@@ -1,6 +1,24 @@
 import * as THREE from 'three';
+import {
+  resolveSectionFaceRegion,
+  resolveSectionFootprint,
+  resolveSectionTrimmingPieces,
+} from '#components/geometry/graphics/section-cuts.js';
+import type {
+  SectionFace,
+  SectionFaceGroup,
+  SectionHalfSpace,
+  SectionPiece,
+  SectionPoint2,
+  SectionRect,
+} from '#components/geometry/graphics/section-cuts.js';
 import { buildPlaneBasis } from '#components/geometry/graphics/three/utils/earcut-contour.js';
-import type { ClosedContour } from '#components/geometry/graphics/three/utils/plane-mesh-contour.js';
+import { buildSectionContourBorderPositions } from '#components/geometry/graphics/three/utils/section-contour-border.js';
+import type { ClosedContour, OpenPolyline } from '#components/geometry/graphics/three/utils/plane-mesh-contour.js';
+import type {
+  SectionCapBooleanOperations,
+  SectionCapBooleanResult,
+} from '#components/geometry/graphics/three/utils/section-cap-polygon-boolean-backend.js';
 import type {
   CapMultiPolygon,
   CapPoint2,
@@ -8,6 +26,7 @@ import type {
   SectionCapBbox,
   SectionCapDiagnostic,
 } from '#components/geometry/graphics/three/utils/section-cap-polygon-types.js';
+import type { SectionCapBooleanDebugSink } from '#components/geometry/graphics/three/utils/section-cap-performance-debug.js';
 
 // Section rings are normalized to unit extent before these dimensionless guards apply.
 const ringEpsilon = 1e-8;
@@ -498,4 +517,278 @@ export const buildSectionCapPolygon = (options: BuildSectionCapPolygonOptions): 
     sanitizedPlanePolygon: multiPolygon,
     diagnostics,
   };
+};
+
+// ---------------------------------------------------------------------------
+// Cut faces: what each face's cap shows among the other cuts
+// ---------------------------------------------------------------------------
+
+/** A face's kept-side plane: the three.js plane its sources are sliced through and its cap basis is built on. */
+export const sectionFaceWorldPlane = (face: Pick<SectionFace, 'plane'>, target = new THREE.Plane()): THREE.Plane => {
+  const [x, y, z] = face.plane.normal;
+  target.normal.set(-x, -y, -z);
+  target.constant = face.plane.constant;
+  return target;
+};
+
+/** The square, in a face's plane coordinates, that holds every point of its caps: normalized cap points lie within ±0.5. */
+const resolveFaceCapRect = (basis: SectionCutPlaneBasis): SectionRect => {
+  const { x: offsetU, y: offsetV } = basis.normalizationOffset;
+  const halfSize = 1 / basis.normalizationScale;
+  return { min: [offsetU - halfSize, offsetV - halfSize], max: [offsetU + halfSize, offsetV + halfSize] };
+};
+
+/** How far into a face's kept side the other cuts are tested: a millionth of the cap square, as footprints are. */
+const resolveFaceEpsilon = (rect: SectionRect): number => 1e-6 * (rect.max[0] - rect.min[0]);
+
+/** What one group's caps are trimmed to, found once per group and shared by its sources. */
+export type SectionCapTrim = Readonly<{
+  group: SectionFaceGroup;
+  /** The pieces that can hide part of the caps: see `resolveSectionTrimmingPieces`. */
+  pieces: readonly SectionPiece[];
+  /** How far into the kept side the pieces are tested. */
+  eps: number;
+  /** Each face's extent as a convex ring in normalized cap coordinates; `undefined` when a face is unbounded. */
+  regions: readonly CapRing[] | undefined;
+  /** Where each piece covers the kept side, as a convex ring in normalized cap coordinates. */
+  footprints: readonly CapRing[];
+  /** The regions and footprints by value, for caches of the trimmed caps. */
+  key: string;
+}>;
+
+type ResolveSectionCapTrimOptions = Readonly<{
+  /** The group's cap basis, built on {@link sectionFaceWorldPlane}. */
+  basis: SectionCutPlaneBasis;
+  group: SectionFaceGroup;
+  /** Every piece of the cut set, in cut order. */
+  pieces: readonly SectionPiece[];
+}>;
+
+/**
+ * What a group shows of its plane: the union of its faces' extents, less where another piece removes the kept side
+ * just behind it. The footprints are taken a millionth of the cap square into the kept side, so coincident faces that
+ * remove opposite sides cancel.
+ */
+export const resolveSectionCapTrim = ({ basis, group, pieces }: ResolveSectionCapTrimOptions): SectionCapTrim => {
+  const { x: offsetU, y: offsetV } = basis.normalizationOffset;
+  const scale = basis.normalizationScale;
+  const rect = resolveFaceCapRect(basis);
+  const eps = resolveFaceEpsilon(rect);
+  const toCapRing = (polygon: readonly SectionPoint2[]): CapRing[] =>
+    polygon.length === 0 ? [] : [polygon.map(([u, v]): CapPoint2 => [(u - offsetU) * scale, (v - offsetV) * scale])];
+  const trimmingPieces = resolveSectionTrimmingPieces(group, pieces);
+  // Every extent is taken on the group's plane, so all of them share the cap basis.
+  const regions = group.faces.some((face) => face.bounds.length === 0)
+    ? undefined
+    : group.faces.flatMap((face) =>
+        toCapRing(resolveSectionFaceRegion({ face: { ...face, plane: group.plane }, rect })),
+      );
+  const footprints = trimmingPieces.flatMap((piece) =>
+    toCapRing(resolveSectionFootprint({ face: group, piece, rect, eps })),
+  );
+  return {
+    group,
+    pieces: trimmingPieces,
+    eps,
+    regions,
+    footprints,
+    key: JSON.stringify([regions ?? 'unbounded', footprints]),
+  };
+};
+
+/** The cap a covering footprint leaves: nothing. Shared, so it is never written to. */
+const noCap: CapMultiPolygon = [];
+
+/**
+ * Where a box lies against a convex counter-clockwise ring, found from its corners: inside when every corner is inside
+ * every edge, outside when all four are beyond one edge or the ring's bounds; across, and left to Clipper, otherwise.
+ */
+const placeBox = (box: SectionCapBbox, ring: CapRing): 'inside' | 'outside' | 'across' => {
+  const bounds = buildBounds(ring);
+  if (
+    Math.abs(signedRingArea(ring)) <= areaEpsilon ||
+    box.minX > bounds.maxX + ringEpsilon ||
+    box.maxX < bounds.minX - ringEpsilon ||
+    box.minY > bounds.maxY + ringEpsilon ||
+    box.maxY < bounds.minY - ringEpsilon
+  ) {
+    return 'outside';
+  }
+  const corners = [
+    [box.minX, box.minY],
+    [box.maxX, box.minY],
+    [box.maxX, box.maxY],
+    [box.minX, box.maxY],
+  ] as const;
+  let isInside = true;
+  for (const [index, from] of ring.entries()) {
+    const to = ring[(index + 1) % ring.length]!;
+    const edgeX = to[0] - from[0];
+    const edgeY = to[1] - from[1];
+    const length = Math.hypot(edgeX, edgeY);
+    if (length <= ringEpsilon) {
+      continue;
+    }
+    let outsideCornerCount = 0;
+    for (const [x, y] of corners) {
+      // Positive to the left of the edge, inside a counter-clockwise ring.
+      const distance = (edgeX * (y - from[1]) - edgeY * (x - from[0])) / length;
+      if (distance < -ringEpsilon) {
+        outsideCornerCount++;
+      }
+      if (distance <= ringEpsilon) {
+        isInside = false;
+      }
+    }
+    if (outsideCornerCount === corners.length) {
+      return 'outside';
+    }
+  }
+  return isInside ? 'inside' : 'across';
+};
+
+type TrimSectionCapPolygonOptions = Readonly<{
+  /** One source's cap on the group's plane, in the normalized coordinates of the group's cap basis. */
+  multiPolygon: CapMultiPolygon;
+  /** The cap's bounds. */
+  bbox: SectionCapBbox;
+  trim: SectionCapTrim;
+  booleanOperations: SectionCapBooleanOperations;
+  /** Told of every Clipper call the trim makes. */
+  debugSink?: SectionCapBooleanDebugSink;
+}>;
+
+/**
+ * The part of a cap its group shows: inside its faces' extents and outside every footprint, so caps meet at the folds
+ * between faces and never cover one another. Clipper runs only against a region or footprint the cap's bounds cross:
+ * a cap nothing trims comes back as the same polygon, and one a footprint covers comes back empty.
+ */
+export const trimSectionCapPolygon = ({
+  multiPolygon,
+  bbox,
+  trim,
+  booleanOperations,
+  debugSink,
+}: TrimSectionCapPolygonOptions): SectionCapBooleanResult => {
+  if (multiPolygon.length === 0) {
+    return { multiPolygon, diagnostics: [] };
+  }
+
+  let result: SectionCapBooleanResult = { multiPolygon, diagnostics: [] };
+  let bounds = bbox;
+  if (trim.regions) {
+    const placements = trim.regions.map((region) => placeBox(bounds, region));
+    if (!placements.includes('inside')) {
+      const crossed = trim.regions.filter((_, index) => placements[index] === 'across');
+      if (crossed.length === 0) {
+        return { multiPolygon: noCap, diagnostics: [] };
+      }
+      // The regions overlap only along shared edges, and Clipper's NonZero rule joins them there.
+      result = booleanOperations.intersectCapPolygons(
+        multiPolygon,
+        crossed.map((region) => [region]),
+        debugSink,
+      );
+      if (result.multiPolygon.length === 0) {
+        return result;
+      }
+      bounds = boundsForCapMultiPolygon(result.multiPolygon);
+    }
+  }
+
+  const subtractors: CapMultiPolygon[] = [];
+  for (const footprint of trim.footprints) {
+    const placement = placeBox(bounds, footprint);
+    if (placement === 'inside') {
+      return { multiPolygon: noCap, diagnostics: result.diagnostics };
+    }
+    if (placement === 'across') {
+      subtractors.push([[footprint]]);
+    }
+  }
+  if (subtractors.length === 0) {
+    return result;
+  }
+  const difference = booleanOperations.differenceCapPolygon(result.multiPolygon, subtractors, debugSink);
+  return { multiPolygon: difference.multiPolygon, diagnostics: [...result.diagnostics, ...difference.diagnostics] };
+};
+
+const _segmentStart = /* @__PURE__ */ new THREE.Vector3();
+const _segmentEnd = /* @__PURE__ */ new THREE.Vector3();
+const _segmentMiddle = /* @__PURE__ */ new THREE.Vector3();
+const _segmentPoint = /* @__PURE__ */ new THREE.Vector3();
+
+/** How far `point` lies inside the half-space: positive inside. */
+const depthIn = (point: THREE.Vector3, { normal, constant }: SectionHalfSpace): number =>
+  point.x * normal[0] + point.y * normal[1] + point.z * normal[2] - constant;
+
+type BuildSectionFaceEvidencePositionsOptions = Readonly<{
+  /** Slice edges lying in the group's plane, in the local space of their mesh. */
+  openPolylines: readonly OpenPolyline[];
+  meshWorldMatrix: THREE.Matrix4;
+  meshWorldInverse: THREE.Matrix4;
+  /** The group's trim: its faces, and the pieces that can hide what it shows, tested as far into its kept side. */
+  trim: SectionCapTrim;
+}>;
+
+/**
+ * Segment end pairs (mesh-local) for the slice edges that lie in a group's plane, keeping only the parts the group
+ * shows: inside one of its faces' extents and outside every piece that can hide it, tested `eps` into its kept side,
+ * as its caps are trimmed.
+ */
+export const buildSectionFaceEvidencePositions = ({
+  openPolylines,
+  meshWorldMatrix,
+  meshWorldInverse,
+  trim,
+}: BuildSectionFaceEvidencePositionsOptions): Float32Array => {
+  const { group, pieces, eps } = trim;
+  const isBounded = trim.regions !== undefined;
+  const planes = [
+    ...(isBounded ? group.faces.flatMap((face) => face.bounds) : []),
+    ...pieces.flatMap((piece) => piece.halfSpaces),
+  ];
+  if (planes.length === 0) {
+    return buildSectionContourBorderPositions({ closedContours: [], openPolylines });
+  }
+
+  const [x, y, z] = group.plane.normal;
+  const positions: number[] = [];
+  const pushPoint = (t: number): void => {
+    _segmentPoint.lerpVectors(_segmentStart, _segmentEnd, t).applyMatrix4(meshWorldInverse);
+    positions.push(_segmentPoint.x, _segmentPoint.y, _segmentPoint.z);
+  };
+  const isInsideExtent = (point: THREE.Vector3): boolean =>
+    !isBounded || group.faces.some((face) => face.bounds.every((bound) => depthIn(point, bound) > 0));
+  for (const polyline of openPolylines) {
+    for (let index = 0; index + 1 < polyline.length; index++) {
+      _segmentStart.copy(polyline[index]!).applyMatrix4(meshWorldMatrix);
+      _segmentEnd.copy(polyline[index + 1]!).applyMatrix4(meshWorldMatrix);
+      // Split where the segment crosses a plane bounding what the group shows; keep each part whose middle it shows.
+      const splits = [0, 1];
+      for (const halfSpace of planes) {
+        const atStart = depthIn(_segmentStart, halfSpace);
+        const atEnd = depthIn(_segmentEnd, halfSpace);
+        if (atStart > 0 !== atEnd > 0) {
+          splits.push(atStart / (atStart - atEnd));
+        }
+      }
+      splits.sort((left, right) => left - right);
+      for (let split = 0; split + 1 < splits.length; split++) {
+        const from = splits[split]!;
+        const to = splits[split + 1]!;
+        _segmentMiddle.lerpVectors(_segmentStart, _segmentEnd, (from + to) / 2);
+        _segmentMiddle.set(_segmentMiddle.x - x * eps, _segmentMiddle.y - y * eps, _segmentMiddle.z - z * eps);
+        const isShown =
+          to - from > 1e-9 &&
+          isInsideExtent(_segmentMiddle) &&
+          !pieces.some((piece) => piece.halfSpaces.every((halfSpace) => depthIn(_segmentMiddle, halfSpace) > 0));
+        if (isShown) {
+          pushPoint(from);
+          pushPoint(to);
+        }
+      }
+    }
+  }
+  return new Float32Array(positions);
 };

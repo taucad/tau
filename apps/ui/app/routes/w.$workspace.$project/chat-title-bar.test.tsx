@@ -17,22 +17,19 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({
-    chats: [
-      {
-        id: 'chat_active',
-        resourceId: 'proj_one',
-        name: 'Bracket design',
-        messages: [],
-        createdAt: 1,
-        updatedAt: 1,
-      },
-    ],
     createChat,
     updateChatName,
     applyGeneratedChatName: vi.fn(),
     isLoading: false,
   }),
 }));
+vi.mock('#hooks/use-chat-records.js', () => ({
+  useChatRecords: () => ({
+    chats: [{ id: 'chat_active', resourceId: 'proj_one', name: 'Bracket design', createdAt: 1, updatedAt: 1 }],
+    isLoading: false,
+  }),
+}));
+vi.mock('#hooks/use-chat.js', () => ({ useChatSelector: () => undefined }));
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { readonly kind: string }, selector: (state: { context: Record<string, unknown> }) => unknown) =>
     selector({ context: actor.kind === 'editor' ? { focusedChatId: 'chat_active' } : { isLoading: false } }),
@@ -67,7 +64,13 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
   TooltipContent: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
 }));
 vi.mock('#components/ui/floating-panel.js', () => ({
-  FloatingPanelContentHeaderActions: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
+  FloatingPanelContentHeaderActions: ({
+    children,
+    className,
+  }: {
+    readonly children: ReactNode;
+    readonly className?: string;
+  }) => <div className={className}>{children}</div>,
   FloatingPanelButtonGroup: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
 }));
 
@@ -106,7 +109,9 @@ describe('ChatTitleBar', () => {
       expect(name).toHaveClass('[app-region:no-drag]');
       expect(name.parentElement).not.toHaveClass('truncate');
       expect(name).not.toHaveClass('truncate');
-      expect(screen.getByRole('button', { name: 'Chat options' })).toBeInTheDocument();
+      const options = screen.getByRole('button', { name: 'Chat options' });
+      expect(name.parentElement?.parentElement).toContainElement(options);
+      expect(options.parentElement?.parentElement).toHaveClass('md:absolute', 'md:right-0');
       expect(screen.queryByText(/search chats/i)).not.toBeInTheDocument();
     });
 

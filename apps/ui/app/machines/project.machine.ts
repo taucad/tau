@@ -1,7 +1,7 @@
 import { setup, types } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import { produce } from 'immer';
-import type { ProjectManifest } from '@taucad/types';
+import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import { assertRootedPath, normalizePath } from '@taucad/utils/path';
 import { classify } from '@taucad/filesystem/path-registry';
 import { isBrowser } from '#constants/browser.constants.js';
@@ -21,20 +21,32 @@ import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 export type ProjectContext = {
   projectId: string;
   project: ProjectManifest | undefined;
+  /**
+   * Why `tau.json` on disk is not the canonical manifest `project` holds (blueprint R4/R5).
+   *
+   * Set by the load for a degraded manifest, and by the change observer when the
+   * bytes stop identifying this project while it is open. While set, implicit
+   * writes are refused; `repairManifest` is the one explicit write.
+   */
+  manifestIssue: ProjectManifestParseIssue | undefined;
   error: Error | undefined;
   isLoading: boolean;
   shouldLoadModelOnStart: boolean;
   kernelOptionsFactory: LazyKernelOptionsFactory;
   fileManagerRef: ActorRefFrom<typeof fileManagerMachine>;
   fileSystemRoot: string;
+  /** Bytes each geometry unit's first render stages (see {@link ProjectInput}). */
+  stage: Record<string, Uint8Array<ArrayBuffer>> | undefined;
   /** Per-viewer-panel graphics machines, keyed by Dockview panel ID */
   viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
   /** Project-scoped model appearance shared by every viewer of the same geometry unit. */
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
-  /** Geometry unit file paths that currently have geometry and at least one export route. */
-  exportableGeometryUnitPaths: Set<string>;
+  /** Visible viewer panels and explicit operations are the runtime's entry-scoped demand. */
+  viewerGeometryDemand: Map<string, string>;
+  operationGeometryDemand: Map<string, string>;
+  runtimeParked: boolean;
   /**
    * Why this project has no kernel, and which unit said so (R4).
    *
@@ -59,6 +71,8 @@ type ProjectInput = {
   fileManagerRef: ActorRefFrom<typeof fileManagerMachine>;
   fileSystemRoot: string;
   kernelOptionsFactory: LazyKernelOptionsFactory;
+  /** Bytes each geometry unit's first render stages, for a memory-mounted project whose kernel cannot see the mount. */
+  stage?: Record<string, Uint8Array<ArrayBuffer>>;
 };
 
 export type ProjectLoadInput = { readonly projectId: string };
@@ -66,6 +80,8 @@ export type ProjectLoadInput = { readonly projectId: string };
 export type ProjectRetrievedEvent = {
   readonly type: 'projectRetrieved';
   readonly project: ProjectManifest;
+  /** Present when `project` is the normalized view of a degraded manifest. */
+  readonly issue?: ProjectManifestParseIssue;
 };
 
 // Define the actors that the machine can invoke
@@ -75,7 +91,7 @@ const loadProjectActor = fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(
   );
 });
 
-const writeProjectActor = fromSafeAsync<void, { project: ProjectManifest }>(async () => {
+const writeProjectActor = fromSafeAsync<void, { project: ProjectManifest; repair?: boolean }>(async () => {
   throw new Error(
     'Not implemented. Please supply the `provide.actors.writeProjectActor` option to the project machine.',
   );
@@ -104,13 +120,12 @@ export type ProjectFileActivityOperation =
 /**
  * Whether a filesystem event is activity on the project's own content.
  *
- * The path registry answers it: authored bytes are content, records, caches
- * and the control plane are not. `tau.json` is the one exception — it is
- * authored, but it is the project's metadata, and a rename or a description
+ * The path registry answers it: versioned bytes are content. `tau.json` is
+ * the one exception — it is project metadata, so a rename or description
  * edit is not work on the design.
  *
  * @param projectRelativePath - Path relative to the project root.
- * @returns `true` when the path is authored project content.
+ * @returns `true` when the path is versioned project content.
  */
 export function isProjectContentActivityPath(projectRelativePath: string): boolean {
   const normalized = normalizePath(projectRelativePath).replace(/^\/+/, '');
@@ -118,7 +133,7 @@ export function isProjectContentActivityPath(projectRelativePath: string): boole
     return false;
   }
 
-  return classify(normalized).class === 'authored';
+  return classify(normalized).versioned;
 }
 
 /**
@@ -126,17 +141,19 @@ export function isProjectContentActivityPath(projectRelativePath: string): boole
  */
 type ProjectEventInternal =
   | { type: 'reloadProject' }
+  /* The change observer: tau.json no longer identifies this project; keep the last good manifest open. */
+  | { type: 'manifestIssueObserved'; issue: ProjectManifestParseIssue }
+  /* The one explicit write over a degraded or unidentifiable tau.json: the manifest this workspace holds. */
+  | { type: 'repairManifest' }
   | { type: 'updateName'; name: string }
   | { type: 'updateDescription'; description: string }
   | { type: 'updateTags'; tags: string[] }
   | { type: 'loadModel' }
   | { type: 'setMainFile'; path: string }
   | { type: 'createGeometryUnit'; entryPath: string; renderTimeout?: number }
-  | {
-      type: 'geometryUnit.exportAvailabilityChanged';
-      actorId: string;
-      available: boolean;
-    }
+  | { type: 'setViewerGeometryDemand'; viewId: string; entryPath?: string }
+  | { type: 'claimGeometryUnit'; claimId: string; entryPath: string; renderTimeout?: number }
+  | { type: 'releaseGeometryUnit'; claimId: string }
   /* R4: a unit reporting whether its kernel was refused, and why. */
   | { type: 'geometryUnit.kernelRefused'; actorId: string; reason: string | undefined }
   | { type: 'openInViewer'; entryPath: string }
@@ -189,8 +206,17 @@ const setError = (error: unknown): ProjectPatch => ({
   isLoading: false,
 });
 
+/** Implicit writes never replace a degraded manifest: its normalized view is lossy (blueprint R4). */
+const isManifestWritable = (context: ProjectContext): boolean => context.manifestIssue === undefined;
+
+/** Repair is refused for a JSON syntax error, whose defaults would erase text a person can still fix. */
+const isManifestRepairable = (context: ProjectContext): boolean =>
+  context.project !== undefined &&
+  context.manifestIssue !== undefined &&
+  context.manifestIssue.code !== 'manifest-invalid-json';
+
 const shouldUpdateProjectName = (context: ProjectContext, event: Extract<ProjectEvent, { type: 'updateName' }>) =>
-  Boolean(context.project && context.project.name !== event.name);
+  Boolean(isManifestWritable(context) && context.project && context.project.name !== event.name);
 
 /** Rewrite the loaded manifest, or leave context alone when no project is loaded. */
 const withProject = (context: ProjectContext, recipe: (project: ProjectManifest) => void): ProjectPatch =>
@@ -224,7 +250,7 @@ const spawnGeometryUnit = (
       ...(options.renderTimeout === undefined ? {} : { renderTimeout: options.renderTimeout }),
     },
   });
-  enq.sendTo(cadUnit, { type: 'initializeModel', entryPath });
+  enq.sendTo(cadUnit, { type: 'initializeModel', entryPath, ...(context.stage ? { stage: context.stage } : {}) });
   return cadUnit;
 };
 
@@ -279,7 +305,6 @@ const createViewGraphics = ({ context, event }: ProjectArgs<'createViewGraphics'
     upDirection: settings.upDirection,
     pinnedMeasurements: settings.pinnedMeasurements,
     sectionView: settings.sectionView,
-    sectionDisplay: settings.sectionDisplay,
     graphicsBackend: settings.graphicsBackend ?? 'webgl',
   };
 
@@ -287,7 +312,6 @@ const createViewGraphics = ({ context, event }: ProjectArgs<'createViewGraphics'
     id: `graphics-view-${context.projectId}-${event.viewId}`,
     input: {
       ...graphicsSeed,
-      measureSnapDistance: 40,
       modelInteractionRef: context.modelInteractionRef,
     },
   });
@@ -308,7 +332,7 @@ const destroyViewGraphics = ({ context, event }: ProjectArgs<'destroyViewGraphic
   return { context: { viewGraphics } };
 };
 
-/** Drop the units a deletion matched, their export routes and a main pointer into them. */
+/** Drop the units a deletion matched and a main pointer into them. */
 const withoutUnits = (context: ProjectContext, matches: (entryPath: string) => boolean): ProjectPatch => {
   const geometryUnits = new Map(context.geometryUnits);
   for (const key of context.geometryUnits.keys()) {
@@ -316,17 +340,33 @@ const withoutUnits = (context: ProjectContext, matches: (entryPath: string) => b
       geometryUnits.delete(key);
     }
   }
-  const exportableGeometryUnitPaths = new Set(context.exportableGeometryUnitPaths);
-  for (const key of context.exportableGeometryUnitPaths) {
-    if (matches(key)) {
-      exportableGeometryUnitPaths.delete(key);
-    }
-  }
   return {
     geometryUnits,
-    exportableGeometryUnitPaths,
+    viewerGeometryDemand: new Map([...context.viewerGeometryDemand].filter(([, path]) => !matches(path))),
+    operationGeometryDemand: new Map([...context.operationGeometryDemand].filter(([, path]) => !matches(path))),
     ...(matches(context.mainEntryPath) ? { mainEntryPath: '' } : {}),
   };
+};
+
+const hasOperationDemand = (context: ProjectContext, entryPath: string): boolean =>
+  [...context.operationGeometryDemand.values()].includes(entryPath);
+
+const shouldRunUnit = (context: ProjectContext, entryPath: string): boolean =>
+  hasOperationDemand(context, entryPath) ||
+  (!context.runtimeParked &&
+    (entryPath === context.mainEntryPath || [...context.viewerGeometryDemand.values()].includes(entryPath)));
+
+const reconcileUnitRuntime = (
+  { previous, next, entryPath }: { previous: ProjectContext; next: ProjectContext; entryPath: string },
+  enq: ProjectEnqueue,
+): void => {
+  if (shouldRunUnit(previous, entryPath) === shouldRunUnit(next, entryPath)) {
+    return;
+  }
+  const unit = next.geometryUnits.get(entryPath);
+  if (unit) {
+    enq.sendTo(unit, { type: shouldRunUnit(next, entryPath) ? 'resumeRuntime' : 'parkRuntime' });
+  }
 };
 
 /**
@@ -363,7 +403,14 @@ export const projectMachine = setup({
 }).createMachine({
   id: 'project',
   context: ({ input, spawn, actors }) => {
-    const { projectId, shouldLoadModelOnStart = true, fileManagerRef, fileSystemRoot, kernelOptionsFactory } = input;
+    const {
+      projectId,
+      shouldLoadModelOnStart = true,
+      fileManagerRef,
+      fileSystemRoot,
+      kernelOptionsFactory,
+      stage,
+    } = input;
 
     const logRef = spawn(actors.logs, {
       id: `log-${projectId}`,
@@ -376,7 +423,6 @@ export const projectMachine = setup({
     // Compilation units are created dynamically after project loads (when we know the main file).
     // The primary geometry unit is created once the project loads.
     const geometryUnits = new Map<string, CadUnitRef>();
-    const exportableGeometryUnitPaths = new Set<string>();
 
     // View graphics are created dynamically by Dockview viewer panels.
     const viewGraphics = new Map<string, ActorRefFrom<typeof graphicsMachine>>();
@@ -384,44 +430,26 @@ export const projectMachine = setup({
     return {
       projectId,
       project: undefined,
+      manifestIssue: undefined,
       error: undefined,
       isLoading: true,
       shouldLoadModelOnStart,
       kernelOptionsFactory,
       fileManagerRef,
       fileSystemRoot,
+      stage,
       viewGraphics,
       modelInteractionRef,
       geometryUnits,
-      exportableGeometryUnitPaths,
+      viewerGeometryDemand: new Map(),
+      operationGeometryDemand: new Map(),
+      runtimeParked: false,
       kernelRefusal: undefined,
       mainEntryPath: '',
       logRef,
     };
   },
   on: {
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- XState event name
-    'geometryUnit.exportAvailabilityChanged': ({ context, event }) => {
-      let entryPath: string | undefined;
-      for (const [candidateEntryPath, actor] of context.geometryUnits) {
-        if (actorIdOf(actor) === event.actorId) {
-          entryPath = candidateEntryPath;
-          break;
-        }
-      }
-
-      if (!entryPath || context.exportableGeometryUnitPaths.has(entryPath) === event.available) {
-        return {};
-      }
-
-      const exportableGeometryUnitPaths = new Set(context.exportableGeometryUnitPaths);
-      if (event.available) {
-        exportableGeometryUnitPaths.add(entryPath);
-      } else {
-        exportableGeometryUnitPaths.delete(entryPath);
-      }
-      return { context: { exportableGeometryUnitPaths } };
-    },
     /* R4: the project keeps the refusal so its live session can report the
      * runtime region failed, which is what puts the reason on the row. */
     // eslint-disable-next-line @typescript-eslint/naming-convention -- XState event name
@@ -438,16 +466,19 @@ export const projectMachine = setup({
     },
     /* R3: the session knows hidden-and-idle, this owns the units. One loop. */
     parkRuntime: ({ context }, enq) => {
-      for (const unit of context.geometryUnits.values()) {
-        enq.sendTo(unit, { type: 'parkRuntime' });
+      for (const [path, unit] of context.geometryUnits) {
+        if (!hasOperationDemand(context, path)) {
+          enq.sendTo(unit, { type: 'parkRuntime' });
+        }
       }
-      return {};
+      return { context: { runtimeParked: true } };
     },
     resumeRuntime: ({ context }, enq) => {
-      for (const unit of context.geometryUnits.values()) {
-        enq.sendTo(unit, { type: 'resumeRuntime' });
+      const resumed = { ...context, runtimeParked: false };
+      for (const path of context.geometryUnits.keys()) {
+        reconcileUnitRuntime({ previous: context, next: resumed, entryPath: path }, enq);
       }
-      return {};
+      return { context: { runtimeParked: false } };
     },
   },
   /* Stop the stateful children; they'll be garbage collected. */
@@ -491,7 +522,9 @@ export const projectMachine = setup({
         // zero dependency on context.project or any loaded data.
         createViewGraphics,
         destroyViewGraphics,
-        projectRetrieved: { context: ({ event }) => ({ project: event.project, isLoading: false }) },
+        projectRetrieved: {
+          context: ({ event }) => ({ project: event.project, manifestIssue: event.issue, isLoading: false }),
+        },
       },
       invoke: {
         src: 'loadProjectActor',
@@ -515,6 +548,7 @@ export const projectMachine = setup({
           },
           on: {
             reloadProject: { target: '#project.loading', context: { isLoading: true } },
+            manifestIssueObserved: ({ event }) => ({ context: { manifestIssue: event.issue } }),
             updateName: ({ context, event }) =>
               shouldUpdateProjectName(context, event)
                 ? {
@@ -523,12 +557,18 @@ export const projectMachine = setup({
                     }),
                   }
                 : undefined,
-            updateDescription: ({ context, event }) => ({
-              context: withProject(context, (project) => {
-                project.description = event.description;
-              }),
-            }),
+            updateDescription: ({ context, event }) =>
+              isManifestWritable(context)
+                ? {
+                    context: withProject(context, (project) => {
+                      project.description = event.description;
+                    }),
+                  }
+                : undefined,
             updateTags: ({ context, event }) => {
+              if (!isManifestWritable(context)) {
+                return undefined;
+              }
               // Deduplicate tags to ensure uniqueness
               const uniqueTags = [...new Set(event.tags)];
               return {
@@ -541,11 +581,14 @@ export const projectMachine = setup({
             loadModel: ({ context, self }, enq) => ({
               context: loadMainModel(context, enq, { self, options: { pointAtExistingUnit: false } }),
             }),
-            setMainFile: ({ context, event }) => ({
-              context: withProject(context, (project) => {
-                project.assets.main.entryPath = event.path;
-              }),
-            }),
+            setMainFile: ({ context, event }) =>
+              isManifestWritable(context)
+                ? {
+                    context: withProject(context, (project) => {
+                      project.assets.main.entryPath = event.path;
+                    }),
+                  }
+                : undefined,
             createGeometryUnit: ({ context, event, self }, enq) => {
               assertRootedPath(event.entryPath);
 
@@ -555,23 +598,76 @@ export const projectMachine = setup({
               }
 
               const geometryUnits = new Map(context.geometryUnits);
-              geometryUnits.set(
-                event.entryPath,
-                spawnGeometryUnit(context, enq, {
-                  self,
-                  entryPath: event.entryPath,
-                  options: {
-                    shouldInitializeKernelOnStart: true,
-                    ...(event.renderTimeout === undefined ? {} : { renderTimeout: event.renderTimeout }),
-                  },
-                }),
-              );
+              const unit = spawnGeometryUnit(context, enq, {
+                self,
+                entryPath: event.entryPath,
+                options: {
+                  shouldInitializeKernelOnStart: true,
+                  ...(event.renderTimeout === undefined ? {} : { renderTimeout: event.renderTimeout }),
+                },
+              });
+              geometryUnits.set(event.entryPath, unit);
               return {
                 context: {
                   geometryUnits,
                   ...(context.mainEntryPath === '' ? { mainEntryPath: event.entryPath } : {}),
                 },
               };
+            },
+            setViewerGeometryDemand: ({ context, event }, enq) => {
+              const previousPath = context.viewerGeometryDemand.get(event.viewId);
+              const viewerGeometryDemand = new Map(context.viewerGeometryDemand);
+              if (event.entryPath === undefined) {
+                viewerGeometryDemand.delete(event.viewId);
+              } else {
+                assertRootedPath(event.entryPath);
+                viewerGeometryDemand.set(event.viewId, event.entryPath);
+              }
+              const next = { ...context, viewerGeometryDemand };
+              if (previousPath !== undefined && previousPath !== event.entryPath) {
+                reconcileUnitRuntime({ previous: context, next, entryPath: previousPath }, enq);
+              }
+              if (event.entryPath !== undefined) {
+                if (context.geometryUnits.has(event.entryPath)) {
+                  reconcileUnitRuntime({ previous: context, next, entryPath: event.entryPath }, enq);
+                } else {
+                  enq.raise({ type: 'createGeometryUnit', entryPath: event.entryPath });
+                }
+              }
+              return { context: { viewerGeometryDemand } };
+            },
+            claimGeometryUnit: ({ context, event }, enq) => {
+              assertRootedPath(event.entryPath);
+              const operationGeometryDemand = new Map(context.operationGeometryDemand);
+              const previousPath = operationGeometryDemand.get(event.claimId);
+              operationGeometryDemand.set(event.claimId, event.entryPath);
+              const next = { ...context, operationGeometryDemand };
+              if (previousPath !== undefined && previousPath !== event.entryPath) {
+                reconcileUnitRuntime({ previous: context, next, entryPath: previousPath }, enq);
+              }
+              if (context.geometryUnits.has(event.entryPath)) {
+                reconcileUnitRuntime({ previous: context, next, entryPath: event.entryPath }, enq);
+              } else {
+                enq.raise({
+                  type: 'createGeometryUnit',
+                  entryPath: event.entryPath,
+                  renderTimeout: event.renderTimeout,
+                });
+              }
+              return { context: { operationGeometryDemand } };
+            },
+            releaseGeometryUnit: ({ context, event }, enq) => {
+              const entryPath = context.operationGeometryDemand.get(event.claimId);
+              if (entryPath === undefined) {
+                return {};
+              }
+              const operationGeometryDemand = new Map(context.operationGeometryDemand);
+              operationGeometryDemand.delete(event.claimId);
+              reconcileUnitRuntime(
+                { previous: context, next: { ...context, operationGeometryDemand }, entryPath },
+                enq,
+              );
+              return { context: { operationGeometryDemand } };
             },
             openInViewer: ({ event }, enq) => {
               assertRootedPath(event.entryPath);
@@ -589,6 +685,8 @@ export const projectMachine = setup({
               return {
                 context: {
                   ...withoutUnits(context, (entryPath) => entryPath === event.entryPath),
+                  /* A still-open viewer may explicitly reopen this unit. */
+                  viewerGeometryDemand: context.viewerGeometryDemand,
                   /* R4: a unit nobody holds cannot keep a row red. */
                   ...(context.kernelRefusal?.actorId === actorIdOf(unit) ? { kernelRefusal: undefined } : {}),
                 },
@@ -629,20 +727,15 @@ export const projectMachine = setup({
                 }
               }
 
-              const exportableGeometryUnitPaths = new Set(context.exportableGeometryUnitPaths);
-              let mutatedExportablePaths = false;
-              for (const key of context.exportableGeometryUnitPaths) {
-                if (matches(key)) {
-                  exportableGeometryUnitPaths.delete(key);
-                  exportableGeometryUnitPaths.add(rewrite(key));
-                  mutatedExportablePaths = true;
-                }
-              }
-
               return {
                 context: {
                   ...(mutatedUnits ? { geometryUnits } : {}),
-                  ...(mutatedExportablePaths ? { exportableGeometryUnitPaths } : {}),
+                  viewerGeometryDemand: new Map(
+                    [...context.viewerGeometryDemand].map(([viewId, entryPath]) => [viewId, rewrite(entryPath)]),
+                  ),
+                  operationGeometryDemand: new Map(
+                    [...context.operationGeometryDemand].map(([claimId, entryPath]) => [claimId, rewrite(entryPath)]),
+                  ),
                   ...(matches(context.mainEntryPath) ? { mainEntryPath: rewrite(context.mainEntryPath) } : {}),
                   // If the main file was renamed, persist its entry pointer.
                   // Recency is stamped separately by `projectFileActivity`, so this
@@ -691,12 +784,14 @@ export const projectMachine = setup({
           states: {
             idle: {
               on: {
-                flushNow: ({ context }) => (context.error === undefined ? undefined : { target: 'writing' }),
+                flushNow: ({ context }) =>
+                  context.error === undefined || !isManifestWritable(context) ? undefined : { target: 'writing' },
                 updateName: ({ context, event }) =>
                   shouldUpdateProjectName(context, event) ? { target: 'writing' } : undefined,
-                updateDescription: { target: 'writing' },
-                updateTags: { target: 'writing' },
-                setMainFile: { target: 'writing' },
+                updateDescription: ({ context }) => (isManifestWritable(context) ? { target: 'writing' } : undefined),
+                updateTags: ({ context }) => (isManifestWritable(context) ? { target: 'writing' } : undefined),
+                setMainFile: ({ context }) => (isManifestWritable(context) ? { target: 'writing' } : undefined),
+                repairManifest: ({ context }) => (isManifestRepairable(context) ? { target: 'repairing' } : undefined),
               },
             },
             pending: {
@@ -706,9 +801,12 @@ export const projectMachine = setup({
               on: {
                 updateName: ({ context, event }) =>
                   shouldUpdateProjectName(context, event) ? { target: 'pending', reenter: true } : undefined,
-                updateDescription: { target: 'pending', reenter: true },
-                updateTags: { target: 'pending', reenter: true },
-                setMainFile: { target: 'pending', reenter: true },
+                updateDescription: ({ context }) =>
+                  isManifestWritable(context) ? { target: 'pending', reenter: true } : undefined,
+                updateTags: ({ context }) =>
+                  isManifestWritable(context) ? { target: 'pending', reenter: true } : undefined,
+                setMainFile: ({ context }) =>
+                  isManifestWritable(context) ? { target: 'pending', reenter: true } : undefined,
                 flushNow: { target: 'writing' },
               },
             },
@@ -725,9 +823,20 @@ export const projectMachine = setup({
               on: {
                 updateName: ({ context, event }) =>
                   shouldUpdateProjectName(context, event) ? { target: 'pending' } : undefined,
-                updateDescription: { target: 'pending' },
-                updateTags: { target: 'pending' },
-                setMainFile: { target: 'pending' },
+                updateDescription: ({ context }) => (isManifestWritable(context) ? { target: 'pending' } : undefined),
+                updateTags: ({ context }) => (isManifestWritable(context) ? { target: 'pending' } : undefined),
+                setMainFile: ({ context }) => (isManifestWritable(context) ? { target: 'pending' } : undefined),
+              },
+            },
+            repairing: {
+              invoke: {
+                src: 'writeProjectActor',
+                input: ({ context }) => ({ project: context.project!, repair: true }),
+                onDone: ({ context }, enq) => {
+                  enq.emit({ type: 'projectUpdated', project: context.project! });
+                  return { target: 'idle', context: { manifestIssue: undefined, error: undefined } };
+                },
+                onError: ({ event }) => ({ target: 'idle', context: setError(event.error) }),
               },
             },
           },

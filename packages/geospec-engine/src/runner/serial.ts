@@ -212,6 +212,8 @@ export const executeGeoSpecFile = async (options: {
         ...(options.matcherWallBackstop === undefined ? {} : { matcherWallBackstop: options.matcherWallBackstop }),
         ...(options.forensic === undefined ? {} : { forensic: options.forensic }),
         ...(context.modelLoader ? { modelLoader: context.modelLoader } : {}),
+        ...(runner.nativeAssertions ? { nativeAssertions: runner.nativeAssertions } : {}),
+        ...(runner.nativeModelLoader ? { nativeModelLoader: runner.nativeModelLoader } : {}),
         ...(runner.stepLoader ? { stepLoader: runner.stepLoader } : {}),
         ...(runner.builtinModules ? { builtinModules: runner.builtinModules } : {}),
         ...(runner.internalProfile ? { internalProfile: runner.internalProfile } : {}),
@@ -235,6 +237,8 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
   // closure-written field to `undefined` after the `delete` below.
   const abortedReason = (): string | undefined => state.aborted;
   const events = createRunnerEventChannel();
+  // Every run executes a cached bundle under its own run token, so overlapping runs can share this cache.
+  const bundleCache: GeoSpecModuleBundleCache = new Map();
 
   return {
     async run(runOptions: GeoSpecRunnerRunOptions): Promise<GeoSpecRunnerResult> {
@@ -306,6 +310,7 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
               : { matcherWallBackstop: runOptions.matcherWallBackstop }),
             ...(runOptions.forensic === undefined ? {} : { forensic: runOptions.forensic }),
             ...(forensicSink === undefined ? {} : { forensicSink }),
+            bundleCache,
           });
           const durationMs = performance.now() - fileStartedAt;
           const primaryLoadKey = context.fileLoadKey();
@@ -363,6 +368,7 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
         return;
       }
       state.closed = true;
+      bundleCache.clear();
       events.emit({ type: 'close' });
       events.clear();
     },

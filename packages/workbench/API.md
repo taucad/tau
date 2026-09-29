@@ -1,0 +1,16 @@
+# Workbench public API report
+
+The root import is `@taucad/workbench`. It exports portable record schemas, codecs, path helpers, camera vocabulary, and section grammar, without React or Dockview. The approved design is the records guide at `docs/research/artifacts/programmable-workbench-charter/api/records/guide.ts` (revision 4). [README.md](./README.md) gives a complete consumer example.
+
+| Export                                                                                                           | Purpose                                                                                                              |
+| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `workbenchRecords.layout`, `.view`, `.entries`                                                                   | Strict codecs for the three live version-1 project files. Each has `schema`, `read(bytes)`, and `serialize(record)`. |
+| `workbenchPaths.layout`, `.view(id)`, `.entries`                                                                 | Project-relative paths for those files.                                                                              |
+| `workbenchLayoutSchema`, `workbenchViewSchema`, `workbenchEntriesSchema`                                         | The versioned envelopes used by the page and file-capable hosts.                                                     |
+| `viewerNodeSchema`, `workbenchLaneNodeSchema`, tab and group schemas                                             | Portable lane trees: views in the viewer; pane and file tabs in the workbench.                                       |
+| `viewFieldsSchema`, camera, display, grid, measurement, entry, and component schemas                             | Reusable field grammars composed by the `arrange_workbench` tool.                                                    |
+| `cameraPresets`, `lengthUnits`, `paneIds`, `sectionSchema`, `sectionCutSchema`, `maxSectionCuts`, `toCameraPose` | Shared vocabulary and geometry helpers.                                                                              |
+
+The root also exports corresponding TypeScript types, including `WorkbenchLayout`, `WorkbenchView`, `WorkbenchEntries`, `ViewerNode`, `WorkbenchLaneNode`, `WorkbenchTab`, `ViewCamera`, `WorkbenchRecordRead`, and `WorkbenchRecordCodec`. `namedLayoutSchema`, `workbenchDeviceSchema`, `workbenchRecords.namedLayout` / `.device`, and their path helpers describe future shapes only; this release has no runtime writer for them.
+
+`read` accepts at most 64 KiB of strict UTF-8 JSON and refuses `__proto__` at any depth. It returns `{ status: 'current', record }` or `{ status: 'invalid-preserved', code, message }`; the refusal code is `INVALID_RECORD` or `NEWER_RECORD`. A caller must retain the original bytes when a read is refused. `serialize` validates, sorts keys recursively, uses two-space indentation, and ends with one newline. The host owns checked filesystem writes; the editor owns live UI adoption and Restore. `projectPathSchema` validates nonempty project-relative paths, and `sectionSchema` is shared with the page parser.

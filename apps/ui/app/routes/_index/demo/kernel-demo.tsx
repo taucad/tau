@@ -181,8 +181,8 @@ export function KernelDemo({
   }, [isCreatingProject, currentParams, projectManager, navigate, project, mainFile, files, presentLocationError]);
 
   return (
-    <div className='flex flex-col overflow-hidden rounded-xl border bg-sidebar md:h-[560px] md:flex-row'>
-      <div className='relative h-[300px] md:h-full md:flex-1'>
+    <div className='flex flex-col overflow-hidden rounded-xl border bg-sidebar md:h-140 md:flex-row'>
+      <div className='relative h-75 md:h-full md:flex-1'>
         <RuntimeStatusOverlay status={status} className='top-auto right-4 bottom-4' />
 
         <Button
@@ -214,7 +214,7 @@ export function KernelDemo({
               <h3 className='text-sm font-semibold'>Parameters</h3>
               <p className='text-xs text-muted-foreground'>Adjust and watch it rebuild</p>
             </div>
-            <div className='h-[280px] overflow-hidden md:h-auto md:flex-1'>
+            <div className='h-70 overflow-hidden md:h-auto md:flex-1'>
               <Parameters
                 isInitialExpanded={isInitialExpanded}
                 parameters={currentParams}
@@ -223,7 +223,7 @@ export function KernelDemo({
                 parameterManifest={parameterManifest!}
                 parameterEdit={{ kind: 'transient' }}
                 units={units}
-                emptyDescription='Loading parameters...'
+                emptyDescription='Loading parameters…'
                 onParametersChange={handleParametersChange}
               />
             </div>
@@ -232,7 +232,7 @@ export function KernelDemo({
                 {exportFormatOptions.length > 0 && activeFormat ? (
                   <>
                     <ComboBoxResponsive
-                      searchPlaceHolder='Search formats...'
+                      searchPlaceHolder='Search formats…'
                       title='Export Format'
                       description='Select a format to export the model'
                       groupedItems={[{ name: 'Formats', items: exportFormatOptions }]}

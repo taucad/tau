@@ -1,0 +1,1 @@
+{"frame":"artifact-xyz","plate":{"max":["11/1","100/11","2/1"],"min":["0/1","0/1","0/1"]},"schema":"geospec.rational-orthogonal-plate/v1","unit":"mm","windows":[{"max":["5/2","5/2","2/1"],"min":["3/2","3/2","0/1"]},{"max":["17/2","17/2","2/1"],"min":["15/2","15/2","0/1"]}]}

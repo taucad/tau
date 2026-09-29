@@ -74,10 +74,21 @@ describe('ParametersWidget number hardening', () => {
     expect(onChange).toHaveBeenCalledWith(3);
   });
 
-  it('should not select an arbitrary scalar from an unsupported union', () => {
-    expect(() => renderWidget(widgetProps({ schema: { type: ['number', 'string'] } }))).toThrow(
-      'Unsupported type: number,string',
-    );
+  it('should take a number or a text value matching the pattern, committing on leave', () => {
+    const onChange = vi.fn();
+    renderWidget(widgetProps({ value: 1, schema: { type: ['number', 'string'], pattern: '^\\d+%$' }, onChange }));
+    const field = screen.getByRole('textbox', { name: 'Input for Width' });
+
+    fireEvent.change(field, { target: { value: 'lots' } });
+    fireEvent.blur(field);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(field).toHaveValue('1');
+    fireEvent.change(field, { target: { value: '95%' } });
+    fireEvent.blur(field);
+    expect(onChange).toHaveBeenLastCalledWith('95%');
+    fireEvent.change(field, { target: { value: '0.9' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(onChange).toHaveBeenLastCalledWith(0.9);
   });
 
   it('should render an empty field with the schema default as its placeholder for undefined values', () => {

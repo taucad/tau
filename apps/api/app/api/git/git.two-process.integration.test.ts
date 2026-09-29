@@ -32,6 +32,8 @@ import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
+import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
+import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 
 /**
@@ -168,10 +170,14 @@ const startWorker = async (): Promise<{ app: NestFastifyApplication; origin: str
     providers: [
       GitRepositoryService,
       GitLfsService,
+      PublicationRateLimiterService,
       S3RepositoryStore,
       { provide: repositoryStoreKey, useExisting: S3RepositoryStore },
       { provide: DatabaseService, useValue: databaseStub },
-      { provide: RedisService, useValue: { client: { get: async () => undefined, set: async () => 'OK' } } },
+      {
+        provide: RedisService,
+        useValue: { client: { get: async () => undefined, set: async () => 'OK', eval: async () => 1 } },
+      },
       {
         provide: ProjectAccessService,
         useValue: {
@@ -184,6 +190,7 @@ const startWorker = async (): Promise<{ app: NestFastifyApplication; origin: str
           invalidate: () => undefined,
         },
       },
+      { provide: DurableEventsService, useValue: { appendRevision: async () => undefined } },
       {
         provide: commercialEntitlementsKey,
         useValue: { getEntitlements: async () => ({ tier: 'pro', canSyncFiles: true }) },

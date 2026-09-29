@@ -48,6 +48,12 @@ function createMockDataSource(): {
 }
 
 describe('FileSelector (explicit dataSource)', () => {
+  it('should name an empty selection trigger with its placeholder', () => {
+    render(<FileSelector selectedFile='' placeholder='Select main file…' onSelect={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Select main file…' })).toBeVisible();
+  });
+
   it('should call loadDirectory on open to show root items', async () => {
     const { dataSource, loadDirectory } = createMockDataSource();
 
@@ -126,7 +132,7 @@ describe('FileSelector (explicit dataSource)', () => {
       expect(screen.getByText('README.md')).toBeInTheDocument();
     });
 
-    const searchInput = screen.getByPlaceholderText('Filter files...');
+    const searchInput = screen.getByPlaceholderText('Filter files…');
     await userEvent.type(searchInput, 'main');
 
     await waitFor(() => {
@@ -145,7 +151,7 @@ describe('FileSelector (explicit dataSource)', () => {
       expect(screen.getByText('README.md')).toBeInTheDocument();
     });
 
-    const searchInput = screen.getByPlaceholderText('Filter files...');
+    const searchInput = screen.getByPlaceholderText('Filter files…');
     await userEvent.type(searchInput, 'main');
 
     await waitFor(() => {
@@ -164,7 +170,7 @@ describe('FileSelector (explicit dataSource)', () => {
       expect(screen.getByText('README.md')).toBeInTheDocument();
     });
 
-    const searchInput = screen.getByPlaceholderText('Filter files...');
+    const searchInput = screen.getByPlaceholderText('Filter files…');
     await userEvent.type(searchInput, 'main');
 
     await waitFor(() => {

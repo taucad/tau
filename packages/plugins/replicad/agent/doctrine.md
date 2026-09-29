@@ -1,9 +1,11 @@
 ## Workflow
 
-1. Author `main.ts` with ES module imports from `replicad`, camelCase names, exported `defaultParams`, and a default `main(params)` returning `Shape3D` or `ShapeConfig[]`.
+1. Author `main.ts` with ES module imports from `replicad`, camelCase names, exported `defaultParams`, and a default `main(params)` returning a shape, Tau `ShapeConfig[]`, or a `Model` envelope.
 2. Prefer BRep-native construction: holes in the source sketch, revolved wall profiles for round shells, and separate named `ShapeConfig` parts when a fused solid is unnecessary.
 3. Use analytical arcs/circles where they fit. For involutes, airfoils, spirals, or cycloids, sample about eight control points and use `drawPointsInterpolation(points)` instead of chained lines.
-4. Verify the entry point and every renderable library file independently.
+4. For appearance, materials, textures, STEP interfaces or mass requests, read `tau-authoring-reference.md` and use Tau model types from `@taucad/replicad/model`. Use physical `material` for glTF effects beyond the legacy color/opacity/metalness/roughness fields.
+5. If parts move relative to one another, read `kinematics-reference.md`. Return separate named parts, export `mechanism` with joints and an animation for every independent motion, and verify the Kinematics pane plays them.
+6. Verify the entry point and every renderable library file independently. Fix material/resource and mechanism warnings even if geometry renders.
 
 For multiple files, import helpers with explicit ESM paths such as `./lib/widget.js`. Library files export geometry builders; `main.ts` assembles them. A standalone test target must export a default `main` returning geometry.
 
@@ -28,4 +30,4 @@ export default function main(p = defaultParams): Shape3D {
 }
 ```
 
-Check invalid dimensions, open/self-intersecting sketches, coincident boolean faces, and accidental polyline curves first.
+Check invalid dimensions, open/self-intersecting sketches, coincident boolean faces, and accidental polyline curves first. `api-index.md` covers upstream `replicad` geometry; `tau-api-index.md` covers Tau's returned model, material and annotation types. Search the appropriate index before assuming a field or API is unavailable.

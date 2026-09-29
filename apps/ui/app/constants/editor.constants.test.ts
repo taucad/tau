@@ -4,17 +4,12 @@ import {
   defaultPanelState,
   defaultRenderTimeout,
   defaultGraphicsSettings,
-  parseGraphicsViewSettings,
-  parseLegacyModelComponentDisplay,
   omitEmptyComponentDisplayState,
-  readLegacyRenderTimeout,
 } from '#constants/editor.constants.js';
+import type { PersistedModelComponentDisplayState } from '#constants/editor.constants.js';
 
-const componentDisplayUnitId = 'file:src/main.ts';
-const coverComponentId = 'component:Cover';
-
-describe('editor constants – panel consistency', () => {
-  it('keeps desktop lanes separate from the mobile navigation IDs', () => {
+describe('editor device defaults', () => {
+  it('keeps desktop lanes separate from mobile navigation and seeds new graphics owners', () => {
     expect(mobilePanelIds).toEqual([
       'chat',
       'files',
@@ -26,251 +21,28 @@ describe('editor constants – panel consistency', () => {
       'share',
       'revisions',
     ]);
-    expect(defaultPanelState.desktopLayout).toEqual({
+    expect(defaultPanelState.desktopLayout).toMatchObject({
       chatOpen: true,
       workbenchOpen: true,
       chatWidth: 320,
       workbenchWidth: 420,
       compactAuxiliary: 'chat',
     });
-    expect(defaultPanelState.modelPaneview).toEqual({});
-    expect(defaultPanelState.consolePaneview).toEqual({});
-  });
-});
-
-describe('graphics view settings parsing', () => {
-  /* Schema v11 (E1): the render timeout is owned per file, so it no longer rides in a view record. */
-  it('should keep the render timeout out of the per-view record', () => {
     expect(defaultRenderTimeout).toBe(180_000);
-    expect(defaultGraphicsSettings).not.toHaveProperty('renderTimeout');
-    expect(
-      parseGraphicsViewSettings({ ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 30_000 }),
-    ).not.toHaveProperty('renderTimeout');
-    expect(readLegacyRenderTimeout({ renderTimeout: 30, schemaVersion: 1 })).toBe(30_000);
-    expect(readLegacyRenderTimeout({ renderTimeout: 30_000, schemaVersion: 10 })).toBe(30_000);
-    expect(readLegacyRenderTimeout({ schemaVersion: 11 })).toBeUndefined();
+    expect(defaultGraphicsSettings.graphicsBackend).toBe('webgl');
   });
 
-  it('should strip a legacy environment preset without discarding other settings', () => {
-    const obsoleteSettingsKey = ['environment', 'Preset'].join('');
-    const settings = parseGraphicsViewSettings({
-      ...defaultGraphicsSettings,
-      [obsoleteSettingsKey]: 'performance',
-      enableGrid: false,
-    });
-
-    expect(settings.enableGrid).toBe(false);
-    expect(settings).not.toHaveProperty(obsoleteSettingsKey);
-  });
-
-  it('should migrate v6 camera state while extracting legacy component display separately', () => {
-    const persisted = {
-      ...defaultGraphicsSettings,
-      schemaVersion: 6,
-      cameraFovAngle: 0,
-      cameraView: {
-        target: [3, 4, 5],
-        direction: [2, 0, 0],
-        up: [0, 0, 4],
-        verticalSpan: 12,
-      },
-      componentDisplay: {
-        schemaVersion: 1,
-        unitsById: {
-          [componentDisplayUnitId]: {
-            hiddenComponentIds: ['component:Housing'],
-            isolatedComponentIds: ['component:SunGear'],
-            opacityByComponentId: { [coverComponentId]: 0.5 },
-          },
-        },
-      },
-    } as const;
-    const settings = parseGraphicsViewSettings(persisted);
-
-    expect(settings.schemaVersion).toBe(11);
-    expect(settings.cameraFovAngle).toBe(0);
-    expect(settings.cameraView).toEqual({
-      frameId: 'tau:root',
-      target: [0.003, 0.004, 0.005],
-      direction: [1, 0, 0],
-      up: [0, 0, 1],
-      verticalSpan: 0.012,
-      perspectiveZoom: 1,
-    });
-    expect(settings).not.toHaveProperty('componentDisplay');
-    expect(parseLegacyModelComponentDisplay(persisted)).toEqual({
-      schemaVersion: 1,
-      unitsById: {
-        [componentDisplayUnitId]: {
-          hiddenComponentIds: ['component:Housing'],
-          isolatedComponentIds: ['component:SunGear'],
-          opacityByComponentId: { [coverComponentId]: 0.5 },
-        },
-      },
-    });
-  });
-
-  it.each([2, 3, 4, 5, 6, 8, 9] as const)('should migrate schema v%s settings to v11', (schemaVersion) => {
-    const settings = parseGraphicsViewSettings({
-      ...defaultGraphicsSettings,
-      schemaVersion,
-      graphicsBackend: schemaVersion === 3 ? 'auto' : 'webgl',
-    });
-
-    expect(settings.schemaVersion).toBe(11);
-    expect(settings.cameraView).toBeUndefined();
-    expect(settings.graphicsBackend).toBe('webgl');
-  });
-
-  it.each([3, 4, 5, 6, 7, 8] as const)(
-    'should normalize persisted WebGPU from schema v%s to WebGL',
-    (schemaVersion) => {
-      const settings = parseGraphicsViewSettings({
-        ...defaultGraphicsSettings,
-        schemaVersion,
-        graphicsBackend: 'webgpu',
-        enableGrid: false,
-      });
-
-      expect(settings.schemaVersion).toBe(11);
-      expect(settings.graphicsBackend).toBe('webgl');
-      expect(settings.enableGrid).toBe(false);
-    },
-  );
-
-  it('should fall back to defaults for corrupt persisted settings', () => {
-    const settings = parseGraphicsViewSettings({
-      ...defaultGraphicsSettings,
-      schemaVersion: 5,
-      componentDisplay: {
-        schemaVersion: 1,
-        unitsById: {
-          [componentDisplayUnitId]: {
-            hiddenComponentIds: [false],
-          },
-        },
-      },
-    });
-
-    expect(settings).toEqual(defaultGraphicsSettings);
-  });
-
-  it.each([
-    { target: [0, 0, Number.POSITIVE_INFINITY], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 2 },
-    { target: [0, 0, 0], direction: [0, 0, 0], up: [0, 0, 1], verticalSpan: 2 },
-    { target: [0, 0, 0], direction: [1, 0, 0], up: [2, 0, 0], verticalSpan: 2 },
-    { target: [0, 0, 0], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 0 },
-  ])('should drop corrupt camera state without discarding other settings', (cameraView) => {
-    const settings = parseGraphicsViewSettings({
-      ...defaultGraphicsSettings,
-      schemaVersion: 6,
-      enableGrid: false,
-      cameraFovAngle: 42,
-      cameraView,
-    });
-
-    expect(settings).toMatchObject({ schemaVersion: 11, enableGrid: false, cameraFovAngle: 42 });
-    expect(settings.cameraView).toBeUndefined();
-  });
-
-  it('should preserve v9 perspective zoom and drop only an invalid camera view', () => {
-    const cameraView = {
-      target: [1, 2, 3],
-      direction: [1, 0, 0],
-      up: [0, 0, 1],
-      verticalSpan: 12,
-      perspectiveZoom: 1.75,
-    } as const;
-    expect(parseGraphicsViewSettings({ ...defaultGraphicsSettings, schemaVersion: 9, cameraView }).cameraView).toEqual({
-      frameId: 'tau:root',
-      ...cameraView,
-    });
-
-    const invalid = parseGraphicsViewSettings({
-      ...defaultGraphicsSettings,
-      schemaVersion: 9,
-      enableGrid: false,
-      cameraView: { ...cameraView, perspectiveZoom: 0 },
-    });
-    expect(invalid).toMatchObject({ schemaVersion: 11, enableGrid: false });
-    expect(invalid.cameraView).toBeUndefined();
-  });
-
-  it('should restore schema v8 camera views with unit perspective zoom', () => {
-    const settings = parseGraphicsViewSettings({
-      ...defaultGraphicsSettings,
-      schemaVersion: 8,
-      cameraView: {
-        target: [1, 2, 3],
-        direction: [1, 0, 0],
-        up: [0, 0, 1],
-        verticalSpan: 12,
-      },
-    });
-
-    expect(settings.cameraView).toEqual({
-      frameId: 'tau:root',
-      target: [1, 2, 3],
-      direction: [1, 0, 0],
-      up: [0, 0, 1],
-      verticalSpan: 12,
-      perspectiveZoom: 1,
-    });
-  });
-
-  it('should migrate v7 pinned measurement lengths from millimetres to metres', () => {
-    const settings = parseGraphicsViewSettings({
-      ...defaultGraphicsSettings,
-      schemaVersion: 7,
-      pinnedMeasurements: [
-        {
-          id: 'measurement-1',
-          startPoint: [1000, 2000, 3000],
-          endPoint: [4000, 5000, 6000],
-          distance: 5196.152,
-        },
-      ],
-    });
-
-    expect(settings.pinnedMeasurements?.[0]).toMatchObject({
-      id: 'measurement-1',
-      frameId: 'tau:root',
-      startPoint: [1, 2, 3],
-      endPoint: [4, 5, 6],
-    });
-    expect(settings.pinnedMeasurements?.[0]?.distance).toBeCloseTo(Math.sqrt(27));
-  });
-
-  it('should omit empty component display state', () => {
+  it('omits empty transient component display while retaining a hidden component', () => {
     expect(
       omitEmptyComponentDisplayState({
         schemaVersion: 1,
-        unitsById: {
-          [componentDisplayUnitId]: {
-            hiddenComponentIds: [],
-            isolatedComponentIds: [],
-            opacityByComponentId: {},
-          },
-        },
+        unitsById: { 'file:main.ts': { hiddenComponentIds: [], isolatedComponentIds: [], opacityByComponentId: {} } },
       }),
     ).toBeUndefined();
-
-    expect(
-      omitEmptyComponentDisplayState({
-        schemaVersion: 1,
-        unitsById: {
-          [componentDisplayUnitId]: {
-            hiddenComponentIds: ['component:Housing'],
-          },
-        },
-      }),
-    ).toEqual({
+    const display: PersistedModelComponentDisplayState = {
       schemaVersion: 1,
-      unitsById: {
-        [componentDisplayUnitId]: {
-          hiddenComponentIds: ['component:Housing'],
-        },
-      },
-    });
+      unitsById: { 'file:main.ts': { hiddenComponentIds: ['part'] } },
+    };
+    expect(omitEmptyComponentDisplayState(display)).toEqual(display);
   });
 });

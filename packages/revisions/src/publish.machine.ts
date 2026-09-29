@@ -21,8 +21,13 @@
  * completion, because `sync.machine` owns the push: the injected `push` actor
  * resolves with the `pushId` and this machine then asks the root for
  * `syncNow { pushId }`, whose settlement comes back through the same root.
- * The bound is the reason the state exists at all — a push that never answers
- * has to land in `error`, never hang (A38: every effect has a failure edge).
+ * Sync answers every `syncNow` it carries, under its own push deadline (RM-S5,
+ * A12), so this machine holds no bound of its own (RM-R3). A dialog with no
+ * root has nobody to push for it, and says so at once.
+ *
+ * `publish` names its request, and `published` or `toast.error` echoes it
+ * (RM-R1); a `publish` that arrives while another runs is refused
+ * `REVISIONS_BUSY` (RM-R11).
  */
 
 import { createAsyncLogic, setup, types } from 'xstate';
@@ -39,9 +44,6 @@ import type {
   PublishDraft,
   PublishFacet,
 } from '#publish.types.js';
-
-/** How long `pushing` waits for the settlement that names its push. @public */
-export const publishPushMilliseconds = 60_000;
 
 /** Input accepted when creating the publishMachine actor. @public */
 export type PublishMachineInput = Readonly<{
@@ -66,7 +68,10 @@ export type PublishMachineContext = Readonly<{
   branch: string;
   /** Names this project already has, for the dialog's picker. */
   tags: readonly RevisionTag[];
-  /** The revision being published — the branch head when the dialog opened. */
+  /**
+   * The revision being published: the one the dialog was opened on (a History
+   * row's *Publish*), or the branch head when it was opened without one.
+   */
   revisionId: string | undefined;
   /** What the remote last advertised for the branch, which is the push lease. */
   expected: string | undefined;
@@ -74,6 +79,8 @@ export type PublishMachineContext = Readonly<{
   remoteTags: Readonly<Record<string, string>>;
   /** Pre-filled name, when a caller opened the dialog on one. */
   tag: string | undefined;
+  /** The id the running `publish` was asked under; its answer echoes it (RM-R1). */
+  requestId: string | undefined;
   draft: PublishDraft | undefined;
   /** The push this state is waiting for the settlement of. */
   pushId: string | undefined;
@@ -86,7 +93,13 @@ export type PublishMachineContext = Readonly<{
 
 /** Events accepted by publishMachine. @public */
 export type PublishMachineEvent =
-  | Readonly<{ type: 'publish'; tag?: string }>
+  | Readonly<{
+      type: 'publish';
+      requestId: string;
+      tag?: string;
+      /** An older revision to name and publish; the branch head when absent. */
+      revisionId?: string;
+    }>
   | Readonly<{ type: 'confirm'; draft: PublishDraft }>
   | Readonly<{ type: 'cancel' }>
   | Readonly<{ type: 'pushSettled'; pushId: string; outcome: SyncPushOutcome }>
@@ -94,9 +107,10 @@ export type PublishMachineEvent =
 
 /** Facts publishMachine emits for a host that holds only the root. @public */
 export type PublishMachineEmitted =
-  | Readonly<{ type: 'published'; publicationId: string; url: string; tag: string }>
+  | Readonly<{ type: 'published'; requestId: string; publicationId: string; url: string; tag: string }>
   | Readonly<{ type: 'toast.info'; message: string }>
-  | Readonly<{ type: 'toast.error'; message: string }>;
+  /* `code` names a refusal the page phrases; the other refusals are still sentences (a Rule 1 gap the guide records). */
+  | Readonly<{ type: 'toast.error'; requestId: string; message: string; code?: 'REVISIONS_BUSY' }>;
 
 /** What `listVersions` answers: the names, and the revision being published. @public */
 export type PublishVersionsActorOutput = Readonly<{
@@ -155,6 +169,8 @@ type PublishEnqueue = EnqueueObject<PublishMachineEvent, PublishMachineEmitted>;
  * the last publish would be applied to this one's read (row 11). */
 const startPublish = (event: Extract<PublishMachineEvent, { type: 'publish' }>): Partial<PublishMachineContext> => ({
   tag: event.tag,
+  requestId: event.requestId,
+  revisionId: event.revisionId,
   draft: undefined,
   pushId: undefined,
   publicationId: undefined,
@@ -163,8 +179,12 @@ const startPublish = (event: Extract<PublishMachineEvent, { type: 'publish' }>):
 });
 
 /* A refusal is remembered for the dialog and said once as a toast. */
-const failWith = (enq: PublishEnqueue, error: string): Partial<PublishMachineContext> => {
-  enq.emit({ type: 'toast.error', message: error });
+const failWith = (
+  context: PublishMachineContext,
+  enq: PublishEnqueue,
+  error: string,
+): Partial<PublishMachineContext> => {
+  enq.emit({ type: 'toast.error', requestId: context.requestId ?? '', message: error });
   return { error };
 };
 
@@ -176,6 +196,8 @@ const publishMachineDefinition = setup({
     events: eventSchemas<PublishMachineEvent>(),
     emitted: eventSchemas<PublishMachineEmitted>(),
     input: types<PublishMachineInput>(),
+    /* MC-R28: `busy` from the read to the row; `asking` never, the dialog's choice is `choosingVersion.ready`. */
+    tags: types<'busy'>(),
   },
   actors: {
     listVersions: createAsyncLogic<PublishVersionsActorOutput, Readonly<{ projectId: string; branch: string }>>({
@@ -187,9 +209,6 @@ const publishMachineDefinition = setup({
       run: unsupported,
     }),
   },
-  delays: {
-    pushSettlement: publishPushMilliseconds,
-  },
 }).createMachine({
   id: 'publish',
   context: ({ input }) => ({
@@ -200,6 +219,7 @@ const publishMachineDefinition = setup({
     expected: undefined,
     remoteTags: {},
     tag: undefined,
+    requestId: undefined,
     draft: undefined,
     pushId: undefined,
     publicationId: undefined,
@@ -208,6 +228,23 @@ const publishMachineDefinition = setup({
     parentRef: input.parentRef,
   }),
   initial: 'idle',
+  on: {
+    /* RM-R11: every state that cannot start a publish answers it; `idle`, `success` and `error` start one. */
+    publish: ({ event }, enq) => {
+      enq.emit({
+        type: 'toast.error',
+        requestId: event.requestId,
+        message: 'Another publish is still running.',
+        code: 'REVISIONS_BUSY',
+      });
+      return {};
+    },
+    /* A stale continuation or settlement is answered by doing nothing (MC-R18). */
+    confirm: () => ({}),
+    cancel: () => ({}),
+    reset: () => ({}),
+    pushSettled: () => ({}),
+  },
   states: {
     idle: {
       on: {
@@ -229,6 +266,7 @@ const publishMachineDefinition = setup({
      * "this project has no revisions yet".
      */
     choosingVersion: {
+      tags: ['busy'],
       initial: 'reading',
       states: {
         reading: {
@@ -239,12 +277,12 @@ const publishMachineDefinition = setup({
               if (event.output.revisionId === undefined) {
                 return {
                   target: '#publish.error',
-                  context: { tags: event.output.tags, ...failWith(enq, noRevisionsYet) },
+                  context: { tags: event.output.tags, ...failWith(context, enq, noRevisionsYet) },
                 };
               }
               const read = {
                 tags: event.output.tags,
-                revisionId: event.output.revisionId,
+                revisionId: context.revisionId ?? event.output.revisionId,
                 expected: event.output.expected,
                 remoteTags: event.output.remoteTags,
               };
@@ -253,7 +291,10 @@ const publishMachineDefinition = setup({
                 ? { target: 'ready', context: read }
                 : { target: '#publish.tagging', context: read };
             },
-            onError: ({ event }, enq) => ({ target: '#publish.error', context: failWith(enq, reason(event.error)) }),
+            onError: ({ context, event }, enq) => ({
+              target: '#publish.error',
+              context: failWith(context, enq, reason(event.error)),
+            }),
           },
           on: {
             /* Held, not refused: the read decides where it goes next. */
@@ -264,7 +305,7 @@ const publishMachineDefinition = setup({
           on: {
             confirm: ({ context, event }, enq) =>
               context.revisionId === undefined
-                ? { target: '#publish.error', context: failWith(enq, noRevisionsYet) }
+                ? { target: '#publish.error', context: failWith(context, enq, noRevisionsYet) }
                 : { target: '#publish.tagging', context: { draft: event.draft } },
           },
         },
@@ -282,6 +323,7 @@ const publishMachineDefinition = setup({
      * not a new one made behind them (W6-a2).
      */
     tagging: {
+      tags: ['busy'],
       invoke: {
         src: 'createTag',
         input: ({ context }) => ({
@@ -290,7 +332,10 @@ const publishMachineDefinition = setup({
           ...(context.draft?.note === undefined ? {} : { note: context.draft.note }),
         }),
         onDone: { target: 'pushing' },
-        onError: ({ event }, enq) => ({ target: 'error', context: failWith(enq, reason(event.error)) }),
+        onError: ({ context, event }, enq) => ({
+          target: 'error',
+          context: failWith(context, enq, reason(event.error)),
+        }),
       },
       on: { cancel: { target: 'idle' } },
     },
@@ -303,6 +348,7 @@ const publishMachineDefinition = setup({
      * republishing over it silently would publish a tree nobody chose.
      */
     pushing: {
+      tags: ['busy'],
       invoke: {
         src: 'push',
         input: ({ context }) => ({
@@ -323,31 +369,33 @@ const publishMachineDefinition = setup({
          * declared success the moment the *request* resolved: `queued`,
          * `failed` and `superseded` were then unreachable outside a restored
          * snapshot, so a publication could name a ref the remote never received
-         * (W22 DEF-W22-2). A dialog with no parent keeps waiting for a
-         * settlement nobody will send, and `pushSettlement` is what ends it.
+         * (W22 DEF-W22-2). A dialog with no parent has nobody to push for
+         * it, so it fails at once rather than waiting on a settlement nobody
+         * sends (RM-R3).
          */
         onDone: ({ context, event }, enq) => {
-          if (context.parentRef !== undefined) {
-            enq.sendTo(context.parentRef, {
-              type: 'syncNow',
-              pushId: event.output.pushId,
-              remote: event.output.remote,
-            });
+          if (context.parentRef === undefined) {
+            return {
+              target: 'error',
+              context: failWith(context, enq, 'This project has no sync to push it to the cloud.'),
+            };
           }
+          enq.sendTo(context.parentRef, {
+            type: 'syncNow',
+            pushId: event.output.pushId,
+            remote: event.output.remote,
+          });
           return { context: { pushId: event.output.pushId } };
         },
-        onError: ({ event }, enq) => ({ target: 'error', context: failWith(enq, reason(event.error)) }),
-      },
-      after: {
-        pushSettlement: (_, enq) => ({
+        onError: ({ context, event }, enq) => ({
           target: 'error',
-          context: failWith(enq, 'Tau could not confirm this project reached the cloud. Try publishing again.'),
+          context: failWith(context, enq, reason(event.error)),
         }),
       },
       on: {
         pushSettled: ({ context, event }, enq) => {
           if (context.pushId !== event.pushId) {
-            return undefined;
+            return {};
           }
           if (event.outcome === 'backedUp') {
             return { target: 'publishing' };
@@ -358,6 +406,7 @@ const publishMachineDefinition = setup({
           return {
             target: 'error',
             context: failWith(
+              context,
               enq,
               event.outcome === 'conflicted'
                 ? 'Someone else changed this project in the cloud. Open it, resolve the conflict, then publish again.'
@@ -375,6 +424,7 @@ const publishMachineDefinition = setup({
      * received, so nothing is uploaded twice (A21).
      */
     publishing: {
+      tags: ['busy'],
       invoke: {
         src: 'createPublication',
         input: ({ context }) => ({
@@ -394,6 +444,7 @@ const publishMachineDefinition = setup({
         onDone: ({ context, event }, enq) => {
           enq.emit({
             type: 'published',
+            requestId: context.requestId ?? '',
             publicationId: event.output.publicationId,
             url: event.output.url,
             tag: context.draft?.tag ?? '',
@@ -403,7 +454,10 @@ const publishMachineDefinition = setup({
             context: { publicationId: event.output.publicationId, shareUrl: event.output.url, error: undefined },
           };
         },
-        onError: ({ event }, enq) => ({ target: 'error', context: failWith(enq, reason(event.error)) }),
+        onError: ({ context, event }, enq) => ({
+          target: 'error',
+          context: failWith(context, enq, reason(event.error)),
+        }),
       },
     },
 
@@ -446,7 +500,7 @@ export interface PublishMachine extends PublishMachineDefinition {}
  * declare const hostActors: PublishActors;
  * const actor = createActor(publishMachine.provide({ actors: hostActors }), { input: { projectId: 'p1' } });
  * actor.start();
- * actor.send({ type: 'publish' });
+ * actor.send({ type: 'publish', requestId: 'publish-1' });
  * actor.send({
  *   type: 'confirm',
  *   draft: { tag: 'v1', projectName: 'bracket', entryPath: 'main.ts', visibility: 'public', title: 'Bracket' },

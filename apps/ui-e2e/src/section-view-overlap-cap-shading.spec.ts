@@ -2,15 +2,13 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 
+type SectionPlaneCut = Readonly<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset: number; isFlipped: boolean }>;
+
 type SectionViewBridgeWindow = Window & {
   __TAU_SECTION_VIEW_TEST__?: {
-    setSectionView(state: {
-      plane: 'xy' | 'xz' | 'yz';
-      direction?: 1 | -1;
-      rotationRadians?: readonly [number, number, number];
-      pivot?: readonly [number, number, number];
-      translation?: number;
-    }): void;
+    setSectionCuts(cuts: readonly SectionPlaneCut[]): string[];
+    updateSectionCut(id: string, patch: Readonly<{ offset: number }>): void;
+    getSectionState(): { cuts: ReadonlyArray<{ id: string }>; isCommitted: boolean; certification: string };
     setCamera(camera: {
       position: readonly [number, number, number];
       target?: readonly [number, number, number];
@@ -48,11 +46,6 @@ type SectionViewBridgeWindow = Window & {
         }
       | undefined;
     getRenderFrame(): { metersPerRenderUnit: number };
-    getPresentation(): {
-      isSectionViewActive: boolean;
-      selectedSectionViewId: string | undefined;
-      sectionViewPivot: readonly [number, number, number];
-    };
     getSectionHelperSummary(): {
       sectionHelperMeshCount: number;
       sectionHelperLineSegments2Count: number;
@@ -104,8 +97,9 @@ const webGpuValidationFailures = async (from: number): Promise<string[]> => {
     .map(({ text, type }) => `[${type}] ${text}`);
 };
 
-const driveOverlapSectionView = async (translation: number): Promise<void> => {
-  await target.evaluate((nextTranslation) => {
+/** Cuts at `offsetMillimetres` on Z, removing +Z; a later call moves that cut, as a drag does. */
+const driveOverlapSectionView = async (offsetMillimetres: number): Promise<void> => {
+  await target.evaluate((offset) => {
     const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
@@ -117,14 +111,13 @@ const driveOverlapSectionView = async (translation: number): Promise<void> => {
       fov: 38,
       zoom: 1.2,
     });
-    bridge.setSectionView({
-      plane: 'xy',
-      direction: 1,
-      rotationRadians: [0, 0, 0],
-      pivot: [0, 0, 0],
-      translation: nextTranslation,
-    });
-  }, translation / 1000);
+    const [cut] = bridge.getSectionState().cuts;
+    if (cut) {
+      bridge.updateSectionCut(cut.id, { offset });
+    } else {
+      bridge.setSectionCuts([{ kind: 'plane', plane: 'xy', offset, isFlipped: false }]);
+    }
+  }, offsetMillimetres / 1000);
 };
 
 const overlapRegionForCanvas = async (): Promise<CanvasRegion> => {
@@ -225,7 +218,7 @@ const waitForExactOverlapDiagnostics = async (): Promise<void> => {
           completeness: bridge.getSectionCapCompleteness(),
           frame: bridge.getRenderFrame(),
           helperCounts: bridge.getSectionHelperSummary().sectionHelperMeshCount,
-          presentation: bridge.getPresentation(),
+          section: bridge.getSectionState(),
         };
       }),
     ]);

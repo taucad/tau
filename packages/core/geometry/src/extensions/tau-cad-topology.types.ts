@@ -1,9 +1,9 @@
 import type { Mechanism } from '@taucad/kinematics';
 import type { JSONObject } from '@taucad/runtime/types';
 
-/** A range in one glTF primitive's index accessor. @public */
+/** A producer-defined face range. Replicad v1 counts triangle index accessor entries; verify its span-unit marker before interpreting. @public */
 export type TauCadTopologyFaceGroup = { readonly start: number; readonly count: number; readonly faceId: number };
-/** A range in one glTF line primitive's index accessor. @public */
+/** A producer-defined edge range. Replicad v1 counts flat XYZ scalars in a non-indexed LINES primitive; verify its span-unit marker before interpreting. @public */
 export type TauCadTopologyEdgeGroup = { readonly start: number; readonly count: number; readonly edgeId: number };
 
 /** One glTF primitive referenced by a topology component. @public */

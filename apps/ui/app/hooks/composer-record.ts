@@ -15,24 +15,23 @@
  */
 
 import { useEffect, useState } from 'react';
-import { createActor } from 'xstate';
-import type { Actor } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
+import type { Actor, AsyncActorLogic } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
 import type { AttachmentStore } from '#db/attachment-store.js';
 import type { ComposerRecord, ComposerRecordStore } from '#db/composer-record-store.js';
 import { createEmptyDraftMessage } from '#hooks/draft.machine.js';
 import type { DraftHydration } from '#hooks/draft.machine.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { composerRecordActors, composerRecordMachine } from '#machines/composer-record.machine.js';
-import type { Attachment } from '#utils/attachment.utils.js';
+import type { StoredAttachment } from '#utils/attachment.utils.js';
 
 /** A running record actor, as every consumer of this seam holds it; its owners start and stop it. */
 export type ComposerRecordRef = Actor<typeof composerRecordMachine>;
 
-type AttachmentStoredEvent = { type: 'attachmentStored'; attachment: Attachment };
+type AttachmentStoredEvent = { type: 'attachmentStored'; attachment: StoredAttachment };
 type StoreAttachmentInput = { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?: string };
-type StoreAttachmentActor = ReturnType<typeof fromSafeAsync<AttachmentStoredEvent, StoreAttachmentInput>>;
+type StoreAttachmentActor = AsyncActorLogic<AttachmentStoredEvent, StoreAttachmentInput>;
 
 /** The actors `draftMachine` is provided with when its surface has a record. */
 export type DraftPersistenceActors = {
@@ -44,26 +43,34 @@ export type DraftPersistenceActors = {
 };
 
 const persistDraftActorFor = (recordRef: ComposerRecordRef) =>
-  fromSafeAsync<void, { draft: MyUIMessage }>(async ({ input }) => {
-    recordRef.send({ type: 'patch', fields: { draft: input.draft } });
+  createAsyncLogic<void, { draft: MyUIMessage }>({
+    run: async ({ input }) => {
+      recordRef.send({ type: 'patch', fields: { draft: input.draft } });
+    },
   });
 
 const persistEditDraftActorFor = (recordRef: ComposerRecordRef) =>
-  fromSafeAsync<void, { messageId: string; draft: MyUIMessage }>(async ({ input }) => {
-    recordRef.send({ type: 'patch', fields: { messageEdits: { [input.messageId]: input.draft } } });
+  createAsyncLogic<void, { messageId: string; draft: MyUIMessage }>({
+    run: async ({ input }) => {
+      recordRef.send({ type: 'patch', fields: { messageEdits: { [input.messageId]: input.draft } } });
+    },
   });
 
 // The draft machine sends only the fields the user touched, so they pass through as given — no defaults.
 const persistSelectionActorFor = (recordRef: ComposerRecordRef) =>
-  fromSafeAsync<void, { toolChoice?: string | string[]; mode?: ChatMode }>(async ({ input }) => {
-    recordRef.send({ type: 'patch', fields: input });
+  createAsyncLogic<void, { toolChoice?: string | string[]; mode?: ChatMode }>({
+    run: async ({ input }) => {
+      recordRef.send({ type: 'patch', fields: input });
+    },
   });
 
 const clearMessageEditActorFor = (recordRef: ComposerRecordRef) =>
-  fromSafeAsync<void, { messageId: string }>(async ({ input }) => {
-    // An edit with no parts is how the store spells "no edit" (D8); it omits
-    // the entry on merge rather than writing an empty message down.
-    recordRef.send({ type: 'patch', fields: { messageEdits: { [input.messageId]: createEmptyDraftMessage() } } });
+  createAsyncLogic<void, { messageId: string }>({
+    run: async ({ input }) => {
+      // An edit with no parts is how the store spells "no edit" (D8); it omits
+      // the entry on merge rather than writing an empty message down.
+      recordRef.send({ type: 'patch', fields: { messageEdits: { [input.messageId]: createEmptyDraftMessage() } } });
+    },
   });
 
 /**
@@ -73,10 +80,12 @@ const clearMessageEditActorFor = (recordRef: ComposerRecordRef) =>
  * @returns The actor.
  */
 export const storeAttachmentActorFor = (attachments: AttachmentStore): StoreAttachmentActor =>
-  fromSafeAsync<AttachmentStoredEvent, StoreAttachmentInput>(async ({ input }) => ({
-    type: 'attachmentStored',
-    attachment: await attachments.put(input.bytes, input.mediaType, input.filename),
-  }));
+  createAsyncLogic<AttachmentStoredEvent, StoreAttachmentInput>({
+    run: async ({ input }) => ({
+      type: 'attachmentStored',
+      attachment: await attachments.put(input.bytes, input.mediaType, input.filename),
+    }),
+  });
 
 /**
  * The `hydrateDraft` fields a loaded record carries: every composer field it

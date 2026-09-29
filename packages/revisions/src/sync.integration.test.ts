@@ -15,18 +15,24 @@
  * | 3 | **red pin (d)** | device B's open pull brings device A's file into B's checkout with no reload, and B renders before the pull answers |
  * | 4 | **red pin (e)** | a device that is merely *ahead* of the remote drains its durable queue on the next open, online, and never reports a conflict (review 2 R1) |
  * | 6 | **W18-b red pin (c)** | a device that has never held the project materializes its tree *and* its `.tau/chats` projection from the remote, with no chat turn (W18 DEF-2) |
+ * | 16 | **W5b (D12, D13)** | two open devices editing different files converge on a remote move: B merges and pushes, A fast-forwards, nobody presses anything |
+ * | 17 | **W5b a1b (D13)** | a push that lands between opening and the stream's first read is not missed: the open pull reads the remote only once the stream knows its tail |
+ * | 13 | **W6 (D14)** | two devices change one file: the device that meets the divergence records it on its conflict line and pushes that line; both list it; deciding on the other device lands a merge on `main` that fast-forwards the recorder and hides the line on both |
+ * | 13c | **D14-P** | the remote answers the conflict line's push `503 GIT_PUSH_RACE_LOST` (another device's push committed first): the line is offered again after the backoff and reaches the remote (isomorphic-git leg) |
+ * | 13b | **RV-W6 F2** | a line removed on the remote stays on the device that recorded it, still listed, and its next push offers it again |
+ * | 15 | **FX1 N** | a hook's plan-quota refusal of `main` reaches the per-ref result as the hook's sentence, and the push settles as a terminal quota answer |
  *
  * Each row runs on both legs: `isomorphic-git` (the browser's port) and native
  * `git` (a disk host's), because A15 is that the two legs are one transport.
  */
 
-import { execFileSync } from 'node:child_process';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import type { RootedFileSystem } from '@taucad/filesystem';
-import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import { classify } from '@taucad/filesystem/path-registry';
 import { createActor } from 'xstate';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
@@ -38,23 +44,16 @@ import { createRevisionActors } from '#revision-effects.js';
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
 import type { SyncQueueRecord } from '#sync.types.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
+import type { ConflictRecord, RevisionPort } from '#revision-port.js';
+import type { RevisionStreamHandlers } from '#revision-stream.js';
+import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
-import type { RevisionPort } from '#revision-port.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 const chatId = 'c1';
 const chatRef = `refs/tau/chats/${chatId}`;
 const mainRef = 'refs/heads/main';
 const syncQueuePath = '.git/sync-pending';
-
-const gitOnPath = ((): boolean => {
-  try {
-    execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 const temporaryRoots: string[] = [];
 
@@ -103,9 +102,27 @@ type Device = Readonly<{
   actors: ReturnType<typeof createRevisionActors>;
   /** Start a scheduler over this device's effects, with a real clock. */
   scheduler: (
-    options?: Readonly<{ online?: boolean }>,
+    options?: Readonly<{ online?: boolean; retryMilliseconds?: number }>,
   ) => ReturnType<typeof createActor<ReturnType<typeof syncMachine.provide>>>;
 }>;
+
+/**
+ * The record device (R1, EQ10(a)) a device's unattributed form names its
+ * segments and conflict lines by, once it has minted one.
+ *
+ * @param of - The device.
+ * @returns Its `host` form's record device id.
+ */
+const recordDeviceOf = async (of: Device): Promise<string> => {
+  const stored = JSON.parse(await of.filesystem.readFile('.git/ops-devices.json', 'utf8')) as {
+    devices: Record<string, string>;
+  };
+  const device = stored.devices['host'];
+  if (device === undefined) {
+    throw new Error('This device has not minted a record device yet.');
+  }
+  return device;
+};
 
 /**
  * One device: a project directory, a port over it, and the sync effects.
@@ -122,6 +139,7 @@ const device = async (
     files?: Readonly<Record<string, string>>;
     onChatsProjected?: (chatIds: readonly string[]) => void;
     wrapFilesystem?: (filesystem: RootedFileSystem) => RootedFileSystem;
+    remoteMoves?: (input: Readonly<{ projectId: string }>, handlers: RevisionStreamHandlers) => () => void;
   }>,
 ): Promise<Device> => {
   const { leg, label, remoteUrl } = input;
@@ -140,10 +158,10 @@ const device = async (
   const actors = createRevisionActors({
     port,
     projectId: 'project-1',
-    authorityEpoch: `epoch-${label}`,
     filesystem: () => input.wrapFilesystem?.(filesystem) ?? filesystem,
     deviceId: () => `device-${label}`,
     ...(input.onChatsProjected === undefined ? {} : { onChatsProjected: input.onChatsProjected }),
+    ...(input.remoteMoves === undefined ? {} : { remoteMoves: input.remoteMoves }),
   });
   return {
     root,
@@ -157,7 +175,7 @@ const device = async (
           debounceMilliseconds: 5,
           /* Long enough that a settled state stays settled while a row asserts it:
            * the backoff is a delay, not something this suite is measuring. */
-          retryMilliseconds: 30_000,
+          retryMilliseconds: options.retryMilliseconds ?? 30_000,
           pullRenderMilliseconds: 20,
           pullDeadlineMilliseconds: 25_000,
           ...(options.online === undefined ? {} : { online: options.online }),
@@ -235,7 +253,7 @@ const queueOf = async (device_: Device): Promise<SyncQueueRecord> => {
   return JSON.parse(stored) as SyncQueueRecord;
 };
 
-describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backend — $name', (leg) => {
+describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git http-backend — $name', (leg) => {
   it('row 1 (red pin c): a refused record ref re-queues only itself while main reaches the remote', async () => {
     const remoteRoot = await temporaryRoot('remote-refuse');
     const remote = await startGitHttpBackend({ root: remoteRoot, refusedRef: chatRef });
@@ -258,7 +276,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
 
       const scheduler = one.scheduler();
       scheduler.start();
-      scheduler.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      scheduler.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(scheduler.getSnapshot()).state).toBe('queued');
@@ -289,6 +307,53 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
     }
   }, 180_000);
 
+  it('row 15 (FX1 N): a hook’s quota refusal keeps its sentence per ref and settles as quota', async () => {
+    const saying = [
+      'Tau: storage quota exceeded — this push needs 4080 bytes more than your plan includes.',
+      'Tau: the largest files it adds are:',
+      'Tau:   bracket.scad (20 bytes)',
+    ];
+    const remoteRoot = await temporaryRoot('remote-quota');
+    const remote = await startGitHttpBackend({ root: remoteRoot, refusedRef: mainRef, refusedSaying: saying });
+    try {
+      const one = await device({
+        leg,
+        label: 'a-quota',
+        remoteUrl: remote.url,
+        files: { 'bracket.scad': 'cube([10, 20, 30]);\n' },
+      });
+      const head = await record({
+        device: one,
+        files: { 'bracket.scad': 'cube([10, 20, 30]);\n' },
+        summary: 'First revision',
+      });
+
+      const scheduler = one.scheduler();
+      scheduler.start();
+      scheduler.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(scheduler.getSnapshot()).state).toBe('failed');
+        },
+        { timeout: 30_000 },
+      );
+
+      /* The per-ref result carried the hook's sentence into the queue, not git's placeholder. */
+      const queue = await queueOf(one);
+      const [entry] = queue.entries;
+      expect(entry?.ref).toBe(mainRef);
+      expect(entry?.reason).toContain('Tau: storage quota exceeded');
+      const facet = selectSyncFacet(scheduler.getSnapshot());
+      expect(facet).toMatchObject({ state: 'failed', reason: 'quota' });
+      expect(facet.error).toContain('bracket.scad (20 bytes)');
+      expect(facet.error).not.toMatch(/hook|pre-receive/iu);
+
+      scheduler.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
   it('row 2 (red pin a): a close revision that could not be pushed is in the queue and retried first', async () => {
     const remoteRoot = await temporaryRoot('remote-offline');
     const remote = await startGitHttpBackend({ root: remoteRoot });
@@ -310,7 +375,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
 
     const first = one.scheduler();
     first.start();
-    first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: head });
+    first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: head, branch: 'main' });
     await vi.waitFor(
       async () => {
         const queued = await queueOf(one);
@@ -390,7 +455,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
       const head = await record({ device: one, files, summary: 'Device A' });
       const first = one.scheduler();
       first.start();
-      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
@@ -403,7 +468,21 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
         leg,
         label: 'b-cloud-open',
         remoteUrl: remote.url,
-        files: { 'tau.json': '{"name":"Bracket","main":"main.scad"}\n' },
+        /* `cloudProjectStub`'s manifest, as `serializeProjectManifest` writes it. */
+        files: {
+          'tau.json': `${JSON.stringify(
+            {
+              $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+              id: 'project-1',
+              name: 'Bracket',
+              description: '',
+              tags: [],
+              assets: { main: { entryPath: 'main.scad' } },
+            },
+            null,
+            2,
+          )}\n`,
+        },
       });
       const second = two.scheduler();
       second.start();
@@ -460,7 +539,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
       });
       const first = one.scheduler();
       first.start();
-      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
@@ -509,7 +588,10 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
         '{"name":"Bracket"}\n',
       );
       expect(
-        await two.filesystem.readFile(`${chatRecordsPath(chatId)}/${chatSegmentPath('device-a-remote-only')}`, 'utf8'),
+        await two.filesystem.readFile(
+          `${chatRecordsPath(chatId)}/${chatSegmentPath(await recordDeviceOf(one))}`,
+          'utf8',
+        ),
       ).toBe('{"type":"turn.start"}\n');
       expect(projectedChats).toEqual([[chatId]]);
 
@@ -544,7 +626,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
       });
       const source = one.scheduler();
       source.start();
-      source.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      source.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(source.getSnapshot()).state).toBe('backedUp');
@@ -745,7 +827,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
 
     const offline = one.scheduler();
     offline.start();
-    offline.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: ahead });
+    offline.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: ahead, branch: 'main' });
     await vi.waitFor(
       async () => {
         const queued = await queueOf(one);
@@ -780,6 +862,417 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
     }
   }, 180_000);
 
+  /*
+   * W5b (D12, D13): two open devices, each editing a different file, converge
+   * with nobody pressing anything. The long poll's wake-up is the one thing
+   * not on this wire (it is the API's, proven by `api-e2e`'s
+   * `revision-stream.spec.ts` and `revision-stream.test.ts`), so it is sent as
+   * the event the subscription raises.
+   */
+  it('row 16 (D12, D13): two devices editing different files converge on a remote move, without a person', async () => {
+    const remoteRoot = await temporaryRoot('remote-converge');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const files = { 'a.scad': 'cube(1);\n', 'b.scad': 'sphere(1);\n' };
+      const one = await device({ leg, label: 'a-converge', remoteUrl: remote.url, files });
+      /* Each revision is the device's own files, as a save cut records them, so both checkouts are clean. */
+      const save = async (device_: Device, summary: string, parent?: string): Promise<string> => {
+        const tree = await captureRevisionTree(device_.filesystem, { exclude: (path) => !classify(path).versioned });
+        const receipt = await device_.port.writeRevision({
+          parents: parent === undefined ? [] : [revisionId(parent)],
+          tree,
+          provenance: { source: 'user', actorId: summary, createdAt: Date.UTC(2026, 8, 26) },
+          summary: { generated: summary },
+        });
+        await device_.port.updateRef({
+          name: mainRef,
+          expectedHead: parent === undefined ? undefined : revisionId(parent),
+          head: revisionId(receipt.commitId),
+        });
+        return receipt.commitId;
+      };
+      const base = await save(one, 'Base');
+      await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }] });
+      const two = await device({ leg, label: 'b-converge', remoteUrl: remote.url });
+      const schedulers = [one.scheduler(), two.scheduler()] as const;
+      for (const scheduler of schedulers) {
+        scheduler.start();
+      }
+      const settled = async (): Promise<void> => {
+        await vi.waitFor(
+          () => {
+            for (const scheduler of schedulers) {
+              expect(scheduler.getSnapshot().matches('backedUp')).toBe(true);
+            }
+          },
+          { timeout: 30_000 },
+        );
+      };
+      await settled();
+      expect(await two.filesystem.readFile('b.scad', 'utf8')).toBe('sphere(1);\n');
+
+      /* A changes one file and backs it up; B, meanwhile, saved another. */
+      await one.filesystem.writeFile('a.scad', 'cube(2);\n');
+      const aHead = await save(one, 'A edits a', base);
+      schedulers[0].send({
+        type: 'revisionMinted',
+        checkoutId: 'live',
+        trigger: 'save',
+        revisionId: aHead,
+        branch: 'main',
+      });
+      await vi.waitFor(
+        async () => {
+          expect(await remote.git(['rev-parse', mainRef])).toBe(aHead);
+        },
+        { timeout: 30_000 },
+      );
+      await settled();
+      await two.filesystem.writeFile('b.scad', 'sphere(2);\n');
+      await save(two, 'B edits b', base);
+
+      /* A's push wakes B: B merges the two lines and pushes the merge; that wakes A. */
+      schedulers[1].send({ type: 'remoteMoved', generation: 2, refs: [mainRef] });
+      await vi.waitFor(
+        async () => {
+          expect(await two.port.readRef(mainRef)).not.toBe(aHead);
+          expect(await remote.git(['rev-parse', mainRef])).toBe(await two.port.readRef(mainRef));
+        },
+        { timeout: 30_000 },
+      );
+      await settled();
+      schedulers[0].send({ type: 'remoteMoved', generation: 3, refs: [mainRef] });
+      await vi.waitFor(
+        async () => {
+          expect(await one.port.readRef(mainRef)).toBe(await two.port.readRef(mainRef));
+        },
+        { timeout: 30_000 },
+      );
+      await settled();
+
+      for (const device_ of [one, two]) {
+        // oxlint-disable-next-line no-await-in-loop -- two devices, compared in turn.
+        expect(await device_.filesystem.readFile('a.scad', 'utf8')).toBe('cube(2);\n');
+        // oxlint-disable-next-line no-await-in-loop -- two devices, compared in turn.
+        expect(await device_.filesystem.readFile('b.scad', 'utf8')).toBe('sphere(2);\n');
+      }
+      for (const scheduler of schedulers) {
+        scheduler.stop();
+      }
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  /**
+   * D14's setup: A and B change one line of one file, A's reaches the remote
+   * first, and B records the divergence on its own conflict line and pushes it.
+   */
+  const conflictOnB = async (
+    remote: Awaited<ReturnType<typeof startGitHttpBackend>>,
+    suffix: string,
+    options: Readonly<{ legOfB?: Leg; retryMilliseconds?: number; beforeConflict?: () => void }> = {},
+  ) => {
+    const one = await device({ leg, label: `a-${suffix}`, remoteUrl: remote.url, files: { 'a.scad': 'cube(1);\n' } });
+    const save = async (device_: Device, summary: string, parent?: string): Promise<string> => {
+      const tree = await captureRevisionTree(device_.filesystem, { exclude: (path) => !classify(path).versioned });
+      const receipt = await device_.port.writeRevision({
+        parents: parent === undefined ? [] : [revisionId(parent)],
+        tree,
+        provenance: { source: 'user', actorId: summary, createdAt: Date.UTC(2026, 8, 26) },
+        summary: { generated: summary },
+      });
+      await device_.port.updateRef({
+        name: mainRef,
+        expectedHead: parent === undefined ? undefined : revisionId(parent),
+        head: revisionId(receipt.commitId),
+      });
+      return receipt.commitId;
+    };
+    const conflictsOf = async (device_: Device): Promise<readonly ConflictRecord[]> => {
+      const { conflicts } = await run<{ conflicts: readonly ConflictRecord[] }>(
+        device_.actors.checkouts.listCheckouts,
+        { projectId: 'project-1' },
+      );
+      return conflicts;
+    };
+    const base = await save(one, 'Base');
+    await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }] });
+    const two = await device({ leg: options.legOfB ?? leg, label: `b-${suffix}`, remoteUrl: remote.url });
+    const schedulers = [
+      one.scheduler(),
+      two.scheduler(options.retryMilliseconds === undefined ? {} : { retryMilliseconds: options.retryMilliseconds }),
+    ] as const;
+    for (const scheduler of schedulers) {
+      scheduler.start();
+    }
+    await vi.waitFor(
+      () => {
+        for (const scheduler of schedulers) {
+          expect(scheduler.getSnapshot().matches('backedUp')).toBe(true);
+        }
+      },
+      { timeout: 30_000 },
+    );
+
+    /* Both change the same line of the same file; A's reaches the remote first. */
+    await one.filesystem.writeFile('a.scad', 'cube(2);\n');
+    const aHead = await save(one, 'A edits a', base);
+    schedulers[0].send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: aHead,
+      branch: 'main',
+    });
+    await vi.waitFor(
+      async () => {
+        expect(await remote.git(['rev-parse', mainRef])).toBe(aHead);
+      },
+      { timeout: 30_000 },
+    );
+    await two.filesystem.writeFile('a.scad', 'cube(3);\n');
+    await save(two, 'B edits a', base);
+
+    /* B meets the divergence, records it on its own line, and that line travels. */
+    /* Named by B's record device (R1), which B mints when it records. */
+    const lineOf = async (): Promise<string> => `conflicts/main/${await recordDeviceOf(two)}`;
+    options.beforeConflict?.();
+    schedulers[1].send({ type: 'remoteMoved', generation: 2, refs: [mainRef] });
+    await vi.waitFor(
+      async () => {
+        expect(schedulers[1].getSnapshot().matches('conflicted')).toBe(true);
+        const pending = await lineOf();
+        expect(await remote.git(['rev-parse', `refs/heads/${pending}`])).toBe(await two.port.readRef(pending));
+      },
+      { timeout: 30_000 },
+    );
+    const line = await lineOf();
+    const recorded = (await two.port.readRef(line)) ?? '';
+    expect(await remote.git(['rev-parse', mainRef])).toBe(aHead);
+    return { one, two, schedulers, conflictsOf, aHead, line, recorded };
+  };
+
+  /*
+   * D14 (charter W6): a conflict travels. Two devices change one file; the one
+   * that meets the divergence records it on its conflict line and pushes that
+   * line, the other fetches it, and both list it. Deciding on the device that
+   * did *not* record it lands a merge on `main` that fast-forwards the recorder,
+   * and ancestry hides the line on both.
+   */
+  it('row 13 (D14): a conflict recorded on one device is listed and decided on the other', async () => {
+    const remoteRoot = await temporaryRoot('remote-conflict');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const { one, two, schedulers, conflictsOf, aHead, line, recorded } = await conflictOnB(remote, 'conflict');
+
+      /* A fetches it: both devices list the same decision about `main`. */
+      schedulers[0].send({ type: 'remoteMoved', generation: 3, refs: [`refs/heads/${line}`] });
+      await vi.waitFor(
+        async () => {
+          expect(await conflictsOf(one)).toStrictEqual([{ revisionId: recorded, line, into: 'main', foreign: true }]);
+        },
+        { timeout: 30_000 },
+      );
+      expect(await conflictsOf(two)).toStrictEqual([{ revisionId: recorded, line, into: 'main', foreign: false }]);
+
+      /* A decides, keeping its own version: a merge on `main` with the conflict among its parents. */
+      const loaded = await run<{ paths: ReadonlyArray<{ path: string }> }>(one.actors.resolution.loadConflict, {
+        projectId: 'project-1',
+        revisionId: recorded,
+      });
+      expect(loaded.paths.map((entry) => entry.path)).toStrictEqual(['a.scad']);
+      await run(one.actors.resolution.applyResolution, {
+        projectId: 'project-1',
+        revisionId: recorded,
+        path: 'a.scad',
+        side: 'mine',
+      });
+      const decided = await run<{ revisionId: string; branch?: string }>(one.actors.resolution.finishMerge, {
+        projectId: 'project-1',
+        revisionId: recorded,
+      });
+      expect(decided.branch).toBe(line);
+      const landed = await one.port.readRevision(revisionId(decided.revisionId));
+      expect(landed?.parents).toStrictEqual([aHead, recorded]);
+      schedulers[0].send({ type: 'conflictResolved', ref: `refs/heads/${line}`, revisionId: decided.revisionId });
+      await vi.waitFor(
+        async () => {
+          expect(await remote.git(['rev-parse', mainRef])).toBe(decided.revisionId);
+        },
+        { timeout: 30_000 },
+      );
+
+      /* B pulls the decision: `main` fast-forwards and the line is hidden on both. */
+      schedulers[1].send({ type: 'remoteMoved', generation: 4, refs: [mainRef] });
+      await vi.waitFor(
+        async () => {
+          expect(await two.port.readRef(mainRef)).toBe(decided.revisionId);
+        },
+        { timeout: 30_000 },
+      );
+      expect(await two.filesystem.readFile('a.scad', 'utf8')).toBe('cube(2);\n');
+      expect(await conflictsOf(one)).toStrictEqual([]);
+      expect(await conflictsOf(two)).toStrictEqual([]);
+      for (const scheduler of schedulers) {
+        scheduler.stop();
+      }
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  /*
+   * D14-P: the Hosted Remote answers a push that overlaps another device's with
+   * `503 GIT_PUSH_RACE_LOST` — retryable and self-clearing (rule 19). A device
+   * meets the conflict because another device pushed, and that device's record
+   * push usually follows at once, so the line's first offer is the one that
+   * loses the race. It must be offered again, not dropped until the next pull.
+   */
+  it.runIf(leg.name === 'isomorphic-git')(
+    'row 13c (D14-P): a conflict line the remote answered race-lost is offered again and travels',
+    async () => {
+      const remoteRoot = await temporaryRoot('remote-conflict-raced');
+      const remote = await startGitHttpBackend({ root: remoteRoot });
+      const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      let racing = false;
+      const raced: string[] = [];
+      const legOfB: Leg = {
+        name: leg.name,
+        port: (_root, filesystem) =>
+          createIsomorphicGitRevisionPort({
+            filesystem,
+            http: createRevisionHttpClient({
+              authorization: () => 'Bearer session-token',
+              fetch: async (input, init) => {
+                const url = input instanceof Request ? input.url : String(input);
+                if (racing && init?.method === 'POST' && url.endsWith('/git-receive-pack')) {
+                  racing = false;
+                  raced.push(url);
+                  return Response.json(
+                    { code: 'GIT_PUSH_RACE_LOST', message: 'Another push for this project committed first; retry.' },
+                    { status: 503, headers: { 'retry-after': '5' } },
+                  );
+                }
+                return fetch(input, init);
+              },
+            }),
+            checkouts: { projectId: 'project-1', root: () => filesystem },
+          }),
+      };
+      try {
+        const { schedulers, line, recorded } = await conflictOnB(remote, 'raced', {
+          legOfB,
+          retryMilliseconds: 50,
+          beforeConflict: () => {
+            racing = true;
+          },
+        });
+        expect(raced).toHaveLength(1);
+        expect(await remote.git(['rev-parse', `refs/heads/${line}`])).toBe(recorded);
+        expect(reported).toHaveBeenCalledWith(
+          '[revisions] conflict line push',
+          expect.objectContaining({ code: 'REMOTE_UNAVAILABLE' }),
+        );
+        for (const scheduler of schedulers) {
+          scheduler.stop();
+        }
+      } finally {
+        reported.mockRestore();
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
+  /*
+   * D14 / RV-W6 F2: a line removed on the remote — another device's *Remove* —
+   * is never taken from the device that recorded it. Its fetch keeps the line
+   * and the decision, and its next push offers the line again.
+   */
+  it('row 13b (D14): a device keeps its own conflict line when the remote drops it, and offers it again', async () => {
+    const remoteRoot = await temporaryRoot('remote-conflict-removed');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const { two, schedulers, conflictsOf, line, recorded } = await conflictOnB(remote, 'removed');
+      await remote.git(['update-ref', '-d', `refs/heads/${line}`]);
+
+      await run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+      expect(await two.port.readRef(line)).toBe(recorded);
+      expect(await conflictsOf(two)).toStrictEqual([{ revisionId: recorded, line, into: 'main', foreign: false }]);
+
+      schedulers[1].send({ type: 'remoteMoved', generation: 5, refs: [mainRef] });
+      await vi.waitFor(
+        async () => {
+          expect(await remote.git(['rev-parse', `refs/heads/${line}`])).toBe(recorded);
+        },
+        { timeout: 30_000 },
+      );
+      for (const scheduler of schedulers) {
+        scheduler.stop();
+      }
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  /*
+   * W5b a1b (D13): the open pull and the stream's first read are two reads of
+   * the remote. Whichever runs second defines what is missed, so the stream's
+   * tail comes first: a push after it is an entry, and a push before it is in
+   * the pull. The stream here is scripted — its tail read is the test's to
+   * time — and the push is injected in the gap between the two steps.
+   */
+  it('row 17 (D13): a push between opening and the stream’s first read is not missed', async () => {
+    const remoteRoot = await temporaryRoot('remote-open-gap');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({ leg, label: 'a-open-gap', remoteUrl: remote.url, files: { 'a.scad': 'cube(1);\n' } });
+      const base = await record({ device: one, files: { 'a.scad': 'cube(1);\n' }, summary: 'Base' });
+      await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }] });
+
+      let stream: RevisionStreamHandlers | undefined;
+      const two = await device({
+        leg,
+        label: 'b-open-gap',
+        remoteUrl: remote.url,
+        remoteMoves: (_input, handlers) => {
+          stream = handlers;
+          return () => undefined;
+        },
+      });
+      const scheduler = two.scheduler();
+      scheduler.start();
+      await vi.waitFor(() => {
+        expect(stream).toBeDefined();
+      });
+      /* The gap: B's open has begun and the stream has not read its tail yet. */
+      await new Promise((resolve) => {
+        setTimeout(resolve, 300);
+      });
+      const pushed = await record({
+        device: one,
+        files: { 'a.scad': 'cube(2);\n' },
+        summary: 'A pushes in the gap',
+        parent: base,
+      });
+      await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }] });
+      /* The tail now includes the push, so the stream will never announce it. */
+      stream?.watching?.();
+
+      await vi.waitFor(
+        async () => {
+          expect(await two.port.readRef(mainRef)).toBe(pushed);
+          expect(scheduler.getSnapshot().matches('backedUp')).toBe(true);
+        },
+        { timeout: 30_000 },
+      );
+      scheduler.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
   it('row 10: a branch the remote has never had is pushed on open, not read as backed up (D38)', async () => {
     const remoteRoot = await temporaryRoot('remote-new-branch');
     const remote = await startGitHttpBackend({ root: remoteRoot });
@@ -798,6 +1291,75 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
         { timeout: 30_000 },
       );
       opened.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  /*
+   * W13c chat-ref C (a, b): the desktop two-client rows' shape. Device B only
+   * *received* the chat, so it has nothing of its own to add: its first write
+   * builds on the fetched head rather than minting a root chain of its own,
+   * nothing about the chat is refused, and B's next revision reaches `main`.
+   */
+  it('row 14 (W13c C): a device that only received a chat never offers a root chain for it', async () => {
+    const remoteRoot = await temporaryRoot('remote-received-chat');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({
+        leg,
+        label: 'a-received-chat',
+        remoteUrl: remote.url,
+        files: {
+          'bracket.scad': 'cube([3, 3, 3]);\n',
+          [`${chatRecordsPath(chatId)}/chat.json`]: '{"name":"Bracket"}\n',
+          [`${chatRecordsPath(chatId)}/events.jsonl`]: '{"type":"turn.start"}\n',
+        },
+      });
+      const head = await record({ device: one, files: { 'bracket.scad': 'cube([3, 3, 3]);\n' }, summary: 'A' });
+      const first = one.scheduler();
+      first.start();
+      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      first.stop();
+      const chatHead = await remote.git(['rev-parse', chatRef]);
+
+      const two = await device({ leg, label: 'b-received-chat', remoteUrl: remote.url });
+      const second = two.scheduler();
+      second.start();
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      const next = await record({
+        device: two,
+        files: { 'bracket.scad': 'cube([4, 4, 4]);\n' },
+        summary: 'B',
+        parent: head,
+      });
+      second.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: next, branch: 'main' });
+      await vi.waitFor(
+        async () => {
+          expect(await remote.git(['rev-parse', mainRef])).toBe(next);
+          expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+
+      /* The chat is exactly A's: B neither rewound it nor queued a refusal of it. */
+      expect(await remote.git(['rev-parse', chatRef])).toBe(chatHead);
+      const queue = await queueOf(two);
+      expect(queue.entries).toEqual([]);
+      const local = await two.port.readRef(chatRef);
+      expect(local === undefined || local === chatHead).toBe(true);
+      second.stop();
     } finally {
       await remote.close();
     }
@@ -935,7 +1497,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
     }
   }, 180_000);
 
-  it("row 12: a fresh device backs up a project whose remote holds another device's empty chat", async () => {
+  it("row 18: a fresh device backs up a project whose remote holds another device's empty chat", async () => {
     const remoteRoot = await temporaryRoot('remote-empty-chat');
     const remote = await startGitHttpBackend({ root: remoteRoot });
     /* The Tau API's `pre-receive` rule (`git.constants.ts`): a ref that does
@@ -997,7 +1559,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
         summary: 'Device B',
         parent: head,
       });
-      second.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: mine });
+      second.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: mine, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(second.getSnapshot())).toMatchObject({ state: 'backedUp', error: undefined });
@@ -1021,7 +1583,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
  * own timeouts, and the machine leaves `opening` on the deadline either way —
  * what is asserted here is the half that was missing, the *request* ending.
  */
-describe.runIf(gitOnPath)('the open pull’s deadline over isomorphic-git', () => {
+describe.runIf(gitToolchainOnPath)('the open pull’s deadline over isomorphic-git', () => {
   it('row 5 (red pin g): a remote that never answers has its request aborted, and the queue takes over', async () => {
     const remoteRoot = await temporaryRoot('remote-hold');
     const remote = await startGitHttpBackend({ root: remoteRoot, hold: true });

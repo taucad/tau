@@ -82,7 +82,8 @@ describe('GeoSpec clean STEP lifecycle', () => {
     );
     const report = JSON.parse(stdout) as { success: boolean; passed: number; failed: number };
 
-    expect(existsSync(join(projectPath, '.tau'))).toBe(true);
+    // Persistent evidence belongs outside the project under test.
+    expect(existsSync(join(projectPath, '.tau'))).toBe(false);
     expect(report).toMatchObject({ success: true, passed: 1, failed: 0 });
   });
 });

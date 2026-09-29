@@ -1,7 +1,6 @@
-import type { IncomingMessage, Server as HttpServer } from 'node:http';
-import type { Duplex } from 'node:stream';
+import type { IncomingMessage } from 'node:http';
 
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import type { Auth } from 'better-auth';
@@ -14,6 +13,8 @@ import { authInstanceKey } from '#constants/auth.constant.js';
 import { asBuffer } from '#api/hosts/host-frame-relay.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
 
 const controlPath = '/v1/agents/control';
 const sessionPathPrefix = '/v1/agents/sessions/';
@@ -21,15 +22,16 @@ const sessionPathPrefix = '/v1/agents/sessions/';
 @Injectable()
 export class HostsGateway implements OnModuleInit, OnModuleDestroy {
   private socketServer: WebSocketServer | undefined;
-  private httpServer: HttpServer | undefined;
-  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node's `upgrade` event hands the handler a Buffer
-  private upgradeHandler: ((request: IncomingMessage, socket: Duplex, head: Buffer) => void) | undefined;
 
   public constructor(
     private readonly hostsService: HostsService,
     private readonly devWebSocketService: DevWebSocketService,
     @Inject(authInstanceKey) private readonly auth: Auth,
     @Inject(HttpAdapterHost) private readonly httpAdapterHost: HttpAdapterHost,
+    // oxlint-disable-next-line new-cap -- NestJS decorator
+    @Optional() private readonly upgradeRouter: UpgradeRouter = new UpgradeRouter(),
+    // oxlint-disable-next-line new-cap -- NestJS decorator
+    @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
   ) {}
 
   public async onModuleInit(): Promise<void> {
@@ -43,22 +45,29 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
       await this.devWebSocketService.ensureStarted();
       return;
     }
-    this.socketServer = new WebSocketServer({ noServer: true });
+    const socketServer = new WebSocketServer({ noServer: true });
+    this.socketServer = socketServer;
     const fastify = this.httpAdapterHost.httpAdapter.getInstance<FastifyInstance>();
-    this.httpServer = fastify.server;
-    // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node's `upgrade` event hands the handler a Buffer
-    const onUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
-      const { pathname } = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
-      if (pathname !== controlPath && !pathname.startsWith(sessionPathPrefix)) {
-        return;
-      }
-      this.socketServer?.handleUpgrade(request, socket, head, (accepted) => {
-        this.socketServer?.emit('connection', accepted, request);
-        void this.closeOnHandleFailure(accepted, request);
-      });
-    };
-    this.upgradeHandler = onUpgrade;
-    this.httpServer.on('upgrade', onUpgrade);
+    this.upgradeRouter.route(
+      fastify.server,
+      (pathname) => pathname === controlPath || pathname.startsWith(sessionPathPrefix),
+      (request, socket, head) => {
+        socketServer.handleUpgrade(request, socket, head, (accepted) => {
+          socketServer.emit('connection', accepted, request);
+          void this.closeOnHandleFailure(accepted, request);
+        });
+      },
+    );
+    /* `HostsService` departs the sockets it has registered; this also reaches
+     * one still in admission, which would otherwise register after the stop and
+     * stay open until the cut. */
+    this.shutdown.signal.addEventListener(
+      'abort',
+      () => {
+        this.closeClients();
+      },
+      { once: true },
+    );
   }
 
   public async onModuleDestroy(): Promise<void> {
@@ -67,17 +76,24 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
       this.devWebSocketService.unregisterPrefixHandler(sessionPathPrefix);
       return;
     }
-    if (this.httpServer && this.upgradeHandler) {
-      this.httpServer.off('upgrade', this.upgradeHandler);
-    }
-    for (const socket of this.socketServer?.clients ?? []) {
-      socket.close(1001, 'service stopping');
-    }
-    /* Every client was told 1001 above; shutdown does not wait on their close
+    this.closeClients();
+    /* Every client was told 1012 above; shutdown does not wait on their close
      * handshakes. This is what the code here always did: `close(cb)` returns
      * undefined, so the `?? resolve()` that used to follow it fired synchronously
      * and the awaited promise was already settled — the wait never existed. */
     this.socketServer?.close();
+  }
+
+  /**
+   * 1012 Service Restart: reconnect, to a Machine that is staying. Resumed as
+   * well, because a socket still paused in admission would never read the
+   * peer's close reply and `ws` would hold it open for its 30 s close timeout.
+   */
+  private closeClients(): void {
+    for (const socket of this.socketServer?.clients ?? []) {
+      socket.close(1012, 'service restart');
+      socket.resume();
+    }
   }
 
   /** The upgrade callback is synchronous, so a route that fails admission closes its socket here. */

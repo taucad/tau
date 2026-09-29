@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ReactNode } from 'react';
+import { StrictMode, useEffect } from 'react';
 import { renderHook, render, screen, act } from '@testing-library/react';
 import { createActor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { ProjectRootConfiguration } from '@taucad/filesystem';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type * as WorkspaceTelemetryModule from '#utils/workspace-telemetry.utils.js';
+import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
 import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { WorkspaceEntry } from '#filesystem/handle-store.js';
 
@@ -62,6 +64,15 @@ const mockProxyMove = vi.fn<(source: string, target: string) => Promise<unknown>
   size: 0,
   mtimeMs: 0,
 }));
+const mockProxyContents =
+  vi.fn<(path: string, filter?: { versionedOnly?: boolean }) => Promise<Record<string, Uint8Array<ArrayBuffer>>>>();
+const mockProxyExists = vi.fn<(path: string) => Promise<boolean>>();
+const mockProxyReadFile = vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>();
+const mockProxyDispose = vi.fn();
+const bridgeProxyDisposals = new Map<unknown, () => void>();
+const disposedBridges = new Map<unknown, boolean>();
+const bridgeEventListeners = new Map<unknown, Set<(data: unknown) => void>>();
+let readFileForBridge: ((bridge: { worker?: unknown }, path: string) => Promise<Uint8Array<ArrayBuffer>>) | undefined;
 const mockWaitForWorkerReady = vi.fn<() => Promise<void>>();
 const mockListProjectManifests = vi.fn<() => Promise<{ roots: readonly unknown[]; entries: readonly unknown[] }>>();
 const mockCreateFileSystemBridge = vi.fn(() => ({
@@ -75,6 +86,7 @@ const mockCreateFileSystemBridge = vi.fn(() => ({
 const mockOpenFileSystemBridge = vi.fn((_worker: unknown, _options: unknown) => ({
   port: new MessageChannel().port1,
   dispose: vi.fn(),
+  worker: _worker,
 }));
 
 /* Observe the connection the opaque runtime filesystem opens, without changing
@@ -82,11 +94,10 @@ const mockOpenFileSystemBridge = vi.fn((_worker: unknown, _options: unknown) => 
 const runtimeBridgeOpens = vi.hoisted(() => [] as Array<() => unknown>);
 
 vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
-  type RuntimeFileSystemModule = typeof import('@taucad/runtime/filesystem');
-  const original = await importOriginal<RuntimeFileSystemModule>();
+  const original = await importOriginal<typeof RuntimeFileSystemModule>();
   return {
     ...original,
-    fromFileSystemBridge: (open: Parameters<RuntimeFileSystemModule['fromFileSystemBridge']>[0]) => {
+    fromFileSystemBridge: (open: Parameters<(typeof RuntimeFileSystemModule)['fromFileSystemBridge']>[0]) => {
       runtimeBridgeOpens.push(open);
       return original.fromFileSystemBridge(open);
     },
@@ -97,9 +108,10 @@ vi.mock('@taucad/fs-bridge', () => ({
   createFileSystemBridge: () => mockCreateFileSystemBridge(),
   openFileSystemBridge: (worker: unknown, options: unknown) => mockOpenFileSystemBridge(worker, options),
   waitForWorkerReady: async () => mockWaitForWorkerReady(),
-  createFileSystemBridgeProxy: vi.fn(() => ({
-    closed: new Promise<void>(() => {
-      /* A live worker never settles it; `ready` fails over when it does (G2c-2). */
+  createFileSystemBridgeProxy: vi.fn((bridge: { worker?: unknown }) => ({
+    /* A live worker never settles it; `ready` fails over when it does (G2c-2). A case kills one with `proxyDeaths`. */
+    closed: new Promise<void>((resolve) => {
+      proxyDeaths.push(resolve);
     }),
     configureProjectRoots: mockConfigureProjectRoots,
     mount: mockMount,
@@ -115,6 +127,27 @@ vi.mock('@taucad/fs-bridge', () => ({
     readdirWithStats: vi.fn(async () => []),
     canDelete: mockProxyCanDelete,
     move: mockProxyMove,
+    contents: mockProxyContents,
+    exists: async (path: string): Promise<boolean> => {
+      if (disposedBridges.get(bridge)) {
+        throw new Error('Bridge port was closed.');
+      }
+      const exists = await mockProxyExists(path);
+      if (disposedBridges.get(bridge)) {
+        throw new Error('Bridge port was closed.');
+      }
+      return exists;
+    },
+    readFile: async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
+      if (disposedBridges.get(bridge)) {
+        throw new Error('Bridge port was closed.');
+      }
+      const bytes = readFileForBridge ? await readFileForBridge(bridge, path) : await mockProxyReadFile(path);
+      if (disposedBridges.get(bridge)) {
+        throw new Error('Bridge port was closed.');
+      }
+      return bytes;
+    },
     /* The rooted half of the same proxy: the file services read the project
        through its composed view, and a mutation asks it who owns the path. */
     provenance: vi.fn(async (path: string) =>
@@ -126,8 +159,22 @@ vi.mock('@taucad/fs-bridge', () => ({
     mkdir: mockProxyMkdir,
     rmdir: mockProxyRmdir,
     writeFile: mockProxyWriteFile,
-    dispose: vi.fn(),
-    listen: vi.fn(() => vi.fn()),
+    dispose: (() => {
+      const dispose = vi.fn((): void => {
+        disposedBridges.set(bridge, true);
+        mockProxyDispose();
+      });
+      bridgeProxyDisposals.set(bridge, dispose);
+      return dispose;
+    })(),
+    listen: vi.fn((_event: string, handler: (data: unknown) => void) => {
+      const listeners = bridgeEventListeners.get(bridge) ?? new Set<(data: unknown) => void>();
+      listeners.add(handler);
+      bridgeEventListeners.set(bridge, listeners);
+      return () => {
+        listeners.delete(handler);
+      };
+    }),
   })),
 }));
 
@@ -166,6 +213,14 @@ vi.mock('#filesystem/handle-store.js', () => ({
   restoreWorkspaceHandle: handleStoreTestState.restoreWorkspaceHandle,
 }));
 
+/* W6 RV1-F1: the agent host re-broker the root provider fires when its worker is replaced. */
+const mockReprovideAgentHostProjects = vi.hoisted(() => vi.fn(async () => undefined));
+/* One `closed` settler per proxy the file manager opened, newest last: settling it is that worker's death. */
+const proxyDeaths = vi.hoisted(() => [] as Array<() => void>);
+vi.mock('#services/agent-host-client.js', () => ({
+  reprovideAgentHostProjects: mockReprovideAgentHostProjects,
+}));
+
 // Stub the workspace-telemetry hook so the provider doesn't pull in
 // PostHog. The returned object is a typed mock so individual emitters can
 // be asserted with `toHaveBeenCalled*`.
@@ -191,6 +246,7 @@ const {
 describe('waitForFileManagerServices', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    readFileForBridge = undefined;
     workerTestState.instances.length = 0;
     mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
     mockWaitForWorkerReady.mockResolvedValue(undefined);
@@ -440,6 +496,44 @@ describe('FileManagerProvider — bindProjectToWorkspace', () => {
     return renderHook(() => useFileManager(), { wrapper });
   };
 
+  /* Finding 7: a provider's first worker replaced no host's bridges, so mounting one (the share page's among them)
+   * never re-brokers the agent host. */
+  it('should not re-broker agent project hosts when a provider mounts its first worker', async () => {
+    const { result } = renderProvider('proj-first');
+
+    await vi.waitFor(() => {
+      expect(result.current.contentService).toBeDefined();
+    });
+
+    expect(mockReprovideAgentHostProjects).not.toHaveBeenCalled();
+  });
+
+  /* RV1-F1 (W6.r1 round 3): a restart replaces the root mount's worker, so each open agent project host is re-brokered
+   * onto the new one, once. */
+  it('should re-broker agent project hosts when the file manager restarts its worker', async () => {
+    const { result } = renderProvider('proj-restart');
+    await vi.waitFor(() => {
+      expect(result.current.contentService).toBeDefined();
+    });
+    const firstContentService = result.current.contentService;
+    const workers = workerTestState.instances.length;
+    mockReprovideAgentHostProjects.mockClear();
+
+    /* The root mount's worker dies, so every proxy over it closes; the file manager restarts it once, unasked (RV1-F1). */
+    act(() => {
+      for (const die of proxyDeaths.splice(0)) {
+        die();
+      }
+    });
+
+    await vi.waitFor(() => {
+      expect(workerTestState.instances.length).toBe(workers + 1);
+      expect(result.current.contentService).toBeDefined();
+      expect(result.current.contentService).not.toBe(firstContentService);
+      expect(mockReprovideAgentHostProjects).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('should persist ProjectFileSystemConfig before dispatching reloadWorkspace', async () => {
     const { result } = renderProvider('proj-bind');
     setDiscoveredProject('proj-bind', 'wsp_target');
@@ -533,6 +627,7 @@ describe('FileManagerProvider — bindProjectToWorkspace', () => {
 describe('FileManagerProvider — client + workspace facades', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    bridgeEventListeners.clear();
     workerTestState.instances.length = 0;
     mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
     mockWaitForWorkerReady.mockResolvedValue(undefined);
@@ -547,6 +642,236 @@ describe('FileManagerProvider — client + workspace facades', () => {
     );
     return renderHook(() => useFileManager(), { wrapper });
   };
+
+  it('watches live workbench records through their own root while the selected code root is a checkout', async () => {
+    const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+      <StrictMode>
+        <FileManagerProvider initialBackend='indexeddb' projectId='p' rootDirectory='/checkouts/c'>
+          {children}
+        </FileManagerProvider>
+      </StrictMode>
+    );
+    const { result, unmount } = renderHook(() => useFileManager(), { wrapper });
+    const liveBridges = (): unknown[] =>
+      mockOpenFileSystemBridge.mock.calls.flatMap(([, options], index) => {
+        const bridge: unknown = mockOpenFileSystemBridge.mock.results[index]?.value;
+        return typeof options === 'object' &&
+          options !== null &&
+          'root' in options &&
+          options.root === '/projects/p' &&
+          'consumer' in options &&
+          options.consumer === 'working-copy'
+          ? [bridge]
+          : [];
+      });
+    await vi.waitFor(() => {
+      expect(liveBridges()).toHaveLength(1);
+    });
+    const firstBridge = liveBridges()[0];
+    const changed = vi.fn();
+    const path = '.tau/workbench/layout.json';
+    const off = result.current.subscribeWorkbenchRecord(path, changed);
+    act(() => {
+      for (const handler of bridgeEventListeners.get(firstBridge) ?? []) {
+        handler({ type: 'fileWritten', path, backend: 'opfs' });
+        handler({ type: 'fileWritten', path: 'src/model.ts', backend: 'opfs' });
+      }
+    });
+    expect(changed).toHaveBeenCalledOnce();
+    act(() => {
+      for (const handler of bridgeEventListeners.get(firstBridge) ?? []) {
+        handler({ type: 'directoryRenamed', oldPath: '.tau/workbench', newPath: '.tau/other', backend: 'opfs' });
+        handler({ type: 'directoryCopied', sourcePath: 'src/records', targetPath: '.tau/workbench', backend: 'opfs' });
+      }
+    });
+    expect(changed).toHaveBeenCalledTimes(3);
+    off();
+    act(() => {
+      for (const handler of bridgeEventListeners.get(firstBridge) ?? []) {
+        handler({ type: 'fileDeleted', path, backend: 'opfs' });
+      }
+    });
+    expect(changed).toHaveBeenCalledTimes(3);
+    const firstService = result.current.contentService;
+    act(() => {
+      result.current.fileManagerRef.send({ type: 'setRoot', path: '/checkouts/other', projectId: 'p' });
+    });
+    await vi.waitFor(() => {
+      expect(result.current.contentService).not.toBe(firstService);
+    });
+    await vi.waitFor(() => {
+      expect(liveBridges()).toHaveLength(2);
+    });
+    const secondBridge = liveBridges()[1];
+    expect(bridgeEventListeners.get(firstBridge)?.size).toBe(0);
+    const offSecond = result.current.subscribeWorkbenchRecord(path, changed);
+    act(() => {
+      for (const handler of bridgeEventListeners.get(secondBridge) ?? []) {
+        handler({ type: 'fileWritten', path, backend: 'opfs' });
+      }
+    });
+    expect(changed).toHaveBeenCalledTimes(4);
+    expect(bridgeProxyDisposals.get(firstBridge)).toHaveBeenCalledOnce();
+    offSecond();
+    unmount();
+    expect(bridgeProxyDisposals.get(secondBridge)).toHaveBeenCalledOnce();
+  });
+
+  it('should complete a rooted record read begun before the worker connects', async () => {
+    const ready = Promise.withResolvers<void>();
+    mockWaitForWorkerReady.mockReturnValueOnce(ready.promise);
+    mockProxyExists.mockResolvedValue(true);
+    const { result } = renderProvider();
+
+    const read = result.current.recordFiles.exists('/projects/root/.tau/workbench/layout.json');
+    await act(async () => {
+      ready.resolve();
+    });
+
+    await expect(read).resolves.toBe(true);
+    expect(mockProxyExists).toHaveBeenCalledExactlyOnceWith('.tau/workbench/layout.json');
+  });
+
+  it('should reopen a held rooted record client after the worker changes', async () => {
+    mockProxyExists.mockResolvedValue(true);
+    const { result } = renderProvider();
+    await vi.waitFor(() => {
+      expect(result.current.contentService).toBeDefined();
+    });
+    const files = result.current.recordFiles;
+    const path = '/projects/root/.tau/workbench/layout.json';
+    await expect(files.exists(path)).resolves.toBe(true);
+    const firstService = result.current.contentService;
+
+    act(() => {
+      result.current.fileManagerRef.send({ type: 'setRoot', path: '/projects/root', projectId: 'other' });
+    });
+    await vi.waitFor(() => {
+      expect(result.current.contentService).not.toBe(firstService);
+    });
+    await expect(files.exists(path)).resolves.toBe(true);
+
+    const opens = mockOpenFileSystemBridge.mock.calls.filter(
+      ([, options]) =>
+        typeof options === 'object' && options !== null && 'consumer' in options && options.consumer === 'working-copy',
+    );
+    expect(opens).toHaveLength(2);
+    expect(mockProxyExists).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads replacement-worker bytes from a child effect before the provider effects run', async () => {
+    const path = '/projects/root/.tau/workbench/layout.json';
+    mockProxyExists.mockResolvedValue(true);
+    const reads: Array<{ service: unknown; bytes: Promise<Uint8Array<ArrayBuffer> | Error> }> = [];
+    let replaceWorker = (): void => {
+      throw new Error('Child has not rendered.');
+    };
+    readFileForBridge = async (bridge) => new Uint8Array([bridge.worker === workerTestState.instances[0] ? 1 : 2]);
+
+    const Child = (): React.JSX.Element => {
+      const { contentService, fileManagerRef, recordFiles } = useFileManager();
+      replaceWorker = () => {
+        fileManagerRef.send({ type: 'setRoot', path: '/projects/root', projectId: 'other' });
+      };
+      useEffect(() => {
+        const bytes = (async (): Promise<Uint8Array<ArrayBuffer> | Error> => {
+          try {
+            if (!(await recordFiles.exists(path))) {
+              throw new Error('Record missing.');
+            }
+            return await recordFiles.readFile(path);
+          } catch (error) {
+            return error instanceof Error ? error : new Error(String(error));
+          }
+        })();
+        reads.push({ service: contentService, bytes });
+      }, [contentService, recordFiles]);
+      return <span hidden />;
+    };
+
+    render(
+      <FileManagerProvider initialBackend='indexeddb' rootDirectory='/projects/root'>
+        <Child />
+      </FileManagerProvider>,
+    );
+    await vi.waitFor(() => {
+      expect(reads.some((read) => read.service !== undefined)).toBe(true);
+    });
+    const initialReadyRead = reads.find((read) => read.service !== undefined);
+    await expect(initialReadyRead?.bytes).resolves.toEqual(new Uint8Array([1]));
+    const firstBridgeIndex = mockOpenFileSystemBridge.mock.calls.findIndex(
+      ([, options]) =>
+        typeof options === 'object' && options !== null && 'consumer' in options && options.consumer === 'working-copy',
+    );
+    const firstBridge: unknown = mockOpenFileSystemBridge.mock.results[firstBridgeIndex]?.value;
+    expect(firstBridge).toBeDefined();
+
+    const readCountBeforeReplacement = reads.length;
+    act(() => {
+      replaceWorker();
+    });
+    await vi.waitFor(() => {
+      expect(reads.slice(readCountBeforeReplacement).some((read) => read.service !== undefined)).toBe(true);
+    });
+    const replacementReads = reads.slice(readCountBeforeReplacement);
+    await expect(Promise.all(replacementReads.map(async (read) => read.bytes))).resolves.toEqual(
+      replacementReads.map(() => new Uint8Array([2])),
+    );
+    expect(bridgeProxyDisposals.get(firstBridge)).toHaveBeenCalledOnce();
+  });
+
+  it('reads versioned files and only registry-selected writable record subtrees for duplication', async () => {
+    mockProxyExists.mockResolvedValue(true);
+    mockProxyContents.mockImplementation(
+      async (path): Promise<Record<string, Uint8Array<ArrayBuffer>>> =>
+        path === ''
+          ? { 'main.ts': new Uint8Array([1]), 'tau.json': new Uint8Array([2]) }
+          : {
+              'layout.json': new Uint8Array([3]),
+              'views/v-abc12345.json': new Uint8Array([4]),
+              'entries.json': new Uint8Array([5]),
+            },
+    );
+    const { result } = renderProvider();
+    await vi.waitFor(() => {
+      expect(result.current.contentService).toBeDefined();
+    });
+
+    const files = await result.current.readDuplicateProjectFiles('/projects/source');
+
+    expect(files).toEqual({
+      'main.ts': new Uint8Array([1]),
+      'tau.json': new Uint8Array([2]),
+      '.tau/workbench/layout.json': new Uint8Array([3]),
+      '.tau/workbench/views/v-abc12345.json': new Uint8Array([4]),
+      '.tau/workbench/entries.json': new Uint8Array([5]),
+    });
+    expect(mockOpenFileSystemBridge).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ root: '/projects/source', consumer: 'user' }),
+    );
+    expect(mockProxyContents.mock.calls).toEqual([['', { versionedOnly: true }], ['.tau/workbench']]);
+    expect(mockProxyExists.mock.calls).toEqual([['.tau/workbench']]);
+    expect(mockProxyReadFile).not.toHaveBeenCalled();
+    expect(mockProxyDispose).toHaveBeenCalledOnce();
+  });
+
+  it('skips absent writable records without reading chats, control plane or cache', async () => {
+    mockProxyExists.mockResolvedValue(false);
+    mockProxyContents.mockResolvedValue({ 'main.ts': new Uint8Array([1]) });
+    const { result } = renderProvider();
+    await vi.waitFor(() => {
+      expect(result.current.contentService).toBeDefined();
+    });
+
+    await expect(result.current.readDuplicateProjectFiles('/projects/source')).resolves.toEqual({
+      'main.ts': new Uint8Array([1]),
+    });
+    expect(mockProxyContents.mock.calls).toEqual([['', { versionedOnly: true }]]);
+    expect(mockProxyExists.mock.calls).toEqual([['.tau/workbench']]);
+    expect(mockProxyReadFile).not.toHaveBeenCalled();
+    expect(mockProxyDispose).toHaveBeenCalledOnce();
+  });
 
   it('exposes a scope-required storage facade whose reads route through the worker proxy', async () => {
     const { result } = renderProvider();

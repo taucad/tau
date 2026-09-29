@@ -21,8 +21,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toPiToolContent } from '@taucad/agent-host';
 import type { JsonValue } from '@taucad/agent-host';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import workbenchBundles from '@taucad/workbench/agent/resources.js';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
+import type { MachineClient, MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
 import type { HashedGeometryResult } from '@taucad/runtime/types';
+import { sha256Bytes } from '@taucad/utils/hash';
 import { createActor, createAsyncLogic } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 
@@ -30,7 +33,7 @@ import * as agentToolsRegistry from '@taucad/agent-tools/registry';
 import type { SystemSkillBundle } from '@taucad/agent-tools/registry';
 
 import { createHostToolRegistry } from '#agent-tools.js';
-import type { HostExportFile, HostRuntimeClient } from '#agent-tools.js';
+import type { HostExportFile, HostRuntimeClient, HostToolRegistryOptions } from '#agent-tools.js';
 
 const roots: string[] = [];
 
@@ -115,6 +118,8 @@ const glb = (): Uint8Array<ArrayBuffer> => {
 const fakeRuntime = (overrides: Partial<HostRuntimeClient> = {}): HostRuntimeClient => {
   const content = glb();
   const base: HostRuntimeClient = {
+    connect: vi.fn(async () => undefined),
+    capabilities: undefined,
     evaluate: vi.fn(
       async (): Promise<HashedGeometryResult> => ({
         success: true,
@@ -161,6 +166,24 @@ const waitForFileEvent = async (
 };
 
 describe('createHostToolRegistry', () => {
+  it.each([undefined, 'legacy', 'native'] as const)(
+    'should publish the explicit %s factory authoring contract before opening its runner',
+    async (geospecAuthoringMode) => {
+      const geospecRunner = vi.fn<() => Promise<GeoSpecRunner>>();
+      const registry = createHostToolRegistry({
+        workspaceRoot: await makeWorkspace(),
+        geospecRunner,
+        geospecAuthoringMode,
+      });
+      const description = registry.list().find((tool) => tool.name === 'test_model')?.description;
+      const native = geospecAuthoringMode === 'native';
+      expect(description).toContain(native ? 'expectNativeGeo' : 'expectGeo');
+      expect(description).toContain(native ? 'loadNativeModel' : 'loadModel');
+      expect(description).not.toContain(native ? 'expectGeo' : 'expectNativeGeo');
+      expect(geospecRunner).not.toHaveBeenCalled();
+    },
+  );
+
   it('offers the file tools and use_skill with no runtime, and never a geometry tool it cannot serve', async () => {
     const registry = createHostToolRegistry({ workspaceRoot: await makeWorkspace() });
     const names = registry.list().map((tool) => tool.name);
@@ -259,6 +282,46 @@ describe('createHostToolRegistry', () => {
     expect(JSON.stringify(result.content)).toContain('cube > is watertight');
   });
 
+  it('closes a GeoSpec worker when its MCP request is cancelled', async () => {
+    const workspaceRoot = await makeWorkspace();
+    await writeFile(join(workspaceRoot, 'cube.geospec.ts'), 'export const spec = 1;\n', 'utf8');
+    const started = Promise.withResolvers<void>();
+    const finished = Promise.withResolvers<Awaited<ReturnType<GeoSpecRunner['run']>>>();
+    // `abort` is cooperative: the run settles once the current file stops, and only then is the runner closed.
+    const abort = vi.fn(() => {
+      finished.resolve({ success: false, passed: 0, failed: 1, selectedTests: 0, files: [] });
+    });
+    const close = vi.fn(async () => undefined);
+    const registry = createHostToolRegistry({
+      workspaceRoot,
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake supplies the runner lifecycle being cancelled.
+      geospecRunner: async () =>
+        ({
+          run: async () => {
+            started.resolve();
+            return finished.promise;
+          },
+          abort,
+          close,
+        }) as unknown as GeoSpecRunner,
+    });
+    const controller = new AbortController();
+    const request = registry.invoke({
+      toolCallId: 'cancel-geospec',
+      toolName: 'test_model',
+      input: {},
+      signal: controller.signal,
+    });
+    await started.promise;
+    const cancelled = expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    controller.abort();
+    await cancelled;
+    expect(abort).toHaveBeenCalledWith('test_model request cancelled');
+    await vi.waitFor(() => {
+      expect(close).toHaveBeenCalled();
+    });
+  });
+
   it('names the source revision of every model test_model loaded (R4)', async () => {
     const workspaceRoot = await makeWorkspace();
     await writeFile(join(workspaceRoot, 'cube.geospec.ts'), 'export const spec = 1;\n', 'utf8');
@@ -338,6 +401,17 @@ describe('createHostToolRegistry', () => {
     expect(JSON.stringify(refused.content)).toContain('PERMISSION_DENIED');
   });
 
+  it('activates and reads the published workbench skill', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const registry = createHostToolRegistry({ workspaceRoot, systemSkillBundles: workbenchBundles });
+    const activated = await invoke(registry, 'use_skill', { skillName: 'workbench' });
+    expect(activated.isError).toBe(false);
+    expect(JSON.stringify(activated.content)).toContain('Read before you rearrange');
+    const read = await invoke(registry, 'read_file', { targetFile: '.agents/skills/workbench/SKILL.md' });
+    expect(read.isError).toBe(false);
+    expect(JSON.stringify(read.content)).toContain('arrange_workbench');
+  });
+
   it('activates an installed Tau Store skill named by the plugin manifest', async () => {
     const workspaceRoot = await makeWorkspace();
     await withSkill(workspaceRoot, 'woodworking', 'Joinery and grain direction');
@@ -384,6 +458,156 @@ describe('createHostToolRegistry', () => {
     expect(names).toContain('get_kernel_result');
     expect(names).toContain('screenshot');
     expect(names).toContain('export_geometry');
+  });
+
+  it('offers request_print only with a runtime, a project id and a machine, and slices at the requested quality through its own export route', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const timestamp = '2026-09-24T00:00:00.000Z';
+    /* Not a real container: the planner's summary is advisory and covered in its own tests. */
+    const sliced = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
+    const slice = vi.fn<HostRuntimeClient['export']>(async () => ({
+      success: true,
+      data: [{ name: 'main.gcode.3mf', mimeType: 'application/vnd.bambulab.gcode-3mf', bytes: sliced }],
+      issues: [],
+    }));
+    const runtimeClient = async () => fakeRuntime({ export: slice });
+    const projectId = 'proj_000000000000000000001';
+    const entry = {
+      machineId: 'machine-1',
+      providerId: 'bambu',
+      descriptor: {
+        id: 'physical-1',
+        name: 'Workshop X1C',
+        model: 'X1C',
+        accepts: [
+          {
+            contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
+            mediaType: 'application/vnd.bambulab.gcode-3mf',
+            requiredMembers: ['Metadata/plate_1.gcode'],
+            payloadSelection: 'plate',
+            technology: 'additive.fff',
+          },
+        ],
+      },
+      snapshot: {
+        connection: 'connected',
+        readiness: 'idle',
+        observedAt: timestamp,
+        setup: { bedType: 'textured-pei', materials: [{ slot: 0, state: 'loaded', materialId: 'PLA' }] },
+      },
+      freshness: 'current',
+    } as unknown as MachineDirectoryEntry;
+    const provider = {
+      id: 'bambu',
+      name: 'Bambu Lab',
+      manifest: {
+        toolhead: {
+          filamentDiameter: { value: 1.75, unit: 'mm' },
+          nozzles: [{ diameter: { value: 0.4, unit: 'mm' } }],
+        },
+        bed: { plates: [{ id: 'cool-plate', label: 'Cool Plate' }] },
+        slicing: {
+          recommended: { nozzleTemperature: { value: 220, unit: 'Cel' }, bedTemperature: { value: 55, unit: 'Cel' } },
+        },
+      },
+    } as unknown as MachineProvider;
+    const requestPrint = vi.fn<MachineClient['requestPrint']>(async (input) => ({
+      requestId: input.requestId,
+      machineId: input.machineId,
+      artifact: input.artifact,
+      configuration: input.configuration,
+      requestedBy: input.requestedBy,
+      summary: input.summary ?? { fileName: 'main.gcode.3mf' },
+      state: 'awaiting-approval',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }));
+    const withdrawPrintRequest = vi.fn<MachineClient['withdrawPrintRequest']>();
+    const machines = {
+      available: true,
+      list: async () => ({
+        cursor: { hostId: 'host-1', authorityId: 'authority-1', generation: 'generation-1', position: 1, revision: 1 },
+        entries: [entry],
+      }),
+      listProviders: async () => [provider],
+      requestPrint,
+      listPrintRequests: async () =>
+        Promise.all(
+          requestPrint.mock.results.map(async (result) => result.value as ReturnType<MachineClient['requestPrint']>),
+        ),
+      withdrawPrintRequest,
+    } as unknown as NonNullable<HostToolRegistryOptions['machines']>;
+
+    const names = (options: Partial<HostToolRegistryOptions>) =>
+      createHostToolRegistry({ workspaceRoot, ...options })
+        .list()
+        .map((tool) => tool.name);
+    expect(names({ runtimeClient, projectId })).not.toContain('request_print');
+    expect(names({ runtimeClient, machines })).not.toContain('request_print');
+    expect(names({ projectId, machines })).not.toContain('request_print');
+    /* No revision history: a print names its project, not a revision. */
+    const registry = createHostToolRegistry({ workspaceRoot, runtimeClient, projectId, machines });
+    expect(registry.list().map((tool) => tool.name)).toContain('request_print');
+
+    const result = await invoke(registry, 'request_print', {
+      targetFile: 'main.ts',
+      preset: 'fine',
+      options: { walls: 3 },
+    });
+    expect(result).toMatchObject({
+      isError: false,
+      content: { request: { requestId: 'call-1', machineId: 'machine-1', state: 'awaiting-approval' } },
+    });
+    /* The quality the agent asked for is what the slicer receives, over the machine's own options. */
+    expect(slice).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+      source: { path: 'main.ts' },
+      signal: expect.any(AbortSignal) as AbortSignal,
+      exportOptions: {
+        plate: 'textured-pei',
+        nozzleDiameter: 0.4,
+        filamentDiameter: 1.75,
+        nozzleTemperature: 220,
+        bedTemperature: 55,
+        walls: 3,
+        preset: 'fine',
+      },
+    });
+    const request = requestPrint.mock.calls[0]![0];
+    expect(request.artifact).not.toHaveProperty('revision');
+    expect(request.artifact).toMatchObject({
+      projectId,
+      path: '.tau/artifacts/call-1__main.ts-gcode.3mf/main.gcode.3mf',
+      digest: `sha256:${await sha256Bytes(sliced)}`,
+      length: sliced.byteLength,
+      mediaType: 'application/vnd.bambulab.gcode-3mf',
+      selectedMember: 'Metadata/plate_1.gcode',
+    });
+    expect(request.configuration).toMatchObject({
+      expectedModel: 'X1C',
+      expectedBedType: 'textured-pei',
+      expectedMaterials: [{ slot: 0, materialId: 'PLA' }],
+      amsMapping: [0],
+    });
+    expect(request.summary).toEqual({ fileName: 'main.gcode.3mf' });
+    /* The slice the machine host will read is the one the runtime produced, recorded in the project. */
+    expect(new Uint8Array(await readFile(join(workspaceRoot, request.artifact.path)))).toEqual(sliced);
+
+    /* The same registry serves MCP: a slicer key the agent may not choose refuses before slicing. */
+    const refused = await invoke(registry, 'request_print', { targetFile: 'main.ts', options: { engine: 'service' } });
+    expect(refused).toMatchObject({
+      isError: true,
+      content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED', message: expect.stringContaining('"engine"') as string },
+    });
+    expect(slice).toHaveBeenCalledOnce();
+    expect(requestPrint).toHaveBeenCalledOnce();
+
+    /* A chat's answer to the request reaches the registry that asked, whichever root the run used (D5, GM.r1 H2). */
+    await registry.answerApproval?.({
+      toolName: 'request_print',
+      payload: { kind: 'print-request', requestId: 'call-1' },
+      resolution: { interruptId: 'interrupt-1', outcome: 'cancelled' },
+    });
+    expect(withdrawPrintRequest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: 'call-1' }));
   });
 
   it('offers both parameter tools only with a native parameter actor and preserves its outcome', async () => {
@@ -475,6 +699,39 @@ describe('createHostToolRegistry', () => {
       checkouts.set('run-3', { cwd: first });
       await readIn('run-3');
       expect(built.mock.calls.length).toBe(live + 3);
+    } finally {
+      built.mockRestore();
+    }
+  });
+
+  it('binds candidate arrangement records to the live root and keeps other record writes in the checkout', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const candidateRoot = await makeWorkspace();
+    const checkouts = new Map([['run-1', { cwd: candidateRoot }]]);
+    const built = vi.spyOn(agentToolsRegistry, 'createChatToolRegistry');
+    try {
+      const registry = createHostToolRegistry({ workspaceRoot, checkouts });
+      await registry.invoke({
+        toolCallId: 'candidate-read',
+        toolName: 'read_file',
+        input: { targetFile: 'main.ts' },
+        runId: 'run-1',
+        signal: new AbortController().signal,
+      });
+      const { 0: candidateOptions } = built.mock.calls.at(-1) ?? [];
+      expect(candidateOptions?.workbenchFileSystemFor).toBeDefined();
+      const { signal } = new AbortController();
+      await candidateOptions!.workbenchFileSystemFor!(signal).writeFileChecked({
+        path: '.tau/workbench/layout.json',
+        data: '{}',
+        preconditions: [{ path: '.tau/workbench/layout.json', expected: null }],
+      });
+      await candidateOptions!.recordFileSystemFor!(signal).writeFile('.tau/chats/chat-test/todo.yaml', 'tasks: []\n');
+      expect(await readFile(join(workspaceRoot, '.tau/workbench/layout.json'), 'utf8')).toBe('{}');
+      expect(await readFile(join(candidateRoot, '.tau/chats/chat-test/todo.yaml'), 'utf8')).toBe('tasks: []\n');
+      await expect(readFile(join(candidateRoot, '.tau/workbench/layout.json'), 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
     } finally {
       built.mockRestore();
     }
@@ -824,6 +1081,34 @@ describe('createHostToolRegistry', () => {
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain('No glb to webp route');
   });
+
+  it.each(['parse: accessor 2 count 4545948 exceeds 4000000', 'parse: declared accessor values exceed 8000000'])(
+    'names the renderer accessor guard as an over-limit capture: %s',
+    async (message) => {
+      const registry = createHostToolRegistry({
+        workspaceRoot: await makeWorkspace(),
+        runtimeClient: async () =>
+          fakeRuntime({
+            transcode: vi.fn<HostRuntimeClient['transcode']>(async () => ({
+              success: false,
+              issues: [
+                {
+                  code: 'RUNTIME',
+                  type: 'runtime',
+                  severity: 'error',
+                  message,
+                  details: { type: 'render', code: 'parse' },
+                },
+              ],
+            })),
+          }),
+      });
+
+      const result = await invoke(registry, 'screenshot', { targetFile: 'main.ts', mode: 'single' });
+      expect(result.content).toMatchObject({ success: false, errorCode: 'RESULT_TOO_LARGE' });
+      expect(JSON.stringify(result.content)).toContain(message);
+    },
+  );
 
   /*
    * The G4 live proof answered six `get_kernel_result` calls and one

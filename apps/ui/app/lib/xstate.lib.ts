@@ -1,5 +1,15 @@
-import { createEventObservableLogic } from 'xstate';
-import type { AnyStateMachine, EventObject, NonReducibleUnknown, StateMachine, Subscribable, TypeSchema } from 'xstate';
+import { createEventObservableLogic, waitFor } from 'xstate';
+import type {
+  AnyActorRef,
+  AnyStateMachine,
+  EventObject,
+  NonReducibleUnknown,
+  Snapshot,
+  SnapshotFrom,
+  StateMachine,
+  Subscribable,
+  TypeSchema,
+} from 'xstate';
 
 // ---------------------------------------------------------------------------
 // fromSafeAsync — async actors that never deliver after they are stopped
@@ -235,3 +245,28 @@ export const actorIdOf = (ref: Subscribable<unknown>): string => runtimeString(r
  * @returns The actor's session id.
  */
 export const actorSessionIdOf = (ref: Subscribable<unknown>): string => runtimeString(ref, 'sessionId');
+
+/**
+ * Wait until `predicate` holds, or until the actor is gone (LT09).
+ *
+ * `waitFor` rejects when its actor stops first, and never settles for one already stopped. A stopped actor has
+ * nothing left to wait for, so both mean "done" to a flush.
+ *
+ * @param actor - The actor to watch.
+ * @param predicate - What its snapshot should reach.
+ * @returns Once the predicate holds or the actor is gone.
+ */
+export const waitUnlessGone = async <Watched extends AnyActorRef>(
+  actor: Watched,
+  predicate: (snapshot: SnapshotFrom<Watched>) => boolean,
+): Promise<void> => {
+  const { status } = actor.getSnapshot() as Snapshot<unknown>;
+  if (status !== 'active') {
+    return;
+  }
+  try {
+    await waitFor(actor, predicate);
+  } catch {
+    // The actor stopped first: it is gone, and so is what it held.
+  }
+};

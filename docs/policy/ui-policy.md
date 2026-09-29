@@ -3,7 +3,7 @@ title: 'UI Policy'
 description: 'Design system entry point: principles, token architecture, typography, spacing, motion, and component composition for all Tau UI surfaces.'
 status: active
 created: '2026-03-14'
-updated: '2026-09-05'
+updated: '2026-09-28'
 related:
   - docs/policy/color-policy.md
   - docs/policy/diagram-policy.md
@@ -83,7 +83,7 @@ Geist Sans for UI text. Geist Mono for code, terminals, and numeric data.
 | Body (prose)      | 16px (`text-base`) | 400     | 1.6         | 0                 |
 | Body (dense UI)   | 14px (`text-sm`)   | 400     | 1.5         | 0                 |
 | Code              | 14px (`text-sm`)   | 400     | 1.7         | 0                 |
-| H1                | 36px (`text-4xl`)  | 700     | 1.1         | -0.02em           |
+| H1                | 36px (`text-4xl`)  | 500     | 1.1         | -0.02em           |
 | H2                | 28px (`text-3xl`)  | 600     | 1.2         | -0.02em           |
 | H3                | 22px (`text-2xl`)  | 600     | 1.3         | -0.01em           |
 | H4                | 18px (`text-lg`)   | 600     | 1.4         | 0                 |

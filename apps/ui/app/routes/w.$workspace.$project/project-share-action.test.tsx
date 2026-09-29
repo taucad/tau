@@ -54,7 +54,7 @@ vi.mock('xstate', async (importOriginal) => {
 });
 
 const editorRef = {
-  getSnapshot: () => ({ context: { unitSettings: { 'main.ts': { renderTimeout: 30_000 } } } }),
+  getSnapshot: () => ({ context: {} }),
 };
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -63,6 +63,7 @@ vi.mock('#hooks/use-project.js', () => ({
     projectId: project.id,
     projectRef,
     editorRef,
+    entriesRecord: { version: 1, entries: { 'main.ts': { renderTimeout: 30_000 } } },
   }),
 }));
 
@@ -172,10 +173,22 @@ describe('ProjectShareWorkbenchPanel', () => {
       );
       await capturedPanelProperties!.collectSnapshot!().catch(() => undefined);
 
-      expect(projectSend).toHaveBeenCalledWith({
-        type: 'createGeometryUnit',
+      const claim = projectSend.mock.calls[0]?.[0] as unknown as {
+        type: string;
+        claimId: string;
+        entryPath: string;
+        renderTimeout?: number;
+      };
+      expect(claim).toEqual({
+        type: 'claimGeometryUnit',
+        claimId: claim.claimId,
         entryPath: 'main.ts',
         renderTimeout: 30_000,
+      });
+      expect(typeof claim.claimId).toBe('string');
+      expect(projectSend).toHaveBeenCalledWith({
+        type: 'releaseGeometryUnit',
+        claimId: claim.claimId,
       });
     } finally {
       geometryUnits.set('main.ts', existing);

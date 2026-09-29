@@ -129,7 +129,7 @@ function DrawerHandleIndicator({ className, ...properties }: React.ComponentProp
       <div
         data-slot='drawer-handle-indicator'
         className={cn(
-          'relative mx-auto mt-1 hidden h-1 w-[60px] shrink-0 rounded-full bg-accent group-data-[vaul-drawer-direction=bottom]/drawer-content:block',
+          'relative mx-auto mt-1 hidden h-1 w-15 shrink-0 rounded-full bg-accent group-data-[vaul-drawer-direction=bottom]/drawer-content:block',
           className,
         )}
         {...properties}

@@ -1,23 +1,23 @@
 import { useQuery } from '@tanstack/react-query';
-import type { Chat } from '@taucad/chat';
+import type { ChatRecord } from '@taucad/chat/schemas';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 
 type AllChatsResult = {
-  readonly chats: Chat[];
+  readonly chats: ChatRecord[];
   readonly isLoading: boolean;
   readonly error: Error | undefined;
 };
 
 /** Non-deleted global chat inventory for command-palette navigation. */
 export function useAllChats(): AllChatsResult {
-  const { getAllChats, isLoading: isWorkerLoading } = useProjectManager();
+  const { getAllChatRecords, isLoading: isWorkerLoading } = useProjectManager();
   const {
     data: chats = [],
     isLoading,
     error,
   } = useQuery({
-    queryKey: ['all-chats'],
-    queryFn: async () => getAllChats(),
+    queryKey: ['all-chats', 'records'],
+    queryFn: async () => getAllChatRecords(),
     enabled: !isWorkerLoading,
   });
 

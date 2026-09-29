@@ -22,6 +22,7 @@ import { createRuntimeClient } from '../../../../../packages/runtime/src/client/
 import { inProcessTransport } from '../../../../../packages/runtime/src/transport/in-process.ts';
 import { fromNodeFs } from '../../../../../packages/runtime/src/filesystem/from-node-fs.ts';
 import { fromMemoryFs } from '../../../../../packages/runtime/src/filesystem/index.ts';
+import { createSqliteComputeEngine, fromSqlite } from '../../../../../packages/runtime/src/node.ts';
 import { defineRuntime } from '../../../../../packages/runtime/src/worker/index.ts';
 
 const { values } = parseArgs({
@@ -417,7 +418,9 @@ const main = async () => {
     mkdirSync(store, { recursive: true });
     writeTree(store, files);
   }
-  const storeExisted = store ? existsSync(join(store, '.tau/cache/compute/v1')) : false;
+  const computeDirectory = store ? `${store}-compute` : undefined;
+  const storeExisted = computeDirectory ? existsSync(computeDirectory) : false;
+  const computeEngine = arm === 'durable' ? createSqliteComputeEngine({ directory: computeDirectory! }) : undefined;
   const baseFileSystem: any = arm === 'memory' || arm === 'poison' ? fromMemoryFs(files) : fromNodeFs(store!);
   /* `--watch off`: hide `watch`/`watchReady` from the inline base the transport mints, so the client's autonomous
    * watched-filesystem rerender (`runtime-client-core.ts` RenderOutcome doc :264) cannot supersede a benchmark render
@@ -449,10 +452,18 @@ const main = async () => {
   };
   const definition = await kernelFor();
   const runtime = defineRuntime(definition as any);
-  const client = createRuntimeClient({ transport: inProcessTransport({ runtime, fileSystem }) });
+  const client = createRuntimeClient({
+    transport: inProcessTransport({
+      runtime,
+      fileSystem,
+      compute: computeEngine
+        ? { mode: 'durable', store: fromSqlite({ store: computeEngine, workspace: store! }) }
+        : { mode: 'memory' },
+    }),
+  });
   let telemetry: any[] = [];
   const logs: string[] = [];
-  client.on('telemetry', (entries: any[]) => telemetry.push(...entries));
+  client.on('telemetry', (batch: { entries: any[] }) => telemetry.push(...batch.entries));
   client.on('log', (entry: any) => {
     if (entry.level === 'warn' || entry.level === 'error') logs.push(`${entry.level}: ${entry.message}`);
   });
@@ -490,7 +501,7 @@ const main = async () => {
           );
       }
       probe.reset();
-      telemetry = [];
+      if (steps.length > 0) telemetry = [];
       logs.length = 0;
       brepDigests = [];
       const load = loadavg();
@@ -603,6 +614,7 @@ const main = async () => {
     throw error;
   } finally {
     await client.shutdown({ drain: true });
+    await computeEngine?.dispose();
   }
   function writeReport(extra: {
     partial: boolean;

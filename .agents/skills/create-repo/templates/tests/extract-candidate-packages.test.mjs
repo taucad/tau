@@ -58,6 +58,12 @@ describe('candidate preview extraction', () => {
   });
 });
 
+/** The `npm pack --json` output for a pkg.pr.new URL, at the version `versionOf` returns. */
+const packed = (url, versionOf) => {
+  const name = url.slice('https://pkg.pr.new/'.length, url.lastIndexOf('@'));
+  return `${JSON.stringify([{ name, version: versionOf(name) }])}\n`;
+};
+
 describe('hosted preview consumer', () => {
   it('should install only roots and verify rewritten sibling previews', () => {
     const sha = 'abc1234abc1234abc1234abc1234abc1234abc12';
@@ -89,6 +95,7 @@ describe('hosted preview consumer', () => {
       sha,
       install(command, args, options) {
         calls.push([command, args]);
+        if (args[0] === 'pack') return packed(args[1], () => '0.0.0-preview-abc1234');
         if (args[0] !== 'install') return;
         const modules = join(options.cwd, 'node_modules');
         mkdirSync(join(modules, 'example'), { recursive: true });
@@ -104,8 +111,60 @@ describe('hosted preview consumer', () => {
       },
     });
 
-    assert.deepEqual(result, { installed: 2, roots: ['example'] });
+    assert.deepEqual(result, { installed: 2, published: 2, roots: ['example'] });
     assert.deepEqual(calls[1][1], ['install', '--ignore-scripts', `https://pkg.pr.new/example@${sha}`]);
+    assert.deepEqual(
+      calls.filter(([, args]) => args[0] === 'pack').map(([, args]) => args[1]),
+      [`https://pkg.pr.new/example@${sha}`, `https://pkg.pr.new/example-linux@${sha}`],
+    );
+  });
+
+  // A native package this runner cannot install is invisible to the root
+  // install, so only the published-manifest audit catches one left unrewritten.
+  it('should reject a published sibling the platform filter hid from the install', () => {
+    const sha = 'abc1234abc1234abc1234abc1234abc1234abc12';
+    const source = temporaryDirectory();
+    const root = join(source, '00');
+    const native = join(source, '01');
+    const metadata = join(source, 'preview.json');
+    mkdirSync(root);
+    mkdirSync(native);
+    writeFileSync(
+      join(root, 'package.json'),
+      `${JSON.stringify({ name: 'example', optionalDependencies: { 'example-s390x': '1.0.0' } })}\n`,
+    );
+    writeFileSync(join(native, 'package.json'), `${JSON.stringify({ name: 'example-s390x' })}\n`);
+    writeFileSync(
+      metadata,
+      `${JSON.stringify({
+        packages: [
+          { name: 'example', url: `https://pkg.pr.new/example@${sha}` },
+          { name: 'example-s390x', url: `https://pkg.pr.new/example-s390x@${sha}` },
+        ],
+      })}\n`,
+    );
+
+    assert.throws(
+      () =>
+        verifyPreviewInstall({
+          from: source,
+          metadata,
+          sha,
+          install(command, args, options) {
+            if (args[0] === 'pack') {
+              return packed(args[1], (name) => (name === 'example' ? '0.0.0-preview-abc1234' : '1.0.0'));
+            }
+            if (args[0] !== 'install') return;
+            const modules = join(options.cwd, 'node_modules');
+            mkdirSync(join(modules, 'example'), { recursive: true });
+            writeFileSync(
+              join(modules, 'example', 'package.json'),
+              `${JSON.stringify({ name: 'example', version: '0.0.0-preview-abc1234', optionalDependencies: { 'example-s390x': `https://pkg.pr.new/example-s390x@${sha}` } })}\n`,
+            );
+          },
+        }),
+      /example-s390x published 1\.0\.0, expected 0\.0\.0-preview-abc1234/u,
+    );
   });
 
   it('should reject untrusted or stale metadata before invoking npm', () => {

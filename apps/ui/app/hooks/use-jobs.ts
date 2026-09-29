@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ENV } from '#environment.config.js';
 import { useProject } from '#hooks/use-project.js';
+import { digestBytes } from '#utils/crypto.utils.js';
 import {
   JobProjectionProtocolError,
   applyDurableJobRead,
@@ -142,11 +143,6 @@ export const requestJobCancellation = async ({
   ) {
     throw new JobProjectionProtocolError('Malformed job cancellation response.');
   }
-};
-
-export const digestBytes = async (bytes: Uint8Array<ArrayBuffer>): Promise<`sha256:${string}`> => {
-  const hash = await globalThis.crypto.subtle.digest('SHA-256', bytes);
-  return `sha256:${[...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 };
 
 export const fetchJobArtifact = async ({

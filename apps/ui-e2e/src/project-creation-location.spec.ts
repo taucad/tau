@@ -153,7 +153,7 @@ describe('project creation locations', () => {
     const workspace = await seedWorkspace(fixture);
     await openHomepage();
     await target.click(selectors.getByRole('button', { name: /^Create in Home/u }));
-    await target.expectCount(selectors.getByPlaceholder('Search locations...'), 0);
+    await target.expectCount(selectors.getByPlaceholder('Search locations…'), 0);
     const homeOption = selectors.getByRole('option', { name: 'Home in this browser' });
     const workspaceOption = selectors.getByRole('option', { name: `${workspace.name} on your disk` });
     await target.expectVisible(homeOption.getByLabelText('Selected location'));
@@ -248,7 +248,7 @@ describe('project creation locations', () => {
     await target.click(selectors.getByRole('button', { name: 'Create in Home' }));
     const locationDrawer = selectors.getByRole('dialog', { name: 'Select a project location' });
     await target.expectVisible(locationDrawer);
-    await target.expectCount(locationDrawer.getByPlaceholder('Search locations...'), 0);
+    await target.expectCount(locationDrawer.getByPlaceholder('Search locations…'), 0);
     await target.click(locationDrawer.getByRole('option', { name: `${workspace.name} on your disk` }));
     await target.expectCount(locationDrawer, 0);
 
@@ -323,7 +323,7 @@ describe('project creation locations', () => {
     await target.click(selectors.getByRole('button', { name: 'Create in Home' }));
     const locationDrawer = selectors.getByRole('dialog', { name: 'Select a project location' });
     await target.expectVisible(locationDrawer);
-    await target.expectCount(locationDrawer.getByPlaceholder('Search locations...'), 0);
+    await target.expectCount(locationDrawer.getByPlaceholder('Search locations…'), 0);
     await target.press(locationDrawer.getByRole('option', { name: 'Home in this browser' }), 'Escape');
     await target.expectCount(locationDrawer, 0);
     await target.expectFocused(editor);

@@ -43,13 +43,25 @@ const actorStub = vi.hoisted(() => {
 
 vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeMap: () => tree.current,
+  useFileTreeSelector: <T,>(select: (snapshot: typeof tree.current) => T): T => select(tree.current),
   useFileTreeEntry: () => undefined,
 }));
 vi.mock('#hooks/use-keyboard.js', () => ({
   useKeybinding: () => ({ formattedKeyCombination: 'Enter' }),
 }));
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ projectRef: actorStub, editorRef: { ...actorStub, send: vi.fn() } }),
+  useProject: () => ({
+    projectRef: actorStub,
+    editorRef: { ...actorStub, send: vi.fn() },
+    viewRecords: new Map(),
+    changeEntryPaths: async () => true,
+  }),
+}));
+vi.mock('#workbench-records/view-actions.js', () => ({
+  useWorkbenchViewCommands: () => ({
+    edit: async () => true,
+    remove: async () => true,
+  }),
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionStatus: () => ({ sync: sync.current }),

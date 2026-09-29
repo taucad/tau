@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_MVdfSGkCd0nvnHGUmilfR",
+  "name": "Dollhouse",
+  "description": "A two-storey gabled house on a stepped foundation, with shuttered windows, a panelled door, an interior floor, partitions and stairs, a ridge-capped roof and a brick chimney, each as its own module.",
+  "tags": ["architecture", "toy", "multi-file", "openscad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.scad",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

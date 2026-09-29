@@ -14,6 +14,19 @@ import {
 import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
+import { actorOf } from '#hooks/use-revisions.js';
+import { useRevisionSessionUser } from '#lib/revision-actor.js';
+
+/**
+ * Who made a revision, as History names them: never a model id or an account id (HQ4).
+ *
+ * @param props - The row's recorded actor and source.
+ * @returns The name.
+ */
+function ActorName({ actor, source }: { readonly actor: string; readonly source: string }): React.JSX.Element {
+  const session = useRevisionSessionUser();
+  return <span className='shrink-0 text-xs text-muted-foreground/70'>{actorOf({ actor, source }, session)}</span>;
+}
 
 type RevisionsInvocation = ToolInvocation<typeof toolName.revisions>;
 type RevisionsOutput = Extract<RevisionsInvocation, { state: 'output-available' }>['output'];
@@ -67,9 +80,9 @@ const revisionRows = (output: RevisionsOutput): ReactNode => {
                 </span>
                 <span className='min-w-0 truncate'>
                   {revision.summary}
-                  {revision.conflicted ? ' (needs resolution)' : ''}
+                  {revision.conflicted ? ' · Needs your decision' : ''}
                 </span>
-                <span className='shrink-0 text-xs text-muted-foreground/70'>{revision.actor}</span>
+                <ActorName actor={revision.actor} source={revision.source} />
               </span>
             </ChatToolCardListItem>
           ))

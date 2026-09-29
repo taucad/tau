@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import JSZip from 'jszip';
 import type * as FileUtilsModule from '@taucad/utils/file';
@@ -24,8 +24,9 @@ vi.mock('@taucad/utils/file', async (importOriginal) => ({
 vi.mock('#components/ui/sonner.js', () => ({
   toast: { warning: vi.fn(), error: vi.fn(), promise: vi.fn() },
 }));
-vi.mock('#components/geometry/converter/format-selector.js', () => ({ FormatSelector: () => null }));
-vi.mock('#components/geometry/converter/converter-file-tree.js', () => ({ ConverterFileTree: () => null }));
+vi.mock('#components/geometry/converter/format-selector.js', () => ({
+  FormatSelector: () => null,
+}));
 vi.mock('@taucad/ui/components/button', () => ({
   Button: ({ children, ...properties }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button type='button' {...properties}>
@@ -102,9 +103,9 @@ describe('Converter dependent export artifacts', () => {
     );
     renderConverter(format);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Download (GLTF|OBJ)$/ }));
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(downloadBlob).toHaveBeenCalledOnce();
     });
     expect(downloadBlob.mock.calls[0]?.[1]).toBe('converted-models.zip');
@@ -114,19 +115,65 @@ describe('Converter dependent export artifacts', () => {
     }
   });
 
+  it('should download a single STL directly even when the multiple-format ZIP preference is enabled', async () => {
+    exportFormat.mockResolvedValueOnce([
+      {
+        name: 'model.stl',
+        mimeType: 'model/stl',
+        bytes: new Uint8Array([1, 2, 3]),
+      },
+    ]);
+    render(
+      <Converter
+        availableFormats={['stl']}
+        exportFormat={exportFormat}
+        selectedFormats={['stl']}
+        shouldUseZipForMultiple
+        onFormatToggle={vi.fn()}
+        onClearSelection={vi.fn()}
+        onZipToggle={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText('Download as ZIP file')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Download options'));
+    expect(screen.getByText('model.stl')).toBeVisible();
+    expect(screen.queryByText('model-converted.zip')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Download STL' }));
+    await waitFor(() => {
+      expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'model.stl');
+    });
+  });
+
   it('should pass every dependent artifact to the project-save callback', async () => {
     exportFormat.mockResolvedValueOnce([
-      { name: 'model.gltf', mimeType: 'model/gltf+json', bytes: new Uint8Array([1]) },
-      { name: 'buffers/model.bin', mimeType: 'application/octet-stream', bytes: new Uint8Array([2]) },
+      {
+        name: 'model.gltf',
+        mimeType: 'model/gltf+json',
+        bytes: new Uint8Array([1]),
+      },
+      {
+        name: 'buffers/model.bin',
+        mimeType: 'application/octet-stream',
+        bytes: new Uint8Array([2]),
+      },
     ]);
     const onExport = renderConverter('gltf');
+    fireEvent.click(screen.getByText('Download options'));
     fireEvent.click(screen.getByLabelText('Save exported files to project'));
-    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Download (GLTF|OBJ)$/ }));
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(onExport).toHaveBeenCalledWith([
-        { filename: 'model.gltf', content: new Uint8Array([1]), format: 'gltf' },
-        { filename: 'buffers/model.bin', content: new Uint8Array([2]), format: 'gltf' },
+        {
+          filename: 'model.gltf',
+          content: new Uint8Array([1]),
+          format: 'gltf',
+        },
+        {
+          filename: 'buffers/model.bin',
+          content: new Uint8Array([2]),
+          format: 'gltf',
+        },
       ]);
     });
   });

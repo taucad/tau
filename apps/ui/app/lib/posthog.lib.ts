@@ -37,17 +37,9 @@ export const redactInvitationTokens = (value: string): string =>
 type AnalyticsEvent = Readonly<{ properties?: Record<string, unknown> }>;
 
 /**
- * Redact every string property an event carries.
- *
- * A shallow pass over the property bag rather than a list of known keys, because
- * the key list is the part that goes stale: `$current_url`, `$pathname`,
- * `$referrer`, `$initial_current_url`, `$prev_pageview_pathname` and
- * autocapture's `attr__href` all hold the same URL, and PostHog adds more.
- *
- * The ceiling is deliberate: it does not walk nested structures, so an rrweb
- * session-replay snapshot would keep a URL inside `$snapshot_data`. Replay is
- * off at init in this build and is started by the analytics lifecycle; a
- * recursive walk on every event is the upgrade path if that changes.
+ * Redact invitation tokens in event properties, including replay snapshots.
+ * The SDK may transport snapshots separately, so recorder masking and decoded
+ * transport checks remain necessary alongside this event hook.
  *
  * @param event - The event PostHog is about to queue.
  * @returns The same event with its string properties redacted.
@@ -57,11 +49,23 @@ export const redactEventProperties = <Event extends AnalyticsEvent>(event: Event
   if (event.properties === undefined) {
     return event;
   }
-  const properties: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(event.properties)) {
-    properties[key] = typeof value === 'string' ? redactInvitationTokens(value) : value;
-  }
-  return { ...event, properties };
+  const redact = (value: unknown): unknown => {
+    if (typeof value === 'string') {
+      return redactInvitationTokens(value);
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => redact(item));
+    }
+    if (
+      value !== null &&
+      typeof value === 'object' &&
+      (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
+    ) {
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redact(item)]));
+    }
+    return value;
+  };
+  return { ...event, properties: redact(event.properties) as Record<string, unknown> };
 };
 
 /**
@@ -86,6 +90,10 @@ export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } 
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
     capture_pageview: 'history_change',
     persistence: 'localStorage+cookie',
+    // Send while consent is still active; the SDK's batch queue otherwise flushes
+    // already-captured events after a later withdrawal.
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
+    request_batching: false,
     // Drop events processed after a withdrawal in this or another tab, before React reacts,
     // and strip invitation tokens from whatever is left (charter W5, D27).
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
@@ -100,6 +108,24 @@ export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } 
     // is started manually by the web analytics lifecycle after the page is idle.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
     disable_session_recording: true,
+    // Invitation links carry bearer credentials in href; rrweb must omit the node before compression.
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
+    session_recording: {
+      blockSelector: 'a[href*="/invitations/"], a[href*="%2Finvitations%2F" i]',
+      // The SDK calls this for rrweb Meta href before snapshot compression too.
+      maskCapturedNetworkRequestFn: (request) => ({
+        ...request,
+        name: redactInvitationTokens(request.name),
+        requestBody:
+          request.requestBody === undefined || request.requestBody === null
+            ? request.requestBody
+            : redactInvitationTokens(request.requestBody),
+        responseBody:
+          request.responseBody === undefined || request.responseBody === null
+            ? request.responseBody
+            : redactInvitationTokens(request.responseBody),
+      }),
+    },
   },
   // When no API key is set, the web analytics boundary remains a no-op.
   // This is useful for development and self-hosted configurations.

@@ -3,6 +3,33 @@ import { createActor } from 'xstate';
 import { measureInputMachine } from '#machines/measure-input.machine.js';
 
 describe('measureInputMachine', () => {
+  it('ignores a second pointer, cancellation and a mismatched pointer release', () => {
+    const actor = createActor(measureInputMachine).start();
+    actor.send({ type: 'pointerDown', button: 0, hasTarget: true, cameraMoving: false, pointerId: 1 });
+    actor.send({
+      type: 'pointerUp',
+      button: 0,
+      hasTarget: true,
+      hasCurrentStart: false,
+      isZeroLength: false,
+      hasActiveSnapTarget: true,
+      pointerId: 2,
+    });
+    expect(actor.getSnapshot().context.result).toBe('ignore');
+    actor.send({ type: 'pointerDown', button: 0, hasTarget: true, cameraMoving: false, pointerId: 1 });
+    actor.send({ type: 'pointerCancel', pointerId: 1 });
+    actor.send({
+      type: 'pointerUp',
+      button: 0,
+      hasTarget: true,
+      hasCurrentStart: false,
+      isZeroLength: false,
+      hasActiveSnapTarget: true,
+      pointerId: 1,
+    });
+    expect(actor.getSnapshot().context.result).toBe('ignore');
+    actor.stop();
+  });
   it('should accept a plain left-click measurement point on a target', () => {
     const actor = createActor(measureInputMachine);
     actor.start();

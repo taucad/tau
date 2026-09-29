@@ -58,3 +58,49 @@ bare = 7
     expect(variables['bare']).toMatchObject({ ty: { type: 'Default', len: 'mm', angle: 'degrees' } });
   });
 });
+
+describe('KclUtilities.injectParametersIntoProgram', () => {
+  const executeWithParameters = async (source: string, parameters: Record<string, unknown>) => {
+    const fs = new FileSystemManager(memoryFs(new Map([['/main.kcl', source]])));
+    const utils = new KclUtilities({ baseUrl: 'ws://fake.example/modeling-commands', fileSystemManager: fs });
+    await utils.initializeWasm();
+    const { program } = await utils.parseKcl(source);
+    const { variables } = await utils.executeMockKcl(
+      KclUtilities.injectParametersIntoProgram(program, parameters),
+      '/main.kcl',
+    );
+    return variables;
+  };
+
+  const source = `@settings(defaultLengthUnit = mm, kclVersion = 1.0)
+thickness = 0.25in
+angle = 30deg
+bare = 7
+label = "a"
+enabled = true
+`;
+
+  it('should keep the declared unit suffix when the unchanged value is written back', async () => {
+    const variables = await executeWithParameters(source, { thickness: 0.25, angle: 30, bare: 7 });
+
+    expect(variables['thickness']).toMatchObject({ value: 0.25, ty: { type: 'Length', in: null } });
+    expect(variables['angle']).toMatchObject({ value: 30, ty: { type: 'Angle', degrees: null } });
+    expect(variables['bare']).toMatchObject({ value: 7, ty: { type: 'Default', len: 'mm' } });
+  });
+
+  it('should keep the declared unit suffix when a value is overridden', async () => {
+    const variables = await executeWithParameters(source, {
+      thickness: 0.5,
+      angle: 45,
+      bare: 9,
+      label: 'b "quoted"',
+      enabled: false,
+    });
+
+    expect(variables['thickness']).toMatchObject({ value: 0.5, ty: { type: 'Length', in: null } });
+    expect(variables['angle']).toMatchObject({ value: 45, ty: { type: 'Angle', degrees: null } });
+    expect(variables['bare']).toMatchObject({ value: 9, ty: { type: 'Default', len: 'mm' } });
+    expect(variables['label']).toMatchObject({ type: 'String', value: 'b "quoted"' });
+    expect(variables['enabled']).toMatchObject({ type: 'Bool', value: false });
+  });
+});

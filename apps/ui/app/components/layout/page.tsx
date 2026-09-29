@@ -1,7 +1,7 @@
-import { Link, Outlet } from 'react-router';
+import { Link, NavigationType, Outlet, useLocation, useNavigationType } from 'react-router';
 import { Fragment } from 'react/jsx-runtime';
-import { useCallback, useMemo, useRef } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
+import type { CSSProperties, ReactNode, UIEvent } from 'react';
 import { Allotment, LayoutPriority } from 'allotment';
 import type { AllotmentHandle } from 'allotment';
 import { AppSidebar } from '#components/layout/app-sidebar.js';
@@ -40,6 +40,66 @@ const sidebarMaximumWidth = 480;
 const sidebarKeyboardResizeStep = 16;
 
 const headerOffsetClasses = 'mt-(--header-height) h-[calc(100dvh-var(--header-height)-1px)]';
+
+/*
+ * Each history entry keeps its place in the shell's scroller. React Router's
+ * `ScrollRestoration` restores `window`, but `html, body { overflow: hidden }`
+ * (global.css) makes the shell's inner element the one that scrolls, so Back
+ * used to land at the top. `Page` owns it once for every `enableOverflowY` route.
+ */
+const scrollStorageKey = (locationKey: string): string => `tau.page-scroll.${locationKey}`;
+
+const readSavedScroll = (locationKey: string): number => {
+  try {
+    return Number(globalThis.sessionStorage.getItem(scrollStorageKey(locationKey)) ?? 0);
+  } catch {
+    // A blocked store means no saved place, never a broken page.
+    return 0;
+  }
+};
+
+/** Milliseconds a restored offset is held while the page settles, unless the person scrolls first. */
+const restoreHoldDuration = 1000;
+const restoreReleaseEvents = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+
+/**
+ * Holds `scroller` at `top` while its content settles. The shell remounts on Back
+ * from a wrapper-less route and its sidebar pane sizes itself a frame later, so the
+ * content first lays out at another width and height; the browser's scroll
+ * anchoring then moves the offset. Re-applying on every resize keeps the saved
+ * place; the hold ends on the person's first scroll input or after `restoreHoldDuration`.
+ */
+const holdScrollPosition = (scroller: HTMLElement, top: number, onRelease: () => void): (() => void) => {
+  const observer = new ResizeObserver(() => {
+    scroller.scrollTop = top;
+  });
+  observer.observe(scroller);
+  for (const child of scroller.children) {
+    observer.observe(child);
+  }
+  const release = (): void => {
+    observer.disconnect();
+    clearTimeout(holdTimeout);
+    for (const type of restoreReleaseEvents) {
+      scroller.removeEventListener(type, release);
+    }
+    onRelease();
+  };
+  const holdTimeout = setTimeout(release, restoreHoldDuration);
+  for (const type of restoreReleaseEvents) {
+    scroller.addEventListener(type, release, { passive: true });
+  }
+  return release;
+};
+
+// ponytail: one sessionStorage write per scroll event; batch on `scrollend` if it ever shows in a profile.
+const saveScroll = (locationKey: string, scrollTop: number): void => {
+  try {
+    globalThis.sessionStorage.setItem(scrollStorageKey(locationKey), String(scrollTop));
+  } catch {
+    // Persistence is best-effort.
+  }
+};
 
 type SectionContentProps = {
   readonly error: ReactNode | undefined;
@@ -200,6 +260,50 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     enablePageFooter: handles.enablePageFooter.some((match) => match.handle.enablePageFooter === true),
     enablePageHeaderMatches: handles.enablePageHeader,
   }));
+  const { key: locationKey, pathname, hash } = useLocation();
+  const navigationType = useNavigationType();
+  const pageScrollRef = useRef<HTMLDivElement>(null);
+  const previousPathnameRef = useRef(pathname);
+  const isRestoringRef = useRef(false);
+  useLayoutEffect(() => {
+    const scroller = pageScrollRef.current;
+    const isSamePage = previousPathnameRef.current === pathname;
+    previousPathnameRef.current = pathname;
+    if (!enableOverflowY || !scroller) {
+      return;
+    }
+    if (navigationType === NavigationType.Replace && isSamePage) {
+      // A filter or dialog written to the URL replaces the entry: stay put and
+      // carry the offset over to the new key.
+      saveScroll(locationKey, scroller.scrollTop);
+      return;
+    }
+    // Back and Forward restore the entry's offset; a new entry starts at the top
+    // (the scroller outlives the navigation).
+    if (navigationType !== NavigationType.Pop) {
+      scroller.scrollTop = 0;
+      return;
+    }
+    const savedTop = readSavedScroll(locationKey);
+    scroller.scrollTop = savedTop;
+    // The top needs no hold, and a fragment names its own place, which the route scrolls to after this.
+    if (savedTop === 0 || hash !== '') {
+      return;
+    }
+    // Scrolls the settling layout causes are not the person's, so they are not saved.
+    isRestoringRef.current = true;
+    return holdScrollPosition(scroller, savedTop, () => {
+      isRestoringRef.current = false;
+    });
+  }, [enableOverflowY, hash, locationKey, navigationType, pathname]);
+  const handlePageScroll = useCallback(
+    (event: UIEvent) => {
+      if (!isRestoringRef.current) {
+        saveScroll(locationKey, event.currentTarget.scrollTop);
+      }
+    },
+    [locationKey],
+  );
   const enablePageHeader = !enablePageHeaderMatches.some((match) => match.handle.enablePageHeader === false);
   const hasPageHeaderChrome = [hasBreadcrumbItems, hasActionItems].includes(true);
   const headerHeightClass = enablePageHeader
@@ -258,7 +362,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
       <Compose components={Providers}>
         {desktopDragBand}
         {enableOverflowY ? (
-          <div className='h-dvh overflow-y-auto'>
+          <div ref={pageScrollRef} className='h-dvh overflow-y-auto' onScroll={handlePageScroll}>
             <Outlet />
           </div>
         ) : (
@@ -350,7 +454,9 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
               </header>
             ) : null}
             <section
+              ref={pageScrollRef}
               className={cn('h-dvh', enableOverflowY && 'overflow-y-auto', enablePageHeader && headerOffsetClasses)}
+              onScroll={enableOverflowY ? handlePageScroll : undefined}
             >
               <Compose components={Providers}>
                 <RouteCommandPaletteItems />

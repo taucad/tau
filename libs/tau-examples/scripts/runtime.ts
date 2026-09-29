@@ -3,10 +3,11 @@ import { esbuild } from '@taucad/esbuild';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
-import { gltfEdgeDetection, parameterCache, parameterFileResolver, parameterUnits } from '@taucad/middleware';
+import { gltfEdgeDetection, parameterFileResolver, parameterUnits } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
 import { openrscad } from '@taucad/openrscad';
 import { loadPicogkKernelOptions, picogk } from '@taucad/picogk';
+import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { tscircuit } from '@taucad/tscircuit';
 import type { RuntimeClient } from '@taucad/runtime/client';
@@ -34,6 +35,7 @@ export const exampleRuntime = defineRuntime({
     replicad(),
     opencascade(),
     manifold(),
+    picovoxel(),
     jscad(),
     openrscad(),
     esbuild(),
@@ -41,7 +43,7 @@ export const exampleRuntime = defineRuntime({
     ...nativePlugins,
     tscircuit(),
   ],
-  middleware: [parameterFileResolver(), parameterCache(), parameterUnits(), gltfEdgeDetection()],
+  middleware: [parameterFileResolver(), parameterUnits(), gltfEdgeDetection()],
 });
 
 /** Kernel ids supported by the example-thumbnail runtime. @public */

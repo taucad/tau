@@ -82,6 +82,8 @@ const preferenceStore = () => {
     }
 
     if (legacyCookie === undefined) {
+      // Unset preferences are read on every render; `update` and `remove` refresh this.
+      cache.set(name, undefined);
       return undefined;
     }
     const legacy = parse(legacyCookie);

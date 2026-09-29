@@ -46,6 +46,34 @@ export const quitChannels = {
  */
 export const externalAgentsChannel = 'tau:external-agents';
 
+/**
+ * The native half of the machine binding ceremony (blueprint D9, D10).
+ *
+ * `beginBinding` travels over the brokered `machines` port and answers with a
+ * ceremony id; the secret that completes it never rides that channel. The
+ * renderer posts it here, main forwards it to the services utility, and the
+ * utility saves it in the host's vault, keyed by the printer, once the
+ * printer accepts it. An omitted code reuses the saved one.
+ */
+export const machinesChannels = {
+  completeBinding: 'tau:machines:complete-binding',
+} as const;
+
+/**
+ * Read-only Bambu Studio presets and settings for the Print pane (blueprint D12).
+ *
+ * Request/response only: the slice itself runs in the kernel utility on the
+ * export route, never over these channels.
+ */
+export const slicersChannels = {
+  bambuStudio: {
+    status: 'tau:slicers:bambu-studio:status',
+    catalog: 'tau:slicers:bambu-studio:catalog',
+    resolveSelection: 'tau:slicers:bambu-studio:resolve-selection',
+    settings: 'tau:slicers:bambu-studio:settings',
+  },
+} as const;
+
 /** IPC methods for bounded compute-store authority controls. */
 export const computeControlChannels = {
   inspect: 'tau:compute:inspect',

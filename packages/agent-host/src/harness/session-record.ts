@@ -3,7 +3,7 @@ import type { Api, AssistantMessage, AssistantMessageDiagnostic, Model } from '@
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { util as zodUtility } from 'zod';
 import type { DurableEventLog, HostRunFailure, MaterializedDocument } from '#waist/ports.js';
-import { reduceEventLog } from '#log/reducer.js';
+import { EventLogError } from '#log/event-log-error.js';
 import { attachmentPathPattern, fileRefBlockSchema } from '#log/event-schema.js';
 import type {
   AgentLogEvent,
@@ -299,9 +299,17 @@ export const createSessionRecord = async (options: CreateSessionRecordOptions): 
       await pending;
       return options.log.read();
     },
+    /* RA-S10: the appender's incremental reduction, not a re-read of the file. It reads tolerantly; a run executes
+     * strictly, so a history the open flagged broken is refused (D16). */
     history: async () => {
       await pending;
-      return reduceEventLog(await options.log.read());
+      if (!(await options.log.historyIntact())) {
+        throw new EventLogError(
+          'HISTORY_INVALID',
+          'This chat has a history row Tau cannot apply; it can be read, not run.',
+        );
+      }
+      return options.log.messages();
     },
   };
 };
@@ -407,7 +415,7 @@ const isFileRef = (block: unknown): boolean => zodUtility.isObject(block) && blo
 const isBlockList = (built: JsonValue | readonly JsonValue[]): built is readonly JsonValue[] => Array.isArray(built);
 
 /**
- * Replace every attachment reference in user messages with the bytes a model reads (D15).
+ * Replace every attachment reference in message content with the bytes a model reads (D15).
  *
  * Returns a transient copy: the input messages — the durable rows — are never
  * mutated. An image becomes an inline `image` block. A document becomes the
@@ -472,7 +480,9 @@ export const materializeAttachments = async (
   };
   const materialized = await Promise.all(
     messages.map(async (message): Promise<ProviderMessage> => {
-      if (message.role !== 'user' || !Array.isArray(message.content) || !message.content.some(isFileRef)) {
+      /* Any role: an external agent's image is recorded by reference on its own
+       * assistant and tool-output rows, and hydration refuses a reference left unread. */
+      if (message.role === 'tool-input' || !Array.isArray(message.content) || !message.content.some(isFileRef)) {
         return message;
       }
       const blocks = await Promise.all(message.content.map(materializeBlock));
@@ -559,6 +569,8 @@ export const piMessageToProvider = (message: AgentMessage, identities: MessageId
     metadata: {
       timestamp: message.timestamp,
       ...(details ? { substituted: details.substituted } : {}),
+      /* The recalled approval this call used: recorded with its output, so it is spent once (D5). */
+      ...(details?.approval ? { approval: { interruptId: details.approval.interruptId } } : {}),
     },
   };
 };

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router';
 import type { MetaFunction } from 'react-router';
+import { PageHeader } from '#components/layout/page-header.js';
+import { PageContent } from '#components/layout/page-content.js';
 import { Filter, RefreshCw, X } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
@@ -40,13 +41,6 @@ import type { Handle } from '#types/matches.types.js';
 export const meta: MetaFunction = () => [{ title: 'Tau usage' }, { name: 'robots', content: 'noindex, nofollow' }];
 
 export const handle: Handle = {
-  breadcrumb() {
-    return (
-      <Button asChild variant='ghost'>
-        <Link to='/usage'>Usage</Link>
-      </Button>
-    );
-  },
   enableOverflowY: true,
 };
 
@@ -143,7 +137,7 @@ function FilterMenu<Value extends string>({
           ) : undefined}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align='start' className='max-h-[300px] w-56 overflow-y-auto'>
+      <DropdownMenuContent align='start' className='max-h-75 w-56 overflow-y-auto'>
         <DropdownMenuLabel>Filter by {label.toLowerCase()}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {options.map((option) => (
@@ -157,7 +151,7 @@ function FilterMenu<Value extends string>({
               onToggle(option.id);
             }}
           >
-            <span className='max-w-[180px] truncate'>{option.label}</span>
+            <span className='max-w-45 truncate'>{option.label}</span>
           </DropdownMenuCheckboxItem>
         ))}
       </DropdownMenuContent>
@@ -195,9 +189,9 @@ export default function UsagePage(): React.JSX.Element {
   const options = usageFilterOptions(snapshot, filters, projectNames);
 
   return (
-    <div className='container mx-auto space-y-6 px-4 py-8'>
+    <PageContent className='space-y-6'>
       <div className='flex flex-col gap-1'>
-        <h1 className='text-3xl font-bold'>Tau usage</h1>
+        <PageHeader title='Tau usage' />
         <p className='text-muted-foreground'>
           Usage through the Tau LLM provider across your devices. Local and connected external providers are billed by
           them, not by Tau, and are not shown here.
@@ -279,6 +273,6 @@ export default function UsagePage(): React.JSX.Element {
           />
         </>
       ) : undefined}
-    </div>
+    </PageContent>
   );
 }

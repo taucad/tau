@@ -9,8 +9,11 @@
       "executor": "nx:run-commands",
       "dependsOn": ["^build"],
       "options": {
-        "command": "tsdown --config-loader=tsx",
-        "cwd": "{projectRoot}"
+        "command": "tsdown",
+        "cwd": "{projectRoot}",
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=8192"
+        }
       }
     }
   }

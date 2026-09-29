@@ -2,18 +2,53 @@ import { createHash } from 'node:crypto';
 
 import {
   formatPrimitiveSelector,
+  resolveShapeName,
   srgbTupleToLinear,
   transformVectorArrayChecked,
   writeGlb,
 } from '@taucad/geometry-core';
 import type { GlbNode, TauCadTopologyComponent, TauCadTopologyPayload } from '@taucad/geometry-core';
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
+import { resolveMechanismComponents, transformMechanism } from '@taucad/kinematics';
+import type { Issue } from '@taucad/kinematics';
+import type { KernelIssue } from '@taucad/runtime/kernel';
 
 import type { PicogkBuild } from '#picogk.protocol.js';
 
 const scalarBytes = 4;
 type PicogkComponent = PicogkBuild['components'][number];
-type PicogkMeshArtifact = Pick<PicogkBuild, 'artifactPath' | 'byteLength' | 'sha256' | 'components'>;
+type PicogkMeshArtifact = Pick<PicogkBuild, 'artifactPath' | 'byteLength' | 'sha256' | 'components' | 'mechanism'>;
+
+const sourceToGltf = [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1] as const;
+
+const mechanismIssue = (issue: Issue): KernelIssue => ({
+  code: issue.code.startsWith('UNKNOWN_') ? 'INVALID_REFERENCE' : 'INVALID_ANNOTATION',
+  severity: 'warning',
+  type: 'kernel',
+  message: `Mechanism${issue.path && ` ${issue.path}`}: ${issue.message} ${issue.recovery}`,
+  details: { producer: { kernelId: 'picogk' }, mechanism: issue },
+});
+
+const convertMechanism = (
+  source: unknown,
+  names: ReadonlyMap<string, string>,
+  onIssues?: (issues: KernelIssue[]) => void,
+) => {
+  const resolved = resolveMechanismComponents({ source, componentIds: Object.fromEntries(names) });
+  const outcome =
+    resolved.status === 'resolved'
+      ? transformMechanism({
+          mechanism: resolved.mechanism,
+          units: { length: 'm', angle: resolved.mechanism.units.angle },
+          matrix: sourceToGltf,
+        })
+      : resolved;
+  if (outcome.status === 'invalid') {
+    onIssues?.(outcome.issues.map(mechanismIssue));
+    return undefined;
+  }
+  return outcome.mechanism;
+};
 
 const viewFloat32 = (bytes: Uint8Array<ArrayBuffer>, offset: number, count: number): Float32Array<ArrayBuffer> => {
   if (offset % scalarBytes !== 0 || offset + count * scalarBytes > bytes.byteLength) {
@@ -109,24 +144,50 @@ const assertArtifactIntegrity = (bytes: Uint8Array<ArrayBuffer>, result: PicogkM
 const componentsToGlb = (
   bytes: Uint8Array<ArrayBuffer>,
   components: readonly PicogkComponent[],
+  options: { mechanismSource?: unknown; onIssues?: (issues: KernelIssue[]) => void },
 ): Uint8Array<ArrayBuffer> => {
   const nodes: GlbNode[] = [];
   const topologyComponents: TauCadTopologyComponent[] = [];
   const occupiedRanges: Array<readonly [number, number]> = [];
+  const authoredNames = new Set<string>();
+  for (const component of components) {
+    if (component.name === undefined) {
+      continue;
+    }
+    if (authoredNames.has(component.name)) {
+      throw new Error(`PicoGK part name "${component.name}" is already in use.`);
+    }
+    authoredNames.add(component.name);
+  }
+  const usedNames = new Set(authoredNames);
+  const names = new Map<string, string>();
   for (const [nodeIndex, component] of components.entries()) {
+    let name = resolveShapeName({ index: nodeIndex, name: component.name });
+    if (component.name === undefined) {
+      let fallbackIndex = nodeIndex;
+      while (usedNames.has(name)) {
+        name = resolveShapeName({ index: ++fallbackIndex });
+      }
+      usedNames.add(name);
+    }
+    // Fallback labels describe display order, so mechanisms may reference only explicit authored names.
+    if (component.name !== undefined) {
+      names.set(name, component.id);
+    }
     const isTriangle = component.kind === 'triangles';
     assertValidShape(component);
     recordRanges(component, occupiedRanges);
     const sourcePositions = viewFloat32(bytes, component.positionOffset, component.positionCount);
     const sourceNormals = isTriangle ? viewFloat32(bytes, component.normalOffset, component.normalCount) : undefined;
     const sourceIndices = viewUint32(bytes, component.indexOffset, component.indexCount);
-    const positions = toGlbVectors(sourcePositions, 'position', component.name);
-    const normals = sourceNormals ? toGlbVectors(sourceNormals, 'direction', component.name) : undefined;
-    assertIndexRange(sourceIndices, sourcePositions.length / 3, component.name);
+    const positions = toGlbVectors(sourcePositions, 'position', name);
+    const normals = sourceNormals ? toGlbVectors(sourceNormals, 'direction', name) : undefined;
+    assertIndexRange(sourceIndices, sourcePositions.length / 3, name);
     const displayColor = component.color;
     const materialColor = srgbTupleToLinear(displayColor);
     nodes.push({
-      name: component.name,
+      name,
+      extras: { tauComponentId: component.id },
       primitives: [
         {
           mode: isTriangle ? 4 : 1,
@@ -142,14 +203,14 @@ const componentsToGlb = (
               ...(component.roughness === 1 ? {} : { roughnessFactor: component.roughness }),
             },
             ...(materialColor[3] < 1 ? { alphaMode: 'BLEND' } : {}),
-            name: component.name,
+            name,
           },
         },
       ],
     });
     topologyComponents.push({
       id: component.id,
-      name: component.name,
+      name,
       kind: isTriangle ? 'mesh' : 'polyline',
       selector: formatPrimitiveSelector(nodeIndex, isTriangle ? 'surface' : 'edges'),
       color: displayColor,
@@ -164,7 +225,15 @@ const componentsToGlb = (
     });
   }
 
-  const topology: TauCadTopologyPayload = { schemaVersion: 1, components: topologyComponents };
+  const mechanism =
+    options.mechanismSource === undefined
+      ? undefined
+      : convertMechanism(options.mechanismSource, names, options.onIssues);
+  const topology: TauCadTopologyPayload = {
+    schemaVersion: 1,
+    components: topologyComponents,
+    ...(mechanism ? { mechanism } : {}),
+  };
   const topologyData = new TextEncoder().encode(JSON.stringify(topology));
   return writeGlb({
     nodes,
@@ -186,12 +255,14 @@ const componentsToGlb = (
  * Validate and adapt one worker scene artifact into Tau's canonical GLB topology substrate.
  * @param bytes Confined artifact bytes read from the worker.
  * @param result Validated artifact descriptor returned by the worker.
+ * @param onIssues Receives mechanism metadata warnings without discarding geometry.
  * @returns A canonical inline GLB with mesh-only Tau topology.
  */
 export const picogkArtifactToGlb = (
   bytes: Uint8Array<ArrayBuffer>,
   result: PicogkMeshArtifact,
+  onIssues?: (issues: KernelIssue[]) => void,
 ): Uint8Array<ArrayBuffer> => {
   assertArtifactIntegrity(bytes, result);
-  return componentsToGlb(bytes, result.components);
+  return componentsToGlb(bytes, result.components, { mechanismSource: result.mechanism, onIssues });
 };

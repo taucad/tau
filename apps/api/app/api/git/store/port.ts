@@ -112,7 +112,12 @@ export type RepositoryStore = {
     options: PutObjectOptions,
   ): Promise<void>;
 
-  /** Reads an object, optionally a byte range with inclusive bounds. */
+  /**
+   * Reads an object, optionally a byte range with inclusive bounds. An absent
+   * key rejects with `RepositoryStoreError` code `missing-pack`, so a reader
+   * learns a manifest names bytes the store does not hold without listing
+   * the prefix first (W13b).
+   */
   getObject(locator: RepositoryLocator, key: string, range?: { start: number; end: number }): Promise<Readable>;
 
   /** Yields every object under a repository-relative prefix, paginating internally. */

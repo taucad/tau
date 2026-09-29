@@ -13,9 +13,18 @@
  * one relay-acceptance predicate.
  */
 import type { ComputeStoreControl } from '@taucad/runtime/types';
+import type { MachineBindingOutcome } from '@taucad/runtime/machine';
 import { z } from 'zod';
-import { externalAgentDescriptorSchema } from '@taucad/agent-host';
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
+import type {
+  BambuMachineHints,
+  BambuStudioCatalog,
+  BambuStudioCatalogFilter,
+  BambuStudioErrorCode,
+  BambuStudioSelection,
+  BambuStudioSettings,
+} from '@taucad/slicer/bambu-studio';
 import { isDesktopTarget as isDesktopBuildTarget } from '#lib/build-target.js';
 
 /**
@@ -38,6 +47,7 @@ type DesktopShell = {
   };
   readonly dialog: DesktopBridge['dialog'];
   readonly openFiles: DesktopBridge['openFiles'];
+  readonly generatedImages: DesktopBridge['generatedImages'];
   readonly quickLook: {
     readonly directPreviewExtensions: readonly string[];
     previewPath(request: { readonly path: string; readonly displayName?: string }): Promise<DesktopQuickLookResult>;
@@ -51,11 +61,94 @@ type DesktopShell = {
     retain(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
     release(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
   };
+  readonly machines?: {
+    completeBinding(input: DesktopMachineBindingCompletion): Promise<unknown>;
+  };
+  /** Answers are `{ ok, value }` or `{ ok: false, error: { code, message } }`; status answers plainly. */
+  readonly slicers?: {
+    readonly bambuStudio: Readonly<
+      Record<'status' | 'catalog' | 'resolveSelection' | 'settings', (input?: unknown) => Promise<unknown>>
+    >;
+  };
   /** Ask main to broker a port for one concern; answered by a relayed message. */
   requestServicesPort(requestId: string, concern: string, context?: Readonly<Record<string, string>>): void;
 };
 
 export type DesktopQuickLookResult = { readonly success: true } | { readonly success: false; readonly error: string };
+
+/**
+ * The native half of one binding ceremony (D10). The host pins trust from the
+ * address discovery found the printer at, so `address` is informational. Without an
+ * `accessCode` the host reuses the code it saved for this printer, and refuses
+ * with `MACHINE_CREDENTIAL_REQUIRED` or `MACHINE_CREDENTIAL_TRUST_CHANGED` when
+ * none is saved or the printer's certificate changed. Both are absent for the
+ * simulator.
+ * @public
+ */
+export type DesktopMachineBindingCompletion = {
+  readonly ceremonyId: string;
+  readonly address?: string;
+  /** A newly typed code, which wins over a saved one. */
+  readonly accessCode?: string;
+};
+
+/**
+ * Whether this machine has a usable Bambu Studio for the Print pane.
+ * @public
+ */
+export type DesktopBambuStudioStatus =
+  | { readonly available: true; readonly version: string; readonly executable: string }
+  | { readonly available: false; readonly reason: string };
+
+/**
+ * A Bambu Studio refusal from main, with the engine's code kept.
+ * @public
+ */
+export type DesktopBambuStudioError = Error & { readonly code: BambuStudioErrorCode };
+
+/**
+ * Bambu Studio presets and settings, read in the desktop main process (blueprint D12).
+ *
+ * Every call except `status` rejects with a {@link DesktopBambuStudioError}
+ * when the engine refuses (`BAMBU_STUDIO_UNAVAILABLE`,
+ * `BAMBU_STUDIO_PRESET_NOT_FOUND`, …), and with a plain `Error` when main
+ * refuses the input itself. Slicing is not here: it runs on the export route.
+ * @public
+ */
+export type DesktopBambuStudio = {
+  /** Whether Bambu Studio is installed, and which version. Never rejects for a missing install. */
+  status(): Promise<DesktopBambuStudioStatus>;
+  /** The selectable presets, optionally narrowed to one printer preset or a model and nozzle. */
+  catalog(filter?: BambuStudioCatalogFilter): Promise<BambuStudioCatalog>;
+  /** Default presets for the bound printer, keeping any the person already chose in `partial`. */
+  resolveSelection(input: {
+    readonly hints: BambuMachineHints;
+    readonly partial?: Partial<BambuStudioSelection>;
+  }): Promise<BambuStudioSelection>;
+  /** JSON Schema, current values and groups of the settings the presets resolve to. */
+  settings(input: Pick<BambuStudioSelection, 'printer' | 'process' | 'filaments'>): Promise<BambuStudioSettings>;
+};
+
+/**
+ * Unwrap main's answer, turning a refusal back into an error with its code.
+ *
+ * @param answer - `{ ok: true, value }` or `{ ok: false, error: { code, message } }`.
+ * @returns The value.
+ */
+const bambuStudioValue = <Value>(answer: unknown): Value => {
+  const result = answer as { ok?: unknown; value?: unknown; error?: { code?: unknown; message?: unknown } } | undefined;
+  if (result?.ok === true) {
+    return result.value as Value;
+  }
+  const message = typeof result?.error?.message === 'string' ? result.error.message : 'Bambu Studio did not answer.';
+  throw Object.assign(new Error(message), { name: 'BambuStudioError', code: result?.error?.code });
+};
+
+/* Parsed, not trusted: main answers with whatever the utility said. */
+const bindingOutcomeSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('bound'), machineId: z.string().min(1).max(256) }),
+  z.object({ status: z.literal('operator-action-required'), ceremonyId: z.string().min(1).max(256) }),
+]);
 
 /** Keep the native app icon aligned with Tau's resolved local theme. */
 export const setDesktopAppIconTheme = (theme: 'light' | 'dark'): void => {
@@ -92,7 +185,18 @@ export const reportDesktopQuiesced = (forced: boolean): void => {
  * The desktop seam, as `apps/ui` consumes it.
  * @public
  */
+export type DesktopAgentHostConnectInput = {
+  readonly workspaceRoot: string;
+  readonly projectId: string;
+  readonly computeMode: 'off' | 'memory' | 'durable';
+  readonly geoSpecEngine?: 'legacy' | 'native' | undefined;
+};
+
 export type DesktopBridge = {
+  /** Exact AP242 measurement in the desktop services utility. */
+  readonly exactMeasurement: { connect(): Promise<MessagePort> };
+  /** Debug-only native GeoSpec comparisons, with byte-only inputs. */
+  readonly geoSpecPerformance: { connect(): Promise<MessagePort> };
   readonly runtimeKernelIds: readonly string[];
   readonly nodeFs: {
     /**
@@ -115,16 +219,38 @@ export type DesktopBridge = {
      *
      * The far end is `serveAgentChannel(port, launcher)` in the services
      * utility — ruling C3's launcher 2 — so the page drives it with
-     * `createAgentChannelClient` from `@taucad/agent-host/channel-client`:
-     * structured frames, no codec, the same T0 vocabulary the daemon serves
-     * over a WebSocket. Main refuses a root the user never granted, and the
-     * promise then never settles rather than resolving onto a port to nowhere.
+     * `createAgentChannelClient` from `@taucad/agent-host/channel-client`,
+     * whose `connect` calls this again for every redial: structured frames, no
+     * codec, the same keyed wire vocabulary the daemon serves over a WebSocket.
+     * Main refuses a root the user never granted, and the promise then never
+     * settles rather than resolving onto a port to nowhere.
      */
-    connect(workspaceRoot: string, projectId: string, computeMode: 'off' | 'memory' | 'durable'): Promise<MessagePort>;
+    connect(input: DesktopAgentHostConnectInput): Promise<MessagePort>;
     /** Keep launcher 2 alive for one project session in this renderer. */
     retain(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
     /** Release that hold and await launcher shutdown when it was the last one. */
     release(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
+  };
+  readonly machines: {
+    /**
+     * Ask main to broker a fresh `MessageChannelMain` to the node machine host
+     * in the services utility, and hand back this side.
+     *
+     * The far end is `NodeMachineHost.serve` over that port, so the page
+     * drives it with `connectMachineChannel` from `@taucad/runtime/machine` —
+     * the same wire the daemon serves over a WebSocket. Printers belong to
+     * this computer, not a project, so no root is named (blueprint D6).
+     */
+    connect(): Promise<MessagePort>;
+    /**
+     * Complete a ceremony `beginBinding` answered with `operator-action-required`.
+     *
+     * A typed access code goes straight to the host, which keeps it in the OS
+     * keychain once the printer accepts it, and is never kept in page state;
+     * the outcome is the host's own. A refusal reaches the page as a message
+     * that carries the host's code.
+     */
+    completeBinding(input: DesktopMachineBindingCompletion): Promise<MachineBindingOutcome>;
   };
   readonly compute: {
     inspect(projectRoot: string): ReturnType<ComputeStoreControl['inspect']>;
@@ -144,9 +270,19 @@ export type DesktopBridge = {
   };
   readonly openFiles: {
     /** Consume paths delivered by macOS Open With as bounded file payloads. */
-    consume(): Promise<ReadonlyArray<{ readonly bytes: Uint8Array<ArrayBuffer>; readonly name: string }>>;
+    consume(): Promise<
+      ReadonlyArray<{
+        readonly bytes: Uint8Array<ArrayBuffer>;
+        readonly name: string;
+      }>
+    >;
+  };
+  readonly generatedImages: {
+    read(path: string): Promise<{ readonly path: string; readonly bytes: Uint8Array<ArrayBuffer> }>;
   };
   readonly quickLook: DesktopShell['quickLook'];
+  /** Slicers that need the desktop host; absent on a shell built before them. */
+  readonly slicers?: { readonly bambuStudio: DesktopBambuStudio };
   /**
    * External ACP agents launcher 2 knows about (W4-ACP), as the one canonical
    * descriptor (VSC1), which the execution selector draws one row each from.
@@ -166,6 +302,19 @@ export type DesktopBridge = {
  * runtime and left every desktop branch in the web bundle.
  */
 export const isDesktopTarget = isDesktopBuildTarget();
+
+/**
+ * Build the typed Bambu Studio surface over preload's plain calls.
+ *
+ * @param calls - `window.tau.slicers.bambuStudio`.
+ * @returns The typed surface.
+ */
+const bambuStudioBridge = (calls: NonNullable<DesktopShell['slicers']>['bambuStudio']): DesktopBambuStudio => ({
+  status: async () => (await calls.status()) as DesktopBambuStudioStatus,
+  catalog: async (filter) => bambuStudioValue(await calls.catalog(filter)),
+  resolveSelection: async (input) => bambuStudioValue(await calls.resolveSelection(input)),
+  settings: async (input) => bambuStudioValue(await calls.settings(input)),
+});
 
 let built: DesktopBridge | undefined;
 /** Correlates one `connect()` with its own relayed port. */
@@ -203,6 +352,12 @@ export const desktopBridge = (): DesktopBridge | undefined => {
   };
 
   built ??= {
+    exactMeasurement: {
+      connect: async () => connectServices('exactMeasurement'),
+    },
+    geoSpecPerformance: {
+      connect: async () => connectServices('geospecPerformance'),
+    },
     runtimeKernelIds: shell.runtimeKernelIds ?? [],
     /* Parsed, not trusted: the names and model ids main put here came out of a
      * vendor adapter's own config options, and this page renders them. */
@@ -216,12 +371,26 @@ export const desktopBridge = (): DesktopBridge | undefined => {
       connect: async () => connectServices('nodeFs'),
     },
     agentHost: {
-      connect: async (workspaceRoot: string, projectId: string, computeMode: 'off' | 'memory' | 'durable') =>
-        connectServices('agentHost', { workspaceRoot, projectId, computeMode }),
+      connect: async ({ workspaceRoot, projectId, computeMode, geoSpecEngine }) =>
+        connectServices('agentHost', {
+          workspaceRoot,
+          projectId,
+          computeMode,
+          ...(geoSpecEngine === undefined ? {} : { geoSpecEngine }),
+        }),
       retain: async (workspaceRoot, projectId, attachmentId) =>
         shell.agentHost.retain(workspaceRoot, projectId, attachmentId),
       release: async (workspaceRoot, projectId, attachmentId) =>
         shell.agentHost.release(workspaceRoot, projectId, attachmentId),
+    },
+    machines: {
+      connect: async () => connectServices('machines'),
+      completeBinding: async (input) => {
+        if (!shell.machines) {
+          throw new Error('This desktop build has no machine binding ceremony.');
+        }
+        return bindingOutcomeSchema.parse(await shell.machines.completeBinding(input));
+      },
     },
     compute: shell.compute ?? {
       inspect: async () => {
@@ -236,7 +405,9 @@ export const desktopBridge = (): DesktopBridge | undefined => {
     },
     dialog: shell.dialog,
     openFiles: shell.openFiles,
+    generatedImages: shell.generatedImages,
     quickLook: shell.quickLook,
+    ...(shell.slicers === undefined ? {} : { slicers: { bambuStudio: bambuStudioBridge(shell.slicers.bambuStudio) } }),
   };
   return built;
 };

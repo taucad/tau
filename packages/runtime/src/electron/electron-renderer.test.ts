@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { createChannelServer, wrapMessagePort } from '@taucad/rpc';
 import type { ChannelServerHandle } from '@taucad/rpc';
 
+import type { MachineChannelClient } from '#machines/machine-channel.js';
 import {
   awaitElectronRelayedPort,
   createElectronClientOptions,
@@ -237,6 +239,58 @@ describe('Electron renderer runtime helpers', () => {
       ['host-1', 'render-timeout'],
       ['host-2', 'render-timeout'],
     ]);
+  });
+
+  it('should negotiate the machines facet the shell brokered and dial it on first use', async () => {
+    let listener: ((event: MessageEvent) => void) | undefined;
+    const target = {
+      addEventListener: vi.fn((_name: 'message', handler: (event: MessageEvent) => void) => {
+        listener = handler;
+      }),
+      removeEventListener: vi.fn(),
+    } as unknown as Window;
+    const requestRuntimePort = vi.fn((requestId: string) => {
+      listener?.(
+        relayEvent({ taucadRelay: runtimeRelayTag, hostId: 'host-m', requestId }, [new MessageChannel().port1]),
+      );
+    });
+    const bridge = {
+      requestRuntimePort,
+      releaseRuntimeHost: vi.fn(),
+      relayTag: { hostExit: hostExitRelayTag, runtime: runtimeRelayTag },
+    };
+    const channel = mock<MachineChannelClient>();
+    channel.listProviders.mockResolvedValue([]);
+    const connect = vi.fn(() => channel);
+
+    const options = await createElectronClientOptions({
+      bridge,
+      context: { projectRoot: '/projects/a' },
+      target,
+      machines: { available: true, connect },
+    })();
+    const transport = options.transport.materialize();
+
+    /* Brokered up front, dialled lazily: a page that never opens the Print
+     * pane never opens the channel. */
+    expect(connect).not.toHaveBeenCalled();
+    const { machines } = transport;
+    if (!machines?.available) {
+      throw new Error('Expected the machines facet the shell offered');
+    }
+    await expect(machines.listProviders({})).resolves.toEqual([]);
+    await machines.list({});
+    /* One channel for every operation, however many times the facet is used. */
+    expect(connect).toHaveBeenCalledOnce();
+    expect(channel.listProviders).toHaveBeenCalledOnce();
+    expect(channel.list).toHaveBeenCalledOnce();
+
+    const bareOptions = await createElectronClientOptions({
+      bridge,
+      context: { projectRoot: '/projects/a' },
+      target,
+    })();
+    expect(bareOptions.transport.materialize().machines).toEqual({ available: false, reason: 'unsupported' });
   });
 
   it('should deliver a hello the utility sent before the runtime client subscribed', async () => {

@@ -53,6 +53,8 @@ export type GeoSpecPoolOptions = {
   createWorker: () => GeoSpecPoolWorkerHandle | Promise<GeoSpecPoolWorkerHandle>;
   /** Optional one-time worker initialization performed after its ready signal. */
   initializeWorker?: (worker: GeoSpecPoolWorkerHandle) => Promise<void> | void;
+  /** Wait for each native worker's cleanup acknowledgement before terminating it. */
+  gracefulShutdown?: boolean;
   /** Worker count. Omit to let the caller's host auto-size before calling. */
   workers: number;
   /** Optional scheduling telemetry. Absent = declared order, no memory class. */
@@ -72,7 +74,14 @@ const shardTimeoutIssue = (file: string, shardWatchdog: number): RunnerIssue => 
 
 const shardErrorResult = (message: string): GeoSpecRunResult => ({
   success: false,
-  issues: [{ code: 'GEOSPEC_SHARD_FAILED', message, severity: 'error', type: 'runtime' }],
+  issues: [
+    {
+      code: 'GEOSPEC_SHARD_FAILED',
+      message,
+      severity: 'error',
+      type: 'runtime',
+    },
+  ],
 });
 
 type PoolWorker = {
@@ -90,7 +99,10 @@ type PoolWorker = {
  * memory, so the exit listener is a real path, not a defensive one.
  */
 type ShardSettlement =
-  | { type: 'complete'; message: Extract<GeoSpecPoolWorkerMessage, { type: 'shard-complete' }> }
+  | {
+      type: 'complete';
+      message: Extract<GeoSpecPoolWorkerMessage, { type: 'shard-complete' }>;
+    }
   | { type: 'listed'; names: string[] }
   | { type: 'error'; message: string }
   /** The non-verdict watchdog fired and the worker was terminated (R11). */
@@ -99,7 +111,15 @@ type ShardSettlement =
 const createWorkerChannel = (
   handle: GeoSpecPoolWorkerHandle,
   emitForensic: (event: Extract<GeoSpecPoolWorkerMessage, { type: 'forensic' }>) => void,
-): { settle: (shardId: number) => Promise<ShardSettlement>; ready: Promise<void>; initialized: Promise<void> } => {
+): {
+  settle: (shardId: number) => Promise<ShardSettlement>;
+  ready: Promise<void>;
+  initialized: Promise<void>;
+  shutdown: Promise<void>;
+  beginInitialization: () => void;
+  beginShutdown: () => void;
+  exited: () => string | undefined;
+} => {
   let pending: ((settlement: ShardSettlement) => void) | undefined;
   let exited: string | undefined;
   let resolveReady: (() => void) | undefined;
@@ -112,6 +132,21 @@ const createWorkerChannel = (
     resolveInitialized = resolve;
     rejectInitialized = reject;
   });
+  // A worker may die before its first run awaits initialization.
+  // async-iife: bootstrap -- An early worker exit can precede the first run awaiting initialization.
+  // oxlint-disable-next-line promise/prefer-await-to-then -- Attach a rejection observer before any run can await this promise.
+  void initialized.catch(() => undefined);
+  let initializationPending = false;
+  let shuttingDown = false;
+  let resolveShutdown: (() => void) | undefined;
+  let rejectShutdown: ((error: Error) => void) | undefined;
+  const shutdown = new Promise<void>((resolve, reject) => {
+    resolveShutdown = resolve;
+    rejectShutdown = reject;
+  });
+  // async-iife: bootstrap -- Shutdown may reject on exit before close starts awaiting it.
+  // oxlint-disable-next-line promise/prefer-await-to-then -- Attach a rejection observer before close can await this promise.
+  void shutdown.catch(() => undefined);
 
   const deliver = (settlement: ShardSettlement): void => {
     const resolve = pending;
@@ -126,11 +161,23 @@ const createWorkerChannel = (
         break;
       }
       case 'initialized': {
-        resolveInitialized?.();
+        if (initializationPending) {
+          initializationPending = false;
+          resolveInitialized?.();
+        } else if (shuttingDown) {
+          resolveShutdown?.();
+        } else {
+          resolveInitialized?.();
+        }
         break;
       }
       case 'initialization-error': {
+        exited = message.message;
+        resolveReady?.();
         rejectInitialized?.(new Error(message.message));
+        if (shuttingDown) {
+          rejectShutdown?.(new Error(message.message));
+        }
         break;
       }
       case 'shard-complete': {
@@ -158,14 +205,24 @@ const createWorkerChannel = (
   handle.onExit((details) => {
     exited = details.message ?? 'the pool worker exited unexpectedly';
     resolveReady?.();
-    if (details.unexpected) {
-      deliver({ type: 'error', message: exited });
-    }
+    rejectInitialized?.(new Error(exited));
+    rejectShutdown?.(new Error(exited));
+    // Even an expected shutdown exit must settle an active shard: close may
+    // have forced termination after the worker missed its cleanup deadline.
+    deliver({ type: 'error', message: exited });
   });
 
   return {
     ready,
     initialized,
+    shutdown,
+    beginInitialization: () => {
+      initializationPending = true;
+    },
+    beginShutdown: () => {
+      shuttingDown = true;
+    },
+    exited: () => exited,
     settle: async (_shardId: number) =>
       exited === undefined
         ? new Promise<ShardSettlement>((resolve) => {
@@ -184,24 +241,46 @@ const createWorkerChannel = (
  */
 export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRunner => {
   const state: { closed: boolean; aborted?: string } = { closed: false };
+  const isClosed = (): boolean => state.closed;
   // Read through an accessor: control-flow analysis would otherwise narrow the
   // closure-written field to `undefined` after the `delete` in `run`.
   const abortedReason = (): string | undefined => state.aborted;
   const workers: PoolWorker[] = [];
   const channels = new WeakMap<GeoSpecPoolWorkerHandle, ReturnType<typeof createWorkerChannel>>();
   const events = createRunnerEventChannel();
+  let running = false;
+  let spawning: Promise<void> | undefined;
+  let closing: Promise<void> | undefined;
 
   const spawn = async (count: number): Promise<void> => {
-    while (workers.length < count) {
-      // oxlint-disable-next-line no-await-in-loop -- Workers are spawned one at a time so a failure to spawn the third does not orphan the first two.
-      const handle = await options.createWorker();
-      channels.set(
-        handle,
-        createWorkerChannel(handle, ({ shardId, name, value, unit }) => {
-          events.emit({ type: 'forensic', shardId, name, value, unit });
-        }),
-      );
-      workers.push({ handle, busy: false, dead: false, initialized: false });
+    if (spawning !== undefined) {
+      return spawning;
+    }
+    const creation = (async (): Promise<void> => {
+      while (workers.length < count && !isClosed()) {
+        // oxlint-disable-next-line no-await-in-loop -- A failed later spawn must not orphan earlier workers.
+        const handle = await options.createWorker();
+        if (isClosed()) {
+          // oxlint-disable-next-line no-await-in-loop -- The just-created handle must be closed before spawn settles.
+          await handle.terminate();
+          return;
+        }
+        channels.set(
+          handle,
+          createWorkerChannel(handle, ({ shardId, name, value, unit }) => {
+            events.emit({ type: 'forensic', shardId, name, value, unit });
+          }),
+        );
+        workers.push({ handle, busy: false, dead: false, initialized: false });
+      }
+    })();
+    spawning = creation;
+    try {
+      await creation;
+    } finally {
+      if (spawning === creation) {
+        spawning = undefined;
+      }
     }
   };
 
@@ -224,7 +303,10 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
     let timer: ReturnType<typeof setTimeout> | undefined;
     const watchdogExpiry = new Promise<ShardSettlement>((resolve) => {
       timer = setTimeout(() => {
-        resolve({ type: 'timeout', message: shardTimeoutIssue(shard.file, shardWatchdog).message });
+        resolve({
+          type: 'timeout',
+          message: shardTimeoutIssue(shard.file, shardWatchdog).message,
+        });
       }, shardWatchdog);
     });
     try {
@@ -240,6 +322,57 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
     }
   };
 
+  // oxlint-disable-next-line typescript/promise-function-async -- Every caller must receive the identical cleanup promise.
+  const closeWorkers = (): Promise<void> => {
+    if (closing !== undefined) {
+      return closing;
+    }
+    state.closed = true;
+    state.aborted = 'closed';
+    closing = (async (): Promise<void> => {
+      // Creation may have yielded after constructing a native Worker but before
+      // recording its handle. It must settle before this cleanup snapshot.
+      try {
+        await spawning;
+      } catch {
+        // The run reports its spawn failure; close still owns earlier workers.
+      }
+      const live = workers.filter((worker) => !worker.dead && channels.get(worker.handle)?.exited() === undefined);
+      try {
+        for (const worker of live) {
+          channels.get(worker.handle)!.beginShutdown();
+          worker.handle.postMessage({ type: 'shutdown' });
+        }
+        if (options.gracefulShutdown) {
+          await Promise.all(
+            live.map(async (worker) => {
+              const channel = channels.get(worker.handle)!;
+              let timer: ReturnType<typeof setTimeout> | undefined;
+              try {
+                await Promise.race([
+                  channel.shutdown,
+                  new Promise<void>((_resolve, reject) => {
+                    timer = setTimeout(() => {
+                      reject(new Error('Native pool shutdown timed out.'));
+                    }, 10_000);
+                  }),
+                ]);
+              } finally {
+                clearTimeout(timer);
+              }
+            }),
+          );
+        }
+      } finally {
+        await Promise.all(workers.map(async (worker) => worker.handle.terminate()));
+        workers.length = 0;
+        events.emit({ type: 'close' });
+        events.clear();
+      }
+    })();
+    return closing;
+  };
+
   return {
     async run(runOptions: GeoSpecRunnerRunOptions): Promise<GeoSpecRunnerResult> {
       if (state.closed) {
@@ -250,107 +383,101 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
           selectedTests: 0,
           files: [],
           issues: [
-            { code: 'GEOSPEC_RUNNER_CLOSED', message: 'GeoSpec runner is closed.', severity: 'error', type: 'runtime' },
+            {
+              code: 'GEOSPEC_RUNNER_CLOSED',
+              message: 'GeoSpec runner is closed.',
+              severity: 'error',
+              type: 'runtime',
+            },
           ],
         };
       }
-      delete state.aborted;
+      if (running) {
+        return {
+          success: false,
+          passed: 0,
+          failed: 1,
+          selectedTests: 0,
+          files: [],
+          issues: [
+            {
+              code: 'GEOSPEC_RUNNER_BUSY',
+              message: 'GeoSpec runner already has an active run.',
+              severity: 'error',
+              type: 'runtime',
+            },
+          ],
+        };
+      }
+      // Reserve synchronously, before the first await, so two callers cannot
+      // install competing pending resolvers on the same worker channel.
+      running = true;
+      try {
+        delete state.aborted;
 
-      const files = runOptions.files.map(assertRootedPath);
-      const runStartedAt = performance.now();
-      events.emit({ type: 'run-start', files });
+        const files = runOptions.files.map(assertRootedPath);
+        const runStartedAt = performance.now();
+        events.emit({ type: 'run-start', files });
 
-      await spawn(Math.max(1, options.workers));
-      await Promise.all(workers.map(async (worker) => channels.get(worker.handle)!.ready));
-      if (options.initializeWorker) {
-        await Promise.all(
-          workers.map(async (worker) => {
-            if (worker.initialized) {
-              return;
+        try {
+          await spawn(Math.max(1, options.workers));
+          if (isClosed()) {
+            throw new Error('GeoSpec pool closed during worker creation.');
+          }
+          await Promise.all(workers.map(async (worker) => channels.get(worker.handle)!.ready));
+          if (isClosed()) {
+            throw new Error('GeoSpec pool closed during worker initialization.');
+          }
+          for (const worker of workers) {
+            const exited = channels.get(worker.handle)!.exited();
+            if (exited !== undefined) {
+              throw new Error(exited);
             }
-            const channel = channels.get(worker.handle)!;
-            await options.initializeWorker!(worker.handle);
-            await channel.initialized;
-            worker.initialized = true;
-          }),
-        );
-      }
-
-      const totals = { passed: 0, failed: 0, selectedTests: 0 };
-      const fileResults: GeoSpecRunnerResult['files'] = [];
-      const issues: RunnerIssue[] = [];
-
-      // R3 splitting: only a file that telemetry says is long enough to be the
-      // critical path pays the extra list-only pass.
-      const splitTests = new Map<string, readonly string[]>();
-      const candidates =
-        files.length < workers.length
-          ? [...new Set([...files, ...filesToSplit(files, options.timings, options.splitThreshold)])]
-          : filesToSplit(files, options.timings, options.splitThreshold);
-      for (const [index, file] of candidates.entries()) {
-        const worker = workers[index % workers.length]!;
-        const shard: GeoSpecPoolShard = { id: -1 - index, file };
-        // oxlint-disable-next-line no-await-in-loop -- The collection pass is cheap and its results decide the plan; running it serially keeps the plan deterministic.
-        const settled = await roundTrip(
-          worker,
-          () => {
-            worker.handle.postMessage({
-              type: 'list-tests',
-              shardId: shard.id,
-              file,
-              ...(runOptions.testTimeout === undefined ? {} : { testTimeout: runOptions.testTimeout }),
-              ...(runOptions.matcherWallBackstop === undefined
-                ? {}
-                : { matcherWallBackstop: runOptions.matcherWallBackstop }),
-              ...(runOptions.forensic === undefined ? {} : { forensic: runOptions.forensic }),
-            });
-          },
-          shard,
-        );
-        if (settled.type === 'listed' && settled.names.length > 1) {
-          splitTests.set(file, settled.names);
+          }
+          if (options.initializeWorker) {
+            await Promise.all(
+              workers.map(async (worker) => {
+                if (worker.initialized) {
+                  return;
+                }
+                const channel = channels.get(worker.handle)!;
+                channel.beginInitialization();
+                await options.initializeWorker!(worker.handle);
+                await channel.initialized;
+                worker.initialized = true;
+              }),
+            );
+          }
+          if (isClosed()) {
+            throw new Error('GeoSpec pool closed during worker initialization.');
+          }
+        } catch (error) {
+          await closeWorkers();
+          throw error;
         }
-        // A failed collection pass is not a failure: the file simply runs whole.
-      }
 
-      const pending = planShards({
-        files,
-        splitTests,
-        ...(options.timings ? { timings: options.timings } : {}),
-      });
-      const perFile = new Map<string, { result: GeoSpecRunResult; durationMs: number }>();
-      let heavyRunning = 0;
+        const totals = { passed: 0, failed: 0, selectedTests: 0 };
+        const fileResults: GeoSpecRunnerResult['files'] = [];
+        const issues: RunnerIssue[] = [];
 
-      const drain = async (worker: PoolWorker): Promise<void> => {
-        while (!worker.dead) {
-          if (abortedReason() !== undefined) {
-            return;
-          }
-          const index = selectShard({ pending, workerLoadKey: worker.loadKey, heavyRunning });
-          if (index === undefined) {
-            return;
-          }
-          const [shard] = pending.splice(index, 1) as [PlannedShard];
-          if (shard.memoryClass === 'heavy') {
-            heavyRunning += 1;
-          }
-          worker.busy = true;
-          events.emit({ type: 'file-start', file: shard.file });
-          const startedAt = performance.now();
-          // oxlint-disable-next-line no-await-in-loop -- One worker runs one shard at a time by construction; concurrency is across workers.
+        // R3 splitting: only a file that telemetry says is long enough to be the
+        // critical path pays the extra list-only pass.
+        const splitTests = new Map<string, readonly string[]>();
+        const candidates =
+          files.length < workers.length
+            ? [...new Set([...files, ...filesToSplit(files, options.timings, options.splitThreshold)])]
+            : filesToSplit(files, options.timings, options.splitThreshold);
+        for (const [index, file] of candidates.entries()) {
+          const worker = workers[index % workers.length]!;
+          const shard: GeoSpecPoolShard = { id: -1 - index, file };
+          // oxlint-disable-next-line no-await-in-loop -- The collection pass is cheap and its results decide the plan; running it serially keeps the plan deterministic.
           const settled = await roundTrip(
             worker,
             () => {
               worker.handle.postMessage({
-                type: 'run-shard',
-                shard: {
-                  id: shard.id,
-                  file: shard.file,
-                  ...(shard.testNamePattern === undefined ? {} : { testNamePattern: shard.testNamePattern }),
-                },
-                ...(runOptions.testNamePattern === undefined
-                  ? {}
-                  : { testNamePattern: String(runOptions.testNamePattern) }),
+                type: 'list-tests',
+                shardId: shard.id,
+                file,
                 ...(runOptions.testTimeout === undefined ? {} : { testTimeout: runOptions.testTimeout }),
                 ...(runOptions.matcherWallBackstop === undefined
                   ? {}
@@ -360,106 +487,170 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
             },
             shard,
           );
-          const durationMs = performance.now() - startedAt;
-          worker.busy = false;
-          if (shard.memoryClass === 'heavy') {
-            heavyRunning -= 1;
+          if (settled.type === 'listed' && settled.names.length > 1) {
+            splitTests.set(file, settled.names);
           }
-
-          // FAILED SHARDS ARE NEVER RETRIED (A11).
-          const result =
-            settled.type === 'complete'
-              ? settled.message.result
-              : shardErrorResult(
-                  settled.type === 'listed' ? 'the pool worker answered a shard with a test list' : settled.message,
-                );
-          if (settled.type === 'complete') {
-            worker.loadKey = settled.message.primaryLoadKey ?? worker.loadKey;
-            options.timings?.record(shard.timingKey, {
-              durationMs: settled.message.durationMs,
-              peakRssBytes: settled.message.workerMemoryBytes ?? 0,
-            });
-          }
-          if (settled.type === 'timeout') {
-            issues.push({
-              code: 'GEOSPEC_SHARD_TIMEOUT',
-              message: settled.message,
-              severity: 'error',
-              type: 'runtime',
-            });
-          }
-
-          const previous = perFile.get(shard.file);
-          perFile.set(shard.file, {
-            result: previous === undefined ? result : mergeShardResults(previous.result, result),
-            durationMs: (previous?.durationMs ?? 0) + durationMs,
-          });
-          events.emit({
-            type: 'file-complete',
-            file: shard.file,
-            result,
-            durationMs,
-            ...(settled.type === 'complete' && settled.message.primaryLoadKey !== undefined
-              ? { primaryLoadKey: settled.message.primaryLoadKey }
-              : {}),
-            ...(settled.type === 'complete' && settled.message.workerMemoryBytes !== undefined
-              ? { workerMemoryBytes: settled.message.workerMemoryBytes }
-              : {}),
-          });
-
-          // Bail means "stop at the first RED", and a file that executed
-          // cleanly with a failing test inside it is red — the same reading
-          // the serial shell uses.
-          const shardFailed = result.success ? result.tests.some((test) => test.status === 'failed') : true;
-          if (runOptions.bail === true && shardFailed) {
-            pending.length = 0;
-            return;
-          }
+          // A failed collection pass is not a failure: the file simply runs whole.
         }
-      };
 
-      await Promise.all(workers.map(async (worker) => drain(worker)));
-      options.timings?.save();
-
-      const abortReason = abortedReason();
-      if (abortReason !== undefined) {
-        issues.push({
-          code: 'GEOSPEC_RUNNER_ABORTED',
-          message: abortReason.length > 0 ? `GeoSpec run aborted: ${abortReason}` : 'GeoSpec run aborted.',
-          severity: 'error',
-          type: 'runtime',
+        const pending = planShards({
+          files,
+          splitTests,
+          ...(options.timings ? { timings: options.timings } : {}),
         });
-        totals.failed += 1;
-        events.emit({ type: 'abort', reason: abortReason });
-      }
+        const perFile = new Map<string, { result: GeoSpecRunResult; durationMs: number }>();
+        let heavyRunning = 0;
 
-      // Results are reported in DECLARED file order, never completion order:
-      // the schedule must not be visible in the output.
-      for (const file of files) {
-        const entry = perFile.get(file);
-        if (entry === undefined) {
-          continue;
+        const drain = async (worker: PoolWorker): Promise<void> => {
+          while (!worker.dead) {
+            if (abortedReason() !== undefined) {
+              return;
+            }
+            const index = selectShard({
+              pending,
+              workerLoadKey: worker.loadKey,
+              heavyRunning,
+            });
+            if (index === undefined) {
+              return;
+            }
+            const [shard] = pending.splice(index, 1) as [PlannedShard];
+            if (shard.memoryClass === 'heavy') {
+              heavyRunning += 1;
+            }
+            worker.busy = true;
+            events.emit({ type: 'file-start', file: shard.file });
+            const startedAt = performance.now();
+            // oxlint-disable-next-line no-await-in-loop -- One worker runs one shard at a time by construction; concurrency is across workers.
+            const settled = await roundTrip(
+              worker,
+              () => {
+                worker.handle.postMessage({
+                  type: 'run-shard',
+                  shard: {
+                    id: shard.id,
+                    file: shard.file,
+                    ...(shard.testNamePattern === undefined ? {} : { testNamePattern: shard.testNamePattern }),
+                  },
+                  ...(runOptions.testNamePattern === undefined
+                    ? {}
+                    : { testNamePattern: String(runOptions.testNamePattern) }),
+                  ...(runOptions.testTimeout === undefined ? {} : { testTimeout: runOptions.testTimeout }),
+                  ...(runOptions.matcherWallBackstop === undefined
+                    ? {}
+                    : { matcherWallBackstop: runOptions.matcherWallBackstop }),
+                  ...(runOptions.forensic === undefined ? {} : { forensic: runOptions.forensic }),
+                });
+              },
+              shard,
+            );
+            const durationMs = performance.now() - startedAt;
+            worker.busy = false;
+            if (shard.memoryClass === 'heavy') {
+              heavyRunning -= 1;
+            }
+
+            // FAILED SHARDS ARE NEVER RETRIED (A11).
+            const result =
+              settled.type === 'complete'
+                ? settled.message.result
+                : shardErrorResult(
+                    settled.type === 'listed' ? 'the pool worker answered a shard with a test list' : settled.message,
+                  );
+            if (settled.type === 'complete') {
+              worker.loadKey = settled.message.primaryLoadKey ?? worker.loadKey;
+              options.timings?.record(shard.timingKey, {
+                durationMs: settled.message.durationMs,
+                peakRssBytes: settled.message.workerMemoryBytes ?? 0,
+              });
+            }
+            if (settled.type === 'timeout') {
+              issues.push({
+                code: 'GEOSPEC_SHARD_TIMEOUT',
+                message: settled.message,
+                severity: 'error',
+                type: 'runtime',
+              });
+            }
+
+            const previous = perFile.get(shard.file);
+            perFile.set(shard.file, {
+              result: previous === undefined ? result : mergeShardResults(previous.result, result),
+              durationMs: (previous?.durationMs ?? 0) + durationMs,
+            });
+            events.emit({
+              type: 'file-complete',
+              file: shard.file,
+              result,
+              durationMs,
+              ...(settled.type === 'complete' && settled.message.primaryLoadKey !== undefined
+                ? { primaryLoadKey: settled.message.primaryLoadKey }
+                : {}),
+              ...(settled.type === 'complete' && settled.message.workerMemoryBytes !== undefined
+                ? { workerMemoryBytes: settled.message.workerMemoryBytes }
+                : {}),
+            });
+
+            // Bail means "stop at the first RED", and a file that executed
+            // cleanly with a failing test inside it is red — the same reading
+            // the serial shell uses.
+            const shardFailed = result.success ? result.tests.some((test) => test.status === 'failed') : true;
+            if (runOptions.bail === true && shardFailed) {
+              pending.length = 0;
+              return;
+            }
+          }
+        };
+
+        await Promise.all(workers.map(async (worker) => drain(worker)));
+        options.timings?.save();
+
+        const abortReason = abortedReason();
+        if (abortReason !== undefined) {
+          issues.push({
+            code: 'GEOSPEC_RUNNER_ABORTED',
+            message: abortReason.length > 0 ? `GeoSpec run aborted: ${abortReason}` : 'GeoSpec run aborted.',
+            severity: 'error',
+            type: 'runtime',
+          });
+          totals.failed += 1;
+          events.emit({ type: 'abort', reason: abortReason });
         }
-        fileResults.push({ file, result: entry.result, durationMs: entry.durationMs });
-        accumulateFileResult(totals, entry.result);
-      }
 
-      if (totals.selectedTests === 0 && totals.failed === 0) {
-        issues.push(createNoMatchingGeoSpecTestsIssue());
-        totals.failed += 1;
-      }
+        // Results are reported in DECLARED file order, never completion order:
+        // the schedule must not be visible in the output.
+        for (const file of files) {
+          const entry = perFile.get(file);
+          if (entry === undefined) {
+            continue;
+          }
+          fileResults.push({
+            file,
+            result: entry.result,
+            durationMs: entry.durationMs,
+          });
+          accumulateFileResult(totals, entry.result);
+        }
 
-      const aggregate: GeoSpecRunnerResult = {
-        success: totals.failed === 0 && issues.length === 0,
-        passed: totals.passed,
-        failed: totals.failed,
-        selectedTests: totals.selectedTests,
-        files: fileResults,
-        ...(issues.length > 0 ? { issues } : {}),
-        durationMs: performance.now() - runStartedAt,
-      };
-      events.emit({ type: 'run-complete', result: aggregate });
-      return aggregate;
+        if (totals.selectedTests === 0 && totals.failed === 0) {
+          issues.push(createNoMatchingGeoSpecTestsIssue());
+          totals.failed += 1;
+        }
+
+        const aggregate: GeoSpecRunnerResult = {
+          success: totals.failed === 0 && issues.length === 0,
+          passed: totals.passed,
+          failed: totals.failed,
+          selectedTests: totals.selectedTests,
+          files: fileResults,
+          ...(issues.length > 0 ? { issues } : {}),
+          durationMs: performance.now() - runStartedAt,
+        };
+        events.emit({ type: 'run-complete', result: aggregate });
+        return aggregate;
+      } finally {
+        running = false;
+      }
     },
 
     on: events.on,
@@ -468,19 +659,7 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
       state.aborted = reason ?? 'requested';
     },
 
-    async close(): Promise<void> {
-      if (state.closed) {
-        return;
-      }
-      state.closed = true;
-      for (const worker of workers) {
-        worker.handle.postMessage({ type: 'shutdown' });
-      }
-      await Promise.all(workers.map(async (worker) => worker.handle.terminate()));
-      workers.length = 0;
-      events.emit({ type: 'close' });
-      events.clear();
-    },
+    close: closeWorkers,
   };
 };
 

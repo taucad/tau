@@ -2469,13 +2469,12 @@ const findRoot = (startDirectory = process.cwd()) => {
 		return resolvedEnvRoot;
 	}
 	let directory = resolve(startDirectory);
-	while (true) {
-		if (isTauRoot(directory)) return directory;
+	while (!isTauRoot(directory)) {
 		const parent = dirname(directory);
-		if (parent === directory) break;
+		if (parent === directory) throw new Error("Could not find the Tau workspace root. Run inside Tau or set TAU_ROOT.");
 		directory = parent;
 	}
-	throw new Error("Could not find the Tau workspace root. Run inside Tau or set TAU_ROOT.");
+	return directory;
 };
 const resolveRoot = (root) => {
 	if (!root) return findRoot();
@@ -2598,7 +2597,7 @@ const readCatalog = (root, catalog) => {
 	}
 	return parseCatalog(readFileSync(filePath, "utf8"), catalog, filePath);
 };
-const assertSafeRepoPath = (root, manifest, name, repo) => {
+const assertSafeRepoPath = ({ root, manifest, name, repo }) => {
 	const cloneRoot = resolve(root, manifest.repos_dir);
 	const configuredPath = repo.path ?? name;
 	if (isAbsolute(configuredPath)) throw new Error(`Repo "${name}" path must be relative: ${configuredPath}.`);
@@ -2610,8 +2609,8 @@ const assertSafeRepoPath = (root, manifest, name, repo) => {
 const buildState = (root, catalogs) => {
 	const publicCatalog = catalogs.public;
 	const privateCatalog = catalogs.private;
-	if (publicCatalog.repos["tau-brain"] || privateCatalog?.repos["tau-brain"]) throw new Error("Repo \"tau-brain\" is forbidden in both catalogs; Tau Brain cannot manage itself.");
-	if (publicCatalog.groups["brain"] || privateCatalog?.groups["brain"]) throw new Error("Group \"brain\" is forbidden in both catalogs.");
+	if (publicCatalog.repos["tau-brain"] ?? privateCatalog?.repos["tau-brain"]) throw new Error("Repo \"tau-brain\" is forbidden in both catalogs; Tau Brain cannot manage itself.");
+	if (publicCatalog.groups["brain"] ?? privateCatalog?.groups["brain"]) throw new Error("Group \"brain\" is forbidden in both catalogs.");
 	const duplicateRepos = privateCatalog ? Object.keys(privateCatalog.repos).filter((name) => publicCatalog.repos[name]) : [];
 	if (duplicateRepos.length > 0) throw new Error(`Repo definitions collide across catalogs: ${duplicateRepos.join(", ")}.`);
 	const duplicateGroups = privateCatalog ? Object.keys(privateCatalog.groups).filter((name) => publicCatalog.groups[name]) : [];
@@ -2643,7 +2642,12 @@ const buildState = (root, catalogs) => {
 	}
 	const paths = /* @__PURE__ */ new Map();
 	for (const [name, repo] of Object.entries(manifest.repos)) {
-		const path = assertSafeRepoPath(root, manifest, name, repo);
+		const path = assertSafeRepoPath({
+			root,
+			manifest,
+			name,
+			repo
+		});
 		const existing = paths.get(path);
 		if (existing) throw new Error(`Repos "${existing}" and "${name}" resolve to the same clone path: ${path}.`);
 		paths.set(path, name);
@@ -2705,14 +2709,14 @@ const repoPath = (context) => resolve(context.root, context.manifest.repos_dir, 
 const includesCatalog = (owner, selection) => selection === "all" || owner === selection;
 const resolveRepos = (state, options = {}) => {
 	const { manifest, repoCatalogs, groupCatalogs } = state;
-	const filter = options.filter;
+	const { filter } = options;
 	const selection = options.catalog ?? "all";
 	const entries = Object.entries(manifest.repos).map(([name, repo]) => [
 		name,
 		repo,
 		repoCatalogs[name]
 	]);
-	if (!filter || filter.all) return entries.filter(([, , owner]) => includesCatalog(owner, selection));
+	if (!filter || filter.all) return entries.filter(([name, repo, owner]) => includesCatalog(owner, selection));
 	if (filter.name) {
 		const repo = manifest.repos[filter.name];
 		const owner = repoCatalogs[filter.name];
@@ -2736,7 +2740,7 @@ const resolveRepos = (state, options = {}) => {
 			repoCatalogs[name]
 		]);
 	}
-	return entries.filter(([, , owner]) => includesCatalog(owner, selection));
+	return entries.filter(([name, repo, owner]) => includesCatalog(owner, selection));
 };
 const resolveGroups = (state, selection = "all") => Object.entries(state.manifest.groups).filter(([name]) => includesCatalog(state.groupCatalogs[name], selection)).map(([name, group]) => [
 	name,
@@ -2858,7 +2862,7 @@ const removeRepo = (state, name) => {
 	const foreignReferences = Object.entries(state.manifest.groups).filter(([groupName, group]) => state.groupCatalogs[groupName] !== owner && group.repos.includes(name)).map(([groupName]) => groupName);
 	if (foreignReferences.length > 0) throw new Error(`Cannot remove "${name}"; ${owner === "public" ? "private" : "public"} group references remain: ${foreignReferences.join(", ")}.`);
 	return mutateCatalog(state, owner, (catalog) => {
-		delete catalog.repos[name];
+		catalog.repos = Object.fromEntries(Object.entries(catalog.repos).filter(([repoName]) => repoName !== name));
 		for (const group of Object.values(catalog.groups)) group.repos = group.repos.filter((repoName) => repoName !== name);
 	});
 };

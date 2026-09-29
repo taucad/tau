@@ -133,12 +133,24 @@ export const ParametersNumber = React.memo(function ParametersNumber({
   const [localValue, setLocalValue] = React.useState<Readonly<{ value: number; authorityValue: number }>>();
   const [inputDiagnostic, setInputDiagnostic] = React.useState<string>();
   const [base, setBase] = React.useState<EditBase>(() => ({ value: authorityValue, binding, authorityValue }));
+  /* Final edits this row submitted that have not settled. While any is in flight, an authority move
+   * is most likely this row's own earlier edit landing, so the row keeps its own base and shown value:
+   * the next step then builds on the newest submitted value instead of an intermediate one the
+   * authority is about to replace. */
+  const [pendingFinals, setPendingFinals] = React.useState(0);
+  /* A local value answers the authority it was entered against; once the authority moves, a later
+   * return to that same value (a reset after a transient edit) must not bring the old entry back. */
+  const [enteredAgainst, setEnteredAgainst] = React.useState(authorityValue);
+  if (!Object.is(enteredAgainst, authorityValue) && pendingFinals === 0) {
+    setEnteredAgainst(authorityValue);
+    setLocalValue(undefined);
+  }
 
   const isDirty = draftText !== '';
   const currentBase: EditBase = { value: authorityValue, binding, authorityValue };
-  const editBase = isDirty || Object.is(base.authorityValue, authorityValue) ? base : currentBase;
+  const editBase = isDirty || pendingFinals > 0 || Object.is(base.authorityValue, authorityValue) ? base : currentBase;
   const draftValue =
-    localValue !== undefined && Object.is(localValue.authorityValue, authorityValue)
+    localValue !== undefined && (pendingFinals > 0 || Object.is(localValue.authorityValue, authorityValue))
       ? localValue.value
       : displayValue(authorityValue, binding, displayUnit);
   /* An authority value that arrived while this row was being edited: the draft is kept, and the row
@@ -210,6 +222,11 @@ export const ParametersNumber = React.memo(function ParametersNumber({
     // It does report a refusal: a transient value is superseded by design, and so is a final one a
     // newer edit displaced before it was applied, but anything else the authority refused must not
     // look entered.
+    const isFinal = pressure === 'final';
+    if (isFinal) {
+      setPendingFinals((count) => count + 1);
+      globalThis.performance.mark('tau:parameter-edit', { detail: { pointer: instancePointer } });
+    }
     const settle = async (): Promise<boolean> => {
       try {
         const outcome = await commit.commit({
@@ -230,9 +247,10 @@ export const ParametersNumber = React.memo(function ParametersNumber({
             },
           },
         });
-        if (pressure === 'final' && outcome !== undefined) {
+        if (isFinal && outcome !== undefined) {
+          /* The shown value follows the authority once nothing of this row's is in flight (the
+           * `enteredAgainst` reset above), so a settled edit never flashes the previous value. */
           if (outcome.status === 'committed' || outcome.status === 'cancelled-before-apply') {
-            setLocalValue(undefined);
             return true;
           }
           const authority = authorityRef.current;
@@ -247,6 +265,10 @@ export const ParametersNumber = React.memo(function ParametersNumber({
         }
       } catch (error) {
         setInputDiagnostic(error instanceof Error ? error.message : 'The parameter could not be saved.');
+      } finally {
+        if (isFinal) {
+          setPendingFinals((count) => count - 1);
+        }
       }
       return false;
     };
@@ -414,7 +436,7 @@ export const ParametersNumber = React.memo(function ParametersNumber({
       }}
       onTextChange={(text) => {
         if (draftRef.current === '' && text !== '') {
-          setBase(currentBase);
+          setBase(editBase);
         }
         retainDraft(
           text,

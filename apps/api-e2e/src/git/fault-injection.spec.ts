@@ -6,7 +6,7 @@ import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import { startApi } from '#git/api-process.js';
 import { gitE2EApiUrl, gitE2EFrontendUrl } from '#git/config.js';
 import { startFaultProxy } from '#git/fault-proxy.js';
@@ -51,6 +51,14 @@ const minioOrigin = process.env['TAU_S3_ENDPOINT'] ?? 'http://localhost:9000';
 const leaseRoot = join(tmpdir(), 'tau-git-leases');
 
 /**
+ * The pids whose lease folders are this suite's to count: the global setup's
+ * two APIs and every victim booted here. `tau-git-leases` is shared by every
+ * API on the machine, so a dev API elsewhere holding a lease in flight is not
+ * a leak of this suite's.
+ */
+const suitePids = new Set(inject('gitE2EApiPids').map(String));
+
+/**
  * Lease directories present now, so a case can prove it left none behind.
  *
  * Leases live under `tau-git-leases/<pid>/` (W10 defect 2's fix), so the census
@@ -70,6 +78,9 @@ const leaseDirectories = async (): Promise<readonly string[]> => {
     workers.map(async (worker): Promise<readonly string[]> => {
       if (!worker.isDirectory() || !/^\d+$/u.test(worker.name)) {
         return [worker.name];
+      }
+      if (!suitePids.has(worker.name)) {
+        return [];
       }
       try {
         const leases = await readdir(join(leaseRoot, worker.name));
@@ -194,6 +205,9 @@ const bootVictim = async (label: string): Promise<void> => {
     frontendUrl: gitE2EFrontendUrl,
     overrides: { TAU_S3_ENDPOINT: `http://localhost:${proxyPort.toString()}` },
   });
+  if (victim.child.pid !== undefined) {
+    suitePids.add(String(victim.child.pid));
+  }
 };
 
 const killVictim = async (): Promise<void> => {

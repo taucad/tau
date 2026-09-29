@@ -8,7 +8,7 @@ import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/cha
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { buildAgentProjection, sortAgentProjections, useAgentProjections } from '#hooks/use-agent-projections.js';
 import type { AgentProjection } from '#hooks/use-agent-projections.js';
-import { useChats } from '#hooks/use-chats.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useModels } from '#hooks/use-models.js';
 import { useProject } from '#hooks/use-project.js';
@@ -20,7 +20,8 @@ vi.mock('@xstate/react', () => ({
     selector: (snapshot: Snapshot) => Selection,
   ): Selection => selector(actor.getSnapshot()),
 }));
-vi.mock('#hooks/use-chats.js', () => ({ useChats: vi.fn() }));
+vi.mock('#hooks/use-chats.js', () => ({ useProjectChatUsage: vi.fn(() => new Map()) }));
+vi.mock('#hooks/use-chat-records.js', () => ({ useChatRecords: vi.fn() }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: vi.fn() }));
 vi.mock('#hooks/use-models.js', () => ({ useModels: vi.fn() }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: vi.fn() }));
@@ -46,6 +47,26 @@ const message = (id: string, createdAt: number, parts: MyUIMessage['parts'] = []
   role: 'user',
   parts,
   metadata: { createdAt, status: 'success' },
+});
+
+const usageMessage = (id: string, createdAt: number, operationId: string): MyUIMessage => ({
+  ...message(id, createdAt, [
+    {
+      type: 'data-usage',
+      data: {
+        type: 'usage',
+        id: `usage-${id}`,
+        operationId,
+        model: 'gpt-default',
+        inputTokens: 1,
+        outputTokens: 1,
+        reasoningTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    },
+  ]),
+  role: 'assistant',
 });
 
 const chat = (id: string, updatedAt: number, messages: MyUIMessage[] = []): Chat => ({
@@ -124,9 +145,9 @@ describe('buildAgentProjection', () => {
       model: { name: 'Claude Sonnet', provider: 'Anthropic' },
       workspace: 'tau',
       /* No chat has a branch of its own — turns attach to the chat's checkout
-       * and never create one (A29, S11) — so a row with no branched turn reads
-       * the default. */
-      branch: 'main',
+       * and never create one (A29, S11) — and a row with no landed turn names
+       * no line rather than guessing `main` (I6). */
+      branch: undefined,
       unread: false,
     });
   });
@@ -146,6 +167,7 @@ describe('buildAgentProjection', () => {
       buildAgentProjection({
         chat: source,
         session,
+        unread: true,
         focusedChatId: 'chat-focused',
         defaultModel,
         resolveModel,
@@ -155,8 +177,8 @@ describe('buildAgentProjection', () => {
     ).toMatchObject({
       workspace: 'solver-node-3',
       branch: 'fea/load-case-b',
-      /* The completion is what the person has not seen; the machine's `read`
-       * region says so, and no second record does (I26). */
+      /* The completion is what the person has not seen; the store's derived answer says so, and no second record
+       * does (I26, PV-S8). */
       unread: true,
     });
 
@@ -207,6 +229,72 @@ describe('buildAgentProjection', () => {
     expect(idleProjection).not.toHaveProperty('detail');
   });
 
+  it('uses host-log usage and message time for a parked record without transcript messages', () => {
+    const { messages: _messages, ...record } = chat('chat-parked', 100);
+    expect(
+      buildAgentProjection({
+        chat: record,
+        history: {
+          operationIds: ['operation-old'],
+          lastActivityAt: 250,
+          inputTokens: 4,
+          outputTokens: 5,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          parts: 1,
+        },
+        defaultModel,
+        resolveModel,
+        defaultWorkspace: 'tau',
+      }),
+    ).toMatchObject({ operationIds: ['operation-old'], lastActivityAt: 250, state: 'idle' });
+  });
+
+  it('should retain durable recency while a parked record awaits its host history', () => {
+    const { messages: _messages, ...record } = chat('chat-awaiting-history', 200);
+    record.recencyAt = 450;
+    expect(
+      buildAgentProjection({
+        chat: record,
+        defaultModel,
+        resolveModel,
+        defaultWorkspace: 'tau',
+      }),
+    ).toMatchObject({ lastActivityAt: 450, operationIds: [] });
+  });
+
+  it('should include live funded work while a prior history summary is catching up, then trust settled history', () => {
+    const source = chat('chat-running', 200, [usageMessage('live-usage', 400, 'operation-new')]);
+    const history = {
+      operationIds: ['operation-old'],
+      lastActivityAt: 250,
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      parts: 1,
+    };
+    const running = buildAgentProjection({
+      chat: source,
+      history,
+      session: buildSession({ chatEntity: source, events: [{ type: 'runLifecycle', phase: 'running' }] }),
+      defaultModel,
+      resolveModel,
+      defaultWorkspace: 'tau',
+    });
+    expect(running).toMatchObject({ operationIds: ['operation-new', 'operation-old'], lastActivityAt: 400 });
+
+    const settled = buildAgentProjection({
+      chat: source,
+      history,
+      session: buildSession({ chatEntity: source }),
+      defaultModel,
+      resolveModel,
+      defaultWorkspace: 'tau',
+    });
+    expect(settled).toMatchObject({ operationIds: ['operation-old'], lastActivityAt: 250 });
+  });
+
   it('reads idle for a chat whose project is not live, with no second derivation', () => {
     const parked = chat('chat-parked', 100);
     parked.error = { category: 'generic', title: 'Failed', message: 'Solver connection failed' };
@@ -221,8 +309,7 @@ describe('buildAgentProjection', () => {
   });
 
   /* W8 (D9, I26): the chat row is no source of unread. A legacy chat whose
-   * record still carries `hasUnreadTurn` reads unread only when its machine —
-   * restored from the unread record — says so. */
+   * record still carries `hasUnreadTurn` reads unread only when the store says so (PV-S8). */
   it('ignores a legacy hasUnreadTurn on the chat row', () => {
     const legacy = Object.assign(chat('chat-legacy', 100), { hasUnreadTurn: true });
 
@@ -263,7 +350,7 @@ describe('useAgentProjections', () => {
     const listeners = new Set<() => void>();
     const sessions = new Map(chats.map((chatEntity) => [chatEntity.id, buildSession({ chatEntity })] as const));
     for (const session of sessions.values()) {
-      session.stateActorRef?.send({ type: 'runLifecycle', phase: 'running' });
+      session.stateActorRef.send({ type: 'runLifecycle', phase: 'running' });
     }
     const store = {
       get: (chatId: string) => sessions.get(chatId),
@@ -272,14 +359,16 @@ describe('useAgentProjections', () => {
         return () => listeners.delete(listener);
       },
       subscribeMembership: () => () => undefined,
+      isUnread: () => false,
+      subscribeUnread: () => () => undefined,
       acquire: vi.fn(),
     } as unknown as ChatSessionStore;
-    vi.mocked(useChats).mockReturnValue({
+    vi.mocked(useChatRecords).mockReturnValue({
       chats,
       isLoading: false,
       error: undefined,
       retry: vi.fn(),
-    } as unknown as ReturnType<typeof useChats>);
+    } as unknown as ReturnType<typeof useChatRecords>);
     vi.mocked(useChatSessionStore).mockReturnValue(store);
 
     const { result } = renderHook(() => useAgentProjections({ workspaceLabel: 'tau' }));
@@ -290,10 +379,51 @@ describe('useAgentProjections', () => {
     expect(store.acquire).not.toHaveBeenCalled();
 
     act(() => {
-      sessions.get('chat-background')?.stateActorRef?.send({ type: 'runLifecycle', phase: 'cancelled' });
+      sessions.get('chat-background')?.stateActorRef.send({ type: 'runLifecycle', phase: 'cancelled' });
     });
 
     expect(result.current.agents.find((agent) => agent.chatId === 'chat-background')?.state).toBe('idle');
     expect(result.current.agents.find((agent) => agent.chatId === 'chat-focused')?.state).toBe('running');
+  });
+
+  it('should refresh a running agent for new tail usage without rebuilding for text-only updates', () => {
+    const source = chat('chat-focused', 100, [message('tail', 120)]);
+    const session = buildSession({ chatEntity: source, events: [{ type: 'runLifecycle', phase: 'running' }] });
+    const listeners = new Set<() => void>();
+    const store = {
+      get: () => session,
+      subscribeChat: (_chatId: string, listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      subscribeMembership: () => () => undefined,
+      isUnread: () => false,
+      subscribeUnread: () => () => undefined,
+    } as unknown as ChatSessionStore;
+    vi.mocked(useChatRecords).mockReturnValue({
+      chats: [source],
+      isLoading: false,
+      error: undefined,
+      retry: vi.fn(),
+    } as unknown as ReturnType<typeof useChatRecords>);
+    vi.mocked(useChatSessionStore).mockReturnValue(store);
+    const { result } = renderHook(() => useAgentProjections());
+    const beforeText = result.current.agents;
+
+    act(() => {
+      session.chat.messages = [message('tail', 120, [{ type: 'text', text: 'more' }])];
+      for (const listener of listeners) {
+        listener();
+      }
+    });
+    expect(result.current.agents).toBe(beforeText);
+
+    act(() => {
+      session.chat.messages = [usageMessage('tail', 120, 'operation-new')];
+      for (const listener of listeners) {
+        listener();
+      }
+    });
+    expect(result.current.agents[0]).toMatchObject({ operationIds: ['operation-new'], lastActivityAt: 120 });
   });
 });

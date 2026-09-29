@@ -126,6 +126,15 @@ export const isRendererExecutionModule = (moduleId: string): boolean => {
   if (/packages\/plugins\/image\/src\/(?:nanoraster-camera|image-label|label)\.ts$/u.test(path)) {
     return false;
   }
+  // Print viewer data: G-code and 3MF parsing, print-intent schemas and plate
+  // descriptors. None of them load a kernel, a worker or WASM.
+  if (
+    /packages\/plugins\/(?:slicer\/src\/(?:toolpath|container|hashes|print-intent|slicer-options)|bambu\/src\/bambu\.plate)\.ts$/u.test(
+      path,
+    )
+  ) {
+    return false;
+  }
   if (
     /packages\/runtime\/src\/(?:framework\/(?:runtime-worker-client|runtime-framework\.constants)|plugins\/plugin-types)\.ts$/u.test(
       path,

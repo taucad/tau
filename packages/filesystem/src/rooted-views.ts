@@ -24,7 +24,13 @@
  * @module
  */
 
-import type { CheckedFileWrite, CheckedFileWriteResult, FileStat, FileStatEntry } from '@taucad/types';
+import type {
+  CheckedFileWrite,
+  CheckedFileWriteResult,
+  FileWritePrecondition,
+  FileStat,
+  FileStatEntry,
+} from '@taucad/types';
 import { assertRootedPath, joinRelativePath, resolveAuthorityPath } from '@taucad/utils/path';
 import type {
   DirectoryEntry,
@@ -44,6 +50,7 @@ import type { WatchRegistry } from '#watch-registry.js';
 import { RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import { getEventOrigin } from '#event-origin-registry.js';
+import { headFileStatFromStat } from '#content-metadata.js';
 
 /**
  * The mutating porcelain a rooted view serves (charter D4).
@@ -80,9 +87,14 @@ export type RootedPorcelain = {
  * Filesystem provider surface issued for one captured mount.
  * @public
  */
-export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'rmdir'> &
+export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'deleteFileChecked' | 'rmdir'> &
   Partial<RootedPorcelain> & {
     writeFileChecked(input: CheckedFileWrite): Promise<CheckedFileWriteResult>;
+    deleteFileChecked(input: {
+      path: string;
+      preconditions: readonly FileWritePrecondition[];
+      signal?: AbortSignal;
+    }): Promise<CheckedFileWriteResult>;
     /**
      * Remove one directory of this root, recursively when asked.
      *
@@ -251,6 +263,19 @@ export class RootedViews {
       const { resolution } = resolveLocal(path);
       return resolution.provider.readdir(resolution.path);
     };
+    const readdirWithStats = captured.provider.readdirWithStats
+      ? ((async (path: string, options?: { readonly content: 'head' }) => {
+          const { resolution } = resolveLocal(path);
+          if (options !== undefined) {
+            if (resolution.provider.supportsHeadListing !== true) {
+              throw Object.assign(new Error('Head-only directory metadata is unavailable.'), { code: 'ENOTSUP' });
+            }
+            const rows = await resolution.provider.readdirWithStats!(resolution.path, options);
+            return rows.map(({ name, ...stat }) => ({ name, ...headFileStatFromStat(stat) }));
+          }
+          return resolution.provider.readdirWithStats!(resolution.path);
+        }) as NonNullable<FileSystemProvider['readdirWithStats']>)
+      : undefined;
     const stat = async (path: string): Promise<FileStat> => {
       const { resolution } = resolveLocal(path);
       return resolution.provider.stat(resolution.path);
@@ -287,6 +312,25 @@ export class RootedViews {
         path: target.authorityPath,
         resolution: target.resolution,
         data: input.data,
+        preconditions,
+        signal: input.signal,
+        context: mutationContext,
+      });
+    };
+    const deleteFileChecked = async (input: {
+      path: string;
+      preconditions: readonly FileWritePrecondition[];
+      signal?: AbortSignal;
+    }): Promise<CheckedFileWriteResult> => {
+      const target = resolveLocal(input.path);
+      assertMutableRoot(target.localPath);
+      const preconditions = input.preconditions.map((precondition) => {
+        const resolved = resolveLocal(precondition.path);
+        return { ...precondition, path: resolved.authorityPath, resolution: resolved.resolution };
+      });
+      return this._pipeline.deleteFileCheckedResolved({
+        path: target.authorityPath,
+        resolution: target.resolution,
         preconditions,
         signal: input.signal,
         context: mutationContext,
@@ -531,6 +575,7 @@ export class RootedViews {
     return {
       id: 'workspace-root',
       capabilities: captured.provider.capabilities,
+      supportsHeadListing: captured.provider.supportsHeadListing,
       dispose() {
         // The provider and rooted view lifetime remain owned by WorkspaceFileService.
       },
@@ -538,8 +583,10 @@ export class RootedViews {
       readFileStream,
       writeFile,
       writeFileChecked,
+      deleteFileChecked,
       appendFile,
       readdir,
+      readdirWithStats,
       readdirEntries,
       stat,
       getFileMode,

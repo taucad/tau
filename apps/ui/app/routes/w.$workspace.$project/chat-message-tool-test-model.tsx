@@ -15,6 +15,7 @@ import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { RequirementIndicator } from '#components/chat/requirement-indicator.js';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { FileLink } from '#components/files/file-link.js';
+import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 
 function TestPassItem({ pass, index }: { readonly pass: TestPass; readonly index: number }): React.JSX.Element {
   return (
@@ -146,7 +147,7 @@ export function ChatMessageToolTestModel({
             <ChatToolCardIcon icon={FlaskConical} />
             <ChatToolCardTitle>
               <ChatToolLabel verb='Running'>
-                <ChatToolDescription>tests...</ChatToolDescription>
+                <ChatToolDescription>tests…</ChatToolDescription>
               </ChatToolLabel>
             </ChatToolCardTitle>
           </ChatToolCardHeader>
@@ -158,9 +159,9 @@ export function ChatMessageToolTestModel({
       const { output: result } = part;
       const { failures = [], passes = [] } = result;
       const groups = groupByTargetFile(passes, failures);
-      const totalRequirements = passes.length + failures.length;
+      const totalRequirements = result.total;
       const requirementNoun = totalRequirements === 1 ? 'requirement' : 'requirements';
-      const hasFailures = failures.length > 0;
+      const hasFailures = result.passed < result.total;
 
       return (
         <ChatToolCard
@@ -168,7 +169,7 @@ export function ChatMessageToolTestModel({
           variant='minimal'
           status={isLoading ? 'loading' : 'ready'}
           isDefaultOpen={hasFailures}
-          isCollapsible={totalRequirements > 0}
+          isCollapsible={totalRequirements > 0 || result.fullResult !== undefined}
         >
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={FlaskConical} tone={hasFailures ? 'destructive' : undefined} />
@@ -180,12 +181,24 @@ export function ChatMessageToolTestModel({
               </ChatToolLabel>
             </ChatToolCardTitle>
           </ChatToolCardHeader>
-          {totalRequirements > 0 && (
+          {(totalRequirements > 0 || result.fullResult !== undefined) && (
             <ChatToolCardContent forceMount>
               <div className='space-y-2 border-l border-foreground/20 py-1 pl-2'>
                 {groups.map((group) => (
                   <FileGroupSection key={group.targetFile} group={group} />
                 ))}
+                {result.fullResult && (
+                  <div className='space-y-1 text-xs text-muted-foreground'>
+                    <span>Full GeoSpec report</span>
+                    <ChatMessageMedia
+                      media={{
+                        url: result.fullResult.path,
+                        mediaType: result.fullResult.mimeType,
+                        filename: 'geospec-report.json',
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             </ChatToolCardContent>
           )}

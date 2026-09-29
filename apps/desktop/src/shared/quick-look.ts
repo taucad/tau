@@ -7,6 +7,7 @@ export const quickLookIpcChannels = {
 } as const;
 
 export const openFilesIpcChannel = 'tau:open-files:consume';
+export const generatedImageIpcChannel = 'tau:generated-image:read';
 
 export type QuickLookResult = { readonly success: true } | { readonly success: false; readonly error: string };
 

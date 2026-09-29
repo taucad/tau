@@ -37,10 +37,15 @@ export type WorkspaceMirror = {
    * runtime already read for this operation are taken from it instead of being read again, which also
    * keeps the mirror byte-identical to what the render was computed from. A cached entry whose length
    * disagrees with the stat is ignored and the file is read.
+   *
+   * `operationId` is the caller's `KernelRuntime.operationId`. Calls sharing one reuse the first
+   * call's projection, since the runtime holds the workspace unchanged for an operation; without
+   * one, every call walks the workspace.
    */
   sync(
     filesystem: KernelFileSystem,
     contents?: ReadonlyMap<string, Uint8Array<ArrayBuffer> | string>,
+    operationId?: number,
   ): Promise<readonly string[]>;
   cleanup(): Promise<void>;
 };
@@ -70,7 +75,7 @@ export const createWorkspaceMirror = async (options: WorkspaceMirrorOptions): Pr
   const excludedDirectories = new Set([...defaultExcludedDirectories, ...(options.excludedDirectories ?? [])]);
   const excludedFileSuffixes = options.excludedFileSuffixes ?? [];
 
-  const sync = async (
+  const walk = async (
     filesystem: KernelFileSystem,
     contents?: ReadonlyMap<string, Uint8Array<ArrayBuffer> | string>,
   ): Promise<readonly string[]> => {
@@ -152,6 +157,18 @@ export const createWorkspaceMirror = async (options: WorkspaceMirrorOptions): Pr
     }
     previousSyncStarted = started;
     return paths.sort();
+  };
+
+  /** The projection made for the last runtime operation that synced. */
+  let lastOperation: { readonly operationId: number; readonly paths: Promise<readonly string[]> } | undefined;
+  const sync: WorkspaceMirror['sync'] = async (filesystem, contents, operationId) => {
+    if (operationId === undefined) {
+      return walk(filesystem, contents);
+    }
+    if (lastOperation?.operationId !== operationId) {
+      lastOperation = { operationId, paths: walk(filesystem, contents) };
+    }
+    return lastOperation.paths;
   };
 
   return {

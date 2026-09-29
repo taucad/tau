@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { messageMetadataSchema } from '#schemas/metadata.schema.js';
+import { messageMetadataSchema, snapshotSchema } from '#schemas/metadata.schema.js';
 
 describe('messageMetadataSchema', () => {
   it('should accept a row carrying the live createdAt + status fields', () => {
@@ -24,5 +24,37 @@ describe('messageMetadataSchema', () => {
       const issue = result.error.issues[0];
       expect(issue?.path).toEqual(['status']);
     }
+  });
+});
+
+describe('snapshotSchema', () => {
+  it('accepts a basic file when its text line count is unknown', () => {
+    expect(
+      snapshotSchema.safeParse({
+        fileTree: [{ path: 'main.ts', name: 'main.ts', type: 'file', size: 5 }],
+        activeFile: { path: 'main.ts', name: 'main.ts' },
+      }).success,
+    ).toBe(true);
+    expect(
+      snapshotSchema.safeParse({
+        fileTree: [{ path: 'main.ts', name: 'main.ts', type: 'file', size: 5, contentKind: 'text' }],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('workbench snapshot', () => {
+  it('accepts adoption and refusal facts and rejects a pane outside the approved vocabulary', () => {
+    const workbench = {
+      layoutDigest: 'missing',
+      lanes: { chat: true, workbench: true },
+      visible: [{ kind: 'pane', pane: 'parameters' }],
+      views: [{ id: 'front', name: 'Front', entryPath: 'main.ts', camera: 'front' }],
+      entries: [{ path: 'main.ts', renderTimeout: 180_000, hidden: 2 }],
+      unavailable: ['kernel', 'console'],
+      refused: [{ tab: { kind: 'pane', pane: 'kernel' }, reason: 'debug-only' }],
+    };
+    expect(snapshotSchema.safeParse({ workbench }).success).toBe(true);
+    expect(snapshotSchema.safeParse({ workbench: { ...workbench, unavailable: ['unknown'] } }).success).toBe(false);
   });
 });

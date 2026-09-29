@@ -1,0 +1,17 @@
+[package]
+name = "geospec-engine-native-csg"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.88"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+geospec-engine-native-core = { path = "../../../rust" }
+manifold-rust = { path = "../source", default-features = false }
+
+[dev-dependencies]
+serde_json = { version = "=1.0.143", features = ["float_roundtrip"] }

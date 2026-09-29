@@ -4,12 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
 import * as machineModule from './project-session.machine.js';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import {
   isProjectSessionClosable,
   projectSessionCloseRefusal,
+  projectSessionIgnoredEvents,
   projectSessionMachine,
 } from './project-session.machine.js';
-import type { ProjectSessionRegion } from './project-session.machine.js';
+import type { ProjectSessionMachineEvent, ProjectSessionRegion } from './project-session.machine.js';
 
 const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
@@ -37,7 +40,8 @@ const recordingParent = (): { ref: AnyActorRef; received: Array<EventObject & Re
 const harness = (options?: {
   readonly readyRegions?: readonly ProjectSessionRegion[];
   readonly parentRef?: AnyActorRef;
-  readonly failCloseStep?: 'cancelRuns' | 'flushProducers' | 'flushSync' | 'releaseLeases' | 'releaseAgentHost';
+  readonly failCloseStep?: 'cancelRuns' | 'flushProducers' | 'flushSync' | 'releaseAgentHost';
+  readonly inspect?: ReturnType<typeof guardActors>['inspect'];
 }) => {
   const order: string[] = [];
   const live = new Set<string>();
@@ -75,12 +79,6 @@ const harness = (options?: {
             throw new Error('flushSync failed');
           }
         }),
-        releaseLeases: fromSafeAsync<void, { projectId: string }>(async () => {
-          order.push('releaseLeases');
-          if (options?.failCloseStep === 'releaseLeases') {
-            throw new Error('releaseLeases failed');
-          }
-        }),
         releaseAgentHost: fromSafeAsync<void, { projectId: string }>(async () => {
           order.push('releaseAgentHost');
           if (options?.failCloseStep === 'releaseAgentHost') {
@@ -102,6 +100,7 @@ const harness = (options?: {
         closeFlushMilliseconds: 100,
         ...(options?.parentRef === undefined ? {} : { parentRef: options.parentRef }),
       },
+      ...(options?.inspect === undefined ? {} : { inspect: options.inspect }),
     },
   );
   /* R3: what the session told its project's runtime to do, in order. */
@@ -269,14 +268,13 @@ describe('projectSessionMachine', () => {
     const { actor } = harness();
     await settle();
 
-    actor.send({ type: 'runStarted', chatId: 'chat-1' });
-    actor.send({ type: 'runStarted', chatId: 'chat-2' });
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1', 'chat-2'], stoppableRuns: ['chat-1', 'chat-2'] });
     expect(actor.getSnapshot().matches({ live: 'busy' })).toBe(true);
 
-    actor.send({ type: 'runSettled', chatId: 'chat-1' });
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-2'], stoppableRuns: ['chat-2'] });
     expect(actor.getSnapshot().matches({ live: 'busy' })).toBe(true);
 
-    actor.send({ type: 'runSettled', chatId: 'chat-2' });
+    actor.send({ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] });
     expect(actor.getSnapshot().matches({ live: 'idle' })).toBe(true);
     expect(actor.getSnapshot().context.runs).toEqual([]);
     actor.stop();
@@ -379,7 +377,7 @@ describe('projectSessionMachine', () => {
     await settle();
     await vi.advanceTimersByTimeAsync(200);
 
-    actor.send({ type: 'runStarted', chatId: 'chat-1' });
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
 
     expect(parking).toEqual([true, false]);
     expect(actor.getSnapshot().matches({ live: 'busy' })).toBe(true);
@@ -400,7 +398,7 @@ describe('projectSessionMachine', () => {
   it('asks before closing a project with a live run, and a cancel keeps it live', async () => {
     const { actor } = harness();
     await settle();
-    actor.send({ type: 'runStarted', chatId: 'chat-1' });
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
 
     actor.send({ type: 'close', reason: 'user' });
     expect(actor.getSnapshot().matches({ closing: 'asking' })).toBe(true);
@@ -410,13 +408,13 @@ describe('projectSessionMachine', () => {
     actor.stop();
   });
 
-  it('cancels, flushes, releases and stops every child in that order (pin d)', async () => {
+  it('cancels, flushes and stops every child without a second lease relay (pin d)', async () => {
     const parent = recordingParent();
     const { actor, order, live } = harness({ parentRef: parent.ref });
     await settle();
-    actor.send({ type: 'runStarted', chatId: 'chat-1' });
-    actor.send({ type: 'openChat', chatId: 'chat-1' });
-    expect(Object.keys(actor.getSnapshot().children).length).toBe(5);
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
+    /* Four regions and no chat: the store owns each chat's root (PV-S5). */
+    expect(Object.keys(actor.getSnapshot().children).length).toBe(4);
 
     actor.send({ type: 'close', reason: 'user' });
     actor.send({ type: 'confirmClose' });
@@ -428,7 +426,6 @@ describe('projectSessionMachine', () => {
       'cancelRuns:chat-1',
       'flushProducers',
       'flushSync',
-      'releaseLeases',
       'releaseAgentHost',
       'stop:fileManager',
       'stop:project',
@@ -445,7 +442,7 @@ describe('projectSessionMachine', () => {
   it('never asks on a policy or quit close', async () => {
     const { actor } = harness();
     await settle();
-    actor.send({ type: 'runStarted', chatId: 'chat-1' });
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
 
     actor.send({ type: 'close', reason: 'quit' });
     await settle();
@@ -465,6 +462,34 @@ describe('projectSessionMachine', () => {
 
     expect(order).toContain('flushSync');
     expect(actor.getSnapshot().matches('closed')).toBe(true);
+    actor.stop();
+  });
+
+  it('fails the close when a close effect was never provided (PV-S5, MC-R8)', async () => {
+    const child = (region: ProjectSessionRegion) =>
+      createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
+        sendBack({ type: 'childReady', region });
+      });
+    const actor = createActor(
+      projectSessionMachine.provide({
+        actors: {
+          fileManager: child('views'),
+          project: child('runtime'),
+          agentHost: child('agentHost'),
+          compute: child('compute'),
+        },
+      }),
+      { input: { projectId: 'proj_a' } },
+    );
+    actor.start();
+    await settle();
+    expect(actor.getSnapshot().matches({ live: 'idle' })).toBe(true);
+
+    actor.send({ type: 'close', reason: 'user' });
+    await settle();
+
+    expect(actor.getSnapshot().matches('closed')).toBe(false);
+    expect(actor.getSnapshot().context.failures['close']).toMatch(/not provided/u);
     actor.stop();
   });
 
@@ -490,13 +515,13 @@ describe('projectSessionMachine', () => {
     actor.stop();
   });
 
-  it.each(['cancelRuns', 'flushSync', 'releaseLeases', 'releaseAgentHost'] as const)(
+  it.each(['cancelRuns', 'flushSync', 'releaseAgentHost'] as const)(
     'keeps resources live and reports failure when %s fails',
     async (failCloseStep) => {
       const parent = recordingParent();
       const { actor, live } = harness({ parentRef: parent.ref, failCloseStep });
       await settle();
-      actor.send({ type: 'runStarted', chatId: 'chat-1' });
+      actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
       actor.send({ type: 'close', reason: 'quit' });
       await settle();
       await settle();
@@ -510,30 +535,12 @@ describe('projectSessionMachine', () => {
     },
   );
 
-  it('owns one chat session per chat, and drops it when the chat closes', async () => {
+  it('records the revision facts it is told, for the registry (the store forwards them to chats, PV-S5)', async () => {
     const { actor } = harness();
     await settle();
-
-    actor.send({ type: 'openChat', chatId: 'chat-1' });
-    actor.send({ type: 'openChat', chatId: 'chat-1' });
-    expect(Object.keys(actor.getSnapshot().context.chatRefs)).toEqual(['chat-1']);
-
-    actor.send({ type: 'chatClosed', chatId: 'chat-1' });
-    expect(actor.getSnapshot().context.chatRefs).toEqual({});
-    actor.stop();
-  });
-
-  it('fans the revision facet out to its chat sessions', async () => {
-    const { actor } = harness();
-    await settle();
-    actor.send({ type: 'openChat', chatId: 'chat-1' });
 
     actor.send({ type: 'revisionState', dirty: true, pushed: false });
 
-    const chatRef = actor.getSnapshot().context.chatRefs['chat-1']!;
-    const value = chatRef.getSnapshot().value as { revision: Record<string, string> };
-    expect(value.revision['tree']).toBe('dirty');
-    expect(value.revision['sync']).toBe('pending');
     expect(actor.getSnapshot().context.dirty).toBe(true);
     expect(actor.getSnapshot().context.pushed).toBe(false);
     actor.stop();
@@ -588,6 +595,63 @@ describe('projectSessionMachine', () => {
     for (const [key, value] of Object.entries(actor.getSnapshot().context)) {
       expect(typeof value, key).not.toBe('function');
     }
+    actor.stop();
+  });
+});
+
+describe('projectSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('answers every sampled event, or declares it ignored, in every reachable state', () => {
+    const events = [
+      { type: 'close', reason: 'user' },
+      { type: 'close', reason: 'idle' },
+      { type: 'confirmClose' },
+      { type: 'cancelClose' },
+      ...regions.map((region) => ({ type: 'childReady', region }) as const),
+      { type: 'childFailed', region: 'runtime', reason: 'x' },
+      { type: 'projectedRunsChanged', runs: ['c'], stoppableRuns: ['c'] },
+      { type: 'projectedRunsChanged', runs: [], stoppableRuns: [] },
+      { type: 'activity' },
+      { type: 'visibilityChanged', visible: true, focused: true },
+      { type: 'visibilityChanged', visible: false, focused: false },
+      { type: 'attention', count: 1 },
+      { type: 'revisionState', dirty: true, pushed: false },
+    ] satisfies ProjectSessionMachineEvent[];
+    expect(
+      unansweredEvents(projectSessionMachine, {
+        input: { projectId: 'p' },
+        events,
+        limit: 100_000,
+        ignore: projectSessionIgnoredEvents,
+        serializeState: (snapshot) =>
+          JSON.stringify([
+            snapshot.value,
+            snapshot.context.runs.length,
+            snapshot.context.closeReason,
+            snapshot.context.openFailed,
+          ]),
+      }),
+    ).toEqual([]);
+  });
+
+  it('leaves no dead letter, unanswered delivery or fault from open through a run to close', async () => {
+    const guard = guardActors({ ignore: { 'project-session': projectSessionIgnoredEvents } });
+    const { actor } = harness({ inspect: guard.inspect });
+    await settle();
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
+    actor.send({ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] });
+    actor.send({ type: 'close', reason: 'user' });
+    await settle();
+    await settle();
+    await settle();
+    expect(actor.getSnapshot().matches('closed')).toBe(true);
     actor.stop();
   });
 });

@@ -17,6 +17,7 @@ import {
   infiniteGridFadeEndVisibleSpans,
   infiniteGridPresentationPlaneByUpDirection,
 } from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
+import { setRaycasterFromCamera } from '#components/geometry/graphics/three/utils/raycaster-from-camera.js';
 import { WebGpuInspectorOverlay } from '#components/geometry/graphics/three/webgpu-inspector-overlay.js';
 import { useFeature } from '#flags/use-feature.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -25,6 +26,21 @@ import { useCameraRig } from '#hooks/use-graphics.js';
 export type ThreeCanvasInstanceProps = ThreeContextProperties & {
   /** Parent bumps canvas key — remount this instance fresh after real device/context loss retry. */
   readonly onRetry: () => void;
+};
+
+/**
+ * Sets R3F's pointer rays with {@link setRaycasterFromCamera} after whichever compute the root settled on: its own, or
+ * the one an `eventPrefix` Canvas installs just before `onCreated`. Three's `setFromCamera` starts an orthographic ray
+ * beyond the scene under WebGPU reversed depth, so model hover, selection and clicks missed in orthographic view.
+ */
+const installTauPointerRays = (state: RootState): void => {
+  const { compute } = state.events;
+  state.setEvents({
+    compute(event, rootState, previous) {
+      compute?.(event, rootState, previous);
+      setRaycasterFromCamera(rootState.raycaster, rootState.pointer, rootState.camera);
+    },
+  });
 };
 
 /**
@@ -80,6 +96,7 @@ export function ThreeCanvasInstance({
   );
 
   const onCanvasCreated = useCallback((state: RootState): void => {
+    installTauPointerRays(state);
     const renderer = state.gl;
 
     if ('isWebGPURenderer' in renderer && renderer.isWebGPURenderer) {

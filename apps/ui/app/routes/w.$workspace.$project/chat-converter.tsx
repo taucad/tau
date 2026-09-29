@@ -2,11 +2,11 @@ import { XIcon, Download, Info, Check, ChevronDown, ChevronRight } from 'lucide-
 import { useCallback, memo, useState, useMemo, useEffect, useRef } from 'react';
 import type { ReactElement } from 'react';
 import { useSelector } from '@xstate/react';
-import type { ActorRefFrom } from 'xstate';
 import type { RuntimeContentInput } from '@taucad/runtime';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import { getActiveGroupValues } from '@taucad/types';
 import type { ExportFile, FileExtension } from '@taucad/types';
+import { randomUuid } from '@taucad/utils/id';
 import { compileParameterManifest, projectJsonSchemaToParameterDeclaration } from '@taucad/parameters';
 import type { ParameterManifest } from '@taucad/parameters';
 import Form from '@rjsf/core';
@@ -35,7 +35,9 @@ import { cn } from '@taucad/ui/utils/cn';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { awaitFreshRender } from '#machines/await-fresh-render.js';
+import { selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { FormatEntry } from '#utils/export-formats.utils.js';
 import {
   bestRouteForActiveKernel,
@@ -44,7 +46,6 @@ import {
   getFormatInfo,
 } from '#utils/export-formats.utils.js';
 import { groupExportFormatsByFidelity } from '#components/files/export-format-groups.js';
-import type { cadMachine } from '#machines/cad.machine.js';
 import { widgets, templates as rjsfTemplates } from '#components/geometry/parameters/rjsf-theme.js';
 import type { ParameterCommit, RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
 import { rjsfFields } from '#components/geometry/parameters/rjsf-field-path.js';
@@ -72,7 +73,6 @@ const toggleConverterKeyCombination = projectWorkspaceKeyCombinations.export;
 
 type GeometryUnitEntry = {
   entryPath: string;
-  actor: ActorRefFrom<typeof cadMachine>;
 };
 
 type ExportPreferences = {
@@ -447,7 +447,7 @@ function GeometryUnitSelector({
         getValue={getCuValue}
         value={defaultValue}
         placeholder='Select file'
-        searchPlaceHolder='Filter files...'
+        searchPlaceHolder='Filter files…'
         title='Select geometry unit'
         description='Choose which file to export geometry from.'
         isSearchEnabled={entries.length > 5}
@@ -947,7 +947,7 @@ function ExportSettings({
 
 function formatButtonLabel(selectedFormats: FileExtension[], isExporting: boolean, hasDestination: boolean): string {
   if (isExporting) {
-    return 'Exporting...';
+    return 'Exporting…';
   }
 
   if (selectedFormats.length === 0) {
@@ -1035,15 +1035,15 @@ function useExportPreferences(fileManager: ReturnType<typeof useFileManager>) {
 
 export const ConverterPanelBody = function ({
   downloadOnly = false,
-}: { readonly downloadOnly?: boolean } = {}): ReactElement {
-  const { geometryUnits, mainEntryPath, parameterService, projectRef } = useProject();
+  isShown = true,
+}: { readonly downloadOnly?: boolean; readonly isShown?: boolean } = {}): ReactElement {
+  const { geometryUnits, mainEntryPath, parameterService, projectRef, viewRecords, entriesRecord } = useProject();
   const fileManager = useFileManager();
   const projectName = useSelector(projectRef, (state) => state.context.project?.name) ?? 'model';
 
   const cuEntries = useMemo<GeometryUnitEntry[]>(() => {
-    const sorted = sortGeometryUnitEntries([...geometryUnits.entries()], mainEntryPath);
-    return sorted.map(([entryPath, actor]) => ({ entryPath, actor }));
-  }, [geometryUnits, mainEntryPath]);
+    return listGeometryEntryPaths(geometryUnits, viewRecords, mainEntryPath).map((entryPath) => ({ entryPath }));
+  }, [geometryUnits, viewRecords, mainEntryPath]);
 
   const [selectedEntryPath, setSelectedEntryPath] = useState(mainEntryPath);
 
@@ -1054,14 +1054,31 @@ export const ConverterPanelBody = function ({
   }, [mainEntryPath]);
 
   useEffect(() => {
-    if (!geometryUnits.has(selectedEntryPath)) {
+    if (!cuEntries.some((entry) => entry.entryPath === selectedEntryPath)) {
       queueMicrotask(() => {
         setSelectedEntryPath(mainEntryPath);
       });
     }
-  }, [geometryUnits, selectedEntryPath, mainEntryPath]);
+  }, [cuEntries, selectedEntryPath, mainEntryPath]);
 
-  const selectedActor = geometryUnits.get(selectedEntryPath) ?? geometryUnits.get(mainEntryPath);
+  const selectedRenderTimeout = entriesRecord?.entries[selectedEntryPath]?.renderTimeout;
+  useEffect(() => {
+    if (!isShown || !selectedEntryPath) {
+      return;
+    }
+    const claimId = randomUuid();
+    projectRef.send({
+      type: 'claimGeometryUnit',
+      claimId,
+      entryPath: selectedEntryPath,
+      renderTimeout: selectedRenderTimeout,
+    });
+    return () => {
+      projectRef.send({ type: 'releaseGeometryUnit', claimId });
+    };
+  }, [isShown, projectRef, selectedEntryPath, selectedRenderTimeout]);
+
+  const selectedActor = geometryUnits.get(selectedEntryPath);
 
   const geometry = useSelector(selectedActor, (state) => state?.context.geometry);
   const capabilities = useSelector(selectedActor, (state) => state?.context.capabilities);
@@ -1183,10 +1200,17 @@ export const ConverterPanelBody = function ({
   );
 
   const handleExport = useCallback(async () => {
-    if (!kernelClient || selectedFormats.length === 0 || !hasDestination) {
+    if (!selectedActor || !kernelClient || selectedFormats.length === 0 || !hasDestination) {
       return;
     }
 
+    const claimId = randomUuid();
+    projectRef.send({
+      type: 'claimGeometryUnit',
+      claimId,
+      entryPath: selectedEntryPath,
+      renderTimeout: selectedRenderTimeout,
+    });
     setIsExporting(true);
 
     const succeeded: FileExtension[] = [];
@@ -1194,11 +1218,24 @@ export const ConverterPanelBody = function ({
     const downloadQueue: DownloadEntry[] = [];
 
     try {
+      const settled = await awaitFreshRender(selectedActor);
+      const failedIssues = selectCadFailureIssues(settled);
+      if (failedIssues) {
+        throw new Error(failedIssues.map((issue) => issue.message).join('; ') || 'The selected CAD render failed');
+      }
+      if (settled.context.latestGeometryOutcome !== 'success') {
+        throw new Error(`No current successful geometry is available for ${selectedEntryPath}`);
+      }
+      const freshKernelClient = settled.context.kernelClient;
+      const freshKernelId = settled.context.activeKernelId;
+      if (!freshKernelClient) {
+        throw new Error('The selected CAD runtime is unavailable');
+      }
       /* oxlint-disable no-await-in-loop -- Sequential: each export depends on shared kernel state */
       for (const format of selectedFormats) {
         try {
-          const route = bestRouteForActiveKernel(kernelClient, format, activeKernelId);
-          if (!route || route.kernelId !== activeKernelId) {
+          const route = bestRouteForActiveKernel(freshKernelClient, format, freshKernelId);
+          if (!route || route.kernelId !== freshKernelId) {
             failed.push(format);
             continue;
           }
@@ -1239,7 +1276,7 @@ export const ConverterPanelBody = function ({
           const content = contentResolved
             ? runtimeContentFromRecord(sanitizeFormDelta(route.content!.schema, contentResolved.values))
             : undefined;
-          const result = await exportWithRuntimeValidatedInput(kernelClient, route, {
+          const result = await exportWithRuntimeValidatedInput(freshKernelClient, route, {
             ...(content && Object.keys(content).length > 0 ? { content } : {}),
             exportOptions: options,
           });
@@ -1282,11 +1319,18 @@ export const ConverterPanelBody = function ({
       } else {
         toast.error(`Failed to export ${failed.map((f) => f.toUpperCase()).join(', ')}`);
       }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Export failed');
     } finally {
       setIsExporting(false);
+      projectRef.send({ type: 'releaseGeometryUnit', claimId });
     }
   }, [
     kernelClient,
+    selectedActor,
+    selectedEntryPath,
+    selectedRenderTimeout,
+    projectRef,
     selectedFormats,
     formatOptions,
     formatContent,
@@ -1462,7 +1506,7 @@ export const ChatConverter = memo(function (properties: {
           </FloatingPanelContentHeaderActions>
         </FloatingPanelContentHeader>
         <FloatingPanelContentBody className='p-0'>
-          <ConverterPanelBody />
+          <ConverterPanelBody isShown={isExpanded} />
         </FloatingPanelContentBody>
       </FloatingPanelContent>
     </FloatingPanel>

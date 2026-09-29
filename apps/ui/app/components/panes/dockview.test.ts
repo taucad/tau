@@ -10,21 +10,26 @@ vi.mock('dockview-react', async () => {
   const dockviewReact = ({
     className,
     disableTabsOverflowList,
+    disableFloatingGroups,
     onReady,
     rightHeaderActionsComponent: RightHeaderActions,
     scrollbars,
   }: {
     className?: string;
     disableTabsOverflowList?: boolean;
+    disableFloatingGroups?: boolean;
     onReady?: (event: DockviewReadyEvent) => void;
     rightHeaderActionsComponent?: FunctionComponent<IDockviewHeaderActionsProps>;
     scrollbars?: string;
-  }) =>
-    createElement(
+  }) => {
+    // The group's element is the mock root, attached by the ref before header-action effects run.
+    const group = { element: undefined as HTMLElement | undefined };
+    return createElement(
       'div',
       {
         className,
         'data-disable-tabs-overflow-list': String(disableTabsOverflowList),
+        'data-disable-floating-groups': String(disableFloatingGroups),
         'data-scrollbars': scrollbars,
         'data-testid': 'dockview-react',
         ref: (element) => {
@@ -32,6 +37,7 @@ vi.mock('dockview-react', async () => {
             return;
           }
 
+          group.element = element;
           onReady?.({
             api: {
               activeGroup: { element },
@@ -46,8 +52,9 @@ vi.mock('dockview-react', async () => {
         { className: 'dv-tabs-container', 'data-testid': 'dockview-tabs' },
         createElement('button', { className: 'dv-tab dv-active-tab', type: 'button' }, 'Tab'),
       ),
-      RightHeaderActions ? createElement(RightHeaderActions, {} as IDockviewHeaderActionsProps) : null,
+      RightHeaderActions ? createElement(RightHeaderActions, { group } as IDockviewHeaderActionsProps) : null,
     );
+  };
 
   return {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Mock key mirrors the upstream export.
@@ -589,6 +596,60 @@ describe('Dockview', () => {
     vi.useRealTimers();
   });
 
+  it("should reveal a pane's active tab when its strip resizes, even outside the active group", () => {
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    const disconnect = vi.fn();
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      public constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      public observe(): void {
+        // Resizes are triggered by calling the captured callback.
+      }
+
+      public unobserve(): void {
+        // Not used by the production hook.
+      }
+
+      public disconnect(): void {
+        disconnect();
+      }
+    };
+    vi.useFakeTimers();
+    try {
+      const view = render(createElement(Dockview, { components: {}, onReady: vi.fn() }));
+      const tabs = screen.getByTestId('dockview-tabs');
+      const tab = screen.getByRole('button', { name: 'Tab' });
+      // A restored layout leaves Dockview's cached offset clipping the active tab under the right fade.
+      Object.defineProperties(tabs, {
+        clientWidth: { configurable: true, value: 296 },
+        scrollLeft: { configurable: true, value: 28, writable: true },
+      });
+      Object.defineProperties(tab, {
+        offsetLeft: { configurable: true, value: 236 },
+        offsetWidth: { configurable: true, value: 112 },
+      });
+      tabs.style.setProperty('--scroll-fade-size', '42px');
+
+      for (const callback of resizeCallbacks) {
+        callback([], {} as ResizeObserver);
+      }
+      expect(tabs.scrollLeft).toBe(28);
+      flushRaf();
+
+      // Tab right edge (236 + 112 = 348) - clientWidth (296) + fade (42) = 94
+      expect(tabs.scrollLeft).toBe(94);
+
+      view.unmount();
+      expect(disconnect).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
   it('should delegate vertical wheel input to custom Dockview tab viewports', () => {
     render(createElement(Dockview, { className: 'caller-class', components: {}, onReady: vi.fn() }));
     const dockview = screen.getByTestId('dockview-react');
@@ -608,6 +669,7 @@ describe('Dockview', () => {
     expect(wrapper?.className).toContain('[--dv-tabs-and-actions-container-height:2.25rem]');
     expect(dockview).toHaveAttribute('data-scrollbars', 'custom');
     expect(dockview).toHaveAttribute('data-disable-tabs-overflow-list', 'true');
+    expect(dockview).toHaveAttribute('data-disable-floating-groups', 'true');
     expect(dockview).toHaveClass('caller-class');
     expect(dockview.className).not.toContain('[--dv-tabs-and-actions-container-height:2.25rem]');
     expect(tabs.scrollLeft).toBe(60);

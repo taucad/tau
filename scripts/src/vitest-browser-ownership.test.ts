@@ -33,6 +33,9 @@ const textFiles = (): ReadonlyArray<readonly [path: string, source: string]> =>
     return source.includes('\0') ? [] : [[path, source] as const];
   });
 
+// Scan once before test timeouts start; every assertion uses the same complete Git inventory.
+const sourceFiles = textFiles();
+
 type ForbiddenPattern = readonly [pattern: string, label: string];
 
 const findForbiddenViolations = (
@@ -55,7 +58,7 @@ const facadePatterns = (): readonly ForbiddenPattern[] => [
 ];
 
 const vitestPlaywrightConfigs = (): ReadonlyArray<readonly [path: string, source: string]> =>
-  textFiles().filter(
+  sourceFiles.filter(
     ([path, source]) =>
       // Match the provider call, not its import: configs may wrap `playwright()` to retype it for their Vitest copy.
       /vitest(?:\.[^.]+)*\.config\.ts$/u.test(path) && /provider:\s*playwright(?:Provider)?\(/u.test(source),
@@ -72,7 +75,7 @@ describe('Vitest Browser test-runner ownership', () => {
       [`${driverName} test`, 'runner command'],
       [`dist/.${driverName}`, 'runner artifact root'],
     ] as const;
-    const violations = findForbiddenViolations(textFiles(), forbidden);
+    const violations = findForbiddenViolations(sourceFiles, forbidden);
 
     expect(violations).toEqual([]);
   });
@@ -80,7 +83,7 @@ describe('Vitest Browser test-runner ownership', () => {
   it('keeps the deleted facade protocol out of the repository', () => {
     const forbidden = facadePatterns();
 
-    expect(findForbiddenViolations(textFiles(), forbidden)).toEqual([]);
+    expect(findForbiddenViolations(sourceFiles, forbidden)).toEqual([]);
     for (const [pattern] of forbidden) {
       expect(findForbiddenViolations([['fixture.ts', pattern]], forbidden)).toHaveLength(1);
     }
@@ -88,7 +91,7 @@ describe('Vitest Browser test-runner ownership', () => {
 
   it('requires browser specs to import test and expect from Vitest', () => {
     const supportRunnerImport = /import\s*\{[^}]*\b(?:expect|test)\b[^}]*\}\s*from\s*['"][^'"]*support[^'"]*['"]/su;
-    const violations = textFiles()
+    const violations = sourceFiles
       .filter(([path, source]) => path.endsWith('.spec.ts') && supportRunnerImport.test(source))
       .map(([path]) => path);
 
@@ -103,13 +106,16 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/desktop-build123d.spec.ts',
       'apps/desktop-e2e/src/desktop-chat-acp.spec.ts',
       'apps/desktop-e2e/src/desktop-chat-in-project.spec.ts',
+      'apps/desktop-e2e/src/desktop-community-preview.spec.ts',
       'apps/desktop-e2e/src/desktop-converter.spec.ts',
       'apps/desktop-e2e/src/desktop-ephemeral-isolation.spec.ts',
       'apps/desktop-e2e/src/desktop-kernel-utility-cap.spec.ts',
       'apps/desktop-e2e/src/desktop-main-editor-kernels.spec.ts',
       'apps/desktop-e2e/src/desktop-native-payload.spec.ts',
+      'apps/desktop-e2e/src/desktop-print-dry-run.spec.ts',
       'apps/desktop-e2e/src/support/desktop-app.ts',
       'apps/desktop-e2e/src/support/gateway-fixture.ts',
+      'apps/desktop-e2e/src/support/revisions-pane.ts',
       'apps/desktop-e2e/src/support/scenario.ts',
       'apps/desktop-e2e/src/support/two-client/browser-client.ts',
       'apps/desktop-e2e/src/support/two-client/git-faults.test.ts',
@@ -117,26 +123,21 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/two-client.spec.ts',
       'apps/react-e2e/browser-command.ts',
       'apps/react-e2e/scripts/benchmark-bundler-products.mts',
-      // Provider-context augmentations: `@vitest/browser-playwright` does not re-export `BrowserContext`.
-      'apps/react-e2e/support/vitest-playwright.d.ts',
       'apps/ui-e2e/src/support/open-to-frame.ts',
-      'apps/ui-e2e/src/support/vitest-playwright.d.ts',
-      'packages/geospec-engine/e2e/browser-command.ts',
-      'packages/plugins/openrscad/e2e/vitest-playwright.d.ts',
+      'packages/geospec-engine-native/bindings/browser-conformance/qualify-mt-product.mjs',
+      'packages/geospec-engine-native/bindings/browser-conformance/run-browser-conformance.ts',
       'scripts/src/canvas-vite.config.test.ts',
       'scripts/src/check-pack-install.ts',
       'scripts/src/reference-html.test.ts',
       'scripts/src/reference-html.ts',
     ]);
     const directDriverImport = /from\s+['"]playwright(?:\/test)?['"]/u;
-    const driverFiles = textFiles()
+    const driverFiles = sourceFiles
       .filter(([, source]) => directDriverImport.test(source))
       .map(([path]) => path)
       .sort();
     const installCommand = `${['play', 'wright'].join('')} install`;
-    const installFiles = textFiles()
-      .filter(([, source]) => source.includes(installCommand))
-      .map(([path]) => path);
+    const installFiles = sourceFiles.filter(([, source]) => source.includes(installCommand)).map(([path]) => path);
 
     expect(driverFiles).toEqual([...allowedDriverFiles].sort());
     // The create-repo template is CI for generated repositories, not a Tau browser-driver site.
@@ -151,7 +152,7 @@ describe('Vitest Browser test-runner ownership', () => {
       String.raw`// Artifact requirement: [^\n]+\n\s*api: \{ ${allowWrite.replace(' ', String.raw`\s*`)} \}`,
       'u',
     );
-    const allowWriteFiles = textFiles().filter(([, source]) => source.includes(allowWrite));
+    const allowWriteFiles = sourceFiles.filter(([, source]) => source.includes(allowWrite));
 
     expect(allowWriteFiles.map(([path]) => path).sort()).toEqual(
       [
@@ -191,6 +192,8 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/react-e2e/vitest.bundlers.config.ts',
         'apps/react-e2e/vitest.config.ts',
         'apps/ui-e2e/vitest.config.ts',
+        'apps/ui/app/components/printer/printer.vitest.browser.config.ts',
+        'apps/ui/app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts',
         'apps/ui/app/workers/agent-host.vitest.browser.config.ts',
         'packages/agent-host/vitest.browser.config.ts',
         'packages/geospec-engine/e2e/vitest.config.ts',
@@ -228,7 +231,7 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/ui-e2e/src/shader-fixture.spec.ts',
       'apps/ui-e2e/src/user-project-thumbnail-generation.spec.ts',
     ]);
-    const violations = textFiles()
+    const violations = sourceFiles
       .filter(([path]) => requiredSpecs.has(path))
       .flatMap(([path, source]) =>
         [

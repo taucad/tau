@@ -6,17 +6,17 @@ Run from the workspace root with pnpm and the actual Nx project name:
 
 ```bash
 pnpm nx show projects
-pnpm nx show project <project>        # Owners, targets and configuration
-pnpm nx lint <project>                # oxlint then ESLint
+pnpm nx show project <project> # Owners, targets and configuration
+pnpm nx lint <project> # oxlint then ESLint
 pnpm nx lint <project> --files=<path> # Focused lint
 pnpm nx test <project> --watch=false
 pnpm nx typecheck <project>
-pnpm nx build <project>               # When the project has this target
+pnpm nx build <project> # When the project has this target
 pnpm nx affected -t lint test build typecheck
-pnpm docs:validate                    # Policy/research frontmatter
+pnpm docs:validate # Policy/research frontmatter
 pnpm nx run scripts:validate-agent-config
-pnpm nx serve ui                      # Production server after build
-pnpm infra:up                         # Local PostgreSQL and Redis
+pnpm nx serve ui # Production server after build
+pnpm infra:up # Local PostgreSQL and Redis
 pnpm infra:down
 pnpm db:generate
 pnpm db:migrate
@@ -58,9 +58,9 @@ Nothing under `packages/**` or `libs/**` depends on `apps/libs/**`. Query projec
 Read these owners when a task touches each concern:
 
 - TS/JS/declarations: [lint](docs/policy/lint-policy.md), [TypeScript](docs/policy/typescript-policy.md), [JSDoc](docs/policy/jsdoc-policy.md); public APIs also [library API](docs/policy/library-api-policy.md)
-- Tests/specs/harnesses: [testing](docs/policy/testing-policy.md); React/jsdom adds [React testing](docs/policy/react-testing-policy.md)
+- Tests/specs/harnesses: [testing](docs/policy/testing-policy.md); React/jsdom adds [React testing](docs/policy/react-testing-policy.md); TLA+/Lean specs add [formal verification](docs/policy/formal-verification-policy.md)
 - XState: [XState](docs/policy/xstate-policy.md); revision graphs/checkouts/machines/sync also [revisions](docs/policy/revisions-policy.md)
-- React/Tailwind/tokens/accessibility: [DESIGN](DESIGN.md), [React](docs/policy/react-policy.md), [UI](docs/policy/ui-policy.md), [color](docs/policy/color-policy.md), [accessibility](docs/policy/accessibility-policy.md)
+- React/Tailwind/tokens/accessibility: [DESIGN](DESIGN.md), [React](docs/policy/react-policy.md), [UI](docs/policy/ui-policy.md), [color](docs/policy/color-policy.md), [accessibility](docs/policy/accessibility-policy.md), [pages](docs/policy/page-composition-policy.md)
 - Prompts/tools/transcripts/compaction/offloading: [context engineering](docs/policy/context-engineering-policy.md), [filesystem context](docs/policy/filesystem-context-policy.md)
 - App-library placement/manifests: [workspace projects](docs/policy/workspace-project-policy.md); use `create-package`
 - Filesystem/runtime/app/UI event fan-out: [event fan-out](docs/policy/event-fanout-policy.md)
@@ -84,7 +84,7 @@ Use `create-research`, `create-charter`, `superplan`, `work-charter` and `update
 
 `docs/{research,reference,handbooks,incidents}` link into optional `repos/tau-brain`. Write through `docs/...`, validate from Tau root, and check Git with `git -C repos/tau-brain status --short -- research/<path>` or `reference/<path>`. Follow the [artifact contract](.agents/skills/create-research/artifacts.md). Workers without Brain return evidence to the permitted parent; ordinary install/build/test/runtime works without Brain.
 
-`repos.yaml` is the public source catalog; authorized checkouts may overlay `repos/tau-brain/repos.yaml`. Use the `repos` skill for dependency-source investigation. Checkouts are optional. New entries default private; `--catalog public -g public-maintenance` requires deliberate OSS publication.
+`repos.yaml` is the public source catalog; authorized checkouts may overlay `repos/tau-brain/repos.yaml`. Use the `repos` skill for dependency-source investigation and catalog entries. Checkouts are optional.
 
 ## Learned User Preferences
 

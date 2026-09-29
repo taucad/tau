@@ -21,7 +21,9 @@
  * a disk reader for skills, and the engine's Node runner for GeoSpec.
  */
 
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, realpath, readdir, stat } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { ResourceQueue } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -34,6 +36,7 @@ import type { RpcGeoSpecClient, RpcSkillResolver } from '@taucad/chat/rpc';
 import {
   createChatToolRegistry,
   createProviderRpcFileSystem,
+  createRuntimeWorkbenchClient,
   createSkillBundleOverlay,
   createSkillBundleRegistry,
 } from '@taucad/agent-tools/registry';
@@ -43,6 +46,7 @@ import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@t
 import { createProjectModelLoader, runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
+import type { Engine as NativeGeoSpecEngine } from '@taucad/geospec-engine-native/node';
 import { assertRootedPath } from '@taucad/utils/path';
 
 /* Not `@taucad/types`: that barrel is an `export type *` the dts bundler cannot
@@ -51,6 +55,8 @@ import { assertRootedPath } from '@taucad/utils/path';
  * as an external import. */
 import type { ExportFile, RuntimeFileSystemBase, SourceRevision } from '@taucad/runtime/types';
 import type { RuntimeClient } from '@taucad/runtime/client';
+import type { MachineClient } from '@taucad/runtime/machine';
+import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { ActorRefFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 
@@ -94,7 +100,7 @@ export type HostExportFile = ExportFile;
  *
  * @public
  */
-export type HostRuntimeClient = Pick<RuntimeClient, 'evaluate' | 'export' | 'transcode'>;
+export type HostRuntimeClient = Pick<RuntimeClient, 'evaluate' | 'export' | 'transcode' | 'connect' | 'capabilities'>;
 
 /** Filesystem capability the host tool registry consumes. @public */
 export type HostToolFileSystem = Omit<RuntimeFileSystemBase, 'watch'>;
@@ -143,13 +149,13 @@ const issueMessage = (issues: ReadonlyArray<{ readonly message: string }>, fallb
 const runtimeFailure = (
   error: unknown,
   targetFile: string,
-): { readonly success: false; readonly errorCode: 'UNKNOWN'; readonly message: string } => {
+): { readonly success: false; readonly errorCode: 'UNKNOWN' | 'RESULT_TOO_LARGE'; readonly message: string } => {
   const reason = error instanceof Error ? error.message : String(error);
-  const isUnavailable =
-    error instanceof Error && (error as Error & { readonly code?: unknown }).code === 'RUNTIME_UNAVAILABLE';
+  const code = error instanceof Error ? (error as Error & { readonly code?: unknown }).code : undefined;
+  const isUnavailable = code === 'RUNTIME_UNAVAILABLE';
   return {
     success: false,
-    errorCode: rpcClientErrorCode.unknown,
+    errorCode: code === 'RESULT_TOO_LARGE' ? rpcClientErrorCode.resultTooLarge : rpcClientErrorCode.unknown,
     /* `RUNTIME_UNAVAILABLE` already reads as a sentence about this host — the
      * supervisor's own failure, verbatim — so it is not wrapped twice. */
     message: isUnavailable ? reason : `This Tau Host could not render ${targetFile}: ${reason}`,
@@ -209,6 +215,128 @@ export const createHostGeoSpecRunner = async (
   return loader ? Object.assign(runner, { sourceRevisions: loader.sourceRevisions }) : runner;
 };
 
+/** One serialized native engine retains subjects only within its canonical root. */
+type NativeGeoSpecSession = {
+  readonly root: string;
+  readonly engine: NativeGeoSpecEngine;
+  readonly carried: Map<string, unknown>;
+};
+
+let nativeSession: NativeGeoSpecSession | undefined;
+let nativeTail: Promise<void> = Promise.resolve();
+
+const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSession> => {
+  const canonicalRoot = await realpath(root);
+  if (nativeSession?.root === canonicalRoot) {
+    return nativeSession;
+  }
+  const previous = nativeSession;
+  nativeSession = undefined;
+  previous?.carried.clear();
+  previous?.engine.close();
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the native package's constructor export.
+  const { Engine } = await import('@taucad/geospec-engine-native/node');
+  const cacheRoot = join(homedir() || tmpdir(), '.cache', 'geospec', 'evidence');
+  let engine: NativeGeoSpecEngine;
+  try {
+    engine = new Engine({ root: cacheRoot, projectRoot: canonicalRoot });
+  } catch (error) {
+    console.warn('GeoSpec native cache unavailable; using a resident engine:', error);
+    engine = new Engine();
+  }
+  const session = {
+    root: canonicalRoot,
+    engine,
+    carried: new Map<string, unknown>(),
+  };
+  nativeSession = session;
+  return session;
+};
+
+/**
+ * Create an opt-in native runner for one tool call using the host's existing runtime.
+ *
+ * Every call in this process shares one engine and runs after the previous call's runner
+ * closes. A call keeps its subjects admitted until the next call settles, which releases
+ * those it did not load again, so repeating `test_model` on unchanged models is digest-only.
+ * The runtime is borrowed; closing this runner hands the engine to the next call.
+ *
+ * @param workspaceRoot - Absolute project root the runner executes against.
+ * @param runtime - Existing project runtime used to export authored models.
+ * @returns The ordinary GeoSpec runner contract over the shared native engine.
+ * @public
+ */
+export const createHostNativeGeoSpecRunner = async (
+  workspaceRoot: string,
+  runtime: HostGeoSpecRuntimeClient,
+): Promise<HostGeoSpecRunner> => {
+  const previous = nativeTail;
+  let endTurn = (): void => undefined;
+  nativeTail = new Promise<void>((resolve) => {
+    endTurn = resolve;
+  });
+  await previous;
+  try {
+    const [session, { createNativeGeoSpecRunner }, { createNodeVmFileSystem }] = await Promise.all([
+      openNativeGeoSpecSession(workspaceRoot),
+      import('geospec/runner/native'),
+      import('@taucad/geospec-engine/node-filesystem'),
+    ]);
+    const revisions = new Map<string, SourceRevision>();
+    const trackedRuntime = new Proxy(runtime, {
+      get(target, property, receiver: unknown): unknown {
+        if (property !== 'export') {
+          return Reflect.get(target, property, receiver) as unknown;
+        }
+        return async (...args: Parameters<HostGeoSpecRuntimeClient['export']>) => {
+          const result = await target.export(...args);
+          if (result.sourceRevision) {
+            revisions.set(result.sourceRevision.entry, result.sourceRevision);
+          }
+          return result;
+        };
+      },
+    });
+    const filesystem = createNodeVmFileSystem(workspaceRoot);
+    const runner = createNativeGeoSpecRunner({
+      filesystem,
+      // PERF-OUTPUT-01: the product reads verdicts and localized failures, so
+      // it selects the bounded success evidence (ruling 13).
+      nativeAssertions: { engine: session.engine, evidenceProfile: 'bounded' },
+      model: {
+        projectPath: workspaceRoot,
+        runtime: trackedRuntime,
+        readSource: async (source) => {
+          if (typeof source !== 'string') {
+            throw new TypeError('Native GeoSpec file sources must be project paths.');
+          }
+          return filesystem.readFile(assertRootedPath(source));
+        },
+        carried: session.carried,
+      },
+    });
+    let closed = false;
+    return {
+      ...runner,
+      sourceRevisions: () => [...revisions.values()],
+      async close() {
+        if (closed) {
+          return;
+        }
+        closed = true;
+        try {
+          await runner.close();
+        } finally {
+          endTurn();
+        }
+      },
+    };
+  } catch (error) {
+    endTurn();
+    throw error;
+  }
+};
+
 /** Options for {@link createHostToolRegistry}. @public */
 export type HostToolRegistryOptions = {
   /** Absolute workspace root every file tool is confined to. */
@@ -244,6 +372,13 @@ export type HostToolRegistryOptions = {
    */
   readonly geospecRunner?: ((workspaceRoot: string) => Promise<HostGeoSpecRunner>) | false | undefined;
   /**
+   * Authoring API of `geospecRunner`, advertised before the first model turn.
+   * Defaults to legacy, matching the built-in runner. A custom native runner
+   * must explicitly pair with `native`; arbitrary factories cannot be inspected
+   * to infer their backend. The caller owns this pairing.
+   */
+  readonly geospecAuthoringMode?: 'legacy' | 'native' | undefined;
+  /**
    * Where each admitted run works, by run id — the map `createProjectRevisions`
    * publishes (V19).
    *
@@ -265,6 +400,23 @@ export type HostToolRegistryOptions = {
    * client here follows.
    */
   readonly revisions?: ProjectRevisions['history'] | undefined;
+  /**
+   * The machines facet this host serves its machine tools over, once the
+   * composition has negotiated and granted it — the daemon under
+   * `tau serve --machines`, the desktop services utility. Omit it and no
+   * machine tool is offered rather than offered-and-failing (the same rule
+   * every other client here follows); a facet that is present but not
+   * `available` offers none either.
+   */
+  readonly machines?: RuntimeTransportFacet<MachineClient> | undefined;
+  /**
+   * The `tau.json` id of the project `workspaceRoot` holds: the desktop's
+   * attached project, or the daemon's served root. Every artifact `request_print`
+   * slices names it, which is how a machine host finds the file again. Omit it
+   * and `request_print` is not offered: a host that cannot name its project
+   * never guesses one.
+   */
+  readonly projectId?: string | undefined;
 };
 
 /**
@@ -283,6 +435,10 @@ export type HostToolRegistryOptions = {
  */
 export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRegistry => {
   const rooted = new Map<string, ToolRegistry>();
+  const liveProvider =
+    options.filesystem?.(options.workspaceRoot) ?? new NodeFsProvider(options.workspaceRoot, { policy: tauPathPolicy });
+  const liveWorkbenchView = composeView({ filesystem: liveProvider }, { consumer: 'user', policy: tauPathPolicy });
+  const liveMutations = new ResourceQueue();
   const skillRegistry =
     options.systemSkillBundles === undefined ? undefined : createSkillBundleRegistry(options.systemSkillBundles);
   const systemSkills = skillRegistry?.bundles.map((bundle) => ({
@@ -315,7 +471,9 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * the composed view. The skill resolver below reads the disk directly and
      * mutates nothing. */
     const provider =
-      options.filesystem?.(workspaceRoot) ?? new NodeFsProvider(workspaceRoot, { policy: tauPathPolicy });
+      workspaceRoot === options.workspaceRoot
+        ? liveProvider
+        : (options.filesystem?.(workspaceRoot) ?? new NodeFsProvider(workspaceRoot, { policy: tauPathPolicy }));
     const view = composeView(
       { filesystem: provider },
       {
@@ -325,7 +483,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       },
     );
     const recordView = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
-    const mutations = new ResourceQueue();
+    const mutations = workspaceRoot === options.workspaceRoot ? liveMutations : new ResourceQueue();
     const { runtimeClient } = options;
 
     const requireRuntime = async (input: { readonly signal?: AbortSignal } = {}): Promise<HostRuntimeClient> => {
@@ -368,7 +526,18 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
           signal: job.signal,
         });
         if (!result.success) {
-          throw new Error(issueMessage(result.issues, 'Image capture failed'));
+          const message = issueMessage(result.issues, 'Image capture failed');
+          const overLimit = result.issues.some(
+            (issue) =>
+              issue.details !== null &&
+              typeof issue.details === 'object' &&
+              'type' in issue.details &&
+              issue.details.type === 'render' &&
+              'code' in issue.details &&
+              issue.details.code === 'parse' &&
+              /accessor \d+ count \d+ exceeds \d+|declared accessor values exceed \d+/u.test(issue.message),
+          );
+          throw Object.assign(new Error(message), overLimit ? { code: 'RESULT_TOO_LARGE' } : {});
         }
         return result.data;
       },
@@ -412,10 +581,16 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * worker returns — the only host-specific part is which runner ran.
      */
     const geospec: RpcGeoSpecClient | undefined = runnerFactory && {
-      async runTests(args) {
+      async runTests(args, context) {
         try {
+          context?.signal?.throwIfAborted();
           const runner = await runnerFactory(workspaceRoot);
+          const abortRunner = (): void => {
+            runner.abort('test_model request cancelled');
+          };
+          context?.signal?.addEventListener('abort', abortRunner, { once: true });
           try {
+            context?.signal?.throwIfAborted();
             const output = await runGeoSpecTests({
               discovery: {
                 readdir: async (path) => readdir(path),
@@ -431,8 +606,10 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
               // resolves its own sources, and an unproven verdict must not claim a revision.
               ...(runner.sourceRevisions === undefined ? {} : { sourceRevisions: runner.sourceRevisions }),
             });
+            context?.signal?.throwIfAborted();
             return { success: true, ...output };
           } finally {
+            context?.signal?.removeEventListener('abort', abortRunner);
             await runner.close();
           }
         } catch (error) {
@@ -441,13 +618,39 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       },
     };
 
+    /* `request_print` needs every leg of the print path: the project id here
+     * names the artifact's project, and the registry offers the tool only when
+     * a runtime to slice with and a machine to ask are attached too. A
+     * candidate turn's slice lands in its checkout, which the machine host
+     * finds through the same project id. */
+    const { revisions, machines, projectId } = options;
     return createChatToolRegistry({
       fileSystemFor: (signal) => createProviderRpcFileSystem({ provider: view, mutations, signal }),
       recordFileSystemFor: (signal) => createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
+      workbenchFileSystemFor: (signal) =>
+        createProviderRpcFileSystem({ provider: liveWorkbenchView, mutations: liveMutations, signal }),
+      workbench: createRuntimeWorkbenchClient(
+        runtimeClient === undefined ? undefined : async () => runtimeClient(options.workspaceRoot),
+      ),
       ...(runtimeClient === undefined ? {} : { kernelClient, graphics, images }),
       ...(parameters === undefined ? {} : { parameters }),
       ...(geospec === undefined ? {} : { geospec }),
-      ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
+      geospecAuthoringMode: options.geospecAuthoringMode,
+      ...(revisions === undefined ? {} : { revisions }),
+      ...(projectId === undefined
+        ? {}
+        : {
+            print: {
+              projectId,
+              readArtifact: async ({ path, signal }) => {
+                signal.throwIfAborted();
+                const bytes = await recordView.readFile(assertRootedPath(path));
+                signal.throwIfAborted();
+                return bytes;
+              },
+            },
+          }),
+      ...(machines === undefined ? {} : { machines }),
       skillResolver,
       testingEnabled: geospec !== undefined,
     });
@@ -488,6 +691,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * names, descriptions and schemas, and the list is read before any run
      * exists. */
     list: () => live.list(),
+    /* An answer names no checkout: every root's registry settles it through the same machine client (D5). */
+    answerApproval: async (answer) => live.answerApproval?.(answer),
     invoke: async (invocation) =>
       rootedRegistry(
         (invocation.runId === undefined ? undefined : options.checkouts?.get(invocation.runId)?.cwd) ??

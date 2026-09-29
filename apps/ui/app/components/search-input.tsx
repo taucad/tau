@@ -31,7 +31,7 @@ export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputPropert
     value = '',
     containerClassName,
     className,
-    placeholder = 'Search...',
+    placeholder = 'Search…',
     onClear,
     keyboardShortcut,
     variant = 'default',
@@ -39,6 +39,9 @@ export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputPropert
   },
   reference,
 ) {
+  const inputReference = React.useRef<HTMLInputElement>(null);
+  React.useImperativeHandle(reference, () => inputReference.current!);
+
   const handlePointerDown = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
   };
@@ -46,13 +49,13 @@ export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputPropert
   return (
     <div className={cn('relative w-full', containerClassName)}>
       <Input
-        ref={reference}
+        ref={inputReference}
         autoComplete='off'
         type='search'
         placeholder={placeholder}
         value={value}
         className={cn(
-          'peer/search-input pr-2 pl-8 not-placeholder-shown:pr-6 placeholder:text-sm placeholder-shown:truncate focus:placeholder:opacity-0 [&::-webkit-search-cancel-button]:appearance-none',
+          'peer/search-input pr-2 pl-8 not-placeholder-shown:pr-8 placeholder:text-sm placeholder-shown:truncate focus:placeholder:opacity-0 [&::-webkit-search-cancel-button]:appearance-none',
           keyboardShortcut && 'placeholder-shown:pr-14',
           variant === 'transparent' && 'bg-transparent dark:bg-transparent',
           className,
@@ -67,11 +70,15 @@ export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputPropert
       ) : null}
       <Button
         variant='secondary'
-        size='icon'
-        className='absolute top-1/2 right-1.5 size-5 -translate-y-1/2 bg-neutral/10 p-0 text-muted-foreground peer-placeholder-shown/search-input:invisible hover:bg-neutral/20 hover:text-foreground'
+        size='icon-xs'
+        className='absolute top-1/2 right-1 -translate-y-1/2 bg-neutral/10 text-muted-foreground peer-placeholder-shown/search-input:invisible hover:bg-neutral/20 hover:text-foreground'
         type='button'
         aria-label='Clear search'
-        onClick={onClear}
+        onClick={() => {
+          onClear();
+          // Clearing hides this button, so focus would otherwise fall to the document body.
+          inputReference.current?.focus();
+        }}
         onPointerDown={handlePointerDown}
       >
         <X className='size-3.5' />

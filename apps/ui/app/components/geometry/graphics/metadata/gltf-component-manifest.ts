@@ -208,6 +208,135 @@ function createCapabilities(hasPreciseTopology: boolean): GeometryComponentCapab
 
 type TopologyPayload = { components?: TopologyComponent[]; mechanism?: unknown };
 
+/** Draw-element spans for one displayed primitive occurrence. IDs are valid only for this GLB. */
+export type GltfMeasurementFeatures = {
+  readonly occurrenceId: string;
+  readonly componentId: string;
+  readonly kind: 'surface' | 'line';
+  readonly primitive: GeometryComponentPrimitiveRef;
+  readonly faces?: ReadonlyArray<{ readonly id: string; readonly start: number; readonly count: number }>;
+  readonly edges?: ReadonlyArray<{ readonly id: string; readonly start: number; readonly count: number }>;
+};
+
+/** The key used for a glTF primitive under a particular scene node, including shared-mesh instances. */
+export function gltfPrimitiveOccurrenceKey(reference: GeometryComponentPrimitiveRef): string {
+  return `${reference.nodeIndex}/${reference.meshIndex}/${reference.primitiveIndex}`;
+}
+
+function validGroups(
+  groups: ReadonlyArray<{ start: number; count: number; id: number }> | undefined,
+  limit: number | undefined,
+  alignment: number,
+): boolean {
+  if (!groups?.length || limit === undefined) {
+    return false;
+  }
+  const ids = new Set<number>();
+  let end = 0;
+  for (const group of [...groups].sort((a, b) => a.start - b.start)) {
+    if (
+      !Number.isInteger(group.id) ||
+      ids.has(group.id) ||
+      !Number.isInteger(group.start) ||
+      !Number.isInteger(group.count) ||
+      group.start < end ||
+      group.start % alignment !== 0 ||
+      group.count <= 0 ||
+      group.count % alignment !== 0 ||
+      group.start + group.count > limit
+    ) {
+      return false;
+    }
+    ids.add(group.id);
+    end = group.start + group.count;
+  }
+  return true;
+}
+
+/**
+ * Preserve Replicad's current-build face and edge groups at the displayed primitive boundary.
+ * Surface spans count index entries. Its non-indexed LINES spans count flat XYZ scalars, so
+ * divide them by three before handing them to the Three.js draw/selection path.
+ */
+export function buildGltfMeasurementFeatures(
+  content: Uint8Array<ArrayBuffer>,
+  manifest: GeometryComponentManifest,
+): ReadonlyMap<string, GltfMeasurementFeatures> {
+  const { json, bin } = parseGltfBytes(content);
+  const topology = readTopologyPayload(json, bin);
+  const components = new Map(topology.components?.map((component) => [component.id, component]) ?? []);
+  const result = new Map<string, GltfMeasurementFeatures>();
+
+  for (const componentId of manifest.nodeOrder) {
+    const node = manifest.nodesById[componentId];
+    const source = components.get(componentId);
+    if (!node || !source) {
+      continue;
+    }
+    const references = node.primitiveRefs ?? [];
+    const surfaces = references.filter(
+      (reference) => (json.meshes?.[reference.meshIndex]?.primitives?.[reference.primitiveIndex]?.mode ?? 4) === 4,
+    );
+    const lines = references.filter(
+      (reference) => json.meshes?.[reference.meshIndex]?.primitives?.[reference.primitiveIndex]?.mode === 1,
+    );
+
+    for (const reference of references) {
+      const primitive = json.meshes?.[reference.meshIndex]?.primitives?.[reference.primitiveIndex];
+      if (!primitive) {
+        continue;
+      }
+      const faceGroups = Array.isArray(primitive.extras?.['faceGroups'])
+        ? (primitive.extras['faceGroups'] as typeof source.faceGroups)
+        : surfaces.length === 1
+          ? source.faceGroups
+          : undefined;
+      const edgeGroups = Array.isArray(primitive.extras?.['edgeGroups'])
+        ? (primitive.extras['edgeGroups'] as typeof source.edgeGroups)
+        : lines.length === 1
+          ? source.edgeGroups
+          : undefined;
+      const faceLimit = primitive.indices === undefined ? undefined : json.accessors?.[primitive.indices]?.count;
+      const edgeLimit = json.accessors?.[primitive.attributes?.['POSITION'] ?? -1]?.count;
+      const faceUnit = primitive.extras?.['tauFaceGroupUnit'] ?? source.sourceRefs?.['faceGroupUnit'];
+      const edgeUnit = primitive.extras?.['tauEdgeGroupUnit'] ?? source.sourceRefs?.['edgeGroupUnit'];
+      const faces =
+        primitive.mode !== 1 &&
+        faceUnit === 'indices-v1' &&
+        validGroups(
+          faceGroups?.map((group) => ({ ...group, id: group.faceId })),
+          faceLimit,
+          3,
+        )
+          ? faceGroups?.map((group) => ({ id: `face:${group.faceId}`, start: group.start, count: group.count }))
+          : undefined;
+      const edges =
+        primitive.mode === 1 &&
+        primitive.indices === undefined &&
+        edgeUnit === 'xyz-scalars-v1' &&
+        validGroups(
+          edgeGroups?.map((group) => ({ ...group, id: group.edgeId })),
+          edgeLimit === undefined ? undefined : edgeLimit * 3,
+          6,
+        )
+          ? edgeGroups?.map((group) => ({ id: `edge:${group.edgeId}`, start: group.start / 3, count: group.count / 3 }))
+          : undefined;
+      if (!faces?.length && !edges?.length) {
+        continue;
+      }
+      result.set(gltfPrimitiveOccurrenceKey(reference), {
+        occurrenceId: `${componentId}@node:${reference.nodeIndex}`,
+        componentId,
+        kind: primitive.mode === 1 ? 'line' : 'surface',
+        primitive: reference,
+        ...(faces?.length ? { faces } : {}),
+        ...(edges?.length ? { edges } : {}),
+      });
+    }
+  }
+  return result;
+}
+
 function readTopologyPayload(json: GltfJson, bin: Uint8Array<ArrayBuffer>): TopologyPayload {
   const extension = json.extensions?.[tauCadTopologyExtension];
   if (!extension) {

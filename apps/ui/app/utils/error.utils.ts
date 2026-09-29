@@ -202,6 +202,10 @@ export function parseErrorForPersistence(error: Error): ChatError {
 
 const parsedErrors = new WeakMap<Error, ChatError>();
 
+/** The code a thrown refusal carries on the error itself, not in a structured message. */
+const thrownCode = (error: Error): string | undefined =>
+  'code' in error && typeof error.code === 'string' ? error.code : undefined;
+
 function parseError(error: Error): ChatError {
   // Handle client-side network errors (these never reach the API)
   if (isTransportError(error)) {
@@ -244,27 +248,34 @@ function parseError(error: Error): ChatError {
     };
   }
 
-  // Fallback for unexpected formats
+  // Fallback for unexpected formats. A refusal thrown by the host or the channel keeps its code, which names its card.
+  const code = thrownCode(error);
   return {
     category: errorCategory.generic,
     title: errorCategoryTitles[errorCategory.generic],
     message: error.message,
     raw: error.message,
+    ...(code === undefined ? {} : { code }),
   };
 }
 
 /**
  * Parses a dispatch that failed before its run existed.
  *
- * Identical to {@link parseErrorForPersistence}, except that a refusal carrying
- * no code of its own is stamped with {@link chatTurnNotStartedCode}. A coded
- * refusal keeps its code: the credit preflight throws the gateway's own 402
- * payload, and that still belongs on the credits card.
+ * Identical to {@link parseErrorForPersistence}, except that a refusal is
+ * stamped with {@link chatTurnNotStartedCode} when it carries no code, or only
+ * a code thrown on the error itself (a host or channel refusal: nothing ran,
+ * so restarting the turn is the recovery). A code in the structured message
+ * is kept: the credit preflight throws the gateway's own 402 payload, and that
+ * still belongs on the credits card.
  *
  * @param error - The admission failure.
  * @returns The persisted error the chat's card reads.
  */
 export function parseAdmissionFailureForPersistence(error: Error): ChatError {
   const parsed = parseErrorForPersistence(error);
-  return parsed.code === undefined ? { ...parsed, code: chatTurnNotStartedCode } : parsed;
+  // A thrown code is not a card of its own here: nothing ran, so the restart is the recovery.
+  return parsed.code === undefined || parsed.code === thrownCode(error)
+    ? { ...parsed, code: chatTurnNotStartedCode }
+    : parsed;
 }

@@ -57,7 +57,7 @@ function createFakeTransport(options?: { deferExports?: boolean }) {
     onNotify: vi.fn(() => () => undefined),
     notify: vi.fn(),
     call: vi.fn(async (method: keyof RuntimeProtocol['calls'], args: unknown, signal?: AbortSignal) => {
-      /* Mirrors the real channel (`libs/rpc/src/channel.ts:839-868`): a supplied
+      /* Mirrors the real channel (`packages/rpc/src/channel.ts:839-868`): a supplied
        * signal rejects the in-flight call with `DOMException(…, 'AbortError')`. */
       const abortRejection = new Promise<never>((_resolve, reject) => {
         const rejectAborted = (): void => {

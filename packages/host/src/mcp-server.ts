@@ -27,10 +27,13 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
 
 import { createTauMcpHttpHandler } from '@taucad/mcp';
-import type { TauMcpDispatch, TauMcpRpcFailure, TauMcpRpcName, TauMcpRpcSuccess } from '@taucad/mcp';
+import type { TauMcpDispatch, TauMcpHostTool, TauMcpRpcFailure, TauMcpRpcName, TauMcpRpcSuccess } from '@taucad/mcp';
 import { rpcName, toolName } from '@taucad/chat/constants';
+import { screenshotImageSchema, screenshotOutputSchema } from '@taucad/chat/schemas/tools/screenshot';
+import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 
-import type { JsonValue, ToolRegistry } from '@taucad/agent-host';
+import type { JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
+import { saveChatAttachment } from '#acp/media.js';
 
 /**
  * Milliseconds a host-minted capability may live.
@@ -46,16 +49,108 @@ import type { JsonValue, ToolRegistry } from '@taucad/agent-host';
  */
 export const hostMcpCapabilityLifetime = 12 * 60 * 60 * 1000;
 
+/**
+ * Milliseconds past its expiry that a capability still admits a turn that holds its binding (E20).
+ *
+ * The binding lease (W10 EA-R6): a prompt that outlives its capability keeps
+ * Tau's tools until the turn releases the binding, because the server list a
+ * session was opened with cannot change (V7). The release is the lease's
+ * releaser and this ceiling its bound (I30), so a vendor prompt that never
+ * ends loses the tools one more lifetime after expiry. A new turn never binds
+ * an expired token: `activate` still requires an unexpired one.
+ *
+ * @public
+ */
+export const hostMcpLeaseCeiling = hostMcpCapabilityLifetime;
+
 /** The prefix every host capability carries; distinct from the API's `tau-mcp-v1`. @public */
 export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
 
-/** The exact CAD-tool grant a host capability carries. @public */
+/**
+ * The exact tool grant a host capability carries.
+ *
+ * The four CAD tools, the workbench record tool, and the print tools (blueprint D5, Bambu Studio D13): an
+ * external agent may read the slicing profiles a machine offers, and open,
+ * read, list and stop a print request through the same ledger a Tau turn
+ * uses, and is told to wait for the person — nothing here starts a print. Every name is dispatched into the daemon's own registry by tool name.
+ *
+ * @public
+ */
 export const hostMcpAllowedTools = [
   toolName.getKernelResult,
   toolName.testModel,
   toolName.screenshot,
   toolName.exportGeometry,
+  toolName.arrangeWorkbench,
+  toolName.getPrintProfiles,
+  toolName.requestPrint,
+  toolName.getPrintRequest,
+  toolName.listPrintRequests,
+  toolName.cancelPrint,
 ] as const;
+
+/** One name from {@link hostMcpAllowedTools}. @public */
+export type HostMcpAllowedTool = (typeof hostMcpAllowedTools)[number];
+
+/**
+ * The registry tools registered beside the CAD four, by name.
+ *
+ * They have no chat RPC, so `@taucad/mcp` dispatches them as `{ toolName }`
+ * calls and this endpoint answers from the registry's own content.
+ */
+const hostMcpRegistryTools: ReadonlySet<HostMcpAllowedTool> = new Set<HostMcpAllowedTool>([
+  toolName.arrangeWorkbench,
+  toolName.getPrintProfiles,
+  toolName.requestPrint,
+  toolName.getPrintRequest,
+  toolName.listPrintRequests,
+  toolName.cancelPrint,
+]);
+
+/** The registry tools that change nothing, here or on a machine. */
+const readOnlyRegistryTools: ReadonlySet<string> = new Set<string>([
+  toolName.getPrintProfiles,
+  toolName.getPrintRequest,
+  toolName.listPrintRequests,
+]);
+
+/** Tool-specific hints where the derived registry defaults do not describe the effect. */
+const hostMcpAnnotationOverrides: Readonly<Partial<Record<string, NonNullable<TauMcpHostTool['annotations']>>>> = {
+  [toolName.arrangeWorkbench]: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+};
+
+const isJsonObject = (value: JsonValue): value is JsonObject =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** Keep a diagnostic summary bounded while the full report remains readable by path. */
+const shortDiagnostic = (value: string): string => (value.length > 300 ? `${value.slice(0, 300)}…` : value);
+
+/**
+ * How one registry tool presents over MCP.
+ *
+ * @param definition - The registry's own definition, schema included.
+ * @returns The host tool `@taucad/mcp` registers.
+ */
+const hostToolOf = (definition: ReturnType<ToolRegistry['list']>[number]): TauMcpHostTool => {
+  const reads = readOnlyRegistryTools.has(definition.name);
+  return {
+    name: definition.name,
+    description: definition.description,
+    inputSchema: definition.inputSchema,
+    annotations: hostMcpAnnotationOverrides[definition.name] ?? {
+      readOnlyHint: reads,
+      destructiveHint: definition.name === toolName.cancelPrint,
+      idempotentHint: definition.name !== toolName.cancelPrint,
+      /* A print request reaches a machine outside this process once accepted. */
+      openWorldHint: !reads,
+    },
+  };
+};
 
 /**
  * The one direction the RPC↔tool map is needed here.
@@ -64,7 +159,7 @@ export const hostMcpAllowedTools = [
  * names, and the pairing is the same one the API applies
  * (`apps/api/app/api/mcp/mcp-authority.service.ts`).
  */
-const toolForRpc: Readonly<Record<TauMcpRpcName, (typeof hostMcpAllowedTools)[number]>> = {
+const toolForRpc: Readonly<Record<TauMcpRpcName, HostMcpAllowedTool>> = {
   [rpcName.getKernelResult]: toolName.getKernelResult,
   [rpcName.runGeoSpecTests]: toolName.testModel,
   [rpcName.captureImages]: toolName.screenshot,
@@ -79,12 +174,7 @@ const capabilityClaimsSchema = z
     sessionKey: z.string().min(1),
     /** Provenance only: which run opened the session. It fences nothing (V7). */
     runId: z.string().min(1),
-    allowedTools: z.tuple([
-      z.literal(toolName.getKernelResult),
-      z.literal(toolName.testModel),
-      z.literal(toolName.screenshot),
-      z.literal(toolName.exportGeometry),
-    ]),
+    allowedTools: z.array(z.enum(hostMcpAllowedTools)).length(hostMcpAllowedTools.length),
     issuedAt: z.number().int().nonnegative(),
     expiresAt: z.number().int().positive(),
   })
@@ -111,6 +201,8 @@ export type HostMcpEndpointOptions = {
    * token: this one is handed to a vendor adapter's process.
    */
   readonly secret: string;
+  /** Workspace root owning the durable chat attachments returned to the agent. */
+  readonly workspaceRoot: string;
   /** The daemon's tool registry; the same one every agent run dispatches through. */
   readonly registry: ToolRegistry;
   /** Clock seam, for tests. */
@@ -173,7 +265,7 @@ const bearerOf = (authorization: string | undefined): string =>
 /**
  * Mount the host-local Tau MCP endpoint over one tool registry.
  *
- * @param options - Signing secret, tool registry, and clock seam.
+ * @param options - Signing secret, workspace root, tool registry, and clock seam.
  * @returns The endpoint: minting, verification, and the HTTP handler.
  * @public
  *
@@ -184,13 +276,22 @@ const bearerOf = (authorization: string | undefined): string =>
  * import type { ToolRegistry } from '@taucad/agent-host';
  *
  * declare const registry: ToolRegistry;
- * const mcp = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry });
+ * declare const workspaceRoot: string;
+ * const mcp = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), workspaceRoot, registry });
  * const capability = mcp.mint({ runId: 'run-1', chatId: 'chat-1' });
  * ```
  */
 export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpEndpoint => {
   const now = options.now ?? Date.now;
-  const handler = createTauMcpHttpHandler();
+  /* Offered iff the registry offers them: a daemon without a granted machines
+   * facet lists none, so an external agent is never told about a tool this
+   * host cannot serve. */
+  const handler = createTauMcpHttpHandler({
+    hostTools: options.registry
+      .list()
+      .filter((definition) => hostMcpRegistryTools.has(definition.name as HostMcpAllowedTool))
+      .map((definition) => hostToolOf(definition)),
+  });
   type Binding = {
     readonly runId: string;
     readonly signal: AbortSignal;
@@ -204,7 +305,8 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       createHmac('sha256', options.secret).update(`${hostMcpCapabilityPrefix}.${encodedClaims}`).digest(),
     );
 
-  const verify = (token: string): HostMcpCapabilityClaims => {
+  /** Signature, schema and issue time; expiry is the caller's (the binding lease reads it differently). */
+  const verifySigned = (token: string): HostMcpCapabilityClaims => {
     const [prefix, encodedClaims, supplied, extra] = token.split('.');
     if (prefix !== hostMcpCapabilityPrefix || !encodedClaims || !supplied || extra !== undefined) {
       throw new HostMcpCapabilityError();
@@ -220,14 +322,35 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
     } catch {
       throw new HostMcpCapabilityError();
     }
-    if (
-      claims.expiresAt <= now() ||
-      claims.issuedAt > now() ||
-      claims.expiresAt - claims.issuedAt > hostMcpCapabilityLifetime
-    ) {
+    if (claims.issuedAt > now() || claims.expiresAt - claims.issuedAt > hostMcpCapabilityLifetime) {
       throw new HostMcpCapabilityError();
     }
     return claims;
+  };
+
+  const verify = (token: string): HostMcpCapabilityClaims => {
+    const claims = verifySigned(token);
+    if (claims.expiresAt <= now()) {
+      throw new HostMcpCapabilityError();
+    }
+    return claims;
+  };
+
+  /**
+   * A request's claims under the binding lease (E20): an expired token is still
+   * admitted while its session holds a binding, up to the ceiling past expiry.
+   *
+   * @param token - The bearer the request carried.
+   * @returns The verified claims.
+   * @throws {@link HostMcpCapabilityError} for a bad token, or an expired one with no binding or past the ceiling.
+   */
+  const verifyLeased = (token: string): HostMcpCapabilityClaims => {
+    const claims = verifySigned(token);
+    const at = now();
+    if (claims.expiresAt > at || (active.has(claims.sessionKey) && at < claims.expiresAt + hostMcpLeaseCeiling)) {
+      return claims;
+    }
+    throw new HostMcpCapabilityError();
   };
 
   /* The chat *session*, not the run: one session spans every turn of a chat, so
@@ -253,8 +376,111 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
     binding: Binding | undefined,
     signal: AbortSignal,
   ): TauMcpDispatch => {
-    return async (call, dispatchOptions) => {
-      const tool = toolForRpc[call.rpcName];
+    /**
+     * One registry result as the MCP adapter returns it.
+     *
+     * Screenshots and oversized GeoSpec reports leave the result as chat
+     * attachment files; everything else passes through.
+     *
+     * @param tool - The registry tool that answered.
+     * @param result - Its result.
+     * @returns The RPC-shaped result the adapter reads.
+     */
+    const present = async (
+      tool: HostMcpAllowedTool,
+      result: Awaited<ReturnType<ToolRegistry['invoke']>>,
+    ): Promise<TauMcpRpcSuccess | TauMcpRpcFailure> => {
+      if (!hostMcpRegistryTools.has(tool)) {
+        if (tool === toolName.screenshot && !result.isError && isJsonObject(result.content)) {
+          const { success: _success, ...payload } = result.content;
+          const capture = screenshotOutputSchema.parse(payload);
+          const images = await Promise.all(
+            capture.images.map(async (image) => {
+              const inline = screenshotImageSchema.parse(image);
+              const match = /^data:(image\/(?:png|webp));base64,([A-Za-z0-9+/]+=*)$/u.exec(inline.dataUrl);
+              if (!match?.[1] || !match[2]) {
+                throw new Error('Tau screenshot returned an invalid image data URL.');
+              }
+              const saved = await saveChatAttachment({
+                workspaceRoot: options.workspaceRoot,
+                chatId: claims.chatId,
+                data: match[2],
+                mimeType: match[1],
+              });
+              return { view: inline.view, ...saved, mimeType: match[1] };
+            }),
+          );
+          return {
+            success: true,
+            images,
+            ...(capture.sourceRevision ? { sourceRevision: capture.sourceRevision } : {}),
+            ...(capture.message === undefined ? {} : { message: capture.message }),
+          };
+        }
+        if (tool === toolName.testModel && !result.isError && isJsonObject(result.content)) {
+          const { success: _success, ...payload } = result.content;
+          const verdict = testModelOutputSchema.parse(payload);
+          const full = JSON.stringify(verdict);
+          if (Buffer.byteLength(full, 'utf8') > 128 * 1024) {
+            const saved = await saveChatAttachment({
+              workspaceRoot: options.workspaceRoot,
+              chatId: claims.chatId,
+              data: Buffer.from(full, 'utf8').toString('base64'),
+              mimeType: 'application/json',
+            });
+            const failures = verdict.failures.slice(0, 20).map((failure) => ({
+              id: shortDiagnostic(failure.id),
+              requirement: shortDiagnostic(failure.requirement),
+              reason: shortDiagnostic(failure.reason),
+              suggestion: shortDiagnostic(failure.suggestion),
+              targetFile: failure.targetFile,
+            }));
+            return {
+              success: true,
+              passed: verdict.passed,
+              total: verdict.total,
+              failures,
+              passes: [],
+              omittedFailures: verdict.failures.length - failures.length,
+              omittedPasses: verdict.passes.length,
+              omittedSourceRevisions: verdict.sourceRevisions?.length ?? 0,
+              fullResult: { ...saved, mimeType: 'application/json' },
+            };
+          }
+        }
+        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the registry returns the canonical RPC result verbatim.
+        return result.content as TauMcpRpcSuccess | TauMcpRpcFailure;
+      }
+      /* A registry tool answers plain content with the error bit beside it;
+       * the adapter reads `success` and `errorCode` the way it does for an
+       * RPC result, so the bit becomes the field here. */
+      const content = isJsonObject(result.content) ? result.content : { value: result.content };
+      if (!result.isError) {
+        return { success: true, ...content };
+      }
+      return {
+        errorCode: typeof content['errorCode'] === 'string' ? content['errorCode'] : 'TOOL_ERROR',
+        message: typeof content['message'] === 'string' ? content['message'] : `${tool} failed.`,
+      };
+    };
+
+    /**
+     * One allowed tool, by name, into the daemon's registry.
+     *
+     * Keyed by tool name rather than RPC name because the print request tools
+     * have no chat RPC — they are registry tools — and this is the one call
+     * the MCP adapter makes for either kind.
+     *
+     * @param tool - The registry tool name the grant is checked against.
+     * @param args - Arguments the MCP adapter already validated.
+     * @param dispatchOptions - The adapter's call identity and cancellation.
+     * @returns The registry result verbatim.
+     */
+    const invokeAllowed = async (
+      tool: HostMcpAllowedTool,
+      args: Readonly<Record<string, unknown>>,
+      dispatchOptions: Parameters<TauMcpDispatch>[1],
+    ): Promise<TauMcpRpcSuccess | TauMcpRpcFailure> => {
       if (!claims.allowedTools.includes(tool)) {
         return { errorCode: 'TOOL_NOT_ALLOWED', message: `${tool} is not in this capability's grant.` };
       }
@@ -272,7 +498,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
          * falls back to it, so a stale id is never a stale directory. */
         runId: binding.runId,
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `@taucad/mcp` validated these args against the tool's own schema.
-        input: call.args as unknown as JsonValue,
+        input: args as unknown as JsonValue,
         signal: AbortSignal.any(
           [binding.signal, dispatchOptions.signal, signal].filter(
             (candidate): candidate is AbortSignal => candidate !== undefined,
@@ -282,11 +508,28 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       binding.pending.add(pending);
       try {
         const result = await pending;
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the registry returns the canonical RPC result verbatim.
-        return result.content as TauMcpRpcSuccess | TauMcpRpcFailure;
+        /* A throw here is Tau's own fault after the tool answered — the agent's
+         * call was fine and a retry repeats it — so it is coded as such rather
+         * than reaching the agent as a bare runtime message it reads as its own. */
+        return await present(tool, result).catch(
+          (error: unknown): TauMcpRpcFailure => ({
+            errorCode: 'MCP_HOST_FAULT',
+            message: `Tau could not return this ${tool} result (${error instanceof Error ? error.message : String(error)}). This is a Tau fault, not a problem with the call; retrying will not help.`,
+          }),
+        );
       } finally {
         binding.pending.delete(pending);
       }
+    };
+    return async (call, dispatchOptions) => {
+      if ('rpcName' in call) {
+        return invokeAllowed(toolForRpc[call.rpcName], call.args, dispatchOptions);
+      }
+      const tool = hostMcpAllowedTools.find((name) => name === call.toolName);
+      if (tool === undefined) {
+        return { errorCode: 'TOOL_NOT_ALLOWED', message: `${call.toolName} is not in this capability's grant.` };
+      }
+      return invokeAllowed(tool, call.args, dispatchOptions);
     };
   };
 
@@ -345,7 +588,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
     handle: async (request, response) => {
       let claims: HostMcpCapabilityClaims;
       try {
-        claims = verify(bearerOf(request.headers.authorization));
+        claims = verifyLeased(bearerOf(request.headers.authorization));
       } catch {
         refuse(response, 401, 'A Tau Host MCP capability is required.');
         return;

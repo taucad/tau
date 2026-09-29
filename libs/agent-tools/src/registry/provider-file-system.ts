@@ -13,21 +13,39 @@
  * filesystem at all, because an unfenced provider does not answer
  * `provenance`.
  *
- * The imports are type-only, so this module stays browser-safe and the registry
- * entry point does not drag a filesystem backend into a bundle.
+ * One content rule lives here because every agent write funnels through it:
+ * `tau.json` must stay a valid manifest with its identity. A broken manifest
+ * cost the project its reachability before any reader could object, so the
+ * model gets the defects as a tool error and retries instead (manifest
+ * recovery blueprint R8).
+ *
+ * The filesystem imports are type-only, so this module stays browser-safe and
+ * the registry entry point does not drag a filesystem backend into a bundle.
  *
  * @module
  */
 
-import type { ResourceQueue } from '@taucad/filesystem';
+import type { DirectoryStatRow, ResourceQueue } from '@taucad/filesystem';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
+import type { CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { applyClientTextMutation, createExactReplacementPlan } from '@taucad/chat/rpc';
 import type { RpcDirectoryEntry, RpcFileStat, RpcFileSystem } from '@taucad/chat/rpc';
+import { rpcClientErrorCode } from '@taucad/chat/schemas/rpc';
+import { checkProjectManifestReplacement } from '@taucad/types';
 import { getErrno } from '@taucad/utils/error';
 import { assertRootedPath } from '@taucad/utils/path';
 
 const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder('utf-8', { fatal: true });
+// eslint-disable-next-line @typescript-eslint/naming-convention -- `ignoreBOM` is the native TextDecoder option name.
+const textDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+/** The project manifest: the one path whose content an agent may edit but never break. */
+const manifestPath = 'tau.json';
+const maximumCheckedPreconditions = 32;
+const maximumCheckedBytes = 8 * 1024 * 1024;
+
+const manifestRefusal = (message: string): Error =>
+  Object.assign(new Error(message), { code: rpcClientErrorCode.validationError });
 
 const abortError = (signal: AbortSignal): Error =>
   signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError');
@@ -37,6 +55,19 @@ const assertNotAborted = (signal?: AbortSignal): void => {
     throw abortError(signal);
   }
 };
+
+const asBytes = (value: Uint8Array<ArrayBuffer> | string): Uint8Array<ArrayBuffer> =>
+  typeof value === 'string' ? textEncoder.encode(value) : new Uint8Array(value);
+
+const equalBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
+  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+
+const unsupported = (error: unknown): boolean =>
+  typeof error === 'object' &&
+  error !== null &&
+  'code' in error &&
+  error.code === 'CHECKED_WRITE_UNSUPPORTED' &&
+  (!('applicationState' in error) || error.applicationState === 'known-not-applied');
 
 /** Options for {@link createProviderRpcFileSystem}. @public */
 export type ProviderRpcFileSystemOptions = {
@@ -74,6 +105,77 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
   const { mutations, provider, signal } = options;
   const bytes = async (path: string): Promise<Uint8Array<ArrayBuffer>> =>
     new Uint8Array(await provider.readFile(assertRootedPath(path)));
+  // oxlint-disable-next-line typescript/no-restricted-types -- null is the checked-write absence sentinel.
+  const currentOrAbsent = async (path: string): Promise<Uint8Array<ArrayBuffer> | null> => {
+    try {
+      return await bytes(path);
+    } catch (error) {
+      if (getErrno(error) === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    }
+  };
+  const canonicalPreconditions = (preconditions: readonly FileWritePrecondition[]): FileWritePrecondition[] =>
+    preconditions.map(({ path, expected }) => ({
+      path: assertRootedPath(path),
+      expected: expected === null ? null : asBytes(expected),
+    }));
+  const assertCheckedBounds = (preconditions: readonly FileWritePrecondition[], dataBytes = 0): void => {
+    if (preconditions.length === 0 || preconditions.length > maximumCheckedPreconditions) {
+      throw new TypeError(`Checked mutations require 1-${String(maximumCheckedPreconditions)} preconditions.`);
+    }
+    if (
+      preconditions.reduce(
+        (total, { expected }) => total + (expected === null ? 0 : asBytes(expected).byteLength),
+        dataBytes,
+      ) > maximumCheckedBytes
+    ) {
+      throw new TypeError(`Checked mutation request exceeds ${String(maximumCheckedBytes)} bytes.`);
+    }
+  };
+  const compare = async (
+    preconditions: readonly FileWritePrecondition[],
+  ): Promise<CheckedFileWriteResult | undefined> => {
+    const compared = await Promise.all(
+      preconditions.map(async ({ path, expected }) => {
+        const actual = await currentOrAbsent(path);
+        return actual === null
+          ? expected === null
+            ? undefined
+            : { path, actual }
+          : expected !== null && equalBytes(actual, asBytes(expected))
+            ? undefined
+            : { path, actual };
+      }),
+    );
+    const conflicts = compared.filter((conflict) => conflict !== undefined);
+    return conflicts.length > 0 ? { status: 'conflict', conflicts } : undefined;
+  };
+  /** Refuse bytes that would leave `tau.json` invalid or re-identify the project. */
+  const assertManifestReplacement = async (
+    path: string,
+    next: Uint8Array<ArrayBuffer>,
+    current?: Uint8Array<ArrayBuffer>,
+  ): Promise<void> => {
+    if (assertRootedPath(path) !== manifestPath) {
+      return;
+    }
+    let existing = current;
+    if (existing === undefined) {
+      try {
+        existing = await bytes(path);
+      } catch (error) {
+        if (getErrno(error) !== 'ENOENT') {
+          throw error;
+        }
+      }
+    }
+    const refusal = checkProjectManifestReplacement(next, existing);
+    if (refusal !== undefined) {
+      throw manifestRefusal(refusal);
+    }
+  };
   const stat = async (path: string): Promise<RpcFileStat> => {
     const target = assertRootedPath(path);
     const value = await provider.stat(target);
@@ -107,6 +209,30 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
     replacement: Uint8Array<ArrayBuffer>,
   ) =>
     mutations.queueFor(path, async () => {
+      /* The queue fences this host's own tool calls only; a person's edit
+       * reaches the checkout by another route (L4 D-103). Where the view can
+       * compare and write in one step, it must, or an edit landing between
+       * the read below and the write is overwritten. */
+      if (provider.writeFileChecked !== undefined) {
+        assertNotAborted(signal);
+        const result = await provider
+          .writeFileChecked({ path, data: replacement, preconditions: [{ path, expected }] })
+          .catch((error: unknown) => {
+            // A direct `NodeFsProvider` declares the method but owns no authority to run it.
+            if (getErrno(error) === 'CHECKED_WRITE_UNSUPPORTED') {
+              return undefined;
+            }
+            throw error;
+          });
+        if (result?.status === 'conflict') {
+          // `null` is an absent file: read it so the caller sees the same ENOENT a read would give.
+          const actual = result.conflicts[0]?.actual;
+          return { status: 'conflict', currentBytes: actual ? new Uint8Array(actual) : await bytes(path) } as const;
+        }
+        if (result !== undefined) {
+          return { status: 'committed', committedBytes: new Uint8Array(result.content) } as const;
+        }
+      }
       const currentBytes = await bytes(path);
       const unchanged =
         currentBytes.byteLength === expected.byteLength &&
@@ -114,11 +240,12 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
       if (!unchanged) {
         return { status: 'conflict', currentBytes } as const;
       }
+      await assertManifestReplacement(path, replacement, currentBytes);
       assertNotAborted(signal);
       await provider.writeFile(path, new Uint8Array(replacement));
       return { status: 'committed', committedBytes: await bytes(path) } as const;
     });
-  const directoryEntry = (row: Awaited<ReturnType<ComposedView['readdirWithStats']>>[number]): RpcDirectoryEntry => {
+  const directoryEntry = (row: DirectoryStatRow): RpcDirectoryEntry => {
     const { name, provenance } = row;
     const modifiedAt = row.mtimeMs > 0 ? new Date(row.mtimeMs).toISOString() : undefined;
     if (row.type === 'dir') {
@@ -146,23 +273,104 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
 
   return {
     async readFile(path) {
-      return textDecoder.decode(await bytes(path));
+      const content = await bytes(path);
+      try {
+        return textDecoder.decode(content);
+      } catch {
+        throw Object.assign(new Error(`File '${path}' is not valid UTF-8 text.`), {
+          code: rpcClientErrorCode.invalidTextEncoding,
+        });
+      }
     },
     async writeFile(path, content) {
       await mutations.queueFor(path, async () => {
+        const next = textEncoder.encode(content);
+        await assertManifestReplacement(path, next);
         assertNotAborted(signal);
-        await provider.writeFile(assertRootedPath(path), textEncoder.encode(content));
+        await provider.writeFile(assertRootedPath(path), next);
+      });
+    },
+    async writeFileChecked(input) {
+      const path = assertRootedPath(input.path);
+      const preconditions = canonicalPreconditions(input.preconditions);
+      const data = asBytes(input.data);
+      assertCheckedBounds(preconditions, data.byteLength);
+      if (!preconditions.some((precondition) => precondition.path === path)) {
+        throw new TypeError('Checked writes require a destination precondition.');
+      }
+      return mutations.queueFor(path, async () => {
+        await assertManifestReplacement(path, data);
+        assertNotAborted(signal);
+        if (provider.writeFileChecked !== undefined) {
+          try {
+            return await provider.writeFileChecked({ path, data, preconditions });
+          } catch (error) {
+            if (!unsupported(error)) {
+              throw error;
+            }
+          }
+        }
+        const conflict = await compare(preconditions);
+        if (conflict) {
+          return conflict;
+        }
+        const current = await currentOrAbsent(path);
+        if (current !== null && equalBytes(current, data)) {
+          return { status: 'unchanged', content: current };
+        }
+        assertNotAborted(signal);
+        await provider.writeFile(path, data);
+        return { status: 'applied', content: await bytes(path) };
+      });
+    },
+    async deleteFileChecked(input) {
+      const path = assertRootedPath(input.path);
+      const preconditions = canonicalPreconditions(input.preconditions);
+      assertCheckedBounds(preconditions);
+      if (path === manifestPath) {
+        throw manifestRefusal('tau.json is the project manifest and cannot be deleted; edit it instead.');
+      }
+      if (!preconditions.some((precondition) => precondition.path === path)) {
+        throw new TypeError('Checked deletes require a destination precondition.');
+      }
+      return mutations.queueFor(path, async () => {
+        assertNotAborted(signal);
+        if (provider.deleteFileChecked !== undefined) {
+          try {
+            return await provider.deleteFileChecked({ path, preconditions });
+          } catch (error) {
+            if (!unsupported(error)) {
+              throw error;
+            }
+          }
+        }
+        const conflict = await compare(preconditions);
+        if (conflict) {
+          return conflict;
+        }
+        const current = await currentOrAbsent(path);
+        if (current === null) {
+          return { status: 'unchanged', content: new Uint8Array() };
+        }
+        assertNotAborted(signal);
+        await provider.unlink(path);
+        return { status: 'applied', content: new Uint8Array() };
       });
     },
     async writeBinaryFile(path, data) {
       await mutations.queueFor(path, async () => {
+        const next = new Uint8Array(data);
+        await assertManifestReplacement(path, next);
         assertNotAborted(signal);
-        await provider.writeFile(assertRootedPath(path), new Uint8Array(data));
+        await provider.writeFile(assertRootedPath(path), next);
       });
     },
     async deleteFile(path) {
       await mutations.queueFor(path, async () => {
         const target = assertRootedPath(path);
+        if (target === manifestPath) {
+          throw manifestRefusal('tau.json is the project manifest and cannot be deleted; edit it instead.');
+        }
         const value = await provider.stat(target);
         assertNotAborted(signal);
         // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
@@ -189,8 +397,10 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
             throw error;
           }
         }
+        const next = textEncoder.encode(existing + content);
+        await assertManifestReplacement(path, next);
         assertNotAborted(signal);
-        await provider.writeFile(assertRootedPath(path), textEncoder.encode(existing + content));
+        await provider.writeFile(assertRootedPath(path), next);
       });
     },
     // oxlint-disable-next-line max-params -- RpcFileSystem owns this four-argument compatibility signature.

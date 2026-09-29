@@ -1,9 +1,10 @@
-import { Fragment, useMemo, useState } from 'react';
-import type { Chat } from '@taucad/chat';
-import { Pencil, Square, Trash2 } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import type { ChatRecord } from '@taucad/chat/schemas';
+import { ChevronRight, Pencil, Square, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
-import type { ProjectListItem } from '#types/project.types.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 import { useChats } from '#hooks/use-chats.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
 import { SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem } from '#components/ui/sidebar.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-navigation.utils.js';
@@ -23,7 +24,9 @@ import {
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { selectChatFacts, useChatSidebarStatus, useSidebarCommands } from '#hooks/use-sidebar-status.js';
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
-import { useChatSession } from '#hooks/use-chat-session.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { Button } from '@taucad/ui/components/button';
+import { toast } from '#components/ui/sonner.js';
 
 const chatsPerPage = 5;
 
@@ -33,21 +36,42 @@ const startOfToday = (): number => {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 };
 
-export const sortProjectChats = (chats: readonly Chat[]): Chat[] => [...chats].sort(compareChatsByRecency);
+export const sortProjectChats = (chats: readonly ChatRecord[]): ChatRecord[] => [...chats].sort(compareChatsByRecency);
 
 export function ProjectChatList({
   project,
   isProjectActive,
+  isExpanded = true,
 }: {
   readonly project: ProjectListItem;
   readonly isProjectActive: boolean;
-}): React.JSX.Element {
-  const { chats, isLoading, error, updateChatName, deleteChat } = useChats(project.id);
+  readonly isExpanded?: boolean;
+}): React.ReactNode {
+  const { chats: allChats, isLoading, error } = useChatRecords(project.id, { includeDeleted: true });
+  const { updateChatName, deleteChat, restoreChat } = useChats(project.id, { enabled: false });
+  const store = useChatSessionStore();
+  useEffect(() => {
+    const releases = allChats.map((chat) => store.observe(chat.id, project.id));
+    return () => {
+      for (const release of releases) {
+        release();
+      }
+    };
+  }, [allChats, project.id, store]);
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const [visibleCount, setVisibleCount] = useState(chatsPerPage);
   const [editingChatId, setEditingChatId] = useState<string | undefined>();
+  const [isTrashOpen, setIsTrashOpen] = useState(false);
+  const chats = useMemo(() => allChats.filter((chat) => chat.deletedAt === undefined), [allChats]);
+  const trashedChats = useMemo(
+    () =>
+      allChats
+        .filter((chat) => chat.deletedAt !== undefined)
+        .sort((left, right) => (right.deletedAt ?? 0) - (left.deletedAt ?? 0)),
+    [allChats],
+  );
   const sortedChats = useMemo(() => sortProjectChats(chats), [chats]);
   const visibleChats = sortedChats.slice(0, visibleCount);
   /* A29: the label appears only when both groups do — a list that is all from
@@ -63,16 +87,41 @@ export function ProjectChatList({
   const listId = `project-chats-${project.id}`;
   const pendingUrl = navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : undefined;
 
-  const handleDelete = async (chatId: string): Promise<void> => {
-    await deleteChat(chatId);
-    if (!isProjectActive || activeChatId !== chatId || !project.slugs) {
+  if (!isExpanded) {
+    return null;
+  }
+
+  const handleDelete = async (chat: ChatRecord): Promise<void> => {
+    try {
+      await deleteChat(chat.id);
+      toast.success(`Moved ${chat.name} to Trash`);
+    } catch (error) {
+      toast.error(`Could not move ${chat.name} to Trash`);
+      console.error('Error trashing chat:', error);
+      return;
+    }
+    if (!isProjectActive || activeChatId !== chat.id || !project.slugs) {
       return;
     }
 
-    const nextChatId = pickNextFocusedChatId(chats, chatId, activeChatId);
+    const nextChatId = pickNextFocusedChatId(chats, chat.id, activeChatId);
     await navigate(nextChatId ? projectChatUrl(project.slugs, nextChatId) : projectUrl(project.slugs), {
       replace: true,
     });
+  };
+
+  const handleRestore = async (chat: ChatRecord): Promise<void> => {
+    try {
+      const restored = await restoreChat(chat.id);
+      if (!restored) {
+        toast.error(`Could not restore ${chat.name}`);
+        return;
+      }
+      toast.success(`Restored ${chat.name}`);
+    } catch (error) {
+      toast.error(`Could not restore ${chat.name}`);
+      console.error('Error restoring chat:', error);
+    }
   };
 
   return (
@@ -126,7 +175,7 @@ export function ProjectChatList({
                 setEditingChatId(undefined);
               }
             }}
-            onDelete={async () => handleDelete(chat.id)}
+            onDelete={async () => handleDelete(chat)}
           />
         </Fragment>
       ))}
@@ -143,6 +192,40 @@ export function ProjectChatList({
           </SidebarMenuButton>
         </SidebarMenuSubItem>
       ) : null}
+      {trashedChats.length > 0 ? (
+        <SidebarMenuSubItem>
+          <SidebarMenuButton
+            type='button'
+            className='gap-1.5 pl-7.5 text-muted-foreground'
+            aria-expanded={isTrashOpen}
+            onClick={() => {
+              setIsTrashOpen((open) => !open);
+            }}
+          >
+            <ChevronRight aria-hidden className={isTrashOpen ? 'size-3 rotate-90' : 'size-3'} />
+            Chat Trash ({trashedChats.length})
+          </SidebarMenuButton>
+        </SidebarMenuSubItem>
+      ) : null}
+      {isTrashOpen
+        ? trashedChats.map((chat) => (
+            <SidebarMenuSubItem key={chat.id}>
+              <div className='flex min-h-7 items-center gap-1 pl-7.5 text-sm'>
+                <span className='min-w-0 flex-1 truncate text-muted-foreground'>{chat.name}</span>
+                <Button
+                  variant='ghost'
+                  size='xs'
+                  aria-label={`Restore ${chat.name}`}
+                  onClick={() => {
+                    void handleRestore(chat);
+                  }}
+                >
+                  Restore
+                </Button>
+              </div>
+            </SidebarMenuSubItem>
+          ))
+        : null}
     </SidebarMenuSub>
   );
 }
@@ -158,7 +241,7 @@ function ProjectChatItem({
   onEditingChange,
   onDelete,
 }: {
-  readonly chat: Chat;
+  readonly chat: ChatRecord;
   readonly project: ProjectListItem;
   readonly isActive: boolean;
   readonly isPending: boolean;
@@ -169,7 +252,6 @@ function ProjectChatItem({
   readonly onDelete: () => Promise<void>;
 }): React.JSX.Element {
   const { closeChat } = useSidebarCommands();
-  useChatSession(chat.id, project.id);
   const status = useChatSidebarStatus(project.id, chat.id);
   const facts: SidebarFacts = status === undefined ? { mark: 'none', sentence: undefined } : selectChatFacts(status);
   /* D7: *Stop* only while there is something to stop. */
@@ -201,7 +283,7 @@ function ProjectChatItem({
         }}
       >
         <Trash2 aria-hidden />
-        Delete
+        Move to Trash
       </Item>
     </>
   );
@@ -236,6 +318,7 @@ function ProjectChatItem({
                   descriptionId={`chat-status-${chat.id}`}
                   isActive={isActive}
                   isPending={isPending}
+                  state={{ openChat: true }}
                 />
               ) : (
                 <span className='fade-label flex-1 text-muted-foreground'>{chat.name}</span>

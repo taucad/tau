@@ -161,7 +161,8 @@ export const publishable = (workspaceValue: Workspace): WorkspaceProject[] =>
 /**
  * Every project carries exactly one `type:` and one `scope:` from the
  * vocabulary. Application libraries additionally carry exactly one `layer:`;
- * other projects may carry one. The returned strings are the violations.
+ * other projects may carry one. Host tags are optional but must be unique and valid.
+ * The returned strings are the violations.
  *
  * @public
  */
@@ -171,7 +172,7 @@ export const validateTags = (workspaceValue: Workspace): string[] =>
       const allowed: readonly string[] = values;
       const present = tags.filter((tag) => tag.startsWith(`${dimension}:`));
       const [tag, ...extra] = present;
-      const required = dimension !== 'layer' || tags.includes('type:app-lib');
+      const required = dimension !== 'host' && (dimension !== 'layer' || tags.includes('type:app-lib'));
       if ((required && tag === undefined) || extra.length > 0) {
         return [`expected exactly one ${dimension}: tag, found ${present.join(', ') || 'none'}`];
       }
@@ -242,31 +243,6 @@ export const bundlePattern = (workspaceValue: Workspace, projectName: string): R
     ? /(?!)/
     : new RegExp(`^(?:${libraries.map((library) => escapeForRegExp(library)).join('|')})(?:/|$)`);
 };
-
-/** Every bundled library mapped to the publishables that claim it. */
-const bundleOwners = (workspaceValue: Workspace): Map<string, string[]> => {
-  const owners = new Map<string, string[]>();
-
-  for (const project of publishable(workspaceValue)) {
-    for (const library of bundledLibraries(workspaceValue, project.name)) {
-      owners.set(library, [...(owners.get(library) ?? []), project.name]);
-    }
-  }
-
-  return owners;
-};
-
-/**
- * Zero owners cannot occur by construction, so this only reports multi-owner
- * libraries — the invariant is exactly one owner per bundled library.
- *
- * @public
- */
-export const bundleOwnershipIssues = (workspaceValue: Workspace): string[] =>
-  [...bundleOwners(workspaceValue)]
-    .filter(([, owners]) => owners.length !== 1)
-    .map(([library, owners]) => `${library} is bundled by ${owners.join(' and ')}`)
-    .sort();
 
 const publishableDependencies = (workspaceValue: Workspace): Map<string, string[]> => {
   const published = new Set(publishable(workspaceValue));

@@ -1,0 +1,49 @@
+---
+title: Agent Tools
+description: Use arrange_workbench to show views, files, and panes while preserving a person's current Tau arrangement.
+docType: reference
+icon: 'lucide:blocks text-purple'
+wordBudgetOverride: 500
+---
+
+# Agent Tools
+
+`arrange_workbench` is Tau's tool for changing what a person sees in the editor. It writes the [portable workbench records](./workbench-records); the page applies them live when the project is open. The tool is available to Tau's agent and to external agents through Tau Host's MCP endpoint, including Codex in Tau Desktop.
+
+## Arrange a view
+
+This input creates a named view of an existing project file and shows it immediately:
+
+```json
+{
+  "views": [
+    {
+      "id": "front",
+      "name": "Front",
+      "entryPath": "main.scad",
+      "camera": { "kind": "preset", "preset": "front" }
+    }
+  ]
+}
+```
+
+A view can instead use `{ "kind": "look", "direction": [0, -1, 0] }`; the direction points from the model toward the camera. Other view fields include `fieldOfView` (0 means orthographic), `upDirection`, display toggles, `grid.unit`, section cuts, and pinned measurements. Section and measurement lengths use metres in the model frame. `entries` changes a file's render timeout and component visibility for all its views.
+
+`open` adds and activates a view, utility pane, or file tab. A file tab can request markdown `preview` or `source`; opening into a hidden workbench lane reveals it. `close` removes a tab and deletes a closed view's record. `viewer` and `workbench` replace their respective group trees when a full arrangement is intended. `lanes` sets chat and workbench lane intent. Omitted keys retain their current values; a supplied list or lane tree replaces that list or tree. The tool does not control window pixel widths, focus, print approval, physical starts, revision actions, installs, or machine binding.
+
+## Preserve the person's arrangement
+
+The per-turn workbench snapshot includes the layout digest and visible state. Pass its `layoutDigest` as `basedOn` when the change depends on the arrangement you read:
+
+```json
+{
+  "basedOn": "sha256:<current-layout-digest>",
+  "open": [{ "kind": "file", "path": "docs/review.md", "presentation": "preview" }]
+}
+```
+
+The placeholder is the snapshot digest, not literal input. A stale `basedOn` at the first layout read returns `RECORD_CONFLICT` before writes; a later per-record checked-write conflict may leave earlier writes. Without `basedOn`, it rereads and retries conflicts against current bytes. The tool validates paths and records, then writes at the **live project root** during candidate and MCP turns. An `INVALID_RECORD` refusal preserves the existing file for correction. The other refusal codes are `VALIDATION_ERROR` and `FILE_NOT_FOUND`.
+
+A successful result says `status: "written"` and lists record paths with their new and previous digests plus the tabs a window will show. `written` confirms record persistence, which may leave bytes unchanged, rather than that the person has already seen it. The native chat card names the arrangement and shows **Written**, **Shown**, or **Shown partly**; **Restore** is visible without expanding a disclosure. A debug-only pane such as `kernel` or `console` can leave a visible placeholder and appear in the next turn's `refused` snapshot.
+
+Read [External Agents](./external-agents) for host setup and [Workbench Records](./workbench-records) for the package codecs and file shapes.

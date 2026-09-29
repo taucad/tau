@@ -1,15 +1,16 @@
 import { z } from 'zod';
 import type { ProviderMetadata, UIMessageChunk } from 'ai';
 import type { AgentLiveEvent, AgentLogEvent, ProviderMessageMetadata } from '@taucad/agent-host';
-import { externalAgentStopSchema } from '@taucad/agent-host';
+import { userProviderMessageSchema } from '@taucad/agent-host';
+import { externalAgentStopSchema } from '@taucad/agent-host/wire';
 import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
 import { acpSessionDataSchema, billingInvocationStatusSchema } from '@taucad/chat';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
 import { errorCategory } from '@taucad/types/constants';
-import type { ErrorCategory } from '@taucad/types';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { isRecord } from '@taucad/utils/schema';
 import { isAttachmentUrl } from '#utils/attachment.utils.js';
+import { normalizedErrorCategoryOf } from '#utils/chat-error-card.js';
 
 type ProviderMessage = Extract<AgentLogEvent, { readonly type: 'message.appended' }>['message'];
 type AssistantProviderMessage = Extract<ProviderMessage, { readonly role: 'assistant' }>;
@@ -17,29 +18,31 @@ type UserProviderMessage = Extract<ProviderMessage, { readonly role: 'user' }>;
 type JsonValue = ProviderMessage['content'];
 
 /**
- * The category a gateway code names, whatever status carried it.
+ * What a failed external call printed, as the person would read it: a shell
+ * call's captured output and exit code, or an MCP result's text blocks.
+ * Without this the error card showed `{"formatted_output":…,"exit_code":1}`.
  *
- * The gateway rewrites a classified provider failure into a Tau frame once the
- * stream is already open, so a mid-stream failure rides the relayed response's
- * own 200: `httpStatusToCategory(200)` answers the generic card, and a quota
- * cut mid-turn reads as an unexplained error instead of a rate limit. Each code
- * here answers exactly one pre-stream status too — `RATE_LIMITED` 429,
- * `UPSTREAM_REJECTED` 502, the other two 503 — so naming the card from the code
- * leaves every pre-stream failure rendering exactly as it did.
- *
- * `PROVIDER_UNAVAILABLE` is the one code the gateway answers with two statuses:
- * 503 on every classified path, but 502 for a body-less provider response. The
- * code names the overloaded card for both, which is what a customer whose
- * provider is unavailable is told either way — and it is the only way a
- * mid-stream 499 or 5xx cut reaches that card instead of the generic one.
+ * @param value - The failed row's content.
+ * @returns The text, or `undefined` when the content has neither shape.
  */
-const gatewayCodeCategories = new Map<string, ErrorCategory>([
-  ['INSUFFICIENT_CREDIT', errorCategory.credits],
-  ['PROVIDER_ACCOUNT_EXHAUSTED', errorCategory.overloaded],
-  ['PROVIDER_UNAVAILABLE', errorCategory.overloaded],
-  ['RATE_LIMITED', errorCategory.rateLimit],
-  ['UPSTREAM_REJECTED', errorCategory.server],
-]);
+const failedOutputText = (value: unknown): string | undefined => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const output = [value['formatted_output'], value['aggregated_output'], value['output'], value['error']].find(
+    (candidate): candidate is string => typeof candidate === 'string' && candidate.trim() !== '',
+  );
+  const result =
+    isRecord(value['result']) && Array.isArray(value['result']['content']) ? value['result']['content'] : [];
+  const resultText = result
+    .flatMap((block: unknown) => (isRecord(block) && typeof block['text'] === 'string' ? [block['text']] : []))
+    .join('\n');
+  const exitCode = typeof value['exit_code'] === 'number' ? `Exit code ${String(value['exit_code'])}` : undefined;
+  const parts = [output ?? (resultText === '' ? undefined : resultText), exitCode].filter(
+    (part): part is string => part !== undefined,
+  );
+  return parts.length === 0 ? undefined : parts.join('\n\n');
+};
 
 const errorText = (value: unknown, fallback: string): string => {
   if (typeof value === 'string') {
@@ -47,6 +50,9 @@ const errorText = (value: unknown, fallback: string): string => {
   }
   if (isRecord(value) && typeof value['message'] === 'string') {
     const { code, status, details } = value;
+    if (typeof value['errorCode'] === 'string') {
+      return JSON.stringify(value);
+    }
     // A coded refusal is a card, not prose: the code is what the card's copy is
     // keyed on, and a host refusal such as `NO_EVICTABLE_HISTORY` carries
     // neither an HTTP status nor structured fields.
@@ -54,7 +60,7 @@ const errorText = (value: unknown, fallback: string): string => {
       // The gateway code is authoritative; the status is only the fallback for
       // codes that name no category of their own.
       const category =
-        gatewayCodeCategories.get(code) ??
+        normalizedErrorCategoryOf(code) ??
         (typeof status === 'number'
           ? httpStatusToCategory(status)
           : /* `rateLimit` is the external agent's *stop* card, and that card is
@@ -78,8 +84,17 @@ const errorText = (value: unknown, fallback: string): string => {
     }
     return value['message'];
   }
-  return value === undefined ? fallback : JSON.stringify(value);
+  return failedOutputText(value) ?? (value === undefined ? fallback : JSON.stringify(value));
 };
+
+/**
+ * What a failed run's terminal row says, as the chat's error and its row's reason read it.
+ *
+ * @param detail - The `failed` row's detail.
+ * @returns The failure's text.
+ * @public
+ */
+export const runFailureText = (detail: unknown): string => errorText(detail, 'Browser agent host failed.');
 
 const blockKey = (runId: string, messageId: string, contentIndex: number): string =>
   JSON.stringify([runId, messageId, contentIndex]);
@@ -332,11 +347,14 @@ const assistantChunks = (
       }
       continue;
     }
-    if (
-      (value['type'] === 'image' || value['type'] === 'audio') &&
-      typeof value['mimeType'] === 'string' &&
-      typeof value['data'] === 'string'
-    ) {
+    /* An agent's media: an image or document by attachment reference (as the
+     * host now records it), or inline — the legacy image and any audio. */
+    const file = userFilePart(value);
+    if (file) {
+      chunks.push({ type: 'file', mediaType: file.mediaType, url: file.url });
+      continue;
+    }
+    if (value['type'] === 'audio' && typeof value['mimeType'] === 'string' && typeof value['data'] === 'string') {
       chunks.push({
         type: 'file',
         mediaType: value['mimeType'],
@@ -623,8 +641,15 @@ export const projectTurnFinalized = (event: AgentLogEvent): TurnFinalizedEvent |
   return settlement?.type === 'turn.finalized' ? settlement : undefined;
 };
 
-/** Extract the durable user turn carried by either canonical commit event. */
+/** Extract an admitted Tau user provisionally, or its later canonical committed row. */
 export const projectAgentHostUserTurn = (event: AgentLogEvent): MyUIMessage | undefined => {
+  if (event.type === 'run.lifecycle' && event.state === 'admitted' && 'admission' in event) {
+    const admission = isRecord(event.admission) ? event.admission : undefined;
+    const message = userProviderMessageSchema.safeParse(admission?.['message']);
+    if (admission?.['kind'] === 'tau' && message.success && admission['turnId'] === message.data.id) {
+      return projectAgentHostUserMessage(message.data, event.recordedAt);
+    }
+  }
   if (event.type === 'message.appended' && event.message.role === 'user') {
     return projectAgentHostUserMessage(event.message, event.recordedAt);
   }
@@ -794,7 +819,7 @@ const lifecycleChunks = (
       return [{ type: 'finish', finishReason: 'stop', messageMetadata: { status: 'success' } }];
     }
     case 'failed': {
-      return [{ type: 'error', errorText: errorText(event.detail, 'Browser agent host failed.') }];
+      return [{ type: 'error', errorText: runFailureText(event.detail) }];
     }
     case 'cancelled': {
       return [{ type: 'abort', reason: errorText(event.detail, 'cancelled') }];
@@ -848,6 +873,21 @@ export type AgentHostApproval = {
    * performs it, so a presenter renders the facts and no action of its own.
    */
   readonly login?: AgentHostLogin | undefined;
+  /**
+   * The durable record this interrupt gates, when the tool named one.
+   *
+   * `request_print` writes `{ requestId, machineId, fileName }` so the Print
+   * pane can resolve the same ledger record the banner shows; other tools may
+   * write nothing.
+   */
+  readonly context?: AgentHostApprovalContext | undefined;
+};
+
+/** Ledger correlation a tool attaches to the interrupt it raises. @public */
+export type AgentHostApprovalContext = {
+  readonly requestId?: string | undefined;
+  readonly machineId?: string | undefined;
+  readonly fileName?: string | undefined;
 };
 
 /** One sign-in method an external agent offered. @public */
@@ -890,9 +930,38 @@ const interruptRequestSchema = z.looseObject({
     .looseObject({
       toolCall: z.looseObject({ title: z.string().optional() }).optional(),
       options: z.array(approvalOptionSchema).optional(),
+      requestId: z.string().min(1).optional(),
+      machineId: z.string().min(1).optional(),
+      fileName: z.string().min(1).optional(),
     })
     .optional(),
 });
+
+const agentHostApprovalContextSchema = z.object({
+  requestId: z.string().min(1).optional(),
+  machineId: z.string().min(1).optional(),
+  fileName: z.string().min(1).optional(),
+});
+
+/**
+ * The ledger correlation one interrupt context carries, if it carries any.
+ *
+ * @param context - The parsed `context` of the interrupt payload.
+ * @returns Only the correlation keys present, or `undefined` when none are.
+ */
+const approvalContextOf = (
+  context: { requestId?: string; machineId?: string; fileName?: string } | undefined,
+): AgentHostApprovalContext | undefined => {
+  if (!context) {
+    return undefined;
+  }
+  const picked: AgentHostApprovalContext = {
+    ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
+    ...(context.machineId === undefined ? {} : { machineId: context.machineId }),
+    ...(context.fileName === undefined ? {} : { fileName: context.fileName }),
+  };
+  return Object.keys(picked).length === 0 ? undefined : picked;
+};
 
 /* `externalAgentLoginSchema` in `agent-wire.ts` is the writer's own shape; this
  * is the reader's, loose for the same reason as the rest of the payload. */
@@ -962,6 +1031,7 @@ const agentHostApprovalSchema = z.object({
   options: z.array(z.object({ optionId: z.string().min(1), name: z.string(), kind: z.string().optional() })),
   agentId: z.string().optional(),
   login: agentHostLoginSchema.optional(),
+  context: agentHostApprovalContextSchema.optional(),
 });
 
 /**
@@ -987,6 +1057,7 @@ const approvalChunks = (
   }
   const request = interruptRequestSchema.safeParse(event.payload).data;
   const login = loginOf(event.payload);
+  const context = approvalContextOf(request?.context);
   const input: AgentHostApproval = {
     interruptId: event.interruptId,
     kind: request?.kind ?? 'approval',
@@ -998,6 +1069,7 @@ const approvalChunks = (
     })),
     ...(request?.agentId === undefined ? {} : { agentId: request.agentId }),
     ...(login === undefined ? {} : { login }),
+    ...(context === undefined ? {} : { context }),
   };
   return [
     {
@@ -1032,6 +1104,7 @@ export const projectAgentHostEvent = (
     case 'safeguard.recorded':
     case 'model.invocation-prepared':
     case 'model.invocation-bound':
+    case 'model.invocation-settled':
     case 'turn.finalized':
     case 'turn.conflicted':
     case 'turn.failed':

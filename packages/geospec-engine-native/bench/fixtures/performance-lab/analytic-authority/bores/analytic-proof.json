@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "taskId": "M3-HOLE-TOPOLOGY-FIXTURES-A1",
+  "authority": "exact construction arithmetic derived only from the pre-execution intent; no STEP import or candidate result input",
+  "intentSha256": "1b3086692e79b8cee191d1847f663619e5cade6e0b22be8cd0b95fb667391d7c",
+  "facts": [
+    {
+      "case": "through",
+      "derivation": "C intersects B for z in [0,10]; pi*1^2*10=10*pi",
+      "removedVolumeMm3": "10*pi",
+      "materialVolumeMm3": "1000-10*pi"
+    },
+    {
+      "case": "blind",
+      "derivation": "C intersects B for z in [2,10]; pi*1^2*8=8*pi",
+      "removedVolumeMm3": "8*pi",
+      "materialVolumeMm3": "1000-8*pi"
+    },
+    {
+      "case": "sealed-cavity",
+      "derivation": "C intersects B for z in [2,8]; pi*1^2*6=6*pi",
+      "removedVolumeMm3": "6*pi",
+      "materialVolumeMm3": "1000-6*pi"
+    },
+    {
+      "case": "edge-notch",
+      "derivation": "B contains exactly the x>=0 half of the centered unit disk; (pi*1^2/2)*10=5*pi",
+      "removedVolumeMm3": "5*pi",
+      "materialVolumeMm3": "1000-5*pi"
+    },
+    {
+      "case": "rigid-transformed",
+      "derivation": "the signed-permutation matrix [[0,0,1],[0,1,0],[-1,0,0]] has determinant 1; it maps +Z to +X, (5,5,0) to (20,35,35), and (5,5,10) to (30,35,35)",
+      "determinant": "1",
+      "axis": [1, 0, 0],
+      "rimCentersMm": [[20, 35, 35], [30, 35, 35]]
+    },
+    {
+      "case": "shared-instance",
+      "derivation": "the two occurrences reference one definition under identity and translation(20,0,0); rigid translation preserves its local geometry"
+    },
+    {
+      "case": "obstructed-through",
+      "derivation": "post x,y offsets lie in [-1/4,1/4], so the farthest squared radius is 2*(1/4)^2=1/8<1; inside B it spans z=[5,10], hence (1/2)*(1/2)*5=5/4",
+      "postCornerSquaredRadiusMm2": "1/8",
+      "boreSquaredRadiusMm2": "1",
+      "intrudingVolumeMm3": "5/4",
+      "consequence": "complete cylindrical-side and circular-rim metadata alone is insufficient to establish an unobstructed straight bore"
+    }
+  ],
+  "excluded": "No nominal imported volume, bound or parameter was used as an exact mathematical golden."
+}

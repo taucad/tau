@@ -10,7 +10,11 @@
 import type { NodeFsPort } from '#backend/node/port.js';
 import type { NodeFsRequest, NodeFsResponse } from '#backend/node/protocol.js';
 import { nodeFsProtocolVersion, nodeFsRequestSchema, parseNodeFsFrame } from '#backend/node/protocol.js';
-import { NodeFsProvider, writeNodeFileCheckedWithAuthority } from '#backend/node/provider.js';
+import {
+  NodeFsProvider,
+  writeNodeFileCheckedWithAuthority,
+  deleteNodeFileCheckedWithAuthority,
+} from '#backend/node/provider.js';
 import { acquireNodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import type { PathPolicy } from '#types.js';
@@ -349,11 +353,49 @@ const runOperation = async (
         throw error;
       }
     }
+    case 'deleteFileChecked': {
+      if (authority === undefined) {
+        throw Object.assign(new Error('Checked deletes require a node filesystem authority owner.'), {
+          code: 'CHECKED_WRITE_UNSUPPORTED',
+          applicationState: 'known-not-applied',
+        });
+      }
+      const input = {
+        ...request,
+        preconditions: request.preconditions.map((precondition) => ({
+          ...precondition,
+          expected:
+            precondition.expected === null || typeof precondition.expected === 'string'
+              ? precondition.expected
+              : new Uint8Array(precondition.expected),
+        })),
+      };
+      const state = { providerInvoked: false };
+      try {
+        return await authority.run(
+          { root: request.root, paths: input.preconditions.map(({ path }) => path) },
+          async (writer) => {
+            state.providerInvoked = true;
+            return deleteNodeFileCheckedWithAuthority(provider, input, writer);
+          },
+        );
+      } catch (error) {
+        if ((error as { applicationState?: unknown }).applicationState === undefined) {
+          Object.assign(error as Record<string, unknown>, {
+            applicationState: state.providerInvoked ? 'potentially-applied' : 'known-not-applied',
+          });
+        }
+        throw error;
+      }
+    }
     case 'readdir': {
       return provider.readdir(request.path);
     }
     case 'readdirWithStats': {
       return provider.readdirWithStats(request.path);
+    }
+    case 'readdirHeadWithStats': {
+      return provider.readdirWithStats(request.path, { content: 'head' });
     }
     case 'stat': {
       return provider.stat(request.path);
@@ -511,7 +553,7 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
         };
       } catch (error) {
         if (
-          request.op === 'writeFileChecked' &&
+          (request.op === 'writeFileChecked' || request.op === 'deleteFileChecked') &&
           (error as { applicationState?: unknown }).applicationState === undefined
         ) {
           Object.assign(error as Record<string, unknown>, { applicationState: 'known-not-applied' });

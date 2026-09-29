@@ -30,6 +30,7 @@ const baseConfig: UserConfig = {
     'src/components/menu.variants.ts',
     'src/components/nested-action.variants.ts',
     'src/components/navigation-menu.tsx',
+    'src/components/password-input.tsx',
     'src/components/popover.variants.ts',
     'src/components/popover.tsx',
     'src/components/progress.tsx',

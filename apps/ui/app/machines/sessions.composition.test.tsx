@@ -36,13 +36,14 @@ import { projectToManifest } from '@taucad/types';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 
 import { SessionsProvider } from '#hooks/use-sessions.js';
-import { sessionsActor } from '#services/sessions-store.js';
+import { createSessionsActor } from '#services/sessions-store.js';
 import { browserLiveProjectBudget, sessionsMachine } from '#machines/sessions.machine.js';
 import type { SessionsMachineEmitted } from '#machines/sessions.machine.js';
 import { projectSessionIdleWindowMilliseconds, projectSessionMachine } from '#machines/project-session.machine.js';
 import { useChatSidebarStatus, useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
+import { chatSessionMachine } from '#machines/chat-session.machine.js';
 
 const {
   workerFrames,
@@ -75,7 +76,7 @@ const {
   const revisionListeners = new Set<() => void>();
   let revisionStatus = {
     dirty: false,
-    branch: 'main',
+    line: { kind: 'branch', name: 'main' } as const,
     sync: { state: 'noRemote' as 'backedUp' | 'checking' | 'noRemote', pendingCount: 0 },
   };
   const editorSnapshot = (): unknown => ({
@@ -144,12 +145,36 @@ const {
         },
       }),
       stopRun: vi.fn(),
+      cancelProjectedRun: vi.fn(async () => 'stopped'),
+      publishProjectHostConnector: vi.fn(() => () => undefined),
       setProjectSession: vi.fn(),
       setFocusedProject: vi.fn(),
+      setRevisionFacts: vi.fn(),
+      /* The store owns each chat's root (PV-S5); a row adds one with `openChatRoot`. */
+      roots: new Map<string, Map<string, unknown>>(),
+      membership: new Set<() => void>(),
+      chatRootsOf(projectId: string) {
+        return this.roots.get(projectId) ?? new Map();
+      },
+      observedChatIdsOf: () => [],
+      getProjection: () => undefined,
+      subscribeProjection: () => () => undefined,
+      subscribeMembership(listener: () => void) {
+        this.membership.add(listener);
+        return () => {
+          this.membership.delete(listener);
+        };
+      },
+      isUnread: () => false,
+      subscribeUnread: () => () => undefined,
     },
     revision: {
       reset: () => {
-        revisionStatus = { dirty: false, branch: 'main', sync: { state: 'noRemote', pendingCount: 0 } };
+        revisionStatus = {
+          dirty: false,
+          line: { kind: 'branch', name: 'main' } as const,
+          sync: { state: 'noRemote', pendingCount: 0 },
+        };
         revisionListeners.clear();
       },
       setSync: (state: typeof revisionStatus.sync.state, pendingCount = 0) => {
@@ -244,6 +269,7 @@ const projectContextOf = (projectId: string): unknown => {
     projectId: 'unused',
     parameterService,
     viewGraphics: viewGraphicsOf(projectId),
+    flushWorkbenchRecordProducers: async () => undefined,
     projectRef: {
       send: (event: { type: string }) => {
         serviceCalls.push(`project:${event.type}`);
@@ -278,6 +304,14 @@ vi.mock('#hooks/use-project.js', () => ({
   },
   useProject: () => projectContextOf(useContext(StubProjectContext)),
 }));
+vi.mock('#routes/w.$workspace.$project/workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
+vi.mock('#routes/w.$workspace.$project/view-settings-sync-host.js', () => ({
+  ViewSettingsSyncHost: () => {
+    const projectId = useContext(StubProjectContext);
+    return <span data-testid='view-settings-host' data-project-id={projectId} />;
+  },
+}));
+vi.mock('#routes/w.$workspace.$project/entries-sync-host.js', () => ({ EntriesSyncHost: () => null }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
@@ -348,9 +382,6 @@ vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({ Revi
 vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
   RevisionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
-vi.mock('#routes/w.$workspace.$project/project-chat-run-settlement.js', () => ({
-  ProjectChatRunSettlement: () => null,
-}));
 vi.mock('#routes/w.$workspace.$project/project-command-items.js', () => ({ ProjectCommandPaletteItems: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-export-action.js', () => ({ ProjectExportAction: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({ ProjectShareRouteIntent: () => null }));
@@ -392,6 +423,27 @@ const ready = (projectId: string): ProjectRouteAccess => ({
     assets: { main: { entryPath: 'main.ts' } },
   }),
 });
+
+/**
+ * Add one chat's root the way the store does on acquire: a started chat machine, then a membership notification.
+ *
+ * @param projectId - The chat's project.
+ * @param chatId - The chat.
+ * @returns The chat's machine.
+ */
+const openChatRoot = (projectId: string, chatId: string) => {
+  const root = createActor(chatSessionMachine, { input: { chatId, projectId } }).start();
+  const roots = chatStore.roots.get(projectId) ?? new Map<string, unknown>();
+  roots.set(chatId, root);
+  chatStore.roots.set(projectId, roots);
+  for (const listener of chatStore.membership) {
+    listener();
+  }
+  return root;
+};
+
+/** The registry the rows share, composed as the app's root composes its own (MC-R4). */
+const sessionsActor = createSessionsActor().start();
 
 const emitted: SessionsMachineEmitted[] = [];
 
@@ -439,7 +491,7 @@ const renderRoute = async (
    * composition needs one too. */
   const at = (id: string): React.JSX.Element => (
     <QueryClientProvider client={queryClient}>
-      <SessionsProvider>
+      <SessionsProvider actor={sessionsActor}>
         <routeModule.ProjectRouteProviders projectId={id} />
       </SessionsProvider>
     </QueryClientProvider>
@@ -492,7 +544,7 @@ const renderRouteFamily = async (
     <MemoryRouter initialEntries={[initialEntry]}>
       <NavigationProbe />
       <QueryClientProvider client={queryClient}>
-        <SessionsProvider>
+        <SessionsProvider actor={sessionsActor}>
           <routeModule.ProjectSessionsHost>
             <Routes>
               <Route path='/' element={<div>Home</div>} />
@@ -548,6 +600,19 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  for (const roots of chatStore.roots.values()) {
+    for (const root of roots.values()) {
+      (root as ReturnType<typeof openChatRoot>).stop();
+    }
+  }
+  chatStore.roots.clear();
+  /* A row that failed with the editor busy leaves its flush owed, and the
+   * registry is a singleton: release it here, or the next row's `settle`
+   * times out on the wedged session and reports a failure that is not its own. */
+  await act(async () => {
+    editor.setIdle(true);
+    await Promise.resolve();
+  });
   /* A refused open is remembered until somebody makes room (R8); drop it so
    * one test's refusal cannot open a project inside the next one. */
   if (sessionsActor.getSnapshot().status === 'active') {
@@ -661,10 +726,10 @@ describe('sessions composition — sidebar rows across eight live projects (S48(
     const projectIds = Array.from({ length: browserLiveProjectBudget }, (_, index) => `row-${String(index)}`);
     expect(liveProjectIds()).toEqual(projectIds);
 
-    /* One chat per project, spawned the way the store spawns them. */
+    /* One chat per project, a root the way the store creates them. */
     for (const projectId of projectIds) {
       await act(async () => {
-        sessionOf(projectId)?.send({ type: 'openChat', chatId: `chat-${projectId}` });
+        openChatRoot(projectId, `chat-${projectId}`);
         await Promise.resolve();
       });
     }
@@ -685,7 +750,7 @@ describe('sessions composition — sidebar rows across eight live projects (S48(
 
     const sidebar = render(
       <QueryClientProvider client={queryClient}>
-        <SessionsProvider>
+        <SessionsProvider actor={sessionsActor}>
           <ul>
             {projectIds.map((projectId) => (
               <li key={projectId}>
@@ -701,9 +766,9 @@ describe('sessions composition — sidebar rows across eight live projects (S48(
     renders.length = 0;
 
     /* One chat starts streaming. */
-    const moved = sessionOf('row-3')?.getSnapshot().context.chatRefs['chat-row-3'];
+    const moved = chatStore.chatRootsOf('row-3').get('chat-row-3') as ReturnType<typeof openChatRoot>;
     await act(async () => {
-      moved?.send({ type: 'runLifecycle', phase: 'running' });
+      moved.send({ type: 'runLifecycle', phase: 'running' });
       await Promise.resolve();
     });
 
@@ -713,38 +778,36 @@ describe('sessions composition — sidebar rows across eight live projects (S48(
   });
 });
 
-describe('sessions composition — host-attested chat completion (P71)', () => {
-  it('keeps an edit made after lifecycle completion out of done until turn.finalized', async () => {
+describe('sessions composition — a finished run reads Done at its terminal row (P71, PV-S9)', () => {
+  it('reads Done at the terminal row without a page finishing state', async () => {
     const view = await renderRoute('finishing-project');
-    const session = sessionOf('finishing-project');
+    let chat: ReturnType<typeof openChatRoot> | undefined;
     await act(async () => {
-      session?.send({ type: 'openChat', chatId: 'finishing-chat' });
+      chat = openChatRoot('finishing-project', 'finishing-chat');
       await Promise.resolve();
     });
-    const chat = session?.getSnapshot().context.chatRefs['finishing-chat'];
 
     function ChatRow(): React.JSX.Element {
       const status = useChatSidebarStatus('finishing-project', 'finishing-chat');
       return <span>{status?.state ?? 'none'}</span>;
     }
 
-    const row = render(<ChatRow />);
+    const row = render(
+      <QueryClientProvider client={queryClient}>
+        <SessionsProvider actor={sessionsActor}>
+          <ChatRow />
+        </SessionsProvider>
+      </QueryClientProvider>,
+    );
     await act(async () => {
       chat?.send({ type: 'runLifecycle', phase: 'running', runId: 'run-finishing' });
       chat?.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-finishing' });
-      /* This is the person's edit in the settlement window. */
+      /* A revision edit does not delay the run's terminal presentation. */
       chat?.send({ type: 'dirtyChanged', dirty: true });
       await Promise.resolve();
     });
 
-    expect(row.getByText('finishing')).toBeInTheDocument();
-    expect(row.queryByText('done')).not.toBeInTheDocument();
-
-    await act(async () => {
-      chat?.send({ type: 'turnFinalizedObserved', runId: 'run-finishing', branch: 'main' });
-      await Promise.resolve();
-    });
-
+    expect(chat?.getSnapshot().matches({ run: 'done' })).toBe(true);
     expect(row.getByText('done')).toBeInTheDocument();
     row.unmount();
     view.unmount();
@@ -776,10 +839,9 @@ describe('sessions composition', () => {
     view.unmount();
   });
 
-  /* R6: the write-side host is mounted beside `ProjectPersistenceGuard`, above the `focused ?` gate.
-   * Move it into the gate -- or back into the viewer -- and a project the person navigated away from
-   * silently stops persisting what its own actors hold, with every other row still green. */
-  it('keeps writing the view settings of a live project that is not focused', async () => {
+  /* R6: the write-side host remains mounted beside ProjectPersistenceGuard above the focus gate.
+   * Its field-level writing is exercised by the dedicated view-store and owner suites. */
+  it('keeps the view record owner mounted for a live project that is not focused', async () => {
     const graphicsRef = createActor(
       graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
       { input: {} },
@@ -789,14 +851,9 @@ describe('sessions composition', () => {
     const view = await renderRoute('pin-unfocused-1');
     await view.rerender('pin-unfocused-2');
     expect(liveProjectIds()).toEqual(['pin-unfocused-1', 'pin-unfocused-2']);
-    serviceCalls.length = 0;
-
-    await act(async () => {
-      graphicsRef.send({ type: 'setGridVisibility', payload: false });
-      await Promise.resolve();
-    });
-
-    expect(serviceCalls).toContain('editor:updateViewSettings');
+    expect(
+      screen.getAllByTestId('view-settings-host').some((element) => element.dataset['projectId'] === 'pin-unfocused-1'),
+    ).toBe(true);
     graphicsRef.stop();
     view.unmount();
   });
@@ -940,15 +997,16 @@ describe('sessions composition', () => {
     view.unmount();
   });
 
-  it('flushes the focused project before showing a non-project route', async () => {
+  it('flushes the focused project before releasing a non-project route', async () => {
     const view = await renderRouteFamily('route-flush-a');
     editor.setIdle(false);
 
     await view.navigate('/projects');
 
+    /* Since 8451a6dca the shell stays in the document while the flush is owed
+     * (no frame without a sidebar), so "not shown yet" is: inert behind the
+     * overlay, and released only once the editor has stored. */
     expect(serviceCalls).toEqual(['editor:flushNow']);
-    /* The shell stays in the document while the flush holds the destination (8451a6dca), so the
-     * library is there — inert, behind the overlay — until the editor has stored. */
     expect(screen.getByRole('status', { name: 'Opening project' })).toBeInTheDocument();
     expect(screen.getByText('Project library').closest('[inert]')).not.toBeNull();
     await act(async () => {
@@ -1006,7 +1064,11 @@ describe('sessions composition', () => {
         await send({ type: 'open', projectId });
       }
       await settle();
-      sessionOf(projectId)?.send({ type: 'runStarted', chatId: `chat-${index}` });
+      sessionOf(projectId)?.send({
+        type: 'projectedRunsChanged',
+        runs: [`chat-${index}`],
+        stoppableRuns: [`chat-${index}`],
+      });
     }
     await settle();
 
@@ -1042,7 +1104,7 @@ describe('sessions composition', () => {
       if (facts.runs === undefined) {
         session?.send({ type: 'revisionState', dirty: facts.dirty === true, pushed: facts.pushed !== false });
       } else {
-        session?.send({ type: 'runStarted', chatId: 'chat-1' });
+        session?.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
       }
       await Promise.resolve();
     });
@@ -1061,7 +1123,7 @@ describe('sessions composition', () => {
     const view = await renderRoute('pin-g');
     const session = sessionOf('pin-g');
     await act(async () => {
-      session?.send({ type: 'runStarted', chatId: 'chat-1' });
+      session?.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
       await Promise.resolve();
     });
     await send({ type: 'idleExpired', projectId: 'pin-g' });
@@ -1069,7 +1131,7 @@ describe('sessions composition', () => {
 
     /* The run settles: the reason is gone, so the row stops saying it. */
     await act(async () => {
-      session?.send({ type: 'runSettled', chatId: 'chat-1' });
+      session?.send({ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] });
       await Promise.resolve();
     });
     expect(sessionsActor.getSnapshot().context.refusals['pin-g']).toBeUndefined();
@@ -1087,7 +1149,7 @@ describe('sessions composition', () => {
     const session = sessionOf('pin-d');
     expect(session).toBeDefined();
     await act(async () => {
-      session?.send({ type: 'runStarted', chatId: 'chat-1' });
+      session?.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
       await Promise.resolve();
     });
     expect(Object.keys(session?.getSnapshot().children ?? {}).length).toBeGreaterThan(0);
@@ -1197,6 +1259,13 @@ describe('sessions composition — the idle window (S48(6))', () => {
               project: readyChild('runtime'),
               agentHost: readyChild('agentHost'),
               compute: readyChild('compute'),
+              /* An unprovided close effect fails the close (MC-R8); these rows are about the timer, not the close. */
+              ...Object.fromEntries(
+                ['cancelRuns', 'flushProducers', 'flushSync', 'releaseAgentHost'].map((name) => [
+                  name,
+                  createAsyncLogic({ run: async () => undefined }),
+                ]),
+              ),
             },
           }),
         },
@@ -1257,7 +1326,7 @@ describe('sessions composition — the idle window (S48(6))', () => {
     registry.send({ type: 'open', projectId: 'timer-busy' });
     await drain(registry);
     const session = registry.getSnapshot().context.refs['timer-busy'];
-    session?.send({ type: 'runStarted', chatId: 'chat-1' });
+    session?.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
     await drain(registry);
     expect(session?.getSnapshot().value).toEqual({ live: 'busy' });
 
@@ -1266,7 +1335,7 @@ describe('sessions composition — the idle window (S48(6))', () => {
     expect(registry.getSnapshot().context.refs['timer-busy']).toBeDefined();
     expect(registry.getSnapshot().context.closed['timer-busy']).toBeUndefined();
 
-    session?.send({ type: 'runSettled', chatId: 'chat-1' });
+    session?.send({ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] });
     await drain(registry);
     registry.clock.advance(projectSessionIdleWindowMilliseconds);
     await drain(registry);
@@ -1423,10 +1492,11 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     vi.resetModules();
     const freshSessions = await import('#hooks/use-sessions.js');
     const freshStore = await import('#services/sessions-store.js');
+    const freshActor = freshStore.createSessionsActor().start();
 
     const view = render(
       <QueryClientProvider client={queryClient}>
-        <freshSessions.SessionsProvider>
+        <freshSessions.SessionsProvider actor={freshActor}>
           <span>app</span>
         </freshSessions.SessionsProvider>
       </QueryClientProvider>,
@@ -1440,7 +1510,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     await settle();
 
     expect(order).toEqual(['producers']);
-    expect(freshStore.sessionsActor.getSnapshot().matches('ready')).toBe(true);
+    expect(freshActor.getSnapshot().matches('ready')).toBe(true);
 
     await act(async () => {
       producers.resolve();
@@ -1449,7 +1519,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     await settle(() => order.length === 2);
 
     expect(order).toEqual(['producers', 'quiesced']);
-    expect(freshStore.sessionsActor.getSnapshot().matches('quiesced')).toBe(true);
+    expect(freshActor.getSnapshot().matches('quiesced')).toBe(true);
     view.unmount();
   });
 
@@ -1510,10 +1580,11 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     vi.resetModules();
     const freshSessions = await import('#hooks/use-sessions.js');
     const freshStore = await import('#services/sessions-store.js');
+    const freshActor = freshStore.createSessionsActor().start();
 
     const view = render(
       <QueryClientProvider client={queryClient}>
-        <freshSessions.SessionsProvider>
+        <freshSessions.SessionsProvider actor={freshActor}>
           <span>app</span>
         </freshSessions.SessionsProvider>
       </QueryClientProvider>,
@@ -1531,10 +1602,9 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
         });
       },
       cancelRuns: async () => undefined,
-      releaseLeases: async () => undefined,
     });
     await act(async () => {
-      freshStore.sessionsActor.send({ type: 'open', projectId: 'quit-hold' });
+      freshActor.send({ type: 'open', projectId: 'quit-hold' });
       await Promise.resolve();
     });
     await settle();
@@ -1548,7 +1618,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
     expect(view.getByRole('status').textContent).toContain('Closing your projects');
     expect(answers).toEqual([]);
-    expect(freshStore.sessionsActor.getSnapshot().matches('quiesced')).toBe(false);
+    expect(freshActor.getSnapshot().matches('quiesced')).toBe(false);
 
     /* The one way out. It answers main rather than leaving the shell to time
      * the renderer out; the packaged-shell ordering is the desktop spec's. */
@@ -1558,11 +1628,58 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     });
     await settle();
 
-    expect(freshStore.sessionsActor.getSnapshot().matches('forced')).toBe(true);
+    expect(freshActor.getSnapshot().matches('forced')).toBe(true);
     expect(answers).toEqual(['quiesced']);
     expect(view.queryByRole('status')).toBeNull();
 
     unregister();
+    view.unmount();
+  });
+
+  it('shows a failed producer flush, keeps sessions live, then retries before answering quit', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const asks: Array<() => void> = [];
+    const answers: string[] = [];
+    (globalThis as { tau?: unknown }).tau = {
+      quit: {
+        onAsk: (handler: () => void) => {
+          asks.push(handler);
+          return () => undefined;
+        },
+        reportQuiesced: () => answers.push('quiesced'),
+      },
+    };
+    flushProducers
+      .mockRejectedValueOnce(new Error('checked workbench write unavailable'))
+      .mockResolvedValueOnce(undefined);
+    vi.resetModules();
+    const freshSessions = await import('#hooks/use-sessions.js');
+    const freshStore = await import('#services/sessions-store.js');
+    const freshActor = freshStore.createSessionsActor().start();
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <freshSessions.SessionsProvider actor={freshActor}>
+          <span>app</span>
+        </freshSessions.SessionsProvider>
+      </QueryClientProvider>,
+    );
+    await settle();
+    await act(async () => {
+      asks[0]?.();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(view.getByRole('status').textContent).toContain('checked workbench write unavailable');
+    expect(freshActor.getSnapshot().matches('ready')).toBe(true);
+    expect(answers).toEqual([]);
+    await act(async () => {
+      view.getByRole('button', { name: 'Try again' }).click();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(flushProducers).toHaveBeenCalledTimes(2);
+    expect(freshActor.getSnapshot().matches('quiesced')).toBe(true);
+    expect(answers).toEqual(['quiesced']);
     view.unmount();
   });
 });

@@ -1,8 +1,8 @@
 import type { CheckedFileWriteResult } from '@taucad/types';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { createActor, createCallbackLogic, createAsyncLogic, waitFor } from 'xstate';
-import { parameterSetMachine, submitParameterRequest } from '#parameter-set.machine.js';
-import type { ParameterSetLoadInput } from '#parameter-set.machine.js';
+import { createParameterSetActor, parameterSetMachine, submitParameterRequest } from '#parameter-set.machine.js';
+import type { ParameterFiles, ParameterSetLoadInput } from '#parameter-set.machine.js';
 import { parameterSetHarness } from '#parameter-set.test-helper.js';
 import { planParameterChange } from '#planning.js';
 import type { ParameterChange } from '#planning.js';
@@ -779,4 +779,62 @@ it('rejects an invalid target before opening observation or loading authority', 
   actor.start();
   expect(actor.getSnapshot().matches('invalidInput')).toBe(true);
   expect(effects).toBe(0);
+});
+
+/** Files over an empty root whose one sidecar watch the test can reset or close. */
+const watchedFiles = (): Readonly<{ files: ParameterFiles; emit(type: string): void; close(): void }> => {
+  const closed = Promise.withResolvers<void>();
+  let onEvent: ((event: Readonly<{ type: string }>) => void) | undefined;
+  return {
+    files: {
+      watchReady: (_request, handler) => {
+        onEvent = handler;
+        return { ready: Promise.resolve(), closed: closed.promise, unsubscribe: () => undefined };
+      },
+      exists: async () => false,
+      readFile: async () => new Uint8Array(),
+      writeFileChecked: async () => {
+        throw new Error('No write expected.');
+      },
+    },
+    emit: (type) => onEvent?.({ type }),
+    close: () => {
+      closed.resolve();
+    },
+  };
+};
+
+const readyFactoryActor = async (files: ParameterFiles) => {
+  const fixture = await parameterSetHarness();
+  fixture.actor.stop();
+  const actor = createParameterSetActor({
+    target: fixture.snapshot.target,
+    files,
+    resolve: async () => fixture.snapshot.manifest,
+  });
+  await waitFor(actor, (state) => state.matches({ open: 'ready' }));
+  return actor;
+};
+
+it('should fail a parameter actor with WATCH_CLOSED when its watch closes', async () => {
+  const watch = watchedFiles();
+  const actor = await readyFactoryActor(watch.files);
+  watch.close();
+  await vi.waitFor(() => {
+    expect(actor.getSnapshot().context.diagnostic).toEqual({
+      code: 'WATCH_CLOSED',
+      message: 'Parameter watch closed.',
+    });
+  });
+  expect(actor.getSnapshot().matches({ open: 'disconnected' })).toBe(true);
+  actor.send({ type: 'close' });
+});
+
+it('should fail a parameter actor with WATCH_RESET when its watch resets', async () => {
+  const watch = watchedFiles();
+  const actor = await readyFactoryActor(watch.files);
+  watch.emit('reset');
+  expect(actor.getSnapshot().context.diagnostic).toEqual({ code: 'WATCH_RESET', message: 'Parameter watch reset.' });
+  expect(actor.getSnapshot().matches({ open: 'disconnected' })).toBe(true);
+  actor.send({ type: 'close' });
 });

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import type { Model, ResolvedModel } from '#hooks/use-models.js';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
@@ -73,7 +73,6 @@ vi.mock('#hooks/use-models.js', () => ({
 }));
 
 vi.mock('#hooks/use-cad-agent-config.js', () => ({
-  useAgentHostPlacements: () => ({ targets: state.placements, loading: false }),
   useBrowserAgentHostProjectAvailability: () => ({ status: 'available' }),
 }));
 
@@ -116,7 +115,7 @@ const codex = (refusal?: ExternalAgentDescriptor['refusal']): AgentHostPlacement
 const renderSheet = (focusEditor = vi.fn(), agentConfig: AgentConfig = noConfig) => {
   render(
     <TooltipProvider>
-      <ChatAgentSheet agentConfig={agentConfig} focusEditor={focusEditor} />
+      <ChatAgentSheet agentConfig={agentConfig} placements={state.placements} focusEditor={focusEditor} />
     </TooltipProvider>,
   );
   return { focusEditor };
@@ -199,7 +198,7 @@ describe('ChatAgentSheet', () => {
     const agentRow = screen.getByRole('button', { name: 'Agent: Tau. Change' });
     await userEvent.click(agentRow);
 
-    expect(screen.getByPlaceholderText('Search agents...')).toHaveFocus();
+    expect(screen.getByPlaceholderText('Search agents…')).toHaveFocus();
     expect(screen.getAllByRole('option').map((option) => option.getAttribute('aria-label'))).toEqual([
       'Tau, in use',
       'Codex · This Mac',
@@ -226,7 +225,7 @@ describe('ChatAgentSheet', () => {
     await userEvent.click(screen.getByRole('option', { name: 'Codex' }));
     /* Browsing an agent changes nothing, and the way back is to the agents. */
     expect(setActiveExecution).not.toHaveBeenCalled();
-    expect(screen.getByPlaceholderText('Search Codex models...')).toHaveFocus();
+    expect(screen.getByPlaceholderText('Search Codex models…')).toHaveFocus();
     expect(screen.getByRole('button', { name: 'Back to agents' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('option', { name: 'GPT-5.6-Sol' }));
 
@@ -288,6 +287,89 @@ describe('ChatAgentSheet', () => {
     renderSheet(vi.fn(), agentConfig);
 
     expect(screen.getByRole('button', { name: 'Agent and model: Codex, GPT-5.6-Sol, Fast mode' })).toBeInTheDocument();
+  });
+
+  it('shows and changes a discovered ACP reasoning option before the first session', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    state.placements = [codex()];
+    const select = vi.fn();
+    renderSheet(vi.fn(), {
+      options: [
+        {
+          type: 'select',
+          id: 'thought_level',
+          name: 'Thinking',
+          category: 'thought_level',
+          currentValue: 'medium',
+          options: [
+            { value: 'low', name: 'Low' },
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+      ],
+      valueOf: (option) => option.currentValue,
+      select,
+    });
+    await userEvent.click(screen.getByRole('button', { name: /Codex.*reasoning Medium/u }));
+    await userEvent.click(
+      within(screen.getByRole('tablist', { name: /Reasoning for Codex/u })).getByRole('tab', { name: 'High' }),
+    );
+    expect(select).toHaveBeenCalledWith('thought_level', 'high');
+  });
+
+  it('clears a previous model’s reasoning choice when choosing another ACP model', async () => {
+    state.execution = {
+      kind: 'acp',
+      hostId: 'desktop',
+      agentId: 'codex',
+      model: 'gpt-5.6-sol',
+      config: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP retains the adapter's wire option id.
+        reasoning_effort: 'ultra',
+      },
+    };
+    const placement = codex();
+    state.placements = [
+      {
+        ...placement,
+        externalAgents: [
+          {
+            id: 'codex',
+            displayName: 'Codex',
+            defaultModel: 'gpt-5.6-sol',
+            models: [
+              { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' },
+              { id: 'gpt-5.5', name: 'GPT-5.5' },
+            ],
+          },
+        ],
+      },
+    ];
+    renderSheet(vi.fn(), {
+      options: [
+        {
+          type: 'select',
+          id: 'reasoning_effort',
+          name: 'Reasoning effort',
+          category: 'thought_level',
+          currentValue: 'medium',
+          options: [{ value: 'ultra', name: 'Ultra' }],
+        },
+      ],
+      valueOf: (option) => option.currentValue,
+      select: vi.fn(),
+    });
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+    await userEvent.click(screen.getByRole('button', { name: /^Model: .*Change$/u }));
+    await userEvent.click(screen.getByRole('option', { name: 'GPT-5.5' }));
+
+    expect(setActiveExecution).toHaveBeenCalledWith({
+      kind: 'acp',
+      hostId: 'desktop',
+      agentId: 'codex',
+      model: 'gpt-5.5',
+    });
   });
 
   it('steps back one view on Escape, and closes only from the settings', async () => {

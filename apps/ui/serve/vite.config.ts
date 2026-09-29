@@ -1,7 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reactRouter } from '@react-router/dev/vite';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
@@ -16,10 +15,13 @@ import { base64Loader } from '@taucad/vite/base64-loader';
 import { createUiReactCompilerPlugin, createUiSourceAliasPlugin, uiSsrOptions } from '../vite.config';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- config-load seam is outside the app alias root.
 import { resolveTauCloudBuildEnabled } from '../build-environment';
+// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
+import { createGeoSpecMtAssets } from '../geospec-mt-assets.vite-plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
 const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
+const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
 
 /**
  * Serve build of `apps/ui` — the SPA a daemon hands to a browser.
@@ -46,23 +48,24 @@ export default defineConfig({
     tauBuildFrontendUrl: JSON.stringify(''),
     tauBuildId: JSON.stringify(Date.now()),
     tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
+    tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
     /* Not `desktop`: `isDesktopTarget()` must fold to `false` here, or the
      * bundle takes the Electron preload's ENV and IPC paths in a plain tab. */
     // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
     'import.meta.env.TAU_TARGET': '"web"',
   },
   plugins: [
+    mtAssets.plugin,
     createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
     tauRuntime(),
     base64Loader,
     createUiReactCompilerPlugin(),
     reactRouter(),
     tailwindcss(),
-    nxViteTsPaths(),
   ],
   worker: {
     // https://vite.dev/config/worker-options.html#worker-plugins
-    plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }), nxViteTsPaths()],
+    plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled })],
   },
   ssr: uiSsrOptions,
   server: {

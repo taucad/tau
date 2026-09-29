@@ -1,0 +1,3 @@
+{"version":1,"leaderEpoch":"epoch-a","sequence":0,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","epoch":2,"type":"run.lifecycle","state":"admitted"}
+{"version":1,"leaderEpoch":"epoch-a","sequence":1,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","epoch":2,"type":"run.lifecycle","state":"running"}
+{"version":1,"leaderEpoch":"epoch-b","sequence":0,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","epoch":1,"type":"message.appended","message":{"id":"m1","role":"assistant","content":"ok"}}

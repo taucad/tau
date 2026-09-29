@@ -4,6 +4,10 @@ import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import type { MobilePanelId } from '#constants/editor.constants.js';
 import type { PanelState } from '#types/editor.types.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
+import { useLocation } from 'react-router';
+import { useSelector } from '@xstate/react';
+import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
+import type { WorkbenchLaneNode } from '@taucad/workbench';
 
 export const projectWorkspaceKeyCombinations = {
   files: { key: 'f', ctrlKey: true },
@@ -20,6 +24,7 @@ export type WorkbenchPanelId =
   | 'kinematics'
   | 'files'
   | 'model'
+  | 'print'
   | 'revisions'
   | 'agents'
   | 'jobs'
@@ -35,6 +40,8 @@ type ProjectWorkspaceContextValue = {
   setWorkbenchOpen: (open: boolean) => void;
   setChatOpen: (open: boolean) => void;
   connectWorkbench: (openPanel: (panelId: WorkbenchPanelId) => void) => () => void;
+  registerLayoutController: (controller: WorkbenchLayoutController) => () => void;
+  layoutController: WorkbenchLayoutController;
 };
 
 const ProjectWorkspaceContext = createContext<ProjectWorkspaceContextValue | undefined>(undefined);
@@ -80,6 +87,33 @@ export function useProjectWorkspace(options?: {
   return context;
 }
 
+/** The page-owned Restore/snapshot API used by the arrangement card and chat snapshot. */
+export function useWorkbenchLayoutController(): WorkbenchLayoutController {
+  return useProjectWorkspace().layoutController;
+}
+
+const containsPane = (node: WorkbenchLaneNode, pane: WorkbenchUtilityPanelId): boolean =>
+  node.kind === 'group'
+    ? node.tabs.some((tab) => tab.kind === 'pane' && tab.pane === pane)
+    : node.children.some((child) => containsPane(child, pane));
+
+const addPane = (node: WorkbenchLaneNode, pane: WorkbenchUtilityPanelId): WorkbenchLaneNode => {
+  if (node.kind === 'group') {
+    const index = node.tabs.findIndex((tab) => tab.kind === 'pane' && tab.pane === pane);
+    return index === -1
+      ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane }], active: node.tabs.length }
+      : { ...node, active: index };
+  }
+  const childIndex = Math.max(
+    0,
+    node.children.findIndex((child) => containsPane(child, pane)),
+  );
+  return {
+    ...node,
+    children: node.children.map((child, index) => (index === childIndex ? addPane(child, pane) : child)),
+  };
+};
+
 const mobilePanelByWorkbenchPanel: Partial<Record<WorkbenchPanelId, MobilePanelId>> = {
   parameters: 'parameters',
   files: 'files',
@@ -91,9 +125,46 @@ const mobilePanelByWorkbenchPanel: Partial<Record<WorkbenchPanelId, MobilePanelI
 
 export function ProjectWorkspaceProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const { editorRef, mainEntryPath } = useProject();
+  const location = useLocation();
   const isMobile = useIsMobile();
+  const isEditorReady = useSelector(editorRef, (snapshot) => snapshot.matches('ready'));
   const openerRef = useRef<((panelId: WorkbenchPanelId) => void) | undefined>(undefined);
-  const queuedPanelRef = useRef<WorkbenchPanelId | undefined>(undefined);
+  const layoutControllerRef = useRef<WorkbenchLayoutController | undefined>(undefined);
+  const layoutListenersRef = useRef(new Set<() => void>());
+  const layoutController = useMemo<WorkbenchLayoutController>(
+    () => ({
+      snapshot: () => layoutControllerRef.current?.snapshot(),
+      subscribe: (listener) => {
+        layoutListenersRef.current.add(listener);
+        return () => {
+          layoutListenersRef.current.delete(listener);
+        };
+      },
+      restorePreviousArrangement: async () => layoutControllerRef.current?.restorePreviousArrangement() ?? false,
+      registerViewer: (apply) => layoutControllerRef.current?.registerViewer(apply) ?? (() => undefined),
+      registerWorkbench: (apply) => layoutControllerRef.current?.registerWorkbench(apply) ?? (() => undefined),
+      personViewerChanged: (node) => layoutControllerRef.current?.personViewerChanged(node),
+      personWorkbenchChanged: (node) => layoutControllerRef.current?.personWorkbenchChanged(node),
+    }),
+    [],
+  );
+  const registerLayoutController = useCallback((controller: WorkbenchLayoutController) => {
+    layoutControllerRef.current = controller;
+    const unsubscribe = controller.subscribe(() => {
+      for (const listener of layoutListenersRef.current) {
+        listener();
+      }
+    });
+    for (const listener of layoutListenersRef.current) {
+      listener();
+    }
+    return () => {
+      if (layoutControllerRef.current === controller) {
+        layoutControllerRef.current = undefined;
+      }
+      unsubscribe();
+    };
+  }, []);
 
   const setChatOpen = useCallback(
     (open: boolean) => {
@@ -107,6 +178,18 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
     },
     [editorRef, isMobile],
   );
+
+  const shouldOpenChat = location.state?.openChat === true || location.state?.focusChatComposer === true;
+  const navigationKey = location.key;
+  /* Each sidebar click is its own navigation, even onto the selected chat, so the
+   * pane opens once per navigation and a pane the user closes afterwards stays closed. */
+  const openedForNavigationRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (isEditorReady && shouldOpenChat && openedForNavigationRef.current !== navigationKey) {
+      openedForNavigationRef.current = navigationKey;
+      setChatOpen(true);
+    }
+  }, [isEditorReady, navigationKey, setChatOpen, shouldOpenChat]);
 
   const setWorkbenchOpen = useCallback(
     (open: boolean) => {
@@ -132,20 +215,15 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
       setWorkbenchOpen(true);
       if (openerRef.current) {
         openerRef.current(panelId);
-      } else {
-        queuedPanelRef.current = panelId;
+      } else if (panelId !== 'files') {
+        layoutController.personWorkbenchChanged((node) => addPane(node, panelId));
       }
     },
-    [editorRef, isMobile, setWorkbenchOpen],
+    [editorRef, isMobile, layoutController, setWorkbenchOpen],
   );
 
   const connectWorkbench = useCallback((opener: (panelId: WorkbenchPanelId) => void) => {
     openerRef.current = opener;
-    const queued = queuedPanelRef.current;
-    queuedPanelRef.current = undefined;
-    if (queued) {
-      opener(queued);
-    }
     return () => {
       if (openerRef.current === opener) {
         openerRef.current = undefined;
@@ -229,14 +307,18 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
     const modelSubscription = editorRef.on('modelComponentRevealRequested', () => {
       openPanel('model');
     });
+    const kinematicsSubscription = editorRef.on('kinematicsRevealRequested', () => {
+      openPanel('kinematics');
+    });
     return () => {
       modelSubscription.unsubscribe();
+      kinematicsSubscription.unsubscribe();
     };
   }, [editorRef, openPanel]);
 
   const value = useMemo(
-    () => ({ openPanel, setWorkbenchOpen, setChatOpen, connectWorkbench }),
-    [connectWorkbench, openPanel, setChatOpen, setWorkbenchOpen],
+    () => ({ openPanel, setWorkbenchOpen, setChatOpen, connectWorkbench, registerLayoutController, layoutController }),
+    [connectWorkbench, layoutController, openPanel, registerLayoutController, setChatOpen, setWorkbenchOpen],
   );
   return <ProjectWorkspaceContext.Provider value={value}>{children}</ProjectWorkspaceContext.Provider>;
 }

@@ -282,6 +282,200 @@ describe('ComputeReuseService', () => {
     expect(compute).toHaveBeenCalledOnce();
   });
 
+  it('should promote each surviving required owner after one shared computation', async () => {
+    const owners = [
+      { name: 'same-name' } as unknown as CacheRetention,
+      { name: 'same-name' } as unknown as CacheRetention,
+    ];
+    const promoted: CacheRetention[] = [];
+    const service = createComputeReuseService({
+      contentStore: createMemoryContentStore({ maxBytes: 4096 }),
+      actionStore: createMemoryActionStore({ maxBytes: 4096 }),
+      promote: async ({ retention: owner }) => {
+        promoted.push(owner);
+        return { status: 'promoted' };
+      },
+    });
+    let release!: (value: string) => void;
+    const work = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+    const compute = vi.fn(async () => work);
+    const first = service.evaluate({ action, codec: textCodec, policy: 'required', retention: owners[0]!, compute });
+    const second = service.evaluate({ action, codec: textCodec, policy: 'required', retention: owners[1]!, compute });
+    release('shared');
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(compute).toHaveBeenCalledOnce();
+    expect(promoted).toEqual(owners);
+    expect(
+      firstResult.source === 'computed' && firstResult.publication.status === 'stored'
+        ? firstResult.publication.retention
+        : undefined,
+    ).toBe(owners[0]);
+    expect(
+      secondResult.source === 'computed' && secondResult.publication.status === 'stored'
+        ? secondResult.publication.retention
+        : undefined,
+    ).toBe(owners[1]);
+  });
+
+  it('should refuse only the owner whose durability barrier declines', async () => {
+    const firstOwner = { name: 'first' } as unknown as CacheRetention;
+    const secondOwner = { name: 'second' } as unknown as CacheRetention;
+    const compute = vi.fn(async () => 'shared');
+    const service = createComputeReuseService({
+      contentStore: createMemoryContentStore({ maxBytes: 4096 }),
+      actionStore: createMemoryActionStore({ maxBytes: 4096 }),
+      promote: async ({ retention: owner }) =>
+        owner === firstOwner ? { status: 'promoted' } : { status: 'no-durable-storage' },
+    });
+
+    const [first, second] = await Promise.allSettled([
+      service.evaluate({ action, codec: textCodec, policy: 'required', retention: firstOwner, compute }),
+      service.evaluate({ action, codec: textCodec, policy: 'required', retention: secondOwner, compute }),
+    ]);
+    expect(compute).toHaveBeenCalledOnce();
+    expect(first.status).toBe('fulfilled');
+    expect(second.status).toBe('rejected');
+    if (first.status !== 'fulfilled' || second.status !== 'rejected') {
+      return;
+    }
+    expect(
+      first.value.source === 'computed' && first.value.publication.status === 'stored'
+        ? first.value.publication.retention
+        : undefined,
+    ).toBe(firstOwner);
+    expect(second.reason).toBeInstanceOf(CacheRequiredError);
+  });
+
+  it('should not promote a canceled first owner when another owner survives', async () => {
+    const firstOwner = { name: 'first' } as unknown as CacheRetention;
+    const secondOwner = { name: 'second' } as unknown as CacheRetention;
+    const promoted: CacheRetention[] = [];
+    const service = createComputeReuseService({
+      contentStore: createMemoryContentStore({ maxBytes: 4096 }),
+      actionStore: createMemoryActionStore({ maxBytes: 4096 }),
+      promote: async ({ retention: owner }) => {
+        promoted.push(owner);
+        return { status: 'promoted' };
+      },
+    });
+    let release!: (value: string) => void;
+    const work = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+    const compute = vi.fn(async () => work);
+    const firstController = new AbortController();
+    const first = service.evaluate({
+      action,
+      codec: textCodec,
+      policy: 'required',
+      retention: firstOwner,
+      signal: firstController.signal,
+      compute,
+    });
+    const second = service.evaluate({ action, codec: textCodec, policy: 'required', retention: secondOwner, compute });
+    firstController.abort();
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    release('shared');
+    const result = await second;
+    expect(compute).toHaveBeenCalledOnce();
+    expect(promoted).toEqual([secondOwner]);
+    expect(
+      result.source === 'computed' && result.publication.status === 'stored' ? result.publication.retention : undefined,
+    ).toBe(secondOwner);
+  });
+
+  it('should reject an owner canceled during promotion without failing another owner', async () => {
+    const firstOwner = { name: 'first' } as unknown as CacheRetention;
+    const secondOwner = { name: 'second' } as unknown as CacheRetention;
+    let startPromotion!: () => void;
+    let finishPromotion!: () => void;
+    const promotionStarted = new Promise<void>((resolve) => {
+      startPromotion = resolve;
+    });
+    const promotionGate = new Promise<void>((resolve) => {
+      finishPromotion = resolve;
+    });
+    const service = createComputeReuseService({
+      contentStore: createMemoryContentStore({ maxBytes: 4096 }),
+      actionStore: createMemoryActionStore({ maxBytes: 4096 }),
+      promote: async ({ retention: owner }) => {
+        if (owner === firstOwner) {
+          startPromotion();
+          await promotionGate;
+        }
+        return { status: 'promoted' };
+      },
+    });
+    const controller = new AbortController();
+    const compute = vi.fn(async () => 'shared');
+    const first = service.evaluate({
+      action,
+      codec: textCodec,
+      policy: 'required',
+      retention: firstOwner,
+      signal: controller.signal,
+      compute,
+    });
+    const second = service.evaluate({ action, codec: textCodec, policy: 'required', retention: secondOwner, compute });
+    await promotionStarted;
+    controller.abort();
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    const survivor = await second;
+    finishPromotion();
+    expect(compute).toHaveBeenCalledOnce();
+    expect(
+      survivor.source === 'computed' && survivor.publication.status === 'stored'
+        ? survivor.publication.retention
+        : undefined,
+    ).toBe(secondOwner);
+  });
+
+  it('should start a fresh same-action flight after every waiter cancels', async () => {
+    const { service } = createService();
+    let start!: () => void;
+    const started = new Promise<void>((resolve) => {
+      start = resolve;
+    });
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    const staleCompute = vi.fn(async () => {
+      start();
+      return new Promise<string>(() => {
+        // The canceled producer ignores its signal and never settles.
+      });
+    });
+    const first = service.evaluate({
+      action,
+      codec: textCodec,
+      policy: 'required',
+      retention,
+      signal: firstController.signal,
+      compute: staleCompute,
+    });
+    const second = service.evaluate({
+      action,
+      codec: textCodec,
+      policy: 'required',
+      retention,
+      signal: secondController.signal,
+      compute: staleCompute,
+    });
+    await started;
+    firstController.abort();
+    secondController.abort();
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(second).rejects.toMatchObject({ name: 'AbortError' });
+    const freshCompute = vi.fn(async () => 'fresh');
+    await expect(
+      service.evaluate({ action, codec: textCodec, policy: 'required', retention, compute: freshCompute }),
+    ).resolves.toMatchObject({ value: 'fresh', publication: { status: 'stored', retention } });
+    expect(staleCompute).toHaveBeenCalledOnce();
+    expect(freshCompute).toHaveBeenCalledOnce();
+  });
+
   it('aborts shared work only after every waiter cancels', async () => {
     const { service } = createService();
     let producerSignal: AbortSignal | undefined;
@@ -346,14 +540,15 @@ describe('ComputeReuseService', () => {
     const { service } = createService();
     promote.mockClear();
     await service.evaluate({ action, codec: textCodec, policy: 'required', retention, compute: async () => 'solved' });
+    const laterOwner = { name: 'later-job' } as unknown as CacheRetention;
     const hit = await service.evaluate({
       action,
       codec: textCodec,
       policy: 'required',
-      retention,
+      retention: laterOwner,
       compute: async () => 'solved',
     });
-    expect(hit).toMatchObject({ source: 'cache', retention });
+    expect(hit).toMatchObject({ source: 'cache', retention: laterOwner });
     expect(promote, 'the hit path pins and awaits the barrier too').toHaveBeenCalledTimes(2);
   });
 

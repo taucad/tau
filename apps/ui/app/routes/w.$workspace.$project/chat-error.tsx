@@ -4,12 +4,14 @@ import { Bot, ChevronRight, CircleAlert, RefreshCcw, WifiOff } from 'lucide-reac
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
-import { useChatActions, useChatRetrySnapshot, useChatSelector } from '#hooks/use-chat.js';
+import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
+import type { CombinedChatState } from '#hooks/use-chat.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { chatHistoryTidyFailureMessage, chatTurnNotStartedCode, parseErrorForPersistence } from '#utils/error.utils.js';
+import { chatHistoryTidyFailureMessage, parseErrorForPersistence } from '#utils/error.utils.js';
+import { cardOf } from '#utils/chat-error-card.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 import { ChatErrorPausedTurn } from '#routes/w.$workspace.$project/chat-error-paused-turn.js';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
@@ -20,37 +22,56 @@ import { ChatErrorRateLimit } from '#routes/w.$workspace.$project/chat-error-rat
 import { ChatErrorTool } from '#routes/w.$workspace.$project/chat-error-tool.js';
 import { ChatErrorAgentStop } from '#routes/w.$workspace.$project/chat-error-agent-stop.js';
 import { ChatErrorProviderAccount } from '#routes/w.$workspace.$project/chat-error-provider-account.js';
-import { externalAgentStopCodes, externalAgentStopSchema, isResumableRunFailure } from '@taucad/agent-host';
+import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.js';
+import { isResumableRunFailure } from '@taucad/agent-host';
+import { externalAgentStopCodes, externalAgentStopSchema } from '@taucad/agent-host/wire';
+import { selectCaughtUp, selectCurrentRun, selectRunFailure } from '#machines/chat-projection.logic.js';
 
-/**
- * Model-call failures that leave the turn whole.
- *
- * Every one of these is raised after the run was admitted and before the
- * provider's reply landed, so no tool ran on the failed call and the history
- * the host would resume from is complete. The category cannot tell them apart:
- * the masked in-stream failure arrives on an HTTP 200, which reads as
- * `generic`, and a 502 reads as `server`.
- *
- * `RUN_ABANDONED` is the host's record of a run whose document died: nothing
- * the person did failed, and the host resumes it from what it had saved.
- */
-const pausedTurnCodes = new Set([
-  'RUN_ABANDONED',
-  'NETWORK_ERROR',
-  'PROVIDER_UNAVAILABLE',
-  'MALFORMED_RESPONSE',
-  'UPSTREAM_REJECTED',
-  'WORKER_CRASHED',
-]);
+const projectedFailureErrors = new WeakMap<Readonly<{ runId: string; text: string }>, NormalizedChatError>();
 
-/**
- * Refusals described as a chat-length problem: compaction could not make room,
- * or the gateway refused the request's size (`REQUEST_TOO_LARGE`).
- */
-const chatTooLongCodes = new Set(['NO_EVICTABLE_HISTORY', 'CIRCUIT_BREAKER_OPEN', 'REQUEST_TOO_LARGE']);
-
-/** Compaction failures whose plain-language recovery is the same kept turn. */
-const chatHistoryTidyFailureCodes = new Set(['SESSION_LOG_INTEGRITY', 'SUMMARY_REQUIRED']);
+/** Only the caught-up host log can retire a legacy chat-wide error. */
+export function selectVisibleChatError(
+  state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'error' | 'persistedError'>,
+): NormalizedChatError | undefined {
+  const { projection } = state;
+  const caughtUp = projection !== undefined && selectCaughtUp(projection);
+  const run = projection === undefined || !caughtUp ? undefined : selectCurrentRun(projection);
+  if (projection !== undefined && run?.lifecycle === 'failed') {
+    const failure = selectRunFailure(projection, run.runId);
+    if (failure !== undefined) {
+      const key = projection.failure;
+      if (key !== undefined) {
+        let parsed = projectedFailureErrors.get(key);
+        if (parsed === undefined) {
+          parsed = parseErrorForPersistence(new Error(failure));
+          projectedFailureErrors.set(key, parsed);
+        }
+        return parsed;
+      }
+    }
+  }
+  if (caughtUp && state.attachmentStatus === 'attached') {
+    // A command refusal carries its command identity. A chat-wide legacy error
+    // does not. A later healthy run also retires a prior refused Start, even
+    // when a different page admitted that run and this page never cleared the
+    // old chat record. A refused Resume still belongs to the same paused run;
+    // the persisted command records that run identity, not just its command ID.
+    const refusal = state.persistedError;
+    if (refusal?.requestId === undefined) {
+      return undefined;
+    }
+    const refusedRunId = refusal.details?.['runId'];
+    const refusedCommandType = refusal.details?.['commandType'];
+    if (
+      run !== undefined &&
+      (run.lifecycle !== 'paused' || refusedRunId !== run.runId || refusedCommandType !== 'resume')
+    ) {
+      return undefined;
+    }
+    return refusal;
+  }
+  return state.error ? parseErrorForPersistence(state.error) : state.persistedError;
+}
 
 /**
  * Attempts to format a string as pretty-printed JSON.
@@ -68,10 +89,8 @@ function tryFormatJson(text: string): string {
  * The card a coded failure names for itself, or `undefined` when its category
  * decides instead.
  *
- * Kept out of the component because the status a failure carries (200 for an
- * in-stream provider failure, none at all for a host refusal) says nothing
- * about whether the turn survived it, so this is a list of codes rather than a
- * branch of the category switch.
+ * Kept out of the component because a status says nothing about whether the
+ * turn survived; the one typed card map and host retry class decide that.
  *
  * @param input - The parsed failure, whether the host will resume it, the card
  * class and the restart gesture a turn that never started is offered.
@@ -82,32 +101,33 @@ function codedErrorCard({
   resumable,
   className,
   onTryAgain,
+  onRegenerate,
+  onNewChat,
+  canOpenNewChat,
 }: {
   readonly error: NormalizedChatError;
   readonly resumable: boolean;
   readonly className: string;
   readonly onTryAgain: () => void;
+  readonly onRegenerate: () => void;
+  readonly onNewChat: () => void;
+  readonly canOpenNewChat: boolean;
 }): React.ReactNode | undefined {
   const { code } = error;
-  if (code === undefined) {
-    return undefined;
-  }
+  const { category, retry } = cardOf(code, error.category);
   const rawDetail = error.raw ? tryFormatJson(error.raw) : undefined;
   const raw = rawDetail === undefined ? {} : { raw: rawDetail };
 
-  // The provider account behind Tau's key refused; the deployment's own card
-  // says whose account it is, so the code outranks the category (a 503 relayed
-  // in a 200 stream would otherwise read as a Tau outage).
-  if (code === 'PROVIDER_ACCOUNT_EXHAUSTED') {
+  if (category === 'providerAccount') {
     return <ChatErrorProviderAccount className={className} description={error.message} details={error.details} />;
   }
 
-  if (chatHistoryTidyFailureCodes.has(code)) {
+  if (category === 'historyTidy') {
     return (
       <ChatErrorPausedTurn
         className={className}
         reason={chatHistoryTidyFailureMessage}
-        resumable={resumable}
+        resumable={retry === 'resume' && resumable}
         guidance='Resume to continue without losing your work.'
         canTryAgain
         {...raw}
@@ -115,51 +135,30 @@ function codedErrorCard({
     );
   }
 
-  if (pausedTurnCodes.has(code)) {
+  /* The host went silent: a browser worker that died and could not be replaced (was `WORKER_CRASHED`, T3), or a
+   * daemon past the channel's liveness bound. The command's effect is unknown — the start may never have been
+   * admitted — so the card claims no run and promises nothing. */
+  if (category === 'peerUnresponsive') {
     return (
       <ChatErrorPausedTurn
         className={className}
-        reason={error.message}
-        resumable={resumable}
-        icon={code === 'PROVIDER_UNAVAILABLE' || code === 'UPSTREAM_REJECTED' ? WifiOff : CircleAlert}
+        title='Tau stopped responding'
+        reason='Tau cannot tell whether this turn started.'
+        resumable={false}
         {...raw}
       />
     );
   }
 
-  // A refusal of the request itself resumes once the model or its settings
-  // change; re-issuing it unchanged meets the same refusal, which is honest and
-  // costs nothing.
-  if (code === 'INVALID_REQUEST') {
-    return (
-      <ChatErrorPausedTurn
-        className={className}
-        title='The model refused this request'
-        reason={error.message}
-        resumable={resumable}
-        guidance='Change the model or its settings, then resume.'
-        canSwitchModel
-        {...raw}
-      />
-    );
-  }
-
-  if (chatTooLongCodes.has(code)) {
-    return <ChatErrorTooLong className={className} resumable={resumable} />;
-  }
-
-  /* Not a failure: the host was asked to continue a run it no longer holds —
-   * it was already settled, or it ended in a way a resume cannot pick up. The
-   * turn is whole and nothing was spent, so the card says so and offers the
-   * one thing that does work, which is running the turn again. */
-  if (code === 'RESUME_UNAVAILABLE') {
+  // The host's hello names a wire this page cannot speak; only updating Tau there helps.
+  if (category === 'updateHost') {
     return (
       <ChatErrorCard
         className={className}
-        tone='neutral'
-        icon={Bot}
-        title='Nothing left to continue'
-        description={error.message}
+        tone='warning'
+        icon={CircleAlert}
+        title='Update Tau on this host'
+        description='This host runs a version of Tau this page cannot talk to. Update Tau there, then try again.'
         actions={
           <Button variant='outline' size='sm' onClick={onTryAgain}>
             <RefreshCcw className='size-3.5' />
@@ -170,9 +169,64 @@ function codedErrorCard({
     );
   }
 
+  if (category === 'pausedTurn') {
+    return (
+      <ChatErrorPausedTurn
+        className={className}
+        reason={error.message}
+        resumable={retry === 'resume' && resumable}
+        icon={error.category === errorCategory.overloaded ? WifiOff : CircleAlert}
+        {...raw}
+      />
+    );
+  }
+
+  // A refusal of the request itself resumes once the model or its settings
+  // change; re-issuing it unchanged meets the same refusal, which is honest and
+  // costs nothing.
+  if (category === 'switchModel') {
+    return (
+      <ChatErrorPausedTurn
+        className={className}
+        title='The model refused this request'
+        reason={error.message}
+        resumable={retry === 'resume' && resumable}
+        guidance='Change the model or its settings, then resume.'
+        canSwitchModel
+        {...raw}
+      />
+    );
+  }
+
+  if (category === 'chatTooLong') {
+    return <ChatErrorTooLong className={className} resumable={retry === 'resume' && resumable} />;
+  }
+
+  /* Not a failure: the host was asked to continue a run it no longer holds —
+   * it was already settled, or it ended in a way a resume cannot pick up. The
+   * turn is whole and nothing was spent, so the card says so and offers the
+   * one thing that does work, which is running the turn again. */
+  if (category === 'nothingToResume') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='neutral'
+        icon={Bot}
+        title='Nothing left to continue'
+        description={error.message}
+        actions={
+          <Button variant='outline' size='sm' onClick={onRegenerate}>
+            <RefreshCcw className='size-3.5' />
+            Try again
+          </Button>
+        }
+      />
+    );
+  }
+
   // Another tab holds this chat's log. Taking it back is a leadership protocol,
   // not an error action (ruling Q6), and reloading already follows that tab.
-  if (code === 'LEADERSHIP_LOST') {
+  if (category === 'otherTab') {
     return (
       <ChatErrorCard
         className={className}
@@ -185,7 +239,7 @@ function codedErrorCard({
   }
 
   // The one restart that loses nothing: admission refused before a run existed.
-  if (code === chatTurnNotStartedCode) {
+  if (category === 'turnNotStarted') {
     return (
       <ChatErrorCard
         className={className}
@@ -203,42 +257,106 @@ function codedErrorCard({
     );
   }
 
+  if (category === 'otherBuild') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='neutral'
+        icon={Bot}
+        title='Another version of Tau is running this chat'
+        description='It continues here when that run finishes; if this window is the older version, reload it.'
+      />
+    );
+  }
+
+  if (category === 'modelPending') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='neutral'
+        icon={Bot}
+        title='Checking whether the last model call finished'
+        role='status'
+        aria-label='Checking whether the last model call finished'
+        aria-busy='true'
+      />
+    );
+  }
+
+  if (category === 'update') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='warning'
+        icon={CircleAlert}
+        title='This chat was continued in a newer version of Tau'
+        actions={
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => {
+              globalThis.location.reload();
+            }}
+          >
+            Reload
+          </Button>
+        }
+      />
+    );
+  }
+
+  if (category === 'historyInvalid') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='warning'
+        icon={CircleAlert}
+        title="Tau can't read this chat's history"
+        description='Start a new chat to keep working.'
+        actions={
+          <Button variant='outline' size='sm' disabled={!canOpenNewChat} onClick={onNewChat}>
+            New chat
+          </Button>
+        }
+      />
+    );
+  }
+
+  if (category === 'externalRestart') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='warning'
+        icon={CircleAlert}
+        title='Tau restarted while the agent waited for your approval'
+        description="Its turn can't be resumed. Send a message to continue."
+        actions={
+          <Button variant='outline' size='sm' onClick={onRegenerate}>
+            Try again
+          </Button>
+        }
+      />
+    );
+  }
+
   return undefined;
 }
 
 export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
   const [genericDetailsOpen, setGenericDetailsOpen] = useState(false);
-  const { retryAttempt } = useChatRetrySnapshot();
   // Derive parsed error inside selector - prefer runtime error, fallback to persisted
-  const parsedError = useChatSelector((state): NormalizedChatError | undefined => {
-    if (state.error) {
-      return parseErrorForPersistence(state.error);
-    }
-
-    return state.persistedError;
-  });
-  const { continueChat } = useChatActions();
-
-  // R7: hide the banner during transparent auto-retry; the reconnecting affordance
-  // is `ChatMessagePlanning`, not this component. The early return MUST sit below
-  // every hook call -- crossing the hook list with a conditional return triggers
-  // React error #300 ("Rendered fewer hooks than expected") on the
-  // retryAttempt 0 -> N transition, which the FloatingPanel boundary then
-  // surfaces as the "Chat Unavailable" screen.
-  if (retryAttempt > 0) {
-    return null;
-  }
+  const parsedError = useChatSelector(selectVisibleChatError);
+  const { regenerate } = useChatActions();
+  const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
 
   if (!parsedError) {
     return null;
   }
 
-  // Generic fallback recovery must preserve partial assistant parts the user
-  // already saw. Specialized components own auth, credits, rate-limit, and
-  // tool-error actions. Credits remain the account-state "Resume" exception.
-  const handleTryAgain = (): void => {
-    continueChat();
-  };
+  // Try again is an explicit replay. Specialized components own auth,
+  // credits, rate-limit, and tool-error actions. Credits remain the
+  // account-state "Resume" exception.
+  const handleTryAgain = regenerate;
 
   // Render the generic/server error view with collapsible details
   const renderGenericError = (): React.ReactNode => {
@@ -316,6 +434,11 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
     resumable,
     className: cn('min-w-0', className),
     onTryAgain: handleTryAgain,
+    onRegenerate: regenerate,
+    onNewChat: () => {
+      void openNewChat();
+    },
+    canOpenNewChat,
   });
   if (codedCard !== undefined) {
     return codedCard;
@@ -323,7 +446,7 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
 
   // Route to specialized error components based on category
   // All cases from ErrorCategory are handled explicitly for exhaustive matching
-  const { category } = parsedError;
+  const { category } = cardOf(parsedError.code, parsedError.category);
   switch (category) {
     case errorCategory.auth: {
       return <ChatErrorUnauthorized className={cn('min-w-0', className)} />;
@@ -337,18 +460,20 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
       return (
         <ChatErrorCredits
           className={cn('min-w-0', className)}
+          resumable={resumable}
           description={parsedError.message}
           details={parsedError.details}
         />
       );
     }
 
-    case errorCategory.rateLimit: {
+    case errorCategory.rateLimit:
+    case 'fundedLimit': {
       return (
         <ChatErrorRateLimit
           className={cn('min-w-0', className)}
           resumable={resumable}
-          title={parsedError.code === 'FUNDED_OPERATION_LIMIT' ? 'Funded operation limit reached' : undefined}
+          title={category === 'fundedLimit' ? 'Funded operation limit reached' : undefined}
           description={parsedError.message}
           retryAfterSeconds={
             typeof parsedError.details?.['retryAfterSeconds'] === 'number'
@@ -359,12 +484,13 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
       );
     }
 
-    case errorCategory.overloaded: {
+    case errorCategory.overloaded:
+    case 'billingRecovery': {
       return (
         <ChatErrorServiceUnavailable
           className={cn('min-w-0', className)}
           resumable={resumable}
-          title={parsedError.code === 'BILLING_RECOVERY_UNAVAILABLE' ? 'Finalizing earlier work' : undefined}
+          title={category === 'billingRecovery' ? 'Finalizing earlier work' : undefined}
           description={parsedError.message}
         />
       );

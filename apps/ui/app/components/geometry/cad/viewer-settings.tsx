@@ -1,6 +1,18 @@
-import React, { useCallback, useState, useMemo } from 'react';
+import React, { useCallback, useRef, useState, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
-import { Axis3D, Box, Grid3X3, Layers, Rotate3D, Settings, PenLine, Sparkles, ArrowUp, Timer } from 'lucide-react';
+import {
+  Aperture,
+  Axis3D,
+  Box,
+  Grid3X3,
+  Layers,
+  Rotate3D,
+  Settings,
+  PenLine,
+  Sparkles,
+  ArrowUp,
+  Timer,
+} from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -13,14 +25,18 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
+import { AxisLabel } from '#components/geometry/cad/section-tool-row.js';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
-import { DropdownMenuSelectItem, preventMenuSliderEscapeDismissal } from '#components/ui/menu-slider-item.js';
-import { axesColors } from '#constants/color.constants.js';
+import {
+  DropdownMenuSelectItem,
+  DropdownMenuSliderItem,
+  preventMenuSliderEscapeDismissal,
+} from '#components/ui/menu-slider-item.js';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
-import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
+import { useCameraRig, useCameraSelector, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
 import { selectCadRenderTimeout } from '#machines/cad.machine.js';
-import { OutputOverflowControl } from '#components/geometry/cad/viewer-overflow-controls.js';
+import { clamp } from '#utils/number.utils.js';
 
 // Up direction options
 type UpDirection = 'x' | 'y' | 'z';
@@ -45,32 +61,108 @@ const defaultTimeoutOption =
   timeoutOptions.find((option) => option.value === defaultRenderTimeout) ?? timeoutOptions[0]!;
 
 const upDirectionOptions: Array<{ value: UpDirection; label: React.ReactNode; ariaLabel: string }> = [
-  { value: 'x', label: <span style={{ color: axesColors.x }}>X</span>, ariaLabel: 'X-up' },
-  { value: 'y', label: <span style={{ color: axesColors.y }}>Y</span>, ariaLabel: 'Y-up' },
-  { value: 'z', label: <span style={{ color: axesColors.z }}>Z</span>, ariaLabel: 'Z-up' },
+  { value: 'x', label: <AxisLabel axis='x' />, ariaLabel: 'X-up' },
+  { value: 'y', label: <AxisLabel axis='y' />, ariaLabel: 'Y-up' },
+  { value: 'z', label: <AxisLabel axis='z' />, ariaLabel: 'Z-up' },
 ];
+
+/** The widest field of view in degrees; 0° is orthographic. */
+const maxVerticalFieldOfView = 90;
+/** Degrees per arrow-key step while Shift is held. */
+const shiftVerticalFieldOfViewStep = 5;
+
+type DropdownMenuContentProps = React.ComponentProps<typeof DropdownMenuContent>;
 
 type ViewerSettingsProps = {
   /**
    * Optional className for styling
    */
   readonly className?: ClassValue;
-  /**
-   * Controls that have overflowed from the toolbar, rendered at the top of the dropdown.
-   * When undefined or empty, the dropdown renders exactly as usual.
-   */
-  readonly overflowControls?: React.ReactNode;
+  /** The side of the trigger the menu opens on. A centred bar opens it upward. */
+  readonly side?: DropdownMenuContentProps['side'];
+  /** How the menu aligns against the trigger. */
+  readonly align?: DropdownMenuContentProps['align'];
 };
+
+/**
+ * A tooltip trigger around a menu slider row. The row stops pointer events from bubbling, so Radix's pointer
+ * handlers run in the capture phase, where the row cannot stop them.
+ */
+function SliderRowTrigger({
+  onPointerMove,
+  onPointerDown,
+  ...properties
+}: React.ComponentProps<'div'>): React.JSX.Element {
+  return <div {...properties} onPointerMoveCapture={onPointerMove} onPointerDownCapture={onPointerDown} />;
+}
+
+/**
+ * The field of view, 0–90° where 0° is orthographic. The row owns its camera subscription, so a scrub re-renders
+ * only this row.
+ */
+function FieldOfViewRow(): React.JSX.Element {
+  const cameraRig = useCameraRig();
+  const fieldOfView = useCameraSelector((state) => state.context.view.requestedVerticalFieldOfView);
+
+  // The camera throws on an angle outside its range, so typed values are clamped as well as stepped ones.
+  const setFieldOfView = useCallback(
+    (value: number) => {
+      cameraRig.actorRef.send({
+        type: 'setVerticalFieldOfView',
+        verticalFieldOfView: clamp(Math.round(value), 0, maxVerticalFieldOfView),
+      });
+    },
+    [cameraRig],
+  );
+
+  const stepFieldOfView = useCallback(
+    (direction: -1 | 1, { shift }: { shift: boolean }) => {
+      setFieldOfView(fieldOfView + direction * (shift ? shiftVerticalFieldOfViewStep : 1));
+    },
+    [fieldOfView, setFieldOfView],
+  );
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <SliderRowTrigger>
+          <DropdownMenuSliderItem
+            value={fieldOfView}
+            min={0}
+            max={maxVerticalFieldOfView}
+            step={1}
+            trailingAdornment='°'
+            aria-label='Field of view, 0° is orthographic'
+            onValueChange={setFieldOfView}
+            onStep={stepFieldOfView}
+          >
+            <Aperture />
+            {fieldOfView === 0 ? 'Orthographic' : 'Field of view'}
+          </DropdownMenuSliderItem>
+        </SliderRowTrigger>
+      </TooltipTrigger>
+      <TooltipContent side='right' sideOffset={12}>
+        Drag for field of view · 0° is orthographic
+        <br />
+        <span className='text-xs opacity-70'>
+          Click or Enter to type · ←→ step 1° · Shift 5° · P toggles orthographic
+        </span>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 /**
  * Component that provides camera and visibility settings for the 3D viewer.
  * All settings are per-view, read from the per-view GraphicsMachine state via GraphicsProvider
  * and the per-view CadMachine state via CadProvider.
  */
-export function ViewerSettings({ className, overflowControls }: ViewerSettingsProps): React.ReactNode {
+export function ViewerSettings({ className, side = 'right', align = 'end' }: ViewerSettingsProps): React.ReactNode {
   const graphicsRef = useGraphics();
 
   const [isOpen, setIsOpen] = useState(false);
+  // A press outside leaves focus with the pointer; a keyboard close returns it to the trigger.
+  const isClosingFromPointerRef = useRef(false);
 
   // Read all settings from per-view graphicsMachine state via context
   const enableSurfaces = useGraphicsSelector((state) => state.context.enableSurfaces);
@@ -170,12 +262,18 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
         <TooltipContent side='top'>Viewer settings</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
-        align='end'
-        side='right'
+        align={align}
+        side={side}
         className='w-72'
         onEscapeKeyDown={preventMenuSliderEscapeDismissal}
+        onPointerDownOutside={() => {
+          isClosingFromPointerRef.current = true;
+        }}
         onCloseAutoFocus={(event) => {
-          event.preventDefault();
+          if (isClosingFromPointerRef.current) {
+            event.preventDefault();
+          }
+          isClosingFromPointerRef.current = false;
         }}
       >
         {!is2dGeometry && (
@@ -243,18 +341,20 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
           Axes
         </DropdownMenuSwitchItem>
         {!is2dGeometry && (
-          <DropdownMenuToggleGroupItem
-            value={upDirection}
-            options={upDirectionOptions}
-            onValueChange={handleUpDirectionChange}
-          >
-            <ArrowUp />
-            Up Direction
-          </DropdownMenuToggleGroupItem>
+          <>
+            <DropdownMenuToggleGroupItem
+              value={upDirection}
+              options={upDirectionOptions}
+              onValueChange={handleUpDirectionChange}
+            >
+              <ArrowUp />
+              Up Direction
+            </DropdownMenuToggleGroupItem>
+            <FieldOfViewRow />
+          </>
         )}
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Rendering</DropdownMenuLabel>
-        <OutputOverflowControl />
         <DropdownMenuSelectItem
           value={currentTimeoutOption}
           options={timeoutOptions}
@@ -271,13 +371,6 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
           <Timer />
           Timeout
         </DropdownMenuSelectItem>
-        {overflowControls !== undefined && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>Controls</DropdownMenuLabel>
-            {overflowControls}
-          </>
-        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

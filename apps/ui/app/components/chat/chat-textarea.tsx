@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { useSelector } from '@xstate/react';
+import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import { useChatTextareaLogic } from '#components/chat/chat-textarea-types.js';
@@ -8,11 +9,11 @@ import { ClientOnly } from '#components/ui/utils/client-only.js';
 import { ChatTextareaSkeleton } from '#components/chat/chat-textarea-skeleton.js';
 import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useChats } from '#hooks/use-chats.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useDraftActions } from '#hooks/use-chat.js';
 import { toast } from '#components/ui/sonner.js';
+import { randomUuid } from '@taucad/utils/id';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
-import type { cadMachine } from '#machines/cad.machine.js';
 import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-types.js';
 import { takeScreenshotGroup } from '#components/chat/tiptap/context-suggestion.utils.js';
 import { useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
@@ -20,9 +21,9 @@ import type { ChatContextReference } from '#components/chat/chat-context-inserti
 import { ChatApprovalBanner } from '#components/chat/chat-approval-banner.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
-import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { latestAcpSessionData } from '#services/agent-host-event-projection.js';
+import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 
 /**
  * Main chat textarea: one composer on every device (C11) — a phone gets the
@@ -88,7 +89,7 @@ export const ChatTextarea = memo(function ({
   const projectContext = useProject({ enableNoContext: true });
   const { treeService } = useFileManager();
   const imageService = useHeadlessImageService();
-  const { chats } = useChats(projectContext?.projectId ?? '');
+  const { chats } = useChatRecords(projectContext?.projectId ?? '');
   const {
     session,
     execution: { execution },
@@ -130,12 +131,13 @@ export const ChatTextarea = memo(function ({
 
   const geometryUnits = projectContext?.geometryUnits;
   const mainEntryPath = projectContext?.mainEntryPath;
+  const viewRecords = projectContext?.viewRecords;
   const mainGeometryFormat = useSelector(
     mainEntryPath ? geometryUnits?.get(mainEntryPath) : undefined,
     (state) => state?.context.geometry?.format,
   );
   const screenshotActionItems = useMemo((): ContextSuggestionItem[] => {
-    if (!geometryUnits || !logic.imageInputSupported) {
+    if (!geometryUnits || !viewRecords || !logic.imageInputSupported) {
       return [];
     }
 
@@ -160,7 +162,7 @@ export const ChatTextarea = memo(function ({
       });
     }
 
-    for (const [entryPath] of geometryUnits) {
+    for (const entryPath of listGeometryEntryPaths(geometryUnits, viewRecords, mainEntryPath ?? '')) {
       if (entryPath === mainEntryPath) {
         continue;
       }
@@ -176,7 +178,7 @@ export const ChatTextarea = memo(function ({
     }
 
     return items;
-  }, [geometryUnits, mainEntryPath, mainGeometryFormat, logic.imageInputSupported]);
+  }, [geometryUnits, viewRecords, mainEntryPath, mainGeometryFormat, logic.imageInputSupported]);
 
   const mounted = useRef(true);
   useEffect(() => {
@@ -209,12 +211,11 @@ export const ChatTextarea = memo(function ({
       if (!currentProjectContext) {
         return undefined;
       }
-      const { viewGraphics, editorRef, mainEntryPath: mainEntry } = currentProjectContext;
-      const { viewSettings } = editorRef.getSnapshot().context;
+      const { viewGraphics, viewRecords, mainEntryPath: mainEntry } = currentProjectContext;
       const target = entryPath ?? mainEntry;
 
       for (const [viewId, gRef] of viewGraphics) {
-        if (viewSettings[viewId]?.entryPath === target) {
+        if (viewRecords.get(viewId)?.entryPath === target) {
           return gRef;
         }
       }
@@ -227,39 +228,38 @@ export const ChatTextarea = memo(function ({
     [],
   );
 
-  /** Resolve the CAD actor matching a viewer entry path. */
-  const resolveCadRefForEntry = useCallback(
-    (entryPath: string | undefined): ActorRefFrom<typeof cadMachine> | undefined => {
-      const currentProjectContext = projectContextRef.current;
-      if (!currentProjectContext) {
-        return undefined;
-      }
-      const { geometryUnits, mainEntryPath: mainEntry } = currentProjectContext;
-      const target = entryPath ?? mainEntry;
-      if (target && geometryUnits.has(target)) {
-        return geometryUnits.get(target);
-      }
-      if (entryPath === undefined) {
-        return geometryUnits.values().next().value;
-      }
-      return undefined;
-    },
-    [],
-  );
-
   const captureEntry = useCallback(
     async (entryPath: string | undefined, captureMode: 'current' | 'orthographic', successToast = false) => {
-      const cadRef = resolveCadRefForEntry(entryPath);
-      if (!cadRef) {
+      const currentProjectContext = projectContextRef.current;
+      const target = [
+        entryPath,
+        currentProjectContext?.mainEntryPath,
+        currentProjectContext?.geometryUnits.keys().next().value,
+      ].find((candidate) => candidate !== undefined && candidate !== '');
+      if (!currentProjectContext || !target) {
         toast.error('No CAD view available for image capture');
         return;
       }
+      const claimId = randomUuid();
+      const { projectRef } = currentProjectContext;
+      projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath: target });
       try {
-        const files = await captureCadImages({
+        const unit = await waitFor(projectRef, (state) => state.context.geometryUnits.has(target), { timeout: 30_000 });
+        const cadRef = unit.context.geometryUnits.get(target);
+        if (!cadRef) {
+          throw new Error('No CAD view available for image capture');
+        }
+        const { captureCadImages, captureFilesToDataUrls, omittedSectionCutsNotice } =
+          await import('#services/headless-capture.js');
+        const graphicsRef = resolveGraphicsRefForEntry(entryPath);
+        const { files, omittedSectionCutIds } = await captureCadImages({
           cadRef,
-          graphicsRef: resolveGraphicsRefForEntry(entryPath),
+          graphicsRef,
           imageService,
-          recipe: { purpose: 'chat', mode: captureMode },
+          recipe:
+            captureMode === 'current' && !graphicsRef
+              ? { purpose: 'chat', mode: 'isometric' }
+              : { purpose: 'chat', mode: captureMode },
         });
         if (!mounted.current) {
           return;
@@ -270,13 +270,18 @@ export const ChatTextarea = memo(function ({
         if (successToast) {
           toast.success('Added screenshot to chat');
         }
+        if (omittedSectionCutIds.length > 0) {
+          toast.warning(omittedSectionCutsNotice);
+        }
       } catch (error) {
         if (mounted.current) {
           toast.error(error instanceof Error ? error.message : 'Image capture failed');
         }
+      } finally {
+        projectRef.send({ type: 'releaseGeometryUnit', claimId });
       }
     },
-    [imageService, resolveCadRefForEntry, resolveGraphicsRefForEntry],
+    [imageService, resolveGraphicsRefForEntry],
   );
 
   // Viewer-drop screenshots use the same settled-geometry adapter as menu actions.
@@ -329,6 +334,7 @@ export const ChatTextarea = memo(function ({
         // State
         dragKind={logic.dragKind}
         isSubmitting={logic.isSubmitting}
+        canResume={logic.canResume}
         isAttaching={logic.isAttaching}
         inputText={logic.inputText}
         attachments={logic.attachments}

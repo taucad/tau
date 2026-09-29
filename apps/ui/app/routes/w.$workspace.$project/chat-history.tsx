@@ -5,12 +5,12 @@ import { useLocation } from 'react-router';
 import { XIcon } from 'lucide-react';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
 import { ChatRevisionMarker } from '#routes/w.$workspace.$project/chat-revision-marker.js';
-import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import type { TurnGroup as TurnGroupData } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { ScrollDownButton } from '#routes/w.$workspace.$project/scroll-down-button.js';
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import { ChatTodoList } from '#components/chat/chat-todo-list.js';
 import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTitleBar } from '#routes/w.$workspace.$project/chat-title-bar.js';
@@ -29,24 +29,21 @@ import { ChatHistoryEmpty } from '#routes/w.$workspace.$project/chat-history-emp
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
 import { ChatAttachmentDirectoriesContext, chatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useChats } from '#hooks/use-chats.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useProject } from '#hooks/use-project.js';
+import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
 
 // Component-local CSS variable. Declared here (rather than in global.css)
 // to keep the chat-history pinning system self-contained — the only
 // consumer is `TurnGroup` (`min-h-(--chat-live-turn-min-h)`). Applied as
 // inline style on `ChatScroller` so it cascades to every Virtuoso item.
 //
-// `--chat-live-turn-min-h` is the min-height for the last turn group so the
-// user message stays pinned at the scroller top while the assistant reply
-// streams in. The min-height is intentionally approximate — `min-height` is
-// elastic, so a slight over/under just affects how much breathing room sits
-// below the assistant reply before content grows past it. Composition: page
-// header (--header-height) + chat panel chrome (~10.25rem: panel header +
-// status bar + chat input + margins).
+// Reserve exactly the transcript viewport for the last turn, including when
+// the pane is resized or the composer/adornments grow. ChatScroller establishes
+// the size container; a window-height estimate creates phantom overflow.
 // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- React.CSSProperties does not type custom-property keys
 const chatScrollerCssVariables = {
-  '--chat-live-turn-min-h': 'calc(100dvh - var(--header-height, 64px) - 10.25rem)',
+  '--chat-live-turn-min-h': '100cqh',
 } as React.CSSProperties;
 
 // Virtuoso's `scrollToIndex` types restrict `behavior` to `'auto' | 'smooth'`,
@@ -103,7 +100,14 @@ const TurnGroup = memo(function ({
 // `<Virtuoso className=...>`), but the public type omits it. We widen here.
 const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: string }>(function (props, ref) {
   return (
-    <div {...props} ref={ref} style={{ ...props.style, ...chatScrollerCssVariables }} className={cn(props.className)} />
+    <div
+      {...props}
+      ref={ref}
+      role='region'
+      aria-label='Chat history'
+      style={{ ...props.style, ...chatScrollerCssVariables }}
+      className={cn('[container-type:size] [scrollbar-gutter:stable]', props.className)}
+    />
   );
 });
 
@@ -119,18 +123,47 @@ const virtuosoComponents = {
   EmptyPlaceholder: ChatHistoryEmptyPlaceholder,
 };
 
-export const ChatHistory = memo(function (props: {
+type ChatHistoryProps = {
   readonly className?: string;
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
-}) {
-  const { className, isExpanded = true, setIsExpanded } = props;
+};
+
+export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ...props }: ChatHistoryProps) {
+  const toggleChatHistory = useCallback(() => {
+    setIsExpanded?.((current) => !current);
+  }, [setIsExpanded]);
+  const { formattedKeyCombination } = useKeybinding(toggleChatKeyCombination, toggleChatHistory);
+
+  return isExpanded ? (
+    <ExpandedChatHistory
+      {...props}
+      isExpanded={isExpanded}
+      setIsExpanded={setIsExpanded}
+      formattedKeyCombination={formattedKeyCombination}
+    />
+  ) : null;
+});
+
+const ExpandedChatHistory = memo(function ({
+  className,
+  isExpanded,
+  setIsExpanded,
+  formattedKeyCombination,
+}: ChatHistoryProps & { readonly formattedKeyCombination: string }) {
   const messageIds = useChatSelector((state) => state.messageOrder);
   const cadChat = useCadChatClient();
   const { treeService } = useFileManager();
   const { projectId } = useProject();
-  const { chats } = useChats(projectId);
+  const { chats } = useChatRecords(projectId);
   const { activeChatId, persistenceActorRef } = useChatContext();
+  const skillsCatalog = useSkillsCatalog();
+  const agentInvocations = useChatSelector((state) => state.agentInvocations);
+  const skillInvocations = skillsCatalog.map((skill) => `/${skill.name}`).join('\n');
+  const knownTokens = useMemo(
+    () => new Set(`${skillInvocations}\n${agentInvocations}`.split('\n').filter(Boolean)),
+    [skillInvocations, agentInvocations],
+  );
   const attachmentDirectories = useMemo(
     () => chatAttachmentDirectories(projectId, activeChatId),
     [activeChatId, projectId],
@@ -138,12 +171,6 @@ export const ChatHistory = memo(function (props: {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatTextareaRef = useRef<ChatTextareaHandle>(null);
   const location = useLocation();
-  const toggleChatHistory = useCallback(() => {
-    setIsExpanded?.((current) => !current);
-  }, [setIsExpanded]);
-
-  const { formattedKeyCombination } = useKeybinding(toggleChatKeyCombination, toggleChatHistory);
-
   useEffect(() => {
     if (location.state?.focusChatComposer === true) {
       chatTextareaRef.current?.focus();
@@ -177,12 +204,8 @@ export const ChatHistory = memo(function (props: {
     };
   }, [persistenceActorRef]);
 
-  // The CAD chat-client composes the per-request `agent` payload (kernel,
-  // model, mode, toolChoice, testingEnabled, snapshot, contextPayload) from
-  // `useCadAgentConfig`. The verb identity stays stable across renders as
-  // long as the underlying agent config identity is stable — memoising the
-  // call site lets the tooltip-heavy memo'd children downstream avoid
-  // re-renders on every editor-state tick.
+  // The turn host owns request configuration; the client exposes action verbs.
+  // Memoising the call site avoids re-rendering tooltip-heavy children.
   const submitChat = cadChat.submit;
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content, attachments }) => {
@@ -192,12 +215,7 @@ export const ChatHistory = memo(function (props: {
     [submitChat],
   );
 
-  // Build the rendered turn groups. A new group starts at index 0 and at
-  // every user message; all other messages join the preceding group. The
-  // result is memoised on the `state.messages` reference inside
-  // `buildTurnGroups`, so streaming tokens (which mutate message *parts*
-  // without adding new ids) reuse the same group array reference.
-  const groups = useChatSelector((state) => buildTurnGroups(state.messages));
+  const groups = useChatSelector((state) => state.turnGroups);
 
   const renderItem = useCallback(
     (index: number, group: TurnGroupData) => {
@@ -263,7 +281,7 @@ export const ChatHistory = memo(function (props: {
       <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
         <FloatingPanelContent
           // `ph-no-capture`: session replay never records chat transcripts.
-          className={cn('ph-no-capture', !isExpanded && 'hidden')}
+          className={cn('ph-no-capture min-h-0 overflow-hidden [container-type:size]', !isExpanded && 'hidden')}
           errorFallback={(errorProps) => (
             <FloatingPanelErrorContent
               {...errorProps}
@@ -291,7 +309,7 @@ export const ChatHistory = memo(function (props: {
           </FloatingPanelContentHeader>
 
           {/* Main chat content area */}
-          <AtReferenceProvider treeService={treeService} chats={chats}>
+          <AtReferenceProvider treeService={treeService} chats={chats} knownTokens={knownTokens}>
             <Virtuoso
               ref={virtuosoRef}
               data={groups}
@@ -303,12 +321,6 @@ export const ChatHistory = memo(function (props: {
               components={virtuosoComponents}
             />
           </AtReferenceProvider>
-          <ScrollDownButton
-            hasContent={messageIds.length > 0}
-            isVisible={!atBottom}
-            onScrollToBottom={scrollToBottom}
-          />
-
           {/*
           A refusal on an empty chat has to land somewhere (I12, W19-b).
 
@@ -319,8 +331,19 @@ export const ChatHistory = memo(function (props: {
           at a time: while there are turns, the group above owns it.
         */}
           {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
-          {/* Chat input area */}
-          <div className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
+          {/* Chat input area. The agent's task list sits directly above the
+              composer, keyed by chat so its fold never carries across chats (D8). */}
+          <div
+            role='region'
+            aria-label='Chat composer'
+            className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'
+          >
+            <ScrollDownButton
+              hasContent={messageIds.length > 0}
+              isVisible={!atBottom}
+              onScrollToBottom={scrollToBottom}
+            />
+            <ChatTodoList key={activeChatId} />
             <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />
           </div>
         </FloatingPanelContent>

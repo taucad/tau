@@ -1,0 +1,1017 @@
+{
+  "name": "geospec-engine-native",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/geospec-engine-native",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package", "host:darwin-arm64"],
+  "targets": {
+    "test": {
+      "dependsOn": ["build", "check-ci-artifacts", "check-delivery-environment", "check-conformance-profile"]
+    },
+    "test-rust": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path packages/geospec-engine-native/rust/Cargo.toml --locked --target-dir node_modules/.cache/geospec-engine-native/target",
+        "forwardAllArgs": false
+      }
+    },
+    "check-wasm": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo check --manifest-path packages/geospec-engine-native/rust/Cargo.toml --locked --target wasm32-unknown-unknown --target-dir node_modules/.cache/geospec-engine-native/target",
+        "forwardAllArgs": false
+      }
+    },
+    "format-rust": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo fmt --manifest-path packages/geospec-engine-native/rust/Cargo.toml -- --check",
+        "forwardAllArgs": false
+      }
+    },
+    "clippy-rust": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo clippy --manifest-path packages/geospec-engine-native/rust/Cargo.toml --locked --all-targets --target-dir node_modules/.cache/geospec-engine-native/target -- -D warnings",
+        "forwardAllArgs": false
+      }
+    },
+    "test-csg": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "commands": [
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path packages/geospec-engine-native/native/manifold-rust/adapter/Cargo.toml --locked --target-dir node_modules/.cache/geospec-engine-native/csg-target --test s4",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path packages/geospec-engine-native/native/manifold-rust/adapter/Cargo.toml --locked --target-dir node_modules/.cache/geospec-engine-native/csg-target --test proofs exact_nary_booleans_transform_properties_decompose_and_slice_match_controls -- --exact",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path packages/geospec-engine-native/native/manifold-rust/adapter/Cargo.toml --locked --target-dir node_modules/.cache/geospec-engine-native/csg-target --test proofs mesh_export_keeps_native_order_and_reports_merge_output -- --exact",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path packages/geospec-engine-native/native/manifold-rust/adapter/Cargo.toml --locked --target-dir node_modules/.cache/geospec-engine-native/csg-target --test proofs section_constructor_and_precision_six_booleans_preserve_membership_and_order -- --exact"
+        ],
+        "parallel": false,
+        "forwardAllArgs": false
+      }
+    },
+    "clippy-csg": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo clippy --manifest-path packages/geospec-engine-native/native/manifold-rust/adapter/Cargo.toml --locked --all-targets --target-dir node_modules/.cache/geospec-engine-native/csg-target -- -D warnings",
+        "forwardAllArgs": false
+      }
+    },
+    "format-csg": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo fmt --manifest-path packages/geospec-engine-native/native/manifold-rust/adapter/Cargo.toml -- --check",
+        "forwardAllArgs": false
+      }
+    },
+    "build-python": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "MACOSX_DEPLOYMENT_TARGET=\"$(node -p 'require(\"./packages/geospec-engine-native/scripts/selected-delivery.json\").macosDeploymentTarget')\" GEOSPEC_PRODUCER_ROUTE=nx-build-python-release-v1 GEOSPEC_PRODUCER_CARGO_CWD=\"$PWD\" GEOSPEC_PRODUCER_MANIFEST=\"${GEOSPEC_PYTHON_MANIFEST:-packages/geospec-engine-native/bindings/python/Cargo.toml}\" RUSTFLAGS=\"${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=$(pwd -P)=tau --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=cargo\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 node_modules/.cache/geospec-engine-native/python-venv/bin/maturin build --manifest-path \"${GEOSPEC_PYTHON_MANIFEST:-packages/geospec-engine-native/bindings/python/Cargo.toml}\" --interpreter node_modules/.cache/geospec-engine-native/python-venv/bin/python --out \"${GEOSPEC_PYTHON_WHEEL_OUT:-node_modules/.cache/geospec-engine-native/python-wheels}\" --target-dir \"${CARGO_TARGET_DIR:-node_modules/.cache/geospec-engine-native/python-target}\" --release --locked --strip",
+        "forwardAllArgs": false
+      }
+    },
+    "test-python": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node_modules/.cache/geospec-engine-native/python-venv/bin/python -m pytest packages/geospec-engine-native/bindings/python/tests -q -p no:cacheprovider",
+        "forwardAllArgs": false
+      }
+    },
+    "clippy-python": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PYO3_PYTHON=\"$PWD/node_modules/.cache/geospec-engine-native/python-venv/bin/python\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo clippy --manifest-path packages/geospec-engine-native/bindings/python/Cargo.toml --locked --all-targets --target-dir node_modules/.cache/geospec-engine-native/python-target -- -D warnings",
+        "forwardAllArgs": false
+      }
+    },
+    "format-python-rust": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo fmt --manifest-path packages/geospec-engine-native/bindings/python/Cargo.toml -- --check",
+        "forwardAllArgs": false
+      }
+    },
+    "build-python314": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "MACOSX_DEPLOYMENT_TARGET=\"$(node -p 'require(\"./packages/geospec-engine-native/scripts/selected-delivery.json\").macosDeploymentTarget')\" GEOSPEC_PRODUCER_ROUTE=nx-build-python314-release-v1 GEOSPEC_PRODUCER_CARGO_CWD=\"$PWD\" GEOSPEC_PRODUCER_MANIFEST=\"${GEOSPEC_PYTHON_MANIFEST:-packages/geospec-engine-native/bindings/python/Cargo.toml}\" RUSTFLAGS=\"${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=$(pwd -P)=tau --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=cargo\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 node_modules/.cache/geospec-engine-native/python314-venv/bin/maturin build --manifest-path \"${GEOSPEC_PYTHON_MANIFEST:-packages/geospec-engine-native/bindings/python/Cargo.toml}\" --interpreter node_modules/.cache/geospec-engine-native/python314-venv/bin/python --out \"${GEOSPEC_PYTHON_WHEEL_OUT:-node_modules/.cache/geospec-engine-native/python314-wheels}\" --target-dir \"${CARGO_TARGET_DIR:-node_modules/.cache/geospec-engine-native/python314-target}\" --release --locked --strip",
+        "forwardAllArgs": false
+      }
+    },
+    "test-python314": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node_modules/.cache/geospec-engine-native/python314-venv/bin/python -m pytest packages/geospec-engine-native/bindings/python/tests -q -p no:cacheprovider",
+        "forwardAllArgs": false
+      }
+    },
+    "clippy-python314": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PYO3_PYTHON=\"$PWD/node_modules/.cache/geospec-engine-native/python314-venv/bin/python\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo clippy --manifest-path packages/geospec-engine-native/bindings/python/Cargo.toml --locked --all-targets --target-dir node_modules/.cache/geospec-engine-native/python314-target -- -D warnings",
+        "forwardAllArgs": false
+      }
+    },
+    "check-node-binding": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo check --manifest-path packages/geospec-engine-native/bindings/node/Cargo.toml --locked --target aarch64-apple-darwin --target-dir node_modules/.cache/geospec-engine-native/node-target",
+        "forwardAllArgs": false
+      }
+    },
+    "clippy-node-binding": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo clippy --manifest-path packages/geospec-engine-native/bindings/node/Cargo.toml --locked --all-targets --target aarch64-apple-darwin --target-dir node_modules/.cache/geospec-engine-native/node-target -- -D warnings",
+        "forwardAllArgs": false
+      }
+    },
+    "format-node-binding": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo fmt --manifest-path packages/geospec-engine-native/bindings/node/Cargo.toml -- --check",
+        "forwardAllArgs": false
+      }
+    },
+    "check-wasm-binding": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo check --manifest-path packages/geospec-engine-native/bindings/wasm/Cargo.toml --locked --target wasm32-unknown-unknown --target-dir node_modules/.cache/geospec-engine-native/wasm-target",
+        "forwardAllArgs": false
+      }
+    },
+    "clippy-wasm-binding": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo clippy --manifest-path packages/geospec-engine-native/bindings/wasm/Cargo.toml --locked --all-targets --target wasm32-unknown-unknown --target-dir node_modules/.cache/geospec-engine-native/wasm-target -- -D warnings",
+        "forwardAllArgs": false
+      }
+    },
+    "format-wasm-binding": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo fmt --manifest-path packages/geospec-engine-native/bindings/wasm/Cargo.toml -- --check",
+        "forwardAllArgs": false
+      }
+    },
+    "clippy-mixed-binding": {
+      "executor": "nx:run-commands",
+      "description": "Lint the current mixed C ABI on the host; build-wasm separately checks the Emscripten target.",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo clippy --manifest-path packages/geospec-engine-native/bindings/emscripten/Cargo.toml --locked --all-targets --target-dir node_modules/.cache/geospec-engine-native/mixed-clippy-target -- -D warnings",
+        "forwardAllArgs": false
+      }
+    },
+    "test-node-host": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node packages/geospec-engine-native/bindings/node/run-conformance.mjs",
+        "forwardAllArgs": false
+      }
+    },
+    "test-wasm-host": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node packages/geospec-engine-native/bindings/wasm/run-conformance.mjs",
+        "forwardAllArgs": false
+      }
+    },
+    "build-wasm": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node packages/geospec-engine-native/scripts/build-mixed-wasm.mts",
+        "forwardAllArgs": false
+      }
+    },
+    "typecheck": {
+      "inputs": ["default", "^production", "{projectRoot}/bindings/node/types/generated/index.d.ts"]
+    },
+    "build-node": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "commands": [
+          "node -e 'const fs=require(\"node:fs\");for(const path of [\"packages/geospec-engine-native/bindings/node/generated/index.js\",\"packages/geospec-engine-native/bindings/node/generated/index.d.ts\",\"packages/geospec-engine-native/bindings/node/generated/geospec-engine-native.darwin-arm64.node\"])fs.rmSync(path,{force:true})'",
+          "MACOSX_DEPLOYMENT_TARGET=\"$(node -p 'require(\"./packages/geospec-engine-native/scripts/selected-delivery.json\").macosDeploymentTarget')\" GEOSPEC_PRODUCER_ROUTE=nx-build-node-release-v1 GEOSPEC_PRODUCER_CARGO_CWD=\"$PWD/packages/geospec-engine-native\" GEOSPEC_PRODUCER_MANIFEST=\"${GEOSPEC_NODE_MANIFEST:-bindings/node/Cargo.toml}\" RUSTFLAGS=\"${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=$(pwd -P)=tau --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=cargo\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 pnpm --dir packages/geospec-engine-native exec napi build --manifest-path \"${GEOSPEC_NODE_MANIFEST:-bindings/node/Cargo.toml}\" --target aarch64-apple-darwin --release --esm --platform --js index.js --dts index.d.ts --output-dir bindings/node/generated --target-dir \"${CARGO_TARGET_DIR:-$PWD/node_modules/.cache/geospec-engine-native/node-target}\" -- --locked",
+          "node -e 'const fs=require(\"node:fs\");for(const path of [\"packages/geospec-engine-native/bindings/node/generated/index.js\",\"packages/geospec-engine-native/bindings/node/generated/index.d.ts\",\"packages/geospec-engine-native/bindings/node/generated/geospec-engine-native.darwin-arm64.node\"]){if(fs.statSync(path).size===0)throw new Error(\"Empty NAPI output: \"+path)}'",
+          "strip -x packages/geospec-engine-native/bindings/node/generated/geospec-engine-native.darwin-arm64.node",
+          "cmp packages/geospec-engine-native/bindings/node/types/generated/index.d.ts packages/geospec-engine-native/bindings/node/generated/index.d.ts"
+        ],
+        "parallel": false,
+        "forwardAllArgs": false
+      }
+    },
+    "build-occt": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "bash packages/geospec-engine-native/native/occt/build-occt.sh",
+        "forwardAllArgs": false
+      }
+    },
+    "test-occt": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "GEOSPEC_OCCT_PREFIX=\"$PWD/node_modules/.cache/geospec-engine-native/occt/install\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path packages/geospec-engine-native/native/occt/rust/Cargo.toml --locked --tests --features qualification --target-dir node_modules/.cache/geospec-engine-native/occt/cargo-target",
+        "forwardAllArgs": false
+      }
+    },
+    "clippy-occt": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "GEOSPEC_OCCT_PREFIX=\"$PWD/node_modules/.cache/geospec-engine-native/occt/install\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo clippy --manifest-path packages/geospec-engine-native/native/occt/rust/Cargo.toml --locked --all-targets --features qualification --target-dir node_modules/.cache/geospec-engine-native/occt/cargo-target -- -D warnings",
+        "forwardAllArgs": false
+      }
+    },
+    "format-occt": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo fmt --manifest-path packages/geospec-engine-native/native/occt/rust/Cargo.toml -- --check",
+        "forwardAllArgs": false
+      }
+    },
+    "assemble-package": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": ["build"],
+      "options": {
+        "command": "bash packages/geospec-engine-native/scripts/assemble-package.sh",
+        "forwardAllArgs": false
+      }
+    },
+    "check-csg-wasm": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo check --manifest-path packages/geospec-engine-native/native/manifold-rust/adapter/Cargo.toml --locked --lib --target wasm32-unknown-unknown --target-dir node_modules/.cache/geospec-engine-native/csg-target",
+        "forwardAllArgs": false
+      }
+    },
+    "test-browser-packed": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node packages/geospec-engine-native/bindings/browser-conformance/run-browser-conformance.ts",
+        "forwardAllArgs": false
+      }
+    },
+    "test-node26-packed": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "\"${GEOSPEC_NODE26:?Set GEOSPEC_NODE26 to the Node 26 executable}\" packages/geospec-engine-native/bindings/browser-conformance/run-node26-conformance.ts",
+        "forwardAllArgs": false
+      }
+    },
+    "test-node26-vitest": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "\"${GEOSPEC_NODE26:?Set GEOSPEC_NODE26 to the Node 26 executable}\" node_modules/vitest/vitest.mjs run --root packages/geospec-engine-native --config vitest.node26.config.ts",
+        "forwardAllArgs": false
+      }
+    },
+    "benchmark-entry": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node packages/geospec-engine-native/bench/run.ts",
+        "forwardAllArgs": true
+      }
+    },
+    "test-benchmark-entry": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --test packages/geospec-engine-native/bench/lib.test.ts packages/geospec-engine-native/bench/broad-harness.test.ts packages/geospec-engine-native/bench/measurements.test.ts",
+        "forwardAllArgs": false
+      }
+    },
+    "typecheck-benchmark-entry": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "pnpm exec tsc -p packages/geospec-engine-native/bench/tsconfig.json --noEmit --incremental false --composite false",
+        "forwardAllArgs": false
+      }
+    },
+    "lint-benchmark-entry": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "commands": [
+          {
+            "command": "pnpm exec oxlint -c .oxlintrc.json --type-aware \"$PWD/packages/geospec-engine-native/bench/lib.ts\" \"$PWD/packages/geospec-engine-native/bench/worker.ts\" \"$PWD/packages/geospec-engine-native/bench/run.ts\" \"$PWD/packages/geospec-engine-native/bench/lib.test.ts\" \"$PWD/packages/geospec-engine-native/bench/broad-harness.test.ts\" \"$PWD/packages/geospec-engine-native/bench/campaign.ts\" \"$PWD/packages/geospec-engine-native/bench/campaign-run.ts\" \"$PWD/packages/geospec-engine-native/bench/report-delay.ts\" \"$PWD/packages/geospec-engine-native/bench/vitest-consumer-event.mjs\" \"$PWD/packages/geospec-engine-native/bench/vitest-consumer.vitest.test.mjs\" \"$PWD/packages/geospec-engine-native/bench/measurements.ts\" \"$PWD/packages/geospec-engine-native/bench/measurements.test.ts\" \"$PWD/packages/geospec-engine-native/bench/process-rss.ts\" \"$PWD/packages/geospec-engine-native/bench/report-validation.ts\" \"$PWD/packages/geospec-engine-native/bench/worker-state.ts\" \"$PWD/packages/geospec-engine-native/bench/source-reward.ts\" \"$PWD/packages/geospec-engine-native/bench/cache-state.ts\"",
+            "forwardAllArgs": false
+          },
+          {
+            "command": "pnpm exec eslint \"$PWD/packages/geospec-engine-native/bench/lib.ts\" \"$PWD/packages/geospec-engine-native/bench/worker.ts\" \"$PWD/packages/geospec-engine-native/bench/run.ts\" \"$PWD/packages/geospec-engine-native/bench/lib.test.ts\" \"$PWD/packages/geospec-engine-native/bench/broad-harness.test.ts\" \"$PWD/packages/geospec-engine-native/bench/campaign.ts\" \"$PWD/packages/geospec-engine-native/bench/campaign-run.ts\" \"$PWD/packages/geospec-engine-native/bench/report-delay.ts\" \"$PWD/packages/geospec-engine-native/bench/vitest-consumer-event.mjs\" \"$PWD/packages/geospec-engine-native/bench/vitest-consumer.vitest.test.mjs\" \"$PWD/packages/geospec-engine-native/bench/measurements.ts\" \"$PWD/packages/geospec-engine-native/bench/measurements.test.ts\" \"$PWD/packages/geospec-engine-native/bench/process-rss.ts\" \"$PWD/packages/geospec-engine-native/bench/report-validation.ts\" \"$PWD/packages/geospec-engine-native/bench/worker-state.ts\" \"$PWD/packages/geospec-engine-native/bench/source-reward.ts\" \"$PWD/packages/geospec-engine-native/bench/cache-state.ts\"",
+            "forwardAllArgs": false
+          }
+        ],
+        "parallel": false
+      }
+    },
+    "test-runtime": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "GEOSPEC_OCCT_PREFIX=\"$PWD/node_modules/.cache/geospec-engine-native/occt/install\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path packages/geospec-engine-native/native/runtime/Cargo.toml --locked --test composition --test retention --target-dir node_modules/.cache/geospec-engine-native/matcher-full-lead/runtime-target",
+        "forwardAllArgs": false
+      }
+    },
+    "build-mixed-wasm": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node packages/geospec-engine-native/scripts/build-mixed-wasm.mts",
+        "forwardAllArgs": false
+      }
+    },
+    "test-occt-set-containment": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "GEOSPEC_OCCT_PREFIX=\"$PWD/node_modules/.cache/geospec-engine-native/occt/install\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path packages/geospec-engine-native/native/occt/rust/Cargo.toml --locked --test set_containment --target-dir node_modules/.cache/geospec-engine-native/occt/cargo-target",
+        "forwardAllArgs": false
+      }
+    },
+    "test-occt-report-bundle": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "GEOSPEC_OCCT_PREFIX=\"$PWD/node_modules/.cache/geospec-engine-native/occt/install\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_OCCT_REPORT_MANIFEST:-packages/geospec-engine-native/native/occt/rust/Cargo.toml}\" --locked --test report_bundle --target-dir \"${GEOSPEC_OCCT_REPORT_TARGET:-node_modules/.cache/geospec-engine-native/matcher-full-report-bundle-a1/cargo-target}\" -- \"${GEOSPEC_OCCT_REPORT_FILTER:-}\" --nocapture --test-threads=1",
+        "forwardAllArgs": false
+      }
+    },
+    "test-broad-fixtures": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --test packages/geospec-engine-native/bench/broad-fixtures.test.ts",
+        "forwardAllArgs": false
+      }
+    },
+    "test-occt-continuous-wall": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "GEOSPEC_OCCT_PREFIX=\"$PWD/node_modules/.cache/geospec-engine-native/occt/install\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path packages/geospec-engine-native/native/occt/rust/Cargo.toml --locked --test continuous_wall --target-dir node_modules/.cache/geospec-engine-native/matcher-full-continuous-wall-adapter-a1/cargo-target",
+        "forwardAllArgs": false
+      }
+    },
+    "test-runtime-continuous-wall": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "GEOSPEC_OCCT_PREFIX=\"$PWD/node_modules/.cache/geospec-engine-native/occt/install\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path packages/geospec-engine-native/native/runtime/Cargo.toml --locked --test continuous_wall --target-dir node_modules/.cache/geospec-engine-native/matcher-full-lead/runtime-target",
+        "forwardAllArgs": false
+      }
+    },
+    "test-runtime-retention": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "GEOSPEC_OCCT_PREFIX=\"$PWD/node_modules/.cache/geospec-engine-native/occt/install\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path packages/geospec-engine-native/native/runtime/Cargo.toml --locked --test retention --target-dir node_modules/.cache/geospec-engine-native/matcher-full-lead/runtime-target",
+        "forwardAllArgs": false
+      }
+    },
+    "test-runtime-overlap-cache": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "GEOSPEC_OCCT_PREFIX=\"${GEOSPEC_OCCT_PREFIX:-$PWD/node_modules/.cache/geospec-engine-native/occt/install}\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_OVERLAP_CACHE_MANIFEST:-packages/geospec-engine-native/native/runtime/Cargo.toml}\" --locked --test overlap_cache --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-lead/runtime-target\" -- repeated_overlap_reuses_owned_results_with_identical_logical_requests --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-effective-defaults": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "commands": [
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_EFFECTIVE_DEFAULTS_MANIFEST:-packages/geospec-engine-native/rust/Cargo.toml}\" --locked --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-effective-defaults-source-a1/target\" --lib -- matchers::relationships::tests::effective_defaults_typed_copies_and_diagnostics_preserve_source_fields --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_EFFECTIVE_DEFAULTS_MANIFEST:-packages/geospec-engine-native/rust/Cargo.toml}\" --locked --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-effective-defaults-source-a1/target\" --test effective_defaults -- effective_defaults_match_all_32_authorized_canonical_controls --exact --nocapture"
+        ],
+        "parallel": false,
+        "forwardAllArgs": false
+      }
+    },
+    "test-ancillary-context": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_CORE_MANIFEST:-packages/geospec-engine-native/rust/Cargo.toml}\" --locked --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/target\" --lib -- ancillary::tests::overlap_query_preserves_required_pair_diagnostic_context --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-relationship-scalar-orders": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_RELATIONSHIP_SCALARS_MANIFEST:-packages/geospec-engine-native/rust/Cargo.toml}\" --locked --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-relationship-scalars-a1/target\" --lib -- matchers::relationships::relationship_scalar_tests::relationship_scalar_orders_match_frozen_node24 --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-coaxial-scalar-orders": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_RELATIONSHIP_SCALARS_MANIFEST:-packages/geospec-engine-native/rust/Cargo.toml}\" --locked --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-relationship-scalars-a1/target\" --lib -- matchers::relationships::relationship_scalar_tests::coaxial_original_axis_intermediates_match_frozen_node24 --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-selector-scalar-orders": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_RELATIONSHIP_SCALARS_MANIFEST:-packages/geospec-engine-native/rust/Cargo.toml}\" --locked --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-relationship-scalars-a1/target\" --lib -- analysis::selection::tests::selector_scalar_orders_match_frozen_node24 --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-axis-inventory-addresses": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_RELATIONSHIP_SCALARS_MANIFEST:-packages/geospec-engine-native/rust/Cargo.toml}\" --locked --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-relationship-scalars-a1/target\" --lib -- analysis::selection::tests::axis_inventory_ids_preserve_face_addresses_and_picks --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-f1-subject-identity": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_F1_IDENTITY_MANIFEST:-packages/geospec-engine-native/rust/Cargo.toml}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-lead/f1-shared-target-b60\" --lib -- identity::tests::should_bind_rational_primary_to_adopted_complete_descriptor --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-f1-producer-1": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_F1_PRODUCER_MANIFEST:?Copied producer manifest must be supplied}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-f1-producer-a1/target-b63\" --test rational_plate_producer -- exact_target_preserves_source_order_and_complete_certificate --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-f1-producer-2": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_F1_PRODUCER_MANIFEST:?Copied producer manifest must be supplied}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-f1-producer-a1/target-b63\" --test rational_plate_producer -- mirrored_windows_fail_both_empty_region_predicates --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-f1-producer-3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_F1_PRODUCER_MANIFEST:?Copied producer manifest must be supplied}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-f1-producer-a1/target-b63\" --test rational_plate_producer -- wider_equal_volume_plate_fails_only_bounds --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-f1-producer-4": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_F1_PRODUCER_MANIFEST:?Copied producer manifest must be supplied}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-f1-producer-a1/target-b63\" --test rational_plate_producer -- extra_separated_window_is_admitted_and_fails_only_volume --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-f1-producer-5": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_F1_PRODUCER_MANIFEST:?Copied producer manifest must be supplied}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-f1-producer-a1/target-b63\" --test rational_plate_producer -- moved_a_fails_only_a_emptiness --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-f1-producer-6": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_F1_PRODUCER_MANIFEST:?Copied producer manifest must be supplied}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-f1-producer-a1/target-b63\" --test rational_plate_producer -- moved_b_fails_only_b_emptiness --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-f1-verifier-1": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_F1_VERIFIER_MANIFEST:?Copied verifier manifest must be supplied}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-f1-verifier-a1/target-b64\" --test rational_plate_verifier -- ordinary_geometry_controls_verify_all_four_predicates --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-f1-verifier-2": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_F1_VERIFIER_MANIFEST:?Copied verifier manifest must be supplied}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-f1-verifier-a1/target-b64\" --test rational_plate_verifier -- ordinary_bound_plans_verify_full_envelope_for_both_polarities --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "check-f1-core-integration": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo check --manifest-path \"${GEOSPEC_F1_INTEGRATION_MANIFEST:?Frozen F1 integration manifest must be supplied}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-lead/f1-shared-target-b60\" --lib",
+        "forwardAllArgs": false
+      }
+    },
+    "check-f1-engine-harness": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo check --manifest-path \"${GEOSPEC_F1_ENGINE_MANIFEST:?Frozen engine harness manifest must be supplied}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-lead/f1-shared-target-b60\" --test rational_plate_producer",
+        "cwd": "."
+      }
+    },
+    "test-f1-engine-fullwire": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_F1_ENGINE_MANIFEST:?Frozen engine harness manifest must be supplied}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-lead/f1-shared-target-b60\" --test rational_plate_producer -- engine_integration::rational_plate_engine_matches_frozen_fullwire_cold_and_warm --exact --nocapture",
+        "cwd": "."
+      }
+    },
+    "test-f1-python-authoring-transport": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "packages/geospec-engine-native/bindings/python/python",
+        "command": "env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 \"${GEOSPEC_F1_PYTHON:?Supply the absolute selected CPython 3.13 or 3.14 interpreter}\" -m unittest discover -s ../tests -p test_f1_authoring.py -k test_fixed_payload_preserves_id_budget_and_both_polarities -v",
+        "forwardAllArgs": false
+      }
+    },
+    "half-cube-trace-stage": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 \"${GEOSPEC_HALF_CUBE_DRIVER:?Supply the reviewed B82 driver}\" stage",
+        "forwardAllArgs": false
+      }
+    },
+    "half-cube-trace-resolve": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 \"${GEOSPEC_HALF_CUBE_DRIVER:?Supply the reviewed B82 driver}\" resolve",
+        "forwardAllArgs": false
+      }
+    },
+    "half-cube-trace-build": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 \"${GEOSPEC_HALF_CUBE_DRIVER:?Supply the reviewed B82 driver}\" build",
+        "forwardAllArgs": false
+      }
+    },
+    "half-cube-trace-bind": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 \"${GEOSPEC_HALF_CUBE_DRIVER:?Supply the reviewed B82 driver}\" bind",
+        "forwardAllArgs": false
+      }
+    },
+    "half-cube-trace-reference": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 \"${GEOSPEC_HALF_CUBE_DRIVER:?Supply the reviewed B82 driver}\" reference",
+        "forwardAllArgs": false
+      }
+    },
+    "half-cube-trace-rust": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 \"${GEOSPEC_HALF_CUBE_DRIVER:?Supply the reviewed B82 driver}\" rust",
+        "forwardAllArgs": false
+      }
+    },
+    "half-cube-trace-compare": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 \"${GEOSPEC_HALF_CUBE_DRIVER:?Supply the reviewed B82 driver}\" compare",
+        "forwardAllArgs": false
+      }
+    },
+    "test-occt-selected-continuous-domain": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER -u CXXFLAGS CXX=\"${GEOSPEC_SELECTED_DOMAIN_CXX:?Supply the frozen compiler}\" GEOSPEC_OCCT_PREFIX=\"${GEOSPEC_SELECTED_DOMAIN_PREFIX:?Supply the frozen installed prefix}\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_SELECTED_DOMAIN_MANIFEST:?Supply the copied B84 adapter manifest}\" --locked --offline --test selected_continuous_domain --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/matcher-full-selected-continuous-adapter-a1/cargo-target\" -- --nocapture --test-threads=1",
+        "forwardAllArgs": false
+      }
+    },
+    "test-f1-budget-batch": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "commands": [
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_F1_BUDGET_MANIFEST:?Supply frozen core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m1-installed-product-a1/f1-budget-target\" --lib -- certificates::engine::ordinary_budget_batch::f1_budget_boundaries_match_cold_and_warm --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_F1_BUDGET_MANIFEST:?Supply frozen core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m1-installed-product-a1/f1-budget-target\" --lib -- certificates::engine::ordinary_budget_batch::f1_batch_bindings_are_fresh_per_plan_and_claim --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_F1_BUDGET_MANIFEST:?Supply frozen core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m1-installed-product-a1/f1-budget-target\" --lib -- certificates::engine::ordinary_budget_batch::f1_late_negative_query_prevents_geometry_evaluation --exact --nocapture"
+        ],
+        "parallel": false,
+        "forwardAllArgs": false
+      }
+    },
+    "test-subject-release-m1": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "forwardAllArgs": false,
+        "commands": [
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M1_LIFECYCLE_MANIFEST:?Supply copied runtime manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m1-lifecycle-check-target\" --test subject_release_m1 -- releases_subjects_for_repeated_and_independent_healthy_sessions --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M1_LIFECYCLE_CORE_MANIFEST:?Supply copied core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m1-lifecycle-check-target\" --lib -- certificates::engine::ordinary_release::releases_verified_plate_capacity_in_healthy_sessions --exact --nocapture"
+        ],
+        "parallel": false
+      }
+    },
+    "test-f1-release-m1": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M1_LIFECYCLE_CORE_MANIFEST:?Supply copied core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m1-lifecycle-check-target\" --lib -- certificates::engine::ordinary_release::releases_verified_plate_capacity_in_healthy_sessions --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-continuous-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "parallel": false,
+        "commands": [
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M3_CONTINUOUS_MANIFEST:?Supply frozen continuous core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-continuous-a1/target\" --lib -- analysis::continuous::tests::insertion_exact_depth_and_authored_band --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M3_CONTINUOUS_MANIFEST:?Supply frozen continuous core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-continuous-a1/target\" --lib -- analysis::continuous::tests::insertion_zero_tangent_and_closed_boundary_line --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M3_CONTINUOUS_MANIFEST:?Supply frozen continuous core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-continuous-a1/target\" --lib -- analysis::continuous::tests::insertion_exact_comparison_precedes_tie_and_subnormal_display --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M3_CONTINUOUS_MANIFEST:?Supply frozen continuous core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-continuous-a1/target\" --lib -- analysis::continuous::tests::void_constant_channel_has_exact_area_four_and_checked_units --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M3_CONTINUOUS_MANIFEST:?Supply frozen continuous core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-continuous-a1/target\" --lib -- analysis::continuous::tests::void_narrow_waist_finds_exact_quarter_area --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M3_CONTINUOUS_MANIFEST:?Supply frozen continuous core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-continuous-a1/target\" --lib -- analysis::continuous::tests::void_preserves_point_connectivity_and_isolation_precedence --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M3_CONTINUOUS_MANIFEST:?Supply frozen continuous core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-continuous-a1/target\" --lib -- analysis::continuous::tests::void_disconnected_path_is_geometric_false --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M3_CONTINUOUS_MANIFEST:?Supply frozen continuous core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-continuous-a1/target\" --lib -- analysis::continuous::tests::void_section_rejects_a_bypass_component --exact --nocapture"
+        ],
+        "forwardAllArgs": false
+      }
+    },
+    "test-face-address-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER -u CXXFLAGS CXX=\"${GEOSPEC_SELECTED_DOMAIN_CXX:?Supply the frozen compiler}\" GEOSPEC_OCCT_PREFIX=\"${GEOSPEC_SELECTED_DOMAIN_PREFIX:?Supply the frozen installed prefix}\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_SELECTED_DOMAIN_MANIFEST:?Supply the copied M3 face adapter manifest}\" --locked --offline --test face_address --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-face-address-a1/target\" -- --nocapture --test-threads=1",
+        "forwardAllArgs": false
+      }
+    },
+    "test-subject-profile-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "forwardAllArgs": false,
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M1_LIFECYCLE_MANIFEST:?Supply copied runtime manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m1-lifecycle-check-target\" --test subject_release_m1 -- releases_subjects_for_repeated_and_independent_healthy_sessions --exact --nocapture"
+      }
+    },
+    "test-f2-source-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "commands": [
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --locked --offline --manifest-path \"${GEOSPEC_M3_F2_CORE_MANIFEST:?Supply frozen copied core manifest}\" --target-dir \"${GEOSPEC_M3_F2_CORE_TARGET:?Supply isolated core target}\" --test parallel_plane_distance_source -- --nocapture --test-threads=1",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --locked --offline --manifest-path \"${GEOSPEC_M3_F2_OCCT_MANIFEST:?Supply frozen copied OCCT manifest}\" --target-dir \"${GEOSPEC_M3_F2_OCCT_TARGET:?Supply isolated OCCT target}\" --test parallel_plane_distance_source -- --nocapture --test-threads=1"
+        ],
+        "parallel": false,
+        "forwardAllArgs": false
+      }
+    },
+    "test-python-admission-options": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "packages/geospec-engine-native/bindings/python/python",
+        "command": "env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 \"${GEOSPEC_ADMISSION_PYTHON:?Supply selected absolute CPython interpreter}\" -m pytest ../tests/test_matchers.py::test_binary_subject_transport_keeps_geometry_out_of_json_and_preserves_order -q -p no:cacheprovider",
+        "forwardAllArgs": false
+      }
+    },
+    "check-f2-integration-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo check --manifest-path \"${GEOSPEC_F2_INTEGRATION_MANIFEST:?Supply frozen core manifest}\" --locked --offline --lib --target-dir node_modules/.cache/geospec-engine-native/m3-f2-integration-a1/target",
+        "forwardAllArgs": false
+      }
+    },
+    "test-f2-engine-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_F2_ENGINE_MANIFEST:?Supply frozen runtime manifest}\" --locked --offline --test parallel_plane_m3 --target-dir node_modules/.cache/geospec-engine-native/runtime-target -- exact_source_planes_bind_runtime_polarity_budget_and_release --exact --nocapture --test-threads=1"
+      }
+    },
+    "test-evidence-projection-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_PROJECTION_MANIFEST:?Supply frozen projection core manifest}\" --locked --offline --test evidence_projection_m3 --target-dir node_modules/.cache/geospec-engine-native/m3-f2-integration-a1/target -- --nocapture --test-threads=1"
+      }
+    },
+    "build": {
+      "cache": false,
+      "dependsOn": ["require-geospec-artifacts"]
+    },
+    "prepare-geospec-ci-artifacts": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        {
+          "runtime": "node packages/geospec-engine-native/scripts/ci-artifacts.mjs cache-key"
+        }
+      ],
+      "outputs": [
+        "{projectRoot}/bindings/node/generated",
+        "{projectRoot}/bindings/emscripten/generated",
+        "{projectRoot}/dist",
+        "{workspaceRoot}/out/artifacts/geospec-native-engine/ci"
+      ],
+      "options": {
+        "command": "node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare",
+        "forwardAllArgs": false
+      }
+    },
+    "require-geospec-artifacts": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node packages/geospec-engine-native/scripts/ci-artifacts.mjs verify",
+        "forwardAllArgs": false
+      }
+    },
+    "require-geospec-delivery": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node packages/geospec-engine-native/scripts/ci-artifacts.mjs verify-delivery",
+        "forwardAllArgs": false
+      }
+    },
+    "check-ci-artifacts": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "commands": [
+          "node --test packages/geospec-engine-native/scripts/ci-artifacts.test.mjs",
+          "python3 -B packages/geospec-engine-native/scripts/test_native_proof.py"
+        ],
+        "parallel": false,
+        "forwardAllArgs": false
+      }
+    },
+    "check-conformance-profile": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --test packages/geospec-engine-native/bindings/node/current-profile.test.mjs",
+        "forwardAllArgs": false
+      }
+    },
+    "check-delivery-environment": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 -B packages/geospec-engine-native/scripts/test_deployment_target.py",
+        "forwardAllArgs": false
+      }
+    },
+    "test-feature-metrics-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "parallel": false,
+        "commands": [
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_FEATURE_METRIC_MANIFEST:?Supply frozen feature metric core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-f2-integration-a1/target\" --lib -- matchers::brep::tests::nominal_feature_metrics_preserve_authored_thresholds_without_enclosures --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_FEATURE_METRIC_MANIFEST:?Supply frozen feature metric core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-f2-integration-a1/target\" --lib -- matchers::brep::tests::nominal_axis_label_does_not_assert_exact_alignment --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_FEATURE_METRIC_MANIFEST:?Supply frozen feature metric core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-f2-integration-a1/target\" --lib -- matchers::brep::tests::evaluation_context_drives_all_eleven_matcher_families_with_one_brep_unit --exact --nocapture"
+        ]
+      }
+    },
+    "check-bore-adapter-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER -u CXXFLAGS CXX=\"${GEOSPEC_BORE_CXX:?Supply the frozen compiler}\" GEOSPEC_OCCT_PREFIX=\"${GEOSPEC_BORE_PREFIX:?Supply the frozen prefix}\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo check --manifest-path \"${GEOSPEC_BORE_MANIFEST:?Supply copied bore adapter manifest}\" --locked --offline --lib --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-hole-topology-adapter-a1/target\"",
+        "forwardAllArgs": false
+      }
+    },
+    "test-bore-core-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "parallel": false,
+        "commands": [
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_BORE_CORE_MANIFEST:?Supply frozen bore core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-f2-integration-a1/target\" --lib -- matchers::brep::tests::bore_inventory_reuses_success_with_identical_cold_warm_debits --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_BORE_CORE_MANIFEST:?Supply frozen bore core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-f2-integration-a1/target\" --lib -- matchers::brep::tests::bore_unknowns_preserve_existential_witness_and_refuse_absence_or_pattern --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_BORE_CORE_MANIFEST:?Supply frozen bore core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-f2-integration-a1/target\" --lib -- matchers::brep::tests::analyze_brep_exposes_partial_bore_inventory_without_fabricated_pattern --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_BORE_CORE_MANIFEST:?Supply frozen bore core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-f2-integration-a1/target\" --lib -- matchers::brep::tests::evaluation_context_drives_all_eleven_matcher_families_with_one_brep_unit --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_BORE_CORE_MANIFEST:?Supply frozen bore core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-f2-integration-a1/target\" --lib -- matchers::brep::tests::analyze_brep_projects_all_available_source_evidence --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_BORE_CORE_MANIFEST:?Supply frozen bore core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-f2-integration-a1/target\" --lib -- matchers::brep::tests::nominal_feature_metrics_preserve_authored_thresholds_without_enclosures --exact --nocapture"
+        ]
+      }
+    },
+    "qualify-occt-contraction-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 \"${GEOSPEC_CONTRACTION_DRIVER:?Supply the source-bound contraction experiment driver}\"",
+        "forwardAllArgs": false
+      }
+    },
+    "test-bore-adapter-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER -u CXXFLAGS CXX=\"${GEOSPEC_BORE_CXX:?Supply the frozen compiler}\" GEOSPEC_OCCT_PREFIX=\"${GEOSPEC_BORE_PREFIX:?Supply the frozen prefix}\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_BORE_MANIFEST:?Supply copied bore adapter manifest}\" --locked --offline --test circular_bores --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-hole-query-a1/target\" -- circular_bores_preserve_local_topology_and_reject_incomplete_or_obstructed_interiors --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "test-box-clearance-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "parallel": false,
+        "commands": [
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M3_CLEARANCE_MANIFEST:?Supply copied clearance core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-clearance-producer-a1/target\" --lib -- analysis::continuous::clearance_tests::exact_distance_and_signed_band_controls --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M3_CLEARANCE_MANIFEST:?Supply copied clearance core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-clearance-producer-a1/target\" --lib -- analysis::continuous::clearance_tests::deterministic_closed_set_witnesses --exact --nocapture",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_M3_CLEARANCE_MANIFEST:?Supply copied clearance core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-clearance-producer-a1/target\" --lib -- analysis::continuous::clearance_tests::finite_display_and_owned_evidence --exact --nocapture"
+        ],
+        "forwardAllArgs": false
+      }
+    },
+    "test-box-clearance-admission-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER -u CXXFLAGS CXX=\"${GEOSPEC_BORE_CXX:?Supply the frozen compiler}\" GEOSPEC_OCCT_PREFIX=\"${GEOSPEC_BORE_PREFIX:?Supply the frozen prefix}\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_BORE_MANIFEST:?Supply copied bore adapter manifest}\" --locked --offline --test box_clearance_subjects --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-hole-query-a1/target\" -- original_clearance_subjects_have_complete_located_box_domains --exact --nocapture",
+        "forwardAllArgs": false
+      }
+    },
+    "check-edge-treatment-adapter-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "parallel": false,
+        "commands": [
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo check --manifest-path \"${GEOSPEC_EDGE_CORE_MANIFEST:?Supply frozen edge-treatment core manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-edge-treatment-adapter-a1/target\" --lib",
+          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo check --manifest-path \"${GEOSPEC_EDGE_OCCT_MANIFEST:?Supply frozen edge-treatment OCCT manifest}\" --locked --offline --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-edge-treatment-adapter-a1/target\" --lib"
+        ],
+        "forwardAllArgs": false
+      }
+    },
+    "test-edge-treatment-query-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_EDGE_QUERY_MANIFEST:?Supply copied OCCT query manifest}\" --locked --offline --test edge_treatments --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-edge-treatment-query-a1/target\" -- --nocapture --test-threads=1",
+        "forwardAllArgs": false
+      }
+    },
+    "test-edge-treatment-core-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_EDGE_TEST_MANIFEST:?Supply copied edge core manifest}\" --locked --offline --lib --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-edge-treatment-core-a1/target\" -- matchers::brep:: --nocapture --test-threads=1",
+        "forwardAllArgs": false
+      }
+    },
+    "check-edge-treatment-shared-m3": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo check --manifest-path \"${GEOSPEC_EDGE_SHARED_MANIFEST:?Supply copied shared core manifest}\" --locked --offline --lib --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/m3-edge-treatment-shared-a1/target\"",
+        "forwardAllArgs": false
+      }
+    },
+    "test-rust-selected": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_RUST_TEST_MANIFEST:?Supply the frozen core manifest}\" --locked --offline --lib --target-dir \"${GEOSPEC_RUST_TEST_TARGET_DIR:?Supply the exclusive target directory}\" -- \"${GEOSPEC_RUST_TEST_FILTER:?Supply the semantic test filter}\" --nocapture --test-threads=1",
+        "forwardAllArgs": false
+      }
+    },
+    "check-coverage-gate": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "python3 -B packages/geospec-engine-native/quality/test_gate.py",
+        "forwardAllArgs": false
+      }
+    },
+    "coverage-critical": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "python3 -B packages/geospec-engine-native/quality/gate.py --inventory-sha256 \"$GEOSPEC_COVERAGE_INVENTORY_SHA256\" --receipts out/reports/coverage/packages/geospec-engine-native/receipts.json",
+        "forwardAllArgs": false
+      }
+    },
+    "prepare-delivery": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py check",
+        "forwardAllArgs": false
+      },
+      "configurations": {
+        "sources": {
+          "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py sources"
+        },
+        "tools": {
+          "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py tools"
+        },
+        "prefixes": {
+          "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py prefixes"
+        },
+        "reuse-native": {
+          "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py prefixes --reuse-prefix native"
+        },
+        "reuse-mixed": {
+          "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py prefixes --reuse-prefix mixed"
+        },
+        "inputs": {
+          "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py inputs"
+        },
+        "verify": {
+          "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py verify"
+        }
+      }
+    },
+    "test-benchmark-statistics": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "forwardAllArgs": false,
+        "commands": [
+          "\"${GEOSPEC_BENCH_ANALYSIS_PYTHON:?Select the pinned analysis Python with NumPy}\" -B packages/geospec-engine-native/bench/campaign-analysis.test.py",
+          "\"${GEOSPEC_BENCH_ANALYSIS_PYTHON:?Select the pinned analysis Python with NumPy}\" -B packages/geospec-engine-native/bench/python-consumer-event.test.py"
+        ],
+        "parallel": false
+      }
+    },
+    "prepare-legacy-reference": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node packages/geospec-engine-native/scripts/prepare-legacy-reference.mts verify-fixture",
+        "forwardAllArgs": false
+      },
+      "configurations": {
+        "stage": {
+          "command": "node packages/geospec-engine-native/scripts/prepare-legacy-reference.mts stage"
+        },
+        "verify-installed": {
+          "command": "node packages/geospec-engine-native/scripts/prepare-legacy-reference.mts verify-installed \"${GEOSPEC_LEGACY_REFERENCE_ROOT:?Set the staged legacy reference root}\""
+        }
+      }
+    },
+    "typecheck-legacy-reference": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "pnpm exec tsgo -p packages/geospec-engine-native/scripts/tsconfig.json",
+        "forwardAllArgs": false
+      }
+    }
+  }
+}

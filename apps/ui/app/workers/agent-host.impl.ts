@@ -1,42 +1,41 @@
-import type { MachineActors } from '#lib/xstate.lib.js';
+/**
+ * The resident worker's project host (W6 RH-S8): one per project the tab has open, built from the ports the page
+ * provides. Every stream of the project is served by one launcher (`createAgentLauncher`), whose chats are led among
+ * the origin's tabs by M2 inside the browser chat store; nothing here elects, forwards or tails.
+ */
+
 import { ResourceQueue } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
-import { createChatToolRegistry, createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
+import {
+  createChatToolRegistry,
+  createProviderRpcFileSystem,
+  createRuntimeWorkbenchClient,
+} from '@taucad/agent-tools/registry';
 import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { createRuntimeClient } from '@taucad/runtime/client';
-import type { ParameterManifest, ParameterResolutionOptions, ParameterSetTarget } from '@taucad/parameters';
-import { loadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
-import type { ParameterAuthority } from '@taucad/parameters/authority';
-import { createActor, createCallbackLogic, createAsyncLogic, waitFor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
-import { parameterSetMachine } from '@taucad/parameters/set-machine';
+import { createParameterSetActor } from '@taucad/parameters/set-machine';
+import type { ParameterSetActor } from '@taucad/parameters/set-machine';
+import { Actor, waitFor } from 'xstate';
 import { fromFsLike } from '@taucad/runtime/filesystem';
 import { connectComputeStoreChannel } from '@taucad/runtime/host';
 import type { FsLike } from '@taucad/runtime/filesystem';
-import { parameterEntryPath } from '@taucad/types';
 import type { FileStat } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
-import { z } from 'zod';
-import { createTauAgentHost, replayedStartOutcome } from '@taucad/agent-host';
-import type {
-  AgentLiveEvent,
-  AgentLogEvent,
-  DurableEventLog,
-  EventLogBatch,
-  HostRunSnapshot,
-  InterruptRequest,
-  InterruptResolution,
-  StorageDurabilityClass,
-  TauAgentHost,
-} from '@taucad/agent-host';
-import { createOpfsEventLog, createProviderAttachmentReader, createProviderEventLog } from '@taucad/agent-host/browser';
+import { followChat } from '@taucad/agent-host';
+import type { ChatLedger, StorageDurabilityClass, ToolRegistry } from '@taucad/agent-host';
+import { connectTurnPlacementChannel } from '@taucad/agent-host/channel-client';
+import type { TurnPlacementChannel, TurnPlacementToolPort } from '@taucad/agent-host/channel-client';
+import { createAgentLauncher, serveAgentChannel } from '@taucad/agent-host/launcher';
+import type { AgentLauncher, AgentLauncherOptions } from '@taucad/agent-host/launcher';
+import { createBrowserChatStore } from '@taucad/agent-host/browser';
+import type { BrowserChatStoreOptions } from '@taucad/agent-host/browser';
 import { createConfiguredGatewayModelTransport } from '#cloud/gateway-model-transport.js';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
@@ -44,45 +43,19 @@ import type { SkillResolver } from '#lib/skill-resolver.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 import type { HeadlessImageService } from '#services/headless-image.service.js';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
-import type {
-  AgentHostWorkerAttachResponse,
-  AgentHostWorkerCallRequest,
-  AgentHostWorkerCallResponse,
-  AgentHostWorkerCommand,
-  AgentHostWorkerEvent,
-  AgentHostWorkerInitializeRequest,
-  AgentHostWorkerLiveEvent,
-  AgentHostWorkerResultResponse,
-  AgentHostWorkerTailResponse,
-  ForwardedAgentHostResponse,
-} from '#workers/agent-host.contract.js';
-import {
-  agentHostTailBatchLimit,
-  agentHostWorkerCommandSchema,
-  agentLiveEventSchema,
-  eventLogBatchSchema,
-  forwardedAgentHostResponseSchema,
-  readCommandReturnAddress,
-} from '#workers/agent-host.contract.js';
-import {
-  acquireChatLeaderLease,
-  agentHostAuthorityName,
-  agentHostProtocolVersion,
-  awaitWhileLeaderLives,
-  createFollowerRecoveryMonitor,
-} from '#workers/agent-host-leader.js';
-import type { AgentHostLockRequest, ChatLeaderLease } from '#workers/agent-host-leader.js';
+import { agentHostWorkerBuild } from '#workers/agent-host.contract.js';
+import type { AgentHostProjectProvide, AgentHostProjectRebridge } from '#workers/agent-host.contract.js';
+import { closeProvidedPorts, createDisposers } from '#workers/agent-host-projects.js';
+import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
-import type { GeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
-
-type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
 
 type ProjectFileSystemBridge = Pick<
   FileSystemBridgeProxy,
   | 'readFile'
   | 'writeFile'
   | 'writeFileChecked'
+  | 'deleteFileChecked'
   | 'appendFile'
   | 'readdir'
   | 'stat'
@@ -97,102 +70,47 @@ type ProjectFileSystemBridge = Pick<
   | 'dispose'
 >;
 
-type LeaderBroadcast =
-  | {
-      readonly version: typeof agentHostProtocolVersion;
-      readonly projectId: string;
-      readonly workspaceId: string;
-      readonly chatId: string;
-      readonly type: 'command';
-      readonly senderId: string;
-      readonly targetGeneration?: string | undefined;
-      readonly command: AgentHostWorkerCommand;
-    }
-  | {
-      readonly version: typeof agentHostProtocolVersion;
-      readonly projectId: string;
-      readonly workspaceId: string;
-      readonly chatId: string;
-      readonly type: 'response';
-      readonly targetId: string;
-      readonly generation: string;
-      readonly response: ForwardedResponse;
-    }
-  | {
-      readonly version: typeof agentHostProtocolVersion;
-      readonly projectId: string;
-      readonly workspaceId: string;
-      readonly chatId: string;
-      readonly type: 'leader';
-      readonly senderId: string;
-      readonly generation: string;
-    }
-  | {
-      readonly version: typeof agentHostProtocolVersion;
-      readonly projectId: string;
-      readonly workspaceId: string;
-      readonly chatId: string;
-      readonly type: 'cursor';
-      readonly senderId: string;
-      readonly generation: string;
-      readonly endCursor: number;
-    }
-  | {
-      readonly version: typeof agentHostProtocolVersion;
-      readonly projectId: string;
-      readonly workspaceId: string;
-      readonly chatId: string;
-      readonly type: 'tail-request' | 'tail-ack';
-      readonly senderId: string;
-      readonly targetGeneration: string;
-      readonly cursor: number;
-    }
-  | {
-      readonly version: typeof agentHostProtocolVersion;
-      readonly projectId: string;
-      readonly workspaceId: string;
-      readonly chatId: string;
-      readonly type: 'tail';
-      readonly targetId: string;
-      readonly generation: string;
-      readonly batch: EventLogBatch;
-    }
-  | {
-      readonly version: typeof agentHostProtocolVersion;
-      readonly projectId: string;
-      readonly workspaceId: string;
-      readonly chatId: string;
-      readonly type: 'live-event';
-      readonly senderId: string;
-      readonly generation: string;
-      readonly event: AgentLiveEvent;
-    };
+/** What the worker as a whole gives each project host. */
+export type ResidentWorkerContext = Readonly<{
+  /** This tab's id among the origin's tabs (RH-R5). */
+  tabId: string;
+  visibility: NonNullable<BrowserChatStoreOptions['visibility']>;
+  /** M1's timers; the worker leaves the defaults, and the browser tier shortens idle eviction (RH-A15). */
+  delays?: AgentLauncherOptions['delays'];
+}>;
 
-type ForwardedResponse = ForwardedAgentHostResponse;
+/** One project host incarnation (RH-R4): its launcher serves every stream of the project. */
+export type BrowserProjectHost = Readonly<{
+  hostId: string;
+  /** Read this host's current leadership actor without taking a lock. */
+  stoppability: (chatId: string) => ReturnType<AgentLauncher['stoppability']>;
+  /** Serve one stream; closing it only detaches (D17). */
+  connect: (port: MessagePort) => void;
+  /** Swap in fresh bridges, as after a file-manager restart; the launcher and its runs stay (RV1-F1). */
+  rebridge: (ports: AgentHostProjectRebridge) => Promise<void>;
+  /** Serve no stream, and settle once every run this host admitted has ended, or `signal` ends (T3). */
+  drain: (signal: AbortSignal) => Promise<void>;
+  /** Stop the launcher and every child, then dispose the bridges this host was given. */
+  close: () => Promise<void>;
+}>;
 
-type LeadershipState = {
-  readonly lease: Extract<ChatLeaderLease, { readonly isLeader: true }>;
-  readonly heartbeatId: ReturnType<typeof globalThis.setInterval>;
-};
+/**
+ * T3: every run in `runIds` has ended; a paused run has too, since its pause survives a restart (RA-S7). A placed run
+ * ends at its settlement row, which M1 appends after the terminal one (W8 TS-S6).
+ */
+const runsEnded =
+  (runIds: ReadonlySet<string>) =>
+  (ledger: ChatLedger): boolean =>
+    [...runIds].every((runId) => {
+      const entry = ledger.runs[runId];
+      if (entry === undefined || entry.lifecycle === 'admitted' || entry.lifecycle === 'running') {
+        return false;
+      }
+      return entry.lifecycle === 'paused' || entry.settlements.some((row) => row.attempt === entry.attempt);
+    });
 
-type WorkerSession = {
-  readonly sessionId: string;
-  readonly tabId: string;
-  readonly fileSystem: ProjectFileSystemBridge;
-  readonly projectRoot: ProjectFileSystemBridge;
-  readonly durability: StorageDurabilityClass;
-  /** Backend of the project's own storage — the only authority for log placement. */
-  readonly storageBackend: string;
-  readonly host: TauAgentHost;
-  readonly runtimeClient: AppRuntimeClient;
-  readonly parameterActors: ReadonlyMap<string, Promise<ParameterActor>>;
-  readonly imageService: HeadlessImageService;
-  readonly geoSpecClient: GeoSpecWorkerRpcClient;
-  readonly computeDispose?: (() => void) | undefined;
-  readonly providerBasePath: string;
-  readonly projectId: string;
-  readonly workspaceId: string;
-};
+/** How often the worker's agent channel sends `lk`, so the page's liveness bound can tell slow from dead (T9 E3). */
+const keepaliveInterval = 1000;
 
 /** OPFS sync access handles exist in workers and never on the main thread. */
 const supportsOpfsSyncAccess = async (): Promise<boolean> => {
@@ -238,18 +156,108 @@ const resolveWorkerDurability = async (
 ): Promise<StorageDurabilityClass> =>
   backend === 'opfs' && (await supportsOpfsSyncAccess()) ? 'exclusive-append' : reported;
 
+/**
+ * How long a bridge may take to answer its hello (D14): a provide or rebridge runs in its project's order, so one that
+ * never answers would hold every later call for that project. Milliseconds.
+ */
+const bridgeReadyBound = 15_000;
+
+/** How long a parameter actor may take to finish its last write when the host closes (D15). Milliseconds. */
+const parameterCloseBound = 10_000;
+
 const createProjectFileSystemProxy = async (port: MessagePort): Promise<ProjectFileSystemBridge> => {
   const { createTransferredFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
   const proxy = createTransferredFileSystemBridgeProxy(port);
-  await proxy.ready;
+  let readyExpiry: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      proxy.ready,
+      new Promise<never>((_resolve, reject) => {
+        const unanswered = Object.assign(new Error('The project filesystem bridge did not answer.'), {
+          code: 'PEER_UNRESPONSIVE',
+        });
+        readyExpiry = setTimeout(reject, bridgeReadyBound, unanswered);
+      }),
+    ]);
+  } catch (error) {
+    /* Its port goes with it: a caller that fails here never holds the proxy. */
+    proxy.dispose();
+    throw error;
+  } finally {
+    clearTimeout(readyExpiry);
+  }
   return proxy;
+};
+
+/** Both bridges of a provide or rebridge; the project root must be writable and declare its durability. */
+const openProjectBridges = async (ports: Pick<AgentHostProjectProvide, 'fileSystemPort' | 'projectRootPort'>) => {
+  const [fileSystemOpened, projectRootOpened] = await Promise.allSettled([
+    createProjectFileSystemProxy(ports.fileSystemPort),
+    createProjectFileSystemProxy(ports.projectRootPort),
+  ]);
+  /* One bridge that failed to open closes the other, which would otherwise outlive the failed provide. */
+  if (fileSystemOpened.status === 'rejected' || projectRootOpened.status === 'rejected') {
+    for (const settled of [fileSystemOpened, projectRootOpened]) {
+      if (settled.status === 'fulfilled') {
+        settled.value.dispose();
+      }
+    }
+    const reason: unknown = [fileSystemOpened, projectRootOpened].find(
+      (settled): settled is PromiseRejectedResult => settled.status === 'rejected',
+    )?.reason;
+    throw reason instanceof Error ? reason : new Error(String(reason));
+  }
+  const fileSystem = fileSystemOpened.value;
+  const projectRoot = projectRootOpened.value;
+  const root = projectRoot.hello.payload;
+  const durability = root.state === 'ready' && root.capabilities.writable ? root.capabilities.durability : undefined;
+  if (!durability) {
+    fileSystem.dispose();
+    projectRoot.dispose();
+    throw Object.assign(new Error('The project filesystem bridge is not writable or did not declare durability.'), {
+      code: 'STORAGE_NOT_WRITABLE',
+    });
+  }
+  return { fileSystem, projectRoot, durability };
+};
+
+/**
+ * One object whose far end `swap` replaces in place (RV1-F1): holders keep `view`, and each call reaches the current
+ * target, read at call time.
+ */
+// oxlint-disable-next-line typescript/no-restricted-types -- a Proxy target is any object; these are bridge proxies.
+const swappable = <Target extends object>(
+  initial: Target,
+): Readonly<{ view: Target; swap: (next: Target) => Target }> => {
+  let current = initial;
+  const view = new Proxy(initial, {
+    get: (_target, key) => {
+      const value: unknown = Reflect.get(current, key);
+      return typeof value === 'function'
+        ? (...args: unknown[]): unknown =>
+            Reflect.apply(Reflect.get(current, key) as (...parameters: unknown[]) => unknown, current, args)
+        : value;
+    },
+  });
+  return {
+    view,
+    swap: (next) => {
+      const previous = current;
+      current = next;
+      return previous;
+    },
+  };
 };
 
 /**
  * The workspace bridge as a `FileSystemProvider`: the one rooted provider this
  * worker hands to the GeoSpec bridge port and to the shared tool filesystem.
+ *
+ * @param proxy - The worker's end of the workspace filesystem bridge.
+ * @returns The provider every tool call and the GeoSpec bridge read through.
+ * @internal
  */
-const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge): FileSystemProvider => {
+export const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge): FileSystemProvider => {
   const { payload } = proxy.hello;
   if (payload.state !== 'ready') {
     throw Object.assign(new Error(`Workspace filesystem bridge is ${payload.state}.`), {
@@ -268,6 +276,27 @@ const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge): FileSy
     capabilities: payload.capabilities,
     readFile,
     writeFile: proxy.writeFile.bind(proxy),
+    /* The agent's conditional write compares and writes in one step only where
+     * the provider can; without this the browser leg fell back to a separate
+     * read and write, and a person's edit between them was overwritten (W0.18).
+     * A bridge served over a bare provider has no such method and its server
+     * answers `Unknown method`, which ran nothing: that is
+     * `CHECKED_WRITE_UNSUPPORTED`, the refusal the tool falls back on.
+     * ponytail: matched on the rpc server's message, which carries no code; the
+     * bridge hello advertising checked writes would remove the match. */
+    writeFileChecked: async (input) => {
+      try {
+        return await proxy.writeFileChecked(input);
+      } catch (error) {
+        if (error instanceof Error && error.message === 'Unknown method: writeFileChecked') {
+          throw Object.assign(new Error('This workspace bridge cannot compare and write in one step.'), {
+            code: 'CHECKED_WRITE_UNSUPPORTED',
+            applicationState: 'known-not-applied',
+          });
+        }
+        throw error;
+      }
+    },
     appendFile: proxy.appendFile.bind(proxy),
     readdir: proxy.readdir.bind(proxy),
     stat: proxy.stat.bind(proxy),
@@ -279,201 +308,6 @@ const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge): FileSy
     lstat: proxy.lstat.bind(proxy),
     dispose: () => undefined,
   };
-};
-
-/** Read every event of one chat in a single batch; the log slices to its own length. */
-const wholeLogLimit = Number.MAX_SAFE_INTEGER;
-
-const channels = new Map<string, BroadcastChannel>();
-const leadership = new Map<string, LeadershipState>();
-const leadershipAttempts = new Map<string, Promise<boolean>>();
-const takeoverAttempts = new Map<string, Promise<HostRunSnapshot | undefined>>();
-const forwarded = new Map<string, ReturnType<typeof Promise.withResolvers<ForwardedResponse>>>();
-const leaderGenerations = new Map<string, string>();
-const followerCursors = new Map<string, number>();
-const followerMonitors = new Map<string, ReturnType<typeof createFollowerRecoveryMonitor>>();
-const followerRecoveries = new Set<string>();
-const followerRetryIds = new Map<string, ReturnType<typeof globalThis.setTimeout>>();
-const tailInFlight = new Set<string>();
-const backgroundTasks = new Set<Promise<void>>();
-const eventStreams = new Set<ReadableStreamDefaultController<AgentHostWorkerEvent>>();
-const liveEventStreams = new Set<ReadableStreamDefaultController<AgentHostWorkerLiveEvent>>();
-let session: WorkerSession | undefined;
-let closing = false;
-
-const leaderHeartbeatInterval = 1000;
-const followerHeartbeatTimeout = 3500;
-const followerTailTimeout = 2000;
-
-const listenTo = <Event>(
-  controllers: Set<ReadableStreamDefaultController<Event>>,
-  signal: AbortSignal,
-): AsyncIterable<Event> => {
-  let cleanup = (): void => undefined;
-  return new ReadableStream<Event>({
-    start(controller) {
-      let active = true;
-      const close = (): void => {
-        if (!active) {
-          return;
-        }
-        active = false;
-        controllers.delete(controller);
-        controller.close();
-        signal.removeEventListener('abort', close);
-      };
-      cleanup = close;
-      controllers.add(controller);
-      if (signal.aborted) {
-        close();
-      } else {
-        signal.addEventListener('abort', close, { once: true });
-      }
-    },
-    cancel: () => {
-      cleanup();
-    },
-  });
-};
-
-/** Durable event stream consumed by the worker's @taucad/rpc listen handler. */
-export const listenAgentHostWorkerEvents = (signal: AbortSignal): AsyncIterable<AgentHostWorkerEvent> =>
-  listenTo(eventStreams, signal);
-
-/** Ephemeral delta stream consumed by the worker's @taucad/rpc listen handler. */
-export const listenAgentHostWorkerLiveEvents = (signal: AbortSignal): AsyncIterable<AgentHostWorkerLiveEvent> =>
-  listenTo(liveEventStreams, signal);
-
-const codedErrorSchema = z.object({ code: z.string() });
-const errorCode = (error: unknown): string => codedErrorSchema.safeParse(error).data?.code ?? 'AGENT_HOST_ERROR';
-
-/**
- * A command the leader refused because it addressed an older generation.
- *
- * The refusal is decided before the command runs, which is what makes one
- * re-address safe: unlike `LEADERSHIP_LOST`, which a leader raises partway
- * through work it may already have done, nothing has happened here.
- */
-const leaderGenerationStaleCode = 'LEADER_GENERATION_STALE';
-
-const errorResponse = (requestId: string, error: unknown): ForwardedAgentHostResponse & { readonly type: 'error' } => ({
-  type: 'error',
-  requestId,
-  code: errorCode(error),
-  message: error instanceof Error ? error.message : String(error),
-});
-
-const broadcastBaseSchema = {
-  version: z.literal(agentHostProtocolVersion),
-  projectId: z.string().min(1),
-  workspaceId: z.string().min(1),
-  chatId: z.string().min(1),
-};
-const leaderBroadcastSchema = z.union([
-  z.strictObject({
-    ...broadcastBaseSchema,
-    type: z.literal('command'),
-    senderId: z.string().min(1),
-    targetGeneration: z.string().optional(),
-    command: agentHostWorkerCommandSchema,
-  }),
-  z.strictObject({
-    ...broadcastBaseSchema,
-    type: z.literal('response'),
-    targetId: z.string().min(1),
-    generation: z.string().min(1),
-    response: forwardedAgentHostResponseSchema,
-  }),
-  z.strictObject({
-    ...broadcastBaseSchema,
-    type: z.literal('leader'),
-    senderId: z.string().min(1),
-    generation: z.string().min(1),
-  }),
-  z.strictObject({
-    ...broadcastBaseSchema,
-    type: z.literal('cursor'),
-    senderId: z.string().min(1),
-    generation: z.string().min(1),
-    endCursor: z.number().int().nonnegative(),
-  }),
-  z.strictObject({
-    ...broadcastBaseSchema,
-    type: z.enum(['tail-request', 'tail-ack']),
-    senderId: z.string().min(1),
-    targetGeneration: z.string().min(1),
-    cursor: z.number().int().nonnegative(),
-  }),
-  z.strictObject({
-    ...broadcastBaseSchema,
-    type: z.literal('tail'),
-    targetId: z.string().min(1),
-    generation: z.string().min(1),
-    batch: eventLogBatchSchema,
-  }),
-  z.strictObject({
-    ...broadcastBaseSchema,
-    type: z.literal('live-event'),
-    senderId: z.string().min(1),
-    generation: z.string().min(1),
-    event: agentLiveEventSchema,
-  }),
-]);
-
-const responseBelongsToChat = (response: ForwardedResponse, chatId: string): boolean => {
-  if (response.type === 'tail') {
-    return response.chatId === chatId;
-  }
-  if (response.type === 'attach') {
-    return response.chatId === chatId && (response.snapshot?.chatId ?? chatId) === chatId;
-  }
-  return response.type === 'result' ? response.snapshot.chatId === chatId : true;
-};
-
-const validatedBroadcast = (
-  value: unknown,
-  active: WorkerSession,
-  chatId: string,
-): LeaderBroadcast | 'unreadable' | undefined => {
-  const parsed = leaderBroadcastSchema.safeParse(value);
-  if (!parsed.success) {
-    /* This channel is keyed on `agentHostProtocolVersion`, so a frame that
-     * reaches here was posted by a peer claiming *this* protocol and failing
-     * its schema — a real defect, not a deploy skew. Dropping it in silence
-     * burned the forwarding wait instead, and the page saw a bare timeout. */
-    console.error('[agentHost] dropped a leader frame this protocol cannot read', chatId, parsed.error.issues);
-    return 'unreadable';
-  }
-  const message = parsed.data as LeaderBroadcast;
-  if (
-    message.projectId !== active.projectId ||
-    message.workspaceId !== active.workspaceId ||
-    message.chatId !== chatId
-  ) {
-    return undefined;
-  }
-  switch (message.type) {
-    case 'command': {
-      return message.command.chatId === chatId ? message : undefined;
-    }
-    case 'response': {
-      return responseBelongsToChat(message.response, chatId) ? message : undefined;
-    }
-    case 'leader':
-    case 'cursor': {
-      return message;
-    }
-    case 'live-event': {
-      return message.event.chatId === chatId ? message : undefined;
-    }
-    case 'tail-request':
-    case 'tail-ack': {
-      return message;
-    }
-    case 'tail': {
-      return message;
-    }
-  }
 };
 
 const requireStoragePathSegment = (value: string, label: string): string => {
@@ -529,1029 +363,119 @@ const createRuntimeRpcClients = (options: {
   });
 };
 
-const broadcastBinding = (active: WorkerSession, chatId: string) =>
-  ({
-    version: agentHostProtocolVersion,
-    projectId: active.projectId,
-    workspaceId: active.workspaceId,
-    chatId,
-  }) as const;
-
-const publishEvent = async (active: WorkerSession, chatId: string, event: AgentLogEvent): Promise<void> => {
-  for (const controller of eventStreams) {
-    controller.enqueue({ chatId, event });
-  }
-  const state = leadership.get(chatId);
-  if (!state) {
-    return;
-  }
-  const { endCursor } = await active.host.readEvents({
-    chatId,
-    cursor: Number.MAX_SAFE_INTEGER,
-    limit: 1,
-  });
-  channelFor(chatId).postMessage({
-    ...broadcastBinding(active, chatId),
-    type: 'cursor',
-    senderId: active.tabId,
-    generation: state.lease.generation,
-    endCursor,
-  } satisfies LeaderBroadcast);
-};
-
-const publishLiveEvent = (active: WorkerSession, event: AgentLiveEvent): void => {
-  const state = leadership.get(event.chatId);
-  if (!state) {
-    return;
-  }
-  for (const controller of liveEventStreams) {
-    controller.enqueue({ chatId: event.chatId, event });
-  }
-  channelFor(event.chatId).postMessage({
-    ...broadcastBinding(active, event.chatId),
-    type: 'live-event',
-    senderId: active.tabId,
-    generation: state.lease.generation,
-    event,
-  } satisfies LeaderBroadcast);
-};
-
-const openProjectEventLog = async (active: WorkerSession, chatId: string): Promise<DurableEventLog> => {
-  const state = leadership.get(chatId);
-  if (!state) {
-    throw Object.assign(new Error(`This tab does not hold the event-log lease for ${chatId}.`), {
-      code: 'NOT_CHAT_LEADER',
-    });
-  }
-  const chatPath = requireStoragePathSegment(chatId, 'chatId');
-  // The OPFS-root leg reaches past the project's own filesystem bridge, so it
-  // is admissible only for a project that genuinely lives in OPFS.
-  const log =
-    active.storageBackend === 'opfs' && active.durability === 'exclusive-append'
-      ? await (async () => {
-          try {
-            const root = await navigator.storage.getDirectory();
-            const project = await root.getDirectoryHandle(
-              requireStoragePathSegment(active.providerBasePath, 'providerBasePath'),
-              { create: false },
-            );
-            const tau = await project.getDirectoryHandle('.tau', {
-              create: true,
-            });
-            const chats = await tau.getDirectoryHandle('chats', {
-              create: true,
-            });
-            const chat = await chats.getDirectoryHandle(chatPath, {
-              create: true,
-            });
-            return await createOpfsEventLog({
-              fileHandle: await chat.getFileHandle('events.jsonl', {
-                create: true,
-              }),
-            });
-          } catch (error) {
-            throw Object.assign(new Error(`Project event storage for ${chatId} is not writable.`), {
-              code: 'STORAGE_NOT_WRITABLE',
-              cause: error,
-            });
-          }
-        })()
-      : await createProviderEventLog({
-          fileSystem: active.projectRoot,
-          // Bridge paths are root-relative (a leading slash fails assertRootedPath).
-          filePath: `.tau/chats/${chatPath}/events.jsonl`,
-        });
-  return {
-    append: async (event) => {
-      if (
-        leadership.get(chatId)?.lease.generation !== state.lease.generation ||
-        event.leaderEpoch !== state.lease.generation
-      ) {
-        throw Object.assign(new Error(`Leadership for ${chatId} changed before append.`), { code: 'LEADERSHIP_LOST' });
-      }
-      const durableEvent =
-        event.type === 'run.lifecycle' && event.state === 'admitted'
-          ? { ...event, storageDurability: active.durability }
-          : event;
-      const outcome = await log.append(durableEvent);
-      if (outcome.appended) {
-        await publishEvent(active, chatId, durableEvent);
-      }
-      return outcome;
-    },
-    read: async () => log.read(),
-    readBatch: async (input) => log.readBatch(input),
-    close: async () => log.close(),
-  };
-};
-
-const trackTask = (operation: () => Promise<void>, onError: (error: unknown) => void): void => {
-  const run = async (): Promise<void> => {
-    try {
-      await operation();
-    } catch (error) {
-      onError(error);
-    } finally {
-      backgroundTasks.delete(task);
-    }
-  };
-  const task = run();
-  backgroundTasks.add(task);
-};
-
-const acknowledgeRun = async (
-  active: WorkerSession,
-  run: { readonly chatId: string; readonly runId?: string | undefined },
-  completion: Promise<unknown>,
-): Promise<HostRunSnapshot> => {
-  const { chatId, runId } = run;
-  /* A refused admission is an answer, not a race to lose: `waitForAdmission`
-   * asks the *chat* what is running, so a command the host refused — because
-   * the chat's previous run has not ended — used to be answered with that
-   * previous run's snapshot, and the caller reported a run-id mismatch while
-   * the real reason was swallowed with the rejected promise. The run id makes
-   * the answer this command's own: two admissions racing on one chat can no
-   * longer be answered with each other's snapshot. */
-  const admitted = await Promise.race([active.host.waitForAdmission(chatId, runId), completion.then(() => undefined)]);
-  if (!admitted) {
-    await completion;
-    return active.host.snapshot(chatId);
-  }
-  trackTask(
-    async () => {
-      await completion;
-    },
-    /* The caller was answered at admission and the run's own failure row is
-     * durable, so there is nobody left to reject to — but a run that died after
-     * its admission is a fact this worker must not discard in silence. */
-    (error) => {
-      console.error('[agentHost] run failed after it was admitted', chatId, runId, error);
-    },
-  );
-  return admitted;
-};
-
-const executeCommand = async (
-  command: AgentHostWorkerCommand,
-  takeover = false,
-): Promise<AgentHostWorkerResultResponse | AgentHostWorkerTailResponse | AgentHostWorkerAttachResponse> => {
-  const active = session;
-  if (!active) {
-    throw Object.assign(new Error('Agent host worker session is not initialized.'), {
-      code: 'SESSION_NOT_INITIALIZED',
-    });
-  }
-  if (command.type === 'tail') {
-    return {
-      type: 'tail',
-      requestId: command.requestId,
-      chatId: command.chatId,
-      batch: await active.host.readEvents(command),
-    };
-  }
-  if (command.type === 'attach') {
-    const chatPath = requireStoragePathSegment(command.chatId, 'chatId');
-    const abandonedLock = `.tau/chats/${chatPath}/events.jsonl.lock`;
-    // Winning this workspace's native Web Lock proves its prior worker is gone;
-    // only the provider advisory marker can have survived the abrupt reload.
-    if (takeover && active.durability !== 'exclusive-append' && (await active.projectRoot.exists(abandonedLock))) {
-      await active.projectRoot.unlink(abandonedLock);
-    }
-    const firstBatch = await active.host.readEvents(command);
-    let batch = firstBatch;
-    let snapshot: HostRunSnapshot | undefined;
-    if (firstBatch.endCursor > 0) {
-      if (takeover) {
-        /* I4: a takeover *records* what it found, it never drives it. Resuming
-         * here re-asked the provider for a turn the person had already paid
-         * for, on a run no page owned — no lease, no revision, no settlement —
-         * and it fired on the next gesture's attach, not on any decision. The
-         * host decides what the record is: an abandoned run fails with
-         * `RUN_ABANDONED` so the saved-turn card can offer Resume, a paused run
-         * is left paused for the interrupt this batch republishes, and a run
-         * this host is still driving is left alone. */
-        const current = takeoverAttempts.get(command.chatId);
-        const attempt = current ?? active.host.markAbandoned(command.chatId);
-        takeoverAttempts.set(command.chatId, attempt);
-        try {
-          snapshot = await attempt;
-        } catch (error) {
-          /* A run that cannot be recorded must not make the chat unopenable:
-           * the client still needs the transcript it attached for. The
-           * leadership check below turns a lost lease into its own refusal. */
-          console.error('[agentHost] could not record an abandoned run', command.chatId, error);
-          snapshot = await active.host.describeRun(command.chatId);
-        } finally {
-          if (takeoverAttempts.get(command.chatId) === attempt) {
-            takeoverAttempts.delete(command.chatId);
-          }
-        }
-        batch = await active.host.readEvents(command);
-      } else {
-        /* Non-throwing: `snapshot`'s `NO_RUN_ADMITTED` escaping here made a chat
-         * whose log holds records but no run impossible to open at all. */
-        snapshot = await active.host.describeRun(command.chatId);
-      }
-    }
-    const state = leadership.get(command.chatId);
-    if (!state) {
-      throw Object.assign(new Error(`This tab lost leadership while attaching ${command.chatId}.`), {
-        code: 'LEADERSHIP_LOST',
-      });
-    }
-    return {
-      type: 'attach',
-      requestId: command.requestId,
-      chatId: command.chatId,
-      batch,
-      leadership: { role: 'leader', generation: state.lease.generation },
-      ...(snapshot ? { snapshot } : {}),
-      /* This attach took the chat over from a dead driver *and* the run it
-       * found still wants the attaching page: one it has just recorded as
-       * abandoned, or one left non-terminal (paused on a person, or still
-       * driven by this host). The page rebuilds from the log either way. */
-      takeover:
-        takeover &&
-        snapshot !== undefined &&
-        (snapshot.failure?.code === 'RUN_ABANDONED' ||
-          (snapshot.state !== 'completed' && snapshot.state !== 'failed' && snapshot.state !== 'cancelled')),
-    };
-  }
-  if (command.type === 'start') {
-    let outcome: ReturnType<typeof replayedStartOutcome> = 'admit';
-    try {
-      /* The whole log, because the fact that decides this is a record anywhere
-       * in it — the run's committed turn — not the state of its tail.
-       *
-       * V9: the run id *is* the admission idempotency key, so every `start` is
-       * checked, not only a replayed one. A duplicate dispatch under a key the
-       * log already carries is the same turn arriving twice — it attaches or
-       * answers as settled — and only the worker's own log can tell it apart
-       * from a new turn. ponytail: one whole-log read per start; the ceiling is
-       * the log's size, and the upgrade path is the host's own run ledger
-       * (`runLedgerOf`) exposed as a cached read. */
-      const batch = await active.host.readEvents({ chatId: command.chatId, cursor: 0, limit: wholeLogLimit });
-      outcome = replayedStartOutcome({ events: batch.events, runId: command.runId });
-    } catch {
-      // The log could not be read, so nothing proves this command was already
-      // admitted; replay it below. Only this read is forgiven — a resume or a
-      // snapshot that fails is reported as itself, not as an admission conflict.
-      outcome = 'admit';
-    }
-    if (outcome !== 'admit') {
-      if (outcome === 'resume') {
-        /* A duplicate `start` for a run this worker is *still executing* has
-         * nothing to resume: the host would refuse the reservation as a live
-         * chat, and the duplicate — a re-broadcast forward, a double-fired
-         * effect — would surface as a failed turn beside a turn that is running
-         * fine. Answer it with the admission it already has. */
-        const running = await active.host.waitForAdmission(command.chatId, command.runId);
-        if (!running) {
-          await acknowledgeRun(
-            active,
-            { chatId: command.chatId, runId: command.runId },
-            active.host.resume(command.chatId),
-          );
-        }
-      }
-      return {
-        type: 'result',
-        requestId: command.requestId,
-        operation: command.type,
-        snapshot: await active.host.snapshot(command.chatId),
-      };
-    }
-  }
-  switch (command.type) {
-    case 'start': {
-      if (command.agent) {
-        /* An external agent is a *daemon* placement (W4-ACP): this worker
-         * registers no external runner, so running the turn on Tau instead
-         * would silently answer with a model and tools the user did not pick. */
-        throw Object.assign(new Error(`This browser host runs no ${command.agent.kind} agents.`), {
-          code: 'EXTERNAL_AGENT_UNAVAILABLE',
-        });
-      }
-      const config = command.config
-        ? {
-            systemPrompt: command.config.systemPrompt,
-            systemPromptBlocks: command.config.systemPromptBlocks,
-            model: command.config.model,
-            toolChoice: command.config.toolChoice,
-            allowedTools: command.config.allowedTools,
-            ...(command.config.snapshot === undefined ? {} : { snapshot: command.config.snapshot }),
-            ...(command.config.contextPayload ? { clientContext: command.config.contextPayload } : {}),
-            ...(command.config.contextMessages ? { contextMessages: command.config.contextMessages } : {}),
-          }
-        : undefined;
-      /* `mode` and `baseRevisionId` are deliberately dropped: on this
-       * placement the *page* owns the revision — `ChatWorkspaceAuthorityProvider`
-       * prepares the turn's workspace in the selected mode and finalizes it —
-       * so the worker would be recording a second, competing one. They ride the
-       * command only because one client object is sent to both transports. */
-      const base = {
-        chatId: command.chatId,
-        runId: command.runId,
-        message: command.message,
-        ...(config ? { config } : {}),
-      };
-      const completion = active.host.admit(
-        command.trigger === 'submit'
-          ? { ...base, trigger: 'submit' }
-          : {
-              ...base,
-              trigger: command.trigger,
-              retainedMessageIds: command.retainedMessageIds,
-            },
-      );
-      return {
-        type: 'result',
-        requestId: command.requestId,
-        operation: command.type,
-        snapshot: await acknowledgeRun(active, { chatId: command.chatId, runId: command.runId }, completion),
-      };
-    }
-    case 'resume': {
-      return {
-        type: 'result',
-        requestId: command.requestId,
-        operation: command.type,
-        /* A `resume` command names no run: the host continues whatever the
-         * chat's ledger ends on, so the chat is the key this one waits by. */
-        snapshot: await acknowledgeRun(active, { chatId: command.chatId }, active.host.resume(command.chatId)),
-      };
-    }
-    case 'record-settlement': {
-      await active.host.recordSettlement({
-        chatId: command.chatId,
-        runId: command.event.runId,
-        event: command.event,
-      });
-      break;
-    }
-    case 'steer': {
-      await active.host.steer({
-        runId: command.runId,
-        message: command.message,
-      });
-      break;
-    }
-    case 'cancel': {
-      await active.host.cancel({ runId: command.runId });
-      break;
-    }
-    case 'resolve-interrupt': {
-      await active.host.resolveInterrupt(command);
-      break;
-    }
-  }
-  const snapshot: HostRunSnapshot = await active.host.snapshot(command.chatId);
-  return {
-    type: 'result',
-    requestId: command.requestId,
-    operation: command.type,
-    snapshot,
-  };
-};
-
-const postForwardedResponse = async (options: {
-  readonly channel: BroadcastChannel;
-  readonly senderId: string;
-  /** The generation this command was accepted under, for the answer it is owed. */
-  readonly generation: string;
-  readonly command: AgentHostWorkerCommand;
-}): Promise<void> => {
-  const { channel, senderId, generation, command } = options;
-  const active = session;
-  if (!active) {
-    /* The whole worker session is gone and every chat's heartbeat with it, so
-     * the follower's liveness bound expires and recovers. There is no session
-     * binding left to address a frame with in any case. */
-    return;
-  }
-  const state = leadership.get(command.chatId);
-  if (!state) {
-    /* Leadership ended between accepting this command and running it — a close
-     * clears the heartbeat and releases the lease, so another tab can already
-     * be leading and heartbeating, which keeps the follower's liveness bound
-     * from ever firing. Nothing ran here, so it is re-addressable. */
-    refuseCommand({
-      channel,
-      active,
-      chatId: command.chatId,
-      generation,
-      targetId: senderId,
-      requestId: command.requestId,
-      error: Object.assign(new Error(`Chat ${command.chatId} changed leader before this command ran.`), {
-        code: leaderGenerationStaleCode,
-      }),
-    });
-    return;
-  }
-  let response: ForwardedResponse;
+/** The project's own OPFS directory, when its log takes the exclusive sync handle (RH-S7's OPFS leg). */
+const opfsProjectDirectory = async (providerBasePath: string): Promise<FileSystemDirectoryHandle> => {
   try {
-    response = await executeCommand(command);
+    const root = await navigator.storage.getDirectory();
+    return await root.getDirectoryHandle(requireStoragePathSegment(providerBasePath, 'providerBasePath'), {
+      create: false,
+    });
   } catch (error) {
-    response = errorResponse(command.requestId, error);
+    throw Object.assign(new Error('Project event storage is not writable.'), {
+      code: 'STORAGE_NOT_WRITABLE',
+      cause: error,
+    });
   }
-  channel.postMessage({
-    ...broadcastBinding(active, command.chatId),
-    type: 'response',
-    targetId: senderId,
-    generation: state.lease.generation,
-    response,
-  } satisfies LeaderBroadcast);
+};
+
+/* `ParameterSetActor` hides the runtime's `stop`; the actor `createActor` made has it. */
+const stopParameterActor = (actor: ParameterSetActor): void => {
+  if (actor instanceof Actor) {
+    actor.stop();
+  }
 };
 
 /**
- * Answer a command this leader will not execute.
+ * Close every parameter actor, reporting one whose last write is still uncertain or did not settle within the bound
+ * (D15). Either is stopped, not left running after its host; a stopped actor was closed and reported already, so a
+ * retried close passes it (W6.r2 M1).
  *
- * The follower's wait is bounded by this leader's heartbeat, so every command
- * it declines is declined out loud; the alternative is a pending request that
- * outlives the turn with nothing on screen.
- *
- * @param options - The refusing leader, the follower to answer and the reason.
+ * @param actors - The host's parameter actors, by target file.
+ * @returns What each close that failed threw.
+ * @internal
  */
-const refuseCommand = (options: {
-  readonly channel: BroadcastChannel;
-  readonly active: WorkerSession;
-  readonly chatId: string;
-  readonly generation: string;
-  readonly targetId: string;
-  readonly requestId: string;
-  readonly error: unknown;
-}): void => {
-  options.channel.postMessage({
-    ...broadcastBinding(options.active, options.chatId),
-    type: 'response',
-    targetId: options.targetId,
-    generation: options.generation,
-    response: errorResponse(options.requestId, options.error),
-  } satisfies LeaderBroadcast);
-};
-
-/** Refuse a `command` frame the strict broadcast schema rejected, when its envelope survives. */
-const refuseUnreadableCommand = (options: {
-  readonly channel: BroadcastChannel;
-  readonly active: WorkerSession;
-  readonly chatId: string;
-  readonly frame: unknown;
-}): void => {
-  const state = leadership.get(options.chatId);
-  const address = readCommandReturnAddress(options.frame);
-  if (!state || !address) {
-    // Not this chat's leader, or nothing left to address: the console record above stands alone.
-    return;
-  }
-  refuseCommand({
-    channel: options.channel,
-    active: options.active,
-    chatId: options.chatId,
-    generation: state.lease.generation,
-    targetId: address.senderId,
-    requestId: address.requestId,
-    error: Object.assign(new Error(`The leader of ${options.chatId} could not read that command frame.`), {
-      code: 'LEADER_COMMAND_UNREADABLE',
+export const closeParameterActors = async (actors: ReadonlyMap<string, ParameterSetActor>): Promise<unknown[]> => {
+  const results = await Promise.allSettled(
+    [...actors.entries()].map(async ([targetFile, actor]) => {
+      if (actor.getSnapshot().status === 'stopped') {
+        return;
+      }
+      actor.send({ type: 'close' });
+      const state = await waitFor(
+        actor,
+        (snapshot) => snapshot.status === 'done' || snapshot.matches({ open: 'uncertain' }),
+        { timeout: parameterCloseBound },
+      ).catch((error: unknown) => {
+        stopParameterActor(actor);
+        throw error;
+      });
+      if (state.status !== 'done') {
+        stopParameterActor(actor);
+        throw new Error(`Parameter write for ${targetFile} remains uncertain.`);
+      }
     }),
-  });
-};
-
-const sendTailBatch = async (options: {
-  readonly channel: BroadcastChannel;
-  readonly targetId: string;
-  readonly chatId: string;
-  readonly cursor: number;
-}): Promise<void> => {
-  const { channel, targetId, chatId, cursor } = options;
-  const active = session;
-  const state = leadership.get(chatId);
-  if (!active || !state) {
-    return;
-  }
-  const batch = await active.host.readEvents({
-    chatId,
-    cursor,
-    limit: agentHostTailBatchLimit,
-  });
-  channel.postMessage({
-    ...broadcastBinding(active, chatId),
-    type: 'tail',
-    targetId,
-    generation: state.lease.generation,
-    batch,
-  } satisfies LeaderBroadcast);
-};
-
-const followerMonitorFor = (chatId: string) => {
-  const current = followerMonitors.get(chatId);
-  if (current) {
-    return current;
-  }
-  const monitor = createFollowerRecoveryMonitor({
-    heartbeatTimeout: followerHeartbeatTimeout,
-    tailTimeout: followerTailTimeout,
-    onStale: () => {
-      tailInFlight.delete(chatId);
-      leaderGenerations.delete(chatId);
-      scheduleFollowerRecovery(chatId);
-    },
-  });
-  followerMonitors.set(chatId, monitor);
-  return monitor;
-};
-
-const observeFollowerLeader = (chatId: string, generation: string): void => {
-  if (leadership.has(chatId)) {
-    return;
-  }
-  const retryId = followerRetryIds.get(chatId);
-  if (retryId !== undefined) {
-    globalThis.clearTimeout(retryId);
-    followerRetryIds.delete(chatId);
-  }
-  if (followerMonitorFor(chatId).observeLeader(generation)) {
-    tailInFlight.delete(chatId);
-  }
-  leaderGenerations.set(chatId, generation);
-};
-
-const beginFollowerTail = (chatId: string, generation: string): void => {
-  tailInFlight.add(chatId);
-  followerMonitorFor(chatId).beginTail(generation);
-};
-
-const settleFollowerTail = (chatId: string, generation: string): boolean => {
-  if (!followerMonitorFor(chatId).settleTail(generation)) {
-    return false;
-  }
-  tailInFlight.delete(chatId);
-  return true;
-};
-
-function channelFor(chatId: string): BroadcastChannel {
-  const existing = channels.get(chatId);
-  if (existing) {
-    return existing;
-  }
-  const active = session;
-  if (!active) {
-    throw new Error('Agent host worker is not initialized.');
-  }
-  const channel = new BroadcastChannel(agentHostAuthorityName({ ...active, chatId }));
-  channel.addEventListener('message', (event: MessageEvent<unknown>) => {
-    const current = session;
-    if (!current) {
-      return;
-    }
-    const message = validatedBroadcast(event.data, current, chatId);
-    if (message === 'unreadable') {
-      refuseUnreadableCommand({ channel, active: current, chatId, frame: event.data });
-      return;
-    }
-    if (!message) {
-      return;
-    }
-    if (message.type === 'leader') {
-      if (message.senderId !== current.tabId) {
-        observeFollowerLeader(chatId, message.generation);
-      }
-      return;
-    }
-    if (message.type === 'response') {
-      if (message.targetId !== current.tabId) {
-        return;
-      }
-      /* Only learn a generation this follower still believes in: a late answer
-       * from a leader that has since been replaced must not re-arm the monitor
-       * on a dead heartbeat. The answer itself is kept either way — it is
-       * addressed to this tab, for a request id this tab minted and is waiting
-       * on, and discarding it left that request pending forever whenever
-       * leadership rolled over while a command was in flight. */
-      const knownGeneration = leaderGenerations.get(chatId);
-      if (!knownGeneration || knownGeneration === message.generation) {
-        observeFollowerLeader(chatId, message.generation);
-      }
-      const pending = forwarded.get(message.response.requestId);
-      if (pending) {
-        forwarded.delete(message.response.requestId);
-        pending.resolve(message.response);
-      }
-      return;
-    }
-    if (message.type === 'cursor') {
-      if (message.senderId === current.tabId) {
-        return;
-      }
-      observeFollowerLeader(chatId, message.generation);
-      const cursor = followerCursors.get(chatId) ?? 0;
-      if (cursor < message.endCursor && !tailInFlight.has(chatId)) {
-        beginFollowerTail(chatId, message.generation);
-        channel.postMessage({
-          ...broadcastBinding(current, chatId),
-          type: 'tail-request',
-          senderId: current.tabId,
-          targetGeneration: message.generation,
-          cursor,
-        } satisfies LeaderBroadcast);
-      }
-      return;
-    }
-    if (message.type === 'live-event') {
-      if (message.senderId !== current.tabId) {
-        observeFollowerLeader(chatId, message.generation);
-      }
-      if (message.senderId !== current.tabId && leaderGenerations.get(chatId) === message.generation) {
-        for (const controller of liveEventStreams) {
-          controller.enqueue({ chatId, event: message.event });
-        }
-      }
-      return;
-    }
-    if (message.type === 'tail') {
-      if (message.targetId !== current.tabId || leaderGenerations.get(chatId) !== message.generation) {
-        return;
-      }
-      observeFollowerLeader(chatId, message.generation);
-      settleFollowerTail(chatId, message.generation);
-      for (const eventItem of message.batch.events) {
-        for (const controller of eventStreams) {
-          controller.enqueue({ chatId, event: eventItem });
-        }
-      }
-      followerCursors.set(chatId, message.batch.nextCursor);
-      if (message.batch.nextCursor < message.batch.endCursor) {
-        beginFollowerTail(chatId, message.generation);
-        channel.postMessage({
-          ...broadcastBinding(current, chatId),
-          type: 'tail-ack',
-          senderId: current.tabId,
-          targetGeneration: message.generation,
-          cursor: message.batch.nextCursor,
-        } satisfies LeaderBroadcast);
-      }
-      return;
-    }
-    const state = leadership.get(chatId);
-    if (!state) {
-      return;
-    }
-    if (message.type === 'tail-request' || message.type === 'tail-ack') {
-      if (message.targetGeneration === state.lease.generation) {
-        trackTask(
-          async () =>
-            sendTailBatch({
-              channel,
-              targetId: message.senderId,
-              chatId,
-              cursor: message.cursor,
-            }),
-          () => undefined,
-        );
-      }
-      return;
-    }
-    // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Re-state the discriminant so the async callbacks retain the command member instead of widening it to any.
-    if (message.type !== 'command') {
-      return;
-    }
-    if (message.targetGeneration !== undefined && message.targetGeneration !== state.lease.generation) {
-      /* Leadership rolled over between the follower's last heartbeat and its
-       * send. Dropping the frame left that follower waiting on a leader it can
-       * still see heartbeating, so its liveness bound never fired and the
-       * composer sat on the request for the life of the tab. Nothing has run
-       * yet — the refusal is decided before any work — so the follower can
-       * re-learn the leader and broadcast this same command once more. */
-      refuseCommand({
-        channel,
-        active: current,
-        chatId,
-        generation: state.lease.generation,
-        targetId: message.senderId,
-        requestId: message.command.requestId,
-        error: Object.assign(new Error(`Chat ${chatId} is led by a newer generation; re-address this command.`), {
-          code: leaderGenerationStaleCode,
-        }),
-      });
-      return;
-    }
-    const commandMessage = message;
-    trackTask(
-      async () =>
-        postForwardedResponse({
-          channel,
-          senderId: commandMessage.senderId,
-          generation: state.lease.generation,
-          command: commandMessage.command,
-        }),
-      (error) => {
-        channel.postMessage({
-          ...broadcastBinding(current, chatId),
-          type: 'response',
-          targetId: commandMessage.senderId,
-          generation: state.lease.generation,
-          response: errorResponse(commandMessage.command.requestId, error),
-        } satisfies LeaderBroadcast);
-      },
-    );
-  });
-  channels.set(chatId, channel);
-  return channel;
-}
-
-const requestLock: AgentHostLockRequest = async (name, options, callback) =>
-  navigator.locks.request(name, options, async (lock) => callback(lock ?? undefined));
-
-const ensureLeadership = async (chatId: string): Promise<boolean> => {
-  if (leadership.has(chatId)) {
-    return true;
-  }
-  const current = leadershipAttempts.get(chatId);
-  if (current) {
-    return current;
-  }
-  channelFor(chatId);
-  const acquire = async (): Promise<boolean> => {
-    const active = session;
-    if (!active) {
-      throw new Error('Agent host worker is not initialized.');
-    }
-    const lease = await acquireChatLeaderLease({
-      projectId: active.projectId,
-      workspaceId: active.workspaceId,
-      chatId,
-      requestLock,
-      createGeneration: randomUuid,
-    });
-    if (!lease.isLeader) {
-      return false;
-    }
-    followerMonitors.get(chatId)?.stop();
-    followerMonitors.delete(chatId);
-    tailInFlight.delete(chatId);
-    active.host.assumeLeadership(chatId, lease.generation);
-    const announce = (): void => {
-      channelFor(chatId).postMessage({
-        ...broadcastBinding(active, chatId),
-        type: 'leader',
-        senderId: active.tabId,
-        generation: lease.generation,
-      } satisfies LeaderBroadcast);
-    };
-    const state: LeadershipState = {
-      lease,
-      heartbeatId: globalThis.setInterval(announce, leaderHeartbeatInterval),
-    };
-    leadership.set(chatId, state);
-    leaderGenerations.set(chatId, lease.generation);
-    announce();
-    trackTask(
-      async () => {
-        try {
-          await lease.completion;
-        } catch {
-          // Lock-manager failure and normal release both invalidate this generation.
-        }
-        if (leadership.get(chatId) !== state) {
-          return;
-        }
-        globalThis.clearInterval(state.heartbeatId);
-        leadership.delete(chatId);
-        leaderGenerations.delete(chatId);
-        await active.host.relinquish(chatId);
-      },
-      () => undefined,
-    );
-    return true;
-  };
-  const attempt = acquire();
-  leadershipAttempts.set(chatId, attempt);
-  try {
-    return await attempt;
-  } finally {
-    leadershipAttempts.delete(chatId);
-  }
-};
-
-const waitForForwardedResponse = async (
-  active: WorkerSession,
-  command: AgentHostWorkerCommand,
-): Promise<ForwardedResponse | undefined> => {
-  const pending = Promise.withResolvers<ForwardedResponse>();
-  forwarded.set(command.requestId, pending);
-  channelFor(command.chatId).postMessage({
-    ...broadcastBinding(active, command.chatId),
-    type: 'command',
-    senderId: active.tabId,
-    targetGeneration: leaderGenerations.get(command.chatId),
-    command,
-  } satisfies LeaderBroadcast);
-  /* Liveness, not a work bound: a `start` is answered at admission time, which
-   * includes preparing the turn, so a constant deadline re-broadcast a command
-   * the leader was still working on — and the leader then executed it twice. */
-  const response = await awaitWhileLeaderLives({
-    response: pending.promise,
-    lastSeenAt: () => followerMonitors.get(command.chatId)?.lastSeenAt(),
-    heartbeatTimeout: followerHeartbeatTimeout,
-  });
-  if (forwarded.get(command.requestId) === pending) {
-    forwarded.delete(command.requestId);
-  }
-  return response;
-};
-
-const forwardCommand = async (command: AgentHostWorkerCommand): Promise<ForwardedResponse> => {
-  const active = session;
-  if (!active) {
-    throw Object.assign(new Error('Agent host worker is not initialized.'), {
-      code: 'SESSION_NOT_INITIALIZED',
-    });
-  }
-  const first = await waitForForwardedResponse(active, command);
-  /* A stale-generation refusal takes the same recovery as no answer at all: the
-   * leader ran nothing, and the re-broadcast below carries no target generation
-   * (or the one just learned), which the current leader accepts. */
-  if (first && !(first.type === 'error' && first.code === leaderGenerationStaleCode)) {
-    if (first.type === 'tail' || first.type === 'attach') {
-      followerCursors.set(command.chatId, first.batch.nextCursor);
-    }
-    return first.type === 'attach'
-      ? {
-          ...first,
-          leadership: {
-            role: 'follower',
-            generation: first.leadership.generation,
-          },
-          takeover: false,
-        }
-      : first;
-  }
-  leaderGenerations.delete(command.chatId);
-  if (await ensureLeadership(command.chatId)) {
-    return executeCommand(command, command.type === 'attach');
-  }
-  const replay = await waitForForwardedResponse(active, command);
-  if (!replay) {
-    throw Object.assign(new Error(`No chat leader answered command ${command.requestId} before its deadline.`), {
-      code: 'LEADER_RESPONSE_TIMEOUT',
-    });
-  }
-  if (replay.type === 'tail' || replay.type === 'attach') {
-    followerCursors.set(command.chatId, replay.batch.nextCursor);
-  }
-  return replay.type === 'attach'
-    ? {
-        ...replay,
-        leadership: {
-          role: 'follower',
-          generation: replay.leadership.generation,
-        },
-        takeover: false,
-      }
-    : replay;
-};
-
-const replayRecoveredBatch = async (options: {
-  readonly active: WorkerSession;
-  readonly chatId: string;
-  readonly initial: EventLogBatch;
-  readonly followerGeneration?: string;
-}): Promise<void> => {
-  const { active, chatId, followerGeneration } = options;
-  let batch = options.initial;
-  for (;;) {
-    for (const eventItem of batch.events) {
-      for (const controller of eventStreams) {
-        controller.enqueue({ chatId, event: eventItem });
-      }
-    }
-    followerCursors.set(chatId, batch.nextCursor);
-    if (batch.nextCursor >= batch.endCursor) {
-      return;
-    }
-    if (leadership.has(chatId)) {
-      // oxlint-disable-next-line no-await-in-loop -- Durable cursor windows must be replayed in order.
-      batch = await active.host.readEvents({
-        chatId,
-        cursor: batch.nextCursor,
-        limit: agentHostTailBatchLimit,
-      });
-      continue;
-    }
-    if (followerGeneration) {
-      beginFollowerTail(chatId, followerGeneration);
-      channelFor(chatId).postMessage({
-        ...broadcastBinding(active, chatId),
-        type: 'tail-ack',
-        senderId: active.tabId,
-        targetGeneration: followerGeneration,
-        cursor: batch.nextCursor,
-      } satisfies LeaderBroadcast);
-    }
-    return;
-  }
-};
-
-const recoverFollower = async (chatId: string): Promise<void> => {
-  const active = session;
-  if (!active || closing || leadership.has(chatId)) {
-    return;
-  }
-  tailInFlight.delete(chatId);
-  leaderGenerations.delete(chatId);
-  const command: AgentHostWorkerCommand = {
-    type: 'attach',
-    chatId,
-    cursor: followerCursors.get(chatId) ?? 0,
-    limit: agentHostTailBatchLimit,
-    requestId: randomUuid(),
-    sessionId: active.sessionId,
-  };
-  const becameLeader = await ensureLeadership(chatId);
-  const response = becameLeader ? await executeCommand(command, true) : await forwardCommand(command);
-  if (response.type === 'error') {
-    throw Object.assign(new Error(response.message), { code: response.code });
-  }
-  if (response.type !== 'attach') {
-    throw new Error(`Follower recovery for ${chatId} returned ${response.type}.`);
-  }
-  const followerGeneration = response.leadership.role === 'follower' ? response.leadership.generation : undefined;
-  if (followerGeneration) {
-    observeFollowerLeader(chatId, followerGeneration);
-  }
-  await replayRecoveredBatch({
-    active,
-    chatId,
-    initial: response.batch,
-    followerGeneration,
-  });
-};
-
-function scheduleFollowerRecovery(chatId: string): void {
-  if (closing || leadership.has(chatId) || followerRecoveries.has(chatId) || followerRetryIds.has(chatId)) {
-    return;
-  }
-  followerRecoveries.add(chatId);
-  trackTask(
-    async () => {
-      try {
-        await recoverFollower(chatId);
-      } finally {
-        followerRecoveries.delete(chatId);
-      }
-    },
-    () => {
-      if (closing || leadership.has(chatId)) {
-        return;
-      }
-      const retryId = globalThis.setTimeout(() => {
-        followerRetryIds.delete(chatId);
-        scheduleFollowerRecovery(chatId);
-      }, followerHeartbeatTimeout);
-      followerRetryIds.set(chatId, retryId);
-    },
   );
-}
+  return results.flatMap((result) => (result.status === 'rejected' ? [result.reason as unknown] : []));
+};
 
-const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: string): Promise<void> => {
-  if (session) {
-    if (session.sessionId === sessionId) {
-      return;
-    }
-    throw Object.assign(new Error('Agent host worker already has a different session.'), { code: 'SESSION_CONFLICT' });
+/**
+ * Open one project host from the ports and defaults the page provided (RH-S8, RH-S12). A failure part way closes
+ * what it opened so far, newest first, and every port the provide transferred (W6.r1 round 3).
+ *
+ * @param provide - The project's bridges, storage, authority and defaults.
+ * @param worker - The tab's identity and visibility.
+ * @returns The host; its launcher is built before this resolves.
+ */
+export const openBrowserProjectHost = async (
+  provide: AgentHostProjectProvide,
+  worker: ResidentWorkerContext,
+): Promise<BrowserProjectHost> => {
+  const opened = createDisposers((closeError) => {
+    console.error('[agent-host worker] a failed project host could not close a resource', closeError);
+  });
+  try {
+    return await composeProjectHost(provide, worker, opened.push);
+  } catch (error) {
+    await opened.disposeAll();
+    closeProvidedPorts(provide);
+    throw error;
   }
-  if (!request.authority.projectId || !request.authority.workspaceId) {
+};
+
+const composeProjectHost = async (
+  provide: AgentHostProjectProvide,
+  worker: ResidentWorkerContext,
+  opened: (dispose: () => unknown) => void,
+): Promise<BrowserProjectHost> => {
+  if (!provide.authority.projectId || !provide.authority.workspaceId) {
     throw Object.assign(new Error('Project and workspace authority are required.'), { code: 'AUTHORITY_INVALID' });
   }
-  const runtimeConfig = uiRuntimeConfigSchema.parse(request.runtimeConfig);
-  if ((request.computeMode === 'durable') !== Boolean(request.computeStorePort)) {
+  const runtimeConfig = uiRuntimeConfigSchema.parse(provide.runtimeConfig);
+  if ((provide.computeMode === 'durable') !== Boolean(provide.computeStorePort)) {
     throw Object.assign(new Error('Durable compute mode and its private store port must be supplied together.'), {
       code: 'COMPUTE_AUTHORITY_INVALID',
     });
   }
-  const computeConnection = request.computeStorePort ? connectComputeStoreChannel(request.computeStorePort) : undefined;
-  const compute = computeConnection
-    ? ({ mode: 'durable', store: computeConnection.store } as const)
-    : request.computeMode === 'off'
+  let computeConnection = provide.computeStorePort ? connectComputeStoreChannel(provide.computeStorePort) : undefined;
+  opened(() => computeConnection?.dispose());
+  const computeStore = computeConnection ? swappable(computeConnection.store) : undefined;
+  const compute = computeStore
+    ? ({ mode: 'durable', store: computeStore.view } as const)
+    : provide.computeMode === 'off'
       ? ({ mode: 'off' } as const)
       : ({ mode: 'memory' } as const);
-  const [fileSystem, projectRoot] = await Promise.all([
-    createProjectFileSystemProxy(request.fileSystemPort),
-    createProjectFileSystemProxy(request.projectRootPort),
-  ]);
-  const projectRootCapabilities = projectRoot.hello.payload;
-  if (
-    projectRootCapabilities.state !== 'ready' ||
-    !projectRootCapabilities.capabilities.writable ||
-    !projectRootCapabilities.capabilities.durability
-  ) {
+  const bridges = await openProjectBridges(provide);
+  /* Every holder below keeps these views, so a rebridge reaches all of them (RV1-F1). */
+  const fileSystemSlot = swappable(bridges.fileSystem);
+  const projectRootSlot = swappable(bridges.projectRoot);
+  const fileSystem = fileSystemSlot.view;
+  const projectRoot = projectRootSlot.view;
+  opened(() => {
     fileSystem.dispose();
     projectRoot.dispose();
-    throw Object.assign(new Error('The project filesystem bridge is not writable or did not declare durability.'), {
-      code: 'STORAGE_NOT_WRITABLE',
-    });
-  }
-  const storageBackend = request.projectStorage.backend;
-  const durability = await resolveWorkerDurability(storageBackend, projectRootCapabilities.capabilities.durability);
+  });
+  const storageBackend = provide.projectStorage.backend;
+  const durability = await resolveWorkerDurability(storageBackend, bridges.durability);
   const fileSystemMutations = new ResourceQueue();
   const skillResolver = createSkillResolver({
     readFile: async (path) => {
@@ -1575,11 +499,16 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
    * project code read too — the kernel runtime below and the GeoSpec runner's
    * port — because the code they run is code the agent wrote (CI1, W14). */
   const workspaceProvider = createRelayedFileSystemProvider(fileSystem);
+  const workbenchRootProvider = createRelayedFileSystemProvider(projectRoot);
+  const workbenchRootView = composeView(
+    { filesystem: workbenchRootProvider },
+    { consumer: 'user', policy: tauPathPolicy },
+  );
   const agentView = composeView(
     { filesystem: workspaceProvider },
     { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
   );
-  const recordView = composeView({ filesystem: workspaceProvider }, { consumer: 'user', policy: tauPathPolicy });
+  /* One runtime client per project host, shared by every turn and chat of the project (RH-A6). */
   const runtimeClient: AppRuntimeClient = createRuntimeClient(
     createDefaultKernelOptions({
       fileSystem: fromFsLike(createRuntimeFsLike(agentView)),
@@ -1587,53 +516,42 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
       compute,
     }),
   );
+  opened(() => {
+    runtimeClient.terminate();
+  });
   // Lazy: the headless-image graph eagerly resolves the resvg wasm URL at
-  // module load, which only the full app build serves. Load it when the worker
-  // actually boots a session so the boot path stays wasm-free.
+  // module load, which only the full app build serves.
   const headlessImageModule = await import('#services/headless-image.service.js');
   const imageService = new headlessImageModule.HeadlessImageService();
+  opened(() => {
+    imageService.dispose();
+  });
   const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
+  const geoSpecEngine = provide.geoSpecEngine ?? 'legacy';
   const geoSpecClient = createGeoSpecWorkerRpcClient({
     openFileSystemBridge: () => createFileSystemBridgePort(agentView),
     runtimeConfig,
+    geoSpecEngine,
   });
-  const runtimeRpc = createRuntimeRpcClients({
-    runtimeClient,
-    imageService,
-  });
-  const parameterActors = new Map<string, Promise<ParameterActor>>();
-  const parameterActorFor = async (targetFile: string): Promise<ParameterActor> => {
+  opened(async () => geoSpecClient.close());
+  const runtimeRpc = createRuntimeRpcClients({ runtimeClient, imageService });
+  /* RH-S12: the one parameter-actor factory, over this project's root bridge. */
+  const parameterActors = new Map<string, ParameterSetActor>();
+  const parameterActorFor = async (targetFile: string): Promise<ParameterSetActor> => {
     const existing = parameterActors.get(targetFile);
     if (existing) {
       return existing;
     }
-    const pending = (async (): Promise<ParameterActor> => {
-      const sidecar = parameterEntryPath(targetFile);
-      const target = {
-        authority: `browser:${request.authority.workspaceId}:${request.authority.projectId}`,
-        root: request.authority.projectId,
+    const actor = createParameterSetActor({
+      target: {
+        authority: `browser:${provide.authority.workspaceId}:${provide.authority.projectId}`,
+        root: provide.authority.projectId,
         entry: targetFile,
-      } as const;
-      let observer: Readonly<{ changed(): void; failed(error: unknown): void }> | undefined;
-      const handleWatch = (event: Readonly<{ type: string }>): void => {
-        if (event.type === 'reset') {
-          observer?.failed(Object.assign(new Error('Parameter watch reset.'), { code: 'WATCH_RESET' }));
-        } else {
-          observer?.changed();
-        }
-      };
-      let prearmed: ReturnType<ProjectFileSystemBridge['watchReady']> | undefined = projectRoot.watchReady(
-        { paths: [sidecar] },
-        handleWatch,
-      );
-      await prearmed.ready;
-      const manifest = async (
-        _target: ParameterSetTarget,
-        signal: AbortSignal,
-        resolution?: ParameterResolutionOptions,
-      ): Promise<ParameterManifest> => {
+      },
+      files: projectRoot,
+      resolve: async ({ entry }, signal, resolution) => {
         const result = await runtimeClient.resolveParameters({
-          source: { path: targetFile },
+          source: { path: entry },
           ...(resolution === undefined ? {} : { resolution }),
           signal,
         });
@@ -1644,172 +562,127 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
           );
         }
         return result.data;
-      };
-      const authority: ParameterAuthority = {
-        path: () => sidecar,
-        read: async (_target, signal) => {
-          signal.throwIfAborted();
-          return (await projectRoot.exists(sidecar)) ? projectRoot.readFile(sidecar) : null;
-        },
-        writeChecked: async ({ signal, ...write }) => {
-          signal?.throwIfAborted();
-          return projectRoot.writeFileChecked(write);
-        },
-      };
-      const observe = (changed: () => void, failed: (error: unknown) => void): (() => void) => {
-        observer = { changed, failed };
-        let active = true;
-        let watch = prearmed;
-        prearmed = undefined;
-        if (!watch) {
-          watch = projectRoot.watchReady({ paths: [sidecar] }, handleWatch);
-          const activeWatch = watch;
-          const reportReady = async (): Promise<void> => {
-            try {
-              await activeWatch.ready;
-            } catch (error) {
-              if (active) {
-                failed(error);
-              }
-            }
-          };
-          // async-iife: report a late watch-open failure to the authority observer.
-          void reportReady();
-        }
-        const activeWatch = watch;
-        const reportClosed = async (): Promise<void> => {
-          await activeWatch.closed;
-          if (active) {
-            failed(Object.assign(new Error('Parameter watch closed.'), { code: 'WATCH_CLOSED' }));
-          }
-        };
-        // async-iife: a live authority treats an unexpected watch close as failure.
-        void reportClosed();
-        return () => {
-          active = false;
-          observer = undefined;
-          activeWatch.unsubscribe();
-        };
-      };
-      const actor = createActor(
-        parameterSetMachine.provide({
-          actors: {
-            /* An agent edits the source between reads, so every load re-resolves; the manifest is
-             * admitted only once per revision, and the sidecar bytes decide what changed. */
-            loadParameterSet: createAsyncLogic({
-              run: async ({ input, signal }) =>
-                loadParameterSnapshot({
-                  target,
-                  authority,
-                  manifest,
-                  ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
-                  signal,
-                }),
-            }),
-            commitParameterSet: createAsyncLogic({
-              run: async ({ input: change, signal }) => commitParameterChange({ change, authority, signal }),
-            }),
-            observeParameterSet: createCallbackLogic(({ sendBack }) =>
-              observe(
-                () => {
-                  sendBack({ type: 'watch.changed' });
-                },
-                (error) => {
-                  sendBack({
-                    type: 'watch.error',
-                    message: error instanceof Error ? error.message : 'Observation failed.',
-                  });
-                },
-              ),
-            ),
-          } satisfies Partial<MachineActors<typeof parameterSetMachine>>,
-        }),
-        { input: { target } },
-      );
-      actor.start();
-      return actor;
-    })();
-    parameterActors.set(targetFile, pending);
-    try {
-      return await pending;
-    } catch (error) {
-      if (parameterActors.get(targetFile) === pending) {
-        parameterActors.delete(targetFile);
-      }
-      throw error;
-    }
+      },
+    });
+    parameterActors.set(targetFile, actor);
+    return actor;
   };
   const parameters = createRuntimeParameterAgentClient({
     mapRuntimeError: (error) => toRpcError(error),
     parameterActorFor,
   });
-  const toolRegistry = createChatToolRegistry({
-    fileSystemFor: (signal) =>
-      createProviderRpcFileSystem({ provider: agentView, mutations: fileSystemMutations, signal }),
-    recordFileSystemFor: (signal) =>
-      createProviderRpcFileSystem({ provider: recordView, mutations: fileSystemMutations, signal }),
-    skillResolver,
-    ...runtimeRpc,
-    parameters,
-    geospec: geoSpecClient,
-    testingEnabled: request.testingEnabled ?? false,
+  const revisions = provide.revisionsPort === undefined ? undefined : createPortRevisionsClient(provide.revisionsPort);
+  opened(() => revisions?.close());
+  /* The registry over one filesystem: the project's own, or an attempt's checkout its placement granted (W8 G09). */
+  const toolRegistryOver = (provider: FileSystemProvider): ToolRegistry => {
+    const view = composeView(
+      { filesystem: provider },
+      { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
+    );
+    const record = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
+    return createChatToolRegistry({
+      fileSystemFor: (signal) =>
+        createProviderRpcFileSystem({ provider: view, mutations: fileSystemMutations, signal }),
+      recordFileSystemFor: (signal) =>
+        createProviderRpcFileSystem({ provider: record, mutations: fileSystemMutations, signal }),
+      workbenchFileSystemFor: (signal) =>
+        createProviderRpcFileSystem({ provider: workbenchRootView, mutations: fileSystemMutations, signal }),
+      workbench: createRuntimeWorkbenchClient(async () => runtimeClient),
+      skillResolver,
+      ...runtimeRpc,
+      parameters,
+      geospec: geoSpecClient,
+      geospecAuthoringMode: geoSpecEngine,
+      machines: runtimeClient.machines,
+      print: {
+        /* The `tau.json` id every print request from this project's agent names (blueprint D5). An attempt reads
+         * its artifact from the checkout its placement granted. */
+        projectId: provide.authority.projectId,
+        readArtifact: async ({ path, signal }) => {
+          signal.throwIfAborted();
+          const bytes = await record.readFile(assertRootedPath(path));
+          signal.throwIfAborted();
+          return bytes;
+        },
+      },
+      revisions,
+      testingEnabled: provide.testingEnabled ?? false,
+    });
+  };
+  const toolRegistry = toolRegistryOver(workspaceProvider);
+  /* ponytail: an attempt's file tools read its checkout; the kernel, GeoSpec and parameter clients stay on the project
+   * root until W8's candidate checkouts need them re-rooted. */
+  const placedTools = (tools: TurnPlacementToolPort): ToolRegistry => {
+    /* A tool port that never answers (D14) fails each invoke; an attempt that invokes nothing leaves no unhandled
+     * rejection. */
+    const opened = (async (): Promise<Readonly<{ registry: ToolRegistry } | { failure: unknown }>> => {
+      try {
+        const proxy = await createProjectFileSystemProxy(tools.port);
+        return { registry: toolRegistryOver(createRelayedFileSystemProvider(proxy)) };
+      } catch (error) {
+        return { failure: error };
+      }
+    })();
+    return {
+      list: () => toolRegistry.list(),
+      invoke: async (invocation) => {
+        const placed = await opened;
+        if ('failure' in placed) {
+          throw placed.failure;
+        }
+        return placed.registry.invoke(invocation);
+      },
+    };
+  };
+  /* W8 TS-S5: the placement session the page brokered into the file-manager worker for this project. */
+  const turnPlacement: TurnPlacementChannel = connectTurnPlacementChannel({
+    port: provide.placementPort,
+    projectId: provide.authority.projectId,
+    toolsFor: placedTools,
   });
-  const activeReference: { current?: WorkerSession } = {};
+  opened(() => {
+    turnPlacement.close('project host failed to open');
+  });
   let cachedSkillFingerprint = '';
   let cachedSkills: Awaited<ReturnType<SkillResolver['getPromptSkillListing']>> = [];
-  const interruptWaiters = new Map<
-    string,
-    {
-      readonly request: InterruptRequest;
-      readonly settled: {
-        readonly promise: Promise<InterruptResolution>;
-        readonly resolve: (resolution: InterruptResolution) => void;
-      };
-    }
-  >();
-  const host = createTauAgentHost({
-    systemPrompt: request.systemPrompt,
-    systemPromptBlocks: request.systemPromptBlocks,
-    model: request.model,
-    modelTransport: createConfiguredGatewayModelTransport({
-      baseUrl: request.gatewayBaseUrl,
-      /* The project every receipt from this worker attributes to. It is the
-       * same id `GET /v1/projects` lists, so the usage page can name it; the
-       * worker refuses to initialize without one (above). */
-      projectId: request.authority.projectId,
-      model: request.model,
+  const opfs =
+    storageBackend === 'opfs' && durability === 'exclusive-append'
+      ? await opfsProjectDirectory(provide.projectStorage.providerBasePath)
+      : undefined;
+  const gatewayOptions = {
+    baseUrl: provide.gatewayBaseUrl,
+    /* The project every receipt from this worker attributes to: the id `GET /v1/projects` lists. */
+    projectId: provide.authority.projectId,
+    model: provide.model,
+    /* The funded (cloud) build checks an attempt's account against it (W11 GI-Q6); self-host ignores it. */
+    principal: () => provide.principal,
+  };
+  /* T3: set as a release drains. A new start is refused HOST_CLOSED; another tab that forwarded it keeps it for this
+   * host's release or a successor (M2, C11). */
+  let draining = false;
+  const launcher: AgentLauncher = createAgentLauncher({
+    admitting: () => !draining,
+    chats: createBrowserChatStore({
+      projectId: provide.authority.projectId,
+      /* Per incarnation: a released host drains beside its successor in this worker, and M2 never hears its own
+       * sender, so each needs its own to hear the other's heartbeats (T3). */
+      tabId: `${worker.tabId}/${provide.hostId}`,
+      build: agentHostWorkerBuild,
+      log:
+        opfs === undefined
+          ? { kind: 'provider', fileSystem: projectRoot, durability }
+          : { kind: 'opfs', directory: opfs },
+      visibility: worker.visibility,
     }),
+    modelTransport: createConfiguredGatewayModelTransport(gatewayOptions),
+    /* The page's session cookie funds a browser turn; there is no pairing to lose. The page names its account. */
+    credential: () => ({ mode: 'session', principal: provide.principal }),
+    systemPrompt: provide.systemPrompt,
+    systemPromptBlocks: provide.systemPromptBlocks,
+    model: provide.model,
     toolRegistry,
-    openEventLog: async (chatId) => {
-      if (!activeReference.current) {
-        throw new Error('Agent host worker initialization is incomplete.');
-      }
-      return openProjectEventLog(activeReference.current, chatId);
-    },
-    // Chat attachments live beside the log in the project's own `.tau/chats`.
-    attachments: createProviderAttachmentReader(projectRoot),
-    interruptPort: {
-      pause: async (interrupt) => {
-        const settled = Promise.withResolvers<InterruptResolution>();
-        interruptWaiters.set(interrupt.interruptId, {
-          request: interrupt,
-          settled,
-        });
-        return settled.promise;
-      },
-      pending: async ({ runId }) =>
-        [...interruptWaiters.values()].flatMap((entry) => (entry.request.runId === runId ? [entry.request] : [])),
-      resume: async (resolution) => {
-        const waiter = interruptWaiters.get(resolution.interruptId);
-        if (!waiter) {
-          throw Object.assign(new Error(`Interrupt ${resolution.interruptId} is not pending.`), {
-            code: 'INTERRUPT_NOT_FOUND',
-          });
-        }
-        interruptWaiters.delete(resolution.interruptId);
-        waiter.settled.resolve(resolution);
-      },
-    },
+    ...(worker.delays === undefined ? {} : { delays: worker.delays }),
+    turnPlacement,
     clientContext: async () => {
       const discovered = await skillResolver.getPromptSkillListing();
       const fingerprint = JSON.stringify(
@@ -1827,164 +700,115 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
         })),
       };
     },
-    onLiveEvent: (event) => {
-      if (!activeReference.current) {
-        throw new Error('Agent host worker initialization is incomplete.');
-      }
-      publishLiveEvent(activeReference.current, event);
-    },
   });
-  const active: WorkerSession = {
-    sessionId,
-    tabId: sessionId,
-    fileSystem,
-    projectRoot,
-    durability,
-    storageBackend,
-    host,
-    runtimeClient,
-    parameterActors,
-    imageService,
-    geoSpecClient,
-    computeDispose: computeConnection?.dispose,
-    providerBasePath: request.projectStorage.providerBasePath,
-    projectId: request.authority.projectId,
-    workspaceId: request.authority.workspaceId,
-  };
-  activeReference.current = active;
-  session = active;
-};
+  const channels = new Set<ReturnType<typeof serveAgentChannel>>();
 
-const releaseSession = async (): Promise<void> => {
-  takeoverAttempts.clear();
-  for (const monitor of followerMonitors.values()) {
-    monitor.stop();
-  }
-  followerMonitors.clear();
-  for (const retryId of followerRetryIds.values()) {
-    globalThis.clearTimeout(retryId);
-  }
-  followerRetryIds.clear();
-  const active = session;
-  session = undefined;
-  const failures: unknown[] = [];
-  if (active) {
-    try {
-      await active.host.close();
-    } catch (error) {
-      failures.push(error);
-    }
-    const parameterResults = await Promise.allSettled(
-      [...active.parameterActors.entries()].map(async ([targetFile, pending]) => {
-        const client = await pending;
-        client.send({ type: 'close' });
-        const state = await waitFor(client, (state) => state.status === 'done' || state.matches({ open: 'uncertain' }));
-        if (state.status !== 'done') {
-          throw new Error(`Parameter write for ${targetFile} remains uncertain.`);
+  return {
+    hostId: provide.hostId,
+    stoppability: (chatId) => launcher.stoppability(chatId),
+    connect: (port) => {
+      const channel = serveAgentChannel(port, launcher, {
+        build: agentHostWorkerBuild,
+        keepaliveInterval,
+        sessionKey: `agent-host:${provide.hostId}`,
+      });
+      channels.add(channel);
+      channel.onClose(() => {
+        channels.delete(channel);
+      });
+    },
+    rebridge: async (ports) => {
+      let next: Awaited<ReturnType<typeof openProjectBridges>>;
+      try {
+        next = await openProjectBridges(ports);
+      } catch (error) {
+        /* A failed rebridge keeps the bridges the host has, and closes every port it was sent (W6.r1 round 4). */
+        closeProvidedPorts(ports);
+        throw error;
+      }
+      const replaced = [fileSystemSlot.swap(next.fileSystem), projectRootSlot.swap(next.projectRoot)];
+      if (ports.computeStorePort !== undefined && computeStore !== undefined) {
+        const nextCompute = connectComputeStoreChannel(ports.computeStorePort);
+        computeStore.swap(nextCompute.store);
+        computeConnection?.dispose();
+        computeConnection = nextCompute;
+      } else {
+        ports.computeStorePort?.close();
+      }
+      /* A parameter actor watches the root it opened on; each reopens on the new one when next asked for. */
+      for (const actor of parameterActors.values()) {
+        actor.send({ type: 'close' });
+      }
+      parameterActors.clear();
+      for (const proxy of replaced) {
+        proxy.dispose();
+      }
+    },
+    drain: async (signal) => {
+      /* Nothing new is admitted here: no stream is served, the registry routes no connect to a released host, and the
+       * launcher refuses a new start, from any tab. */
+      draining = true;
+      for (const channel of channels) {
+        channel.dispose('project host released');
+      }
+      channels.clear();
+      /* Every run the launcher admitted, whichever tab sent it, re-read until a pass adds none: one admitted while the
+       * last pass followed is followed too (W6.r1 round 4). */
+      const ended = new Promise<undefined>((resolve) => {
+        signal.addEventListener('abort', () => {
+          resolve(undefined);
+        });
+      });
+      let followed = '';
+      while (!signal.aborted) {
+        /* Only answered admissions: a refused or failed one is gone before its answer settles (W6.r1 round 5). */
+        // oxlint-disable-next-line no-await-in-loop -- each pass reads the runs the one before it could not see.
+        const runs = await Promise.race([launcher.admittedRuns(), ended]);
+        if (runs === undefined) {
+          return;
         }
-      }),
-    );
-    for (const result of parameterResults) {
-      if (result.status === 'rejected') {
-        failures.push(result.reason as unknown);
+        const pass = JSON.stringify([...runs].map(([chatId, runIds]) => [chatId, [...runIds]]));
+        if (pass === followed) {
+          return;
+        }
+        followed = pass;
+        // oxlint-disable-next-line no-await-in-loop -- each pass follows what the one before it could not see.
+        await Promise.all(
+          [...runs].map(async ([chatId, runIds]) => {
+            // oxlint-disable-next-line no-empty-pattern -- only the follow's end matters.
+            for await (const {} of followChat(launcher.read, chatId, {
+              signal,
+              until: runsEnded(runIds),
+            })) {
+              /* Each batch moves the ledger; `until` ends the follow once the runs have ended. */
+            }
+          }),
+        );
       }
-    }
-    const geospecResult = await Promise.allSettled([active.geoSpecClient.close()]);
-    for (const result of geospecResult) {
-      if (result.status === 'rejected') {
-        failures.push(result.reason as unknown);
+    },
+    close: async () => {
+      for (const channel of channels) {
+        channel.dispose('project host closed');
       }
-    }
-    active.imageService.dispose();
-    active.runtimeClient.terminate();
-    active.computeDispose?.();
-    active.fileSystem.dispose();
-    active.projectRoot.dispose();
-    const states = [...leadership.values()];
-    for (const state of states) {
-      globalThis.clearInterval(state.heartbeatId);
-      state.lease.release();
-    }
-    const leaseCompletions: Array<Promise<void>> = [];
-    for (const state of states) {
-      leaseCompletions.push(state.lease.completion);
-    }
-    await Promise.allSettled(leaseCompletions);
-    leadership.clear();
-    for (const channel of channels.values()) {
-      channel.close();
-    }
-    channels.clear();
-    for (const pending of forwarded.values()) {
-      pending.reject(new Error('Agent host worker closed.'));
-    }
-    forwarded.clear();
-    followerRecoveries.clear();
-    followerCursors.clear();
-    tailInFlight.clear();
-    leaderGenerations.clear();
-  }
-  if (failures.length > 0) {
-    throw new AggregateError(failures, 'Browser agent host could not release every session resource.');
-  }
-};
-
-const close = async (): Promise<void> => {
-  if (closing) {
-    return;
-  }
-  closing = true;
-  try {
-    await releaseSession();
-  } finally {
-    /* The flag guards a *re-entrant* close, not the worker's whole lifetime.
-     * Leaving it latched made `close` permanently a no-op, so the next
-     * `initialize` kept the released session and refused the new one with
-     * SESSION_CONFLICT — invisible in a real worker, which terminates after
-     * closing, and fatal to anything that reuses the module. A throw from the
-     * disposal below used to re-latch exactly that wedge, so it is cleared
-     * here rather than on the happy path. */
-    closing = false;
-  }
-};
-
-const withoutRequestId = (
-  response: Exclude<ForwardedResponse, { readonly type: 'error' }>,
-): AgentHostWorkerCallResponse => {
-  const { requestId: _requestId, ...result } = response;
-  return result;
-};
-
-/** Handle one validated Channel call after the lightweight worker bootstrap loads. */
-export const handleAgentHostWorkerRequest = async (
-  request: Exclude<AgentHostWorkerCallRequest, { readonly type: 'capabilities' }>,
-  sessionId: string,
-): Promise<AgentHostWorkerCallResponse> => {
-  if (request.type === 'initialize') {
-    await initialize(request, sessionId);
-    return { type: 'initialized' };
-  }
-  if (request.type === 'close') {
-    await close();
-    return { type: 'closed' };
-  }
-  if (!session || session.sessionId !== sessionId) {
-    throw Object.assign(new Error('Agent host worker session is not initialized.'), {
-      code: 'SESSION_NOT_INITIALIZED',
-    });
-  }
-  const command: AgentHostWorkerCommand = {
-    ...request,
-    requestId: randomUuid(),
-    sessionId,
+      channels.clear();
+      const failures: unknown[] = [];
+      await launcher.close().catch((error: unknown) => {
+        failures.push(error);
+      });
+      failures.push(...(await closeParameterActors(parameterActors)));
+      await geoSpecClient.close().catch((error: unknown) => {
+        failures.push(error);
+      });
+      imageService.dispose();
+      revisions?.close();
+      turnPlacement.close('project host closed');
+      runtimeClient.terminate();
+      computeConnection?.dispose();
+      fileSystem.dispose();
+      projectRoot.dispose();
+      if (failures.length > 0) {
+        throw new AggregateError(failures, 'The project host could not release every resource.');
+      }
+    },
   };
-  const alreadyLeader = leadership.has(request.chatId);
-  const isLeader = await ensureLeadership(request.chatId);
-  const response = isLeader
-    ? await executeCommand(command, request.type === 'attach' && !alreadyLeader)
-    : await forwardCommand(command);
-  if (response.type === 'error') {
-    throw Object.assign(new Error(response.message), { code: response.code });
-  }
-  return withoutRequestId(response);
 };

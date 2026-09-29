@@ -2,7 +2,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { isValidElement } from 'react';
 import { createPortal } from 'react-dom';
+import { Printer } from 'lucide-react';
 import type {
   DockviewApi,
   DockviewDidDropEvent,
@@ -21,12 +23,28 @@ import type { PendingFilePlacement } from '#routes/w.$workspace.$project/chat-wo
 import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
-const { featureState, mobileState, mockOpenPanel, mockProjectSend, mockToastError } = vi.hoisted(() => ({
-  featureState: { value: false },
-  mobileState: { value: false },
-  mockOpenPanel: vi.fn(),
-  mockProjectSend: vi.fn(),
-  mockToastError: vi.fn(),
+const { featureState, mobileState, mockOpenPanel, mockProjectSend, mockToastError, mockPrintBody, mockExportBody } =
+  vi.hoisted(() => ({
+    featureState: { value: false },
+    mobileState: { value: false },
+    mockOpenPanel: vi.fn(),
+    mockProjectSend: vi.fn(),
+    mockToastError: vi.fn(),
+    mockPrintBody: vi.fn(),
+    mockExportBody: vi.fn(),
+  }));
+
+vi.mock('#routes/w.$workspace.$project/chat-print.js', () => ({
+  PrintPanelBody: ({ isShown }: { readonly isShown?: boolean }) => {
+    mockPrintBody(isShown);
+    return <div data-testid='print-body' />;
+  },
+}));
+vi.mock('#routes/w.$workspace.$project/chat-converter.js', () => ({
+  ConverterPanelBody: ({ isShown }: { readonly isShown?: boolean }) => {
+    mockExportBody(isShown);
+    return <div data-testid='export-body' />;
+  },
 }));
 
 vi.mock('sonner', () => ({ toast: { error: mockToastError } }));
@@ -124,6 +142,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 const editorMachineSnapshot = {
   context: {
     openFiles: [] as Array<{ paneId: string; path: string; readOnly?: boolean }>,
+    fileSidebars: {} as Record<string, number>,
     panelState: { desktopLayout: { workbenchOpen: true } },
   },
   status: 'active',
@@ -131,10 +150,29 @@ const editorMachineSnapshot = {
   error: undefined,
 };
 
+let currentEditorSnapshot = editorMachineSnapshot;
+type EditorListener =
+  | ((snapshot: typeof editorMachineSnapshot) => void)
+  | { next: (snapshot: typeof editorMachineSnapshot) => void };
+const editorListeners = new Set<EditorListener>();
+const publishOpenFiles = (openFiles: typeof editorMachineSnapshot.context.openFiles): void => {
+  currentEditorSnapshot = { ...editorMachineSnapshot, context: { ...editorMachineSnapshot.context, openFiles } };
+  for (const listener of editorListeners) {
+    if (typeof listener === 'function') {
+      listener(currentEditorSnapshot);
+    } else {
+      listener.next(currentEditorSnapshot);
+    }
+  }
+};
+
 const mockEditorRef = {
   send: vi.fn(),
-  getSnapshot: () => editorMachineSnapshot,
-  subscribe: () => ({ unsubscribe: vi.fn() }),
+  getSnapshot: () => currentEditorSnapshot,
+  subscribe: (listener: EditorListener) => {
+    editorListeners.add(listener);
+    return { unsubscribe: () => editorListeners.delete(listener) };
+  },
 };
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -279,11 +317,40 @@ const {
   WorkbenchEmptyGroupWatermark,
   WorkbenchDockviewTab,
   WorkbenchLeftActions,
+  getWorkbenchTabIcon,
   WorkbenchPlaceholderPanel,
   WorkbenchRightHeaderActions,
   workbenchSurfaces,
   workbenchPanels,
+  PrintWorkbenchPanel,
+  ExportWorkbenchPanel,
 } = await import('#routes/w.$workspace.$project/chat-workbench-dockview.js');
+
+describe('hidden workbench operation panels', () => {
+  it.each([
+    ['Print', PrintWorkbenchPanel, mockPrintBody],
+    ['Export', ExportWorkbenchPanel, mockExportBody],
+  ] as const)('passes hidden visibility to mounted %s body and wakes it on reveal', (_name, Panel, body) => {
+    let onVisibilityChange: (() => void) | undefined;
+    const api = {
+      isVisible: false,
+      onDidVisibilityChange: (listener: () => void) => {
+        onVisibilityChange = listener;
+        return { dispose: vi.fn() };
+      },
+    } as unknown as IDockviewPanelProps['api'];
+    const properties = { api } as IDockviewPanelProps;
+
+    render(<Panel {...properties} />);
+    expect(body).toHaveBeenLastCalledWith(false);
+
+    act(() => {
+      Object.assign(api, { isVisible: true });
+      onVisibilityChange?.();
+    });
+    expect(body).toHaveBeenLastCalledWith(true);
+  });
+});
 
 const createTabProperties = ({
   id,
@@ -353,6 +420,19 @@ const mockPanelApi = {
   setTitle: vi.fn(),
 } as unknown as IDockviewPanelProps['api'];
 
+describe('getWorkbenchTabIcon', () => {
+  it('should mark printer files with the printer icon, as the viewer tab does, and leave other files to their extension', () => {
+    const icon = (id: string, params: Record<string, unknown>): React.ReactNode =>
+      getWorkbenchTabIcon(createTabProperties({ id, title: id, params }));
+    for (const filePath of ['exports/main.gcode.3mf', 'prints/bracket.gcode']) {
+      const element = icon('file-1', { filePath });
+      expect(isValidElement(element) && element.type).toBe(Printer);
+    }
+    expect(icon('file-2', { filePath: 'main.scad' })).toBeUndefined();
+    expect(icon('file-3', { filePath: 'exports/main.3mf' })).toBeUndefined();
+  });
+});
+
 describe('WorkbenchRightHeaderActions', () => {
   beforeEach(() => {
     mobileState.value = false;
@@ -389,6 +469,8 @@ describe('FileEditor routing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     editorMachineSnapshot.context.openFiles = [];
+    currentEditorSnapshot = editorMachineSnapshot;
+    editorListeners.clear();
     mockIsApplyingFilesystemContent.mockReturnValue(false);
     mockSaveEditor.mockResolvedValue(undefined);
     mockContentSaveEditor.mockResolvedValue(undefined);
@@ -406,6 +488,32 @@ describe('FileEditor routing', () => {
     expect(placeholder).toHaveAttribute('data-slot', 'editor-pane-placeholder');
     expect(placeholder).toHaveTextContent('Loading mystery.dat');
     expect(screen.getAllByRole('group', { name: 'File actions for mystery.dat' })).toHaveLength(1);
+  });
+
+  it('does not rerender for unrelated or unchanged open file entries', () => {
+    mockUseMonacoServices.mockReturnValue({ modelService: undefined });
+    mockUseFileContent.mockReturnValue({ kind: 'loading' });
+    editorMachineSnapshot.context.openFiles = [{ paneId: 'pane-1', path: 'image.png' }];
+    render(<FileEditor paneId='pane-1' filePath='image.png' panelApi={mockPanelApi} />);
+    const renders = mockUseFileContent.mock.calls.length;
+
+    act(() => {
+      publishOpenFiles([
+        { paneId: 'pane-1', path: 'image.png' },
+        { paneId: 'other-pane', path: 'other.txt' },
+      ]);
+    });
+    expect(mockUseFileContent).toHaveBeenCalledTimes(renders);
+
+    act(() => {
+      publishOpenFiles([{ paneId: 'pane-1', path: 'image.png', readOnly: true }]);
+    });
+    expect(mockUseFileContent).toHaveBeenCalledTimes(renders + 1);
+
+    act(() => {
+      publishOpenFiles([{ paneId: 'pane-1', path: 'renamed.png', readOnly: true }]);
+    });
+    expect(mockUseFileContent).toHaveBeenLastCalledWith('renamed.png');
   });
 
   /* I3: an editor that mounts before the model is bound creates the model
@@ -1399,6 +1507,7 @@ describe('Workbench file reconciliation', () => {
     expect(workbenchSurfaces.map(({ id }) => id)).toEqual([
       'parameters',
       'model',
+      'print',
       'kinematics',
       'revisions',
       'agents',
@@ -1450,6 +1559,19 @@ describe('Workbench file reconciliation', () => {
     restoreWorkbenchLayout({ api: dockview.api, layout: {} as SerializedDockview, isTauDebugEnabled: true });
 
     expect(dockview.removePanel).toHaveBeenCalledExactlyOnceWith(legacyFiles);
+  });
+
+  it('replaces a legacy Machines utility with the Print pane in its group', () => {
+    const legacyMachines = panel('workbench:machines');
+    const dockview = createTestDockview([legacyMachines]);
+
+    restoreWorkbenchLayout({ api: dockview.api, layout: {} as SerializedDockview, isTauDebugEnabled: true });
+
+    expect(dockview.addPanel).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: workbenchPanels.print.id, component: 'print', title: 'Print' }),
+    );
+    expect(dockview.removePanel).toHaveBeenCalledExactlyOnceWith(legacyMachines);
+    expect(dockview.panels.map(({ id }) => id)).toEqual([workbenchPanels.print.id]);
   });
 
   it('keeps Share in a restored editor layout', () => {

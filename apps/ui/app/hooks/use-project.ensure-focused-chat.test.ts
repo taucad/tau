@@ -15,7 +15,7 @@ const makeChat = (overrides: Partial<Chat> & { id: string }): Chat => ({
 
 describe('ensureFocusedChatForProject', () => {
   it('should create a missing empty chat without bumping parent project recency', async () => {
-    const getChatsForResource = vi.fn<ChatStorage['getChatsForResource']>().mockResolvedValue([]);
+    const getChatRecordsForResource = vi.fn<ChatStorage['getChatRecordsForResource']>().mockResolvedValue([]);
     const createNavigationRepairChat = vi.fn<ChatStorage['createNavigationRepairChat']>().mockResolvedValue(
       makeChat({
         id: 'chat_created',
@@ -24,7 +24,7 @@ describe('ensureFocusedChatForProject', () => {
     );
     const onCreatedChat = vi.fn();
     const worker = {
-      getChatsForResource,
+      getChatRecordsForResource,
       createNavigationRepairChat,
     };
 
@@ -44,7 +44,9 @@ describe('ensureFocusedChatForProject', () => {
   it('prefers a valid requested chat over the persisted selection', async () => {
     const requested = makeChat({ id: 'chat_requested' });
     const persisted = makeChat({ id: 'chat_persisted' });
-    const getChatsForResource = vi.fn<ChatStorage['getChatsForResource']>().mockResolvedValue([persisted, requested]);
+    const getChatRecordsForResource = vi
+      .fn<ChatStorage['getChatRecordsForResource']>()
+      .mockResolvedValue([persisted, requested]);
     const createNavigationRepairChat = vi.fn<ChatStorage['createNavigationRepairChat']>();
 
     const result = await ensureFocusedChatForProject({
@@ -52,7 +54,7 @@ describe('ensureFocusedChatForProject', () => {
       requestedChatId: 'chat_requested',
       persistedChatId: 'chat_persisted',
       worker: {
-        getChatsForResource,
+        getChatRecordsForResource,
         createNavigationRepairChat,
       },
     });
@@ -69,7 +71,7 @@ describe('ensureFocusedChatForProject', () => {
       requestedChatId: id,
       persistedChatId: persisted.id,
       worker: {
-        getChatsForResource: vi.fn<ChatStorage['getChatsForResource']>().mockResolvedValue([persisted]),
+        getChatRecordsForResource: vi.fn<ChatStorage['getChatRecordsForResource']>().mockResolvedValue([persisted]),
         createNavigationRepairChat: vi.fn<ChatStorage['createNavigationRepairChat']>(),
       },
     });
@@ -90,7 +92,7 @@ describe('ensureFocusedChatForProject', () => {
       requestedChatId: 'chat_missing',
       persistedChatId: 'chat_stale',
       worker: {
-        getChatsForResource: vi.fn<ChatStorage['getChatsForResource']>().mockResolvedValue(chats),
+        getChatRecordsForResource: vi.fn<ChatStorage['getChatRecordsForResource']>().mockResolvedValue(chats),
         createNavigationRepairChat: vi.fn<ChatStorage['createNavigationRepairChat']>(),
       },
     });
@@ -99,7 +101,9 @@ describe('ensureFocusedChatForProject', () => {
       requestedChatId: undefined,
       persistedChatId: undefined,
       worker: {
-        getChatsForResource: vi.fn<ChatStorage['getChatsForResource']>().mockResolvedValue(chats.slice(0, 3)),
+        getChatRecordsForResource: vi
+          .fn<ChatStorage['getChatRecordsForResource']>()
+          .mockResolvedValue(chats.slice(0, 3)),
         createNavigationRepairChat: vi.fn<ChatStorage['createNavigationRepairChat']>(),
       },
     });
@@ -120,12 +124,30 @@ describe('isKnownChatId', () => {
     return queryClient;
   };
 
-  it('should recognise a chat present in any cached chat list for the project', () => {
+  it('should recognise a chat present in a current visible list for the project', () => {
     const queryClient = clientWithChats([knownChat]);
 
     expect(
       isKnownChatId({ chatId: 'chat_listed', createdChatId: undefined, projectId: 'project_test', queryClient }),
     ).toBe(true);
+  });
+
+  it('recognises metadata lists while refusing deleted-only and invalidated lists', async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(['chats', 'project_test', 'records', { includeDeleted: false }], [knownChat]);
+    expect(
+      isKnownChatId({ chatId: knownChat.id, createdChatId: undefined, projectId: 'project_test', queryClient }),
+    ).toBe(true);
+
+    await queryClient.invalidateQueries({ queryKey: ['chats', 'project_test'] });
+    expect(
+      isKnownChatId({ chatId: knownChat.id, createdChatId: undefined, projectId: 'project_test', queryClient }),
+    ).toBe(false);
+
+    queryClient.setQueryData(['chats', 'project_test', 'records', { includeDeleted: true }], [knownChat]);
+    expect(
+      isKnownChatId({ chatId: knownChat.id, createdChatId: undefined, projectId: 'project_test', queryClient }),
+    ).toBe(false);
   });
 
   it('should recognise the chat this render just created', () => {

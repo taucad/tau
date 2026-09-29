@@ -2,7 +2,7 @@ export { EventLogError } from '#log/event-log-error.js';
 export { parseEventLog, serializeLogEvent } from '#log/serialization.js';
 export { reduceEventLog } from '#log/reducer.js';
 export { mergeLogSegments } from '#log/segments.js';
-export type { ChatLogSegment } from '#log/segments.js';
+export type { ChatLogSegment, MergeLogSegmentsOptions } from '#log/segments.js';
 export {
   agentLogEventSchema,
   jsonValueSchema,
@@ -11,55 +11,33 @@ export {
   userProviderMessageSchema,
 } from '#log/event-schema.js';
 export { createAgentSession, createTransportStreamFunction, requestedMaxTokens } from '#harness/session.js';
-export { agentHostRefusalCodes, createTauAgentHost, isResumableRunFailure } from '#host/tau-agent-host.js';
-export { replayedStartOutcome } from '#host/replayed-start.js';
-export type { ReplayedStartOutcome } from '#host/replayed-start.js';
-/* The daemon channel vocabulary. Zod only — the WebSocket client half validates
- * against these same schemas inside a browser bundle, so they must not ride the
- * Node-only `/node-launcher` subpath. */
+export { createTauAgentHost } from '#host/tau-agent-host.js';
+export { isResumableRunFailure } from '#log/resumable.js';
 export {
-  admissionConfigFor,
-  agentChannelAdmissionConfigSchema,
-  agentChannelCommandSchema,
-  agentChannelEventSchema,
-  agentChannelLiveEventSchema,
-  agentChannelRevisionEventSchema,
-  agentChannelModelCostSchema,
-  agentChannelModelSchema,
-  agentChannelProtocolSchemas,
-  agentChannelResponseSchema,
-  agentChannelSystemPromptBlockSchema,
-  agentChannelTailBatchLimit,
-  agentChannelToolChoiceSchema,
-  externalAgentAuthMethodSchema,
-  externalAgentDescriptorSchema,
-  externalAgentLoginSchema,
-  externalAgentRefusalCodes,
-  externalAgentStopCodes,
-  externalAgentStopSchema,
-} from '#launchers/node/agent-wire.js';
+  emptyChatLedger,
+  foldChatLedger,
+  foldReadAnswer,
+  replayedStartOutcome,
+  unsettledAttempts,
+} from '#log/chat-ledger.js';
 export type {
-  AgentChannelAdmissionConfig,
-  AgentChannelCommand,
-  AgentChannelEvent,
-  AgentChannelLeadership,
-  AgentChannelLiveEvent,
-  AgentChannelProtocol,
-  AgentChannelRequest,
-  AgentChannelRevisionCommand,
-  AgentChannelRevisionEvent,
-  AgentChannelResponse,
-  AgentChannelResultOperation,
-  ExternalAgentDescriptor,
-  ExternalAgentLogin,
-  ExternalAgentRefusalCode,
-  ExternalAgentStop,
-  ExternalAgentStopCode,
-} from '#launchers/node/agent-wire.js';
-/* The transport union and its close vocabulary. Types only — the client half
- * itself ships from `@taucad/agent-host/channel-client`. */
+  ChatLedger,
+  InvocationEntry,
+  LedgerAnomaly,
+  LedgerPosition,
+  ReadFold,
+  ReplayedStartOutcome,
+  RunEntry,
+} from '#log/chat-ledger.js';
+export { followChat, readFolded } from '#log/follow-chat.js';
+export type { ChatRead, FoldedRead } from '#log/follow-chat.js';
+/* The seam's owner half, shared by the daemon launcher and the browser worker. The wire vocabulary itself ships
+ * from `@taucad/agent-host/wire`. */
+export { createCommandOwner } from '#channel/command-owner.js';
+export type { CommandEffect, CommandOwnerOptions } from '#channel/command-owner.js';
+/* The transport union. Types only — the client half itself ships from `@taucad/agent-host/channel-client`. */
 export type { AgentChannelEndpoint } from '#channel/endpoint.js';
-export type { AgentChannelClient, AgentChannelCloseReason } from '#channel/agent-channel-client.js';
+export type { AgentChannelClient } from '#channel/agent-channel-client.js';
 /* R3: apps never import `@taucad/rpc`, so the few channel types an app needs to
  * declare its own worker protocol are re-exported from here. */
 export type { Channel, ChannelServer, ChannelServerHandle, WireProtocolSchemas, WithTransferables } from '@taucad/rpc';
@@ -67,7 +45,6 @@ export {
   GatewayModelTransportError,
   createCachedSystemPromptBlocks,
   createGatewayModelTransport,
-  gatewayModelErrorCodes,
   isGatewayProviderKind,
   isOpenAiGatewayProviderKind,
 } from '#transport/gateway-model-transport.js';
@@ -75,7 +52,8 @@ export { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gatewa
 export { composeModelCallMiddleware } from '#harness/model-call-middleware.js';
 export { normalizeLatexDelimiters, trimToolResultContext } from '#harness/cad-middleware.js';
 export { HostCompactionError } from '#harness/compaction.js';
-export { canonicalJson, defaultSafeguardThresholds, summarizeToolEvents } from '#harness/safeguards.js';
+export { defaultSafeguardThresholds, summarizeToolEvents } from '#harness/safeguards.js';
+export { canonicalJson } from '#log/canonical-json.js';
 export { normalizeToolInput, tauToolKinds, toPiToolContent } from '#harness/tools.js';
 export type { EventLogErrorCode } from '#log/event-log-error.js';
 export type { EventLogAppender, EventLogAppendOutcome, EventLogBatch } from '#log/event-log-appender.js';
@@ -90,12 +68,14 @@ export type {
   JsonObject,
   JsonValue,
   LogEventBase,
+  RowKey,
   ModelSystemPromptBlock,
   ModelProviderKind,
   MessageAppendedEvent,
   MessageEnvelopeReplacedEvent,
   ModelInvocationBoundEvent,
   ModelInvocationPreparedEvent,
+  ModelInvocationSettledEvent,
   ModelReasoningConfig,
   ProviderMessage,
   ProviderMessageMetadata,
@@ -115,6 +95,7 @@ export type {
   TurnContextSnapshot,
   TurnModelConfig,
   TurnHistoryProjectionCommittedEvent,
+  TurnPlacement,
   UserProviderMessage,
 } from '#log/event-types.js';
 export { modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
@@ -125,10 +106,12 @@ export type {
   HostRun,
   HostRunFailure,
   HostRunSnapshot,
+  HostToolApproval,
+  HostToolApprovalAnswer,
+  HostToolApprovalRecord,
   HostToolDefinition,
   HostToolInvocation,
   HostToolResult,
-  InterruptApprovalPort,
   InterruptRequest,
   InterruptResolution,
   MaterializedDocument,
@@ -136,7 +119,14 @@ export type {
   ModelInvocationBinding,
   ModelStreamRequest,
   ModelTransport,
-  RunLifecycleCommands,
+  InvocationFunding,
+  InvocationResolutionRequest,
+  TurnAttemptKey,
+  TurnPlacementAnswer,
+  TurnPlacementFact,
+  TurnPlacementGrant,
+  TurnPlacementPort,
+  TurnSettlementRow,
   ToolRegistry,
 } from '#waist/ports.js';
 export type { ModelCostRates, StopReason, Usage } from '@earendil-works/pi-ai';
@@ -150,11 +140,18 @@ export type {
   SafeguardThresholds,
   ToolEventSummary,
 } from '#harness/safeguards.js';
-export type { AgentSession, AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
+export type {
+  AgentRunOutcome,
+  AgentSession,
+  AgentSessionModel,
+  CreateAgentSessionOptions,
+  HostClock,
+  StreamStallBound,
+} from '#harness/session.js';
 export { materializeAttachments } from '#harness/session-record.js';
 export type { AttachmentReader, DocumentBlockBuilder, MaterializedAttachments } from '#harness/session-record.js';
 export type {
-  AgentHostRefusalCode,
+  CommandKey,
   CreateTauAgentHostOptions,
   ExternalAgentLogEvent,
   ExternalAgentPort,
@@ -168,7 +165,6 @@ export type {
 } from '#host/tau-agent-host.js';
 export type {
   CachedSystemPromptOptions,
-  GatewayFundedOperationProtocol,
   GatewayModelErrorCode,
   GatewayModelTransportOptions,
 } from '#transport/gateway-model-transport.js';

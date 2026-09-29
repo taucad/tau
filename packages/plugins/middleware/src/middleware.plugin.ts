@@ -22,12 +22,11 @@ export const middleware = definePlugin({
   presets: {
     default: [
       'middleware.parameterFileResolver',
-      'middleware.parameterCache',
       'middleware.parameterUnits',
       'middleware.geometryCache',
       'middleware.gltfEdgeDetection',
     ],
-    cache: ['middleware.parameterCache', 'middleware.geometryCache'],
+    cache: ['middleware.geometryCache'],
     units: ['middleware.parameterUnits'],
   },
 });

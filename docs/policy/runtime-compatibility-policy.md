@@ -79,8 +79,8 @@ The following tests are release gates for runtime wire changes:
 - `packages/runtime/src/types/runtime-protocol-payload-shape.test.ts` — payload invariants and additive-reader compatibility;
 - `packages/runtime/src/types/protocol-header.runtime.test.ts` — protocol-header validation and typed mismatch errors;
 - `packages/runtime/src/framework/runtime-worker-client.initialize.test.ts` — hello ordering and connect-time mismatch rejection;
-- `libs/rpc/src/wire.test.ts` and `libs/rpc/src/channel-lifecycle.test.ts` — frame-version rejection and diagnostic behavior;
-- `libs/rpc/src/wire-protocol-validation.test.ts` — schema-bound notification drop behavior.
+- `packages/rpc/src/wire.test.ts` and `packages/rpc/src/channel-lifecycle.test.ts` — frame-version rejection and diagnostic behavior;
+- `packages/rpc/src/wire-protocol-validation.test.ts` — schema-bound notification drop behavior.
 
 Do not weaken or bypass these gates to land a wire change. If a required behavior changes, update `protocolVersion`, implementation, policy, and tests together.
 

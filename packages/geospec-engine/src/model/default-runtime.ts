@@ -8,6 +8,7 @@ import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
 import { middleware } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
+import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
 import { tscircuit } from '@taucad/tscircuit';
@@ -20,6 +21,9 @@ export const defaultRuntime = defineRuntime({
     opencascade(),
     jscad(),
     manifold(),
+    // Serial, not 'auto': Node reports cross-origin isolated, and GeoSpec evidence must come from
+    // the single-threaded build (blueprint D34). Exact exports run serial regardless.
+    picovoxel({ kernels: { default: { wasm: 'serial' } } }),
     gltf(),
     brep(),
     rhino(),

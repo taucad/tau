@@ -3,7 +3,7 @@ import * as React from 'react';
 import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
 import { createAttachmentStore } from '#db/attachment-store.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import type { Attachment } from '#utils/attachment.utils.js';
+import type { StoredAttachment } from '#utils/attachment.utils.js';
 import { getEnvironment } from '#environment.config.js';
 
 type FixtureImage = {
@@ -54,7 +54,7 @@ export const loader = async (): Promise<Response> => {
 
 const ChatImageCarouselDebugRoute = (): React.JSX.Element => {
   const { recordFiles } = useFileManager();
-  const [images, setImages] = React.useState<readonly Attachment[]>();
+  const [images, setImages] = React.useState<readonly StoredAttachment[]>();
 
   React.useEffect(() => {
     const store = createAttachmentStore(recordFiles, fixtureDirectory);

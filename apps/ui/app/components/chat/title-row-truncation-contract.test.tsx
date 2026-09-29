@@ -282,7 +282,7 @@ describe('chat-tool title-row truncation cascade', () => {
     render(
       <>
         <FileLink path='main.kcl' asChild>
-          <span data-testid='file-asChild' className='inline-flex items-center gap-1 rounded-xs bg-purple/10 px-1.5'>
+          <span data-testid='file-asChild' className='inline-flex items-center gap-1 rounded-xs bg-feature/10 px-1.5'>
             main.kcl
           </span>
         </FileLink>

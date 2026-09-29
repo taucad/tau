@@ -221,6 +221,13 @@ export const projectGit = pgTable('project_git', {
   storageBytes: bigint('storage_bytes', { mode: 'number' }).notNull().default(0),
   lfsBytes: bigint('lfs_bytes', { mode: 'number' }).notNull().default(0),
   /**
+   * Bytes of packs a compaction retired that the store still keeps inside the
+   * retention window (charter D18, L6-F5): real storage, never counted against
+   * the plan. Written by the post-compaction sweep, which lists `packs/` anyway,
+   * so it is exact after every sweep and only changes when a sweep runs.
+   */
+  retainedBytes: bigint('retained_bytes', { mode: 'number' }).notNull().default(0),
+  /**
    * The manifest generation this row was last told about (D19). Derived state —
    * accounting, LFS marks, publications — is keyed to it, and any request that
    * sees `derived_generation` behind it re-derives. There is no reconcile job.
@@ -1029,10 +1036,38 @@ export const creditOperation = billing.table(
       'credit_operation_states',
       sql`${table.category} IN ('llm','zoo_engine') AND ${table.dispatchState} IN ('admitted','intent_recorded','accepted','recovery_required') AND ${table.customerState} IN ('pending','settled','released','absorbed') AND ${table.supplierState} IN ('reserved','preliminary','unresolved','final','funded_exception') AND ${table.generation} > 0`,
     ),
+    // GI-R2: a row with a reporting history settles only after its dispatch intent; the timestamp is immutable, while
+    // a sweep claim overwrites dispatch_state. Rows from before 0021 (history_version NULL) cannot prove it either way.
+    check(
+      'credit_operation_dispatch',
+      sql`${table.historyVersion} IS NULL OR ${table.customerState} <> 'settled' OR ${table.dispatchIntentAt} IS NOT NULL`,
+    ),
     check(
       'credit_operation_terminal',
       sql`(${table.customerState} = 'pending' AND ${table.baseTransactionId} IS NULL AND ${table.terminalRevision} IS NULL AND ${table.resolvedAt} IS NULL AND ${table.chargedAtoms} IS NULL) OR (${table.customerState} <> 'pending' AND ${table.baseTransactionId} IS NOT NULL AND ${table.terminalRevision} IS NOT NULL AND ${table.terminalRevision} > 0 AND ${table.resolvedAt} IS NOT NULL AND ${table.chargedAtoms} IS NOT NULL AND ${table.chargedAtoms} BETWEEN 0 AND ${table.authorizedAtoms})`,
     ),
+  ],
+);
+
+/**
+ * Attempt keys an owner-scoped lookup found unadmitted and fenced (GI-R3): admission refuses a voided key, so a
+ * `not_found` answer means "never admitted, and never will be". Written and checked under the account-row lock.
+ */
+export const creditAttemptVoid = billing.table(
+  'credit_attempt_void',
+  {
+    accountId: text('account_id').notNull(),
+    environment: text('environment').notNull(),
+    surface: text('surface').notNull(),
+    attemptKey: text('attempt_key').notNull(),
+    voidedAt: timestamp('voided_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.accountId, table.surface, table.attemptKey] }),
+    foreignKey({
+      columns: [table.environment, table.accountId],
+      foreignColumns: [creditAccount.environment, creditAccount.id],
+    }).onDelete('restrict'),
   ],
 );
 
@@ -1741,9 +1776,18 @@ export const hostDevice = pgTable(
      * also stops a container and which project a run directory row belongs to.
      */
     cloudProjectId: text('cloud_project_id'),
+    /**
+     * The cloud host's repository-scoped push credential (D21, I10), hashed;
+     * null on a paired laptop. A second secret beside `credential_hash`
+     * because that one also opens the model gateway, jobs and the control
+     * socket: this one opens `cloud_project_id`'s git routes and nothing else,
+     * and dies with `revoked_at`. Only `git-transport.ts` reads it.
+     */
+    gitCredentialHash: text('git_credential_hash'),
   },
   (table) => [
     uniqueIndex('agent_device_credential_hash_idx').on(table.credentialHash),
+    uniqueIndex('agent_device_git_credential_hash_idx').on(table.gitCredentialHash),
     index('agent_device_owner_idx').on(table.ownerId, desc(table.createdAt)),
     /* Partial: a revoked cloud host stays as history and must not block the
      * next provisioning of the same project. */
@@ -1891,7 +1935,7 @@ export const jobRun = pgTable(
   ],
 );
 
-/** Durable at-least-once dispatch intent; Hatchet idempotency closes the crash-after-trigger window. */
+/** Historical durable dispatch intent retained with existing job data while job execution is paused. */
 export const jobDispatchOutbox = pgTable(
   'job_dispatch_outbox',
   {

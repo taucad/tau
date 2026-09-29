@@ -55,30 +55,49 @@ export const kernelConfigurations = [
     longDescription:
       'A native C# computational-engineering workflow backed by PicoGK and OpenVDB. Author strongly typed voxel models with live desktop rendering and mesh export.',
     emptyCode: `using System.ComponentModel.DataAnnotations;
-using System.Numerics;
 using PicoGK;
 
-Library.Go(Params.VoxelSizeMm, () =>
-{
-    Library.oViewer().SetGroupMaterial(0, "4f7dd9", 0f, 0.7f);
-    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, Params.RadiusMm), 0);
-});
+Library.Go(Params.VoxelSizeMm, () => { });
 
 public static class Params
 {
     [Range(0.05, 5.0)]
     [Display(Name = "Voxel size", Description = "OpenVDB voxel size in millimetres", Order = 0)]
     public static float VoxelSizeMm { get; set; } = 0.5f;
-
-    [Range(1.0, 100.0)]
-    [Display(Name = "Radius", Description = "Sphere radius in millimetres", Order = 1)]
-    public static float RadiusMm { get; set; } = 20f;
 }
 `,
     recommended: 'Native C# Voxel Engineering',
     tags: ['C#', 'PicoGK', 'OpenVDB', 'Voxels', 'Desktop'],
     features: ['CoreCLR JIT', 'Upstream PicoGK API', 'Interactive parameters', 'Topology-aware GLB'],
     requiresRuntimeKernelId: 'picogk',
+  },
+  {
+    id: 'picovoxel',
+    name: 'PicoVoxel',
+    dimensions: [3],
+    language: 'typescript',
+    description: 'TypeScript voxel and implicit CAD that runs in the browser',
+    mainFile: 'main.ts',
+    // PicoVoxel is the PicoGK engine compiled to WebAssembly; the field is display-only.
+    backendProvider: 'picogk',
+    longDescription:
+      "PicoGK's OpenVDB voxel engine compiled to WebAssembly. Author voxel, implicit and lattice models in TypeScript with ShapeKernel and LatticeLibrary, in the browser, the desktop app or the CLI. The viewer shows a fast preview; exports and GeoSpec checks replay the model exactly.",
+    emptyCode: `import type { Pico, Voxels } from 'picovoxel';
+
+export const defaultParams = { voxelSize: 0.5 };
+
+export default function main(pico: Pico, params = defaultParams): Voxels[] {
+  return [];
+}
+`,
+    recommended: 'Voxel & Lattice CAD in the Browser',
+    tags: ['TypeScript', 'PicoGK', 'OpenVDB', 'Voxels', 'Implicit', 'Lattices', 'Browser'],
+    features: [
+      'ShapeKernel & LatticeLibrary',
+      'SDF expressions',
+      'Fast preview with exact export',
+      'Interactive parameters',
+    ],
   },
   {
     id: 'build123d',
@@ -91,18 +110,14 @@ public static class Params
     longDescription:
       'A best-in-class Python CAD API backed by native OpenCascade. Build precise parametric parts and assemblies with direct STEP export and topology-aware rendering in the Tau desktop app.',
     emptyCode: `from dataclasses import dataclass
-from build123d import Box, Shape
+from build123d import Shape
 
 @dataclass(frozen=True)
 class Params:
-    width: float = 40.0
-    depth: float = 30.0
-    height: float = 20.0
+    pass
 
-def main(params: Params) -> Shape:
-    result = Box(params.width, params.depth, params.height)
-    result.label = "Body"
-    return result
+def main(params: Params) -> Shape | None:
+    return None
 `,
     recommended: 'Native Python Engineering CAD',
     tags: ['Python', 'OpenCascade', 'BRep', 'Desktop', 'Precision'],

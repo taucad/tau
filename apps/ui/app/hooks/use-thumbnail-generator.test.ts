@@ -25,10 +25,13 @@ const getSnapshot = vi.fn(() => ({
       content: geometryFormat === 'gltf' ? geometryContent : '<svg xmlns="http://www.w3.org/2000/svg"/>',
       hash: 'geometry-hash',
     },
+    lastRequestedRenderId: 0,
   },
 }));
 let geometryListener: ((event: { geometry: { hash: string } }) => void) | undefined;
 const unsubscribe = vi.fn();
+const unsubscribeSnapshots = vi.fn();
+const subscribe = vi.fn(() => ({ unsubscribe: unsubscribeSnapshots }));
 const on = vi.fn((_event: string, listener: (event: { geometry: { hash: string } }) => void) => {
   geometryListener = listener;
   return { unsubscribe };
@@ -36,7 +39,7 @@ const on = vi.fn((_event: string, listener: (event: { geometry: { hash: string }
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
-    geometryUnits: new Map([['src/main.ts', { getSnapshot, on }]]),
+    geometryUnits: new Map([['src/main.ts', { getSnapshot, on, subscribe }]]),
     mainEntryPath: 'src/main.ts',
     projectId: 'proj_aaaaaaaaaaaaaaaaaaaaa',
   }),
@@ -98,7 +101,7 @@ describe('useThumbnailGenerator', () => {
     snapshotEntryPath = sourceEntryPath;
     geometryFormat = 'gltf';
     getProjectFileSystemConfig.mockResolvedValue(locator('/projects/one'));
-    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 768, height: 576, close: vi.fn() }));
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 1536, height: 1152, close: vi.fn() }));
   });
 
   afterEach(() => {
@@ -125,9 +128,9 @@ describe('useThumbnailGenerator', () => {
       format: 'webp',
       exportOptions: {
         mode: 'single',
-        width: 768,
-        height: 576,
-        lineWidth: 3,
+        width: 1536,
+        height: 1152,
+        lineWidth: 6,
         camera: {
           framing: 'bounds',
           direction: [0.6123724357, -0.6123724357, 0.5],
@@ -192,7 +195,7 @@ describe('useThumbnailGenerator', () => {
     exportImage.mockResolvedValueOnce(webpFile(2));
     await expect(
       thumbnailInput!.render({ kind: 'manual-thumbnail', signal: new AbortController().signal }),
-    ).rejects.toThrow('expected 768×576 pixels, received 640×480');
+    ).rejects.toThrow('expected 1536×1152 pixels, received 640×480');
     expect(writeFile).not.toHaveBeenCalled();
   });
 
@@ -221,7 +224,7 @@ describe('useThumbnailGenerator', () => {
       sourcePath: sourceEntryPath,
       content: '<svg xmlns="http://www.w3.org/2000/svg"/>',
       format: 'webp',
-      exportOptions: { width: 768, height: 576, quality: 0.9 },
+      exportOptions: { width: 1536, height: 1152, quality: 0.9 },
     });
   });
 
@@ -234,7 +237,7 @@ describe('useThumbnailGenerator', () => {
     expect(event?.type).toBe('settled');
     if (event?.type === 'settled') {
       expect(event.hash).toBe(
-        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.9:768x576:m0.1:lw3:camera-bounds-v1:edges:studio-v5',
+        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.9:1536x1152:m0.1:lw6:camera-bounds-v1:edges:studio-v5',
       );
     }
   });
@@ -271,12 +274,13 @@ describe('useThumbnailGenerator', () => {
     });
   });
 
-  it('should unsubscribe from geometry events on unmount', () => {
+  it('should unsubscribe from geometry events and render requests on unmount', () => {
     const { unmount } = renderHook(() => useThumbnailGenerator());
 
     unmount();
 
     expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(unsubscribeSnapshots).toHaveBeenCalledOnce();
   });
 
   it('should resolve regenerate with the machine-reported outcome', async () => {

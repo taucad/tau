@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-08T11:57:58.246232+00:00",
+  "oracle": {
+    "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-wall-oracle-a1/revisions/nominal-facts-a2/prospective-box-fullwire.json",
+    "sha256": "b43e2939a75814940dcb72ff0f522f10d7dfa960bfc823ba8ec4464de156aba3"
+  },
+  "verifiedArtifacts": 35,
+  "verifiedRawDoubleFields": 1646,
+  "approvedIds": [
+    "continuous02/nominal-box/min5/positive",
+    "continuous02/nominal-box/min5/negative",
+    "continuous02/nominal-box/min10/positive",
+    "continuous02/nominal-box/min10/negative",
+    "continuous02/nominal-box/min11/positive",
+    "continuous02/nominal-box/min11/negative"
+  ],
+  "certificateEqualsIndependentNominalFactsAndObservedAdapter": true,
+  "checks": "Full source-hash joins; nominal vertices/planes/directed rectangle cycles/opposite edge incidence/tolerances; six complete claim/result wrappers/polarities/algebra/supports/formula; authored requests preserved. Static box adapter reviewed.",
+  "scope": "Box only, numerical kernel certificate. No exact-real lifting. Cylinder periodic/seam correspondence remains open; no positive cylinder or family completion."
+}

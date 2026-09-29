@@ -19,13 +19,26 @@ export const hostAdmissionOperations = [
   'jobs.openArtifact',
   'machines.listProviders',
   'machines.discover',
+  'machines.beginBinding',
+  'machines.removeBinding',
   'machines.list',
   'machines.pairing.begin',
   'machines.pairing.status',
   'machines.unpair',
   'machines.snapshot',
+  'machines.get',
   'machines.watch',
+  'machines.preparePrint',
+  'machines.uploadPrint',
+  'machines.startPrint',
+  'machines.reconcileOperation',
+  'machines.controlRun',
   'machines.captureStill',
+  'machines.requestPrint',
+  'machines.listPrintRequests',
+  'machines.watchPrintRequests',
+  'machines.resolvePrintRequest',
+  'machines.withdrawPrintRequest',
   'machines.validate',
   'machines.query',
 ] as const;
@@ -58,6 +71,14 @@ export type AdmitHostOperationInput = Readonly<{
   operation: HostAdmissionOperation;
 }>;
 
+/** Named input for checking whether a session may enter one host route. @public */
+export type AdmitHostRouteInput = Readonly<{
+  session: HostSessionHandle;
+  authorityId: string;
+  workspaceId: string;
+  route: HostAdmissionRoute;
+}>;
+
 /** Refusal codes produced by local host admission. @public */
 export type HostAdmissionRefusalCode =
   | 'INVALID_SESSION'
@@ -85,6 +106,18 @@ export type AdmittedHostOperation = Readonly<{
   workspaceId: string;
   route: HostAdmissionRoute;
   operation: HostAdmissionOperation;
+  signal: AbortSignal;
+  assertCurrent(): void;
+}>;
+
+/** Successful route preflight; exact operation admission remains mandatory. @public */
+export type AdmittedHostRoute = Readonly<{
+  hostId: string;
+  actor: HostActor;
+  authorityId: string;
+  workspaceId: string;
+  route: HostAdmissionRoute;
+  signal: AbortSignal;
   assertCurrent(): void;
 }>;
 
@@ -92,6 +125,7 @@ export type AdmittedHostOperation = Readonly<{
 export type HostAdmissionAuthority = Readonly<{
   hostId: string;
   issueTrustedSession(input: IssueHostSessionInput): HostSessionHandle;
+  admitRoute(input: AdmitHostRouteInput): AdmittedHostRoute;
   admit(input: AdmitHostOperationInput): AdmittedHostOperation;
   revoke(session: HostSessionHandle): boolean;
 }>;
@@ -104,6 +138,7 @@ type SessionRecord = Readonly<{
   authorityId: string;
   workspaceId: string;
   grants: ReadonlySet<string>;
+  abort: AbortController;
   state: { revoked: boolean };
 }>;
 
@@ -222,8 +257,46 @@ export const createHostAdmissionAuthority = (input: CreateHostAdmissionAuthority
         grants.add(key);
       }
       const handle = Object.freeze({}) as HostSessionHandle;
-      sessions.set(handle, { actor, authorityId, workspaceId, grants, state: { revoked: false } });
+      sessions.set(handle, {
+        actor,
+        authorityId,
+        workspaceId,
+        grants,
+        abort: new AbortController(),
+        state: { revoked: false },
+      });
       return handle;
+    },
+    admitRoute(input_) {
+      const inputRecord = record(input_, ['session', 'authorityId', 'workspaceId', 'route'], 'HOST_ROUTE_ADMISSION');
+      const session = own(inputRecord, 'session') as HostSessionHandle;
+      const sessionRecord = resolve(session);
+      const authorityId = identity(own(inputRecord, 'authorityId'), 'AUTHORITY_ID');
+      const workspaceId = identity(own(inputRecord, 'workspaceId'), 'WORKSPACE_ID');
+      const route = own(inputRecord, 'route');
+      if (route !== 'jobs' && route !== 'machines') {
+        throw new HostAdmissionRefusal('ROUTE_DENIED');
+      }
+      if (sessionRecord.authorityId !== authorityId) {
+        throw new HostAdmissionRefusal('AUTHORITY_MISMATCH');
+      }
+      if (sessionRecord.workspaceId !== workspaceId) {
+        throw new HostAdmissionRefusal('WORKSPACE_MISMATCH');
+      }
+      if (![...operationsByRoute[route]].some((operation) => sessionRecord.grants.has(grantKey(route, operation)))) {
+        throw new HostAdmissionRefusal('ROUTE_DENIED');
+      }
+      return Object.freeze({
+        hostId,
+        actor: sessionRecord.actor,
+        authorityId,
+        workspaceId,
+        route,
+        signal: sessionRecord.abort.signal,
+        assertCurrent(): void {
+          resolve(session);
+        },
+      });
     },
     admit(input_) {
       const inputRecord = record(
@@ -260,6 +333,7 @@ export const createHostAdmissionAuthority = (input: CreateHostAdmissionAuthority
         workspaceId,
         route,
         operation: operation_,
+        signal: sessionRecord.abort.signal,
         assertCurrent(): void {
           resolve(session);
         },
@@ -271,6 +345,7 @@ export const createHostAdmissionAuthority = (input: CreateHostAdmissionAuthority
         return false;
       }
       found.state.revoked = true;
+      found.abort.abort(new HostAdmissionRefusal('SESSION_REVOKED'));
       return true;
     },
   });

@@ -6,6 +6,7 @@ export const toolName = {
   useSkill: 'use_skill',
   readFile: 'read_file',
   editFile: 'edit_file',
+  arrangeWorkbench: 'arrange_workbench',
   listDirectory: 'list_directory',
   createFile: 'create_file',
   deleteFile: 'delete_file',
@@ -17,6 +18,13 @@ export const toolName = {
   applyParameterOperation: 'apply_parameter_operation',
   screenshot: 'screenshot',
   revisions: 'revisions',
+  updateTodos: 'update_todos',
+  getMachine: 'get_machine',
+  getPrintProfiles: 'get_print_profiles',
+  requestPrint: 'request_print',
+  getPrintRequest: 'get_print_request',
+  listPrintRequests: 'list_print_requests',
+  cancelPrint: 'cancel_print',
 } as const satisfies Record<string, string>;
 
 /** @public */

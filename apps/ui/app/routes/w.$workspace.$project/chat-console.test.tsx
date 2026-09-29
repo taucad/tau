@@ -180,7 +180,7 @@ describe('ChatConsole', () => {
     const { ChatConsole } = await import('./chat-console.js');
     render(<ChatConsole />);
 
-    expect(screen.getByRole('searchbox', { name: 'Filter logs' })).toHaveAttribute('placeholder', 'Filter logs...');
+    expect(screen.getByRole('searchbox', { name: 'Filter logs' })).toHaveAttribute('placeholder', 'Filter logs…');
     expect(screen.getByRole('button', { name: 'Filter by log level' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Console settings' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear logs' })).toBeDisabled();

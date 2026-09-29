@@ -65,7 +65,7 @@ const vertexModelIds = Object.values(modelList.vertexai)
 /** One current model per remaining provider wire, beside every Vertex row. */
 const matrixModelIds: readonly string[] = [
   ...vertexModelIds,
-  'anthropic-claude-haiku-4.5',
+  'anthropic-claude-sonnet-5.5',
   'openai-gpt-5.6-luna',
   'xai-grok-4.7',
 ];
@@ -267,7 +267,7 @@ const liveThread = async (options: LiveThreadOptions): Promise<HostRunSnapshot> 
           systemPrompt,
           model,
           toolRegistry,
-          eventLog: await createNodeEventLog({ filePath }),
+          eventLog: await createNodeEventLog({ filePath, access: 'write' }),
         });
         try {
           await session.prompt({ id: `${chatId}-user-${String(index + 1)}`, role: 'user', content: prompt });

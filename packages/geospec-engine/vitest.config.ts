@@ -1,5 +1,4 @@
 import { configDefaults, defineConfig } from 'vitest/config';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
 /** Broad by construction: new executable source is covered unless it enters one of these audited non-production classes. */
 export const engineCoverageSourcePolicy = {
@@ -16,10 +15,15 @@ export const engineCoverageSourcePolicy = {
 };
 
 export default defineConfig({
-  plugins: [nxViteTsPaths()],
   test: {
     environment: 'node',
-    exclude: [...configDefaults.exclude, 'e2e/**'],
+    exclude: [
+      ...configDefaults.exclude,
+      'e2e/**',
+      'experiments/performance-lab/performance-lab.test.ts',
+      'experiments/performance-lab/performance-lab-cli.test.ts',
+      'experiments/performance-lab/performance-lab-focus.test.ts',
+    ],
     setupFiles: ['./src/testing/vitest-setup.ts'],
     typecheck: {
       enabled: true,

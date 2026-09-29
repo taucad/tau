@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadPicogkKernelOptions, picogkRuntimeManifestSchema } from '#picogk-resources.js';
+import { picogkProtocolVersion } from '#picogk.protocol.js';
 
 const digest = 'a'.repeat(64);
 const hostTarget = `${process.platform}-${process.arch}`;
@@ -19,7 +20,7 @@ const manifest = (target = hostTarget) => ({
   picoGkArchiveSha256: digest,
   picoGkHostedPatchSha256: digest,
   hostApiVersion: 1,
-  protocolVersion: 3,
+  protocolVersion: picogkProtocolVersion,
   sceneArtifactVersion: 3,
   topologySchemaVersion: 1,
   sourceFilesSha256: digest,
@@ -77,9 +78,25 @@ describe('PicoGK prepared resources', () => {
     );
   });
 
+  it('should refuse resources prepared for another worker protocol with the command that re-prepares them', () => {
+    const { resourceRoot } = fixture();
+    writeFileSync(
+      join(resourceRoot, hostTarget, 'tau-runtime-manifest.json'),
+      JSON.stringify({ ...manifest(), protocolVersion: picogkProtocolVersion - 1 }),
+    );
+
+    expect(() => loadPicogkKernelOptions({ resourceRoot })).toThrow(
+      `PicoGK resources at ${join(resourceRoot, hostTarget)} were prepared for worker protocol ${picogkProtocolVersion - 1}, ` +
+        `but this build speaks protocol ${picogkProtocolVersion}. ` +
+        'Re-prepare them with `pnpm nx run desktop:prepare-picogk-dotnet`.',
+    );
+  });
+
   it('pins protocol versions, digests, and confined relative resource paths', () => {
     expect(picogkRuntimeManifestSchema.safeParse({ ...manifest(), schemaVersion: 1 }).success).toBe(false);
-    expect(picogkRuntimeManifestSchema.safeParse({ ...manifest(), protocolVersion: 2 }).success).toBe(false);
+    expect(
+      picogkRuntimeManifestSchema.safeParse({ ...manifest(), protocolVersion: picogkProtocolVersion - 1 }).success,
+    ).toBe(false);
     expect(picogkRuntimeManifestSchema.safeParse({ ...manifest(), workerSha256: 'invalid' }).success).toBe(false);
     expect(picogkRuntimeManifestSchema.safeParse({ ...manifest(), workerPath: '/worker' }).success).toBe(false);
     expect(picogkRuntimeManifestSchema.safeParse({ ...manifest(), workerPath: '../worker' }).success).toBe(false);

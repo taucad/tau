@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Chat } from '@taucad/chat';
+import type { MyUIMessage } from '@taucad/chat';
+import type { ChatRecord } from '@taucad/chat/schemas';
 import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import { useProject } from '#hooks/use-project.js';
 
 /** Applies the generated title for the first user message of a new chat. */
 export function useActiveChatNaming({
   activeChat,
+  firstMessage,
   isProjectLoading,
   isChatsLoading,
   applyGeneratedChatName,
 }: {
-  readonly activeChat: Chat | undefined;
+  readonly activeChat: ChatRecord | undefined;
+  readonly firstMessage?: MyUIMessage;
   readonly isProjectLoading: boolean;
   readonly isChatsLoading: boolean;
   readonly applyGeneratedChatName: (chatId: string, name: string) => Promise<unknown>;
@@ -21,7 +24,6 @@ export function useActiveChatNaming({
   const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
-    const firstMessage = activeChat?.messages[0];
     if (
       !activeChat ||
       isProjectLoading ||
@@ -57,7 +59,7 @@ export function useActiveChatNaming({
     return () => {
       cancelled = true;
     };
-  }, [activeChat, applyGeneratedChatName, client, isChatsLoading, isProjectLoading, projectId]);
+  }, [activeChat, firstMessage, applyGeneratedChatName, client, isChatsLoading, isProjectLoading, projectId]);
 
   return isGenerating;
 }

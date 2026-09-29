@@ -12,6 +12,7 @@ import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { ViewerLink } from '#components/files/viewer-link.js';
+import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 
 function FilenameLink({ targetFile }: { readonly targetFile: string }): React.JSX.Element {
   return <ViewerLink path={targetFile}>{targetFile}</ViewerLink>;
@@ -56,7 +57,9 @@ export function ChatMessageToolScreenshot({
     case 'output-available': {
       const { output } = part;
       const allImages = output.images;
-      const renderableImages = allImages.filter((img) => img.dataUrl.startsWith('data:'));
+      const renderableImages = allImages.filter((image) =>
+        'dataUrl' in image ? image.dataUrl.startsWith('data:') : image.path.startsWith('attachments/'),
+      );
       const count = allImages.length;
       const noun = count === 1 ? 'screenshot' : 'screenshots';
 
@@ -91,10 +94,13 @@ export function ChatMessageToolScreenshot({
               >
                 {renderableImages.map((image) => (
                   <div key={image.view} className='flex flex-col items-center gap-1'>
-                    <img
-                      src={image.dataUrl}
+                    <ChatMessageMedia
+                      media={
+                        'dataUrl' in image
+                          ? { url: image.dataUrl, mediaType: image.dataUrl.slice(5, image.dataUrl.indexOf(';')) }
+                          : { url: image.path, mediaType: image.mimeType }
+                      }
                       alt={`${image.view} view`}
-                      className='rounded-sm border bg-background object-contain'
                     />
                     <span className='text-xs text-muted-foreground'>{image.view}</span>
                   </div>

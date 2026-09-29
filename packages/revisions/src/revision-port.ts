@@ -75,11 +75,18 @@ export type RevisionRecord = Readonly<{
   receipt: RevisionReceipt;
 }>;
 
-/** One graph node as `log` reports it. Tree-free by contract. @public */
+/**
+ * One graph node as `log` reports it. Tree-free by contract: the tree's id is
+ * on the commit the walk already read, and no tree object is ever opened.
+ *
+ * @public
+ */
 export type RevisionLogEntry = Readonly<{
   id: RevisionId;
   changeId: string;
   parents: readonly RevisionId[];
+  /** Object id of the tree this revision carries, as {@link RevisionRecord.treeId}. */
+  treeId: string;
   summary: RevisionSummary;
   provenance: RevisionProvenance;
   conflicted: boolean;
@@ -206,6 +213,25 @@ export type RevisionLogInput = Readonly<{
   /** Heads to walk back from. Every recorded revision when absent. */
   heads?: readonly RevisionId[];
   limit?: number;
+}>;
+
+/** Two heads to compare by reachability. @public */
+export type RevisionDivergenceInput = Readonly<{
+  head: RevisionId;
+  base: RevisionId;
+}>;
+
+/**
+ * How far two heads have gone apart, as `git rev-list --left-right --count
+ * head...base` counts it.
+ *
+ * @public
+ */
+export type RevisionDivergence = Readonly<{
+  /** Revisions reachable from `head` and not from `base`. */
+  ahead: number;
+  /** Revisions reachable from `base` and not from `head`. */
+  behind: number;
 }>;
 
 /** Input for a tree-free path diff. @public */
@@ -388,16 +414,29 @@ export type CheckoutRecord = Readonly<Omit<Checkout, 'baseRevisionId'>> &
     leaseChatIds: readonly string[];
     /** Set when the host's policy would offer this checkout for removal (A25). */
     removable?: boolean;
-    /**
-     * Set when this branch's head is a conflicted revision (A22, W10).
-     *
-     * The head *is* the conflicted revision — a conflicted merge mints it on the
-     * branch a person merged from — so there is no second id to carry. One
-     * commit read per checkout answers it, and it is record-derived like every
-     * other field here, so *Needs resolution* survives a reload (I3).
-     */
-    conflicted?: boolean;
   }>;
+
+/**
+ * One conflicted revision no decision has landed yet (charter D14).
+ *
+ * Read from the conflict lines themselves, `refs/heads/conflicts/<into>/<device>`,
+ * on every host that holds them — recorded here or fetched from another device —
+ * so *Needs your decision* survives a reload and appears on every device (I3).
+ * A revision the line it decides already contains is resolved and is never
+ * listed.
+ *
+ * @public
+ */
+export type ConflictRecord = Readonly<{
+  /** The conflicted revision. */
+  revisionId: string;
+  /** Its conflict line, `conflicts/<into>/<device>`. */
+  line: string;
+  /** The line the decision lands on. */
+  into: string;
+  /** Whether another device recorded it. */
+  foreign: boolean;
+}>;
 
 /**
  * One named version: an annotated tag on a revision (S31, A21).
@@ -485,6 +524,11 @@ export type RevisionPort = Readonly<{
    * may place a parent before a child (review 4 R39).
    */
   log(input?: RevisionLogInput): Promise<readonly RevisionLogEntry[]>;
+  /**
+   * Count what each of two heads has that the other lacks, without listing
+   * either history: the walk stops at their common ancestry.
+   */
+  divergence(input: RevisionDivergenceInput): Promise<RevisionDivergence>;
   diff(input: RevisionDiffInput): Promise<readonly RevisionDiffEntry[]>;
   /** Every ref the remote advertises, without fetching an object. */
   listRemoteRefs(remote: string): Promise<readonly RemoteRef[]>;
@@ -549,6 +593,8 @@ export type RemoteStorageRefusal = Readonly<{
 export type RevisionPortErrorCode =
   /** A branch was asked of a checkout that has no revision and nothing to record. */
   | 'BRANCH_NEEDS_REVISION'
+  /** A branch name conflict lines own: `conflicts` or a name under it (charter D14). */
+  | 'BRANCH_NAME_RESERVED'
   /** The requested branch already has a checkout, or the id names no checkout. */
   | 'CHECKOUT_CONFLICT'
   | 'ENGINE_FAILED'
@@ -588,6 +634,14 @@ export type RevisionPortErrorCode =
    * the new address. Terminal: retrying the old address reproduces it.
    */
   | 'REMOTE_MOVED'
+  /**
+   * HTTP 500 `GIT_REPOSITORY_INCOMPLETE`: the hosted repository is damaged.
+   *
+   * Its manifest names a pack the store does not hold. Terminal: every retry
+   * reproduces it until an operator restores the repository, so it is never
+   * filed as `REMOTE_UNAVAILABLE`.
+   */
+  | 'REMOTE_DAMAGED'
   /** HTTP 413 with no LFS file list; a batch refusal keeps raising `LfsQuotaError`. */
   | 'REMOTE_QUOTA_EXCEEDED'
   /**
@@ -620,17 +674,28 @@ export type RevisionPortErrorCode =
 /** Typed revision-port failure. @public */
 export class RevisionPortError extends Error {
   public readonly code: RevisionPortErrorCode;
+  /**
+   * How long a rate-limited remote (HTTP 429) asked this host to wait: its
+   * `Retry-After`, or a bounded default on a leg that cannot read the header.
+   * A wait, not a failure to back off from (W13d).
+   */
+  public readonly retryAfterMilliseconds: number | undefined;
 
   /**
    * Create a stable port failure.
    *
    * @param code - Machine-readable failure category.
    * @param message - Safe diagnostic without remote credentials or command arguments.
-   * @param options - Optional cause.
+   * @param options - Optional cause, and a rate limit's wait.
    */
-  public constructor(code: RevisionPortErrorCode, message: string, options?: ErrorOptions) {
+  public constructor(
+    code: RevisionPortErrorCode,
+    message: string,
+    options?: ErrorOptions & Readonly<{ retryAfterMilliseconds?: number }>,
+  ) {
     super(message, options);
     this.name = 'RevisionPortError';
     this.code = code;
+    this.retryAfterMilliseconds = options?.retryAfterMilliseconds;
   }
 }

@@ -25,6 +25,11 @@ import type { ChangeEvent } from '#types.js';
 export type CoalescerOptions = {
   /** Window for coalescing events. Default: 50. Milliseconds. */
   coalescingWindow?: number;
+  /**
+   * Deliver the events that open a window on the next timer tick instead of at its end; events arriving during the
+   * window still coalesce and are delivered when it closes. Default: false.
+   */
+  leadingEdge?: boolean;
   /** Maximum queue depth before emitting overflow. Default: 10,000. */
   maxQueueDepth?: number;
   /** Called with every event discarded when queue depth is exceeded. */
@@ -87,6 +92,7 @@ function collapsePathHistory(history: ChangeEvent[]): ChangeEvent | undefined {
 export class EventCoalescer {
   /** Milliseconds. */
   private readonly _coalescingWindow: number;
+  private readonly _leadingEdge: boolean;
   private readonly _maxQueueDepth: number;
   private readonly _onOverflow?: (events: readonly ChangeEvent[]) => void;
   private readonly _deliverCallback: (events: ChangeEvent[]) => void;
@@ -102,6 +108,7 @@ export class EventCoalescer {
   public constructor(deliverCallback: (events: ChangeEvent[]) => void, options?: CoalescerOptions) {
     this._deliverCallback = deliverCallback;
     this._coalescingWindow = options?.coalescingWindow ?? defaultCoalescingWindow;
+    this._leadingEdge = options?.leadingEdge ?? false;
     this._maxQueueDepth = options?.maxQueueDepth ?? defaultMaxQueueDepth;
     this._onOverflow = options?.onOverflow;
   }
@@ -128,9 +135,22 @@ export class EventCoalescer {
     if (this._timer !== undefined) {
       return;
     }
+    if (!this._leadingEdge) {
+      this._timer = setTimeout(() => {
+        this._timer = undefined;
+        this._flush();
+      }, this._coalescingWindow);
+      return;
+    }
+    // One tick batches every event emitted by the same operation; the window opens before delivery so events a
+    // handler causes are coalesced into it rather than delivered on another leading tick.
     this._timer = setTimeout(() => {
+      this._timer = setTimeout(() => {
+        this._timer = undefined;
+        this._flush();
+      }, this._coalescingWindow);
       this._flush();
-    }, this._coalescingWindow);
+    }, 0);
   }
 
   /** Immediately flush any pending events (e.g. on dispose). */
@@ -152,8 +172,6 @@ export class EventCoalescer {
   }
 
   private _flush(): void {
-    this._timer = undefined;
-
     if (this._pending.length === 0) {
       return;
     }

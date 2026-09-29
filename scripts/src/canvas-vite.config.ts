@@ -1,10 +1,15 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
-import type { UserConfig } from 'vite';
+import type { Plugin, UserConfig } from 'vite';
+
+import { appendReviewEvent, finishReview, readReviewEvents, readReviewThreads } from '#canvas-review.js';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const artifactsRoot = resolve(repoRoot, 'docs/research/artifacts');
@@ -28,6 +33,132 @@ export const resolveCanvasRoot = (input = process.env['TAU_CANVAS_PATH'], allowe
 };
 
 const sharedStyles = resolve(import.meta.dirname, '../canvas/styles.css');
+const reviewLayer = resolve(import.meta.dirname, '../canvas/review-layer.ts');
+
+/** SHA-256 over the canvas's own files (not its review events), so a comment names the revision reviewed. */
+const sourceDigest = (root: string): string => {
+  const hash = createHash('sha256');
+  const walk = (directory: string): void => {
+    const entries = readdirSync(directory, { withFileTypes: true }).toSorted((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+    for (const entry of entries) {
+      if (entry.name === 'review' || entry.name === 'node_modules' || entry.name.startsWith('.')) {
+        continue;
+      }
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        walk(path);
+      } else {
+        hash.update(relative(root, path)).update('\0').update(readFileSync(path));
+      }
+    }
+  };
+  walk(root);
+  return `sha256:${hash.digest('hex')}`;
+};
+
+const reviewer = (root: string): string => {
+  try {
+    return execFileSync('git', ['config', 'user.name'], { cwd: root, encoding: 'utf8' }).trim() || 'reviewer';
+  } catch {
+    return 'reviewer';
+  }
+};
+
+const readBody = async (request: IncomingMessage): Promise<unknown> => {
+  const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+  for await (const chunk of request) {
+    chunks.push(chunk as Uint8Array<ArrayBuffer>);
+  }
+  const text = new TextDecoder().decode(Buffer.concat(chunks));
+  return text ? JSON.parse(text) : {};
+};
+
+type ReviewReply = readonly [status: number, body: unknown];
+
+const refusedReply = (status: number, code: string, message: string): ReviewReply => [
+  status,
+  { status: 'refused', code, message },
+];
+
+/**
+ * The review layer (scripts/canvas/review-layer.ts) and its endpoints. Serve only: a static build has
+ * no writer. Requests must be same-origin JSON, so another site open in the browser cannot post to it.
+ */
+const reviewPlugin = (root: string, allowedRoot: string): Plugin => {
+  const artifacts = realpathSync(allowedRoot);
+  const target = { canvas: relative(artifacts, root), root: artifacts };
+
+  const threads = async (): Promise<ReviewReply> => {
+    const events = readReviewEvents(target);
+    let pending = events.length;
+    try {
+      const tracked = execFileSync('git', ['ls-files', '--', 'review'], { cwd: root, encoding: 'utf8' });
+      pending -= tracked.split('\n').filter(Boolean).length;
+    } catch {
+      // Not in Git: every event is pending, and Finish says why it cannot commit.
+    }
+    return [
+      200,
+      { canvas: target.canvas, source: sourceDigest(root), pending, threads: await readReviewThreads(target) },
+    ];
+  };
+
+  const handle = async (request: IncomingMessage): Promise<ReviewReply> => {
+    const site = request.headers['sec-fetch-site'];
+    if (site !== undefined && site !== 'same-origin') {
+      return refusedReply(403, 'READ_ONLY', 'Review requests must come from the canvas page.');
+    }
+    if (request.method === 'GET' && request.url === '/threads') {
+      return threads();
+    }
+    if (request.method !== 'POST' || request.headers['content-type'] !== 'application/json') {
+      return refusedReply(405, 'INVALID_EVENT', 'POST JSON to /events or /finish.');
+    }
+    if (request.url === '/events') {
+      const body = await readBody(request);
+      // The page never names its author: the reviewer is whoever runs this server.
+      const event =
+        typeof body === 'object' && body !== null
+          ? { ...body, author: { kind: 'person', name: reviewer(root) } }
+          : body;
+      const outcome = await appendReviewEvent({ ...target, event });
+      return [outcome.status === 'written' ? 201 : 422, outcome];
+    }
+    if (request.url === '/finish') {
+      const outcome = await finishReview(target);
+      return [outcome.status === 'refused' ? 409 : 200, outcome];
+    }
+    return refusedReply(404, 'INVALID_EVENT', `No review endpoint ${request.url ?? ''}.`);
+  };
+
+  const respond = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    let reply: ReviewReply;
+    try {
+      reply = await handle(request);
+    } catch (error) {
+      reply = refusedReply(500, 'WRITE_FAILED', error instanceof Error ? error.message : String(error));
+    }
+    response.statusCode = reply[0];
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify(reply[1]));
+  };
+
+  return {
+    name: 'tau-canvas-review',
+    apply: 'serve',
+    configureServer: (server) => {
+      server.middlewares.use('/__tau/review', (request, response) => {
+        // async-iife: bootstrap — connect does not await middleware; respond() settles every error itself.
+        void respond(request, response);
+      });
+    },
+    transformIndexHtml: () => [
+      { tag: 'script', attrs: { type: 'module', src: `/@fs/${reviewLayer}` }, injectTo: 'body' },
+    ],
+  };
+};
 
 export const createCanvasConfig = (
   canvasRoot = resolveCanvasRoot(),
@@ -38,6 +169,9 @@ export const createCanvasConfig = (
   const appRoot = resolve(repoRoot, 'apps/ui/app');
   const uiRoot = resolve(repoRoot, 'packages/ui/src');
   const sourceRoots = [appRoot, realpathSync(allowedRoot)];
+  // A linked worktree's `docs/research` resolves into the owning checkout's Brain, outside
+  // this checkout, so a canvas's own fixtures may live under the resolved artifacts root.
+  const fixtureRoots = [realpathSync(repoRoot), realpathSync(allowedRoot)];
   const aliases = new Map<string, string>();
   const aliasesPath = resolve(root, 'canvas.aliases.json');
   if (existsSync(aliasesPath)) {
@@ -50,7 +184,7 @@ export const createCanvasConfig = (
         throw new Error('Canvas aliases require # imports and repository-relative fixture paths');
       }
       const fixture = realpathSync(resolve(repoRoot, target));
-      if (!fixture.startsWith(`${repoRoot}${sep}`)) {
+      if (!fixtureRoots.some((directory) => fixture.startsWith(`${directory}${sep}`))) {
         throw new Error('Canvas fixture aliases must remain inside the Tau checkout');
       }
       aliases.set(specifier, fixture);
@@ -76,13 +210,16 @@ export const createCanvasConfig = (
     // writer's fails with 504 Outdated Optimize Dep.
     cacheDir: resolve(repoRoot, 'node_modules/.vite/canvas', relative(realpathSync(allowedRoot), root)),
     resolve: {
-      alias: {
-        '@taucad/ui': resolve(repoRoot, 'packages/ui/src'),
-        // The shared API design guide renderer (create-ts-api skill).
-        '@tau/api-guide': resolve(import.meta.dirname, '../canvas/api-guide.tsx'),
-        react: resolve(repoRoot, 'scripts/node_modules/react'),
-        'react-dom': resolve(repoRoot, 'packages/ui/node_modules/react-dom'),
-      },
+      alias: [
+        { find: '@taucad/ui', replacement: resolve(repoRoot, 'packages/ui/src') },
+        // Tau's precompiled Shiki grammars, which a guide passes for languages Shiki does not bundle (KCL).
+        // Exact match: a string alias would also rewrite the app's `@taucad/grammars/openscad` imports.
+        { find: /^@taucad\/grammars$/, replacement: resolve(repoRoot, 'libs/grammars/src/index.ts') },
+        // The shared API design guide renderer (create-api skill).
+        { find: '@tau/api-guide', replacement: resolve(import.meta.dirname, '../canvas/api-guide.tsx') },
+        { find: 'react', replacement: resolve(repoRoot, 'scripts/node_modules/react') },
+        { find: 'react-dom', replacement: resolve(repoRoot, 'packages/ui/node_modules/react-dom') },
+      ],
     },
     plugins: [
       {
@@ -139,6 +276,7 @@ export const createCanvasConfig = (
         },
       },
       tailwindcss(),
+      reviewPlugin(root, allowedRoot),
     ],
     server: {
       host: '127.0.0.1',

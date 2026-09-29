@@ -25,7 +25,8 @@ export type RevisionStatusProjection = Readonly<{
    * only the host that made them knows which is which.
    */
   checkoutRoot: string | undefined;
-  branch: string | undefined;
+  /** The line that checkout is on (D3); never an absent branch standing for several states. */
+  line: RevisionLine;
   /**
    * Whether the checkout registry has answered once. Before it has, a checkout
    * named here has no root yet; that is not the same as a checkout that is
@@ -54,6 +55,19 @@ export type RevisionStatusProjection = Readonly<{
     removedPathCount: number;
     dirty: boolean;
     revisionNumber: number | undefined;
+    /**
+     * Whether *Undo restore* has something to undo: this checkout's head is the
+     * restore row this root minted on the selected line (W0's undo target).
+     * Absent reads as false — nothing is offered — so a projection fixture
+     * written before it never offers an undo the machine would refuse.
+     */
+    undoable?: boolean;
+    /**
+     * Whether *Undo* has an operation of this device's to reverse on the
+     * selected line (D15), as the operation log last answered. Absent reads as
+     * false, like `undoable`.
+     */
+    canUndo?: boolean;
   }>;
   /** Which remote this project has, and what it costs (S26 *Sync*, S35). */
   remote: RemoteFacet;
@@ -95,6 +109,26 @@ export type RevisionStatusProjection = Readonly<{
   conflicts: readonly RevisionConflictFacet[];
 }>;
 
+/**
+ * The line of history the selected checkout is on (D3).
+ *
+ * - `branch` — it tracks `name`, and `name` has at least one revision.
+ * - `unborn` — it tracks `name`, and `name` has no revision yet: a project that
+ *   has not been recorded. Its first cut creates the line.
+ * - `unknown` — nothing names a line yet: the registry has not answered, or it
+ *   answered with no branch for this checkout. A client view reads `unknown`
+ *   until its projection arrives, too.
+ *
+ * There is no detached state: a restore mints on its line (D1), so a checkout
+ * is always on a branch once its store exists.
+ *
+ * @public
+ */
+export type RevisionLine =
+  | Readonly<{ kind: 'branch'; name: string }>
+  | Readonly<{ kind: 'unborn'; name: string }>
+  | Readonly<{ kind: 'unknown' }>;
+
 /** One branch as the *Branches* region renders it. @public */
 export type RevisionBranchFacet = Readonly<{
   name: string;
@@ -112,15 +146,25 @@ export type RevisionBranchFacet = Readonly<{
   leaseChatIds: readonly string[];
 }>;
 
-/** One conflicted branch as the *Needs resolution* card renders it. @public */
+/** One undecided conflicted revision as the *Needs your decision* card renders it (D14). @public */
 export type RevisionConflictFacet = Readonly<{
-  /** The conflicted revision, which is that branch's head. */
+  /** The conflicted revision. */
   revisionId: string;
+  /** Its conflict line, `conflicts/<into>/<device>`. */
   branch: string | undefined;
+  /** The line the decision lands on — what *Needs your decision on …* names (HQ2). */
+  into: string;
+  /** Whether another device recorded it; only such a line is offered for removal (D24). */
+  foreign: boolean;
   /** The two side labels the markers carry, once its child has read them. */
   labels: Readonly<{ ours: string; theirs: string }> | undefined;
-  /** One row per file, with the side chosen for it so far. */
-  paths: ReadonlyArray<Readonly<{ path: string; openable: boolean; side: ResolutionSide | undefined }>>;
+  /**
+   * One row per file, with the side chosen for it so far; `keys` names the
+   * parameter keys both sides changed, for a parameter record.
+   */
+  paths: ReadonlyArray<
+    Readonly<{ path: string; openable: boolean; keys?: readonly string[]; side: ResolutionSide | undefined }>
+  >;
   /** A resolution effect is running. */
   busy: boolean;
   /** Every file has a side, so *Merge into `<current>`* can be asked for again. */

@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.spec.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "incremental": false,
+    "noEmit": true,
+    "paths": {
+      "#*": ["../../src/*"],
+      "@taucad/geospec/assertion-client": ["../../src/assertion-client/index.ts"],
+      "@taucad/geospec/vitest": ["../../src/vitest/index.ts"]
+    }
+  },
+  "files": ["type-consumer.ts"],
+  "include": []
+}

@@ -11,6 +11,9 @@ import { modelSupportsInput, modelSupportsTools } from '#types/model.types.js';
  *
  * Internal browser RPC schemas are intentionally
  * excluded: they are not serialized into provider function declarations.
+ * The print tools are admitted unconditionally: a host lists them only when a
+ * machine is negotiated and granted, and a turn is offered only what its host
+ * lists.
  *
  * @public
  */
@@ -22,6 +25,7 @@ export const cadProviderFacingToolNames = [
   toolName.applyParameterOperation,
   toolName.screenshot,
   toolName.editFile,
+  toolName.arrangeWorkbench,
   toolName.useSkill,
   toolName.readFile,
   toolName.listDirectory,
@@ -32,6 +36,13 @@ export const cadProviderFacingToolNames = [
   toolName.webSearch,
   toolName.webBrowser,
   toolName.revisions,
+  toolName.updateTodos,
+  toolName.getMachine,
+  toolName.getPrintProfiles,
+  toolName.requestPrint,
+  toolName.getPrintRequest,
+  toolName.listPrintRequests,
+  toolName.cancelPrint,
 ] as const satisfies readonly ToolName[];
 
 const requiredModelInputModalities: Partial<Record<ToolName, readonly ModelInputModality[]>> = {
@@ -59,6 +70,37 @@ export const filterProviderFacingToolNamesByModelSupport = ({
   );
 };
 
+const normalizeTupleItems = (value: unknown): void => {
+  if (value === null || typeof value !== 'object') {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      normalizeTupleItems(item);
+    }
+    return;
+  }
+  const object = value as Record<string, unknown>;
+  const { items } = object;
+  if (Array.isArray(items)) {
+    const tupleItems: unknown[] = items;
+    const [first] = tupleItems;
+    if (
+      first === undefined ||
+      object['additionalItems'] !== undefined ||
+      tupleItems.some((item) => JSON.stringify(item) !== JSON.stringify(first))
+    ) {
+      throw new Error('Provider tool schema has a tuple that cannot use one items schema');
+    }
+    object['items'] = first;
+    object['minItems'] = tupleItems.length;
+    object['maxItems'] = tupleItems.length;
+  }
+  for (const child of Object.values(object)) {
+    normalizeTupleItems(child);
+  }
+};
+
 /**
  * Serialize one tool input schema exactly as the host puts it on the wire.
  *
@@ -84,6 +126,8 @@ export const filterProviderFacingToolNamesByModelSupport = ({
 export const toProviderToolJsonSchema = (schema: z.ZodType): Record<string, unknown> => {
   const jsonSchema = z.toJSONSchema(schema, { target: 'draft-7', io: 'input' }) as Record<string, unknown>;
   delete jsonSchema['$schema'];
+  // Draft 7 tuple arrays are invalid in Draft 2020-12; homogeneous fixed arrays work on both provider dialects.
+  normalizeTupleItems(jsonSchema);
   return jsonSchema;
 };
 

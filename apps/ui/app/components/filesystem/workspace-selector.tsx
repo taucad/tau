@@ -170,7 +170,7 @@ export function WorkspaceSelector({
       getValue={optionValue}
       value={state.selectedOption}
       emptyListMessage='No locations found.'
-      searchPlaceHolder='Search locations...'
+      searchPlaceHolder='Search locations…'
       isSearchEnabled={state.options.length >= 5}
       title='Select a project location'
       description='Choose where new project files are stored.'

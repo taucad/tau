@@ -6,7 +6,18 @@ import type { RenderFrame } from '@taucad/spatial';
 import { toThreeRenderPoint } from '@taucad/three/spatial';
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
+import { graphicsSettingsForView } from '#workbench-records/projection.js';
 import type { GraphicsViewSettings } from '#constants/editor.constants.js';
+import type { GraphicsContext } from '#machines/graphics.machine.js';
+import { areSectionCutsEqual, resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
+import type {
+  SectionAxis,
+  SectionCut,
+  SectionCutPatch,
+  SectionPiece,
+  SectionPlane,
+} from '#components/geometry/graphics/section-cuts.js';
+import type { SectionHandleTarget } from '#components/geometry/graphics/three/controls/section-handles.js';
 import {
   useCameraConnectorRef,
   useCameraRig,
@@ -33,14 +44,25 @@ import {
   infiniteGridPresentationPlaneByUpDirection,
 } from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
 
-type SectionPlaneId = 'xy' | 'xz' | 'yz';
+/**
+ * A cut to add: what is left out takes the Add menu's default with no view (a plane through the bounds centre,
+ * unflipped; a 90° cutaway from angle zero). A cutaway passes through the bounds centre.
+ */
+export type SectionViewTestCut =
+  | Readonly<{ kind: 'plane'; plane: SectionPlane; offset?: number; isFlipped?: boolean }>
+  | Readonly<{ kind: 'revolution'; axis: SectionAxis; start?: number; sweep?: number }>;
 
-export type SectionViewTestState = Readonly<{
-  plane: SectionPlaneId;
-  direction?: 1 | -1;
-  rotationRadians?: readonly [number, number, number];
-  pivot?: readonly [number, number, number];
-  translation?: number;
+export type SectionViewTestSectionState = Readonly<{
+  isActive: boolean;
+  cuts: readonly SectionCut[];
+  selectedCutId: string | undefined;
+  hoveredCutId: string | undefined;
+  /** The cuts the caps last certified, which picking and captures read, and the pieces they remove. */
+  committedCuts: readonly SectionCut[];
+  committedPieces: readonly SectionPiece[];
+  certification: GraphicsContext['sectionCertification'];
+  /** Whether the committed cuts hold the live cuts' values: the caps have caught up with the last edit. */
+  isCommitted: boolean;
 }>;
 
 export type SectionViewTestCamera = Readonly<{
@@ -128,16 +150,6 @@ export type SectionViewTestRenderedModelComponentState = Readonly<{
   materialOpacities: readonly number[];
 }>;
 
-export type SectionViewTestPresentationState = Readonly<{
-  isSectionViewActive: boolean;
-  selectedSectionViewId: string | undefined;
-  sectionViewDirection: 1 | -1;
-  sectionViewPivot: readonly [number, number, number];
-  sectionViewRotation: readonly [number, number, number];
-  enableClippingLines: boolean;
-  enableClippingMesh: boolean;
-}>;
-
 export type SectionViewTestCapCompleteness =
   | Readonly<{
       status: 'complete';
@@ -160,6 +172,12 @@ export type SectionViewTestMeasureState = Readonly<{
   cameraInteracting: boolean;
   /** Meshes the measure tool has drawn into the scene: snap indicators, lines and labels. */
   measurementUiMeshCount: number;
+  rendererGeometryCount: number;
+  snapDistancePx: number;
+  candidates: GraphicsContext['measureCandidates'];
+  activeCandidateId: string | undefined;
+  lockedTargetId: string | undefined;
+  mode: GraphicsContext['measureMode'];
   currentStart: readonly [number, number, number] | undefined;
   measurements: ReadonlyArray<
     Readonly<{
@@ -167,20 +185,36 @@ export type SectionViewTestMeasureState = Readonly<{
       distance: number;
       startPoint: readonly [number, number, number];
       endPoint: readonly [number, number, number];
+      operation?: string;
+      quality?: string;
+      status?: string;
+      unavailableReason?: string;
     }>
   >;
 }>;
 
 export type SectionViewTestBridgeApi = Readonly<{
   getGraphicsBackend(): 'webgl' | 'webgpu';
+  /** Identity from this viewport's renderer, never a separately created probe context. */
+  getRendererIdentity(): Readonly<{ api: 'webgl' | 'webgpu'; name: string; frame: number }>;
+  getViewportCanvas(): HTMLCanvasElement;
   /** The durable record this view persists, for revisit-equals-reload assertions (Law 4). */
   getViewSettings(): GraphicsViewSettings | undefined;
   isGeometryFramed(): boolean;
-  showPlaneSelectors(): void;
-  setSectionView(state: SectionViewTestState): void;
-  clearSectionView(): void;
+  /** Replaces the cuts, none selected, turning Section on (off for none); returns the ids of those added. */
+  setSectionCuts(cuts: readonly SectionViewTestCut[]): string[];
+  /** Adds a cut, selected, turning Section on; undefined when the list is full. */
+  addSectionCut(cut: SectionViewTestCut): string | undefined;
+  updateSectionCut(id: string, patch: SectionCutPatch): void;
+  /** Removing the last cut turns Section off. */
+  removeSectionCut(id: string): void;
+  selectSectionCut(id: string | undefined): void;
+  /** On with no cuts adds the default plane. */
+  setSectionViewActive(active: boolean): void;
+  getSectionState(): SectionViewTestSectionState;
+  /** Where a drawn handle is on screen; only the selected cut has drag handles. */
+  projectSectionHandle(kind: SectionHandleTarget['kind'], cutId: string): SectionViewTestProjectedPoint | undefined;
   setPresentation(presentation: Readonly<{ surfaces: boolean; lines: boolean }>): void;
-  getPresentation(): SectionViewTestPresentationState;
   setPostProcessingEnabled(enabled: boolean): void;
   setGridPresentationClipPolicy(policy: Readonly<{ far: boolean; near: boolean }>): void;
   getModelComponents(): SectionViewTestModelComponent[];
@@ -198,11 +232,9 @@ export type SectionViewTestBridgeApi = Readonly<{
   getRenderFrame(): RenderFrame;
   setRenderFrame(renderFrame: RenderFrame): void;
   projectWorldPoint(point: readonly [number, number, number]): SectionViewTestProjectedPoint;
-  projectSectionTransformHandle(axis: 'X' | 'Y' | 'Z'): SectionViewTestProjectedPoint | undefined;
   getModelHoverState(): SectionViewTestModelHoverState;
   setMeasureActive(active: boolean): void;
   getMeasureState(): SectionViewTestMeasureState;
-  getSelectorLabels(): string[];
   getSectionHelperSummary(): SectionViewTestHelperSummary;
   getSectionCapCompleteness(): SectionViewTestCapCompleteness | undefined;
   getSectionCapOverlapDiagnostics(): SectionCapOverlapDebugSummary | undefined;
@@ -274,24 +306,21 @@ export const getSectionViewTestMeasurementUiMeshCount = (scene: THREE.Object3D):
   return meshes.size;
 };
 
-export const getSectionViewTestSelectorLabels = (scene: THREE.Object3D): string[] => {
-  const labels = new Set<string>();
-
-  for (const root of getSceneRenderRoots(scene as THREE.Scene)) {
-    root.traverse((child) => {
-      if (!(child instanceof THREE.Mesh)) {
-        return;
-      }
-
-      const label = (child.geometry.userData as Record<string, unknown>)['selectorLabel'];
-      if (typeof label === 'string') {
-        labels.add(label);
-      }
-    });
-  }
-
-  return [...labels];
-};
+/** A point in normalized device coordinates, in viewport pixels; visible inside the view volume. */
+const toProjectedPoint = (
+  projected: THREE.Vector3,
+  rect: Pick<DOMRect, 'height' | 'left' | 'top' | 'width'>,
+): SectionViewTestProjectedPoint => ({
+  x: rect.left + ((projected.x + 1) / 2) * rect.width,
+  y: rect.top + ((1 - projected.y) / 2) * rect.height,
+  visible:
+    projected.x >= -1 &&
+    projected.x <= 1 &&
+    projected.y >= -1 &&
+    projected.y <= 1 &&
+    projected.z >= -1 &&
+    projected.z <= 1,
+});
 
 function getLineSegments2SegmentCount(object: THREE.Object3D): number {
   const attributes = (object as { geometry?: THREE.BufferGeometry }).geometry?.attributes;
@@ -362,51 +391,32 @@ export const getSectionViewTestHelperSummary = (scene: THREE.Object3D): SectionV
   };
 };
 
-export const projectSectionViewTestTransformHandle = ({
-  axis,
+/**
+ * Where a section handle is on screen: the centre of the bounds of its hit meshes, which the handles name
+ * `kind:cutId`; undefined while none is drawn.
+ */
+export const projectSectionViewTestHandle = ({
+  target,
   camera,
   rect,
   scene,
 }: {
-  readonly axis: 'X' | 'Y' | 'Z';
+  readonly target: SectionHandleTarget;
   readonly camera: THREE.Camera;
   readonly rect: Pick<DOMRect, 'height' | 'left' | 'top' | 'width'>;
   readonly scene: THREE.Object3D;
 }): SectionViewTestProjectedPoint | undefined => {
-  let result: SectionViewTestProjectedPoint | undefined;
-  const projectTransformHandle = (child: THREE.Object3D): void => {
-    if (
-      result !== undefined ||
-      !(child instanceof THREE.Mesh) ||
-      child.name !== axis ||
-      !hasSceneTag(child, sceneTag.sectionViewHelper) ||
-      !isActuallyVisible(child)
-    ) {
-      return;
-    }
-
-    const bounds = new THREE.Box3().setFromObject(child);
-    if (bounds.isEmpty()) {
-      return;
-    }
-    const projected = bounds.getCenter(new THREE.Vector3()).project(camera);
-    result = {
-      x: rect.left + ((projected.x + 1) / 2) * rect.width,
-      y: rect.top + ((1 - projected.y) / 2) * rect.height,
-      visible:
-        projected.x >= -1 &&
-        projected.x <= 1 &&
-        projected.y >= -1 &&
-        projected.y <= 1 &&
-        projected.z >= -1 &&
-        projected.z <= 1,
-    };
-  };
+  const name = `${target.kind}:${target.cutId}`;
+  const bounds = new THREE.Box3();
   for (const root of getSceneRenderRoots(scene as THREE.Scene)) {
     root.updateMatrixWorld(true);
-    root.traverse(projectTransformHandle);
+    root.traverse((child) => {
+      if (child.name === name && hasSceneTag(child, sceneTag.sectionViewHelper) && isActuallyVisible(child)) {
+        bounds.expandByObject(child);
+      }
+    });
   }
-  return result;
+  return bounds.isEmpty() ? undefined : toProjectedPoint(bounds.getCenter(new THREE.Vector3()).project(camera), rect);
 };
 
 export const getSectionViewTestCapOverlapDiagnostics = (
@@ -513,6 +523,19 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         maximumRequestToActorSyncMilliseconds: Math.max(diagnostics.maximumRequestToActorSyncMilliseconds, elapsed),
       };
     };
+    const addSectionCut = (cut: SectionViewTestCut): string | undefined => {
+      const count = graphicsActor.getSnapshot().context.sectionCuts.length;
+      graphicsActor.send({
+        type: 'addSectionCut',
+        payload: cut.kind === 'plane' ? { kind: 'plane', plane: cut.plane } : { kind: 'revolution', axis: cut.axis },
+      });
+      const added = graphicsActor.getSnapshot().context.sectionCuts[count];
+      if (added) {
+        // The cut is its own patch: a patch ignores `kind`, and a value left out keeps the default.
+        graphicsActor.send({ type: 'updateSectionCut', payload: { id: added.id, patch: cut } });
+      }
+      return added?.id;
+    };
     const bridge: SectionViewTestBridgeApi = {
       getViewSettings() {
         if (!project) {
@@ -525,11 +548,27 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         )?.[0];
         return viewId === undefined
           ? undefined
-          : project.editorRef.getSnapshot().context.viewSettings[viewId]?.graphicsSettings;
+          : project.viewRecords.get(viewId)
+            ? graphicsSettingsForView(project.viewRecords.get(viewId)!)
+            : undefined;
       },
       getGraphicsBackend() {
         const renderer = get().gl as unknown as { readonly backend?: { readonly isWebGPUBackend?: boolean } };
         return renderer.backend?.isWebGPUBackend === true ? 'webgpu' : 'webgl';
+      },
+      getRendererIdentity() {
+        const { gl } = get();
+        const api = 'isWebGPURenderer' in gl && gl.isWebGPURenderer ? 'webgpu' : 'webgl';
+        const context = api === 'webgl' ? gl.getContext() : undefined;
+        const debug = context?.getExtension('WEBGL_debug_renderer_info');
+        return {
+          api,
+          name: debug ? String(context?.getParameter(debug.UNMASKED_RENDERER_WEBGL) ?? '') : '',
+          frame: gl.info.render.frame,
+        };
+      },
+      getViewportCanvas() {
+        return get().gl.domElement;
       },
       isGeometryFramed() {
         const { size } = get();
@@ -542,44 +581,52 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           cameraSnapshot.context.view.viewport.height === size.height
         );
       },
-      showPlaneSelectors() {
-        graphicsActor.send({ type: 'setSectionViewActive', payload: true });
-        graphicsActor.send({ type: 'selectSectionView', payload: undefined });
+      setSectionCuts(cuts) {
+        for (const { id } of graphicsActor.getSnapshot().context.sectionCuts) {
+          graphicsActor.send({ type: 'removeSectionCut', payload: id });
+        }
+        const ids = cuts.flatMap((cut) => addSectionCut(cut) ?? []);
+        graphicsActor.send({ type: 'selectSectionCut', payload: undefined });
+        return ids;
       },
-      setSectionView(state) {
-        graphicsActor.send({ type: 'setSectionViewActive', payload: true });
-        graphicsActor.send({ type: 'selectSectionView', payload: state.plane });
-        graphicsActor.send({ type: 'setSectionViewDirection', payload: state.direction ?? 1 });
-        if (state.rotationRadians) {
-          graphicsActor.send({ type: 'setSectionViewRotation', payload: [...state.rotationRadians] });
-        }
-
-        if (state.pivot) {
-          graphicsActor.send({ type: 'setSectionViewPivot', payload: [...state.pivot] });
-        }
-
-        if (state.translation !== undefined) {
-          graphicsActor.send({ type: 'setSectionViewTranslation', payload: state.translation });
-        }
+      addSectionCut,
+      updateSectionCut(id, patch) {
+        graphicsActor.send({ type: 'updateSectionCut', payload: { id, patch } });
       },
-      clearSectionView() {
-        graphicsActor.send({ type: 'setSectionViewActive', payload: false });
+      removeSectionCut(id) {
+        graphicsActor.send({ type: 'removeSectionCut', payload: id });
+      },
+      selectSectionCut(id) {
+        graphicsActor.send({ type: 'selectSectionCut', payload: id });
+      },
+      setSectionViewActive(active) {
+        graphicsActor.send({ type: 'setSectionViewActive', payload: active });
+      },
+      getSectionState() {
+        const { context } = graphicsActor.getSnapshot();
+        return {
+          isActive: context.isSectionViewActive,
+          cuts: context.sectionCuts,
+          selectedCutId: context.selectedSectionCutId,
+          hoveredCutId: context.hoveredSectionCutId,
+          committedCuts: context.committedSectionCuts,
+          committedPieces: resolveSectionPieces(context.committedSectionCuts),
+          certification: context.sectionCertification,
+          isCommitted: areSectionCutsEqual(context.committedSectionCuts, context.sectionCuts),
+        };
+      },
+      projectSectionHandle(kind, cutId) {
+        const { camera, gl } = get();
+        return projectSectionViewTestHandle({
+          target: { kind, cutId },
+          camera,
+          rect: gl.domElement.getBoundingClientRect(),
+          scene,
+        });
       },
       setPresentation(presentation) {
         graphicsActor.send({ type: 'setSurfaceVisibility', payload: presentation.surfaces });
         graphicsActor.send({ type: 'setLinesVisibility', payload: presentation.lines });
-      },
-      getPresentation() {
-        const { context } = graphicsActor.getSnapshot();
-        return {
-          isSectionViewActive: context.isSectionViewActive,
-          selectedSectionViewId: context.selectedSectionViewId,
-          sectionViewDirection: context.sectionViewDirection,
-          sectionViewPivot: [...context.sectionViewPivot],
-          sectionViewRotation: [...context.sectionViewRotation],
-          enableClippingLines: context.enableClippingLines,
-          enableClippingMesh: context.enableClippingMesh,
-        };
       },
       setPostProcessingEnabled(enabled) {
         graphicsActor.send({ type: 'setPostProcessingVisibility', payload: enabled });
@@ -641,17 +688,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
               .add(vertices[2]!)
               .multiplyScalar(1 / 3)
               .project(camera);
-            points.push({
-              x: rect.left + ((projected.x + 1) / 2) * rect.width,
-              y: rect.top + ((1 - projected.y) / 2) * rect.height,
-              visible:
-                projected.x >= -1 &&
-                projected.x <= 1 &&
-                projected.y >= -1 &&
-                projected.y <= 1 &&
-                projected.z >= -1 &&
-                projected.z <= 1,
-            });
+            points.push(toProjectedPoint(projected, rect));
           }
         });
         return points;
@@ -787,26 +824,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           camera,
         );
 
-        return {
-          x: rect.left + ((projected.x + 1) / 2) * rect.width,
-          y: rect.top + ((1 - projected.y) / 2) * rect.height,
-          visible:
-            projected.x >= -1 &&
-            projected.x <= 1 &&
-            projected.y >= -1 &&
-            projected.y <= 1 &&
-            projected.z >= -1 &&
-            projected.z <= 1,
-        };
-      },
-      projectSectionTransformHandle(axis) {
-        const { camera, gl } = get();
-        return projectSectionViewTestTransformHandle({
-          axis,
-          camera,
-          rect: gl.domElement.getBoundingClientRect(),
-          scene,
-        });
+        return toProjectedPoint(projected, rect);
       },
       getModelHoverState() {
         const { context } = modelInteractionRef.getSnapshot();
@@ -826,17 +844,26 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           isMeasureActive: context.isMeasureActive,
           cameraInteracting: context.cameraInteracting,
           measurementUiMeshCount: getSectionViewTestMeasurementUiMeshCount(scene),
+          rendererGeometryCount: get().gl.info.memory.geometries,
+          snapDistancePx: context.measureSnapDistance,
+          candidates: context.measureCandidates,
+          activeCandidateId: context.measureActiveCandidateId,
+          lockedTargetId: context.measureLockedTargetId,
+          mode: context.measureMode,
           currentStart: context.currentMeasurementStart,
-          measurements: context.measurements.map(({ id, distance, startPoint, endPoint }) => ({
-            id,
-            distance,
-            startPoint,
-            endPoint,
-          })),
+          measurements: context.measurements.map(
+            ({ id, distance, startPoint, endPoint, operation, quality, status, unavailableReason }) => ({
+              id,
+              distance,
+              startPoint,
+              endPoint,
+              operation,
+              quality,
+              status,
+              unavailableReason,
+            }),
+          ),
         };
-      },
-      getSelectorLabels() {
-        return getSectionViewTestSelectorLabels(scene);
       },
       getSectionHelperSummary() {
         return getSectionViewTestHelperSummary(scene);

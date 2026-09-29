@@ -1,8 +1,6 @@
 import { defineConfig } from 'vitest/config';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
 export default defineConfig({
-  plugins: [nxViteTsPaths()],
   // Mirrors electron.vite.config.ts for a self-host build; unit tests exercise that transport.
   define: { tauCloudBuildEnabled: 'false' },
   test: {

@@ -1,40 +1,27 @@
-import { HttpException } from '@nestjs/common';
-import type { HttpStatus } from '@nestjs/common';
+import { ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
+import type { GatewayErrorCode } from '@taucad/agent-host/wire';
 
-export type LlmGatewayErrorType =
-  | 'BILLING_RECOVERY_UNAVAILABLE'
-  | 'FUNDED_HELPER_LIMIT'
-  | 'FUNDED_OPERATION_LIMIT'
-  | 'INSUFFICIENT_CREDIT'
-  | 'INVALID_REQUEST'
-  | 'MODEL_NOT_IN_CATALOG'
-  | 'ORIGIN_NOT_ALLOWED'
-  /**
-   * The provider account behind the key Tau spent against has no credit or is
-   * not billable. Distinct from INSUFFICIENT_CREDIT, which is the customer's own
-   * Tau balance. `details` carries `providerId`, the provider's own
-   * `providerCode` when it sent one, and `accountOwner`: `operator` on a
-   * self-hosted API, whose message is the provider's own sentence, or `tau` on
-   * Cloud, whose message never names the supplier's state.
-   */
-  | 'PROVIDER_ACCOUNT_EXHAUSTED'
-  | 'PROVIDER_UNAVAILABLE'
-  | 'RATE_LIMITED'
-  /**
-   * The serialized request is past the funded request contract's byte bound
-   * (or the object count its digest walks). A 413: resending the same history
-   * meets the same refusal, and no model choice changes it. `details` carries
-   * `maximumBytes`.
-   */
-  | 'REQUEST_TOO_LARGE'
-  | 'UNAUTHENTICATED'
-  /**
-   * The upstream provider refused the relayed request (a non-429 4xx). Distinct
-   * from PROVIDER_UNAVAILABLE so a malformed or unsupported request is not
-   * reported to the client as a provider outage. The message names the upstream
-   * status only — the upstream body is never forwarded.
-   */
-  | 'UPSTREAM_REJECTED';
+/**
+ * The gateway's refusal codes: the registry's gateway entries, which document each code (D11). A type import, erased
+ * at build, so the existing devDependency on `@taucad/agent-host` is enough.
+ */
+export type LlmGatewayErrorType = GatewayErrorCode;
+
+/** Turns the billing owner's closed-account refusal into the gateway's stable wire code. */
+export const isBillingAccountClosed = (error: unknown): boolean => {
+  if (!(error instanceof ForbiddenException)) {
+    return false;
+  }
+  const body = error.getResponse();
+  return typeof body === 'object' && 'code' in body && body.code === 'billing_account_closed';
+};
+
+export const billingAccountClosedError = (): LlmGatewayError =>
+  new LlmGatewayError(
+    HttpStatus.FORBIDDEN,
+    'BILLING_ACCOUNT_CLOSED',
+    'This Tau billing account is closed or restricted, so its model requests cannot be checked or charged.',
+  );
 
 export class LlmGatewayError extends HttpException {
   /**

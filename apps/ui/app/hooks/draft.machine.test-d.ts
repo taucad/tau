@@ -4,7 +4,7 @@ import type { ActorRefFrom, EmittedFrom, EventFromLogic } from 'xstate';
 import type { DraftPersistenceActors } from '#hooks/composer-record.js';
 import { draftMachine } from '#hooks/draft.machine.js';
 import type { DraftAttachment, DraftMachineContext } from '#hooks/draft.machine.js';
-import type { Attachment } from '#utils/attachment.utils.js';
+import type { StoredAttachment } from '#utils/attachment.utils.js';
 
 type DraftEvent = EventFromLogic<typeof draftMachine>;
 type DraftEmitted = EmittedFrom<typeof draftMachine>;
@@ -37,7 +37,7 @@ expectTypeOf<DraftEmitted['type']>().toEqualTypeOf<
 
 // Drafts hold references, never data URLs; a stored attachment is a draft attachment.
 expectTypeOf<DraftMachineContext['draftAttachments']>().toEqualTypeOf<DraftAttachment[]>();
-expectTypeOf<Attachment>().toExtend<DraftAttachment>();
+expectTypeOf<StoredAttachment>().toExtend<DraftAttachment>();
 
 // The record seam's actors provide into this machine as they are.
 declare const persistence: DraftPersistenceActors;

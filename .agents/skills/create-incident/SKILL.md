@@ -14,14 +14,14 @@ incident happens, not reconstructed afterwards, and it ends by routing every cor
 
 ## What this skill owns
 
-| Concern | Owner |
-| --- | --- |
-| Severity ladder, record shape, the rules below | this skill |
-| How to respond to a class of failure | the cloud handbook's `docs/handbooks/cloud/playbooks/` |
-| Who and what to call, consoles, comms channels, kill switches and their authority | `docs/handbooks/cloud/playbooks/process.md` (private) |
-| What happened, as it happened | `docs/incidents/<id>/` (private) |
-| Handbook corrections an incident produces | `create-handbook` update mode |
-| An investigation that outgrows the record | `create-research` |
+| Concern                                                                           | Owner                                                  |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Severity ladder, record shape, the rules below                                    | this skill                                             |
+| How to respond to a class of failure                                              | the cloud handbook's `docs/handbooks/cloud/playbooks/` |
+| Who and what to call, consoles, comms channels, kill switches and their authority | `docs/handbooks/cloud/playbooks/process.md` (private)  |
+| What happened, as it happened                                                     | `docs/incidents/<id>/` (private)                       |
+| Handbook corrections an incident produces                                         | `create-handbook` update mode                          |
+| An investigation that outgrows the record                                         | `create-research`                                      |
 
 This skill is public, so it carries no hostnames, account identifiers or contacts. Those live in the
 handbook. It works with an empty handbook: the ladder and the record procedure are here.
@@ -41,12 +41,12 @@ docs/incidents/
 
 One operator, so severity sets attention and update cadence, not paging tiers.
 
-| Level | Means | Cadence |
-| --- | --- | --- |
-| `SEV1` | Most users cannot use the product; data lost or exposed; money moving wrongly at scale; a live credential leaked | Drop everything. Status now rewritten every 30 minutes. A customer message is considered within the first hour |
-| `SEV2` | A major capability is down or badly degraded for many users (chat, sign-in, sync, checkout); a money error for one customer | Status now every 60 minutes |
-| `SEV3` | Minor degradation with a workaround; one supplier route down with alternatives; a staging-only failure; a near miss. May be opened after the fact | One entry when opened, one when closed |
-| `drill` | A tabletop or game-day. Same record, same rules; nothing real is changed | — |
+| Level   | Means                                                                                                                                             | Cadence                                                                                                        |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `SEV1`  | Most users cannot use the product; data lost or exposed; money moving wrongly at scale; a live credential leaked                                  | Drop everything. Status now rewritten every 30 minutes. A customer message is considered within the first hour |
+| `SEV2`  | A major capability is down or badly degraded for many users (chat, sign-in, sync, checkout); a money error for one customer                       | Status now every 60 minutes                                                                                    |
+| `SEV3`  | Minor degradation with a workaround; one supplier route down with alternatives; a staging-only failure; a near miss. May be opened after the fact | One entry when opened, one when closed                                                                         |
+| `drill` | A tabletop or game-day. Same record, same rules; nothing real is changed                                                                          | —                                                                                                              |
 
 Severity is provisional at declaration and may move either way. Each change is a timeline line.
 
@@ -62,20 +62,20 @@ severity, not `SEV3`.
 
 ## Modes
 
-| Mode | Trigger | What it does |
-| --- | --- | --- |
-| **open** | Someone reports or sees a customer-impacting failure | Declare first, investigate second |
-| **work** | The incident is open | Propose the mitigation before diagnosing; capture evidence; append to the timeline |
-| **mitigate / resolve** | Impact stopped; cause fixed | Stamp the timestamp, move `state`, verify |
-| **review** | After resolution; within five working days for `SEV1` and `SEV2` | Root cause, what helped and hurt, routed follow-ups |
-| **close** | Review done | Refuse unless the conditions below hold |
-| **drill** | A tabletop or game-day | The same flow with `severity: drill`; every command is described, not run |
+| Mode                   | Trigger                                                          | What it does                                                                       |
+| ---------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| **open**               | Someone reports or sees a customer-impacting failure             | Declare first, investigate second                                                  |
+| **work**               | The incident is open                                             | Propose the mitigation before diagnosing; capture evidence; append to the timeline |
+| **mitigate / resolve** | Impact stopped; cause fixed                                      | Stamp the timestamp, move `state`, verify                                          |
+| **review**             | After resolution; within five working days for `SEV1` and `SEV2` | Root cause, what helped and hurt, routed follow-ups                                |
+| **close**              | Review done                                                      | Refuse unless the conditions below hold                                            |
+| **drill**              | A tabletop or game-day                                           | The same flow with `severity: drill`; every command is described, not run          |
 
 ### open
 
 1. Declare first. Ask the operator **one** combined question and do not wait for an answer that is
-   not coming: what is seen, since when, which environment, and *"may I run the platform's read-only
-   log and status commands for this incident and save scrubbed excerpts under `evidence/`?"*. A
+   not coming: what is seen, since when, which environment, and _"may I run the platform's read-only
+   log and status commands for this incident and save scrubbed excerpts under `evidence/`?"_. A
    provisional severity is enough. That one answer pre-authorizes read-only capture for this incident
    only, so perishable evidence is not lost while the question is outstanding; every mutating action
    still needs its own go (Rule 1).
@@ -113,12 +113,12 @@ still `open`.
 
 Fill Root cause, What helped and what hurt, and Follow-ups. Route every follow-up:
 
-| Finding | Destination |
-| --- | --- |
+| Finding                                         | Destination                                                                                               |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | The handbook was wrong, missing or slow to find | `create-handbook` update mode; the playbook that was used is re-verified and its `Last exercised` updated |
-| A gap that must close before launch | A row on `docs/handbooks/cloud/readiness/go-live-checklist.md` |
-| A code or configuration defect | An issue |
-| A question too large for the record | `create-research`, linked from the record and back to it |
+| A gap that must close before launch             | A row on `docs/handbooks/cloud/readiness/go-live-checklist.md`                                            |
+| A code or configuration defect                  | An issue                                                                                                  |
+| A question too large for the record             | `create-research`, linked from the record and back to it                                                  |
 
 ### close
 
@@ -136,7 +136,7 @@ Same modes, same record, same rules, with `severity: drill`; every command is de
 output that would decide its branch, and none is run.
 
 1. **The simulated moments are stamped with real time.** A drill's scenario supplies the story; the
-   clock supplies the stamp. Read `date -u` at the point the drill *reaches* each moment and write
+   clock supplies the stamp. Read `date -u` at the point the drill _reaches_ each moment and write
    what it printed — `started_at` and `detected_at` when the scenario is taken up, `mitigated_at`
    when the drill settles on the action that would stop impact, `resolved_at` when the walk-through
    of the fix ends. Say in `description` or on the timeline line that the moment is simulated.
@@ -202,18 +202,18 @@ stamp is corrected by a new line that supersedes the old one, never by editing i
 
 ## Pitfalls
 
-| Pitfall | Do this instead |
-| --- | --- |
-| A timestamp that looks estimated (`21:00`, "about an hour ago") | Run `date -u` and paste what it printed |
-| Writing several timeline lines from one clock read, or drafting a line before the thing happens | One `date -u` read immediately before each line |
-| Editing or reordering the timeline to make it read well | Append a correcting line |
-| Pasting raw command output into `evidence/` | Capture outside the record, read it, scrub it, save a summarized excerpt |
-| Diagnosing before mitigating | Propose the mitigation with its undo first, run it on the operator's go, then investigate with the evidence you captured |
-| Waiting for authority before capturing a log buffer that is expiring | Ask for read-only capture in the declaration question, then capture |
-| A drill left with empty `mitigated_at` and `resolved_at` | Stamp the moment the drill reaches it, from `date -u` (drill mode) |
-| Opening a second record for the same event | One event, one record; link related records from the timeline |
-| Closing with a follow-up that has no destination | Route it, or leave the record open |
-| Waiting for the handbook page that does not exist | Say so in the timeline and keep going |
+| Pitfall                                                                                         | Do this instead                                                                                                          |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| A timestamp that looks estimated (`21:00`, "about an hour ago")                                 | Run `date -u` and paste what it printed                                                                                  |
+| Writing several timeline lines from one clock read, or drafting a line before the thing happens | One `date -u` read immediately before each line                                                                          |
+| Editing or reordering the timeline to make it read well                                         | Append a correcting line                                                                                                 |
+| Pasting raw command output into `evidence/`                                                     | Capture outside the record, read it, scrub it, save a summarized excerpt                                                 |
+| Diagnosing before mitigating                                                                    | Propose the mitigation with its undo first, run it on the operator's go, then investigate with the evidence you captured |
+| Waiting for authority before capturing a log buffer that is expiring                            | Ask for read-only capture in the declaration question, then capture                                                      |
+| A drill left with empty `mitigated_at` and `resolved_at`                                        | Stamp the moment the drill reaches it, from `date -u` (drill mode)                                                       |
+| Opening a second record for the same event                                                      | One event, one record; link related records from the timeline                                                            |
+| Closing with a follow-up that has no destination                                                | Route it, or leave the record open                                                                                       |
+| Waiting for the handbook page that does not exist                                               | Say so in the timeline and keep going                                                                                    |
 
 ## Checklist
 

@@ -21,7 +21,7 @@ jobs:
       npm-publish: ${{ steps.release.outputs.npm_publish }}
       version: ${{ steps.release.outputs.version }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -49,7 +49,7 @@ jobs:
     needs: preflight
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -57,7 +57,12 @@ jobs:
         with:
           node-version: '@@CREATE_REPO_node-latest@@'
       - run: pnpm nx run @@CREATE_REPO_slug@@:quality
-      - run: node --test tests/ci/ci-release.test.mjs tests/ci/release-attestations.test.mjs
+      - run: >-
+          node --test
+          tests/ci/ci-release.test.mjs
+          tests/ci/release-attestations.test.mjs
+          tests/ci/registry-wait.test.mjs
+          tests/extract-candidate-packages.test.mjs
       - name: Require a Version Plan for release-affecting changes
         if: needs.preflight.outputs.kind != 'release-pull-request' && needs.preflight.outputs.kind != 'release'
         shell: bash
@@ -86,7 +91,7 @@ jobs:
     needs: preflight
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -102,7 +107,7 @@ jobs:
         node: ['@@CREATE_REPO_node-floor@@', '@@CREATE_REPO_node-latest@@']
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -127,7 +132,7 @@ jobs:
             artifact: win32-x64-msvc
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -139,21 +144,21 @@ jobs:
       - name: Test and build native candidate
         shell: bash
         run: '@@CREATE_REPO_native-test-build-command@@'
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-${{ matrix.artifact }}
           path: candidate-native/${{ matrix.artifact }}/*.tgz
           if-no-files-found: error
 
   candidate:
-    needs: [preflight, quality, docs-prose, node, native]
+    needs: [preflight, quality, node, native]
     runs-on: ubuntu-latest
     outputs:
       filename: ${{ steps.pack.outputs.filename }}
       integrity: ${{ steps.pack.outputs.integrity }}
       version: ${{ steps.pack.outputs.version }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -174,7 +179,7 @@ jobs:
           mkdir -p candidate
           npm pack --ignore-scripts --pack-destination candidate
           node scripts/candidate-manifest.mjs candidate
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: npm-candidate
           path: candidate/
@@ -188,7 +193,7 @@ jobs:
         node: ['@@CREATE_REPO_node-floor@@', '@@CREATE_REPO_node-latest@@']
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -218,7 +223,7 @@ jobs:
             os: '@@CREATE_REPO_webkit-runner@@'
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -241,7 +246,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -254,7 +259,7 @@ jobs:
     needs: preflight
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -271,7 +276,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -292,7 +297,7 @@ jobs:
           --no-template
           @@CREATE_REPO_pkg-pr-new-pnpm-flag@@
           './preview-packages/*'
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pkg-pr-new-preview
           path: preview.json
@@ -305,10 +310,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '@@CREATE_REPO_node-latest@@'
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -324,7 +329,7 @@ jobs:
 
   publish:
     if: needs.preflight.outputs.npm-publish == 'true'
-    needs: [preflight, candidate, consumer, browser, security]
+    needs: [preflight, candidate, docs-prose, consumer, browser, security]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -334,7 +339,7 @@ jobs:
         with:
           name: npm-candidate
           path: candidate
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '@@CREATE_REPO_node-latest@@'
           registry-url: https://registry.npmjs.org
@@ -346,43 +351,42 @@ jobs:
             published="$(npm view "$name@$version" dist.integrity 2>/dev/null || true)"
             if [[ -n "$published" ]]; then
               if [[ "$published" != "$integrity" ]]; then
-                echo "ERROR: registry integrity differs for $name@$version" >&2
+                echo "::error::registry integrity differs for $name@$version"
                 exit 1
               fi
               continue
             fi
-            npm publish "./candidate/$filename" --access public --provenance
+            if [[ -n "$(npm view "$name@$version" version 2>/dev/null || true)" ]]; then
+              echo "::error::registry returned $name@$version without dist.integrity"
+              exit 1
+            fi
+            npm publish "./candidate/$filename" --access public --provenance </dev/null
           done < /tmp/packages
 
   registry-verify:
     if: always() && needs.preflight.outputs.npm-publish == 'true' && needs.publish.result == 'success'
     needs: [preflight, candidate, publish]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: npm-candidate
           path: candidate
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '@@CREATE_REPO_node-latest@@'
           registry-url: https://registry.npmjs.org
+      - name: Wait for the registry to serve every candidate with its attestation
+        run: node scripts/registry-wait.mjs --manifest candidate/manifest.json
       - name: Verify registry bytes and provenance
         shell: bash
         run: |
-          node -e "for (const p of require('./candidate/manifest.json').packages) console.log([p.name,p.version,p.integrity].join('\t'))" > /tmp/packages
-          while IFS=$'\t' read -r name version integrity; do
-            published="$(npm view "$name@$version" dist.integrity)"
-            if [[ "$published" != "$integrity" ]]; then
-              echo "ERROR: registry integrity differs for $name@$version" >&2
-              exit 1
-            fi
-          done < /tmp/packages
           workspace="$PWD"
           directory="$(mktemp -d)"
           cd "$directory"
@@ -395,8 +399,7 @@ jobs:
             /tmp/npm-audit-signatures.json \
             candidate/manifest.json \
             '${{ github.sha }}' \
-            '${{ github.run_id }}' \
-            '${{ github.run_attempt }}'
+            '${{ github.run_id }}'
       - name: Record the verified release
         env:
           GH_TOKEN: ${{ github.token }}

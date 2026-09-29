@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -8,6 +9,8 @@ using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using PicoGK;
 using PicoGK.Numerics;
@@ -99,7 +102,9 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
                     captured.MeshConstruction,
                     captured.MeshExtraction,
                     captured.NormalGeneration,
-                    0));
+                    0),
+                captured.Mechanism,
+                captured.Warnings);
         }
         finally
         {
@@ -125,7 +130,9 @@ internal sealed record CapturedScene(
     IReadOnlyList<ExtractedComponent> Components,
     double MeshConstruction,
     double MeshExtraction,
-    double NormalGeneration);
+    double NormalGeneration,
+    JsonElement? Mechanism,
+    IReadOnlyList<Issue> Warnings);
 
 internal sealed record GeometrySnapshot(string Kind, float[] Positions, uint[] Indices, ColorFloat? LineColor);
 
@@ -143,10 +150,13 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     private readonly List<SceneObject> objects = [];
     private readonly Dictionary<object, SceneObject> objectIndex = new(ReferenceEqualityComparer.Instance);
     private readonly ConditionalWeakTable<object, ComponentIdentity> componentIdentities = new();
+    private ConditionalWeakTable<object, AuthoredName> authoredNames = new();
     private readonly Dictionary<object, MaterializedComponent> materialized = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<int, Material> materials = [];
     private readonly Dictionary<int, Matrix4x4> groupMatrices = [];
     private readonly HashSet<int> hiddenGroups = [];
+    private readonly List<Issue> warnings = [];
+    private JsonElement? mechanism;
     private ExceptionDispatchInfo? pumpError;
     private volatile bool cancelled;
     private bool completed;
@@ -158,6 +168,8 @@ internal sealed class CaptureViewerBackend : IViewerBackend
 
     // ponytail: a fixed bound replaces the removed per-render capture knob; it is producer backpressure only.
     private const int MaximumPendingCommands = 256;
+    private const int MaximumMechanismValues = 100_000;
+    private const int MaximumMechanismBytes = 256 * 1024;
 
     internal CaptureViewerBackend(string artifactRoot)
     {
@@ -200,13 +212,16 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         set => throw UnsupportedCapability("camera orientation");
     }
 
-    public void Add(Voxels vox, int nGroupID) => Enqueue(new ViewerCommand(() => AddObject(vox, nGroupID)));
+    public void Add(Voxels vox, int nGroupID) => Enqueue(new ViewerCommand(() => AddObject(vox, null, nGroupID)));
+    public void Add(Voxels vox, string name, int nGroupID) => EnqueueNamed(vox, name, nGroupID);
     public void Remove(Voxels vox) => Enqueue(new ViewerCommand(() => RemoveObject(vox)));
     public void SetObjectMatrix(Voxels vox, Matrix4x4 mat) => Enqueue(new ViewerCommand(() => SetMatrix(vox, mat)));
-    public void Add(Mesh msh, int nGroupID) => Enqueue(new ViewerCommand(() => AddObject(msh, nGroupID)));
+    public void Add(Mesh msh, int nGroupID) => Enqueue(new ViewerCommand(() => AddObject(msh, null, nGroupID)));
+    public void Add(Mesh msh, string name, int nGroupID) => EnqueueNamed(msh, name, nGroupID);
     public void Remove(Mesh msh) => Enqueue(new ViewerCommand(() => RemoveObject(msh)));
     public void SetObjectMatrix(Mesh msh, Matrix4x4 mat) => Enqueue(new ViewerCommand(() => SetMatrix(msh, mat)));
-    public void Add(PolyLine poly, int nGroupID) => Enqueue(new ViewerCommand(() => AddObject(poly, nGroupID)));
+    public void Add(PolyLine poly, int nGroupID) => Enqueue(new ViewerCommand(() => AddObject(poly, null, nGroupID)));
+    public void Add(PolyLine poly, string name, int nGroupID) => EnqueueNamed(poly, name, nGroupID);
     public void Remove(PolyLine poly) => Enqueue(new ViewerCommand(() => RemoveObject(poly)));
     public void SetObjectMatrix(PolyLine poly, Matrix4x4 mat) => Enqueue(new ViewerCommand(() => SetMatrix(poly, mat)));
 
@@ -215,7 +230,84 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         objects.Clear();
         objectIndex.Clear();
         materialized.Clear();
+        authoredNames = new();
+        mechanism = null;
     }));
+
+    public void SetMechanism(object source)
+    {
+        try
+        {
+            ArgumentNullException.ThrowIfNull(source);
+            // Serialize before enqueueing: no user object can hold a collectible assembly alive.
+            // Project into BCL-only values before using STJ. Its reflection metadata cache would
+            // otherwise root source types from the model's collectible assembly across builds.
+            var values = 0;
+            var snapshot = JsonSerializer.SerializeToElement(ProjectMechanism(source, new HashSet<object>(ReferenceEqualityComparer.Instance), 0, ref values));
+            if (Encoding.UTF8.GetByteCount(snapshot.GetRawText()) > MaximumMechanismBytes)
+                throw new JsonException("Mechanism exceeds 256 KiB of JSON.");
+            Enqueue(new ViewerCommand(() => mechanism = snapshot));
+        }
+        catch (Exception error) when (error is not OutOfMemoryException and not OperationCanceledException)
+        {
+            Enqueue(new ViewerCommand(() =>
+            {
+                mechanism = null;
+                warnings.Add(new Issue(
+                    $"PicoGK mechanism could not be serialized: {error.Message}",
+                    "CS_TAU_MECHANISM_SERIALIZATION", "validation", "warning"));
+            }));
+        }
+    }
+
+    private object? ProjectMechanism(object? value, HashSet<object> path, int depth, ref int values)
+    {
+        if (cancelled) throw new OperationCanceledException("The PicoGK build was cancelled.");
+        if (depth > 64) throw new JsonException("Mechanism exceeds the maximum JSON depth of 64.");
+        if (++values > MaximumMechanismValues) throw new JsonException("Mechanism exceeds 100,000 JSON values.");
+        if (value is null || value is string or bool or char or byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal or JsonElement)
+            return value;
+        if (value is JsonNode node) return JsonSerializer.SerializeToElement(node);
+        if (value is Enum enumerated) return Convert.ChangeType(enumerated, Enum.GetUnderlyingType(enumerated.GetType()));
+        if (!path.Add(value)) throw new JsonException("Mechanism contains a reference cycle.");
+        try
+        {
+            if (value is IDictionary dictionary)
+            {
+                var result = new Dictionary<string, object?>();
+                foreach (DictionaryEntry entry in dictionary)
+                {
+                    if (entry.Key is not string key) throw new JsonException("Mechanism object keys must be strings.");
+                    result.Add(key, ProjectMechanism(entry.Value, path, depth + 1, ref values));
+                }
+                return result;
+            }
+            if (value is IDictionary<string, object?> genericDictionary)
+            {
+                var result = new Dictionary<string, object?>();
+                foreach (var entry in genericDictionary)
+                    result.Add(entry.Key, ProjectMechanism(entry.Value, path, depth + 1, ref values));
+                return result;
+            }
+            if (value is IEnumerable sequence)
+            {
+                var result = new List<object?>();
+                foreach (var item in sequence) result.Add(ProjectMechanism(item, path, depth + 1, ref values));
+                return result;
+            }
+            var properties = new Dictionary<string, object?>();
+            foreach (var property in value.GetType().GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            {
+                if (property.GetMethod is null || property.GetIndexParameters().Length != 0) continue;
+                properties.Add(property.Name, ProjectMechanism(property.GetValue(value), path, depth + 1, ref values));
+            }
+            return properties;
+        }
+        finally
+        {
+            path.Remove(value);
+        }
+    }
 
     // Screenshots existed only to mark scene bookmarks, which Tau no longer delivers; the model keeps running.
     public void RequestScreenShot(string strScreenShotPath) => Enqueue(new ViewerCommand(() => { }));
@@ -278,16 +370,8 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         lock (gate)
         {
             ThrowIfDisposed();
-            var components = MaterializeComponents();
-            if (components.Count == 0)
-            {
-                throw new WorkerException(new Issue(
-                    "The PicoGK viewer contained no visible mesh or polyline geometry when the program completed.",
-                    "CS_TAU_EMPTY_SCENE",
-                    "validation",
-                    "error"));
-            }
-            return new CapturedScene(components, meshConstruction, meshExtraction, normalGeneration);
+            // An empty viewer is an empty scene, not an error: new projects start with no geometry.
+            return new CapturedScene(MaterializeComponents(), meshConstruction, meshExtraction, normalGeneration, mechanism, warnings.ToArray());
         }
     }
 
@@ -304,10 +388,12 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             objects.Clear();
             objectIndex.Clear();
             componentIdentities.Clear();
+            authoredNames.Clear();
             materialized.Clear();
             materials.Clear();
             groupMatrices.Clear();
             hiddenGroups.Clear();
+            warnings.Clear();
         }
         commands.Dispose();
     }
@@ -371,14 +457,26 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     [ExcludeFromCodeCoverage]
     private void RethrowPumpError() => pumpError?.Throw();
 
-    private void AddObject(object identity, int group)
+    private void EnqueueNamed(object identity, string name, int group)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name != name.Trim())
+            throw InvalidName("PicoGK authored names must be nonempty and have no surrounding whitespace.");
+        Enqueue(new ViewerCommand(() => AddObject(identity, name, group)));
+    }
+
+    private void AddObject(object identity, string? name, int group)
     {
         ArgumentNullException.ThrowIfNull(identity);
         if (!componentIdentities.TryGetValue(identity, out var componentIdentity))
         {
             var ordinal = ++nextComponentOrdinal;
-            componentIdentity = new ComponentIdentity($"component:picogk-{ordinal}", ordinal);
+            componentIdentity = new ComponentIdentity($"component:picogk-{ordinal}");
             componentIdentities.Add(identity, componentIdentity);
+        }
+        if (name is not null)
+        {
+            authoredNames.Remove(identity);
+            authoredNames.Add(identity, new AuthoredName(name));
         }
         if (objectIndex.TryGetValue(identity, out var existing))
         {
@@ -392,8 +490,8 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         var item = new SceneObject(
             identity,
             componentIdentity.Id,
-            componentIdentity.Ordinal,
             group,
+            authoredNames.TryGetValue(identity, out var authored) ? authored.Value : null,
             snapshot,
             Matrix4x4.Identity);
         objects.Add(item);
@@ -464,13 +562,16 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     private List<ExtractedComponent> MaterializeComponents()
     {
         var components = new List<ExtractedComponent>();
+        var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in objects.Where(item => !hiddenGroups.Contains(item.Group)))
         {
             if (item.Geometry.Positions.Length == 0 || item.Geometry.Indices.Length == 0) continue;
+            if (item.Name is { } name && !names.Add(name))
+                throw InvalidName($"Duplicate PicoGK authored name '{name}' in the final scene.");
             var matrix = MatrixFor(item);
             var material = MaterialFor(item);
             if (materialized.TryGetValue(item.Identity, out var cached) &&
-                cached.Group == item.Group && cached.Matrix == matrix && cached.Material == material)
+                cached.Group == item.Group && cached.Matrix == matrix && cached.Material == material && cached.Component.Name == item.Name)
             {
                 components.Add(cached.Component);
                 continue;
@@ -487,7 +588,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             var component = new ExtractedComponent(
                 item.Id,
                 item.Geometry.Kind,
-                $"group-{item.Group}-object-{item.Ordinal}",
+                item.Name,
                 ColorValues(material.Color),
                 material.Metallic,
                 material.Roughness,
@@ -547,6 +648,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     }
 
     private static float[] ColorValues(ColorFloat color) => [color.R, color.G, color.B, color.A];
+    private static WorkerException InvalidName(string message) => new(new Issue(message, "CS_TAU_INVALID_NAME", "validation", "error"));
     private static WorkerException UnsupportedCapability(string capability) => new(new Issue(
         $"The hosted PicoGK viewer does not support {capability}.",
         "CS_TAU_VIEWER_CAPABILITY",
@@ -555,12 +657,13 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(disposed, this);
 
     private sealed record ViewerCommand(Action Apply, ManualResetEventSlim? Completion = null);
-    private sealed record ComponentIdentity(string Id, int Ordinal);
+    private sealed record ComponentIdentity(string Id);
+    private sealed record AuthoredName(string Value);
     private sealed record SceneObject(
         object Identity,
         string Id,
-        int Ordinal,
         int Group,
+        string? Name,
         GeometrySnapshot Geometry,
         Matrix4x4 Matrix);
     private sealed record MaterializedComponent(int Group, Matrix4x4 Matrix, Material Material, ExtractedComponent Component);

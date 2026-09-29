@@ -17,8 +17,8 @@
  *
  * - **`<ActiveChatProvider chatId>`** — session-backed (project route).
  *   Chat-row-preferred model/kernel with cookie fallback and dual-write on
- *   set; live `status` from the AI SDK `Chat`; `stop` dispatches
- *   `stopRequest`; `contextUsage` is the most-recent `data-context-usage`
+ *   set; live `status` from the AI SDK `Chat`; `stop` sends a keyed host cancel;
+ *   `contextUsage` is the most-recent `data-context-usage`
  *   part on any message; `session` carries the live triple.
  *
  * `useActiveChatSession()` remains the strict entry point for genuine
@@ -31,22 +31,34 @@
  */
 
 import { useActorRef, useSelector } from '@xstate/react';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type { Chat } from '@ai-sdk/react';
-import { waitFor } from 'xstate';
+import { isResumableRunFailure } from '@taucad/agent-host';
+import { createAsyncLogic } from 'xstate';
+import { waitUnlessGone } from '#lib/xstate.lib.js';
 import type { ActorRefFrom } from 'xstate';
-import { isAnyToolPart } from '@taucad/chat';
 import type { CadAgentExecution, ContextUsageData, MyUIMessage } from '@taucad/chat';
 import type { KernelEntry, KernelId } from '@taucad/types/constants';
 import { isKernelId, resolveKernel } from '@taucad/types/constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { draftMachine } from '#hooks/draft.machine.js';
 import { resizeImageActor } from '#hooks/resize-image.actor.js';
 import { useDraftImageErrorToast } from '#hooks/use-draft-image-error-toast.js';
 import { inspect } from '#machines/inspector.js';
 import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession } from '#services/chat-session-store.js';
+import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
+import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
@@ -165,10 +177,11 @@ export type ChatComposerContextValue = {
   agentActivity: ChatAgentActivity;
   /**
    * Cancel-in-flight callback. No-op under the composer provider;
-   * dispatches `stopRequest` to the persistence machine under the session
-   * provider.
+   * sends one keyed host cancel through the session store under the session provider.
    */
   stop: () => void;
+  /** Continue a failed host run while it can still be resumed. */
+  resume: (() => void) | undefined;
   /**
    * Most-recent `data-context-usage` part across the chat's messages, or
    * `undefined` when no usage data has streamed. Always `undefined` under
@@ -200,12 +213,14 @@ const ActiveChatSessionContext = createContext<ActiveChatSessionContextValue | u
 // Composer-only draft actor wiring
 // ---------------------------------------------------------------------------
 
-const noopPersistDraftActor = fromSafeAsync<void, { draft: MyUIMessage }>(async () => undefined);
-const noopPersistEditDraftActor = fromSafeAsync<void, { messageId: string; draft: MyUIMessage }>(async () => undefined);
-const noopPersistSelectionActor = fromSafeAsync<void, { toolChoice?: string | string[]; mode?: ChatMode }>(
-  async () => undefined,
-);
-const noopClearMessageEditActor = fromSafeAsync<void, { messageId: string }>(async () => undefined);
+const noopPersistDraftActor = createAsyncLogic<void, { draft: MyUIMessage }>({ run: async () => undefined });
+const noopPersistEditDraftActor = createAsyncLogic<void, { messageId: string; draft: MyUIMessage }>({
+  run: async () => undefined,
+});
+const noopPersistSelectionActor = createAsyncLogic<void, { toolChoice?: string | string[]; mode?: ChatMode }>({
+  run: async () => undefined,
+});
+const noopClearMessageEditActor = createAsyncLogic<void, { messageId: string }>({ run: async () => undefined });
 
 /** A pre-project composer that keeps no record; each owns its draft-stage attachment directory. */
 export type ComposerSurface = Parameters<typeof composerRecordPaths.surfaceAttachments>[0];
@@ -279,6 +294,7 @@ export function ChatComposerProvider({
       status: 'ready',
       agentActivity: 'ready',
       stop: noopStop,
+      resume: undefined,
       contextUsage: undefined,
       session: undefined,
       canSelectExecution: false,
@@ -330,7 +346,7 @@ export function HomeNewProjectComposerProvider({
   useFlushOnClose(
     async () => {
       draftActorRef.send({ type: 'flushNow' });
-      await waitFor(draftActorRef, (state) => state.matches({ inputSaving: 'idle' }));
+      await waitUnlessGone(draftActorRef, (state) => state.matches({ inputSaving: 'idle' }));
       await flushRecord(recordRef);
     },
     { stage: 'producer' },
@@ -360,6 +376,7 @@ export function HomeNewProjectComposerProvider({
       status: 'ready',
       agentActivity: 'ready',
       stop: noopStop,
+      resume: undefined,
       contextUsage: undefined,
       session: undefined,
       canSelectExecution: true,
@@ -372,21 +389,41 @@ export function HomeNewProjectComposerProvider({
 }
 
 /**
- * Session-backed provider. Acquires the live `ChatSession` for `chatId`
- * from the app-shell `ChatSessionStore`, then populates the unified
- * composer contract from chat-row + cookie sources. Mounting this provider
- * implies a session must be acquirable; consumers below it can call
+ * Session-backed provider. Acquires the live `ChatSession` for `chatId` in its
+ * own project from the app-shell `ChatSessionStore`, then populates the unified
+ * composer contract from chat-row + cookie sources. It renders nothing until the
+ * acquisition has committed, so consumers below it can call
  * {@link useActiveChatSession} freely.
  */
 export function ActiveChatProvider({
   children,
   chatId,
+  projectId,
 }: {
   readonly children: React.ReactNode;
   readonly chatId: string;
-}): React.JSX.Element {
-  const session = useChatSession(chatId);
+  readonly projectId: string;
+}): React.JSX.Element | undefined {
+  const session = useChatSession(chatId, projectId);
+  if (session === undefined) {
+    return undefined;
+  }
+  return (
+    <ActiveChatSessionProvider chatId={chatId} session={session}>
+      {children}
+    </ActiveChatSessionProvider>
+  );
+}
 
+function ActiveChatSessionProvider({
+  children,
+  chatId,
+  session,
+}: {
+  readonly children: React.ReactNode;
+  readonly chatId: string;
+  readonly session: ChatSession;
+}): React.JSX.Element {
   // Single global toast site for image-resize failures across the chat
   // surface. Mounted at the provider so the 12 image entry points never
   // need their own try/catch around the resize step. See
@@ -398,8 +435,9 @@ export function ActiveChatProvider({
   const model = useExecutionModel(execution);
   const kernel = useSessionKernel(session);
   const status = useSessionStatus(chatId);
-  const agentActivity = useSessionAgentActivity(session, chatId, status);
+  const agentActivity = useSessionAgentActivity(session);
   const stop = useSessionStop(session);
+  const resume = useSessionResume(session, chatId);
   const contextUsage = useSessionContextUsage(chatId);
   const consumeDraft = useConsumeDraft(session.draftActorRef);
 
@@ -422,6 +460,7 @@ export function ActiveChatProvider({
       status,
       agentActivity,
       stop,
+      resume,
       contextUsage,
       session: sessionValue,
       canSelectExecution: true,
@@ -436,6 +475,7 @@ export function ActiveChatProvider({
       status,
       agentActivity,
       stop,
+      resume,
       contextUsage,
       sessionValue,
       consumeDraft,
@@ -593,7 +633,7 @@ function useConsumeDraft(
 ): () => Promise<void> {
   return useCallback(async () => {
     draftActorRef.send({ type: 'clearDraft' });
-    await waitFor(draftActorRef, (snapshot) => snapshot.matches({ inputSaving: 'idle' }));
+    await waitUnlessGone(draftActorRef, (snapshot) => snapshot.matches({ inputSaving: 'idle' }));
     if (!owner) {
       return;
     }
@@ -601,7 +641,7 @@ function useConsumeDraft(
     // the navigation that follows cannot strand it. A failed write keeps
     // retrying and is reported by the record's toasts.
     if (owner.recordRef) {
-      await waitFor(owner.recordRef, (snapshot) => !snapshot.matches({ writes: 'persisting' }));
+      await waitUnlessGone(owner.recordRef, (snapshot) => !snapshot.matches({ writes: 'persisting' }));
     }
     // Project creation has already copied the draft's bytes into the new chat;
     // keep only what the draft references now.
@@ -653,44 +693,92 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
 }
 
 /**
- * Live `chat.status` snapshot. Returns `'ready'` while the session is
- * mounting (and as a constant under the composer provider, which does
- * not call this helper).
+ * One visible status for both composer controls: host projection takes precedence when a reattached run outlives the
+ * SDK request. Returns `'ready'` while the session is mounting (and under the composer-only provider).
  */
 function useSessionStatus(chatId: string): ChatInstance['status'] {
-  return useChatSessionSnapshot(chatId, (s) => s?.chat.status ?? 'ready');
+  const sdkStatus = useChatSessionSnapshot(chatId, (s) => s?.chat.status ?? 'ready');
+  const store = useChatSessionStore();
+  const subscribe = useCallback((listener: () => void) => store.subscribeProjection(chatId, listener), [chatId, store]);
+  const snapshot = useCallback(() => store.getProjection(chatId), [chatId, store]);
+  const projection = useSyncExternalStore(subscribe, snapshot, snapshot);
+  return selectVisibleChatStatus(sdkStatus, projection);
 }
 
-function useSessionAgentActivity(
-  session: ChatSession,
-  chatId: string,
-  status: ChatInstance['status'],
-): ChatAgentActivity {
-  const approvalRequired = useChatSessionSnapshot(chatId, (snapshot) =>
-    snapshot?.chat.messages.some((message) =>
-      message.parts.some((part) => isAnyToolPart(part) && part.state === 'approval-requested'),
-    ),
+/**
+ * What the chat's agent is doing, as the composer names it: a select over the chat's machine, whose run and approvals
+ * come from its log's projection (PV-S7, D12), and the request's stop. No transcript scan and no SDK status.
+ */
+function useSessionAgentActivity(session: ChatSession): ChatAgentActivity {
+  const approvalRequired = useSelector(session.stateActorRef, (snapshot) => snapshot.context.pendingApprovalCount > 0);
+  /* A paused run waits for the person, so the composer is theirs. */
+  const working = useSelector(
+    session.stateActorRef,
+    (snapshot) =>
+      snapshot.matches({ run: 'queued' }) ||
+      (snapshot.matches({ run: 'running' }) && !snapshot.matches({ run: { running: 'waiting' } })),
   );
-  const stopping = useSelector(session.persistenceActorRef, (snapshot) =>
-    snapshot.matches({ requestLifecycle: 'stopping' }),
+  const store = useChatSessionStore();
+  const subscribeStop = useCallback(
+    (listener: () => void) => store.subscribeChat(session.chatId, listener),
+    [session.chatId, store],
   );
+  const readStop = useCallback(() => store.isStopping(session.chatId), [session.chatId, store]);
+  const stopping = useSyncExternalStore(subscribeStop, readStop, readStop);
   if (approvalRequired) {
     return 'approval-required';
   }
   if (stopping) {
     return 'stopping';
   }
-  return status === 'submitted' || status === 'streaming' ? 'working' : 'ready';
+  return working ? 'working' : 'ready';
 }
 
 /**
- * Stable `stop()` callback that dispatches `stopRequest` to the
- * persistence machine for the active session.
+ * Stable `stop()` callback for the active session's projected host run.
  */
 function useSessionStop(session: ChatSession): () => void {
+  const store = useChatSessionStore();
   return useCallback(() => {
-    session.persistenceActorRef.send({ type: 'stopRequest' });
-  }, [session.persistenceActorRef]);
+    store.stopRun(session.chatId);
+  }, [session.chatId, store]);
+}
+
+/** Offer Resume only for a settled, resumable host failure. */
+function useSessionResume(session: ChatSession, chatId: string): (() => void) | undefined {
+  const store = useChatSessionStore();
+  const subscribe = useCallback((listener: () => void) => store.subscribeProjection(chatId, listener), [chatId, store]);
+  const snapshot = useCallback(() => store.getProjection(chatId), [chatId, store]);
+  const projection = useSyncExternalStore(subscribe, snapshot, snapshot);
+  const turn = useSelector(session.stateActorRef, (state) => state.context.turn);
+  const persistence = useSelector(session.persistenceActorRef, (state) => state);
+  const canResume = (current = projection): boolean => {
+    const run = current !== undefined && selectCaughtUp(current) ? selectCurrentRun(current) : undefined;
+    return (
+      run?.lifecycle === 'failed' &&
+      isResumableRunFailure(run.failure) &&
+      turn === undefined &&
+      persistence.matches({ requestLifecycle: 'idle', chatLoading: 'idle' }) &&
+      !persistence.context.isLoadingChat &&
+      session.chat.status !== 'submitted' &&
+      session.chat.status !== 'streaming'
+    );
+  };
+  const resume = useCallback(() => {
+    const current = store.getProjection(chatId);
+    const run = current !== undefined && selectCaughtUp(current) ? selectCurrentRun(current) : undefined;
+    if (
+      run?.lifecycle !== 'failed' ||
+      !isResumableRunFailure(run.failure) ||
+      session.stateActorRef.getSnapshot().context.turn !== undefined ||
+      !session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle', chatLoading: 'idle' })
+    ) {
+      return;
+    }
+    void store.touchChatRecency(chatId, Date.now());
+    void store.requestTurn(chatId, { kind: 'continue' });
+  }, [chatId, session, store]);
+  return canResume() ? resume : undefined;
 }
 
 /**

@@ -44,6 +44,7 @@ import {
   billingRoutePause,
   billingReversalCase,
   creditAccount,
+  creditAttemptVoid,
   creditOperation,
   creditTransaction,
   supplierCostEvidence,
@@ -848,6 +849,20 @@ export class CreditLedgerService {
             customerState: customerState(replay.customerState),
           };
         }
+        // GI-R3: a lookup found this key unadmitted and voided it under this same lock; its client has moved on.
+        const [voided] = await tx
+          .select({ attemptKey: creditAttemptVoid.attemptKey })
+          .from(creditAttemptVoid)
+          .where(
+            and(
+              eq(creditAttemptVoid.accountId, accountId),
+              eq(creditAttemptVoid.surface, input.surface),
+              eq(creditAttemptVoid.attemptKey, input.attemptKey),
+            ),
+          );
+        if (voided) {
+          return { status: 'denied', reason: 'attempt_voided' };
+        }
         for (const requirement of requirements) {
           const budget = budgets.find(({ id }) => id === requirement.budgetId);
           const fundingRow = funding.find(({ id }) => id === budget?.fundingId);
@@ -1177,6 +1192,48 @@ export class CreditLedgerService {
         ),
       );
     return row?.operation;
+  }
+
+  /**
+   * Two-way attempt lookup (GI-R3): answers the owner's row for the key, or, when there is none, voids the key under
+   * the account-row lock admission takes, so the key is never admitted afterwards. Whichever commits first decides.
+   *
+   * @param input - The authenticated owner and the attempt key it asks about.
+   * @returns The operation row, or `{ voided: true }` when the key was never admitted and never will be.
+   */
+  public async resolveAttempt(input: {
+    environment: BillingEnvironment;
+    authUserId: string;
+    surface: string;
+    attemptKey: string;
+  }): Promise<typeof creditOperation.$inferSelect | { readonly voided: true }> {
+    const found = await this.getOperationForAttempt(input);
+    if (found) {
+      return found;
+    }
+    // The same call admission makes, so a first request racing this lookup serializes on one account row.
+    const accountId = await this.ensureAccountBinding(input);
+    return this.databaseService.database.transaction(async (tx) => {
+      await this.lockAccount(tx, accountId);
+      const [row] = await tx
+        .select()
+        .from(creditOperation)
+        .where(
+          and(
+            eq(creditOperation.accountId, accountId),
+            eq(creditOperation.surface, input.surface),
+            eq(creditOperation.attemptKey, input.attemptKey),
+          ),
+        );
+      if (row) {
+        return row;
+      }
+      await tx
+        .insert(creditAttemptVoid)
+        .values({ accountId, environment: input.environment, surface: input.surface, attemptKey: input.attemptKey })
+        .onConflictDoNothing();
+      return { voided: true } as const;
+    });
   }
 
   /** Calls the typed, deduplicated current-period issuer only from admission. */
@@ -2895,7 +2952,7 @@ export class CreditLedgerService {
       ) {
         throw new Error('Period must bind its owned subscription and invoice');
       }
-      customerBindingId = slot.customerBindingId ?? undefined;
+      customerBindingId = slot.customerBindingId;
     }
     const [customer] = await tx
       .select()

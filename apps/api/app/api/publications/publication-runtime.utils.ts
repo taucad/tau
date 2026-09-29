@@ -12,6 +12,7 @@ export const publicationKernelExtensions = [
   { id: 'replicad', extensions: ['ts', 'js'] },
   { id: 'opencascade', extensions: ['ts', 'js'] },
   { id: 'manifold', extensions: ['ts', 'js'] },
+  { id: 'picovoxel', extensions: ['ts', 'js'] },
   { id: 'jscad', extensions: ['ts', 'js'] },
   { id: 'gltf', extensions: ['glb', 'gltf'] },
   { id: 'brep', extensions: ['step', 'stp', 'iges', 'igs', 'brep'] },

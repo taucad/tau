@@ -43,10 +43,11 @@
     "@taucad/chat": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/parameters": "workspace:*",
-    "@taucad/runtime": "workspace:*",
+    "@taucad/slicer": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/units": "workspace:*",
     "@taucad/utils": "workspace:*",
-    "geospec": "workspace:*",
-    "zod": "catalog:"
+    "geospec": "workspace:*"
   },
   "imports": {
     "#*.js": "./src/*.ts",
@@ -56,6 +57,8 @@
     "xstate": "^6.0.0-alpha.59"
   },
   "devDependencies": {
-    "xstate": "catalog:"
+    "@taucad/runtime": "workspace:*",
+    "xstate": "catalog:",
+    "zod": "catalog:"
   }
 }

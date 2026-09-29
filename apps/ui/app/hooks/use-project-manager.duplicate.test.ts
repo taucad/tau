@@ -26,15 +26,15 @@ let lastManifest = serializeProjectManifest(projectToManifest(sourceProject));
 const phases: string[] = [];
 
 /**
- * What the source project's own composed view answers with `versionedOnly`: the
- * project, and none of the control plane, records or cache beside it (charter
- * D11, ZIP follow-up F-2). A raw walk of the same directory would also carry
- * `.git/**`, `.tau/chats/**` and `thumbnail.webp`.
+ * The source project's composed read returns authored files and selected
+ * writable records, with control plane, chats and cache omitted.
  */
-const mockReadVersionedProjectFiles = vi.fn(async () => ({
-  'main.ts': new Uint8Array([1]),
-  'tau.json': serializeProjectManifest(projectToManifest(sourceProject)),
-}));
+const mockReadDuplicateProjectFiles = vi.fn(
+  async (): Promise<Record<string, Uint8Array<ArrayBuffer>>> => ({
+    'main.ts': new Uint8Array([1]),
+    'tau.json': serializeProjectManifest(projectToManifest(sourceProject)),
+  }),
+);
 const mockSyncProjectRoots = vi.fn(async () => {
   phases.push('roots');
 });
@@ -62,7 +62,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
       commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
     },
     workspace: { syncProjectRoots: mockSyncProjectRoots },
-    readVersionedProjectFiles: mockReadVersionedProjectFiles,
+    readDuplicateProjectFiles: mockReadDuplicateProjectFiles,
   }),
 }));
 
@@ -172,6 +172,7 @@ vi.mock('xstate', async (importOriginal) => {
 });
 
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
+const { tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
 
 const createWrapper = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -187,6 +188,19 @@ const createWrapper = () => {
 describe('useProjectManager.duplicateProject', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
+      removeItem: (key: string) => {
+        storage.delete(key);
+      },
+      clear: () => {
+        storage.clear();
+      },
+    });
     phases.length = 0;
     lastManifest = serializeProjectManifest(projectToManifest(sourceProject));
     mockGetProjectFileSystemConfig.mockResolvedValue({
@@ -216,14 +230,51 @@ describe('useProjectManager.duplicateProject', () => {
       [consumableBytes]: true,
     });
     expect(phases).toEqual(['pending', 'commit', 'locator', 'roots', 'resources', 'complete']);
-    expect(mockReadVersionedProjectFiles).toHaveBeenCalledWith(`/projects/${sourceProject.id}`);
+    expect(mockReadDuplicateProjectFiles).toHaveBeenCalledWith(`/projects/${sourceProject.id}`);
   });
 
-  it('journals only the project, never the control plane, records or cache beside it', async () => {
+  /* D19 (W11 a2): a copy has no remote of its own, so it backs up by default. */
+  it('should mark the duplicate for backup by default', async () => {
+    globalThis.localStorage.clear();
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await act(async () => result.current.duplicateProject(sourceProject.id));
+
+    const targetId = mockDuplicate.mock.calls[0]?.[0].targetManifest.id ?? '';
+    expect(tauCloudIntent.get(targetId)).toBe('default');
+    expect(tauCloudIntent.get(sourceProject.id)).toBeUndefined();
+  });
+
+  it('journals workbench layout, views and entries beside authored files, with a fresh manifest', async () => {
+    const layout = new Uint8Array([2]);
+    const view = new Uint8Array([3]);
+    const entries = new Uint8Array([4]);
+    mockReadDuplicateProjectFiles.mockResolvedValueOnce({
+      'main.ts': new Uint8Array([1]),
+      'tau.json': serializeProjectManifest(projectToManifest(sourceProject)),
+      '.tau/workbench/layout.json': layout,
+      '.tau/workbench/views/v-abc12345.json': view,
+      '.tau/workbench/entries.json': entries,
+    });
+
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await act(async () => result.current.duplicateProject(sourceProject.id));
+
+    expect(mockDuplicate.mock.calls[0]?.[0].files).toEqual({
+      'main.ts': { content: new Uint8Array([1]) },
+      '.tau/workbench/layout.json': { content: layout },
+      '.tau/workbench/views/v-abc12345.json': { content: view },
+      '.tau/workbench/entries.json': { content: entries },
+    });
+    expect(mockCommitPendingProjectDirectory).toHaveBeenCalledWith(
+      expect.objectContaining({ manifest: serializeProjectManifest(duplicateProject) }),
+    );
+  });
+
+  it('journals only selected project bytes, never the control plane, chats or cache', async () => {
     /* The raw directory read this replaced handed the journal every byte in the
      * project directory: the duplicate then carried the source's `.git`, its
      * chats under a foreign resource id, and its thumbnail (ZIP follow-up F-2). */
-    mockReadVersionedProjectFiles.mockResolvedValueOnce({
+    mockReadDuplicateProjectFiles.mockResolvedValueOnce({
       'main.ts': new Uint8Array([1]),
       'tau.json': serializeProjectManifest(projectToManifest(sourceProject)),
     });
@@ -233,7 +284,7 @@ describe('useProjectManager.duplicateProject', () => {
 
     const journalled = Object.keys(mockDuplicate.mock.calls[0]?.[0].files ?? {});
     expect(journalled).toEqual(['main.ts']);
-    expect(mockReadVersionedProjectFiles).toHaveBeenCalledWith(`/projects/${sourceProject.id}`);
+    expect(mockReadDuplicateProjectFiles).toHaveBeenCalledWith(`/projects/${sourceProject.id}`);
   });
 
   it('records the same webaccess workspace on the duplicate', async () => {
@@ -268,7 +319,7 @@ describe('useProjectManager.duplicateProject', () => {
   });
 
   it('leaves the duplicate pending when source-file copying fails', async () => {
-    mockReadVersionedProjectFiles.mockRejectedValueOnce(new Error('copy failed'));
+    mockReadDuplicateProjectFiles.mockRejectedValueOnce(new Error('copy failed'));
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
     await expect(act(async () => result.current.duplicateProject(sourceProject.id))).rejects.toThrow('copy failed');

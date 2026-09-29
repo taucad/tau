@@ -1,10 +1,11 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
 import type * as KinematicsModule from '@taucad/kinematics';
+import type * as NumberFieldModule from '#components/geometry/parameters/parameters-number-field.js';
 import type { Mechanism } from '@taucad/kinematics';
 import type { KernelIssue } from '@taucad/runtime';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -19,6 +20,20 @@ vi.mock('@taucad/kinematics', async (importOriginal) => ({
 }));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: (): boolean => false }));
 
+// Counts each field's renders by name, so a test can show which rows a pose change re-renders.
+const fieldRenders = vi.hoisted(() => new Map<string, number>());
+vi.mock('#components/geometry/parameters/parameters-number-field.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof NumberFieldModule>();
+  return {
+    ...actual,
+    ParametersNumberField(props: React.ComponentProps<typeof actual.ParametersNumberField>) {
+      const label = props['aria-label'] ?? '';
+      fieldRenders.set(label, (fieldRenders.get(label) ?? 0) + 1);
+      return <actual.ParametersNumberField {...props} />;
+    },
+  };
+});
+
 // A static stand-in for a subscribable actor: the pane only selects from these.
 const staticRef = <T,>(snapshot: T) => ({ getSnapshot: () => snapshot, subscribe: () => ({ unsubscribe: vi.fn() }) });
 
@@ -26,9 +41,46 @@ const project = vi.hoisted(() => ({
   geometryUnits: new Map<string, unknown>(),
   viewGraphics: new Map<string, unknown>(),
   editorRef: undefined as unknown,
+  projectRef: { send: vi.fn() },
 }));
+
+type RevealListener = (event: { entryPath: string; unitId: string; componentId: string }) => void;
+const revealListeners = new Set<RevealListener>();
+
+/** The editor as the pane reads it: view settings, and the reveal the part menu emits. */
+const editorRef = (viewSettings: Record<string, { entryPath: string }>) => ({
+  ...staticRef({ context: { viewSettings } }),
+  on: (_type: 'kinematicsRevealRequested', listener: RevealListener) => {
+    revealListeners.add(listener);
+    return {
+      unsubscribe: () => {
+        revealListeners.delete(listener);
+      },
+    };
+  },
+});
+
+const requestReveal = (componentId: string): void => {
+  act(() => {
+    for (const listener of revealListeners) {
+      listener({ entryPath: 'main.ts', unitId, componentId });
+    }
+  });
+};
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ ...project, mainEntryPath: 'main.ts' }),
+  useProject: () => ({
+    ...project,
+    mainEntryPath: 'main.ts',
+    viewRecords: new Map(
+      Object.entries(
+        (
+          project.editorRef as
+            | { getSnapshot?: () => { context: { viewSettings: Record<string, { entryPath: string }> } } }
+            | undefined
+        )?.getSnapshot?.().context.viewSettings ?? {},
+      ),
+    ),
+  }),
 }));
 
 vi.mock('dockview-react', () => ({
@@ -60,6 +112,9 @@ vi.mock('dockview-react', () => ({
 
 beforeAll(() => {
   globalThis.HTMLElement.prototype.scrollIntoView = vi.fn();
+  // Neither exists in jsdom: a reveal waits on running animations, then scrolls the pane's scroller.
+  globalThis.HTMLElement.prototype.scrollTo = vi.fn();
+  globalThis.HTMLElement.prototype.getAnimations = () => [];
 });
 
 const unitId = 'file:main.ts';
@@ -149,6 +204,7 @@ function renderPane({
   isBuilding = false,
   kernelIssues = [],
   panelApi,
+  partNames = {},
 }: {
   readonly withViewer?: boolean;
   readonly withMechanism?: boolean;
@@ -157,6 +213,8 @@ function renderPane({
   readonly isBuilding?: boolean;
   readonly kernelIssues?: readonly KernelIssue[];
   readonly panelApi?: ReturnType<typeof createPanelVisibility>['panelApi'];
+  /** Display names of components, as the model's component manifest gives them. */
+  readonly partNames?: Readonly<Record<string, string>>;
 } = {}) {
   kinematics = createActor(kinematicsMachine, { input: {} }).start();
   if (withMechanism) {
@@ -171,8 +229,13 @@ function renderPane({
       }),
     ],
   ]);
-  project.viewGraphics = new Map(withViewer ? [['view-1', staticRef({ context: { kinematicsRef: kinematics } })]] : []);
-  project.editorRef = staticRef({ context: { viewSettings: { 'view-1': { entryPath } } } });
+  // The pane reads only node names from the manifest.
+  const manifest = { nodesById: Object.fromEntries(Object.entries(partNames).map(([id, name]) => [id, { id, name }])) };
+  const modelInteractionRef = staticRef({ context: { unitsById: { [`file:${entryPath}`]: { manifest } } } });
+  project.viewGraphics = new Map(
+    withViewer ? [['view-1', staticRef({ context: { kinematicsRef: kinematics, modelInteractionRef } })]] : [],
+  );
+  project.editorRef = editorRef({ 'view-1': { entryPath } });
   return render(
     <TooltipProvider>
       <KinematicsPanelBody panelApi={panelApi} />
@@ -184,31 +247,110 @@ const workbenchShown = { chat: true, workbench: true };
 const workbenchHidden = { chat: true, workbench: false };
 
 const field = (name: string) => screen.getByRole('spinbutton', { name });
+const trigger = (name: string) => screen.getByRole('button', { name });
+
+/** The sun's followers start in a closed group; most follower checks open it first. */
+async function openSunFollowers(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(trigger('Followers of sun'));
+}
 const statusRegion = () => screen.getByRole('status', { name: 'Kinematics status' });
 const alertRegion = () => screen.getByRole('alert', { name: 'Kinematics error' });
 
 describe('KinematicsPanelBody', () => {
   beforeEach(() => {
     solvePose.mockReset();
+    project.projectRef.send.mockClear();
   });
 
-  it('should render driver sliders in degrees and millimetres and describe read-only followers by joint, relation and range', () => {
+  it('should render driver sliders in degrees and millimetres and describe read-only followers by joint, relation and range', async () => {
+    const user = userEvent.setup();
     renderPane();
+    await openSunFollowers(user);
 
     expect(field('sun')).toHaveValue('0');
     expect(field('arm')).not.toHaveAttribute('readonly');
     expect(field('slide')).toBeInTheDocument();
     expect(field('carrier')).toHaveAttribute('readonly');
-    expect(field('carrier')).toHaveAccessibleDescription('Revolute joint · follower. = 0.25 × sun. Unlimited range');
-    expect(field('arm')).toHaveAccessibleDescription('Revolute joint · driver. Range -45° to 90°');
-    expect(field('slide')).toHaveAccessibleDescription('Prismatic joint · driver. Range 0 mm to 50 mm');
-    expect(screen.getByText('Root base · 5 links · 4 joints')).toBeInTheDocument();
-    expect(screen.getByText('Drag parts in the viewer to move them while this pane is open.')).toBeInTheDocument();
+    expect(field('carrier')).toHaveAccessibleDescription(
+      'Revolute joint · follower · carrier. = 0.25 × sun. Unlimited range. Moves 1 part: component:carrier',
+    );
+    expect(field('arm')).toHaveAccessibleDescription(
+      'Revolute joint · driver · arm. Range -45° to 90°. Moves 1 part: component:arm',
+    );
+    expect(field('slide')).toHaveAccessibleDescription(
+      'Prismatic joint · driver · slide. Range 0 mm to 50 mm. Moves 1 part: component:slide',
+    );
+    expect(screen.getByText('Root base · 5 links · 4 joints · m, rad')).toBeInTheDocument();
+    expect(screen.queryByText(/Drag parts in the viewer/)).not.toBeInTheDocument();
     expect(statusRegion()).toHaveTextContent('Ready');
   });
 
-  it('should announce each joint value with its unit and only the limits the joint declares', () => {
+  it('should hold a driver and a closed Followers group in an open group card and keep other drivers as rows', async () => {
+    const user = userEvent.setup();
     renderPane();
+
+    expect(trigger('Group: sun')).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger('Followers of sun')).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger('Followers of sun')).toHaveTextContent('(1)');
+    expect(screen.queryByRole('button', { name: 'Group: arm' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'carrier' })).not.toBeInTheDocument();
+    // Inside its group the driver's control is labelled by what it sets.
+    expect(screen.getByText('Angle')).toBeInTheDocument();
+
+    await openSunFollowers(user);
+    expect(field('carrier')).toBeInTheDocument();
+    expect(screen.getByText('Ratio 0.25')).toBeInTheDocument();
+
+    await user.click(trigger('Group: sun'));
+    expect(screen.queryByRole('spinbutton', { name: 'sun' })).not.toBeInTheDocument();
+    expect(trigger('Group: sun')).toHaveTextContent('0°');
+  });
+
+  it('should read joint names from the mechanism and keep the id in the details', () => {
+    renderPane({
+      loaded: { ...mechanism, joints: { ...mechanism.joints, arm: { ...mechanism.joints['arm']!, name: 'Shoulder' } } },
+    });
+
+    expect(field('Shoulder')).toHaveAccessibleDescription(expect.stringContaining('Revolute joint · driver · arm'));
+    expect(screen.queryByRole('spinbutton', { name: 'arm' })).not.toBeInTheDocument();
+  });
+
+  it('should show twelve followers and the rest on request', async () => {
+    const user = userEvent.setup();
+    const vanes = Array.from({ length: 14 }, (_, index) => `vane-${index + 1}`);
+    renderPane({
+      loaded: {
+        ...mechanism,
+        links: {
+          ...mechanism.links,
+          ...Object.fromEntries(vanes.map((id) => [id, { components: [`component:${id}`] }])),
+        },
+        joints: {
+          ...mechanism.joints,
+          ...Object.fromEntries(
+            vanes.map((id) => [
+              id,
+              { type: 'revolute', parent: 'base', child: id, origin: [0, 0, 0], axis: [1, 0, 0] },
+            ]),
+          ),
+        },
+        couplings: vanes.map((id) => ({ driver: 'arm', follower: id, ratio: 1 })),
+      },
+    });
+
+    await user.click(trigger('Followers of arm'));
+    expect(screen.getByRole('spinbutton', { name: 'vane-12' })).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'vane-13' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Show 2 more' }));
+    expect(screen.getByRole('spinbutton', { name: 'vane-14' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Show \d+ more$/u })).not.toBeInTheDocument();
+  });
+
+  it('should announce each joint value with its unit and only the limits the joint declares', async () => {
+    const user = userEvent.setup();
+    renderPane();
+    await openSunFollowers(user);
 
     expect(field('arm')).toHaveAttribute('aria-valuenow', '0');
     expect(field('arm')).toHaveAttribute('aria-valuetext', '0 °');
@@ -223,8 +365,10 @@ describe('KinematicsPanelBody', () => {
     expect(field('carrier')).not.toHaveAttribute('aria-valuemax');
   });
 
-  it('should show a small coupling ratio to four significant digits', () => {
+  it('should show a small coupling ratio to four significant digits', async () => {
+    const user = userEvent.setup();
     renderPane();
+    await openSunFollowers(user);
 
     act(() => {
       kinematics.send({
@@ -235,10 +379,13 @@ describe('KinematicsPanelBody', () => {
     });
 
     expect(field('carrier')).toHaveAccessibleDescription(expect.stringContaining('= -0.03333 × sun'));
+    expect(screen.getByText('Ratio -0.03333')).toBeInTheDocument();
   });
 
-  it('should describe a curve follower by its driver', () => {
+  it('should describe a curve follower by its driver', async () => {
+    const user = userEvent.setup();
     renderPane();
+    await openSunFollowers(user);
 
     act(() => {
       kinematics.send({
@@ -252,11 +399,13 @@ describe('KinematicsPanelBody', () => {
     });
 
     expect(field('carrier')).toHaveAccessibleDescription(expect.stringContaining('= curve of sun'));
+    expect(screen.getByText('Curve')).toBeInTheDocument();
   });
 
   it('should convert a typed driver value into mechanism units and derive its followers', async () => {
     const user = userEvent.setup();
     renderPane();
+    await openSunFollowers(user);
 
     await user.click(field('sun'));
     await user.clear(field('sun'));
@@ -292,6 +441,7 @@ describe('KinematicsPanelBody', () => {
   it('should step an unlimited driver on from beyond a full turn without snapping it back', async () => {
     const user = userEvent.setup();
     renderPane();
+    await openSunFollowers(user);
     // The four-sun-turns clip paused at sun 900° (carrier 225°).
     act(() => {
       kinematics.send({ type: 'play', unitId });
@@ -319,17 +469,21 @@ describe('KinematicsPanelBody', () => {
     await user.clear(field('arm'));
     await user.type(field('arm'), '120{Enter}');
 
-    expect(field('arm')).toHaveAccessibleDescription('At limit Revolute joint · driver. Range -45° to 90°');
+    expect(field('arm')).toHaveAccessibleDescription(
+      'At limit Revolute joint · driver · arm. Range -45° to 90°. Moves 1 part: component:arm',
+    );
     expect(unit().coordinates['arm']).toBeCloseTo(90 * degrees);
   });
 
-  it('should toggle playback in the playback group and reset to the as-built pose', async () => {
+  it('should toggle playback, show the clip time while it runs and reset to the as-built pose from the file mark', async () => {
     const user = userEvent.setup();
     renderPane();
+    expect(screen.queryByRole('button', { name: 'Reset pose to as built' })).not.toBeInTheDocument();
     act(() => {
       kinematics.send({ type: 'setCoordinate', unitId, id: 'arm', value: 10 * degrees });
     });
     const playback = within(screen.getByRole('group', { name: 'Playback' }));
+    expect(screen.queryByRole('group', { name: 'Timeline' })).not.toBeInTheDocument();
 
     await user.click(playback.getByRole('button', { name: 'Play' }));
     expect(unit().playback).toMatchObject({ status: 'playing', animationId: 'four-sun-turns' });
@@ -338,14 +492,113 @@ describe('KinematicsPanelBody', () => {
     act(() => {
       kinematics.send({ type: 'tick', unitId, elapsed: 1 });
     });
+    expect(screen.getByRole('spinbutton', { name: 'Time' })).toHaveAttribute('aria-valuetext', '1.0 of 4.0 seconds');
     await user.click(playback.getByRole('button', { name: 'Pause' }));
     expect(unit().playback).toMatchObject({ status: 'paused', time: 1 });
     expect(statusRegion()).toHaveTextContent('Paused at 1.0 s');
 
-    await user.click(playback.getByRole('button', { name: 'Reset pose' }));
+    await user.click(screen.getByRole('button', { name: 'Reset pose to as built' }));
     expect(unit().coordinates).toEqual({ sun: 0, arm: 0, slide: 0 });
     expect(unit().playback.status).toBe('stopped');
-    expect(screen.queryByRole('toolbar')).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Timeline' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset pose to as built' })).not.toBeInTheDocument();
+  });
+
+  it('should seek to a typed clip time', async () => {
+    const user = userEvent.setup();
+    renderPane();
+    act(() => {
+      kinematics.send({ type: 'play', unitId });
+      kinematics.send({ type: 'pause', unitId });
+    });
+
+    await user.click(screen.getByRole('spinbutton', { name: 'Time' }));
+    await user.clear(screen.getByRole('spinbutton', { name: 'Time' }));
+    await user.type(screen.getByRole('spinbutton', { name: 'Time' }), '2{Enter}');
+
+    expect(unit().playback).toMatchObject({ status: 'paused', time: 2 });
+    expect(field('sun')).toHaveValue('720');
+  });
+
+  it('should mark a moved driver, reset it alone, and hide driver marks while a clip plays', async () => {
+    const user = userEvent.setup();
+    renderPane();
+    act(() => {
+      kinematics.send({ type: 'setCoordinate', unitId, id: 'arm', value: 10 * degrees });
+      kinematics.send({ type: 'setCoordinate', unitId, id: 'slide', value: 0.01 });
+    });
+    expect(screen.queryByRole('button', { name: 'Reset sun' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Reset arm' }));
+    expect(unit().coordinates).toEqual({ sun: 0, arm: 0, slide: 0.01 });
+    expect(screen.queryByRole('button', { name: 'Reset arm' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset pose to as built' })).toBeInTheDocument();
+
+    act(() => {
+      kinematics.send({ type: 'play', unitId });
+    });
+    expect(screen.queryByRole('button', { name: 'Reset slide' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset pose to as built' })).toBeInTheDocument();
+  });
+
+  it('should expand every group and collapse the driver groups from the file header', async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(screen.getByRole('button', { name: 'Expand all' }));
+    expect(field('carrier')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Collapse all' }));
+    expect(trigger('Group: sun')).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Expand all' })).toBeInTheDocument();
+  });
+
+  it('should offer no Expand all when no driver has followers', () => {
+    renderPane({ loaded: { ...mechanism, couplings: [] } });
+
+    expect(screen.queryByRole('button', { name: 'Expand all' })).not.toBeInTheDocument();
+    expect(field('carrier')).toBeInTheDocument();
+  });
+
+  it('should point the viewer at the parts a hovered or focused row moves', async () => {
+    const user = userEvent.setup();
+    renderPane();
+    const row = (name: string) => field(name).closest('[data-slot=kinematics-joint]')!;
+
+    fireEvent.mouseEnter(row('sun'));
+    expect(unit().hoveredComponentIds).toEqual(['component:sun', 'component:carrier']);
+    fireEvent.mouseLeave(row('sun'));
+    expect(unit().hoveredComponentIds).toEqual([]);
+
+    await user.click(field('arm'));
+    expect(unit().hoveredComponentIds).toEqual(['component:arm']);
+  });
+
+  it('should open the groups around a revealed follower and focus its field', async () => {
+    renderPane();
+
+    requestReveal('component:carrier');
+
+    expect(trigger('Followers of sun')).toHaveAttribute('aria-expanded', 'true');
+    await vi.waitFor(() => {
+      expect(field('carrier')).toHaveFocus();
+    });
+  });
+
+  it('should re-render only the rows whose values a pose change moves', () => {
+    renderPane();
+    act(() => {
+      kinematics.send({ type: 'play', unitId });
+    });
+    const before = new Map(fieldRenders);
+
+    act(() => {
+      kinematics.send({ type: 'tick', unitId, elapsed: 0.5 });
+    });
+
+    expect(fieldRenders.get('sun')).toBeGreaterThan(before.get('sun') ?? 0);
+    expect(fieldRenders.get('arm')).toBe(before.get('arm'));
+    expect(fieldRenders.get('slide')).toBe(before.get('slide'));
   });
 
   it('should play the chosen animation from the picker, including the driver sweep, at the chosen speed', async () => {
@@ -448,18 +701,32 @@ describe('KinematicsPanelBody', () => {
     const user = userEvent.setup();
     renderPane();
 
-    await user.type(screen.getByRole('searchbox', { name: 'Filter joints' }), 'arm');
+    await user.type(screen.getByRole('searchbox', { name: 'Filter joints and parts' }), 'arm');
 
     expect(field('arm')).toBeInTheDocument();
     expect(screen.queryByRole('spinbutton', { name: 'sun' })).not.toBeInTheDocument();
     expect(screen.queryByRole('spinbutton', { name: 'carrier' })).not.toBeInTheDocument();
   });
 
-  it('should name the Drivers and Followers regions when the entry path has a space', () => {
+  it('should find a follower by the name of the part it moves and open its group', async () => {
+    const user = userEvent.setup();
+    renderPane({ partNames: { 'component:carrier': 'Carrier plate', 'component:arm': 'Arm link' } });
+
+    await user.type(screen.getByRole('searchbox', { name: 'Filter joints and parts' }), 'plate');
+
+    expect(field('carrier')).toBeInTheDocument();
+    expect(field('carrier')).toHaveAccessibleDescription(expect.stringContaining('Moves 1 part: Carrier plate'));
+    expect(screen.queryByRole('spinbutton', { name: 'arm' })).not.toBeInTheDocument();
+
+    await user.clear(screen.getByRole('searchbox', { name: 'Filter joints and parts' }));
+    expect(screen.queryByRole('spinbutton', { name: 'carrier' })).not.toBeInTheDocument();
+  });
+
+  it('should keep its drivers when the entry path has a space', () => {
     renderPane({ entryPath: 'gear box.ts' });
 
     expect(screen.getByRole('region', { name: 'Drivers' })).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Followers' })).toBeInTheDocument();
+    expect(field('arm')).toBeInTheDocument();
   });
 
   it('should give a mechanism without degrees of freedom its own copy and nothing to play', () => {
@@ -474,8 +741,7 @@ describe('KinematicsPanelBody', () => {
     });
 
     expect(screen.getByText('No movable joints. Every joint in this mechanism is fixed.')).toBeInTheDocument();
-    expect(screen.queryByText('No matching joints')).not.toBeInTheDocument();
-    expect(screen.queryByText(/Drag parts in the viewer/)).not.toBeInTheDocument();
+    expect(screen.queryByText('No matching joints or parts')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Play' })).toBeDisabled();
   });
 
@@ -543,12 +809,22 @@ describe('KinematicsPanelBody', () => {
       const { panelApi, setVisible } = createPanelVisibility(false);
       renderPane({ panelApi });
       expect(unit().dragEnabled).toBe(false);
+      expect(project.projectRef.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'claimGeometryUnit' }));
 
       setVisible(true);
       expect(unit().dragEnabled).toBe(true);
+      const claim = project.projectRef.send.mock.calls.find(
+        ([event]) => event.type === 'claimGeometryUnit',
+      )?.[0] as unknown as {
+        claimId: string;
+        entryPath: string;
+      };
+      expect(claim.entryPath).toBe('main.ts');
+      expect(typeof claim.claimId).toBe('string');
 
       setVisible(false);
       expect(unit().dragEnabled).toBe(false);
+      expect(project.projectRef.send).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: claim.claimId });
     });
 
     it('should disarm viewer drags while the workbench lane is hidden', () => {
@@ -578,8 +854,15 @@ describe('KinematicsPanelBody', () => {
       const first = kinematics;
       const second = createActor(kinematicsMachine, { input: {} }).start();
 
-      project.viewGraphics = new Map([['view-2', staticRef({ context: { kinematicsRef: second } })]]);
-      project.editorRef = staticRef({ context: { viewSettings: { 'view-2': { entryPath: 'main.ts' } } } });
+      project.viewGraphics = new Map([
+        [
+          'view-2',
+          staticRef({
+            context: { kinematicsRef: second, modelInteractionRef: staticRef({ context: { unitsById: {} } }) },
+          }),
+        ],
+      ]);
+      project.editorRef = editorRef({ 'view-2': { entryPath: 'main.ts' } });
       view.rerender(
         <TooltipProvider>
           <KinematicsPanelBody />

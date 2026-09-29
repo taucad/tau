@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { fileRefBlockSchema, userProviderMessageSchema } from '#log/event-schema.js';
+import { createTauAgentHost } from '#host/tau-agent-host.js';
+import { emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
+import { createEventLogAppender } from '#log/event-log-appender.js';
+import type { EventLogAppender } from '#log/event-log-appender.js';
+import { fakePlacement } from '#host/tau-agent-host.fixture.js';
+import { memoryEventLogStorage } from '#log/event-log-storage.fixture.js';
+import { classifyLogRow, fileRefBlockSchema, userProviderMessageSchema } from '#log/event-schema.js';
 
 const hash = 'a'.repeat(64);
 
@@ -79,5 +85,154 @@ describe('userProviderMessageSchema', () => {
     };
 
     expect(userProviderMessageSchema.parse(message)).toEqual(message);
+  });
+});
+
+describe('tolerant reading (CL-R1, CL-A2)', () => {
+  const envelope = (sequence: number) => ({
+    version: 1,
+    leaderEpoch: 'e01',
+    epoch: 1,
+    sequence,
+    recordedAt: '2026-09-26T00:00:00.000Z',
+    runId: 'run-1',
+  });
+  const line = (row: Record<string, unknown>) => `${JSON.stringify(row)}\n`;
+  const logOf = async (lines: readonly string[]) => {
+    const file = memoryEventLogStorage(new TextEncoder().encode(lines.join('')));
+    return createEventLogAppender(file.storage);
+  };
+
+  it('should open a log whose middle line is unreadable and quarantine it', async () => {
+    const log = await logOf([
+      line({ ...envelope(0), type: 'run.lifecycle', state: 'admitted' }),
+      'garbage\n',
+      line({ ...envelope(1), type: 'run.lifecycle', state: 'running' }),
+    ]);
+
+    await expect(log.read()).resolves.toHaveLength(2);
+    await expect(log.anomalies()).resolves.toEqual([expect.objectContaining({ kind: 'quarantined' })]);
+  });
+
+  it('should keep a row with an unknown enum value as opaque', async () => {
+    const suspended = { ...envelope(1), type: 'run.lifecycle', state: 'suspended' };
+    const log = await logOf([line({ ...envelope(0), type: 'run.lifecycle', state: 'admitted' }), line(suspended)]);
+    const ledger = foldChatLedger(emptyChatLedger, await log.read());
+
+    expect(classifyLogRow(suspended).class).toBe('opaque');
+    const rows = await log.read();
+    expect(rows[1]).toEqual(suspended);
+    expect(ledger.runs['run-1']).toMatchObject({ lifecycle: 'admitted', opaque: true });
+  });
+
+  it('should refuse commands on a run that holds an opaque row', async () => {
+    const log = await logOf([
+      line({ ...envelope(0), type: 'message.appended', message: { id: 'turn-1', role: 'user', content: 'Hi.' } }),
+      line({ ...envelope(1), type: 'run.lifecycle', state: 'admitted' }),
+      line({ ...envelope(2), type: 'run.lifecycle', state: 'running' }),
+      line({ ...envelope(3), version: 2, type: 'run.lifecycle', state: 'running', lane: 'newer' }),
+    ]);
+    const host = createTauAgentHost({
+      systemPrompt: 'opaque',
+      model: { id: 'opaque-model', contextWindow: 1000 },
+      modelTransport: {
+        funding: { type: 'unfunded' },
+        async *stream() {
+          yield* [];
+        },
+      },
+      toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      placement: fakePlacement({
+        registry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      }).port,
+      openEventLog: async () => log,
+    });
+
+    await expect(host.resume('chat-1')).rejects.toMatchObject({ code: 'RUN_UNREADABLE' });
+    await expect(log.read()).resolves.toHaveLength(4);
+    await host.close();
+  });
+
+  // CL-S2: read tolerantly, execute strictly. A lost history line leaves the chat readable and refuses to run it.
+  const hostOver = (log: EventLogAppender) =>
+    createTauAgentHost({
+      systemPrompt: 'history',
+      model: { id: 'history-model', contextWindow: 1000 },
+      modelTransport: {
+        funding: { type: 'unfunded' },
+        async *stream() {
+          yield { type: 'completed', stopReason: 'stop' } as const;
+        },
+      },
+      toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      placement: fakePlacement({
+        registry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      }).port,
+      openEventLog: async () => log,
+    });
+  const brokenHistoryLines = (middle: (sequence: number) => string, counted: boolean): string[] => {
+    const at = (offset: number) => (counted ? offset + 1 : offset);
+    return [
+      line({ ...envelope(0), type: 'message.appended', message: { id: 'turn-1', role: 'user', content: 'Hi.' } }),
+      middle(1),
+      line({ ...envelope(at(1)), type: 'run.lifecycle', state: 'admitted' }),
+      line({ ...envelope(at(2)), type: 'run.lifecycle', state: 'running' }),
+      line({
+        ...envelope(at(3)),
+        type: 'run.lifecycle',
+        state: 'failed',
+        detail: { message: 'rate', code: 'RATE_LIMITED' },
+      }),
+    ];
+  };
+
+  /* A lost line answers HISTORY_INVALID; a newer build's history row (D16), in any run, answers RUN_UNREADABLE, so the
+   * person is offered the update rather than told the chat is corrupt. */
+  it.each([
+    {
+      name: 'a garbage message.appended line',
+      middle: () => '{"type":"message.appended","message":{"id":"turn-2"}\n',
+      counted: false,
+      code: 'HISTORY_INVALID',
+    },
+    {
+      name: 'an opaque message.appended row',
+      middle: (sequence: number) =>
+        line({ ...envelope(sequence), runId: 'run-0', type: 'message.appended', message: { id: 'turn-2' } }),
+      counted: true,
+      code: 'RUN_UNREADABLE',
+    },
+  ])('should read a chat with $name but refuse to start or resume it', async ({ middle, counted, code }) => {
+    const log = await logOf(brokenHistoryLines(middle, counted));
+    const host = hostOver(log);
+
+    await expect(log.read()).resolves.toHaveLength(counted ? 5 : 4);
+    await expect(log.historyIntact()).resolves.toBe(false);
+    await expect(
+      host.admit({
+        chatId: 'chat-1',
+        runId: 'run-2',
+        trigger: 'submit',
+        message: { id: 'turn-3', role: 'user', content: 'Go.' },
+      }),
+    ).rejects.toMatchObject({ code });
+    await expect(host.resume('chat-1')).rejects.toMatchObject({ code });
+    await host.close();
+  });
+
+  // CL-A22
+  it('should keep unknown tauInternal fields', () => {
+    const row = {
+      ...envelope(0),
+      type: 'message.appended',
+      message: {
+        id: 'turn-1',
+        role: 'user',
+        content: 'Hi.',
+        metadata: { tauInternal: { kind: 'external-agent', futureLimit: { resetsAt: 7 } } },
+      },
+    };
+
+    expect(classifyLogRow(row)).toMatchObject({ class: 'known', event: row });
   });
 });

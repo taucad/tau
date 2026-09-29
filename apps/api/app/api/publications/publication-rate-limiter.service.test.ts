@@ -88,4 +88,37 @@ describe('PublicationRateLimiterService', () => {
     expect(expirySeconds).toBe('86400');
     expect(count).toBe('7');
   });
+
+  /* D22: the git routes' budgets are fixed windows, and a refusal owes the
+     client the seconds until the window ends as `Retry-After`. */
+  it('should key a window budget by its window, expire it with the window and say when it ends', async () => {
+    vi.useFakeTimers({ now: new Date('2026-09-25T10:00:45.000Z') });
+    try {
+      const { service, evalSpy } = createServiceWithEvalReturns([60, 61]);
+
+      const within = await service.consumeWindowBudget({ key: 'git:user_1:proj_1', limit: 60, windowSeconds: 60 });
+      const over = await service.consumeWindowBudget({ key: 'git:user_1:proj_1', limit: 60, windowSeconds: 60 });
+
+      expect(within).toEqual({ allowed: true, count: 60, retryAfterSeconds: 15 });
+      expect(over).toEqual({ allowed: false, count: 61, retryAfterSeconds: 15 });
+      const window = Math.floor(Date.parse('2026-09-25T10:00:45.000Z') / 60_000);
+      expect(evalSpy.mock.calls[0]?.[2]).toBe(`git:user_1:proj_1:w60:${String(window)}`);
+      expect(evalSpy.mock.calls[0]?.[3]).toBe('60');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should end a day-long window at UTC midnight', async () => {
+    vi.useFakeTimers({ now: new Date('2026-09-25T23:59:00.000Z') });
+    try {
+      const { service } = createServiceWithEvalReturns([1]);
+
+      await expect(
+        service.consumeWindowBudget({ key: 'git:hydrate:owner_1', limit: 10, windowSeconds: 86_400 }),
+      ).resolves.toMatchObject({ allowed: true, retryAfterSeconds: 60 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

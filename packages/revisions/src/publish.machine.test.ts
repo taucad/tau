@@ -15,7 +15,8 @@
  * | 4b | `pushing --syncNow--> (root)` | **P39**: the push is asked of the scheduler, never declared settled here |
  * | 5 | `tagging → error` | naming has a failure edge |
  * | 6 | `pushing → error` (rejected push) | a refused push is an error, never a silent publish |
- * | 7 | `pushing --after--> error` | **red pin (d)**: no settlement inside the bound lands in `error`, never hangs |
+ * | 7 | `pushing` with no root → `error` | a dialog nobody pushes for fails at once; sync's own deadline answers every push (RM-R3) |
+ * | 20 | `publish` while busy → `toast.error{REVISIONS_BUSY}` | a verb is answered by its id, never dropped (RM-R11) |
  * | 8 | `pushing --pushSettled(foreign)-->` | an uncorrelated settlement does not advance the push |
  * | 9 | `publishing → error` | the API call has a failure edge |
  * | 10 | `error --publish--> choosingVersion` | retry from a failure |
@@ -31,14 +32,17 @@
  */
 
 import { createActor, createCallbackLogic, createAsyncLogic } from 'xstate';
-import type { Actor, AnyActorRef, AnyEventObject, AsyncActorLogic } from 'xstate';
+import type { Actor, AnyActorRef, AnyEventObject, AnyMachineSnapshot, AsyncActorLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#publish.machine.js';
-import { publishMachine, publishPushMilliseconds, selectPublishFacet } from '#publish.machine.js';
+import { publishMachine, selectPublishFacet } from '#publish.machine.js';
 import type {
   PublishActors,
   PublishMachineEmitted,
+  PublishMachineEvent,
+  PublishPushActorInput,
+  PublishPushActorOutput,
   PublishTagActorInput,
   PublishVersionsActorOutput,
 } from '#publish.machine.js';
@@ -46,7 +50,10 @@ import type { PublishDraft } from '#publish.types.js';
 import { revisionId } from '#algorithms/index.js';
 
 import type { RevisionTag } from '#revision-port.js';
-import { createManualClock } from '#test/fake-actors.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { createFakeParent } from '@taucad/xstate-testing/fakes';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 const tagV1: RevisionTag = {
   name: 'v1',
@@ -99,7 +106,7 @@ const head: PublishVersionsActorOutput = {
 type Started = Readonly<{
   actor: Actor<typeof publishMachine>;
   emitted: PublishMachineEmitted[];
-  clock: ReturnType<typeof createManualClock>;
+  clock: StepClock;
   calls: Array<Readonly<{ name: string; input: unknown }>>;
   /** Everything the dialog sent its root — `syncNow`, and nothing else (P39). */
   asked: AnyEventObject[];
@@ -129,6 +136,7 @@ const startPushing = (overrides: Partial<PublishActors> = {}): Started =>
         expected: 'rev-1',
         remoteTags: { v1: 'rev-1' },
         tag: undefined,
+        requestId: 'pub-1',
         draft,
         pushId: 'push-1',
         publicationId: undefined,
@@ -167,7 +175,8 @@ const start = (
     createPublication: record('createPublication', () => ({ publicationId: 'pub_1', url: 'https://tau.new/p/pub_1' })),
     ...overrides,
   };
-  const clock = createManualClock();
+  const guard = guardActors();
+  const clock = new StepClock();
   const provided = publishMachine.provide({ actors });
   /*
    * The root's forwarding edge, as small as it really is (W22 DEF-W22-2).
@@ -191,13 +200,14 @@ const start = (
         }
       });
     }),
+    { inspect: guard.inspect },
   );
   parent.start();
   const input = { projectId: 'p1', parentRef: parent };
   const actor =
     from === undefined
-      ? createActor(provided, { clock, input })
-      : createActor(provided, { clock, input, snapshot: provided.resolveState(from) });
+      ? createActor(provided, { clock, input, inspect: guard.inspect })
+      : createActor(provided, { clock, input, inspect: guard.inspect, snapshot: provided.resolveState(from) });
   dialog.ref = actor;
   const emitted: PublishMachineEmitted[] = [];
   for (const type of ['published', 'toast.info', 'toast.error'] as const) {
@@ -218,7 +228,7 @@ describe('publishMachine', () => {
   it('1: reads this project’s names from the graph when the dialog opens', async () => {
     const { actor } = start();
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
 
     expect(actor.getSnapshot().matches({ choosingVersion: 'ready' })).toBe(true);
@@ -235,19 +245,19 @@ describe('publishMachine', () => {
   it('2: fails visibly when the names cannot be read', async () => {
     const { actor, emitted } = start({ listVersions: failing('graph unreadable') });
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
 
     expect(actor.getSnapshot().matches('error')).toBe(true);
     expect(selectPublishFacet(actor.getSnapshot()).error).toBe('graph unreadable');
-    expect(emitted).toContainEqual({ type: 'toast.error', message: 'graph unreadable' });
+    expect(emitted).toContainEqual({ type: 'toast.error', requestId: 'pub-1', message: 'graph unreadable' });
     actor.stop();
   });
 
   it('3: writes nothing when the dialog is cancelled before confirming', async () => {
     const { actor, calls } = start();
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     actor.send({ type: 'cancel' });
 
@@ -259,7 +269,7 @@ describe('publishMachine', () => {
   it('4: names, pushes and records the publication in one pass', async () => {
     const { actor, emitted, calls } = start();
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     actor.send({ type: 'confirm', draft });
     await settle();
@@ -270,11 +280,35 @@ describe('publishMachine', () => {
     expect(calls[2]?.input).toMatchObject({ projectId: 'p1', tag: 'v2', revisionId: 'rev-2', visibility: 'public' });
     expect(emitted).toContainEqual({
       type: 'published',
+      requestId: 'pub-1',
       publicationId: 'pub_1',
       url: 'https://tau.new/p/pub_1',
       tag: 'v2',
     });
     expect(selectPublishFacet(actor.getSnapshot()).shareUrl).toBe('https://tau.new/p/pub_1');
+    actor.stop();
+  });
+
+  it('4c: names and publishes an older revision when the dialog was opened on one, and the head again after', async () => {
+    const { actor, calls } = start();
+
+    actor.send({ type: 'publish', requestId: 'publish-1', revisionId: 'rev-1' });
+    await settle();
+    actor.send({ type: 'confirm', draft });
+    await settle();
+
+    expect(actor.getSnapshot().matches('success')).toBe(true);
+    expect(calls[0]?.input).toStrictEqual({ name: 'v2', revisionId: 'rev-1' });
+    /* The branch still travels under its own lease: an older revision is already in its history. */
+    expect(calls[1]?.input).toStrictEqual({ branch: 'main', tag: 'v2', expected: 'rev-1', expectedTag: undefined });
+    expect(calls[2]?.input).toMatchObject({ tag: 'v2', revisionId: 'rev-1' });
+
+    /* A later publish without one names the head, not the revision the last dialog was opened on. */
+    actor.send({ type: 'publish', requestId: 'publish-2' });
+    await settle();
+    actor.send({ type: 'confirm', draft: { ...draft, tag: 'v3' } });
+    await settle();
+    expect(calls[3]?.input).toStrictEqual({ name: 'v3', revisionId: 'rev-2' });
     actor.stop();
   });
 
@@ -286,7 +320,7 @@ describe('publishMachine', () => {
      * three outcomes reachable at all. */
     const { actor, asked } = start({ push: pending() });
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     actor.send({ type: 'confirm', draft });
     await settle();
@@ -297,7 +331,7 @@ describe('publishMachine', () => {
     actor.stop();
 
     const settled = start();
-    settled.actor.send({ type: 'publish' });
+    settled.actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     settled.actor.send({ type: 'confirm', draft });
     await settle();
@@ -309,7 +343,7 @@ describe('publishMachine', () => {
   it('5: fails visibly when the name cannot be written', async () => {
     const { actor } = start({ createTag: failing('name already used by a branch') });
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     actor.send({ type: 'confirm', draft });
     await settle();
@@ -322,7 +356,7 @@ describe('publishMachine', () => {
   it('6: treats a refused push as an error, never as a publication', async () => {
     const { actor, calls } = start({ push: failing('someone else moved main') });
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     actor.send({ type: 'confirm', draft });
     await settle();
@@ -333,27 +367,58 @@ describe('publishMachine', () => {
     actor.stop();
   });
 
-  it('7: lands in error when no settlement names the push inside the bound', async () => {
-    const { actor, clock } = start({ push: pending() });
+  /* RM-R3: sync answers every push under its own deadline, so the dialog holds no bound; with no root nothing would. */
+  it('7: fails at once when it has no root to push for it', async () => {
+    const actors: PublishActors = {
+      listVersions: versions(head),
+      createTag: createAsyncLogic({ run: async ({ input }) => ({ ...tagV1, name: input.name }) }),
+      push: createAsyncLogic<PublishPushActorOutput, PublishPushActorInput>({
+        run: async () => ({ pushId: 'push-1', remote: 'tau' }),
+      }),
+      createPublication: pending(),
+    };
+    const actor = createActor(publishMachine.provide({ actors }), {
+      input: { projectId: 'p1' },
+      clock: new StepClock(),
+      inspect: guardActors().inspect,
+    });
+    const emitted: PublishMachineEmitted[] = [];
+    actor.on('toast.error', (event) => emitted.push(event));
+    actor.start();
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     actor.send({ type: 'confirm', draft });
     await settle();
-    expect(actor.getSnapshot().matches('pushing')).toBe(true);
-
-    clock.advance(publishPushMilliseconds);
-    await settle();
 
     expect(actor.getSnapshot().matches('error')).toBe(true);
-    expect(selectPublishFacet(actor.getSnapshot()).error).toContain('could not confirm');
+    expect(emitted).toStrictEqual([
+      { type: 'toast.error', requestId: 'pub-1', message: 'This project has no sync to push it to the cloud.' },
+    ]);
+    actor.stop();
+  });
+
+  it('should refuse a verb while busy with REVISIONS_BUSY', async () => {
+    const { actor, emitted } = start({ push: pending() });
+
+    actor.send({ type: 'publish', requestId: 'pub-1' });
+    await settle();
+    actor.send({ type: 'confirm', draft });
+    await settle();
+    actor.send({ type: 'publish', requestId: 'pub-2' });
+
+    expect(emitted).toStrictEqual([
+      { type: 'toast.error', requestId: 'pub-2', message: 'Another publish is still running.', code: 'REVISIONS_BUSY' },
+    ]);
+    expect(actor.getSnapshot().matches('pushing')).toBe(true);
+    expect(selectPublishFacet(actor.getSnapshot()).phase).toBe('working');
     actor.stop();
   });
 
   it('8: ignores a settlement that names another push', async () => {
     const { actor } = start({ push: pending() });
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     actor.send({ type: 'confirm', draft });
     await settle();
@@ -399,7 +464,7 @@ describe('publishMachine', () => {
   it('19: offers the name under the lease the remote advertised, never a force (P38)', async () => {
     const { actor, calls } = start();
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     actor.send({ type: 'confirm', draft: { ...draft, tag: 'v1' } });
     await settle();
@@ -412,7 +477,7 @@ describe('publishMachine', () => {
   it('19: leases "must not exist" for a name the remote does not hold (P38)', async () => {
     const { actor, calls } = start();
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     actor.send({ type: 'confirm', draft: { ...draft, tag: 'v2' } });
     await settle();
@@ -426,7 +491,7 @@ describe('publishMachine', () => {
   it('9: fails visibly when the publication cannot be recorded', async () => {
     const { actor } = start({ createPublication: failing('storage quota reached') });
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     actor.send({ type: 'confirm', draft });
     await settle();
@@ -439,11 +504,11 @@ describe('publishMachine', () => {
   it('10: retries from a failure without restarting the actor', async () => {
     const { actor } = start({ listVersions: failing('offline') });
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     expect(actor.getSnapshot().matches('error')).toBe(true);
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
 
     expect(actor.getSnapshot().matches('choosingVersion')).toBe(true);
     expect(selectPublishFacet(actor.getSnapshot()).error).toBeUndefined();
@@ -453,13 +518,13 @@ describe('publishMachine', () => {
   it('11: re-publishing re-enters the picker with the names already taken', async () => {
     const { actor } = start();
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     actor.send({ type: 'confirm', draft });
     await settle();
     expect(actor.getSnapshot().matches('success')).toBe(true);
 
-    actor.send({ type: 'publish', tag: 'v2' });
+    actor.send({ type: 'publish', requestId: 'pub-2', tag: 'v2' });
     await settle();
 
     expect(actor.getSnapshot().matches('choosingVersion')).toBe(true);
@@ -470,7 +535,7 @@ describe('publishMachine', () => {
   it('12: closes back to idle', async () => {
     const { actor } = start();
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     actor.send({ type: 'confirm', draft });
     await settle();
@@ -485,7 +550,7 @@ describe('publishMachine', () => {
       listVersions: versions({ tags: [], revisionId: undefined, expected: undefined, remoteTags: {} }),
     });
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     actor.send({ type: 'confirm', draft });
     await settle();
@@ -497,7 +562,7 @@ describe('publishMachine', () => {
 
   it('14: cancels out of naming and out of pushing', async () => {
     const naming = start({ createTag: pending() });
-    naming.actor.send({ type: 'publish' });
+    naming.actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     naming.actor.send({ type: 'confirm', draft });
     await settle();
@@ -507,7 +572,7 @@ describe('publishMachine', () => {
     naming.actor.stop();
 
     const pushing = start({ push: pending() });
-    pushing.actor.send({ type: 'publish' });
+    pushing.actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     pushing.actor.send({ type: 'confirm', draft });
     await settle();
@@ -518,7 +583,12 @@ describe('publishMachine', () => {
   });
 
   it('15: starts headlessly, keeps a serializable context and exports one machine', () => {
-    const actor = createActor(publishMachine, { input: { projectId: 'p1' } });
+    const guard = guardActors();
+    const actor = createActor(publishMachine, {
+      input: { projectId: 'p1' },
+      clock: new StepClock(),
+      inspect: guard.inspect,
+    });
 
     actor.start();
 
@@ -533,7 +603,7 @@ describe('publishMachine', () => {
     const settler = Promise.withResolvers<PublishVersionsActorOutput>();
     const { actor, calls } = start({ listVersions: createAsyncLogic({ run: async () => settler.promise }) });
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     actor.send({ type: 'confirm', draft });
     await settle();
     expect(calls).toStrictEqual([]);
@@ -549,7 +619,7 @@ describe('publishMachine', () => {
   it('16: names the revision the dialog read, and never asks for a new one', async () => {
     const { actor, calls } = start();
 
-    actor.send({ type: 'publish' });
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
     actor.send({ type: 'confirm', draft: { ...draft, note: 'first release' } });
     await settle();
@@ -559,5 +629,47 @@ describe('publishMachine', () => {
       input: { name: 'v2', revisionId: 'rev-2', note: 'first release' },
     });
     actor.stop();
+  });
+
+  it('should answer every public event in every reachable state', () => {
+    const invokeOf = (path: string): string => publishMachine.getStateNodeById(`publish.${path}`).invoke[0]?.id ?? '';
+    const [readInvoke, tagInvoke, pushInvoke, publishInvoke] = [
+      'choosingVersion.reading',
+      'tagging',
+      'pushing',
+      'publishing',
+    ].map((path) => invokeOf(path));
+    const publicEvents: readonly PublishMachineEvent[] = [
+      { type: 'publish', requestId: 'pub-1' },
+      { type: 'confirm', draft },
+      { type: 'cancel' },
+      { type: 'pushSettled', pushId: 'push-1', outcome: 'backedUp' },
+      { type: 'reset' },
+    ];
+    /* A root to push for it, or `pushing` never waits and `publishing` is unreachable. */
+    const parent = createFakeParent();
+    const options = {
+      input: { projectId: 'p1', parentRef: parent.ref },
+      /* Effect outcomes reach the states behind each invoke; they are not public. */
+      events: [
+        ...publicEvents,
+        { type: `xstate.done.actor.${readInvoke}`, output: head },
+        { type: `xstate.error.actor.${readInvoke}`, error: new Error('graph unreadable') },
+        { type: `xstate.done.actor.${tagInvoke}`, output: { ...tagV1, name: 'v2', revisionId: revisionId('rev-2') } },
+        { type: `xstate.done.actor.${pushInvoke}`, output: { pushId: 'push-1', remote: 'tau' } },
+        {
+          type: `xstate.done.actor.${publishInvoke}`,
+          output: { publicationId: 'pub_1', url: 'https://tau.new/p/pub_1' },
+        },
+      ],
+      limit: 200,
+      /* The value alone merges `pushing` before and after the push answers; `pushSettled` reads `pushId`. */
+      serializeState: (snapshot: AnyMachineSnapshot) =>
+        JSON.stringify([snapshot.value, (snapshot.context as { pushId?: string }).pushId]),
+    };
+
+    expect(unansweredEvents(publishMachine, options)).toEqual([]);
+    expect(unreachedStates(publishMachine, options)).toEqual([]);
+    parent.stop();
   });
 });

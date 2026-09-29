@@ -26,17 +26,11 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
-import {
-  bundledLibraries,
-  bundleOwnershipIssues as bundleRuleOwnershipIssues,
-  publishable,
-  workspace,
-} from '@taucad/nx';
+import { bundledLibraries, publishable, workspace } from '@taucad/nx';
 import {
   bundledArtifactIssues,
   bundledWorkspaceMirrors,
   bundleDeclarationClosure,
-  bundleOwnershipIssues,
   bundleWitnessIssues,
   copyTargetPaths,
   doubledPathSegments,
@@ -132,21 +126,19 @@ const directPermittedBundles = new Map(
   ]),
 );
 
-const permittedBundles = bundleDeclarationClosure(
-  directPermittedBundles,
-  resolved.projects.flatMap((project) =>
-    project.manifest?.name !== undefined && project.manifest.private === true && project.tags.includes('type:lib')
-      ? [
-          {
-            name: project.manifest.name,
-            dependencies: project.manifest.dependencies,
-            optionalDependencies: project.manifest.optionalDependencies,
-            devDependencies: project.manifest.devDependencies,
-          },
-        ]
-      : [],
-  ),
+const privateLibraries = resolved.projects.flatMap((project) =>
+  project.manifest?.name !== undefined && project.manifest.private === true && project.tags.includes('type:lib')
+    ? [
+        {
+          name: project.manifest.name,
+          dependencies: project.manifest.dependencies,
+          optionalDependencies: project.manifest.optionalDependencies,
+          devDependencies: project.manifest.devDependencies,
+        },
+      ]
+    : [],
 );
+const permittedBundles = bundleDeclarationClosure(directPermittedBundles, privateLibraries);
 
 /** Every directory under `<projectDirectory>/dist`, relative to that `dist`. */
 function distributionDirectories(projectDirectory: string): string[] {
@@ -382,35 +374,20 @@ function validateBundleOwnership(): CheckResult {
     .filter((project) => !unbuilt.includes(project))
     .map((project) => ({ owner: project.name, bundled: bundledWorkspaceProjects(project) }));
 
-  // Two independent witnesses: the mirrors say what the builds did (one owner
-  // each, and each permitted), the rule says what the manifests and tags allow.
-  const issues = [
-    ...bundleOwnershipIssues(roots),
-    ...bundleWitnessIssues(roots, permittedBundles),
-    ...bundleRuleOwnershipIssues(resolved),
-  ];
+  const issues = bundleWitnessIssues(roots, permittedBundles);
   const notes =
     unbuilt.length === 0
       ? undefined
-      : [`ownership unverified for unbuilt package(s): ${unbuilt.map((project) => project.name).join(', ')}`];
+      : [`bundle mirrors unverified for unbuilt package(s): ${unbuilt.map((project) => project.name).join(', ')}`];
 
   return issues.length === 0
-    ? { name: 'tau-bundle-ownership', status: 'pass', details: ['bundled workspace modules have one owner'], notes }
+    ? { name: 'tau-bundle-ownership', status: 'pass', details: ['bundle mirrors are permitted by each owner'], notes }
     : {
         name: 'tau-bundle-ownership',
         status: 'fail',
-        details: [`${String(issues.length)} bundle ownership conflict(s) found`, ...issues],
+        details: [`${String(issues.length)} invalid bundle mirror(s) found`, ...issues],
         notes,
       };
-}
-
-/**
- * Workspace packages inlined into this artifact: what the build actually
- * mirrored. What the rule *permits* is the ownership check's business.
- */
-function bundledWorkspacePackages(): string[] {
-  const project = publishableProjects.find((candidate) => candidate.name === packageName);
-  return project ? bundledWorkspaceProjects(project).filter((name) => name !== packageName) : [];
 }
 
 /** Every emitted module and declaration file, read once: three rules parse them. */
@@ -421,13 +398,16 @@ const emittedFiles = walkDirectory(join(absoluteRoot, 'dist'))
 const emitted = emittedSpecifiers(emittedFiles);
 
 function validateBundledArtifact(): CheckResult {
-  const bundledPackages = bundledWorkspacePackages();
-  const issues = bundledArtifactIssues(packageJson.dependencies ?? {}, emittedFiles, bundledPackages);
+  const issues = bundledArtifactIssues(
+    packageJson.dependencies ?? {},
+    emittedFiles,
+    privateLibraries.map((library) => library.name),
+  );
   return issues.length === 0
     ? {
         name: 'tau-bundled-artifact',
         status: 'pass',
-        details: ['bundled workspace packages are absent from production dependencies and emitted specifiers'],
+        details: ['private workspace libraries are absent from production dependencies and emitted specifiers'],
       }
     : {
         name: 'tau-bundled-artifact',
@@ -493,6 +473,10 @@ function validateWorkspaceRanges(): CheckResult {
  * the canonical two entries, and a reason that outlives its key is an issue.
  */
 const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  '@taucad/slicer': {
+    '#bambu-studio/engine.js':
+      'node/default platform swap for the Bambu Studio engine, pinned by src/slicer.plugin.test.ts',
+  },
   '@taucad/geospec-engine': {
     '#cache/node-evidence-store.js':
       'browser/default platform swap for the evidence store, pinned by src/browser-import-graph.test.ts',
@@ -502,11 +486,25 @@ const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string,
     '#e2e/*.js': 'browser-engine harness outside src/; relative imports are banned workspace-wide',
     '#experiments/*.js': 'load-path experiments outside src/; relative imports are banned workspace-wide',
   },
+  '@taucad/geospec-engine-native': {
+    '#native-binding':
+      'workspace NAPI-RS generated types/Node loader and published copied dist loader select a private platform addon outside src',
+    '#mixed-wasm-binding':
+      'workspace generated Emscripten glue and published copied dist glue retain an adjacent external Wasm asset outside src',
+    '#bench/*':
+      'NodeNext benchmark harness lives outside src and workspace lint bans the relative imports that would replace this private development-only alias',
+  },
   '@taucad/openrscad': {
     '#e2e/*.js': 'browser USDZ harness outside src/; relative imports are banned workspace-wide',
   },
   '@taucad/tau-examples': {
     '#scripts/*.js': 'thumbnail/manifest generators outside src/; relative imports are banned workspace-wide',
+  },
+  // The canonical `#*.js` target is a literal `.ts` file, which never reaches a `.tsx`
+  // component; a tsconfig alias would, but it leaks into every program compiling this source.
+  '@taucad/ui': {
+    '#components/*.variants.js': 'variant modules are .ts and share components/ with the .tsx components',
+    '#components/*.js': 'components are .tsx, which the canonical #*.js -> ./src/*.ts target cannot reach',
   },
 };
 

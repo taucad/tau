@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { desktopE2EFrontendUrl } from '#support/config.js';
 import { deliverDesktopDeepLink, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
+import { openBackupChooser } from '#support/revisions-pane.js';
 import { expectSignedIn, expectVisible } from '#support/scenario.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import { forgetSeededProjects, seedProPlan, tauCloudOwnerIds } from '#support/two-client/tau-cloud.js';
@@ -100,11 +101,7 @@ describe('desktop share links', () => {
       .getByRole('button', { name: /^Open Revisions\./u })
       .first()
       .click({ timeout: 120_000 });
-    const connect = page.getByRole('button', { name: 'Connect Tau Cloud', exact: true }).first();
-    if (await connect.isVisible()) {
-      await connect.click();
-    }
-    await expectVisible(page.getByRole('region', { name: 'Sync' }).first(), 60_000);
+    await openBackupChooser(page);
     /* Waited for rather than sampled: the region renders before its choices do,
      * and a sampled `isVisible()` skipped the connect entirely — leaving a
      * project with no remote, which renders no invitation card at all. */
@@ -159,5 +156,18 @@ describe('desktop share links', () => {
      * link needs to navigate in, then read the URL back. */
     await wait(3000);
     expect(page.url(), 'R4: a link outside the four the app publishes must not move the window').toBe(opened);
+  }, 300_000);
+
+  /* A builtin slug carries a dot, and the shell once read `.birdhouse` as a
+   * missing asset's extension: the deep link's document load answered 404 and
+   * left a blank window (community-page-refresh audit, Finding 1 F8). */
+  it('should render a builtin example opened through a tau:// share link', async () => {
+    const { page } = live();
+
+    await deliverDesktopDeepLink(live(), 'tau://s/builtin~replicad.birdhouse');
+    await expect
+      .poll(() => page.url(), { message: 'R4: an admitted deep link must navigate the window', timeout: 60_000 })
+      .toBe('app://tau/s/builtin~replicad.birdhouse');
+    await expectVisible(page.getByText('Birdhouse').first(), 120_000);
   }, 300_000);
 });

@@ -1,4 +1,5 @@
-import { AtSign, Eye, EyeOff, FileBox, Focus, EllipsisVertical, RotateCcw, Target } from 'lucide-react';
+import { AtSign, Eye, EyeOff, FileBox, Focus, EllipsisVertical, Rotate3d, RotateCcw, Target } from 'lucide-react';
+import { findLinkByComponent } from '@taucad/kinematics';
 import type { ActorRefFrom } from 'xstate';
 import type {
   GeometryComponentAppearance,
@@ -33,6 +34,7 @@ import type { MenuDisclosureItemProperties } from '#components/ui/menu-disclosur
 import { menuItemVariants, menuSeparatorVariants } from '@taucad/ui/components/menu.variants';
 import { cn } from '@taucad/ui/utils/cn';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { MaterialSwatch, gltfDefaultBaseColorLabel } from '#components/geometry/cad/material-swatch.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 
@@ -62,6 +64,7 @@ type ModelComponentActionContextContentProperties = ModelComponentActionMenuData
 type ModelComponentActions = {
   readonly addToChat: () => void;
   readonly revealInExplorer: () => void;
+  readonly showKinematics: () => void;
   readonly focusComponent: () => void;
   readonly hideComponent: () => void;
   readonly toggleIsolation: () => void;
@@ -73,7 +76,15 @@ type ModelComponentActions = {
 type ModelComponentActionDescriptor =
   | {
       readonly type: 'item';
-      readonly id: 'focus' | 'addToChat' | 'revealInExplorer' | 'hide' | 'isolate' | 'showAll' | 'resetOpacity';
+      readonly id:
+        | 'focus'
+        | 'addToChat'
+        | 'revealInExplorer'
+        | 'showKinematics'
+        | 'hide'
+        | 'isolate'
+        | 'showAll'
+        | 'resetOpacity';
       readonly label: string;
       readonly icon: React.ReactNode;
       readonly isDisabled?: boolean;
@@ -119,6 +130,28 @@ export function buildModelComponentGeometryReference(
     label: node.name,
     kind: node.kind,
   };
+}
+
+/**
+ * The part, or the first part inside it, that belongs to a link of the unit's mechanism: what "Show kinematics"
+ * reveals. `undefined` disables the item.
+ */
+export function findModelComponentKinematicsTarget(
+  manifest: GeometryComponentManifest,
+  node: GeometryComponentNode,
+): string | undefined {
+  const { mechanism } = manifest;
+  if (!mechanism) {
+    return undefined;
+  }
+  const pending = [node.id];
+  for (let id = pending.shift(); id !== undefined; id = pending.shift()) {
+    if (findLinkByComponent({ mechanism, componentId: id })) {
+      return id;
+    }
+    pending.push(...(manifest.nodesById[id]?.childIds ?? []));
+  }
+  return undefined;
 }
 
 export function ModelComponentActionDropdown({
@@ -193,7 +226,6 @@ export function ModelComponentViewerMenuItems({
 
 type SurfaceMaterials = NonNullable<GeometryComponentAppearance['materials']>;
 // oxlint-disable-next-line tau-lint/no-hardcoded-color -- This text reports the glTF format's material default; it is not a UI palette or style.
-const gltfDefaultBaseColorLabel = '#ffffff';
 
 function formatMaterialValues(materials: SurfaceMaterials, factor: 'color' | 'metalness' | 'roughness'): string {
   const values = new Map<string, { explicit: number; defaulted: number }>();
@@ -220,41 +252,6 @@ function formatMaterialValues(materials: SurfaceMaterials, factor: 'color' | 'me
     return `${value} (${counts.explicit > 0 ? 'includes glTF default' : 'glTF default'})`;
   });
   return labels.length === 1 ? labels[0]! : `Mixed: ${labels.join(', ')}`;
-}
-
-const numericFactor = (value: number | 'unavailable' | undefined): number => (typeof value === 'number' ? value : 1);
-
-/**
- * A small lit sphere of a part's surface materials, so the menu row reads as that part at a glance:
- * the base colour (a pie of colours when the surfaces differ), a highlight that tightens as
- * roughness drops, and a darker rim as metalness rises.
- */
-export function MaterialSwatch({ materials }: { readonly materials: SurfaceMaterials }): React.JSX.Element {
-  const colors = [
-    ...new Set(
-      materials.map(({ color }) =>
-        color === undefined || color === 'unavailable' ? gltfDefaultBaseColorLabel : color,
-      ),
-    ),
-  ];
-  const fill =
-    colors.length === 1
-      ? colors[0]!
-      : `conic-gradient(${colors.map((color, index) => `${color} ${(index * 100) / colors.length}% ${((index + 1) * 100) / colors.length}%`).join(', ')})`;
-  const roughness = numericFactor(materials[0]?.roughness);
-  const metalness = numericFactor(materials[0]?.metalness);
-  // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Light and shadow on a rendered material preview, not UI palette colours.
-  const highlight = `radial-gradient(circle at 32% 30%, rgb(255 255 255 / ${0.85 * (1 - roughness)}) 0, transparent ${35 + 35 * roughness}%)`;
-  // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Light and shadow on a rendered material preview, not UI palette colours.
-  const rim = `radial-gradient(circle, transparent 50%, rgb(0 0 0 / ${0.1 + 0.3 * metalness}) 100%)`;
-  return (
-    <span
-      aria-hidden
-      data-slot='material-swatch'
-      className='size-4 shrink-0 rounded-full ring-1 ring-border'
-      style={{ background: `${highlight}, ${rim}, ${fill}` }}
-    />
-  );
 }
 
 /**
@@ -354,6 +351,14 @@ function useModelComponentActionDescriptors(
       onSelect: actions.addToChat,
     },
     ...revealInExplorerDescriptor,
+    {
+      type: 'item',
+      id: 'showKinematics',
+      label: 'Show kinematics',
+      icon: <Rotate3d className='size-3.5' />,
+      isDisabled: findModelComponentKinematicsTarget(data.manifest, data.node) === undefined,
+      onSelect: actions.showKinematics,
+    },
     { type: 'separator', id: 'primary' },
     {
       type: 'item',
@@ -564,6 +569,22 @@ function useModelComponentActions({
           entryPath: manifest.sourceFile!,
           unitId,
           componentId: node.id,
+        });
+      });
+    },
+    showKinematics: () => {
+      const componentId = findModelComponentKinematicsTarget(manifest, node);
+      if (componentId === undefined || !manifest.sourceFile || !project) {
+        return;
+      }
+      workspace?.openPanel('kinematics');
+      // The pane listens once mounted; a frame lets a newly opened pane subscribe, as Reveal in Explorer does.
+      requestAnimationFrame(() => {
+        project.editorRef.send({
+          type: 'revealModelComponentInKinematics',
+          entryPath: manifest.sourceFile!,
+          unitId,
+          componentId,
         });
       });
     },

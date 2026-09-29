@@ -11,6 +11,7 @@ import {
 import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
 import { clearLedger, recordRpcOutcome } from '#services/rpc-ledger.js';
 import { metaConfig } from '#constants/meta.constants.js';
+import { storedRef } from '#utils/attachment.test-utils.js';
 
 const baseMessage = (parts: MyUIMessage['parts']): MyUIMessage => ({
   id: 'msg-1',
@@ -279,6 +280,24 @@ describe('serializeMessage', () => {
   });
 
   describe('tool parts', () => {
+    it('serializes the arrange call keys and written record paths', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-arrange_workbench',
+          toolCallId: 'arrange-1',
+          state: 'output-available',
+          input: { open: [{ kind: 'pane', pane: 'details' }], lanes: { workbench: true } },
+          output: {
+            status: 'written',
+            revisions: [{ path: '.tau/workbench/layout.json', digest: 'missing', previousDigest: 'missing' }],
+            visible: [{ kind: 'pane', pane: 'details' }],
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="arrange_workbench">\narrange_workbench(open, lanes)\n</tool_call>\n<tool_result>\n-> .tau/workbench/layout.json\n</tool_result>',
+      );
+    });
     it('serializes tool-web_search output-available', () => {
       const message = baseMessage([
         {
@@ -805,8 +824,8 @@ describe('buildUserMessage', () => {
     const message = buildUserMessage({
       text: '  model the bracket  ',
       attachments: [
-        { hash: imageHash, mediaType: 'image/jpeg' },
-        { hash: documentHash, mediaType: 'application/pdf', filename: 'bracket-spec.pdf' },
+        storedRef({ hash: imageHash, mediaType: 'image/jpeg' }),
+        storedRef({ hash: documentHash, mediaType: 'application/pdf', filename: 'bracket-spec.pdf' }),
       ],
     });
 
@@ -827,7 +846,7 @@ describe('buildUserMessage', () => {
   it('should carry the byte length only when the reference knows it (P29)', () => {
     const message = buildUserMessage({
       text: '',
-      attachments: [{ hash: imageHash, mediaType: 'image/png', byteLength: 42 }],
+      attachments: [storedRef({ hash: imageHash, mediaType: 'image/png', byteLength: 42 })],
     });
 
     expect(message.parts).toEqual([

@@ -8,18 +8,17 @@ import { errorCategory } from '@taucad/types/constants';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import { createChatFileStore } from '#db/chat-file-storage.js';
+import type { ChatStoreClient } from '#db/chat-file-storage.js';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import type { ChatStorage } from '#types/storage.types.js';
-import type { ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryState } from '#types/project-library.types.js';
+import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
 
 /**
  * The chat store's behaviour, re-pointed from `indexeddb-storage.test.ts`.
  *
- * Every case here was a case against the browser object store before W17 moved
- * the chat to `.tau/chats/<id>/chat.json`: the atomicity rules, the
- * field-scoped writers, recency and unread, message edits, duplication and the
- * soft delete are the same contract with a file underneath, so the coverage was
- * re-pointed rather than deleted (S43, review 3 F10).
+ * The record owns metadata and a pending startup command intent. A host-log
+ * projection, not this store, owns all accepted transcript messages.
  */
 
 const decoder = new TextDecoder();
@@ -36,8 +35,12 @@ const nextProjectId = (): string => `proj_${String(projectSequence++).padStart(2
  */
 const createStoreWithFiles = (): {
   store: ReturnType<typeof createChatFileStore>;
+  reopen: (projectIds?: () => Promise<string[]>) => ReturnType<typeof createChatFileStore>;
+  reads: string[];
+  read: (path: string) => Promise<string>;
   write: (path: string, content: string) => Promise<void>;
   exists: (path: string) => Promise<boolean>;
+  directoriesRead: string[];
 } => {
   let filesystem: FileSystemProvider | undefined;
   const provider = async (): Promise<FileSystemProvider> => {
@@ -46,6 +49,8 @@ const createStoreWithFiles = (): {
   };
   const rooted = (path: string): string => path.replace(/^\/+/u, '');
   const seen = new Set<string>();
+  const reads: string[] = [];
+  const directoriesRead: string[] = [];
   /* Only a project path names a project; a composer record lives in the Home
    * workspace and must never be mistaken for one. */
   const noteProject = (path: string): void => {
@@ -71,39 +76,49 @@ const createStoreWithFiles = (): {
   async function readFile(path: string, options: 'utf8'): Promise<string>;
   async function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   async function readFile(path: string, options?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
+    reads.push(path);
     const filesystem = await provider();
     const bytes = await filesystem.readFile(rooted(path));
     return options === 'utf8' ? decoder.decode(bytes) : bytes;
   }
-  const store = createChatFileStore({
-    client: {
-      readFile,
-      writeFile: async (path, data) => {
-        noteProject(path);
-        const filesystem = await provider();
-        await filesystem.writeFile(rooted(path), data);
-      },
-      readdir: async (path) => {
-        const filesystem = await provider();
-        return filesystem.readdir(rooted(path));
-      },
-      exists: async (path) => {
-        const filesystem = await provider();
-        return filesystem.exists(rooted(path));
-      },
-      unlink: async (path) => {
-        const filesystem = await provider();
-        await filesystem.unlink(rooted(path));
-      },
-      rmdir: async (path, options) => {
-        const provided = await provider();
-        await (options?.recursive === true ? removeTree(rooted(path)) : provided.rmdir(rooted(path)));
-      },
+  const client: ChatStoreClient = {
+    readFile,
+    writeFile: async (path, data) => {
+      noteProject(path);
+      const filesystem = await provider();
+      await filesystem.writeFile(rooted(path), data);
     },
-    projectIds: async () => [...seen],
-  });
+    readdir: async (path) => {
+      directoriesRead.push(path);
+      const filesystem = await provider();
+      return filesystem.readdir(rooted(path));
+    },
+    exists: async (path) => {
+      const filesystem = await provider();
+      return filesystem.exists(rooted(path));
+    },
+    unlink: async (path) => {
+      const filesystem = await provider();
+      await filesystem.unlink(rooted(path));
+    },
+    rmdir: async (path, options) => {
+      const provided = await provider();
+      await (options?.recursive === true ? removeTree(rooted(path)) : provided.rmdir(rooted(path)));
+    },
+  };
+  const reopen = (
+    projectIds: () => Promise<string[]> = async () => [...seen],
+  ): ReturnType<typeof createChatFileStore> => createChatFileStore({ client, projectIds });
+  const store = reopen();
   return {
     store,
+    reopen,
+    reads,
+    directoriesRead,
+    read: async (path) => {
+      const provided = await provider();
+      return decoder.decode(await provided.readFile(rooted(path)));
+    },
     /* Seed the checkout the way a fetch's projection does: files appear, and
      * nothing the store wrote put them there. */
     write: async (path, content) => {
@@ -134,10 +149,11 @@ const draftMessage = (text: string): MyUIMessage => ({
   parts: [{ type: 'text', text }],
 });
 
-const startupRequest = (messageId: string, id = 'req_startup_test'): NonNullable<Chat['startupRequest']> => ({
+const startupRequest = (message: MyUIMessage, id = 'req_startup_test'): NonNullable<Chat['startupRequest']> => ({
   id,
   kind: 'regenerate-tail',
-  messageId,
+  messageId: message.id,
+  message,
   source: 'homepage-initial-message',
   createdAt: 1,
 });
@@ -178,55 +194,23 @@ describe('chat file store', () => {
 
     await expect(store.getAllChats()).resolves.toMatchObject([{ id: first.id }]);
     await expect(store.getAllChats({ includeDeleted: true })).resolves.toHaveLength(2);
+    await expect(store.getAllChatRecords()).resolves.toMatchObject([{ id: first.id }]);
+    await expect(store.getAllChatRecords({ includeDeleted: true })).resolves.toHaveLength(2);
+    await expect(store.getChatRecordsForResource('proj_two')).resolves.toEqual([]);
+    await expect(store.getChatRecordsForResource('proj_two', { includeDeleted: true })).resolves.toMatchObject([
+      { id: second.id },
+    ]);
   });
 
-  describe('chat draft resurrection — disjoint-field writes preserve every field', () => {
-    // These tests reproduce the original "draft resurrection" race: a sent
-    // draft was reappearing in the input field because two concurrent
-    // updateChat({draft}) and updateChat({messages}) calls performed
-    // get + put across two separate transactions. After atomic updateChat,
-    // per-chatId mutex, and field-scoped patchChat the production
-    // call sites use patchChat and the race is closed at every layer.
-    /* Rewritten for W8: the draft left `Chat` for the composer record, so the
-     * race is pinned on `name`, another field written beside `messages`. */
-    it('should preserve both name and messages when patchChat("name") and patchChat("messages") race repeatedly', async () => {
-      const iterations = 200;
+  describe('disjoint metadata writes', () => {
+    it('preserves concurrent name and error patches', async () => {
       const store = createStore();
       const chat = await freshChat(store);
-
-      /* oxlint-disable no-await-in-loop -- race-detection: each iteration must settle before the next */
-      for (let i = 0; i < iterations; i++) {
-        const text = `iter-${i}`;
-        const messages = [userMessage(text)];
-
-        await Promise.all([store.patchChat(chat.id, 'name', text), store.patchChat(chat.id, 'messages', messages)]);
-
-        const final = await store.getChat(chat.id);
-        expect(final?.name).toBe(text);
-        expect(final?.messages).toEqual(messages);
-      }
-      /* oxlint-enable no-await-in-loop */
-    });
-
-    it('should preserve both error and messages when patchChat("error") and patchChat("messages") race', async () => {
-      const iterations = 100;
-      const store = createStore();
-      const chat = await freshChat(store);
-
-      /* oxlint-disable no-await-in-loop -- race-detection: each iteration must settle before the next */
-      for (let i = 0; i < iterations; i++) {
-        const tag = `err-${i}`;
-        const error = sampleError(tag);
-        const messages = [userMessage(tag)];
-
-        await Promise.all([store.patchChat(chat.id, 'error', error), store.patchChat(chat.id, 'messages', messages)]);
-
-        const final = await store.getChat(chat.id);
-        expect(final?.error?.title).toBe(tag);
-        expect(final?.messages).toHaveLength(1);
-        expect(final?.messages[0]?.parts[0]).toEqual({ type: 'text', text: tag });
-      }
-      /* oxlint-enable no-await-in-loop */
+      await Promise.all([
+        store.patchChat(chat.id, 'name', 'Renamed'),
+        store.patchChat(chat.id, 'error', sampleError('Refused')),
+      ]);
+      expect(await store.getChat(chat.id)).toMatchObject({ name: 'Renamed', error: sampleError('Refused') });
     });
   });
 
@@ -252,7 +236,7 @@ describe('chat file store', () => {
 
       expect(result?.name).toBe('Replaced');
       expect(stored?.name).toBe('Replaced');
-      expect(stored?.messages).toEqual([userMessage('full')]);
+      expect(stored?.messages).toEqual([]);
     });
 
     it('should bump updatedAt for material changes and return undefined for no-op updates', async () => {
@@ -276,7 +260,7 @@ describe('chat file store', () => {
     it('should consume a matching startup request exactly once', async () => {
       const store = createStore();
       const message = userMessage('initial');
-      const request = startupRequest(message.id);
+      const request = startupRequest(message);
       const chat = await store.createChat('resource_test', {
         name: 'Startup Chat',
         messages: [message],
@@ -288,14 +272,154 @@ describe('chat file store', () => {
       const staleConsume = await store.consumeChatStartupRequest(chat.id, request.id);
 
       expect(consumed?.startupRequest).toBeUndefined();
+      expect(consumed?.messages).toEqual([]);
       expect(storedAfterConsume?.startupRequest).toBeUndefined();
+      expect(storedAfterConsume?.messages).toEqual([]);
       expect(staleConsume).toBeUndefined();
+    });
+
+    it('rehydrates the exact pending command input after reopening, including attachment refs', async () => {
+      const files = createStoreWithFiles();
+      const message: MyUIMessage = {
+        id: 'msg_attachment',
+        role: 'user',
+        metadata: { createdAt: 1, status: 'pending' },
+        parts: [
+          { type: 'file', url: 'attachments/image.png', mediaType: 'image/png' },
+          { type: 'text', text: 'Use this image' },
+        ],
+      };
+      const request = startupRequest(message);
+      const created = await files.store.createChat('resource_test', {
+        name: 'Startup Chat',
+        messages: [message],
+        startupRequest: request,
+      });
+
+      const reloaded = await files.reopen().getChat(created.id);
+      expect(reloaded?.startupRequest).toEqual(request);
+      expect(reloaded?.messages).toEqual([message]);
+    });
+
+    it('reads a new project seed by its known project id before the projects inventory is cached', async () => {
+      const files = createStoreWithFiles();
+      const message = draftMessage('first turn');
+      const created = await files.store.createChat('project_new_seed', {
+        name: 'Initial design',
+        messages: [message],
+        startupRequest: startupRequest(message),
+      });
+      const cold = files.reopen(async () => []);
+
+      expect(await cold.getChat(created.id)).toBeUndefined();
+      expect(await cold.getChat(created.id, 'project_new_seed')).toMatchObject({
+        id: created.id,
+        messages: [message],
+        startupRequest: startupRequest(message),
+      });
+    });
+
+    it.each([
+      ['missing message', undefined],
+      ['mismatched id', { id: 'msg_other', role: 'user', parts: [{ type: 'text', text: 'wrong' }] }],
+      ['assistant role', { id: 'msg_pending', role: 'assistant', parts: [{ type: 'text', text: 'wrong' }] }],
+      ['invalid shape', { id: 'msg_pending', role: 'user', parts: [{ type: 'text' }] }],
+    ])('keeps malformed %s intent undispatched and visible as history error', async (_, message) => {
+      const files = createStoreWithFiles();
+      const chatId = 'chat_malformed';
+      const record = {
+        id: chatId,
+        resourceId: 'resource_test',
+        name: 'Malformed startup',
+        createdAt: 1,
+        updatedAt: 1,
+        startupRequest: {
+          id: 'req_pending',
+          kind: 'regenerate-tail',
+          messageId: 'msg_pending',
+          message,
+          source: 'homepage-initial-message',
+          createdAt: 1,
+        },
+      };
+      await files.write(`/projects/resource_test/.tau/chats/${chatId}/chat.json`, JSON.stringify(record));
+
+      const loaded = await files.store.getChat(chatId);
+      expect(loaded?.startupRequest?.id).toBe('req_pending');
+      expect(loaded?.messages).toEqual([]);
+      expect(loaded?.error?.code).toBe('HISTORY_INVALID');
+    });
+
+    it.each([
+      ['unknown kind', { kind: 'future-kind' }],
+      ['unknown source', { source: 'future-source' }],
+      ['invalid command id', { id: 'not-a-request-id' }],
+      ['invalid timestamp', { createdAt: -1 }],
+      [
+        'non-pending message',
+        { message: { ...draftMessage('initial'), metadata: { createdAt: 1, status: 'success' } } },
+      ],
+    ])('does not dispatch a persisted startup intent with %s', async (_, override) => {
+      const files = createStoreWithFiles();
+      const path = '/projects/resource_test/.tau/chats/chat_bad_envelope/chat.json';
+      const message = draftMessage('initial');
+      await files.write(
+        path,
+        JSON.stringify({
+          id: 'chat_bad_envelope',
+          resourceId: 'resource_test',
+          name: 'Bad envelope',
+          createdAt: 1,
+          updatedAt: 1,
+          startupRequest: { ...startupRequest(message), ...override },
+        }),
+      );
+
+      const loaded = await files.store.getChat('chat_bad_envelope');
+      expect(loaded?.messages).toEqual([]);
+      expect(loaded?.error?.code).toBe('HISTORY_INVALID');
+      expect(JSON.parse(await files.read(path))).not.toHaveProperty('error');
+    });
+
+    it('does not persist a synthetic history error during an unrelated metadata patch', async () => {
+      const files = createStoreWithFiles();
+      const path = '/projects/resource_test/.tau/chats/chat_malformed/chat.json';
+      await files.write(
+        path,
+        JSON.stringify({
+          id: 'chat_malformed',
+          resourceId: 'resource_test',
+          name: 'Before',
+          createdAt: 1,
+          updatedAt: 1,
+          startupRequest: {
+            id: 'req_pending',
+            kind: 'regenerate-tail',
+            messageId: 'msg_pending',
+            message: { id: 'msg_other', role: 'user', parts: [{ type: 'text', text: 'wrong' }] },
+            source: 'homepage-initial-message',
+            createdAt: 1,
+          },
+        }),
+      );
+
+      await files.store.patchChat('chat_malformed', 'name', 'After');
+      const bytes = await files.read(path);
+      const persisted: unknown = JSON.parse(bytes);
+      expect(persisted).toMatchObject({ name: 'After', startupRequest: { id: 'req_pending' } });
+      expect(persisted).not.toHaveProperty('error');
+      const loaded = await files.store.getChat('chat_malformed');
+      expect(loaded?.error?.code).toBe('HISTORY_INVALID');
+      await files.store.updateChat('chat_malformed', { ...loaded!, name: 'Again' });
+      const updated: unknown = JSON.parse(await files.read(path));
+      expect(updated).toMatchObject({ name: 'Again' });
+      expect(updated).not.toHaveProperty('error');
     });
 
     it('should no-op when the startup request id is stale', async () => {
       const store = createStore();
       const message = userMessage('initial');
-      const request = startupRequest(message.id);
+      const request = startupRequest(message);
       const chat = await store.createChat('resource_test', {
         name: 'Startup Chat',
         messages: [message],
@@ -310,13 +434,10 @@ describe('chat file store', () => {
       expect(stored?.updatedAt).toBe(chat.updatedAt);
     });
 
-    /* Rewritten for W8: the restored draft is written to the composer record
-     * by `ChatSessionStore`; the chat row commits the transcript and the
-     * startup cleanup. */
-    it('should commit restored messages and startup cleanup together', async () => {
+    it('clears a matching startup intent without persisting restored messages', async () => {
       const store = createStore();
       const message = userMessage('cancelled');
-      const request = startupRequest(message.id);
+      const request = startupRequest(message);
       const chat = await store.createChat('resource_test', {
         name: 'Cancelled Startup',
         messages: [message],
@@ -338,34 +459,14 @@ describe('chat file store', () => {
       expect(restored?.updatedAt).toBeGreaterThan(chat.updatedAt);
     });
 
-    it('should preserve disjoint writers when cancelled restore races another field', async () => {
-      const iterations = 100;
+    it('does not treat a restored message array as a record mutation', async () => {
       const store = createStore();
       const chat = await freshChat(store);
-
-      /* oxlint-disable no-await-in-loop -- race-detection: each iteration must settle before the next */
-      for (let i = 0; i < iterations; i++) {
-        const text = `cancelled-${i}`;
-        const message = userMessage(text);
-        const request = startupRequest(message.id, `req_restore_${i}`);
-
-        await store.patchChat(chat.id, 'messages', [message]);
-        await store.patchChat(chat.id, 'startupRequest', request);
-
-        await Promise.all([
-          store.patchChat(chat.id, 'activeExecution', { kind: 'tau', model: `model-${i}` }),
-          store.commitCancelledDraftRestore(chat.id, {
-            messages: [],
-            clearStartupRequestId: request.id,
-          }),
-        ]);
-
-        const final = await store.getChat(chat.id);
-        expect(final?.activeExecution).toEqual({ kind: 'tau', model: `model-${i}` });
-        expect(final?.messages).toEqual([]);
-        expect(final?.startupRequest).toBeUndefined();
-      }
-      /* oxlint-enable no-await-in-loop */
+      await expect(
+        store.commitCancelledDraftRestore(chat.id, { messages: [userMessage('not a record')] }),
+      ).resolves.toBeUndefined();
+      const stored = await store.getChat(chat.id);
+      expect(stored?.messages).toEqual([]);
     });
   });
 
@@ -398,7 +499,7 @@ describe('chat file store', () => {
     const state = await freshProject(provider);
     const chat = await store.createChat(state.projectId, { name: 'A', messages: [] });
     await store.updateChat(chat.id, { name: 'B' });
-    await store.patchChat(chat.id, 'messages', [userMessage('hi')]);
+    await store.patchChat(chat.id, 'error', sampleError('Refused'));
     await store.softDeleteChat(chat.id);
 
     expect(await provider.getProjectLibraryState(state.projectId)).toEqual(state);
@@ -422,7 +523,7 @@ describe('chat file store', () => {
       const store = createStore();
       const seeded = await store.createChat('resource_test', {
         name: 'Original',
-        messages: [userMessage('hello')],
+        messages: [],
         error: sampleError('seed-error'),
         activeKernel: 'manifold',
       });
@@ -432,7 +533,7 @@ describe('chat file store', () => {
 
       const after = await store.getChat(seeded.id);
       expect(after?.name).toBe('Renamed');
-      expect(after?.messages).toEqual(before.messages);
+      expect(after?.messages).toEqual([]);
       expect(after?.error).toEqual(before.error);
       expect(after?.activeKernel).toBe(before.activeKernel);
       expect(after?.id).toBe(before.id);
@@ -467,6 +568,16 @@ describe('chat file store', () => {
       expect(result).toBeUndefined();
     });
 
+    it('refuses transcript writes through the old field-scoped API', async () => {
+      const files = createStoreWithFiles();
+      const chat = await freshChat(files.store);
+      await expect(files.store.patchChat(chat.id, 'messages', [userMessage('not a record')])).rejects.toThrow(
+        'host-log-owned',
+      );
+      const stored = await files.reopen().getChat(chat.id);
+      expect(stored?.messages).toEqual([]);
+    });
+
     it('should preserve both writes when patchChat for different keys race', async () => {
       const iterations = 100;
       const store = createStore();
@@ -475,16 +586,16 @@ describe('chat file store', () => {
       /* oxlint-disable no-await-in-loop -- race-detection: each iteration must settle before the next */
       for (let i = 0; i < iterations; i++) {
         const execution = { kind: 'tau', model: `model-${i}` } as const;
-        const messages = [userMessage(`m-${i}`)];
+        const error = sampleError(`error-${i}`);
 
         await Promise.all([
           store.patchChat(chat.id, 'activeExecution', execution),
-          store.patchChat(chat.id, 'messages', messages),
+          store.patchChat(chat.id, 'error', error),
         ]);
 
         const final = await store.getChat(chat.id);
         expect(final?.activeExecution).toEqual(execution);
-        expect(final?.messages).toEqual(messages);
+        expect(final?.error).toEqual(error);
       }
       /* oxlint-enable no-await-in-loop */
     });
@@ -537,7 +648,7 @@ describe('chat file store', () => {
       await expect(store.touchChatRecency('chat_missing', 1)).resolves.toBeUndefined();
     });
 
-    it('preserves recency, name, and messages across repeated concurrent writes', async () => {
+    it('preserves recency, name, and execution across repeated concurrent writes', async () => {
       const store = createStore();
       const chat = await freshChat(store);
       const initialActivityAt = chat.recencyAt!;
@@ -545,17 +656,17 @@ describe('chat file store', () => {
       /* oxlint-disable no-await-in-loop -- race regression requires each iteration to settle before the next */
       for (let index = 1; index <= 100; index++) {
         const activityAt = initialActivityAt + index;
-        const messages = [userMessage(`activity-race-${index}`)];
+        const execution = { kind: 'tau', model: `model-${index}` } as const;
         await Promise.all([
           store.touchChatRecency(chat.id, activityAt),
           store.patchChat(chat.id, 'name', `name-${index}`),
-          store.patchChat(chat.id, 'messages', messages),
+          store.patchChat(chat.id, 'activeExecution', execution),
         ]);
 
         const stored = await store.getChat(chat.id);
         expect(stored?.recencyAt).toBe(activityAt);
         expect(stored?.name).toBe(`name-${index}`);
-        expect(stored?.messages).toEqual(messages);
+        expect(stored?.activeExecution).toEqual(execution);
       }
       /* oxlint-enable no-await-in-loop */
     });
@@ -634,6 +745,19 @@ describe('chat file store', () => {
       const store = createStore();
       const result = await store.softDeleteChat('chat_missing');
       expect(result).toBeUndefined();
+    });
+
+    it('restores a tombstoned chat to the active list', async () => {
+      const store = createStore();
+      const chat = await freshChat(store);
+
+      await store.deleteChat(chat.id);
+      expect(await store.getChatsForResource(chat.resourceId)).toEqual([]);
+
+      const restored = await store.patchChat(chat.id, 'deletedAt', undefined);
+      expect(restored?.deletedAt).toBeUndefined();
+      const activeChats = await store.getChatsForResource(chat.resourceId);
+      expect(activeChats.map((entry) => entry.id)).toEqual([chat.id]);
     });
   });
 });
@@ -746,95 +870,101 @@ describe('chat file store — composer record deletion (D11)', () => {
   });
 });
 
-/**
- * A chat opened from `.tau/chats/**` alone, with no help from this session.
- *
- * `chat.json` carries no `messages` (P26/D25): the transcript is the session
- * log's, so a chat that arrived as files — a fetch's projection, a clone, a
- * second device — has to render from `events.jsonl` and nothing else.
- */
-describe('chat file store — the transcript the log implies', () => {
+/** Record lookup discovers logs but never reads transcript bytes. */
+describe('chat file store — log ownership boundary', () => {
   const chatId = 'chat_from_files';
   const projectId = 'proj_000000000000000000fs';
-  const logLine = (input: {
-    sequence: number;
-    role: 'user' | 'assistant';
-    text: string;
-    epoch?: string;
-    runId?: string;
-  }): string =>
-    `${JSON.stringify({
-      version: 1,
-      leaderEpoch: input.epoch ?? 'epoch-one',
-      sequence: input.sequence,
-      recordedAt: new Date(Date.UTC(2026, 8, 13, 6, 0, input.sequence)).toISOString(),
-      runId: input.runId ?? 'run-one',
-      type: 'message.appended',
-      message: { id: `m${String(input.sequence)}`, role: input.role, content: input.text },
-    })}\n`;
-
   const record = `${JSON.stringify(
     { id: chatId, resourceId: projectId, name: 'From the log', createdAt: 1, updatedAt: 2 },
     undefined,
     2,
   )}\n`;
 
-  const texts = (chat: Chat | undefined): readonly string[] =>
-    (chat?.messages ?? []).flatMap((message) =>
-      message.parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])),
-    );
-
-  it('renders a chat whose record was never written by this session', async () => {
-    const { store, write } = createStoreWithFiles();
+  it('reads metadata only for a chat whose log contains turns', async () => {
+    const { store, write, reads } = createStoreWithFiles();
     await write(`/projects/${projectId}/.tau/chats/${chatId}/${'chat.json'}`, record);
-    await write(
-      `/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`,
-      `${logLine({ sequence: 0, role: 'user', text: 'Make it 40mm' })}${logLine({ sequence: 1, role: 'assistant', text: 'Done.' })}`,
-    );
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`, 'accepted host events');
 
     const chat = await store.getChat(chatId);
     expect(chat?.name).toBe('From the log');
-    expect(texts(chat)).toEqual(['Make it 40mm', 'Done.']);
-    /* And the record on disk still holds no transcript: the derivation is the
-     * only history, never a second copy beside it. */
+    expect(chat?.messages).toEqual([]);
+    expect(reads).not.toContain(`/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`);
     expect(record).not.toContain('messages');
   });
 
-  /* Two devices: this one's log at `events.jsonl`, the other's projected in as
-   * `events/<deviceId>.jsonl`. Disjoint paths, so reading is a merge. */
-  it("merges another device's projected segment into the transcript", async () => {
-    const { store, write } = createStoreWithFiles();
+  it('does not cache or derive a remote segment as record messages', async () => {
+    const { store, write, reads } = createStoreWithFiles();
     await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, record);
-    await write(
-      `/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`,
-      logLine({ sequence: 0, role: 'user', text: 'From here' }),
-    );
-    await write(
-      `/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`,
-      /* A later `recordedAt` — the only ordering fact a record carries, since
-       * the epoch is a random UUID per leadership lease. */
-      logLine({ sequence: 1, role: 'user', text: 'From there', epoch: 'epoch-two', runId: 'run-two' }),
-    );
-
-    expect(texts(await store.getChat(chatId))).toEqual(['From here', 'From there']);
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`, 'remote host events');
+    const chat = await store.getChat(chatId);
+    expect(chat?.messages).toEqual([]);
+    expect(reads).not.toContain(`/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`);
   });
 
-  it("refreshes a cached transcript when another device's segment changes", async () => {
+  it('lists modern metadata without reading either local or foreign log segments', async () => {
+    const { store, write, reads, directoriesRead } = createStoreWithFiles();
+    const modernRecord = JSON.stringify({
+      id: chatId,
+      resourceId: projectId,
+      name: 'Modern chat',
+      createdAt: 1,
+      updatedAt: 2,
+      recencyAt: 3,
+    });
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, modernRecord);
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`, 'local host events');
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`, 'remote host events');
+
+    expect(await store.getChatRecordsForResource(projectId)).toEqual([
+      expect.objectContaining({ id: chatId, name: 'Modern chat', recencyAt: 3 }),
+    ]);
+    expect(reads).toEqual([`/projects/${projectId}/.tau/chats/${chatId}/chat.json`]);
+    expect(directoriesRead).toEqual([`/projects/${projectId}/.tau/chats`]);
+
+    const fullChats = await store.getChatsForResource(projectId);
+    expect(fullChats[0]?.messages).toEqual([]);
+    expect(reads).not.toContain(`/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`);
+    expect(reads).not.toContain(`/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`);
+  });
+
+  it('keeps log-only chats visible and falls back to creation time for legacy metadata', async () => {
+    const { store, write } = createStoreWithFiles();
+    const logOnlyId = 'chat_log_only';
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, record);
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`, 'local host events');
+    await write(`/projects/${projectId}/.tau/chats/${logOnlyId}/events.jsonl`, 'remote host events');
+
+    const full = await store.getChatsForResource(projectId);
+    const metadata = await store.getChatRecordsForResource(projectId);
+    expect(metadata.map((chat) => chat.id).sort((left, right) => left.localeCompare(right))).toEqual(
+      full.map((chat) => chat.id).sort((left, right) => left.localeCompare(right)),
+    );
+    expect(metadata.map((chat) => chat.recencyAt).sort((left, right) => (left ?? 0) - (right ?? 0))).toEqual(
+      full.map((chat) => getChatRecencyAt(chat)).sort((left, right) => left - right),
+    );
+    expect(metadata.find((chat) => chat.id === chatId)?.recencyAt).toBe(1);
+    expect(metadata.find((chat) => chat.id === logOnlyId)?.recencyAt).toBe(0);
+    expect(metadata.find((chat) => chat.id === logOnlyId)?.name).toBe('New chat');
+  });
+
+  it('reads changed projected metadata on the next listing', async () => {
     const { store, write } = createStoreWithFiles();
     await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, record);
-    await write(
-      `/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`,
-      logLine({ sequence: 0, role: 'user', text: 'Before sync', epoch: 'epoch-two' }),
-    );
-    expect(texts(await store.getChat(chatId))).toEqual(['Before sync']);
+    expect(await store.getChatRecordsForResource(projectId)).toMatchObject([{ name: 'From the log', recencyAt: 1 }]);
 
     await write(
-      `/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`,
-      `${logLine({ sequence: 0, role: 'user', text: 'Before sync', epoch: 'epoch-two' })}${logLine({ sequence: 1, role: 'assistant', text: 'After sync', epoch: 'epoch-two' })}`,
+      `/projects/${projectId}/.tau/chats/${chatId}/chat.json`,
+      JSON.stringify({
+        id: chatId,
+        resourceId: projectId,
+        name: 'After sync',
+        createdAt: 1,
+        updatedAt: 3,
+        recencyAt: 3,
+      }),
     );
-    store.invalidateLog(chatId);
 
-    expect(texts(await store.getChat(chatId))).toEqual(['Before sync', 'After sync']);
+    expect(await store.getChatRecordsForResource(projectId)).toMatchObject([{ name: 'After sync', recencyAt: 3 }]);
   });
 
   /* A record that has not landed yet is a real runtime state, not a migration
@@ -842,13 +972,17 @@ describe('chat file store — the transcript the log implies', () => {
    * (a1 review R4). */
   it('lists a chat directory that holds a log but no record yet', async () => {
     const { store, write } = createStoreWithFiles();
-    await write(
-      `/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`,
-      logLine({ sequence: 0, role: 'user', text: 'Arrived first' }),
-    );
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`, 'accepted host events');
 
     const listed = await store.getChatsForResource(projectId);
     expect(listed.map((chat) => chat.id)).toEqual([chatId]);
-    expect(texts(listed[0])).toEqual(['Arrived first']);
+    expect(listed[0]?.messages).toEqual([]);
+  });
+
+  it('lists a foreign-log-only chat directory before its record arrives', async () => {
+    const { store, write } = createStoreWithFiles();
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`, 'remote host events');
+    const listed = await store.getChatsForResource(projectId);
+    expect(listed.map((chat) => chat.id)).toEqual([chatId]);
   });
 });

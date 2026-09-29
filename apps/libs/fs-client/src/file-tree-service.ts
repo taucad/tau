@@ -1,5 +1,12 @@
-import type { FileContentMetadata, FileEntry, FileProvenance, FileStatEntry, FileStat } from '@taucad/types';
-import type { FileTreeNode } from '@taucad/filesystem';
+import type {
+  FileContentMetadata,
+  FileEntry,
+  FileProvenance,
+  FileStatEntry,
+  FileStat,
+  FileTreeContentMetadata,
+} from '@taucad/types';
+import type { DirectoryStatRow, FileTreeNode } from '@taucad/filesystem';
 import { getFileContentMetadata } from '@taucad/filesystem';
 import { Topic } from '@taucad/events';
 import type { FileContentService, ContentChangeEvent } from '#file-content-service.js';
@@ -81,8 +88,10 @@ type PollingTelemetryState = {
 
 const isFileTreeFileNode = (entry: FileTreeNode): entry is FileTreeFileNode => entry.children === undefined;
 
-const fileMetadataFields = (metadata: FileContentMetadata): FileContentMetadata =>
-  metadata.contentKind === 'text' ? { contentKind: 'text', lineCount: metadata.lineCount } : { contentKind: 'binary' };
+const fileMetadataFields = (metadata: FileTreeContentMetadata): FileTreeContentMetadata =>
+  metadata.contentKind === 'text'
+    ? { contentKind: 'text', ...(metadata.lineCount === undefined ? {} : { lineCount: metadata.lineCount }) }
+    : { contentKind: 'binary' };
 
 /**
  * Lightweight file listing entry for search / complete-tree snapshots.
@@ -92,7 +101,7 @@ const fileMetadataFields = (metadata: FileContentMetadata): FileContentMetadata 
 export type FileItem = {
   path: string;
   size: number;
-} & FileContentMetadata;
+} & FileTreeContentMetadata;
 
 type FileTreeServiceInit = {
   proxy: ComposedViewClient;
@@ -140,7 +149,9 @@ export class FileTreeService {
   private readonly paths: WorkspacePathResolver;
   private readonly visibility: VisibilityProvider;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
-  private pendingRefreshPath: string | undefined;
+  /* Every directory a mutation touched in this window. A re-read lists one
+   * directory, so collapsing two to their common ancestor re-read neither. */
+  private readonly pendingRefreshPaths = new Set<string>();
   private pollingTimer: ReturnType<typeof setTimeout> | undefined;
   private pollingActive = false;
   private visibilityUnsub: (() => void) | undefined;
@@ -160,6 +171,9 @@ export class FileTreeService {
   private _completeTreeVersion = 0;
   private readonly _listingPathSubscribers = new PathSubscriberRegistry<void>();
   private readonly _listingGuard = new RefreshGenerationGuard();
+  /* Latest-started re-read wins, per directory: a refresh of one directory
+   * never cancels another's, and an older listing never lands over a newer. */
+  private readonly _refreshGuard = new RefreshGenerationGuard();
   private readonly _inFlightDirectoryList = new Map<string, Promise<void>>();
   private readonly unsubscribeChannel: Array<() => void>;
   readonly #treeTopic = new Topic<void>({ name: 'FileTreeService.tree' });
@@ -348,6 +362,15 @@ export class FileTreeService {
     return this.proxy.stat(absolutePath);
   }
 
+  /** Exact current children for agent RPCs, independent of the cached UI tree. */
+  public async listDirectoryExact(path: string): Promise<DirectoryStatRow[]> {
+    try {
+      return await this.proxy.readDirectoryExact(this.paths.toAbsoluteWorkspacePath(path));
+    } catch (error) {
+      throw new DirectoryListingFailedError(classifyDirectoryListingError(error, path));
+    }
+  }
+
   /**
    * Get all file stats in a directory recursively via proxy.
    * @param path - Directory path to enumerate.
@@ -455,27 +478,11 @@ export class FileTreeService {
   // === Refresh Control ===
 
   /**
-   * Debounce tree refresh. Multiple calls coalesce to common ancestor.
-   * @param path - Path hint whose refresh should be merged with pending work.
+   * Debounce tree refresh. Calls inside one window coalesce into one re-read per directory.
+   * @param path - Directory to re-read once the window closes.
    */
   public scheduleRefresh(path: string): void {
-    if (this.pendingRefreshPath === undefined) {
-      this.pendingRefreshPath = path;
-    } else if (this.pendingRefreshPath === '' || path === '') {
-      this.pendingRefreshPath = '';
-    } else {
-      const currentParts = this.pendingRefreshPath.split('/');
-      const newParts = path.split('/');
-      const commonParts: string[] = [];
-      for (let i = 0; i < Math.min(currentParts.length, newParts.length); i++) {
-        if (currentParts[i] === newParts[i]) {
-          commonParts.push(currentParts[i]!);
-        } else {
-          break;
-        }
-      }
-      this.pendingRefreshPath = commonParts.join('/');
-    }
+    this.pendingRefreshPaths.add(path);
 
     if (this.refreshTimer !== undefined) {
       clearTimeout(this.refreshTimer);
@@ -483,9 +490,9 @@ export class FileTreeService {
 
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = undefined;
-      const pendingPath = this.pendingRefreshPath;
-      this.pendingRefreshPath = undefined;
-      if (pendingPath !== undefined) {
+      const pendingPaths = [...this.pendingRefreshPaths];
+      this.pendingRefreshPaths.clear();
+      for (const pendingPath of pendingPaths) {
         void this.executeRefresh(pendingPath);
       }
     }, this.refreshDebounce);
@@ -636,7 +643,7 @@ export class FileTreeService {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = undefined;
     }
-    this.pendingRefreshPath = undefined;
+    this.pendingRefreshPaths.clear();
     // The new root has not reported native observation yet: poll it promptly.
     this.nativelyObserved = false;
     this.reschedulePoll?.();
@@ -753,22 +760,32 @@ export class FileTreeService {
     this.optimisticDelete(relativePath);
   }
 
+  /*
+   * The optimistic patch shows the move at once; the parent's re-read is what
+   * makes it true (Rule 7). A rename from a name the tree never listed — a
+   * staged copy swapped into place — patches nothing, and a listing taken
+   * mid-swap can land after the patch, so only a re-read that starts after
+   * the event settles the directory.
+   */
   private handleFileRenamedRelative(event: WorkerRelativeRenameEvent): void {
     const oldRelative = event.oldPath;
     const newRelative = event.newPath;
     if (oldRelative !== undefined && newRelative !== undefined) {
       this.optimisticRename(oldRelative, newRelative);
-      return;
-    }
-    if (oldRelative !== undefined) {
+    } else if (oldRelative !== undefined) {
       this.optimisticDelete(oldRelative);
-      return;
     }
-    if (newRelative !== undefined) {
-      const parentPath = this.paths.parentOf(newRelative);
-      if (this.isDirectoryResolvedKey(parentPath)) {
-        this.scheduleRefresh(parentPath);
+    for (const path of [oldRelative, newRelative]) {
+      if (path !== undefined) {
+        this.refreshResolvedParent(path);
       }
+    }
+  }
+
+  private refreshResolvedParent(relativePath: string): void {
+    const parentPath = this.paths.parentOf(relativePath);
+    if (this.isDirectoryResolvedKey(parentPath)) {
+      this.scheduleRefresh(parentPath);
     }
   }
 
@@ -932,6 +949,11 @@ export class FileTreeService {
   }
 
   private optimisticAdd(path: string, metadata: { size: number } & FileContentMetadata): void {
+    /* A write to a listed file changes its content, never what the view stamped on it. */
+    if (this._tree.get(path)?.type === 'file') {
+      this.updateFileMetadata(path, metadata);
+      return;
+    }
     const parts = path.split('/');
     const name = parts.at(-1) ?? path;
     const newTree = new Map(this._tree);
@@ -963,6 +985,7 @@ export class FileTreeService {
       mtimeMs: Date.now(),
       isLoaded: entry.isLoaded,
       ...fileMetadataFields(metadata),
+      ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
     });
     this._tree = newTree;
     this.notifyTreeSubscribers();
@@ -1012,15 +1035,13 @@ export class FileTreeService {
     if (this._epoch !== epoch) {
       return;
     }
-    this._refreshAbortController?.abort();
-    const controller = new AbortController();
-    this._refreshAbortController = controller;
 
     try {
       const absolutePath = this.paths.toAbsoluteWorkspacePath(path);
       const relativeDirectory = this.relativeDirectoryKeyFromUserPath(path);
+      const generation = this._refreshGuard.begin(relativeDirectory);
       const entries = await this.proxy.readDirectory(absolutePath);
-      if (controller.signal.aborted) {
+      if (this._epoch !== epoch || !this._refreshGuard.isCurrent(relativeDirectory, generation)) {
         return;
       }
       this.mergeChildren(relativeDirectory, entries);
@@ -1066,12 +1087,13 @@ export class FileTreeService {
         if (!this.isDirectoryResolvedKey(path)) {
           continue;
         }
+        const generation = this._refreshGuard.begin(path);
         // oxlint-disable-next-line no-await-in-loop -- Parent directories must merge before their still-present resolved descendants.
         const entries = await this.proxy.readDirectory(this.paths.toAbsoluteWorkspacePath(path));
         if (controller !== this._refreshAbortController) {
           return;
         }
-        if (this.isDirectoryResolvedKey(path)) {
+        if (this._refreshGuard.isCurrent(path, generation) && this.isDirectoryResolvedKey(path)) {
           this.mergeChildren(path, entries);
         }
       }

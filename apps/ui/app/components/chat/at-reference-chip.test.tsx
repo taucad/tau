@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render as renderBare, screen, waitFor } from '@testing-library/react';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry } from '@taucad/types';
 import type { Chat } from '@taucad/chat';
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
+
+/** The app mounts one TooltipProvider at its root; file chips carry a path tooltip. */
+const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: TooltipProvider });
 
 type FileFileEntry = Extract<FileEntry, { type: 'file' }>;
 type DirectoryFileEntry = Extract<FileEntry, { type: 'dir' }>;
@@ -159,15 +163,27 @@ describe('AtReferenceChip', () => {
     expect(screen.getByText('highlighted text')).toBeInTheDocument();
   });
 
-  it('should render skill chip when data-slash-command is set', () => {
+  it('should render a skill chip for a token the chat knows', () => {
     render(
-      <AtReferenceProvider treeService={createMockTreeService()} chats={[]}>
-        <AtReferenceChip data-slash-command='create-policy' />
+      <AtReferenceProvider treeService={createMockTreeService()} chats={[]} knownTokens={new Set(['$imagegen'])}>
+        <AtReferenceChip data-invocation='$imagegen' />
       </AtReferenceProvider>,
     );
 
-    expect(screen.getByText('/create-policy')).toBeInTheDocument();
+    /* A chip carries its type icon beside the label; plain text has none. */
+    expect(screen.getByText('$imagegen').parentElement?.querySelector('svg')).toBeInTheDocument();
     expect(screen.queryByTestId('file-link')).not.toBeInTheDocument();
+  });
+
+  it('should render an unknown token as plain text', () => {
+    const { container } = render(
+      <AtReferenceProvider treeService={createMockTreeService()} chats={[]} knownTokens={new Set(['/create-policy'])}>
+        <AtReferenceChip data-invocation='$5' />
+      </AtReferenceProvider>,
+    );
+
+    expect(container.querySelector('svg')).not.toBeInTheDocument();
+    expect(container).toHaveTextContent('$5');
   });
 
   it('should render fallback mark when neither data attribute is present', () => {

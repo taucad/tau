@@ -1,6 +1,11 @@
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
 import { addProjectConfiguration } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing.js';
-import { describe, expect, it } from 'vitest';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
+import { afterAll, describe, expect, it } from 'vitest';
+import type { AnyMachineSnapshot, AnyStateMachine } from 'xstate';
 
 import { machineGenerator } from '#generators/machine/generator.js';
 import { packageGenerator } from '#generators/package/generator.js';
@@ -175,5 +180,58 @@ describe('machine generator', () => {
     const manifest = readJson<{ exports: Record<string, string> }>(tree, 'packages/camera/package.json');
     expect(manifest.exports['./orbit-machine']).toBe('./src/orbit.machine.ts');
     expect(manifest.exports['./dolly-machine']).toBe('./src/dolly.machine.ts');
+  });
+
+  describe('the generated machine contract', () => {
+    // Generated sources import only `xstate`, which resolves from the root node_modules (tool-output location policy).
+    const scratch = resolve(
+      import.meta.dirname,
+      '../../../../../node_modules/.cache/workspace-plugin/machine-generator',
+    );
+    afterAll(() => {
+      rmSync(scratch, { recursive: true, force: true });
+    });
+
+    const generateAndLoad = async (): Promise<Record<string, unknown>> => {
+      const tree = createTreeWithEmptyWorkspace();
+      await packageGenerator(tree, { name: 'camera' });
+      await machineGenerator(tree, { name: 'orbit', project: 'camera', subpath: 'orbit-machine' });
+      mkdirSync(scratch, { recursive: true });
+      const path = join(scratch, `orbit-${Date.now()}.machine.ts`);
+      writeFileSync(path, readText(tree, 'packages/camera/src/orbit.machine.ts'));
+      return (await import(path)) as Record<string, unknown>;
+    };
+
+    it('should generate a machine with no unanswered public event', async () => {
+      const module = await generateAndLoad();
+      const machine = module['orbitMachine'] as AnyStateMachine;
+      const ignore = (module['orbitIgnoredEvents'] ?? []) as ReadonlyArray<readonly [string, string]>;
+      const options = {
+        input: {},
+        events: [{ type: 'reset' }, { type: 'xstate.error.execution' }],
+        limit: 100,
+        serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
+      };
+
+      expect(unansweredEvents(machine, { ...options, ignore })).toEqual([]);
+      expect(unreachedStates(machine, options)).toEqual([]);
+    });
+
+    it('should generate a root onError, a version and a factory', async () => {
+      const tree = createTreeWithEmptyWorkspace();
+      await packageGenerator(tree, { name: 'camera' });
+      await machineGenerator(tree, { name: 'orbit', project: 'camera', subpath: 'orbit-machine' });
+
+      const source = readText(tree, 'packages/camera/src/orbit.machine.ts');
+      const test = readText(tree, 'packages/camera/src/orbit.machine.test.ts');
+      const manifest = readJson<{ devDependencies: Record<string, string> }>(tree, 'packages/camera/package.json');
+      expect(source).toContain("version: '1',");
+      expect(source).toMatch(/^ {2}onError: /mu);
+      expect(source).toContain('export const createOrbitActor = (');
+      expect(source).toContain('export const orbitIgnoredEvents');
+      expect(test).toContain("from '@taucad/xstate-testing/inspect'");
+      expect(test).toContain('unansweredEvents(orbitMachine');
+      expect(manifest.devDependencies['@taucad/xstate-testing']).toBe('workspace:*');
+    });
   });
 });

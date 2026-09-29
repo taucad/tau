@@ -33,6 +33,14 @@ export type BundleOptions = {
   readonly maxShardTokens?: number;
   /** Groups materialized eagerly; the rest are generated but fetched on demand. */
   readonly eagerGroups?: readonly string[];
+  /** Authored on-demand references copied into the generated bundle. */
+  readonly authoredFiles?: Readonly<Record<string, string>>;
+  /** A second public authoring surface, kept separate when names overlap the primary corpus. */
+  readonly supplementalApi?: {
+    readonly corpus: ApiCorpus;
+    readonly prefix: string;
+    readonly groupBy: (entry: ApiEntry) => string;
+  };
 };
 
 /** A written bundle: its declaration, and what it cost. @public */
@@ -86,6 +94,30 @@ export const writeCorpusBundle = async (
   for (const shard of shards) {
     written.set(`${shard.slug}.md`, renderShard(shard, corpus));
   }
+  const supplemental = options.supplementalApi;
+  let supplementalShardCount = 0;
+  if (supplemental !== undefined) {
+    const namedShards = planShards(supplemental.corpus, { groupBy: supplemental.groupBy }).map((shard) => ({
+      ...shard,
+      slug: `${supplemental.prefix}-${shard.slug}`,
+    }));
+    supplementalShardCount = namedShards.length;
+    written.set(
+      `${supplemental.prefix}-api-index.md`,
+      renderIndex(supplemental.corpus, namedShards, {
+        title: `${supplemental.corpus.metadata.packageName} authoring API index`,
+      }),
+    );
+    for (const shard of namedShards) {
+      written.set(`${shard.slug}.md`, renderShard(shard, supplemental.corpus));
+    }
+  }
+  for (const [file, contents] of Object.entries(options.authoredFiles ?? {})) {
+    if (written.has(file)) {
+      throw new Error(`authored reference collides with generated file: ${file}`);
+    }
+    written.set(file, contents);
+  }
 
   await rm(directory, { recursive: true, force: true });
   await mkdir(directory, { recursive: true });
@@ -104,7 +136,7 @@ export const writeCorpusBundle = async (
       body: skill.markdown,
     },
     bodyTokens: skill.bodyTokens,
-    shardCount: shards.length,
+    shardCount: shards.length + supplementalShardCount,
     bytes,
   };
 };

@@ -23,8 +23,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import {
   ModelComponentActionContextContent,
   ModelComponentActionDropdown,
-  MaterialSwatch,
 } from '#components/geometry/cad/model-component-action-menu.js';
+import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject } from '#hooks/use-project.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
@@ -32,7 +32,7 @@ import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#mac
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
-import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import {
   PaneviewHeader,
   PaneviewHeaderAction,
@@ -155,7 +155,7 @@ export function ModelPanelBody({ onRequestOpen }: { readonly onRequestOpen?: () 
       <div data-slot='model-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
         <SearchInput
           aria-label='Filter parts'
-          placeholder='Filter parts...'
+          placeholder='Filter parts…'
           value={query}
           className='h-7 min-w-0 bg-background'
           onChange={(event) => {
@@ -228,24 +228,23 @@ function ChatGeometryExplorerContent({
   readonly query: string;
   readonly revealTarget: ModelComponentRevealTarget | undefined;
 }): React.JSX.Element {
-  const viewSettings = useSelector(project.editorRef, (state) => state.context.viewSettings);
   const resolveGraphicsForFile = useCallback(
     (entryPath: string): GraphicsActorRef | undefined => {
       for (const [viewId, graphicsRef] of project.viewGraphics) {
-        if (viewSettings[viewId]?.entryPath === entryPath) {
+        if (project.viewRecords.get(viewId)?.entryPath === entryPath) {
           return graphicsRef;
         }
       }
       return undefined;
     },
-    [project.viewGraphics, viewSettings],
+    [project.viewGraphics, project.viewRecords],
   );
   const entries = useMemo(
     () =>
-      sortGeometryUnitEntries([...project.geometryUnits.entries()], project.mainEntryPath).map(
-        ([entryPath]): [string, GraphicsActorRef | undefined] => [entryPath, resolveGraphicsForFile(entryPath)],
+      listGeometryEntryPaths(project.geometryUnits, project.viewRecords, project.mainEntryPath).map(
+        (entryPath): [string, GraphicsActorRef | undefined] => [entryPath, resolveGraphicsForFile(entryPath)],
       ),
-    [project.geometryUnits, project.mainEntryPath, resolveGraphicsForFile],
+    [project.geometryUnits, project.mainEntryPath, resolveGraphicsForFile, project.viewRecords],
   );
 
   if (entries.length === 0) {

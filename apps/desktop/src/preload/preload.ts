@@ -27,13 +27,15 @@ import {
   appIconThemeChannel,
   agentHostSessionChannels,
   externalAgentsChannel,
+  machinesChannels,
   quitChannels,
   computeControlChannels,
   readBootstrap,
   servicesPortRelayTag,
+  slicersChannels,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
-import { openFilesIpcChannel, quickLookIpcChannels } from '#shared/quick-look.js';
+import { generatedImageIpcChannel, openFilesIpcChannel, quickLookIpcChannels } from '#shared/quick-look.js';
 import type {
   DesktopOpenFile,
   QuickLookPathRequest,
@@ -92,6 +94,25 @@ contextBridge.exposeInMainWorld('tau', {
       await ipcRenderer.invoke(agentHostSessionChannels.release, { workspaceRoot, projectId, attachmentId });
     },
   },
+  machines: {
+    /* The one route a secret takes: invoke → main → the utility's ceremony,
+     * which saves it once the printer accepts it. Omit `accessCode` to reuse
+     * a saved one. The port relay above carries the non-secret half. */
+    completeBinding: async (input: { ceremonyId: string; address?: string; accessCode?: string }): Promise<unknown> =>
+      ipcRenderer.invoke(machinesChannels.completeBinding, input),
+  },
+  slicers: {
+    /* Read-only presets and settings (D12); refusals arrive as `{ ok: false, error }`. */
+    bambuStudio: {
+      status: async (): Promise<unknown> => ipcRenderer.invoke(slicersChannels.bambuStudio.status),
+      catalog: async (filter?: unknown): Promise<unknown> =>
+        ipcRenderer.invoke(slicersChannels.bambuStudio.catalog, filter),
+      resolveSelection: async (input: unknown): Promise<unknown> =>
+        ipcRenderer.invoke(slicersChannels.bambuStudio.resolveSelection, input),
+      settings: async (input: unknown): Promise<unknown> =>
+        ipcRenderer.invoke(slicersChannels.bambuStudio.settings, input),
+    },
+  },
   nodeFs: { homeRoot: bootstrap.homeRoot },
   runtimeKernelIds: bootstrap.runtimeKernelIds,
   /* A call, not a value (D17): main answers when ACP discovery settles, which no
@@ -135,6 +156,13 @@ contextBridge.exposeInMainWorld('tau', {
   openFiles: {
     consume: async (): Promise<DesktopOpenFile[]> =>
       (await ipcRenderer.invoke(openFilesIpcChannel)) as DesktopOpenFile[],
+  },
+  generatedImages: {
+    read: async (path: string): Promise<{ readonly path: string; readonly bytes: Uint8Array<ArrayBuffer> }> =>
+      (await ipcRenderer.invoke(generatedImageIpcChannel, path)) as {
+        readonly path: string;
+        readonly bytes: Uint8Array<ArrayBuffer>;
+      },
   },
   quickLook: {
     directPreviewExtensions: quickLookManifest.directElectronPreviewExtensions,

@@ -42,7 +42,7 @@ test('downloads a project archive of its own files, without its control plane', 
   await openSeededProject();
 
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
-  await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions...'), 'Download ZIP');
+  await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), 'Download ZIP');
   const command = selectors.getByRole('option', { name: /^Download ZIP(?:\s|$)/u });
   await target.expectVisible(command, 15_000);
 

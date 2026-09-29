@@ -1,0 +1,144 @@
+{
+  "authority": {
+    "canonicalProfile": "geospec-jcs-v1",
+    "protocolVersion": 3,
+    "registryVersion": 5,
+    "requirementRevision": "M4-TRUSTED-EVALUATOR-A1-W11-demo-r2"
+  },
+  "claims": [
+    {
+      "canonicalClaimSha256": "ff1264c8b57243a942fcb028a9422bab6882c6bc4389498024012221ad03a0a7",
+      "claim": {
+        "capability": "toHaveNoComponentInterference",
+        "claimId": "family.toHaveNoComponentInterference.positive",
+        "payload": {
+          "expected": {
+            "allowances": [
+              {
+                "left": "housing",
+                "maxVolume": 381,
+                "reason": "source-observation allowance",
+                "right": "shaft"
+              }
+            ],
+            "tolerance": 0.001
+          },
+          "kind": "componentInterference"
+        },
+        "polarity": "positive",
+        "subjectSlots": ["subject"],
+        "workUnitBudget": 8000000
+      }
+    },
+    {
+      "canonicalClaimSha256": "a5180ad05afecfb51cec5343220a9c14c59d78b2385edc168b85ba0582f7e01c",
+      "claim": {
+        "capability": "toHaveNoComponentInterference",
+        "claimId": "family.toHaveNoComponentInterference.negative",
+        "payload": {
+          "expected": {
+            "allowances": [
+              {
+                "left": "housing",
+                "maxVolume": 381,
+                "reason": "source-observation allowance",
+                "right": "shaft"
+              }
+            ],
+            "tolerance": 0.001
+          },
+          "kind": "componentInterference"
+        },
+        "polarity": "negative",
+        "subjectSlots": ["subject"],
+        "workUnitBudget": 8000000
+      }
+    },
+    {
+      "canonicalClaimSha256": "04b3b3e3767b452e11f774e27587f1fe43b2983b060c05ecd14a1adc02617526",
+      "claim": {
+        "capability": "toHaveNoComponentInterference",
+        "claimId": "required-pair",
+        "payload": {
+          "expected": {
+            "pairs": [{ "left": "A", "right": "absent" }],
+            "tolerance": 0.001
+          },
+          "kind": "componentInterference"
+        },
+        "polarity": "positive",
+        "subjectSlots": ["part"],
+        "workUnitBudget": 8000000
+      }
+    }
+  ],
+  "requirements": {
+    "freshChallengeRequired": true,
+    "maxClaims": 16,
+    "maxSubjectBytes": 16777216,
+    "maxTotalSubjectBytes": 67108864,
+    "workerDeadlineMs": 30000
+  },
+  "schema": "geospec-approved-evaluation-plan-v2",
+  "subjects": [
+    {
+      "expectedIdentity": "7b40f4f0f21860f92b42229cabd8879b694e1594c0b577c64db069f2a9f773cd",
+      "format": "step",
+      "frame": { "coordinateSystem": "z-up", "outputUnit": "mm", "sourceUnit": "auto" },
+      "identityField": "subjectHash",
+      "ingestRequest": {
+        "canonicalProfile": "geospec-jcs-v1",
+        "format": "step",
+        "frame": { "coordinateSystem": "z-up", "outputUnit": "mm", "sourceUnit": "auto" },
+        "ingestOptions": { "name": "clearance.aabb-gap-false-positive" },
+        "method": "ingestSubject",
+        "primaryByteLength": 29458,
+        "protocolVersion": 3,
+        "registryVersion": 5,
+        "requestId": "ingest:clearance.aabb-gap-false-positive",
+        "resources": []
+      },
+      "ingestRequestSha256": "99775998b95d257357ef9b59a97b25b1c8f15fc079edc7cb8df6df0482fda7f8",
+      "primary": {
+        "byteLength": 29458,
+        "path": "../../../docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/native-inputs-b55/c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+        "sha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2"
+      },
+      "resources": [],
+      "slot": "subject"
+    },
+    {
+      "expectedIdentity": "5ee8cd9f75f8e15390814eeced8693a27516c2cb7944d3fb8383fe0ef063d9c9",
+      "format": "gltf",
+      "frame": { "coordinateSystem": "z-up", "outputUnit": "mm", "sourceUnit": "mm" },
+      "identityField": "subjectHash",
+      "ingestRequest": {
+        "canonicalProfile": "geospec-jcs-v1",
+        "format": "gltf",
+        "frame": { "coordinateSystem": "z-up", "outputUnit": "mm", "sourceUnit": "mm" },
+        "ingestOptions": {},
+        "method": "ingestSubject",
+        "primaryByteLength": 481,
+        "protocolVersion": 3,
+        "registryVersion": 5,
+        "requestId": "ingest:A-scale1",
+        "resources": [{ "byteLength": 54, "name": "mesh.bin" }]
+      },
+      "ingestRequestSha256": "8e8e597a154bd95316a4f3f245f396eaf50201c8701bd453febed2950659a37c",
+      "primary": {
+        "byteLength": 481,
+        "path": "../../../docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/principal-integration-a14/binding/assets/9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60.gltf",
+        "sha256": "9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60"
+      },
+      "resources": [
+        {
+          "byteLength": 54,
+          "name": "mesh.bin",
+          "path": "../../../docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/principal-integration-a14/binding/assets/44e591ff58befb886e14f45d6b795bd74a669e8c2e3604e2fb0b7687ec9d45a8.bin",
+          "sha256": "44e591ff58befb886e14f45d6b795bd74a669e8c2e3604e2fb0b7687ec9d45a8"
+        }
+      ],
+      "slot": "part"
+    }
+  ]
+}

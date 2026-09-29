@@ -9,10 +9,7 @@
     "jsx": "react-jsx",
 <% } -%>
     "types": ["node"],
-    "target": "ESNext",
-    "paths": {
-      "#*": ["./src/*"]
-    }
+    "target": "ESNext"
   },
   "include": ["src/**/*.ts"<% if (typeof react !== 'undefined' && react) { %>, "src/**/*.tsx"<% } %>],
   "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "src/**/*.test-d.ts"<% if (typeof react !== 'undefined' && react) { %>, "src/**/*.spec.tsx", "src/**/*.test.tsx"<% } %>]

@@ -1,0 +1,129 @@
+{
+  "configs": {
+    "AttachGeneration.reuse.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoReuseOfClosingLauncher"
+      },
+      "kind": "witness",
+      "ref": "L6 N2; FixUtil guards it (W0.11, RV6-F3)"
+    },
+    "AttachGeneration.aba-deadline.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoStaleReleaseDeletesNewEpoch"
+      },
+      "kind": "witness",
+      "ref": "L6 N3; FixMain guards it (W0.11, RV6-F3)"
+    },
+    "AttachGeneration.fixed.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W0.11; W6 RH-S1, RH-A8: FixMain and FixUtil, ConnectServed, and W6.r1 finding 14's ReleasedHostCloses (1,882 states with `act`)"
+    },
+    "AttachGeneration.export.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W6.f1 graph export (graphs.AttachGeneration): projectHost replay and walk"
+    },
+    "AttachGeneration.main-only-NoReuseOfClosingLauncher.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoReuseOfClosingLauncher"
+      },
+      "kind": "witness",
+      "ref": "W6 RH-S1, RH-A8: FixMain alone leaves L6 N2 (9-state trace)"
+    },
+    "AttachGeneration.util-only-NoStaleReleaseDeletesNewEpoch.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoStaleReleaseDeletesNewEpoch"
+      },
+      "kind": "witness",
+      "ref": "W6 RH-S1, RH-A8: FixUtil alone leaves L6 N3 (14-state trace)"
+    },
+    "AcpSessions.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W10 I33 safety parts, EA-S1"
+    },
+    "AcpSessions.target-live.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W10 I33 CancelSettles, Terminates"
+    },
+    "AcpSessions.export.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W10 graph export (graphs.AcpSessions)"
+    },
+    "AcpSessions.target-two-runs.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W10 I33 under the L2a D2 gap"
+    },
+    "AcpSessions.target-two-runs-live.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W10 liveness, two runs per key"
+    },
+    "AcpSessions.no-lease.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoPromptPastCapability"
+      },
+      "kind": "witness",
+      "ref": "W10 LEASE knob"
+    },
+    "AcpSessions.no-evict-on-end.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostLimitIdle"
+      },
+      "kind": "witness",
+      "ref": "W10 EVICT_ON_END knob"
+    },
+    "AcpSessions.no-keep-key.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OneSessionPerKey"
+      },
+      "kind": "witness",
+      "ref": "W10 KEEP_KEY knob"
+    },
+    "AcpSessions.no-busy-guard.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoEvictBusy"
+      },
+      "kind": "witness",
+      "ref": "W10 BUSY_GUARD knob"
+    },
+    "AcpSessions.no-hard-close.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "Terminates"
+      },
+      "kind": "witness",
+      "ref": "W10 HARD_CLOSE knob"
+    },
+    "AcpSessions.no-queued-cancel.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoPromptAfterCancel"
+      },
+      "kind": "witness",
+      "ref": "W10 QUEUED_CANCEL knob (W10.r1 finding 1)"
+    }
+  },
+  "graphs": {
+    "AttachGeneration": {
+      "config": "AttachGeneration.export.cfg",
+      "phase": "lstate"
+    },
+    "AcpSessions": {
+      "config": "AcpSessions.export.cfg",
+      "phase": "ent"
+    }
+  }
+}

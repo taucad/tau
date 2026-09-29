@@ -24,4 +24,17 @@ describe('FitViewControl', () => {
 
     expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'fitView' });
   });
+
+  it('should show the F shortcut in its tooltip', async () => {
+    const user = userEvent.setup();
+    render(
+      <TooltipProvider>
+        <FitViewControl shortcut='F' />
+      </TooltipProvider>,
+    );
+
+    await user.hover(screen.getByRole('button', { name: 'Fit view' }));
+
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Fit viewF');
+  });
 });

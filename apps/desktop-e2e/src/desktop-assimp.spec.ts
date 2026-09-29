@@ -83,7 +83,7 @@ const openInViewer = async (page: Page, entryPath: string): Promise<void> => {
   const item = fileTreeItemOf(page, entryPath);
   await expectVisible(item, 60_000);
   await item.hover();
-  await page.getByRole('button', { name: `Actions for ${basename(entryPath)}`, exact: true }).click();
+  await page.getByRole('button', { name: `More actions for ${basename(entryPath)}`, exact: true }).click();
   await page.getByRole('menuitem', { name: 'Open in Viewer', exact: true }).click();
   await expectVisible(page.locator(`.dv-tab[aria-label="${entryPath}"]`), 60_000);
 };
@@ -214,7 +214,7 @@ const expectTriangleGlb = async (path: string, size: number, color?: readonly nu
 
 const openConsole = async (page: Page): Promise<void> => {
   await page.getByRole('button', { name: 'Search', exact: true }).click();
-  const search = page.getByPlaceholder('Search projects, chats, and actions...');
+  const search = page.getByPlaceholder('Search projects, chats, and actions…');
   await search.fill('Open console');
   await page.getByText('Open console', { exact: true }).click();
 };
@@ -366,36 +366,26 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
             ),
             'createRuntimeClient',
           );
-          const requestRuntimePort = unique(
-            callables(rendererModule).filter((value) =>
-              value.toString().includes('requestElectronRuntimePort: preload relay omitted the runtime host ID'),
-            ),
-            'requestElectronRuntimePort',
+          // `@taucad/runtime/electron/renderer` is dynamically imported, so the
+          // chunk exposes it as a namespace object whose keys keep source names.
+          const electronRenderer = Object.values(rendererModule).find(
+            (value): value is { createElectronClientOptions: Callable } =>
+              typeof value === 'object' &&
+              value !== null &&
+              typeof (value as { createElectronClientOptions?: unknown }).createElectronClientOptions === 'function',
           );
-          const transportFactories = callables(rendererModule).filter((value) => {
-            const source = value.toString();
-            return source.includes('materialize') && source.includes('describe');
-          });
-          const port = await requestRuntimePort({ context: { definition: 'default', projectRoot } });
-          const transport = unique(
-            transportFactories.filter((value) => {
-              try {
-                const candidate = value({ port }) as { id?: unknown; materialize?: unknown };
-                return candidate.id === 'electron-utility' && typeof candidate.materialize === 'function';
-              } catch {
-                return false;
-              }
-            }),
-            'electron-utility transport',
-          )({ port });
+          if (!electronRenderer) {
+            throw new Error('Expected a packaged @taucad/runtime/electron/renderer namespace export');
+          }
           const environment = (globalThis as typeof globalThis & { ENV: Record<string, string> }).ENV;
-          const client = createRuntimeClient({
+          const provideClientOptions = electronRenderer.createElectronClientOptions({
             config: {
               tauApiUrl: environment['TAU_API_URL'],
               tauWebSocketUrl: environment['TAU_WEBSOCKET_URL'],
             },
-            transport,
-          }) as RuntimeClient;
+            context: { definition: 'default', projectRoot },
+          }) as () => Promise<unknown>;
+          const client = createRuntimeClient(await provideClientOptions()) as RuntimeClient;
           const state = globalThis as typeof globalThis & {
             __tauAssimpLifecycle?: { client: RuntimeClient; first: Promise<unknown>; second?: Promise<unknown> };
           };

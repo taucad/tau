@@ -16,16 +16,24 @@ import { dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
-import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
-import type { ToolRegistry } from '@taucad/agent-host';
-import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
+import type { AgentLauncher } from '@taucad/agent-host/launcher';
+
+import { createNodeLauncher } from '#node-launcher.fixture.js';
+import type { ToolRegistry, TurnPlacementPort } from '@taucad/agent-host';
+import type { CommandAnswer } from '@taucad/agent-host/wire';
+import { RevisionPortError, createIsomorphicGitRevisionPort, readRevisionLog } from '@taucad/revisions';
 import { createNativeGitRevisionPort } from '@taucad/revisions/node';
-import type { RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
+import type { RevisionPort, RevisionStatusProjection, TurnAttemptKey } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
+import type { RevisionId } from '@taucad/revisions/algorithms';
 
-import { createProjectRevisionPort, createProjectRevisions, openProjectRevisions } from '#revisions.js';
+import {
+  createProjectRevisionPort,
+  createProjectRevisions,
+  openProjectRevisions,
+  requireRevisionToolchain,
+} from '#revisions.js';
 import type { HostRevisionEvent, ProjectRevisions, TurnCheckout, TurnFinalizedEvent } from '#revisions.js';
 import type { RevisionOpenOutcome } from '#index.js';
 
@@ -76,25 +84,25 @@ const scriptedTurn = (request: number, callsTool: boolean): readonly string[] =>
     : ['data: {"choices":[{"index":0,"delta":{"content":"Done."},"finish_reason":"stop"}]}\n\n', 'data: [DONE]\n\n'];
 
 const roots: string[] = [];
-const launchers: NodeAgentLauncher[] = [];
+/* A launcher closes first, so its attempts settle; then the tree records what is on disk and stops. */
+const launchers: Array<Readonly<{ close: () => Promise<void> }>> = [];
 
 afterEach(async () => {
   await Promise.all(launchers.splice(0).map(async (launcher) => launcher.close()));
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
 
-const hasGit = ((): boolean => {
-  try {
-    execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
+/* The same `git` + `git lfs` probe the host refuses on (OQ-B8), so a machine
+ * without `git-lfs` skips these rows instead of failing them. */
+const gitToolchainOnPath = await requireRevisionToolchain().then(
+  () => true,
+  () => false,
+);
 
 type Harness = {
-  readonly launcher: NodeAgentLauncher;
+  readonly launcher: AgentLauncher;
   readonly workspaceRoot: string;
+  readonly checkoutsDirectory: string;
   /** Where each admitted run works, exactly as an external agent port reads it. */
   readonly checkouts: Map<string, TurnCheckout>;
   /** Every host revision event, in order. */
@@ -104,6 +112,8 @@ type Harness = {
   readonly refs: () => Promise<readonly string[]>;
   readonly port: RevisionPort;
   readonly revisions: ProjectRevisions;
+  /** Every attempt the placement session was asked to admit, in order. */
+  readonly admitted: TurnAttemptKey[];
 };
 
 /**
@@ -126,12 +136,21 @@ const harness = async (
     readonly wrapPort?: (port: RevisionPort) => RevisionPort;
     /** Whether only the launcher's first turn calls the tool, or every turn. */
     readonly toolTurns?: 'first' | 'every';
+    /** A chat's `turn`th gateway answer in place of the scripted one, when it returns one. */
+    readonly respond?: (turn: number) => Response | undefined;
+    /** A project an earlier host left behind, reopened as it is, in place of a new one. */
+    readonly reopen?: Readonly<{ workspaceRoot: string; checkoutsDirectory: string }>;
+    /** Wrap the placement session the launcher is given. */
+    readonly wrapPlacement?: (placement: TurnPlacementPort) => TurnPlacementPort;
   } = {},
 ): Promise<Harness> => {
-  const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-revisions-'));
-  const checkoutsDirectory = await mkdtemp(join(tmpdir(), 'tau-host-checkouts-'));
-  roots.push(workspaceRoot, checkoutsDirectory);
-  await writeFile(join(workspaceRoot, 'main.ts'), 'export const size = 1;\n');
+  const workspaceRoot = options.reopen?.workspaceRoot ?? (await mkdtemp(join(tmpdir(), 'tau-host-revisions-')));
+  const checkoutsDirectory =
+    options.reopen?.checkoutsDirectory ?? (await mkdtemp(join(tmpdir(), 'tau-host-checkouts-')));
+  if (options.reopen === undefined) {
+    roots.push(workspaceRoot, checkoutsDirectory);
+    await writeFile(join(workspaceRoot, 'main.ts'), 'export const size = 1;\n');
+  }
   await options.seed?.(workspaceRoot);
   let written = 0;
   const toolRegistry: ToolRegistry = {
@@ -151,10 +170,15 @@ const harness = async (
   const responses = new Map<string, number>();
   const events: HostRevisionEvent[] = [];
   const settlements = new Map<string, PromiseWithResolvers<TurnFinalizedEvent>>();
+  /* The root's settlement, once M1 has appended its row and acknowledged it: the lease is gone, so the chat is free. */
   const settlementFor = async (runId: string): Promise<TurnFinalizedEvent> => {
     const pending = settlements.get(runId) ?? Promise.withResolvers<TurnFinalizedEvent>();
     settlements.set(runId, pending);
-    return pending.promise;
+    const settlement = await pending.promise;
+    await expect
+      .poll(() => existsSync(join(workspaceRoot, '.tau', 'runs', `${runId}.json`)), { timeout: 10_000 })
+      .toBe(false);
+    return settlement;
   };
   const created = createPort(workspaceRoot, checkoutsDirectory);
   const port = options.wrapPort?.(created) ?? created;
@@ -174,40 +198,59 @@ const harness = async (
       pending.resolve(event);
     },
   });
-  const launcher = revisions.record(
-    createNodeAgentLauncher({
-      workspaceRoot,
-      gatewayBaseUrl: 'https://gateway.example',
-      model,
-      systemPrompt: 'You are Tau.',
-      toolRegistry,
-      auth: () => 'daemon-bearer',
-      fetch: (async (_url: string, init: { body?: string }) => {
-        const body = String(init.body ?? '');
-        const chat = /"chatId":"([^"]+)"/u.exec(body)?.[1] ?? 'chat';
-        const turn = responses.get(chat) ?? 0;
-        responses.set(chat, turn + 1);
-        /* Every turn is the same pair, so a chat's second turn writes as its
-         * first did. The first turn's closing request is mid-turn by
-         * construction: its base is captured and its tool has returned, and
-         * nothing has settled yet — and it is the only one held, so a hook that
-         * waits on a later turn cannot wait on itself. */
-        if (turn === 1) {
-          await options.duringTurn?.(workspaceRoot);
-        }
-        return sse(scriptedTurn(turn, options.toolTurns === 'every' ? turn % 2 === 0 : turn === 0));
-      }) as unknown as typeof globalThis.fetch,
+  const placement = revisions.placement(() => toolRegistry);
+  const admitted: TurnAttemptKey[] = [];
+  const launcher = createNodeLauncher({
+    workspaceRoot,
+    gatewayBaseUrl: 'https://gateway.example',
+    model,
+    systemPrompt: 'You are Tau.',
+    toolRegistry,
+    /* The grant's tools are this registry: the probe writes the live tree whatever the checkout (W8 TS-S4). */
+    turnPlacement: (options.wrapPlacement ?? ((port: TurnPlacementPort) => port))({
+      ...placement,
+      admit: async (input) => {
+        admitted.push(input.key);
+        return placement.admit(input);
+      },
     }),
-  );
-  launchers.push(launcher);
+    auth: () => 'daemon-bearer',
+    fetch: (async (_url: string, init: { body?: string }) => {
+      const body = String(init.body ?? '');
+      const chat = /"chatId":"([^"]+)"/u.exec(body)?.[1] ?? 'chat';
+      const turn = responses.get(chat) ?? 0;
+      responses.set(chat, turn + 1);
+      /* Every turn is the same pair, so a chat's second turn writes as its
+       * first did. The first turn's closing request is mid-turn by
+       * construction: its base is captured and its tool has returned, and
+       * nothing has settled yet — and it is the only one held, so a hook that
+       * waits on a later turn cannot wait on itself. */
+      if (turn === 1) {
+        await options.duringTurn?.(workspaceRoot);
+      }
+      const failed = options.respond?.(turn);
+      if (failed !== undefined) {
+        return failed;
+      }
+      return sse(scriptedTurn(turn, options.toolTurns === 'every' ? turn % 2 === 0 : turn === 0));
+    }) as unknown as typeof globalThis.fetch,
+  });
+  launchers.push({
+    close: async () => {
+      await launcher.close();
+      await revisions.release();
+    },
+  });
   return {
     launcher,
     workspaceRoot,
+    checkoutsDirectory,
     checkouts,
     events,
     settlementFor,
     port,
     revisions,
+    admitted,
     leaseIds: async () => {
       try {
         const runs = await readdir(join(workspaceRoot, '.tau', 'runs'));
@@ -224,28 +267,56 @@ const harness = async (
 };
 
 /**
+ * One run of `chat-1` as the launcher's ledger holds it.
+ *
+ * @param launcher - The recording launcher.
+ * @param runId - The run.
+ * @returns The run's entry, if the log has one.
+ */
+const runOf = async (launcher: AgentLauncher, runId = 'run-1') => {
+  const ledger = await launcher.host.ledger('chat-1');
+  return ledger.runs[runId];
+};
+
+/**
+ * The settlement rows of one run of `chat-1`.
+ *
+ * @param launcher - The recording launcher.
+ * @param runId - The run.
+ * @returns The run's settlements, if the log has the run.
+ */
+const settlementsOf = async (launcher: AgentLauncher, runId = 'run-1') => {
+  const run = await runOf(launcher, runId);
+  return run?.settlements;
+};
+
+/**
  * Admit one Tau turn the way a client does.
  *
  * @param launcher - The recording launcher.
  * @param turn - The chat and the client's idempotency key for the run.
  */
 const startTurn = async (
-  launcher: NodeAgentLauncher,
-  turn: { readonly chatId: string; readonly runId: string },
-): Promise<void> => {
-  await launcher.execute({
+  launcher: AgentLauncher,
+  turn: { readonly chatId: string; readonly runId: string; readonly checkoutId?: string },
+): Promise<CommandAnswer> =>
+  launcher.execute({
     type: 'start',
-    trigger: 'submit',
-    chatId: turn.chatId,
-    runId: turn.runId,
-    message: {
-      id: `message-${turn.runId}`,
-      role: 'user',
-      content: 'Double the size.',
+    commandId: `start-${turn.runId}`,
+    payload: {
+      trigger: 'submit',
+      chatId: turn.chatId,
+      runId: turn.runId,
+      /* The person's placement choice (TS-R12); absent, the chat's last checkout, then the live one. */
+      ...(turn.checkoutId === undefined ? {} : { checkoutId: turn.checkoutId }),
+      message: {
+        id: `message-${turn.runId}`,
+        role: 'user',
+        content: 'Double the size.',
+      },
+      config: { systemPrompt: 'You are Tau.', toolChoice: 'auto', model },
     },
-    config: { systemPrompt: 'You are Tau.', toolChoice: 'auto', model },
   });
-};
 
 const ports = [
   {
@@ -264,7 +335,7 @@ const ports = [
     name: 'native-git',
     /* Never skipped: a machine with no `git` cannot answer for this row, and a
      * row that silently passed would be worse than one that did not run. */
-    enabled: hasGit,
+    enabled: gitToolchainOnPath,
     create: (workspaceRoot: string, checkoutsDirectory: string): RevisionPort =>
       createNativeGitRevisionPort({
         repositoryPath: workspaceRoot,
@@ -280,7 +351,7 @@ const ports = [
  * invisible — the app opened, files edited, and no revision ever appeared. The
  * host now says so once, by name, when the project opens.
  */
-describe.runIf(hasGit)('a disk host that cannot record', () => {
+describe.runIf(gitToolchainOnPath)('a disk host that cannot record', () => {
   it('reports the missing binaries once, and records with the executables it is given', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-toolchain-'));
     roots.push(workspaceRoot);
@@ -300,7 +371,7 @@ describe.runIf(hasGit)('a disk host that cannot record', () => {
     } finally {
       process.env['PATH'] = previousPath;
       if (missing !== undefined) {
-        await expect(missing.release()).rejects.toThrow('checkout was not ready');
+        await expect(missing.release()).rejects.toThrow('no live checkout to record at close');
       }
     }
     const unavailable = events.find((event) => event.type === 'revision.unavailable');
@@ -373,11 +444,11 @@ for (const row of ports) {
         chatId: 'chat-1',
         checkoutId: 'live',
       });
-      /* The epoch and the start are the host's own, so the record is read as
-       * text rather than matched against a value the test would have to mint. */
-      expect(leaseRecord).toMatch(/"authorityEpoch":\s*"[^"]+"/u);
+      /* The start is the host's own, so the record is read as text rather than
+       * matched against a value the test would have to mint. */
       expect(leaseRecord).toMatch(/"startedAt":\s*\d+/u);
-      await expect(held.leaseIds()).resolves.toEqual([]);
+      /* RM-R10: the lease retires after the settlement is announced, on its acknowledgement. */
+      await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toEqual([]);
 
       /* The turn's write is in the live tree, and the revision is a record of
        * it: one revision on `main`, parented on the base the turn descended
@@ -395,6 +466,19 @@ for (const row of ports) {
       const base = revision?.parents[0];
       const baseTree = base === undefined ? undefined : await held.port.readTree(base);
       expect(new TextDecoder().decode(baseTree?.get('main.ts'))).toBe('export const size = 1;\n');
+    }, 30_000);
+
+    // W4.r1: a start re-sent under its key after the turn settled is `replayed`; the lease this call took is retired.
+    it('retires the lease a replayed start admitted', async () => {
+      const held = await harness(row.create);
+      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      await held.settlementFor('run-1');
+      await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toEqual([]);
+
+      const replay = await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+
+      expect(replay.status).toBe('replayed');
+      await expect.poll(async () => held.leaseIds(), { timeout: 5000 }).toEqual([]);
     }, 30_000);
 
     it('serves the same revision graph and branch verbs over the host channel', async () => {
@@ -415,15 +499,32 @@ for (const row of ports) {
       );
       expect(history.status).toMatchObject({
         projectId: 'project-1',
-        branch: 'main',
+        line: { kind: 'branch', name: 'main' },
       });
+      /* One revision by id, and how far two heads have gone apart: History's
+       * pinned rows and the Branches region, without reading a whole log. */
+      const head = String(settlement.revisionId);
+      const one = await held.revisions.channel.request({ command: 'log', from: head, limit: 1 });
+      const record = await held.port.readRevision(revisionId(head));
+      expect(one.result).toEqual([expect.objectContaining({ revisionId: head, treeId: record?.treeId })]);
+      const parent = String(record?.parents[0]);
+      await expect(
+        held.revisions.channel.request({ command: 'divergence', head, base: parent }),
+      ).resolves.toMatchObject({ result: { ahead: 1, behind: 0 } });
       await expect(held.revisions.channel.request({ command: 'open' })).resolves.toMatchObject({
         status: { projectId: 'project-1' },
       });
 
-      await held.revisions.channel.request({
+      /* B7 (W8 TS-S5): the verb answers with the checkout the registry made, never on a bound. */
+      const created = (await held.revisions.channel.request({
         command: 'createBranch',
         name: 'isolated-run',
+      })) as Readonly<{ result: unknown }>;
+      expect(created.result).toMatchObject({
+        branch: 'isolated-run',
+        checkoutId: expect.any(String) as unknown,
+        /* The registry's own root, as the branch toast carries it. */
+        checkoutRoot: expect.any(String) as unknown,
       });
       await expect
         .poll(() => held.revisions.status().branches.map((branch) => branch.name), { timeout: 10_000 })
@@ -432,7 +533,9 @@ for (const row of ports) {
         command: 'switch',
         branch: 'isolated-run',
       });
-      await expect.poll(() => held.revisions.status().branch, { timeout: 10_000 }).toBe('isolated-run');
+      await expect
+        .poll(() => held.revisions.status().line, { timeout: 10_000 })
+        .toEqual({ kind: 'branch', name: 'isolated-run' });
       const linkedStatusResponse: unknown = await held.revisions.channel.request({ command: 'status' });
       const linkedStatus = linkedStatusResponse as Readonly<{
         status: RevisionStatusProjection;
@@ -445,7 +548,13 @@ for (const row of ports) {
         /^\/checkouts\//u,
       );
 
-      await startTurn(held.launcher, { chatId: 'chat-2', runId: 'run-2' });
+      /* The page sends the person's checkout with the start; the switch alone places nothing (TS-R12). */
+      await startTurn(held.launcher, {
+        chatId: 'chat-2',
+        runId: 'run-2',
+        ...(held.revisions.status().checkoutId === undefined ? {} : { checkoutId: held.revisions.status().checkoutId }),
+      });
+      await expect.poll(() => held.checkouts.get('run-2'), { timeout: 10_000 }).toBeDefined();
       const candidatePlacement = held.checkouts.get('run-2');
       await held.settlementFor('run-2');
       expect(candidatePlacement?.mode).toBe('candidate');
@@ -461,10 +570,140 @@ for (const row of ports) {
         done: false,
         value: {
           kind: 'status',
-          value: { projectId: 'project-1', branch: 'isolated-run' },
+          value: { projectId: 'project-1', line: { kind: 'branch', name: 'isolated-run' } },
         },
       });
       abort.abort();
+    }, 30_000);
+
+    /* L2-F4: linked checkouts live in this host's data directory, outside the
+     * workspace, so a watcher on the workspace alone never saw their writes —
+     * no dirty state, no idle revision, no write-generation guard. Native only:
+     * the isomorphic row's linked checkout is a route, not a directory. */
+    it.runIf(row.name === 'native-git')(
+      'raises a write under a linked checkout against that checkout (L2-F4)',
+      async () => {
+        const held = await harness(row.create);
+        await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+        await held.settlementFor('run-1');
+        await held.revisions.channel.request({ command: 'createBranch', name: 'isolated-run' });
+        await expect
+          .poll(() => held.revisions.status().branches.some((branch) => branch.name === 'isolated-run'), {
+            timeout: 10_000,
+          })
+          .toBe(true);
+        const checkouts = await held.port.listCheckouts?.();
+        const linked = checkouts?.find((checkout) => checkout.kind === 'linked');
+        expect(linked).toBeDefined();
+        const changed = vi.spyOn(held.revisions, 'changed');
+
+        await writeFile(join(linked?.root ?? '', 'part.ts'), 'export const part = 1;\n');
+
+        /* Raised against the checkout whose root it landed in, never the live one. */
+        await expect.poll(() => changed.mock.calls, { timeout: 10_000 }).toContainEqual([linked?.id, ['part.ts']]);
+        expect(changed.mock.calls.filter(([, paths]) => paths.includes('part.ts'))).toEqual([
+          [linked?.id, ['part.ts']],
+        ]);
+      },
+      30_000,
+    );
+
+    /* The close ruling: letting a project go records every dirty checkout, live
+     * and linked, not only the live one. Native only, like L2-F4 above. */
+    it.runIf(row.name === 'native-git')(
+      'records a dirty linked checkout when the host lets the project go (close ruling)',
+      async () => {
+        const held = await harness(row.create);
+        await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+        await held.settlementFor('run-1');
+        await held.revisions.channel.request({ command: 'createBranch', name: 'isolated-run' });
+        await expect
+          .poll(() => held.revisions.status().branches.some((branch) => branch.name === 'isolated-run'), {
+            timeout: 10_000,
+          })
+          .toBe(true);
+        const checkouts = await held.port.listCheckouts?.();
+        const linked = checkouts?.find((checkout) => checkout.kind === 'linked');
+        const changed = vi.spyOn(held.revisions, 'changed');
+        const before = await readRevisionLog(held.port, { branch: 'isolated-run' });
+        await writeFile(join(linked?.root ?? '', 'part.ts'), 'export const part = 1;\n');
+        await expect.poll(() => changed.mock.calls, { timeout: 10_000 }).toContainEqual([linked?.id, ['part.ts']]);
+
+        await held.revisions.channel.request({ command: 'quiesce' });
+
+        const after = await readRevisionLog(held.port, { branch: 'isolated-run' });
+        expect(after).toHaveLength(before.length + 1);
+        expect(after[0]).toMatchObject({ trigger: 'close' });
+      },
+      30_000,
+    );
+
+    /* M3: the host's save channel is the worker's. A *Save* another writer beat
+     * says so, and a close that loses its CAS lets the project go at once
+     * rather than holding quit for the whole bound. */
+    it('answers a lost save on the save channel, and settles a lost close at once (M3)', async () => {
+      let lose = false;
+      const held = await harness(row.create, {
+        wrapPort: (port) => ({
+          ...port,
+          updateRef: async (input) =>
+            lose
+              ? {
+                  status: 'conflicted',
+                  name: input.name,
+                  expectedHead: input.expectedHead,
+                  actualHead: input.expectedHead,
+                  proposedHead: input.head,
+                }
+              : port.updateRef(input),
+        }),
+      });
+      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      await held.settlementFor('run-1');
+      const abort = new AbortController();
+      const frames: Array<Readonly<{ kind: string; value: unknown }>> = [];
+      const reading = (async (): Promise<void> => {
+        for await (const frame of held.revisions.channel.events(abort.signal)) {
+          frames.push(frame);
+        }
+      })();
+      try {
+        lose = true;
+        await writeFile(join(held.workspaceRoot, 'main.ts'), 'export const size = 42;\n');
+        await held.revisions.channel.request({ command: 'saveRevision' });
+
+        await expect
+          .poll(() => frames.find((frame) => frame.kind === 'toast'), { timeout: 10_000 })
+          .toMatchObject({ kind: 'toast', value: { type: 'error', subject: 'save', code: 'CAS_LOST' } });
+
+        const started = Date.now();
+        await expect(held.revisions.channel.request({ command: 'quiesce' })).rejects.toThrow(
+          /moved this branch first/u,
+        );
+        expect(Date.now() - started).toBeLessThan(4000);
+      } finally {
+        lose = false;
+        abort.abort();
+        await reading.catch(() => undefined);
+      }
+    }, 30_000);
+
+    /* RV-W2b #2: a terminally failed sync is already in the durable record and
+     * on the Sync region; it must not hold every close for ever. */
+    it('lets a project go when its sync has failed, keeping the refusal in the projection', async () => {
+      const held = await harness(row.create, {
+        wrapPort: (port) => ({
+          ...port,
+          listRemotes: async () => [{ name: 'origin', kind: 'git', url: 'https://git.example.invalid/project.git' }],
+          listRemoteRefs: async () => {
+            throw new RevisionPortError('REMOTE_DAMAGED', "Tau: this project's cloud copy is damaged");
+          },
+        }),
+      });
+      await expect.poll(() => held.revisions.status().sync.state, { timeout: 10_000 }).toBe('failed');
+
+      await expect(held.revisions.channel.request({ command: 'quiesce' })).resolves.toMatchObject({ result: null });
+      expect(held.revisions.status().sync).toMatchObject({ state: 'failed', reason: 'damaged' });
     }, 30_000);
 
     /* Red pin (attempt a2): a project that holds a large object records like any other.
@@ -540,6 +779,8 @@ for (const row of ports) {
       });
       await admitted.promise;
       await startTurn(held.launcher, { chatId: 'chat-2', runId: 'run-2' });
+      /* The start is answered at its intent row; its placement follows (TS-R8). */
+      await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toContain('run-2.json');
       second.resolve();
       await first;
       const firstSettlement = await held.settlementFor('run-1');
@@ -551,12 +792,14 @@ for (const row of ports) {
       expect(firstSettlement.checkoutId).toBe('live');
       expect(secondSettlement.checkoutId).toBe('live');
       await expect(held.refs()).resolves.toEqual(['main']);
-      await expect(held.leaseIds()).resolves.toEqual([]);
+      /* RM-R10: the lease retires after the settlement is announced, on its acknowledgement. */
+      await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toEqual([]);
 
       /* AC9's other half: the settlement names every lease on the checkout, and
        * the revision itself still carries the run that minted it — the case
        * where a naive "one lease, one run" rule would drop attribution. */
-      expect(secondSettlement.runIds).toEqual(['run-2', 'run-1']);
+      // The settlement lists its lease run ids sorted (revision-effects), not in lease order.
+      expect(secondSettlement.runIds).toEqual(['run-1', 'run-2']);
       expect(firstSettlement.runIds).toContain('run-1');
       /* Which of the two mints the shared content is not fixed — the later
        * chat's *base* mint records whatever the earlier one has already written,
@@ -589,13 +832,11 @@ for (const row of ports) {
       await expect(held.refs()).resolves.toEqual(['main']);
     }, 30_000);
 
-    it('reports a turn that failed after it was leased, and lets go of its run', async () => {
+    /* TS-Q9, TS-R3: a result cut the store refuses keeps the lease while M1 backs off; the next cut settles it. */
+    it('should keep the lease while the store refuses the turn revision, and settle once it takes it', async () => {
+      let refusing = true;
       const held = await harness(row.create, {
-        /* The turn's own mint fails; the dirty-base pre-mint that precedes it
-         * still has to succeed, or the turn would fail before it was ever
-         * leased. Both carry the turn's own trigger since W6 — the base mint is
-         * the turn's first act, not a user save — so they are told apart by
-         * order rather than by attribution. */
+        /* The turn's result mint fails; the dirty-base pre-mint before it succeeds, told apart by order. */
         wrapPort: (() => {
           let agentWrites = 0;
           return (port) => ({
@@ -603,7 +844,7 @@ for (const row of ports) {
             writeRevision: async (input) => {
               if (input.provenance.source === 'agent') {
                 agentWrites += 1;
-                if (agentWrites > 1) {
+                if (agentWrites > 1 && refusing) {
                   throw new Error('the store refused the turn’s revision');
                 }
               }
@@ -615,41 +856,26 @@ for (const row of ports) {
 
       await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
 
-      /* No outcome is silent: a turn that ran and recorded nothing is reported
-       * exactly once, and leaves nothing of itself behind (a2 R2). */
       await expect
-        .poll(() => held.events.filter((event) => event.type === 'turn.failed'), { timeout: 20_000 })
-        .toHaveLength(1);
-      expect(held.events.find((event) => event.type === 'turn.failed')).toMatchObject({
-        turnId: 'message-run-1',
-        runId: 'run-1',
-        chatId: 'chat-1',
-        checkoutId: 'live',
-      });
-      expect(held.events.filter((event) => event.type === 'turn.finalized')).toHaveLength(0);
-      expect(held.checkouts.size).toBe(0);
-      await expect(held.leaseIds()).resolves.toEqual([]);
+        .poll(async () => runOf(held.launcher).then((run) => run?.lifecycle), { timeout: 10_000 })
+        .toBe('completed');
+      /* The cut is refused and retried: no settlement row, and the lease holds the checkout. */
+      expect(await settlementsOf(held.launcher)).toEqual([]);
+      expect(await held.leaseIds()).toEqual(['run-1.json']);
+
+      refusing = false;
+      const settlement = await held.settlementFor('run-1');
+
+      expect(settlement.revisionId).toMatch(/^[\da-f]{40}$/u);
+      expect(await settlementsOf(held.launcher)).toHaveLength(1);
+      expect(held.events.filter((event) => event.type === 'turn.failed')).toEqual([]);
     }, 30_000);
 
-    it('does not retire a live lease when a second host opens the same project', async () => {
+    /* TS-A5, TS-S7, I25: no epoch sweep, so a second host over the project reads the live lease and leaves it. */
+    it("should not retire a live tab's lease when a second tab opens the project", async () => {
       let leasesAfterSecondOpen: readonly string[] = [];
       const held = await harness(row.create, {
         duringTurn: async (workspaceRoot) => {
-          /* A second window in this process, over the same project. Its registry
-           * sweeps on open — and with an epoch of its own it would retire the
-           * lease the running turn is holding right now (a2 R4). */
-          const stale = new NodeFsProvider(workspaceRoot);
-          await stale.writeFile(
-            '.tau/runs/run-dead.json',
-            JSON.stringify({
-              runId: 'run-dead',
-              turnId: 'message-dead',
-              chatId: 'chat-dead',
-              checkoutId: 'live',
-              authorityEpoch: 'epoch-of-a-process-that-died',
-              startedAt: 1,
-            }),
-          );
           const checkoutsDirectory = await mkdtemp(join(tmpdir(), 'tau-host-checkouts-'));
           roots.push(checkoutsDirectory);
           const second = createProjectRevisions({
@@ -657,13 +883,12 @@ for (const row of ports) {
             projectId: 'project-1',
             port: row.create(workspaceRoot, checkoutsDirectory),
           });
-          /* The stale lease disappearing is the proof that the second host's
-           * own sweep ran, so what survives it is measured, never waited out. */
+          /* The second registry has read the lease: what survives its open is measured, never waited out. */
           await expect
-            .poll(async () => readdir(join(workspaceRoot, '.tau', 'runs')), {
+            .poll(() => second.status().branches.find((branch) => branch.name === 'main')?.leaseChatIds, {
               timeout: 10_000,
             })
-            .not.toContain('run-dead.json');
+            .toEqual(['chat-1']);
           const surviving = await readdir(join(workspaceRoot, '.tau', 'runs'));
           leasesAfterSecondOpen = surviving.toSorted();
           await second.release();
@@ -678,341 +903,251 @@ for (const row of ports) {
       expect(settlement.revisionId).toMatch(/^[\da-f]{40}$/u);
     }, 30_000);
 
-    it('retires a lease a superseded authority epoch left behind, when the project opens', async () => {
-      const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-revisions-stale-'));
-      const checkoutsDirectory = await mkdtemp(join(tmpdir(), 'tau-host-checkouts-'));
-      roots.push(workspaceRoot, checkoutsDirectory);
-      await writeFile(join(workspaceRoot, 'main.ts'), 'export const size = 1;\n');
-      const port = row.create(workspaceRoot, checkoutsDirectory);
-      await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
-      const stale = new NodeFsProvider(workspaceRoot);
-      await stale.writeFile(
-        '.tau/runs/run-dead.json',
-        JSON.stringify({
-          runId: 'run-dead',
-          turnId: 'message-dead',
-          chatId: 'chat-dead',
-          checkoutId: 'live',
-          authorityEpoch: 'epoch-of-a-process-that-died',
-          startedAt: 1,
-        }),
-      );
-
-      const revisions = createProjectRevisions({
-        workspaceRoot,
-        projectId: 'project-1',
-        port,
-      });
-      /* The registry sweeps on open, not on a heartbeat: a host restart is the
-       * only thing that can tell a crashed turn's lease from a live one (F13). */
-      await expect
-        .poll(async () => readdir(join(workspaceRoot, '.tau', 'runs')), {
-          timeout: 10_000,
-        })
-        .toEqual([]);
-      await revisions.release();
-    }, 30_000);
-
     /*
-     * C71: the lease of a host that is still running is never swept.
-     *
-     * The epoch used to be one per *process*, so a second process over the same
-     * project — `tau serve` beside the app, or `tau revisions` beside either —
-     * opened with an epoch of its own and retired the live lease of a turn that
-     * was running right then, taking its run id out of the revision's
-     * provenance. The epoch is now the project's, adopted from the host that
-     * still owns it; only a dead owner's epoch is superseded.
+     * A host whose agent host dies after the root cut (W6 RH-R14): its launcher closes, its revisions root lives on and
+     * holds the attempt's lease; the next host over the project opens beside it.
      */
-    it('keeps the lease of a host that is still running, and retires a dead one’s', async () => {
-      const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-revisions-epoch-'));
-      const checkoutsDirectory = await mkdtemp(join(tmpdir(), 'tau-host-checkouts-'));
-      const configDirectory = await mkdtemp(join(tmpdir(), 'tau-host-epoch-config-'));
-      roots.push(workspaceRoot, checkoutsDirectory, configDirectory);
-      process.env['TAU_CONFIG_DIR'] = configDirectory;
-      await writeFile(join(workspaceRoot, 'main.ts'), 'export const size = 1;\n');
-      const port = row.create(workspaceRoot, checkoutsDirectory);
-      await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
-      const records = new NodeFsProvider(workspaceRoot);
-      const lease = async (runId: string, authorityEpoch: string): Promise<void> =>
-        records.writeFile(
-          `.tau/runs/${runId}.json`,
-          JSON.stringify({
-            runId,
-            turnId: `message-${runId}`,
-            chatId: 'chat-1',
-            checkoutId: 'live',
-            authorityEpoch,
-            startedAt: 1,
-          }),
-        );
-      await lease('run-1', 'epoch-of-the-running-host');
-      await lease('run-dead-a', 'epoch-of-a-process-that-died');
-
-      /* The host that owns this project right now, with an epoch of its own. */
-      const owner = createProjectRevisions({
-        workspaceRoot,
-        projectId: 'project-1',
-        port,
-        authorityEpoch: 'epoch-of-the-running-host',
-      });
-      let second: ReturnType<typeof createProjectRevisions> | undefined;
-      try {
-        await expect
-          .poll(async () => readdir(join(workspaceRoot, '.tau', 'runs')), { timeout: 10_000 })
-          .not.toContain('run-dead-a.json');
-        /* Written after the owner's own sweep, so what disappears next is the
-         * second host's sweep and nothing else. */
-        await lease('run-dead-b', 'epoch-of-a-process-that-died');
-
-        second = createProjectRevisions({
-          workspaceRoot,
-          projectId: 'project-1',
-          port: row.create(workspaceRoot, checkoutsDirectory),
-        });
-        await expect
-          .poll(async () => readdir(join(workspaceRoot, '.tau', 'runs')), { timeout: 10_000 })
-          .not.toContain('run-dead-b.json');
-
-        expect(await readdir(join(workspaceRoot, '.tau', 'runs'))).toStrictEqual(['run-1.json']);
-      } finally {
-        await second?.release();
-        await owner.release();
-        delete process.env['TAU_CONFIG_DIR'];
-      }
-    }, 30_000);
-
-    it('refuses a turn it cannot place, instead of running it unrecorded', async () => {
-      const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-revisions-refused-'));
-      const checkoutsDirectory = await mkdtemp(join(tmpdir(), 'tau-host-checkouts-'));
-      roots.push(workspaceRoot, checkoutsDirectory);
-      const port = row.create(workspaceRoot, checkoutsDirectory);
-      const broken: RevisionPort = {
-        ...port,
-        listCheckouts: async () => {
-          throw new Error('the store is unreadable');
-        },
-      };
-      const revisions = createProjectRevisions({
-        workspaceRoot,
-        projectId: 'project-1',
-        port: broken,
-      });
-      const launcher = revisions.record(
-        createNodeAgentLauncher({
-          workspaceRoot,
-          gatewayBaseUrl: 'https://gateway.example',
-          model,
-          systemPrompt: 'You are Tau.',
-          toolRegistry: {
-            list: () => [],
-            invoke: async () => ({ content: '', isError: false }),
-          },
-          auth: () => 'daemon-bearer',
-          fetch: (async () => sse(scriptedTurn(1, false))) as unknown as typeof globalThis.fetch,
-        }),
-      );
-      launchers.push(launcher);
-
-      await expect(startTurn(launcher, { chatId: 'chat-1', runId: 'run-1' })).rejects.toMatchObject({
-        code: 'REVISION_PREPARE_FAILED',
-      });
-      launchers.splice(launchers.indexOf(launcher), 1);
-      await expect(launcher.close()).rejects.toThrow('checkout was not ready');
-    }, 30_000);
-
-    it('answers a turn that ended before its lease with the reason, not with the bound (W19-b-a2)', async () => {
-      const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-revisions-unleased-'));
-      const checkoutsDirectory = await mkdtemp(join(tmpdir(), 'tau-host-checkouts-'));
-      roots.push(workspaceRoot, checkoutsDirectory);
-      /*
-       * Placement succeeds and the *base* cut fails, which is the shape every
-       * pre-lease terminal path shares (D17: the turn may not lease a dirty
-       * tree, so it asks the checkout to mint one first). The turn reaches
-       * `#turn.failed` and announces its release; before W19-b-a2 nothing on
-       * this leg settled the admission, so the caller waited out the host's
-       * whole 30 s patience and then heard "it was never leased" — a sentence
-       * naming nothing, which is the I12 failure the browser leg already fixed.
-       */
-      const port = row.create(workspaceRoot, checkoutsDirectory);
-      const unwritable: RevisionPort = {
-        ...port,
-        writeRevision: async () => {
-          throw new Error('the store is out of space');
-        },
-      };
-      const revisions = createProjectRevisions({
-        workspaceRoot,
-        projectId: 'project-1',
-        port: unwritable,
-      });
-      const launcher = revisions.record(
-        createNodeAgentLauncher({
-          workspaceRoot,
-          gatewayBaseUrl: 'https://gateway.example',
-          model,
-          systemPrompt: 'You are Tau.',
-          toolRegistry: {
-            list: () => [],
-            invoke: async () => ({ content: '', isError: false }),
-          },
-          auth: () => 'daemon-bearer',
-          fetch: (async () => sse(scriptedTurn(1, false))) as unknown as typeof globalThis.fetch,
-        }),
-      );
-      launchers.push(launcher);
-
-      await expect(startTurn(launcher, { chatId: 'chat-1', runId: 'run-1' })).rejects.toMatchObject({
-        code: 'REVISION_PREPARE_FAILED',
-        message: expect.stringContaining('out of space') as unknown as string,
-      });
-      launchers.splice(launchers.indexOf(launcher), 1);
-      await expect(launcher.close()).rejects.toThrow('out of space');
-      /* The test's own bound is the pin: 20 s is shorter than the host's
-       * `admissionMilliseconds`, so a run that only the timer settles fails
-       * here rather than passing slowly. */
-    }, 20_000);
-
-    /*
-     * The two rows that follow run on one port, and deliberately.
-     *
-     * They need the host's 30 s patience to elapse, which means faking the
-     * clock — and a fake clock also fires the native port's own `git lfs` start
-     * deadline, failing the row for a reason that has nothing to do with what
-     * it asserts. What it asserts is `packages/host` bookkeeping — the
-     * `admissions` and `turns` maps around one `admitTurn` — which is identical
-     * whichever port records underneath. One port proves it; every other row in
-     * this describe still runs on both.
-     */
-    const clockSafePort = row.name === 'isomorphic-git';
-
-    /**
-     * One turn the host stopped waiting for, on a registry that answers too late.
-     *
-     * The root buffers an admission that arrives before the registry has
-     * answered and replays it the moment it does (A38) — here, after the host's
-     * 30 s patience has expired and the caller has been refused. That is where
-     * both rows below start, with the registry released and the run refused.
-     *
-     * @returns The harness whose `run-1` the bound gave up on.
-     */
-    const refusedByTheBound = async (): Promise<Harness> => {
-      const registry = Promise.withResolvers<void>();
-      const held = await harness(row.create, {
-        wrapPort: (port) => ({
-          ...port,
-          listCheckouts: async () => {
-            await registry.promise;
-            return (await port.listCheckouts?.()) ?? [];
+    const holderAndNext = async (): Promise<Readonly<{ holder: Harness; next: Harness; refusals: string[] }>> => {
+      const cut = Promise.withResolvers<void>();
+      const holder = await harness(row.create, {
+        wrapPlacement: (placement) => ({
+          ...placement,
+          complete: async (input) => {
+            await placement.complete(input);
+            cut.resolve();
+            return { requestId: input.requestId, status: 'refused', code: 'SESSION_FENCED', message: 'The host died.' };
           },
         }),
       });
-
-      /*
-       * Only `setTimeout` is faked, and the real one is kept: `execute` reads
-       * the chat record off the real disk before it admits anything, so the
-       * bound this row fires does not exist yet when the clock is first
-       * advanced. Each step sleeps for real to let that read land, then jumps
-       * the host's patience again, so whichever step arms the bound, the next
-       * one fires it.
-       */
-      const realSetTimeout = globalThis.setTimeout;
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-      try {
-        const refused = expect(startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' })).rejects.toMatchObject({
-          code: 'REVISION_PREPARE_FAILED',
-        });
-        for (let step = 0; step < 40; step += 1) {
-          vi.advanceTimersByTime(5000);
-          // oxlint-disable-next-line no-await-in-loop -- one real pause per step, by design.
-          await new Promise<void>((resolve) => {
-            realSetTimeout(resolve, 25);
-          });
-        }
-        await refused;
-      } finally {
-        /* Real timers before the registry lands: everything the root starts on
-         * its first announcement schedules its own, and a fake clock advancing
-         * through them proves nothing these rows are about. */
-        vi.useRealTimers();
-      }
-
-      registry.resolve();
-      return held;
+      await startTurn(holder.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      await cut.promise;
+      await holder.launcher.close();
+      const refusals: string[] = [];
+      const next = await harness(row.create, {
+        reopen: { workspaceRoot: holder.workspaceRoot, checkoutsDirectory: holder.checkoutsDirectory },
+        wrapPlacement: (placement) => ({
+          ...placement,
+          complete: async (input) => {
+            const answer = await placement.complete(input);
+            if (answer.status === 'refused') {
+              refusals.push(answer.code);
+            }
+            return answer;
+          },
+        }),
+      });
+      return { holder, next, refusals };
     };
 
-    /*
-     * T4-02, the daemon leg: the host's patience is bounded, the root's queue
-     * is not.
-     *
-     * The replay happens after the caller has been refused: a turn spawns,
-     * takes the checkout's lease, and nothing is left to send it
-     * `turnCompleted`, so the checkout reads as held for the life of the
-     * process and every later save on it records nothing. A lease has no
-     * heartbeat by policy (§8), so this host giving up is the only liveness
-     * signal it has — it has to tell the root, not only its caller.
-     */
-    it.runIf(clockSafePort)(
-      'abandons an admission its own bound refused, rather than leasing the checkout for nobody',
-      async () => {
-        const held = await refusedByTheBound();
+    /* TS-A14, I25, RM-R8 (W8.r1 H1): only the holder root settles its attempt; the next leader waits on its mark. */
+    it("should not settle or retire another tab's attempt while that tab's revisions root lives, after a steal and after its agent-host worker dies", async () => {
+      const { holder, next, refusals } = await holderAndNext();
 
-        /* The lease an orphan takes lands a few ticks after the registry does, so
-         * this polls for it: the row fails the moment one appears rather than
-         * passing on a race. */
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-          // oxlint-disable-next-line no-await-in-loop -- polling for the lease this row must never see.
-          const leased = await held.leaseIds();
-          if (leased.length > 0) {
-            break;
-          }
-          // oxlint-disable-next-line no-await-in-loop -- polling is sequential by definition.
-          await new Promise<void>((resolve) => {
-            setTimeout(resolve, 100);
-          });
-        }
+      await expect.poll(() => refusals, { timeout: 20_000 }).toContain('LEASE_HELD_ELSEWHERE');
+      expect(await settlementsOf(next.launcher)).toEqual([]);
+      expect(await next.leaseIds()).toEqual(['run-1.json']);
 
-        expect(await held.leaseIds()).toEqual([]);
-      },
-      30_000,
-    );
+      /* The holder's tab closes: its mark is free, the queued wait reports the lease, and the next leader settles it. */
+      await holder.revisions.release();
+      await expect
+        .poll(async () => settlementsOf(next.launcher).then((settlements) => settlements?.length), { timeout: 20_000 })
+        .toBe(1);
+      await expect.poll(async () => next.leaseIds(), { timeout: 10_000 }).toEqual([]);
+      const settled = await settlementsOf(next.launcher);
+      expect(settled?.[0]).toMatchObject({
+        attempt: 1,
+        event: { type: 'turn.finalized' },
+      });
+    }, 60_000);
 
-    /*
-     * The other half of the same give-up: the run id has to become admittable
-     * again.
-     *
-     * `execute` skips admission for a run it has already admitted
-     * (`turns.has(runId)`), which is how a turn's own later commands stay out
-     * of the placement path. Every other way an admission ends drops that
-     * record — the release announcement does, the failed `execute` does — but
-     * the bound did not, so a client retrying the run id it was just refused
-     * went straight to the launcher: the agent ran with no lease, wrote into
-     * the live checkout unfenced, and its turn recorded no revision at all.
-     * That is the one thing a host may never do (I-EDIT).
-     */
-    it.runIf(clockSafePort)(
-      'admits a retry of the run its bound refused, rather than running it with no lease',
-      async () => {
-        const held = await refusedByTheBound();
+    /* TS-A5: a save the live lease refuses reports it; the lease is reconciled once its tab closes, and the save then mints. */
+    it("should reconcile a closed tab's lease after the open tab's save is refused", async () => {
+      const { holder, next, refusals } = await holderAndNext();
+      await writeFile(join(next.workspaceRoot, 'main.ts'), 'export const size = 9;\n');
+      await next.revisions.channel.request({ command: 'saveRevision', requestId: 'save-1' });
 
-        await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      /* The refused save and the opening both reconcile, and the live holder's lease refuses both. */
+      await expect.poll(() => refusals, { timeout: 20_000 }).toContain('LEASE_HELD_ELSEWHERE');
+      expect(await next.leaseIds()).toEqual(['run-1.json']);
 
-        /* The settlement lands after `execute` resolves: the launcher's terminal
-         * marker is what completes the turn. */
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-          if (held.events.some((event) => event.type === 'turn.finalized' && event.runId === 'run-1')) {
-            break;
-          }
-          // oxlint-disable-next-line no-await-in-loop -- polling is sequential by definition.
-          await new Promise<void>((resolve) => {
-            setTimeout(resolve, 100);
-          });
-        }
+      await holder.revisions.release();
 
-        const finalized = held.events.flatMap((event) => (event.type === 'turn.finalized' ? [event.runId] : []));
-        expect(finalized).toEqual(['run-1']);
-      },
-      30_000,
-    );
+      await expect.poll(async () => next.leaseIds(), { timeout: 20_000 }).toEqual([]);
+      expect(await settlementsOf(next.launcher)).toHaveLength(1);
+    }, 60_000);
+
+    /* TS-A4, TS-S7: the next host's reconciliation, not a sweep, settles an attempt a host died holding. */
+    it('should append the row and retire the lease when the host starts after a crash between the cut and the row', async () => {
+      const cut = Promise.withResolvers<void>();
+      const crashed = await harness(row.create, {
+        wrapPlacement: (placement) => ({
+          ...placement,
+          complete: async (input) => {
+            await placement.complete(input);
+            cut.resolve();
+            /* The host dies here: the root has cut and settled, and M1 hears only its session end, so no `turn.*` row. */
+            return { requestId: input.requestId, status: 'refused', code: 'SESSION_FENCED', message: 'The host died.' };
+          },
+        }),
+      });
+      await startTurn(crashed.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      await cut.promise;
+      await crashed.launcher.close();
+      await crashed.revisions.release();
+      expect(await settlementsOf(crashed.launcher)).toEqual([]);
+      expect(await crashed.leaseIds()).toEqual(['run-1.json']);
+
+      const next = await harness(row.create, {
+        reopen: { workspaceRoot: crashed.workspaceRoot, checkoutsDirectory: crashed.checkoutsDirectory },
+      });
+
+      await expect
+        .poll(async () => settlementsOf(next.launcher).then((settlements) => settlements?.length), {
+          timeout: 20_000,
+        })
+        .toBe(1);
+      await expect.poll(async () => next.leaseIds(), { timeout: 10_000 }).toEqual([]);
+      const [settlement] = (await settlementsOf(next.launcher)) ?? [];
+      expect(settlement).toMatchObject({ attempt: 1, event: { type: 'turn.finalized' } });
+      expect(next.admitted).toEqual([]);
+    }, 60_000);
+
+    /* HD-3, TS-R9: a refusal is `admit`'s answer, so the run ends with its code at once, not at a 30 s bound. */
+    it('should answer a refused placement at once', async () => {
+      const held = await harness(row.create, {
+        /* The dirty base cannot be minted, so placement refuses before the agent could write (TS-R1). */
+        wrapPort: (port) => ({
+          ...port,
+          writeRevision: async () => {
+            throw new Error('the store is out of space');
+          },
+        }),
+      });
+
+      const answer = await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+
+      expect(answer.status).toBe('applied');
+      await expect
+        .poll(async () => runOf(held.launcher), { timeout: 5000 })
+        .toMatchObject({ lifecycle: 'failed', failure: { code: 'BASE_CUT_FAILED' } });
+      /* The `turn.failed` row may follow the lifecycle row in a later batch. */
+      await expect
+        .poll(async () => settlementsOf(held.launcher).then((settlements) => settlements?.length), {
+          timeout: 5000,
+        })
+        .toBe(1);
+      const ledger = await held.launcher.host.ledger('chat-1');
+      expect(ledger.runs['run-1']?.settlements).toEqual([
+        expect.objectContaining({
+          attempt: 1,
+          event: expect.objectContaining({ type: 'turn.failed', code: 'BASE_CUT_FAILED' }) as unknown,
+        }),
+      ]);
+      expect(await held.leaseIds()).toEqual([]);
+      expect(await readFile(join(held.workspaceRoot, 'main.ts'), 'utf8')).toBe('export const size = 1;\n');
+      /* The close cut cannot mint either, and says why. */
+      const closing = launchers.pop();
+      await expect(closing?.close()).rejects.toThrow('out of space');
+    }, 20_000);
+
+    /* HD-4, TS-R8: a replayed start is answered from the ledger's applied set before any placement. */
+    it('should answer a replayed start of a settled run without placing it', async () => {
+      const held = await harness(row.create);
+      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      await held.settlementFor('run-1');
+      await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toEqual([]);
+
+      const replay = await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+
+      expect(replay.status).toBe('replayed');
+      expect(held.admitted.map(({ runId, attempt }) => `${runId}/${String(attempt)}`)).toEqual(['run-1/1']);
+      expect(await held.leaseIds()).toEqual([]);
+      expect(held.events.filter((event) => event.type === 'turn.finalized')).toHaveLength(1);
+    }, 30_000);
+
+    /* HD-5, TS-R8: reservation comes before placement, so a busy chat is refused before any lease. */
+    it('should refuse a busy chat before placement', async () => {
+      const busy = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const held = await harness(row.create, {
+        duringTurn: async () => {
+          busy.resolve();
+          await release.promise;
+        },
+      });
+      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      await busy.promise;
+
+      const second = await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-2' });
+
+      expect(second).toMatchObject({ status: 'refused', code: 'CHAT_RUN_LIVE' });
+      expect(await held.leaseIds()).toEqual(['run-1.json']);
+      expect(held.admitted.map(({ runId }) => runId)).toEqual(['run-1']);
+      release.resolve();
+      await held.settlementFor('run-1');
+    }, 30_000);
+
+    /* HD-6, TS-R9: M1's terminal transition calls `complete` itself; the host follows no chat to settle it. */
+    it('should settle every turn without an event watch', async () => {
+      const held = await harness(row.create, { toolTurns: 'every' });
+
+      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      await held.settlementFor('run-1');
+      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-2' });
+      await held.settlementFor('run-2');
+      await startTurn(held.launcher, { chatId: 'chat-2', runId: 'run-3' });
+      await held.settlementFor('run-3');
+
+      await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toEqual([]);
+      const first = await held.launcher.host.ledger('chat-1');
+      const second = await held.launcher.host.ledger('chat-2');
+      /* One settlement row per attempt, appended by M1 and acknowledged (TS-R18). */
+      expect(
+        [first, second].flatMap((ledger) =>
+          Object.entries(ledger.runs).flatMap(([runId, entry]) =>
+            entry.settlements.map((settlement) => `${runId}/${String(settlement.attempt)}:${settlement.event.type}`),
+          ),
+        ),
+      ).toEqual(['run-1/1:turn.finalized', 'run-2/1:turn.finalized', 'run-3/1:turn.finalized']);
+    }, 30_000);
+
+    /* TS-A12, TS-R10: a resting attempt is settled; the resumed attempt is admitted again under a new lease. */
+    it('should settle a paused attempt and admit its resumed attempt with a new lease', async () => {
+      const held = await harness(row.create, {
+        /* The turn's closing request fails after the tool wrote: the run rests, resumable. */
+        respond: (turn) => (turn === 1 ? new Response('upstream unavailable', { status: 503 }) : undefined),
+      });
+
+      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      await expect
+        .poll(async () => settlementsOf(held.launcher).then((settlements) => settlements?.length), {
+          timeout: 10_000,
+        })
+        .toBe(1);
+      await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toEqual([]);
+      const rested = await held.launcher.host.ledger('chat-1');
+      expect(rested.runs['run-1']).toMatchObject({ lifecycle: 'failed', attempt: 1 });
+
+      const resumed = await held.launcher.execute({
+        type: 'resume',
+        commandId: 'resume-run-1',
+        payload: { chatId: 'chat-1', runId: 'run-1' },
+      });
+
+      expect(resumed.status).toBe('applied');
+      await expect
+        .poll(async () => settlementsOf(held.launcher).then((settlements) => settlements?.length), {
+          timeout: 10_000,
+        })
+        .toBe(2);
+      await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toEqual([]);
+      const settled = await held.launcher.host.ledger('chat-1');
+      expect(settled.runs['run-1']?.settlements.map(({ attempt, event }) => [attempt, event.type])).toEqual([
+        [1, 'turn.finalized'],
+        [2, 'turn.finalized'],
+      ]);
+      expect(held.admitted.map(({ attempt }) => attempt)).toEqual([1, 2]);
+    }, 30_000);
   });
 }
 
@@ -1021,7 +1156,7 @@ for (const row of ports) {
  * without a port and that default is native Git over the project directory,
  * with linked checkouts in the host's own data directory. No mode exists to
  * choose (S12, A10, D9). */
-describe.runIf(hasGit)('the disk-host default', () => {
+describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
   it('gives browser, desktop and CLI identical revision identity and keeps desktop checkouts outside the project', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-default-'));
     const cliRoot = await mkdtemp(join(tmpdir(), 'tau-cli-default-'));
@@ -1172,7 +1307,7 @@ describe.runIf(hasGit)('the disk-host default', () => {
    * empty directory with nothing but the project's id and where its remote is,
    * and `openFromRemote` is the whole gesture.
    */
-  it.runIf(hasGit)(
+  it.runIf(gitToolchainOnPath)(
     'opens a project this machine has never held from its remote',
     async () => {
       const bare = await mkdtemp(join(tmpdir(), 'tau-host-open-remote-'));
@@ -1250,7 +1385,7 @@ describe.runIf(hasGit)('the disk-host default', () => {
    * "there is anything to open" are different facts. An empty remote must not
    * be reported as opened over an empty directory.
    */
-  it.runIf(hasGit)(
+  it.runIf(gitToolchainOnPath)(
     'refuses to open a project whose Tau Cloud repository is still empty',
     async () => {
       const bare = await mkdtemp(join(tmpdir(), 'tau-host-open-empty-'));
@@ -1294,7 +1429,7 @@ describe.runIf(hasGit)('the disk-host default', () => {
    * refusal is prompt and in the remote's own words, and is never the "did not
    * answer in time" sentence the unhandled states used to produce.
    */
-  it.runIf(hasGit)(
+  it.runIf(gitToolchainOnPath)(
     'refuses an open that collides with work this machine already has',
     async () => {
       const bare = await mkdtemp(join(tmpdir(), 'tau-host-open-clash-'));
@@ -1463,10 +1598,13 @@ describe('a branch refusal over the host channel', () => {
     })();
     try {
       await revisions.channel.request({ command: 'open' });
-      /* A project with nothing recorded has nothing to branch from, which is
-         the cheapest refusal this tree mints — any refused verb proves the
-         relay, and this one needs no turn to have run. */
-      await revisions.channel.request({ command: 'createBranch', name: 'isolated-run' });
+      /* A branch the live checkout already holds is refused however soon the
+         registry answers — any refused verb proves the relay, and this one
+         needs no turn to have run. The verb itself is refused with the tree's
+         code (B7), and the toast still reaches the pane. */
+      await expect(revisions.channel.request({ command: 'createBranch', name: 'main' })).rejects.toMatchObject({
+        code: expect.any(String) as unknown,
+      });
 
       await expect
         .poll(
@@ -1479,7 +1617,7 @@ describe('a branch refusal over the host channel', () => {
             type: 'error',
             subject: 'branch',
             operation: 'create',
-            branch: 'isolated-run',
+            branch: 'main',
             code: expect.any(String) as unknown as string,
             message: expect.any(String) as unknown as string,
           },
@@ -1487,6 +1625,145 @@ describe('a branch refusal over the host channel', () => {
     } finally {
       abort.abort();
       await reading.catch(() => undefined);
+      await revisions.release();
+    }
+  }, 30_000);
+
+  /* Asked the moment the project opens, before its registry has loaded: the
+     registry dropped the verb, and the pane waited out the 30 s bound (W4 a3b). */
+  it('answers a branch from an unknown base asked for as the project opens', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-branch-early-'));
+    roots.push(workspaceRoot);
+    const revisions = createProjectRevisions({
+      workspaceRoot,
+      projectId: 'project-1',
+      port: createIsomorphicGitRevisionPort({
+        filesystem: new NodeFsProvider(workspaceRoot),
+        checkouts: { projectId: 'project-1', root: () => new NodeFsProvider(workspaceRoot) },
+      }),
+    });
+    const abort = new AbortController();
+    const frames: Array<Readonly<{ kind: string; value: unknown }>> = [];
+    const reading = (async (): Promise<void> => {
+      for await (const frame of revisions.channel.events(abort.signal)) {
+        frames.push(frame);
+      }
+    })();
+    try {
+      await revisions.channel.request({ command: 'open' });
+      /* The verb itself is refused with the tree's code (B7), and the toast still reaches the pane. */
+      await expect(
+        revisions.channel.request({ command: 'createBranch', name: 'feature', from: 'no-such-revision' }),
+      ).rejects.toMatchObject({ code: 'UNKNOWN_REVISION' });
+
+      await expect
+        .poll(() => frames.find((frame) => frame.kind === 'toast'), { timeout: 5000 })
+        .toMatchObject({ kind: 'toast', value: { type: 'error', branch: 'feature', code: 'UNKNOWN_REVISION' } });
+    } finally {
+      abort.abort();
+      await reading.catch(() => undefined);
+      await revisions.release();
+    }
+  }, 30_000);
+});
+
+describe('a restore refusal over the host channel', () => {
+  it('carries the refusal code, not only a sentence', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-restore-refusal-'));
+    roots.push(workspaceRoot);
+    const revisions = createProjectRevisions({
+      workspaceRoot,
+      projectId: 'project-1',
+      port: createIsomorphicGitRevisionPort({
+        filesystem: new NodeFsProvider(workspaceRoot),
+        checkouts: { projectId: 'project-1', root: () => new NodeFsProvider(workspaceRoot) },
+      }),
+    });
+    const abort = new AbortController();
+    const frames: Array<Readonly<{ kind: string; value: unknown }>> = [];
+    const reading = (async (): Promise<void> => {
+      for await (const frame of revisions.channel.events(abort.signal)) {
+        frames.push(frame);
+      }
+    })();
+    try {
+      await revisions.channel.request({ command: 'open' });
+      await expect.poll(() => revisions.status().checkoutId, { timeout: 10_000 }).toBeDefined();
+      /* A revision this store never held: the cheapest refusal a restore mints. */
+      await revisions.channel.request({ command: 'restore', revisionId: '0'.repeat(40) });
+
+      await expect
+        .poll(
+          () =>
+            frames.find(
+              (frame) =>
+                frame.kind === 'toast' && (frame.value as { type?: string; subject?: string }).subject === 'restore',
+            ),
+          { timeout: 10_000 },
+        )
+        .toMatchObject({
+          kind: 'toast',
+          value: {
+            type: 'error',
+            subject: 'restore',
+            code: expect.any(String) as unknown as string,
+            message: expect.any(String) as unknown as string,
+          },
+        });
+    } finally {
+      abort.abort();
+      await reading.catch(() => undefined);
+      await revisions.release();
+    }
+  }, 30_000);
+});
+
+describe('an editor conflict over the host channel (D14)', () => {
+  it('records an unmergeable edit on this device’s conflict line, and says when there is nothing to record', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-editor-conflict-'));
+    roots.push(workspaceRoot);
+    const port = createIsomorphicGitRevisionPort({
+      filesystem: new NodeFsProvider(workspaceRoot),
+      checkouts: { projectId: 'project-1', root: () => new NodeFsProvider(workspaceRoot) },
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const record = async (parents: readonly string[], content: string): Promise<RevisionId> => {
+      const { commitId } = await port.writeRevision({
+        parents: parents.map((parent) => revisionId(parent)),
+        tree: new ImmutableRevisionTree([['a.txt', new TextEncoder().encode(content)]]),
+        provenance: { source: 'user', actorId: 'test', createdAt: Date.UTC(2026, 8, 26) },
+        summary: { generated: content },
+      });
+      return revisionId(commitId);
+    };
+    const base = await record([], 'base\n');
+    const head = await record([base], 'theirs\n');
+    await port.updateRef({ name: 'main', expectedHead: undefined, head });
+    await port.setHead('main');
+    await writeFile(join(workspaceRoot, 'a.txt'), 'theirs\n');
+    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'project-1', port });
+    try {
+      await revisions.channel.request({ command: 'open' });
+
+      await expect(
+        revisions.channel.request({ command: 'recordEditorConflict', path: 'a.txt', base: 'theirs\n', mine: 'x\n' }),
+      ).resolves.toMatchObject({ result: { status: 'unchanged' } });
+      const answer = (await revisions.channel.request({
+        command: 'recordEditorConflict',
+        path: 'a.txt',
+        base: 'base\n',
+        mine: 'mine\n',
+      })) as unknown as { result: { status: string; line: string; into: string; revisionId: string } };
+
+      expect(answer.result).toMatchObject({ status: 'recorded', into: 'main' });
+      expect(answer.result.line).toMatch(/^conflicts\/main\/[\w.-]+$/u);
+      expect(await port.readRef(answer.result.line)).toBe(answer.result.revisionId);
+      const recorded = await port.readRevision(revisionId(answer.result.revisionId));
+      expect(recorded?.parents[0]).toBe(head);
+      /* Nothing reaches the files or main. */
+      expect(await port.readRef('main')).toBe(head);
+      expect(await readFile(join(workspaceRoot, 'a.txt'), 'utf8')).toBe('theirs\n');
+    } finally {
       await revisions.release();
     }
   }, 30_000);
@@ -1501,7 +1778,7 @@ describe('a branch refusal over the host channel', () => {
  * so none of this row touches the network. `authorizeRemote` is how the page
  * re-validates once it has re-minted.
  */
-describe.runIf(hasGit)('a Tau-managed remote credential over the host channel', () => {
+describe.runIf(gitToolchainOnPath)('a Tau-managed remote credential over the host channel', () => {
   it('should hold an unavailable frame and re-validate on authorizeRemote', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-remote-credential-'));
     roots.push(workspaceRoot);

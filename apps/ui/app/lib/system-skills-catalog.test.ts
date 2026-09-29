@@ -9,6 +9,7 @@ const progressiveDisclosureSkillNames = [
   'create-model',
   'cad-build123d',
   'cad-picogk',
+  'cad-picovoxel',
   'cad-openscad',
   'cad-replicad',
   'cad-manifold',

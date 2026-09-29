@@ -16,6 +16,7 @@ import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
 import { PublicationTopbar } from '#components/share/publication-topbar.js';
+import { ephemeralKernelOptions, ephemeralPreviewStage } from '#constants/ephemeral-kernel-options.js';
 import type { ParsedPublication } from '#components/share/parsed-publication.js';
 
 type SharedProjectFiles = Record<string, { content: Uint8Array<ArrayBuffer> }>;
@@ -132,28 +133,41 @@ const SharedProjectLayout = ({
   readonly managementActions?: React.ReactNode;
 }): React.JSX.Element => {
   const isMobile = useIsMobile();
+  const topbar = (
+    <SharedProjectTopbar
+      publication={publication}
+      files={files}
+      archive={archive}
+      shareUrl={shareUrl}
+      sourceLabel={sourceLabel}
+      managementActions={
+        isMobile ? (
+          <>
+            {/* A glyph, like its neighbours at phone widths. A label would overflow the bar below 24rem, and from
+                40rem, where the neighbours show theirs, when every action is present. */}
+            <DrawerTrigger asChild>
+              <Button type='button' size='sm' variant='ghost' aria-label='Workbench' className='size-8 px-0'>
+                <PanelBottom className='size-3.5' aria-hidden />
+              </Button>
+            </DrawerTrigger>
+            {managementActions}
+          </>
+        ) : (
+          managementActions
+        )
+      }
+    />
+  );
 
   return (
     <div className='flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-sidebar'>
-      <SharedProjectTopbar
-        publication={publication}
-        files={files}
-        archive={archive}
-        shareUrl={shareUrl}
-        sourceLabel={sourceLabel}
-        managementActions={managementActions}
-      />
       <ChatContextInsertionProvider>
         {isMobile ? (
-          <div className='relative min-h-0 flex-1 bg-background'>
-            <ViewerDockview profile='shared' />
+          <>
+            {/* The viewer's bottom edge belongs to its controls, so the workbench opens from the top bar. The drawer
+                wraps only the bar and its content, so `useIsInsideDrawer` stays false in the viewer. */}
             <Drawer modal>
-              <DrawerTrigger asChild>
-                <Button type='button' className='absolute right-3 bottom-3 z-30' size='sm' variant='secondary'>
-                  <PanelBottom className='mr-1.5 size-3.5' aria-hidden />
-                  Workbench
-                </Button>
-              </DrawerTrigger>
+              {topbar}
               <DrawerContent className='h-[min(78dvh,48rem)] bg-sidebar'>
                 <DrawerTitle className='sr-only'>Project workbench</DrawerTitle>
                 <DrawerDescription className='sr-only'>
@@ -164,24 +178,30 @@ const SharedProjectLayout = ({
                 </div>
               </DrawerContent>
             </Drawer>
-          </div>
+            <main className='relative min-h-0 flex-1 bg-background'>
+              <ViewerDockview profile='shared' />
+            </main>
+          </>
         ) : (
-          <div className='min-h-0 flex-1 p-2'>
-            <Allotment
-              separator={false}
-              proportionalLayout={false}
-              className='size-full overflow-hidden rounded-lg border border-border bg-background [--focus-border:var(--primary)]'
-            >
-              <Allotment.Pane minSize={360} priority={LayoutPriority.High}>
-                <ViewerDockview profile='shared' />
-              </Allotment.Pane>
-              <Allotment.Pane minSize={300} preferredSize={380} priority={LayoutPriority.Low}>
-                <div className='size-full border-l border-border'>
-                  <WorkbenchDockview profile='shared' />
-                </div>
-              </Allotment.Pane>
-            </Allotment>
-          </div>
+          <>
+            {topbar}
+            <main className='min-h-0 flex-1 p-2'>
+              <Allotment
+                separator={false}
+                proportionalLayout={false}
+                className='size-full overflow-hidden rounded-lg border border-border bg-background [--focus-border:var(--primary)]'
+              >
+                <Allotment.Pane minSize={360} priority={LayoutPriority.High}>
+                  <ViewerDockview profile='shared' />
+                </Allotment.Pane>
+                <Allotment.Pane minSize={300} preferredSize={380} priority={LayoutPriority.Low}>
+                  <div className='size-full border-l border-border'>
+                    <WorkbenchDockview profile='shared' />
+                  </div>
+                </Allotment.Pane>
+              </Allotment>
+            </main>
+          </>
         )}
       </ChatContextInsertionProvider>
     </div>
@@ -214,12 +234,19 @@ export const SharedProjectWorkbench = ({
       new Map(Object.entries(hydratedFiles).map(([path, file]) => [path, { filename: path, content: file.content }])),
     [hydratedFiles],
   );
+  // A memory-mounted project is not on disk, so it renders like a preview: on the ephemeral kernel, bytes staged.
+  const projectInput = useMemo(() => ({ stage: ephemeralPreviewStage(hydratedFiles) }), [hydratedFiles]);
 
   return (
     <FileManagerProvider initialBackend='memory' rootDirectory={rootDirectory}>
       <SharedProjectHydrator files={hydratedFiles} rootDirectory={rootDirectory} storageRootKey={storageRootKey}>
         <WebglContextTrackerProvider>
-          <ProjectProvider projectId={projectId} profile='shared'>
+          <ProjectProvider
+            projectId={projectId}
+            profile='shared'
+            kernelOptionsFactory={ephemeralKernelOptions}
+            input={projectInput}
+          >
             <MonacoModelServiceProvider>
               <ProjectWorkspaceProvider>
                 <SharedProjectLayout

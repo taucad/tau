@@ -10,6 +10,7 @@ import process from 'node:process';
 import {
   desktopE2EApiUrl,
   desktopE2ECompletedArtifact,
+  desktopE2EFreeTierSyncEnabled,
   desktopE2EFrontendUrl,
   desktopE2EPackagedExecutable,
   desktopE2EProviderStubKey,
@@ -30,6 +31,17 @@ import {
 const workspaceRoot = resolve(import.meta.dirname, '../..');
 const apiRoot = resolve(import.meta.dirname, '../api');
 const apiLiveUrl = new URL('/health/live', desktopE2EApiUrl);
+const apiReadyTimeout = (() => {
+  const configured = process.env['TAU_E2E_API_READY_TIMEOUT_MS'];
+  if (configured === undefined) {
+    return 180_000;
+  }
+  const milliseconds = Number(configured);
+  if (!Number.isSafeInteger(milliseconds) || milliseconds <= 0) {
+    throw new Error('TAU_E2E_API_READY_TIMEOUT_MS must be a positive integer.');
+  }
+  return milliseconds;
+})();
 
 const isApiReady = async (): Promise<boolean> => {
   try {
@@ -41,7 +53,7 @@ const isApiReady = async (): Promise<boolean> => {
 };
 
 const waitForApi = async (child: ChildProcess): Promise<void> => {
-  const deadline = Date.now() + 180_000;
+  const deadline = Date.now() + apiReadyTimeout;
   while (!(await isApiReady())) {
     if (child.exitCode !== null) {
       throw new Error(`Tau API test server exited with code ${String(child.exitCode)}`);
@@ -132,10 +144,10 @@ export const setup = async (): Promise<() => void> => {
    * (`billing.module.ts`), so the seed turn on the fixture route stays mocked
    * while the live turn's own wire (`TAU_E2E_LIVE_MODEL`, OpenAI by default)
    * reaches the real provider and earns the credit delta; an Anthropic live
-   * model would be stubbed and is not a supported live selection. Not the
-   * completed-artifact tier: its isolated API has no billing environment, and
-   * `environmentSchema` refuses this name without `BILLING_ENVIRONMENT=development`. */
-  if (!desktopE2ECompletedArtifact) {
+   * model would be stubbed and is not a supported live selection. The default
+   * completed-artifact tier remains self-host; an explicit isolated-cloud
+   * gateway run uses its verified disposable development billing database. */
+  if (!desktopE2ECompletedArtifact || process.env['TAU_E2E_COMPLETED_CLOUD_GATEWAY'] === 'true') {
     environment['TAU_CLOUD_ENABLED'] = 'true';
     environment['BILLING_ENVIRONMENT'] = 'development';
     environment['BILLING_USAGE_CURSOR_SECRET'] = 'desktop-e2e-usage-cursor-secret-min-32-chars';
@@ -155,7 +167,10 @@ export const setup = async (): Promise<() => void> => {
    * server-side is otherwise invisible from the Electron side of the glass. */
   const logDirectory = resolve(import.meta.dirname, '../../out/test-results/desktop-e2e');
   mkdirSync(logDirectory, { recursive: true });
-  const apiLog = createWriteStream(resolve(logDirectory, 'api.log'), { flags: 'w' });
+  /* The gate-open pass is a second API in the same target run; its own log
+   * keeps the first pass's evidence. */
+  const apiLogName = desktopE2EFreeTierSyncEnabled ? 'api-free-tier-sync.log' : 'api.log';
+  const apiLog = createWriteStream(resolve(logDirectory, apiLogName), { flags: 'w' });
   // Nest also loads .env from cwd. Completed-package tests use the fixture's
   // private directory so neither Node nor Nest can read real API credentials.
   const apiCwd = desktopE2ECompletedArtifact ? process.env['TAU_E2E_API_CWD'] : apiRoot;

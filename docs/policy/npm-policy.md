@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-09-17'
+updated: '2026-09-29'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -52,6 +52,8 @@ Internal workspace libraries under `libs/*` and `apps/libs/*` are `"private": tr
 Every dependency declared in a publishable package must be classified into exactly one of these buckets. Bucket selection is non-negotiable.
 
 Use pnpm to change workspace dependencies. Add a general root dependency with `pnpm add -w <dependency>` and root development tooling with `pnpm add -Dw <dependency>`. A package-owned production dependency belongs in that package's manifest: use `pnpm --filter <package-name> add <dependency>` and apply the classification below. Do not rely on a root installation to hide an undeclared consumer runtime requirement.
+
+Serialize dependency changes and the resulting install before parallel verification. The pinned pnpm 11 defaults to installing when a command detects stale dependencies; use per-call `pnpm_config_verify_deps_before_run=error` for concurrent checks so drift fails instead of starting competing installs.
 
 | Bucket                      | Field                                                             | Treatment                                                    |
 | --------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------ |
@@ -102,6 +104,8 @@ INCORRECT:
 ```
 
 Plugin and core packages have additional dependency rules:
+
+**Schema-only exception:** `@taucad/project-core` owns the portable Tau project-manifest schema and parser consumed by Runtime and GeoSpec. It must not import or declare `@taucad/runtime` in any dependency field; Runtime declares the public project-core dependency. The Runtime-peer rule below does not apply to this package. Its emitted Zod API still requires the literal Zod peer and catalog development dependency. This exception prevents the Runtime → private types → project-core → Runtime cycle; it grants no exception to plugin packages or other core packages.
 
 | Package class                                | Required dependency shape                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -196,12 +200,12 @@ When a publishable package depends on a private workspace library (anything unde
 
 Published first-party packages are different. `@taucad/*` plugin and core packages that have their own public package identity must stay external when they provide independent versioning, optional host payloads, or payload isolation. For example, `@taucad/cli` may depend on `@taucad/image`, but `@taucad/runtime` must not bundle or depend on it.
 
-Use a single regex per package that names every private workspace dep explicitly. Do not use a catch-all `/^@taucad\//` — externally-published packages (for example, plugin packages, `@taucad/kcl-wasm-lib`, or `libcascade`) must stay external.
+Use `bundlePattern(await workspace(), projectName)` to derive a subpath-aware regex from that package's eligible private workspace devDependencies. Do not use a catch-all `/^@taucad\//` — externally-published packages (for example, plugin packages, `@taucad/kcl-wasm-lib`, or `libcascade`) must stay external.
 
 CORRECT:
 
 ```typescript
-const TAU_WORKSPACE_BUNDLE = /^@taucad\/(events|filesystem|fs-bridge|json-schema|memory|rpc|types|utils)(\/|$)/;
+const TAU_WORKSPACE_BUNDLE = /^@taucad\/(events|filesystem|fs-bridge|json-schema|memory|types|utils)(\/|$)/;
 
 export default defineConfig({
   // ...
@@ -211,11 +215,11 @@ export default defineConfig({
 });
 ```
 
-The runtime bundle list is exactly events, filesystem, fs-bridge, JSON Schema, memory, RPC, types, and utils. Public `@taucad/units`, concrete plugin, and public core packages stay external.
+The runtime's current private bundle candidates are events, fs-bridge, JSON Schema, memory, RPC, types, and utils. Published `@taucad/filesystem`, `@taucad/units`, concrete plugin, and public core packages stay external.
 
-Generic jobs and configuration are internal runtime modules with focused public runtime subpaths, not separate jobs/configuration packages. Reuse the existing single runtime bundle owner for their private filesystem/path dependencies and consume units through public `@taucad/units`; do not introduce a dependency back-edge, duplicate private bundle, or another foundation package merely to preserve the superseded separate-package layout. Base configuration imports remain independent of the explicit Zod authoring entry. Check packed JavaScript and declarations from both entries; source aliases are not publication proof. Independently published consumers outside this consolidation still require their own valid dependency disposition.
+Generic jobs and configuration are internal runtime modules with focused public runtime subpaths, not separate jobs/configuration packages. Their private filesystem/path dependencies are bundled into runtime and units are consumed through public `@taucad/units`; do not introduce a dependency back-edge or another foundation package merely to preserve the superseded separate-package layout. Base configuration imports remain independent of the explicit Zod authoring entry. Check packed JavaScript and declarations from both entries; source aliases are not publication proof. Independently published consumers outside this consolidation still require their own valid dependency disposition.
 
-Every bundled private workspace library has exactly one published owner at any time — the pkgcheck bundle-ownership gate enforces this. When a private helper serves multiple published packages after the plugin split, either its shared logic becomes a published core package the plugins consume, or the private library is dissolved into its consumers. Never bundle the same private library into two published owners. `@taucad/converter` takes the dissolution path: it is removed entirely (per-backend import kernels in plugin packages, shared glTF machinery in `@taucad/geometry-core`), so no package bundles it — see `docs/research/runtime-converter-dissolution-blueprint.md`.
+Each published package may independently bundle a private workspace library it is permitted to use. The pkgcheck mirror witness verifies permission for each package; its artifact and strict-consumer checks reject leaked private imports and unresolved declarations. A shared private helper does not need a public package identity merely because multiple public packages embed it. Identity-sensitive dependencies remain external according to their peer rules. `@taucad/converter` was removed entirely (per-backend import kernels in plugin packages, shared glTF machinery in `@taucad/geometry-core`), so no package bundles it — see `docs/research/runtime-converter-dissolution-blueprint.md`.
 
 INCORRECT:
 
@@ -227,7 +231,7 @@ deps: {
 
 The `(\/|$)` suffix is required so subpath imports (`@taucad/utils/id`, `@taucad/types/constants`) match — without it, the regex bundles only bare-specifier imports and leaves subpaths external (the failure mode in [rolldown/tsdown#544](https://github.com/rolldown/tsdown/issues/544)).
 
-**Why**: Bundling workspace deps gives consumers a single-install experience. Subpath-aware regexes prevent silent partial-bundling regressions. Keeping the explicit list (rather than `/^@taucad\//`) prevents accidentally bundling externally-published `@taucad/*` packages, which would duplicate WASM bindings and break consumer dedup.
+**Why**: Bundling workspace deps gives consumers a single-install experience. Subpath-aware regexes prevent silent partial-bundling regressions. Deriving each package's pattern from its private-library manifest dependencies (rather than `/^@taucad\//`) prevents accidentally bundling externally-published `@taucad/*` packages, which would duplicate WASM bindings and break consumer dedup.
 
 ### 5. `exports` and `publishConfig.exports` Must Stay in Lockstep
 
@@ -327,16 +331,16 @@ INCORRECT (missing `engines`, `sideEffects`, `bugs`, `homepage`):
 
 Every package must pass `tools/pkgcheck.ts` before publish. The orchestrator runs these sub-checks in order; any single failure blocks the publish.
 
-| Check                            | Tool                                                         | Purpose                                                                    | Severity |
-| -------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------- | -------- |
-| 1. Tau metadata                  | `tools/pkgcheck.ts`                                          | Tau-specific ESM-only metadata and publish-map checks                      | error    |
-| 2. Bundle ownership              | `tools/pkgcheck.ts`                                          | One published owner per bundled workspace package                          | error    |
-| 3. Bundled declaration specifier | `tools/pkgcheck.ts`                                          | No bundled workspace specifier remains in runtime declarations             | error    |
-| 4. Strict consumer types         | `tsc`                                                        | Runtime declarations pass with `skipLibCheck: false` under both resolvers  | error    |
-| 5. `publint`                     | [publint](https://publint.dev)                               | `package.json` field validity (`exports`, `main`, `types` vs actual files) | error    |
-| 6. `attw`                        | [@arethetypeswrong/core](https://arethetypeswrong.github.io) | TypeScript type resolution for ESM-only packages (`profile: 'esm-only'`)   | error    |
-| 7. `madge`                       | [madge](https://github.com/pahen/madge)                      | Circular dependency detection inside `src/`                                | error    |
-| 8. `size-limit`                  | [size-limit](https://github.com/ai/size-limit)               | Per-entry bundle size budgets (defined in `.size-limit.json`)              | error    |
+| Check                            | Tool                                                         | Purpose                                                                     | Severity |
+| -------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------- | -------- |
+| 1. Tau metadata                  | `tools/pkgcheck.ts`                                          | Tau-specific ESM-only metadata and publish-map checks                       | error    |
+| 2. Bundle ownership              | `tools/pkgcheck.ts`                                          | Each emitted workspace mirror is permitted by its package manifest and tags | error    |
+| 3. Bundled declaration specifier | `tools/pkgcheck.ts`                                          | No bundled workspace specifier remains in runtime declarations              | error    |
+| 4. Strict consumer types         | `tsc`                                                        | Runtime declarations pass with `skipLibCheck: false` under both resolvers   | error    |
+| 5. `publint`                     | [publint](https://publint.dev)                               | `package.json` field validity (`exports`, `main`, `types` vs actual files)  | error    |
+| 6. `attw`                        | [@arethetypeswrong/core](https://arethetypeswrong.github.io) | TypeScript type resolution for ESM-only packages (`profile: 'esm-only'`)    | error    |
+| 7. `madge`                       | [madge](https://github.com/pahen/madge)                      | Circular dependency detection inside `src/`                                 | error    |
+| 8. `size-limit`                  | [size-limit](https://github.com/ai/size-limit)               | Per-entry bundle size budgets (defined in `.size-limit.json`)               | error    |
 
 Run locally:
 

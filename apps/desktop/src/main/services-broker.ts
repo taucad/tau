@@ -12,9 +12,10 @@ import { realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import type { MessageChannelMain, MessagePortMain, UtilityProcess } from 'electron';
+import type { MachineBindingOutcome } from '@taucad/runtime/machine';
 
 /** Concerns the services utility serves, one dedicated port each. */
-export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem'] as const;
+export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'machines'] as const;
 
 /**
  * A concern the renderer may ask for a port to.
@@ -28,7 +29,36 @@ export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem'] as 
 export type ServicesConcern = (typeof servicesConcerns)[number];
 
 /** Concerns a renderer may request directly. */
-export const rendererServicesConcerns: readonly ServicesConcern[] = ['nodeFs', 'agentHost'];
+export const rendererServicesConcerns: ReadonlyArray<ServicesConcern | 'exactMeasurement' | 'geospecPerformance'> = [
+  'nodeFs',
+  'agentHost',
+  'geospecPerformance',
+  'exactMeasurement',
+  'machines',
+];
+
+/**
+ * The native completion of one binding ceremony (D10).
+ *
+ * `accessCode` is the LAN secret the person typed; absent, the utility reuses
+ * the printer's saved code while its certificate still matches. The utility
+ * pins the endpoint the provider connects to, so `address` is carried for
+ * older renderers and ignored.
+ */
+export type MachineBindingCompletion = Readonly<{ ceremonyId: string; address?: string; accessCode?: string }>;
+
+/**
+ * The broker's shutdown admission refusing a new concern.
+ *
+ * Typed so main can answer it as the intended lifecycle refusal it is, apart
+ * from a concern that failed to connect.
+ */
+export class ServicesQuiescingError extends Error {
+  public constructor() {
+    super('The services broker is quiescing and accepts no new concerns.');
+    this.name = 'ServicesQuiescingError';
+  }
+}
 
 /** Observable result of the bounded services-host drain. */
 export type ServicesQuiesceOutcome =
@@ -58,6 +88,17 @@ export type ServicesBrokerOptions = {
     readonly closed: Promise<unknown>;
     dispose(): void;
   };
+  /** Open one separately supervised geometry-runner port for an admitted root. */
+  readonly connectGeometry?: (
+    input: Readonly<{
+      root: string;
+      context: Readonly<Record<string, string>>;
+      engine: 'native' | 'legacy';
+      stillAuthorized: () => boolean;
+    }>,
+  ) => MessagePortMain;
+  /** Recheck queued/active geometry suites whenever a main-owned root grant changes. */
+  readonly revokeGeometry?: () => void;
   /** Called once for each freshly forked utility, for diagnostics attachment. */
   readonly onSpawn?: (utility: UtilityProcess) => void;
   /** Diagnostics sink. */
@@ -81,6 +122,12 @@ export type ServicesBroker = {
     input: Readonly<{ workspaceRoot: string; projectId: string; attachmentId: string }>,
     boundMilliseconds: number,
   ): Promise<void>;
+  /**
+   * Complete one binding ceremony in the utility and await its outcome.
+   *
+   * Not a control frame: a secret is never replayed onto a fresh fork.
+   */
+  completeMachineBinding(input: MachineBindingCompletion, boundMilliseconds: number): Promise<MachineBindingOutcome>;
   /** Send a control frame (root admission, credential updates) to the utility. */
   post(message: unknown): void;
   /** Original project identity retained for an admitted execution root. */
@@ -117,6 +164,8 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
    * accumulates. */
   const controlFrames = new Map<string, unknown>();
   const runtimeContexts = new Map<string, Readonly<Record<string, string>>>();
+  /* Project owner attached to the context actually admitted after port transfer. */
+  const admittedProjectIds = new WeakMap<Readonly<Record<string, string>>, string | undefined>();
   const projectIds = new Map<string, string>();
   /* Turn checkouts the utility registered, kept apart from the project contexts
    * `connect()` owns: a candidate turn's kernel and GeoSpec tools must reach the
@@ -128,8 +177,14 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   const runtimeLeases = new Map<string, ReturnType<ServicesBrokerOptions['connectRuntime']>>();
   const runtimeLeaseClosures = new Map<string, Promise<void>>();
   const projectAttachments = new Map<string, Set<string>>();
+  /* Monotone per root for the broker's life, never deleted on release (L6 N3):
+   * a release that outlived its deadline may still be closing in the utility,
+   * and a restarted count would hand the next adoption that release's number,
+   * letting the stale release delete the new session's launcher. */
   const attachmentGenerations = new Map<string, number>();
   const releaseWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<void>>>();
+  const bindingWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<MachineBindingOutcome>>>();
+  let bindingRequest = 0;
   /* Roots with a release in flight, by how many. `releaseAgentHost` awaits the
    * utility, and a window that remounts inside that wait re-adopts the project
    * under the attachment id that is releasing. */
@@ -174,6 +229,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       runtimeContexts.delete(workspaceRoot);
     }
     checkoutContexts.clear();
+    options.revokeGeometry?.();
   };
 
   /**
@@ -200,6 +256,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     if (type === 'runtime-context-release') {
       if (checkoutContexts.delete(canonicalWorkspaceRoot)) {
         runtimeContexts.delete(canonicalWorkspaceRoot);
+        options.revokeGeometry?.();
       }
       return;
     }
@@ -219,6 +276,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     }
     runtimeContexts.set(canonicalWorkspaceRoot, { ...projectContext, projectRoot: canonicalWorkspaceRoot });
     checkoutContexts.add(canonicalWorkspaceRoot);
+    options.revokeGeometry?.();
   };
 
   const handleUtilityMessage = (spawned: UtilityProcess, frame: unknown): void => {
@@ -234,6 +292,28 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           pending.resolve();
         } else {
           pending.reject(new Error('The desktop agent host could not release this project.'));
+        }
+      }
+      return;
+    }
+    if (
+      (type === 'machine-binding-completed' || type === 'machine-binding-complete-failed') &&
+      typeof requestId === 'string'
+    ) {
+      const pending = bindingWaiters.get(requestId);
+      if (pending !== undefined) {
+        bindingWaiters.delete(requestId);
+        const record = frame as Record<string, unknown>;
+        if (type === 'machine-binding-completed') {
+          pending.resolve(record['outcome'] as MachineBindingOutcome);
+        } else {
+          pending.reject(
+            new Error(
+              typeof record['message'] === 'string'
+                ? record['message']
+                : 'The desktop machine host could not complete this binding.',
+            ),
+          );
         }
       }
       return;
@@ -267,6 +347,48 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       }
       runtimeLeases.get(requestId)?.dispose();
       runtimeLeases.delete(requestId);
+      return;
+    }
+    if (
+      type === 'geometry-port-request' &&
+      typeof requestId === 'string' &&
+      requestId.length > 0 &&
+      requestId.length <= 128
+    ) {
+      const { engine } = frame as Record<string, unknown>;
+      const context = typeof workspaceRoot === 'string' ? runtimeContexts.get(canonicalRoot(workspaceRoot)) : undefined;
+      if (
+        utility !== spawned ||
+        !acceptingConnections ||
+        context === undefined ||
+        typeof workspaceRoot !== 'string' ||
+        (engine !== 'native' && engine !== 'legacy') ||
+        options.connectGeometry === undefined
+      ) {
+        spawned.postMessage({
+          type: 'geometry-port-refused',
+          requestId,
+          message: 'Main refused an unadmitted GeoSpec runner root or engine.',
+        });
+        return;
+      }
+      try {
+        const rootKey = canonicalRoot(workspaceRoot);
+        const port = options.connectGeometry({
+          root: workspaceRoot,
+          context,
+          engine,
+          stillAuthorized: () =>
+            acceptingConnections && utility === spawned && runtimeContexts.get(rootKey) === context,
+        });
+        spawned.postMessage({ type: 'geometry-port', requestId }, [port]);
+      } catch (error) {
+        spawned.postMessage({
+          type: 'geometry-port-refused',
+          requestId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
       return;
     }
     if (
@@ -340,6 +462,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           pending.reject(new Error('The desktop services host exited while releasing a project.'));
         }
         releaseWaiters.clear();
+        for (const pending of bindingWaiters.values()) {
+          pending.reject(new Error('The desktop services host exited while binding a machine.'));
+        }
+        bindingWaiters.clear();
       }
     });
     spawned.on('message', (message: unknown) => {
@@ -372,7 +498,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   return {
     connect(concern, context) {
       if (!acceptingConnections) {
-        throw new Error('The services broker is quiescing and accepts no new concerns.');
+        throw new ServicesQuiescingError();
       }
       let concernContext = context;
       if (concern === 'agentHost' && context?.['workspaceRoot']) {
@@ -391,14 +517,18 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         concern === 'agentHost' && context?.['workspaceRoot']
           ? (() => {
               const projectRoot = canonicalRoot(context['workspaceRoot']);
+              const prior = runtimeContexts.get(projectRoot);
+              const computeMode = context['computeMode'] ?? 'off';
               return {
                 key: projectRoot,
-                value: {
-                  projectRoot,
-                  computeProjectRoot: projectRoot,
-                  computeMode: context['computeMode'] ?? 'off',
-                  definition: 'default',
-                },
+                value:
+                  prior?.['projectRoot'] === projectRoot &&
+                  prior['computeProjectRoot'] === projectRoot &&
+                  prior['computeMode'] === computeMode &&
+                  prior['definition'] === 'default' &&
+                  admittedProjectIds.get(prior) === projectIds.get(projectRoot)
+                    ? prior
+                    : { projectRoot, computeProjectRoot: projectRoot, computeMode, definition: 'default' },
               } as const;
             })()
           : undefined;
@@ -414,7 +544,11 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         throw error;
       }
       if (projectContext) {
-        runtimeContexts.set(projectContext.key, projectContext.value);
+        admittedProjectIds.set(projectContext.value, projectIds.get(projectContext.key));
+        if (runtimeContexts.get(projectContext.key) !== projectContext.value) {
+          runtimeContexts.set(projectContext.key, projectContext.value);
+          options.revokeGeometry?.();
+        }
       }
       log('info', 'services.concern-connected', { concern });
       return channel.port1;
@@ -449,8 +583,8 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       const spawned = utility;
       if (spawned === undefined) {
         projectAttachments.delete(root);
-        attachmentGenerations.delete(root);
         runtimeContexts.delete(root);
+        options.revokeGeometry?.();
         projectIds.delete(root);
         return;
       }
@@ -487,8 +621,8 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
          * would strand the launcher that re-adoption is already using. */
         if (attachmentGenerations.get(root) === generation) {
           projectAttachments.delete(root);
-          attachmentGenerations.delete(root);
           runtimeContexts.delete(root);
+          options.revokeGeometry?.();
           projectIds.delete(root);
         }
         const releasing = (releasingRoots.get(root) ?? 1) - 1;
@@ -501,6 +635,31 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           clearTimeout(releaseTimeout);
         }
         releaseWaiters.delete(requestId);
+      }
+    },
+    async completeMachineBinding(input, boundMilliseconds) {
+      if (!acceptingConnections) {
+        throw new Error('The services broker is quiescing and completes no bindings.');
+      }
+      bindingRequest += 1;
+      const requestId = `machine-binding-${String(bindingRequest)}`;
+      const pending = Promise.withResolvers<MachineBindingOutcome>();
+      bindingWaiters.set(requestId, pending);
+      let bindingTimeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        ensure().postMessage({ type: 'machine-binding-complete', requestId, ...input });
+        const deadline = new Promise<never>((_resolve, reject) => {
+          bindingTimeout = setTimeout(() => {
+            reject(new Error('The desktop machine binding timed out.'));
+          }, boundMilliseconds);
+          bindingTimeout.unref();
+        });
+        return await Promise.race([pending.promise, deadline]);
+      } finally {
+        if (bindingTimeout !== undefined) {
+          clearTimeout(bindingTimeout);
+        }
+        bindingWaiters.delete(requestId);
       }
     },
     post(message) {
@@ -517,6 +676,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
     quiesce(boundMilliseconds) {
       acceptingConnections = false;
+      options.revokeGeometry?.();
       if (quiescence !== undefined) {
         return quiescence;
       }
@@ -563,6 +723,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           pending.reject(new Error('The desktop services broker was disposed.'));
         }
         releaseWaiters.clear();
+        for (const pending of bindingWaiters.values()) {
+          pending.reject(new Error('The desktop services broker was disposed.'));
+        }
+        bindingWaiters.clear();
         settleQuiescence?.({ status: 'host-exited' });
         utility?.kill();
         utility = undefined;

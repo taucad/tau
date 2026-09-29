@@ -1,0 +1,34 @@
+{
+  "fixtures": [
+    {
+      "file": "two-cube-assembly.step",
+      "sha256": "e6f67bab80f21b84b69e3434211abec4f987715963e2f0bf73a2f32fc2279028",
+      "source": "packages/geospec-engine/fixtures/xde/two-cube-assembly.step"
+    },
+    {
+      "file": "inch-cube.step",
+      "sha256": "99a0b886b4aa9250f190bad6654e813f007fce8806d9abf3a27fbd9ebbcf58d5",
+      "source": "out/artifacts/geospec/native-spikes-20260905/s3/non-mm-inch.step"
+    },
+    {
+      "file": "nist-pmi-bspline.step",
+      "sha256": "59bbc09a34621c03106e4c1b2a5bc909fdb67463117c16c4965ee7a6fe5c1521",
+      "source": "packages/geospec-engine/fixtures/interop/nist-pmi/nist_ctc_05_asme1_ap242-e1.stp"
+    },
+    {
+      "file": "truncated.step",
+      "sha256": "75b913550cf45526c9ba987eff2162ad2a9234ca30ecc344e7ecc63b5e5e23e1",
+      "source": "out/artifacts/geospec/native-spikes-20260905/s3/truncated.step"
+    },
+    {
+      "file": "ap242-box.step",
+      "sha256": "9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf",
+      "source": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-05-execution/lanes/s8/evidence/subjects/build123d-box-ap242.step"
+    },
+    {
+      "file": "external-reference.step",
+      "sha256": "e29044ebc0f4d56b5000cab3bbfcd27e6099283b198723bd43a096e48d05863f",
+      "source": "ap242-box.step plus hand-authored DOCUMENT/PRODUCT_DEFINITION_WITH_ASSOCIATED_DOCUMENTS entities declaring missing-external.step"
+    }
+  ]
+}

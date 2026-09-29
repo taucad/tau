@@ -5,11 +5,17 @@ import { mock } from 'vitest-mock-extended';
 import { projectToManifest } from '@taucad/types';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
-import { sessionsActor } from '#services/sessions-store.js';
+import { createSessionsActor } from '#services/sessions-store.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import type { ActorRefFrom } from 'xstate';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
+import { holdEditorConflictRecord } from '#lib/monaco-model-service.js';
+import type * as AgentHostClientModule from '#services/agent-host-client.js';
+import type * as HandleStoreModule from '#filesystem/handle-store.js';
+
+/** The registry these rows share, composed as the app's root composes its own (MC-R4). */
+const sessionsActor = createSessionsActor().start();
 
 const projectA = 'proj_aaaaaaaaaaaaaaaaaaaaa';
 const projectB = 'proj_bbbbbbbbbbbbbbbbbbbbb';
@@ -18,10 +24,11 @@ const projectC = 'proj_ccccccccccccccccccccc';
 let currentProjectId = projectA;
 const getProjectRouteAccess = vi.fn<(projectId: string) => Promise<ProjectRouteAccess>>();
 const restoreProject = vi.fn<(projectId: string) => Promise<void>>();
-const projectManager = {
+/* W2: a trash or restore publishes a new manager value carrying the next
+ * `libraryRevision`, and that value is how it reaches an already-resolved route. */
+let projectManager = {
   getProjectRouteAccess,
   restoreProject,
-  /* W2: bumping this is how a trash or restore reaches an already-resolved route. */
   libraryRevision: 0,
 };
 const mounts: string[] = [];
@@ -35,6 +42,72 @@ const projectProviderChatInputs: Array<{
 const editorSend = vi.fn();
 const projectSend = vi.fn();
 const connectRemote = vi.fn(async () => undefined);
+const connectorReleases: Array<ReturnType<typeof vi.fn>> = [];
+const publishProjectHostConnector = vi.fn(
+  (
+    _projectId: string,
+    _connector: (chatId: string) => Promise<unknown>,
+    _stoppability: (chatId: string) => Promise<unknown>,
+  ) => {
+    const release = vi.fn();
+    connectorReleases.push(release);
+    return release;
+  },
+);
+const browserClientOptions: unknown[] = [];
+const browserHostLeaseReleases: Array<ReturnType<typeof vi.fn>> = [];
+const retainBrowserAgentHostProject = vi.fn((_options: unknown) => {
+  const release = vi.fn();
+  browserHostLeaseReleases.push(release);
+  return release;
+});
+const daemonClientTransports: unknown[] = [];
+const cancelProjectedRun = vi.fn(async (): Promise<'stopped' | 'continuing'> => 'stopped');
+const storedHostSettings = new Map<
+  string,
+  { activeExecution?: { kind: 'tau'; model: string; hostId?: string }; activeKernel?: 'openscad' }
+>();
+let fileManagerReady = false;
+const projectWorkspace = { syncProjectRoots: vi.fn(async () => undefined) };
+const projectFileManagerRef = {
+  getSnapshot: () => ({
+    context: { rootDirectory: '/projects/live', openFileSystemBridge: vi.fn(), openRevisionSessionPort: vi.fn() },
+    matches: (state: string) => state === 'ready' && fileManagerReady,
+  }),
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
+const chatSessionStore = {
+  get: () => undefined,
+  setProjectSession: () => undefined,
+  setFocusedProject: () => undefined,
+  publishProjectHostConnector,
+  getChatHostSettings: async (chatId: string) => storedHostSettings.get(chatId),
+  cancelProjectedRun,
+};
+vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof AgentHostClientModule>()),
+  createBrowserAgentHostClient: (options: unknown) => {
+    browserClientOptions.push(options);
+    return { close: async () => undefined };
+  },
+  retainBrowserAgentHostProject,
+  createAgentHostClient: (transport: unknown) => {
+    daemonClientTransports.push(transport);
+    return { close: async () => undefined };
+  },
+  readBrowserRunStoppability: async () => 'stoppable',
+}));
+vi.mock('#services/daemon-agent-host-client.js', () => ({
+  createDaemonAgentHostTransport: (dial: unknown) => ({ dial }),
+}));
+vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof HandleStoreModule>()),
+  getProjectFileSystemConfig: async (projectId: string) => ({
+    projectId,
+    backend: 'opfs',
+    providerBasePath: projectId,
+  }),
+}));
 /* `quiesce` is W13's close cut: `closing.flushing` calls it on this client. */
 const revisionClient = { subscribeEvents: () => () => undefined, quiesce: async () => undefined };
 let editorIsIdle = true;
@@ -93,6 +166,7 @@ const parameterService = {
   close: vi.fn(async () => undefined),
   subscribeUnsavedDrafts: () => () => undefined,
 };
+const flushWorkbenchRecords = async (): Promise<void> => undefined;
 
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => projectManager,
@@ -120,10 +194,8 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     );
   },
   useFileManager: () => ({
-    fileManagerRef: {
-      getSnapshot: () => ({ context: {}, matches: () => false }),
-      subscribe: () => ({ unsubscribe: () => undefined }),
-    },
+    fileManagerRef: projectFileManagerRef,
+    workspace: projectWorkspace,
   }),
   useOptionalFileManager: () => undefined,
 }));
@@ -143,8 +215,17 @@ vi.mock('#hooks/use-project.js', () => ({
     projectProviderChatInputs.push({ requestedChatId, createdChatId });
     return <div>{children}</div>;
   },
-  useProject: () => ({ projectRef, editorRef, parameterService, viewGraphics }),
+  useProject: () => ({
+    projectRef,
+    editorRef,
+    parameterService,
+    viewGraphics,
+    flushWorkbenchRecordProducers: flushWorkbenchRecords,
+  }),
 }));
+vi.mock('./workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
+vi.mock('./view-settings-sync-host.js', () => ({ ViewSettingsSyncHost: () => null }));
+vi.mock('./entries-sync-host.js', () => ({ EntriesSyncHost: () => null }));
 vi.mock('#hooks/use-flush-on-close.js', () => {
   const flushProducers = async (): Promise<void> => undefined;
   return { useFlushOnClose: () => undefined, useFlushProducers: () => flushProducers };
@@ -166,10 +247,12 @@ vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionCommands: () => ({ connectRemote }),
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: () => ({
-    get: () => undefined,
-    setProjectSession: () => undefined,
-    setFocusedProject: () => undefined,
+  useChatSessionStore: () => chatSessionStore,
+}));
+vi.mock('#hooks/use-models.js', () => ({
+  useModels: () => ({
+    defaultExecution: { kind: 'tau', model: 'fixture-model' },
+    resolveModel: (id: string) => ({ id, name: id, isResolved: false, provider: { id: 'unknown', name: 'Unknown' } }),
   }),
 }));
 /* The `Mod+S` registration needs the application root's `KeyboardProvider`,
@@ -189,9 +272,6 @@ vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
 vi.mock('#routes/w.$workspace.$project/revision-restore.js', () => ({ RevisionRestore: () => null }));
 vi.mock('#routes/w.$workspace.$project/workbench-checkout-root.js', () => ({ WorkbenchCheckoutRoot: () => null }));
 vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({ RevisionOutcomes: () => null }));
-vi.mock('#routes/w.$workspace.$project/project-chat-run-settlement.js', () => ({
-  ProjectChatRunSettlement: () => null,
-}));
 vi.mock('#routes/w.$workspace.$project/project-command-items.js', () => ({
   ProjectCommandPaletteItems: () => null,
 }));
@@ -216,6 +296,7 @@ vi.mock('#routes/w.$workspace.$project/revision-conflict-chat.js', () => ({ Revi
 vi.mock('#hooks/use-focused-chat-read-state.js', () => ({ useFocusedChatReadState: () => undefined }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   ChatWorkspaceAuthorityProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  readRootedBridgeCapabilities: async () => ({ writable: true, durability: 'exclusive-append' }),
 }));
 /*
  * The notice presentation is W3's own suite. Here it stands in for every
@@ -223,8 +304,8 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
  * whether the app shell survived it.
  */
 vi.mock('#routes/w.$workspace.$project/project-route-notices.js', async () => {
-  const { createContext, useContext } = await import('react');
-  const ProjectRouteRetryContext = createContext<() => void>(() => undefined);
+  const { useContext } = await import('react');
+  const { ProjectRouteRetryContext } = await import('#routes/w.$workspace.$project/project-route-state.js');
   return {
     ProjectRouteRetryContext,
     ProjectRouteNotice: ({ state }: { readonly state: { kind: string; error?: Error } }) => {
@@ -300,7 +381,7 @@ const renderRouteProvider = ({
    * tree would never show one — include it exactly where the shell does.
    */
   const Provider = ({ children }: React.PropsWithChildren): React.JSX.Element => (
-    <SessionsProvider>
+    <SessionsProvider actor={sessionsActor}>
       <routeModule.ProjectRouteProviders
         projectId={currentProjectId}
         requestedChatId={requestedChatId}
@@ -335,6 +416,15 @@ beforeEach(() => {
   editorSend.mockReset();
   projectSend.mockReset();
   connectRemote.mockClear();
+  publishProjectHostConnector.mockClear();
+  connectorReleases.length = 0;
+  browserClientOptions.length = 0;
+  retainBrowserAgentHostProject.mockClear();
+  browserHostLeaseReleases.length = 0;
+  daemonClientTransports.length = 0;
+  storedHostSettings.clear();
+  cancelProjectedRun.mockClear();
+  fileManagerReady = false;
   editorObservers.clear();
   editorIsIdle = true;
 });
@@ -385,6 +475,91 @@ afterEach(async () => {
 });
 
 describe('project route session identity', () => {
+  it('closes an unseen live chat by projected host cancel without an SDK session', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    renderRouteProvider();
+    await screen.findAllByTestId('project-session');
+    const session = sessionsActor.getSnapshot().context.refs[projectA];
+    expect(session).toBeDefined();
+    session?.send({
+      type: 'projectedRunsChanged',
+      runs: ['chat-unseen', 'chat-other-build'],
+      stoppableRuns: ['chat-unseen'],
+    });
+    session?.send({ type: 'close', reason: 'user' });
+    session?.send({ type: 'confirmClose' });
+    await waitFor(() => {
+      expect(cancelProjectedRun).toHaveBeenCalledWith('chat-unseen');
+    });
+    expect(cancelProjectedRun).not.toHaveBeenCalledWith('chat-other-build');
+  });
+  it('keeps the project open when a preflight-stoppable run refuses cancellation', async () => {
+    cancelProjectedRun.mockResolvedValueOnce('continuing');
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    renderRouteProvider();
+    await screen.findAllByTestId('project-session');
+    const session = sessionsActor.getSnapshot().context.refs[projectA];
+    expect(session).toBeDefined();
+    session?.send({ type: 'projectedRunsChanged', runs: ['chat-unseen'], stoppableRuns: ['chat-unseen'] });
+    session?.send({ type: 'close', reason: 'user' });
+    session?.send({ type: 'confirmClose' });
+    await waitFor(() => {
+      expect(cancelProjectedRun).toHaveBeenCalledWith('chat-unseen');
+      expect(session?.getSnapshot().matches('failed')).toBe(true);
+    });
+    expect(sessionsActor.getSnapshot().context.refs[projectA]).toBe(session);
+  });
+  it('retains one project connector when focus moves to another live project', async () => {
+    fileManagerReady = true;
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const { Provider, view } = renderRouteProvider();
+    await screen.findAllByTestId('project-session');
+    expect(publishProjectHostConnector).toHaveBeenCalledWith(projectA, expect.any(Function), expect.any(Function));
+    const connector = publishProjectHostConnector.mock.calls[0]?.[1] as (chatId: string) => Promise<unknown>;
+    await connector('chat-browser');
+    expect(retainBrowserAgentHostProject).toHaveBeenCalledOnce();
+
+    currentProjectId = projectB;
+    view.rerender(<Provider>content</Provider>);
+    await waitFor(() => {
+      expect(focusedSessionId()).toBe(projectB);
+    });
+    expect(sessionIds()).toContain(projectA);
+    expect(publishProjectHostConnector.mock.calls.map(([projectId]) => projectId)).toEqual([projectA, projectB]);
+    expect(browserHostLeaseReleases[0]).not.toHaveBeenCalled();
+  });
+
+  it('opens unopened chats on their own persisted host and retains one browser host until unmount', async () => {
+    fileManagerReady = true;
+    storedHostSettings.set('chat-browser', {
+      activeExecution: { kind: 'tau', model: 'model-browser' },
+      activeKernel: 'openscad',
+    });
+    storedHostSettings.set('chat-daemon', {
+      activeExecution: { kind: 'tau', model: 'model-daemon', hostId: 'origin' },
+    });
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const { view } = renderRouteProvider();
+    await waitFor(() => {
+      expect(publishProjectHostConnector).toHaveBeenCalledWith(projectA, expect.any(Function), expect.any(Function));
+    });
+    const connector = publishProjectHostConnector.mock.calls[0]?.[1] as (chatId: string) => Promise<unknown>;
+
+    await connector('chat-browser');
+    await connector('chat-daemon');
+    await connector('chat-browser');
+    expect(browserClientOptions).toHaveLength(2);
+    expect(retainBrowserAgentHostProject).toHaveBeenCalledOnce();
+    expect(browserClientOptions[0]).toMatchObject({
+      authority: { projectId: projectA, workspaceId: 'live' },
+      projectStorage: { projectId: projectA, backend: 'opfs' },
+    });
+    expect((browserClientOptions[0] as { systemPrompt: string }).systemPrompt).toContain('model-browser');
+    expect(daemonClientTransports).toHaveLength(1);
+    view.unmount();
+    expect(connectorReleases[0]).toHaveBeenCalledOnce();
+    expect(browserHostLeaseReleases[0]).toHaveBeenCalledOnce();
+  });
   it('should settle parameters and both UI stores, and leave the cut to flushSync', async () => {
     const order: string[] = [];
     const parameters = mock<ParameterSetService>();
@@ -432,6 +607,70 @@ describe('project route session identity', () => {
     ).rejects.toThrow('checked parameter flush failed');
     expect(project.send).not.toHaveBeenCalled();
     expect(editor.send).not.toHaveBeenCalled();
+  });
+
+  it('keeps project close retryable until workbench record producers save their latest bytes', async () => {
+    const order: string[] = [];
+    let offline = true;
+    const parameters = mock<ParameterSetService>();
+    const project = mock<ActorRefFrom<typeof projectMachine>>();
+    const editor = mock<ActorRefFrom<typeof editorMachine>>();
+    const projectSnapshot = mock<ReturnType<ActorRefFrom<typeof projectMachine>['getSnapshot']>>();
+    const editorSnapshot = mock<ReturnType<ActorRefFrom<typeof editorMachine>['getSnapshot']>>();
+    projectSnapshot.matches.mockReturnValue(true);
+    editorSnapshot.matches.mockReturnValue(true);
+    project.getSnapshot.mockReturnValue(projectSnapshot);
+    editor.getSnapshot.mockReturnValue(editorSnapshot);
+    parameters.close.mockImplementation(async () => {
+      order.push('parameters');
+    });
+    project.send.mockImplementation(() => {
+      order.push('project');
+    });
+    editor.send.mockImplementation(() => {
+      order.push('editor');
+    });
+    const flushWorkbenchRecords = async (): Promise<void> => {
+      order.push('workbench');
+      if (offline) {
+        throw new Error('checked workbench write unavailable');
+      }
+    };
+    const flush = async () =>
+      sessionsModule.flushProjectSessionPersistence({
+        parameterService: parameters,
+        projectRef: project,
+        editorRef: editor,
+        flushWorkbenchRecords,
+        closeFlushMilliseconds: 100,
+      });
+    await expect(flush()).rejects.toThrow('checked workbench write unavailable');
+    expect(order).toEqual(['parameters', 'workbench']);
+    offline = false;
+    await flush();
+    expect(order).toEqual(['parameters', 'workbench', 'parameters', 'workbench', 'project', 'editor']);
+  });
+
+  it('should refuse the close flush while an editor conflict is being recorded, before anything is torn down (RV-W5b2 R2-1)', async () => {
+    const parameters = mock<ParameterSetService>();
+    const project = mock<ActorRefFrom<typeof projectMachine>>();
+    const editor = mock<ActorRefFrom<typeof editorMachine>>();
+    const release = holdEditorConflictRecord('proj-recording');
+    try {
+      await expect(
+        sessionsModule.flushProjectSessionPersistence({
+          projectId: 'proj-recording',
+          parameterService: parameters,
+          projectRef: project,
+          editorRef: editor,
+          closeFlushMilliseconds: 100,
+        }),
+      ).rejects.toThrow('An edit that overlapped another change is still being recorded. Try again in a moment.');
+      expect(parameters.close).not.toHaveBeenCalled();
+      expect(project.send).not.toHaveBeenCalled();
+    } finally {
+      release();
+    }
   });
 
   it('should refuse the producers flush when project storage reports idle with an error', async () => {
@@ -780,7 +1019,7 @@ describe('project route session identity', () => {
      * Finding 2: deleting the open project closes its session and writes
      * `deletedAt`. The close was live; the trash was not, so the route kept
      * showing "Closed" — and its Reopen would have re-mounted a trashed
-     * project. The revision counter is what makes the second fact arrive.
+     * project. The manager's next value is what makes the second fact arrive.
      */
     getProjectRouteAccess.mockResolvedValue(ready(projectA));
     const { Provider, view } = renderRouteProvider();
@@ -788,7 +1027,7 @@ describe('project route session identity', () => {
 
     getProjectRouteAccess.mockResolvedValue(trashed(projectA));
     await act(async () => {
-      projectManager.libraryRevision += 1;
+      projectManager = { ...projectManager, libraryRevision: projectManager.libraryRevision + 1 };
       view.rerender(<Provider>content</Provider>);
       await new Promise<void>((resolve) => {
         globalThis.setTimeout(resolve, 0);
@@ -805,7 +1044,7 @@ describe('project route session identity', () => {
 
     getProjectRouteAccess.mockResolvedValue(ready(projectA));
     await act(async () => {
-      projectManager.libraryRevision += 1;
+      projectManager = { ...projectManager, libraryRevision: projectManager.libraryRevision + 1 };
       view.rerender(<Provider>content</Provider>);
       await new Promise<void>((resolve) => {
         globalThis.setTimeout(resolve, 0);

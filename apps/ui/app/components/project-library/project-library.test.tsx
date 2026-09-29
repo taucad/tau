@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { useState } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { projectManifestSchemaUrl, projectToManifest } from '@taucad/types';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import type { ProjectListItem } from '#types/project.types.js';
+import { cookieName } from '#constants/cookie.constants.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
 
@@ -36,20 +37,27 @@ const createUseProjectsResult = () => ({
   error: undefined as Error | undefined,
   retry: vi.fn(),
   deleteProject: vi.fn(async () => true),
+  verifyProjectQuiescent: vi.fn(async () => undefined),
   duplicateProject: vi.fn(),
   restoreProject: vi.fn(),
   permanentlyDeleteProject: vi.fn(),
   updateName: vi.fn(),
   adoptProject: vi.fn(async () => undefined),
+  repairProject: vi.fn(async () => undefined),
+  chooseProjectDirectory: vi.fn(async () => undefined),
 });
 let mockUseProjectsResult = createUseProjectsResult();
+/** Projects in this device's Trash: answered only to a listing that includes them. */
+let mockTrashedProjects: ProjectListItem[] = [];
 
 /** What `useProjects` was last asked for, so the trashed view is observable. */
 const useProjectsOptions: Array<{ includeDeleted: boolean }> = [];
 vi.mock('#hooks/use-projects.js', () => ({
   useProjects: (options: { includeDeleted: boolean }) => {
     useProjectsOptions.push(options);
-    return mockUseProjectsResult;
+    return options.includeDeleted
+      ? { ...mockUseProjectsResult, projects: [...mockUseProjectsResult.projects, ...mockTrashedProjects] }
+      : mockUseProjectsResult;
   },
 }));
 
@@ -69,17 +77,18 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   }),
 }));
 
-const { mockCloseProject, mockToastSuccess, mockToastError } = vi.hoisted(() => ({
+const { mockCloseProject, mockToastSuccess, mockToastError, mockToastWarning } = vi.hoisted(() => ({
   mockCloseProject: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockToastError: vi.fn(),
+  mockToastWarning: vi.fn(),
 }));
 
 vi.mock('#hooks/use-sidebar-status.js', () => ({
   useSidebarCommands: () => ({ closeProject: mockCloseProject }),
 }));
 vi.mock('#components/ui/sonner.js', () => ({
-  toast: { success: mockToastSuccess, error: mockToastError },
+  toast: { success: mockToastSuccess, error: mockToastError, warning: mockToastWarning },
 }));
 
 vi.mock('#hooks/use-kernel.js', () => ({
@@ -129,15 +138,22 @@ vi.mock('#components/project-library/project-action-dropdown.js', () => ({
     actions,
   }: {
     readonly project: ProjectListItem;
-    readonly actions: { readonly handleDelete: (project: ProjectListItem) => void };
+    readonly actions: {
+      readonly handleDelete: (project: ProjectListItem) => void;
+      readonly handlePermanentlyDelete: (project: ProjectListItem) => void;
+    };
   }) => (
     <button
       type='button'
       onClick={() => {
-        actions.handleDelete(project);
+        if (project.deletedAt === undefined) {
+          actions.handleDelete(project);
+        } else {
+          actions.handlePermanentlyDelete(project);
+        }
       }}
     >
-      {`Trash ${project.name}`}
+      {`${project.deletedAt === undefined ? 'Trash' : 'Delete permanently'} ${project.name}`}
     </button>
   ),
 }));
@@ -150,6 +166,25 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   SharedWorkerGate: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
   HomeFileManagerProvider: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
 }));
+
+/* D20: the Tau Cloud listing, scripted rather than fetched. */
+const { cloudListing, mockOpenCloudProject } = vi.hoisted(() => ({
+  cloudListing: {
+    current: [] as Array<{ id: string; name: string; role: 'owner' | 'write' | 'read'; updatedAt?: number }>,
+  },
+  mockOpenCloudProject: vi.fn(async () => undefined),
+}));
+vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useCloudProjects: () => ({ projects: cloudListing.current, isSettled: true, isFailed: false, isFetching: false }),
+}));
+vi.mock('#hooks/use-open-cloud-project.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useOpenCloudProject: () => mockOpenCloudProject,
+}));
+vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => 'authed' }));
+/* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
+vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' } }));
 
 vi.mock('#hooks/use-cad-preview.js', () => ({
   CadPreviewProvider: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
@@ -164,6 +199,161 @@ describe('ProjectLibrary', () => {
     vi.clearAllMocks();
     mockCookieValues = {};
     mockUseProjectsResult = createUseProjectsResult();
+    mockTrashedProjects = [];
+    cloudListing.current = [];
+  });
+
+  // ── D20: one list, local and Tau Cloud ──────────────────────────────────────
+  describe('one list with Tau Cloud (D20)', () => {
+    const renderLibrary = (): void => {
+      render(
+        <MemoryRouter>
+          <TooltipProvider>
+            <ProjectLibrary />
+          </TooltipProvider>
+        </MemoryRouter>,
+      );
+    };
+
+    it('should list local-only, both and Tau-Cloud-only projects in the same grid, with no second section', () => {
+      cloudListing.current = [
+        { id: 'proj_aaaaaaaaaaaaaaaaaaaaa', name: 'Gearbox Alpha', role: 'owner' },
+        { id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' },
+      ];
+      renderLibrary();
+
+      expect(screen.getByRole('link', { name: 'Open Gearbox Alpha' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Open Bracket Beta' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
+      /* Both: the Tau Cloud glyph, once. */
+      expect(screen.getAllByText('Also on Tau Cloud')).toHaveLength(1);
+      expect(screen.getByText('Backed up on Tau Cloud. This device does not have it yet.')).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'From Tau Cloud' })).toBeNull();
+    });
+
+    it('should mark each row local, both or Tau Cloud only', () => {
+      mockCookieValues = { [cookieName.projectViewMode]: 'table' };
+      cloudListing.current = [
+        { id: 'proj_aaaaaaaaaaaaaaaaaaaaa', name: 'Gearbox Alpha', role: 'owner' },
+        { id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' },
+      ];
+      renderLibrary();
+
+      expect(screen.getByRole('row', { name: /Gearbox Alpha/u })).toHaveTextContent('Also on Tau Cloud');
+      expect(screen.getByRole('row', { name: /Bracket Beta/u })).not.toHaveTextContent('Also on Tau Cloud');
+      const cloudOnly = screen.getByRole('row', { name: /Hinge Delta/u });
+      expect(cloudOnly).toHaveTextContent('Backed up on Tau Cloud. This device does not have it yet.');
+      expect(within(cloudOnly).getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
+    });
+
+    it('should never offer a project in this device’s Trash as Tau Cloud’s alone', () => {
+      mockTrashedProjects = [
+        { ...makeProject('proj_ddddddddddddddddddddd', 'Hinge Delta', '/hinge-delta'), deletedAt: 5 },
+      ];
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
+      renderLibrary();
+
+      expect(screen.queryByRole('button', { name: 'Open Hinge Delta' })).toBeNull();
+      expect(screen.queryByText('Hinge Delta')).toBeNull();
+    });
+
+    it('should open a Tau-Cloud-only project by cloning it under the remote’s id', async () => {
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
+      renderLibrary();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open Hinge Delta' }));
+
+      await waitFor(() => {
+        expect(mockOpenCloudProject).toHaveBeenCalledWith(
+          expect.objectContaining({ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta' }),
+        );
+      });
+    });
+
+    it('should say it is opening, and be busy, while the clone runs', async () => {
+      let finish: () => void = () => undefined;
+      mockOpenCloudProject.mockImplementationOnce(
+        async () =>
+          new Promise<undefined>((resolve) => {
+            finish = () => {
+              resolve(undefined);
+            };
+          }),
+      );
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
+      renderLibrary();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open Hinge Delta' }));
+
+      const opening = await screen.findByRole('button', { name: 'Opening… Hinge Delta' });
+      expect(opening).toHaveAttribute('aria-busy', 'true');
+      expect(opening).toBeDisabled();
+      finish();
+      expect(await screen.findByRole('button', { name: 'Open Hinge Delta' })).toHaveAttribute('aria-busy', 'false');
+    });
+
+    it('should say whose a shared Tau-Cloud-only project is before it is opened', () => {
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Reference Jig', role: 'read' }];
+      renderLibrary();
+
+      mockCookieValues = { [cookieName.projectViewMode]: 'table' };
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Reference Jig', role: 'read' }];
+      renderLibrary();
+
+      const card = screen.getByRole('row', { name: /Reference Jig/u });
+      expect(card).toHaveTextContent('Can view');
+      expect(card).toHaveTextContent('Shared with you. You can open it but not change it.');
+    });
+
+    it('should show a Tau-Cloud-only project instead of the empty state when this device has none', () => {
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [] };
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
+      renderLibrary();
+
+      expect(screen.getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
+      expect(screen.queryByText('No projects yet')).toBeNull();
+    });
+
+    it('should leave Tau-Cloud-only projects out of the table’s selection', () => {
+      mockCookieValues = { [cookieName.projectViewMode]: 'table' };
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
+      renderLibrary();
+
+      /* Two local rows can be selected; the Tau Cloud row has nothing here to trash. */
+      expect(screen.getAllByRole('checkbox', { name: 'Select row' })).toHaveLength(2);
+      expect(screen.getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
+    });
+
+    it('should select only this device’s projects on Select all', () => {
+      mockCookieValues = { [cookieName.projectViewMode]: 'table' };
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
+      renderLibrary();
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
+
+      expect(screen.getByRole('button', { name: 'Move to Trash 2' })).toBeInTheDocument();
+      expect(within(screen.getByRole('row', { name: /Hinge Delta/u })).queryByRole('checkbox')).toBeNull();
+    });
+
+    it('counts completed bulk trash results before reporting partial success', async () => {
+      mockCookieValues = { [cookieName.projectViewMode]: 'table' };
+      const deleteProject = vi
+        .fn(async () => true)
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false);
+      mockUseProjectsResult = { ...createUseProjectsResult(), deleteProject };
+      renderLibrary();
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Move to Trash 2' }));
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Move to Trash' }));
+
+      await waitFor(() => {
+        expect(deleteProject).toHaveBeenCalledTimes(2);
+        expect(mockToastWarning).toHaveBeenCalledWith('Moved 1 project to Trash; 1 failed');
+      });
+      expect(mockToastSuccess).not.toHaveBeenCalled();
+    });
   });
 
   it('should render the projects heading and every project from useProjects', () => {
@@ -453,6 +643,104 @@ describe('ProjectLibrary', () => {
     });
   });
 
+  it('lets a person choose which copied folder a project opens from', async () => {
+    const locator = {
+      backend: 'webaccess',
+      storageRootKey: 'webaccess:wsp_alpha',
+      relativeDirectory: 'relief-copy',
+      workspaceId: 'wsp_alpha',
+    } as const;
+    const manifest = projectToManifest({
+      id: 'proj_ccccccccccccccccccccc',
+      name: 'Relief',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.cs' } },
+    });
+    mockUseProjectsResult = {
+      ...createUseProjectsResult(),
+      conflicts: [{ status: 'duplicate-id', manifest, locator }],
+    };
+
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+    screen.getByRole('button', { name: 'Use this folder' }).click();
+
+    await vi.waitFor(() => {
+      expect(mockUseProjectsResult.chooseProjectDirectory).toHaveBeenCalledExactlyOnceWith(locator, manifest.id);
+    });
+  });
+
+  it('names a degraded manifest’s exact defect and repairs it on request', async () => {
+    const degraded: ProjectListItem = {
+      ...mockProjects[0]!,
+      manifestIssue: {
+        code: 'manifest-invalid',
+        issues: [
+          { code: 'unrecognized_keys', keys: ['second'], path: ['assets'], message: 'Unrecognized key: "second"' },
+        ],
+      },
+    };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [degraded, mockProjects[1]!] };
+
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('assets: Unrecognized key: "second"')).toBeInTheDocument();
+    screen.getByRole('button', { name: 'Repair' }).click();
+
+    await vi.waitFor(() => {
+      expect(mockUseProjectsResult.repairProject).toHaveBeenCalledExactlyOnceWith(degraded.id);
+    });
+  });
+
+  it('names what quarantines a manifest it cannot read as this project', () => {
+    mockUseProjectsResult = {
+      ...createUseProjectsResult(),
+      conflicts: [
+        {
+          status: 'invalid',
+          locator: {
+            backend: 'webaccess',
+            storageRootKey: 'webaccess:wsp_alpha',
+            relativeDirectory: 'from-the-future',
+            workspaceId: 'wsp_alpha',
+          },
+          issue: {
+            code: 'manifest-unknown-schema',
+            found: 'https://tau.new/schemas/tau-schema-v2.json',
+            supported: projectManifestSchemaUrl,
+          },
+        },
+      ],
+    };
+
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByText('tau.json uses a format this version of Tau does not support. Update Tau to open it.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('$schema "https://tau.new/schemas/tau-schema-v2.json" is not supported by this version of Tau.'),
+    ).toBeInTheDocument();
+  });
+
   it('reports the trash outcome instead of assuming success', async () => {
     const deleteProject = vi.fn(async () => false);
     mockUseProjectsResult = { ...createUseProjectsResult(), deleteProject };
@@ -550,6 +838,26 @@ describe('ProjectLibrary', () => {
       renderAt('/projects?trash=1');
 
       expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: true });
+    });
+
+    it('does not offer permanent deletion while a run cannot be verified quiescent', async () => {
+      mockTrashedProjects = [{ ...mockProjects[0]!, deletedAt: 1 }];
+      const verifyProjectQuiescent = vi.fn(async () => {
+        throw new Error('Restore and open this project to verify its chats before deleting it.');
+      });
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [mockProjects[1]!], verifyProjectQuiescent };
+      renderAt('/projects?trash=1');
+      screen.getByRole('button', { name: `Delete permanently ${mockProjects[0]!.name}` }).click();
+      await waitFor(() => {
+        expect(verifyProjectQuiescent).toHaveBeenCalledWith(mockProjects[0]!.id);
+        expect(mockToastError).toHaveBeenCalledWith(
+          `Could not delete ${mockProjects[0]!.name} permanently`,
+          // oxlint-disable-next-line typescript/no-unsafe-assignment -- Vitest's asymmetric matcher is typed any.
+          expect.objectContaining({ description: expect.stringMatching(/Restore and open/u) }),
+        );
+      });
+      expect(screen.queryByRole('heading', { name: 'Delete this project permanently?' })).not.toBeInTheDocument();
+      expect(mockUseProjectsResult.permanentlyDeleteProject).not.toHaveBeenCalled();
     });
 
     it('hides trashed projects at /projects', () => {

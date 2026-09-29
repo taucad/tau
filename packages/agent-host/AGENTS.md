@@ -1,6 +1,6 @@
 # Agent host
 
-`@taucad/agent-host` owns portable, browser-safe CAD-agent execution, lifecycle, and the durable session log. Keep provider orchestration, UI state, and application-framework composition in their hosts. Own the wire and tool contracts this package publishes (`src/launchers/node/agent-wire.ts`, `src/harness/tools.ts`); a published package cannot depend on the private `libs/chat`, so consumers there mirror them. Follow `docs/policy/library-api-policy.md`, `docs/policy/chat-request-config-policy.md`, `docs/policy/context-engineering-policy.md`, and `docs/policy/typescript-policy.md`.
+`@taucad/agent-host` owns portable, browser-safe CAD-agent execution, lifecycle, and the durable session log. Keep provider orchestration, UI state, and application-framework composition in their hosts. Own the wire and tool contracts this package publishes (`src/wire/`, the `./wire` subpath, and `src/harness/tools.ts`); a published package cannot depend on the private `libs/chat`, so consumers there mirror them. Follow `docs/policy/library-api-policy.md`, `docs/policy/chat-request-config-policy.md`, `docs/policy/context-engineering-policy.md`, and `docs/policy/typescript-policy.md`.
 
 ## Operational invariants
 
@@ -14,4 +14,4 @@
 
 Implement deterministic model fixtures through the host's `ModelTransport` and yield typed `ModelStreamEvent` values. Drive replay from the durable event log and provider-message roles; do not depend on a provider SDK's runtime class identity.
 
-Validate with `pnpm nx lint agent-host`, `pnpm nx test agent-host --watch=false`, `pnpm nx typecheck agent-host`, and `pnpm nx build agent-host`. Run `pnpm nx run agent-host:test:browser` for browser execution.
+Validate with `pnpm nx lint agent-host`, `pnpm nx test agent-host --watch=false`, `pnpm nx typecheck agent-host`, and `pnpm nx build agent-host`. Run `pnpm nx run agent-host:test:e2e` for browser execution; CI runs it in the e2e lane.

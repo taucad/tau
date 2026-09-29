@@ -6,8 +6,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { MeasureControl } from '#components/geometry/cad/measure-control.js';
 
 type GraphicsState = {
-  readonly context: { readonly geometry: { readonly format: 'gltf' } };
-  readonly matches: (value: unknown) => boolean;
+  readonly context: { readonly isMeasureActive: boolean };
 };
 
 const mocks = vi.hoisted(() => ({
@@ -18,8 +17,16 @@ const mocks = vi.hoisted(() => ({
 vi.mock('#hooks/use-graphics.js', () => ({
   useGraphics: () => ({ send: mocks.graphicsSend }),
   useGraphicsSelector: <T,>(selector: (state: GraphicsState) => T): T =>
-    selector({ context: { geometry: { format: 'gltf' } }, matches: () => mocks.isMeasureActive }),
+    selector({ context: { isMeasureActive: mocks.isMeasureActive } }),
 }));
+
+const renderToggle = (properties: React.ComponentProps<typeof MeasureControl> = {}): void => {
+  render(
+    <TooltipProvider>
+      <MeasureControl {...properties} />
+    </TooltipProvider>,
+  );
+};
 
 describe('MeasureControl', () => {
   beforeEach(() => {
@@ -27,27 +34,45 @@ describe('MeasureControl', () => {
     mocks.isMeasureActive = false;
   });
 
-  it('should expose an unpressed Measure toggle that enables the measuring tool', async () => {
+  it('should start measuring and then call onStart', async () => {
     const user = userEvent.setup();
-    render(
-      <TooltipProvider>
-        <MeasureControl />
-      </TooltipProvider>,
-    );
+    const onStart = vi.fn();
+    renderToggle({ onStart });
 
     await user.click(screen.getByRole('button', { name: 'Measure', pressed: false }));
 
     expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'setMeasureActive', payload: true });
+    expect(onStart).toHaveBeenCalledOnce();
   });
 
-  it('should keep the Measure name and report pressed when active', () => {
+  it('should stop measuring without calling onStart while active', async () => {
     mocks.isMeasureActive = true;
-    render(
-      <TooltipProvider>
-        <MeasureControl />
-      </TooltipProvider>,
-    );
+    const user = userEvent.setup();
+    const onStart = vi.fn();
+    renderToggle({ onStart });
 
-    expect(screen.getByRole('button', { name: 'Measure', pressed: true })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Measure', pressed: true }));
+
+    expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'setMeasureActive', payload: false });
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
+  it('should show the name and the shortcut at rest', async () => {
+    const user = userEvent.setup();
+    renderToggle({ shortcut: 'M' });
+
+    await user.hover(screen.getByRole('button', { name: 'Measure' }));
+
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('MeasureM');
+  });
+
+  it('should read Stop measure while running', async () => {
+    mocks.isMeasureActive = true;
+    const user = userEvent.setup();
+    renderToggle();
+
+    await user.hover(screen.getByRole('button', { name: 'Measure' }));
+
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Stop measure');
   });
 });

@@ -17,7 +17,7 @@ import {
   probeAcpAgents,
   resolveAcpAdapters,
 } from '#acp/registry.js';
-import { externalAgentDescriptorSchema } from '@taucad/agent-host';
+import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
 
 const fakeAgentPath = new URL('fixtures/fake-agent.ts', import.meta.url).pathname;
 
@@ -156,11 +156,17 @@ describe('probeAcpAgentModels', () => {
       { modelProbeTimeout: 20_000 },
     );
 
-    expect(probed.agents[0]?.models).toEqual([
+    expect(probed.agents[0]?.models?.map(({ id, name }) => ({ id, name }))).toEqual([
       { id: 'gpt-5.3-codex-spark', name: 'gpt-5.3-codex-spark' },
       { id: 'gpt-5.3-codex', name: 'gpt-5.3-codex' },
     ]);
+    expect(probed.agents[0]?.models?.[1]?.thoughtLevel?.currentValue).toBe('medium');
     expect(probed.agents[0]?.defaultModel).toBe('gpt-5.3-codex-spark');
+    expect(probed.agents[0]?.thoughtLevel).toMatchObject({
+      id: 'thought_level',
+      currentValue: 'medium',
+      options: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }],
+    });
   });
 
   it('flattens a grouped select, because Tau’s picker is one list', async () => {
@@ -185,6 +191,7 @@ describe('probeAcpAgentModels', () => {
 
     expect(probed.agents.map((agent) => agent.id)).toEqual(['codex']);
     expect(probed.agents[0]?.models).toBeUndefined();
+    expect(probed.agents[0]?.thoughtLevel).toBeUndefined();
     expect(probed.refused).toEqual([]);
     expect(Date.now() - started).toBeLessThan(10_000);
   });
@@ -228,7 +235,7 @@ describe('externalAgentDescriptors', () => {
       acpAgentProfiles,
     );
 
-    expect(descriptors).toEqual([
+    expect(descriptors).toMatchObject([
       {
         id: 'codex',
         displayName: 'Codex',
@@ -242,6 +249,7 @@ describe('externalAgentDescriptors', () => {
        * and it is named from the profile because resolution knew about it. */
       { id: 'claude', displayName: 'Claude Code', models: [], refusal: 'CLI_TOO_OLD' },
     ]);
+    expect(descriptors[0]?.thoughtLevel?.currentValue).toBe('medium');
     /* VSC1: every tier parses exactly this — no string element, no extra key. */
     for (const descriptor of descriptors) {
       expect(externalAgentDescriptorSchema.parse(descriptor)).toEqual(descriptor);

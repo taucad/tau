@@ -242,7 +242,7 @@ export function GithubGistManagement({
             size='sm'
             variant='ghost'
             aria-label='Manage GitHub Gist'
-            className='h-8 px-2.5 text-xs max-sm:size-8 max-sm:px-0'
+            className='h-8 px-2.5 text-xs max-md:size-8 max-md:px-0'
             disabled={status === undefined || busy}
           >
             {busy ? (
@@ -250,7 +250,7 @@ export function GithubGistManagement({
             ) : (
               <EllipsisVertical className='size-3.5' aria-hidden />
             )}
-            <span className='hidden sm:inline'>Manage</span>
+            <span className='hidden md:inline'>Manage</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align='end'>

@@ -1,0 +1,198 @@
+--- a/src/ModelingAlgorithms/TKTopAlgo/BRepExtrema/BRepExtrema_ExtCF.hxx
++++ b/src/ModelingAlgorithms/TKTopAlgo/BRepExtrema/BRepExtrema_ExtCF.hxx
+@@ -22,0 +23 @@
++#include <TopoDS_Face.hxx>
+@@ -23,0 +25,2 @@
++#include <memory>
++
+@@ -25 +28 @@
+-class TopoDS_Face;
++class BRepTopAdaptor_FClass2d;
+@@ -26,0 +30,27 @@
++//! Invocation-local face preparation for GeoSpec's edge/face distance path.
++//! The caller owns this state and must not share it across concurrent calls.
++class BRepExtrema_PreparedFaceCF
++{
++public:
++  Standard_EXPORT BRepExtrema_PreparedFaceCF(const TopoDS_Face& theFace,
++                                            double             theRequestTolerance);
++  Standard_EXPORT ~BRepExtrema_PreparedFaceCF();
++
++  Standard_EXPORT bool Matches(const TopoDS_Face& theFace,
++                               double             theRequestTolerance) const;
++
++private:
++  friend class BRepExtrema_ExtCF;
++
++  TopoDS_Face                              myFace;
++  double                                   myFaceTolerance;
++  double                                   myRequestTolerance;
++  occ::handle<BRepAdaptor_Surface>         mySurface;
++  std::unique_ptr<BRepTopAdaptor_FClass2d> myClassifier;
++  double                                   myU1 = 0.0;
++  double                                   myU2 = 0.0;
++  double                                   myV1 = 0.0;
++  double                                   myV2 = 0.0;
++  double                                   mySurfaceTolerance = 0.0;
++};
++
+@@ -36,0 +67,6 @@
++  //! GeoSpec-only opt-in; a mismatched face falls back to the original path.
++  Standard_EXPORT BRepExtrema_ExtCF(const TopoDS_Edge&          E,
++                                   const TopoDS_Face&          F,
++                                   BRepExtrema_PreparedFaceCF* thePrepared,
++                                   double                     theRequestTolerance);
++
+@@ -74,0 +111,2 @@
++  BRepExtrema_PreparedFaceCF*            myPrepared = nullptr;
++  double                                 myRequestTolerance = 0.0;
+--- a/src/ModelingAlgorithms/TKTopAlgo/BRepExtrema/BRepExtrema_ExtCF.cxx
++++ b/src/ModelingAlgorithms/TKTopAlgo/BRepExtrema/BRepExtrema_ExtCF.cxx
+@@ -25,0 +26,2 @@
++#include <optional>
++
+@@ -27,0 +30,21 @@
++BRepExtrema_PreparedFaceCF::BRepExtrema_PreparedFaceCF(const TopoDS_Face& theFace,
++                                                     double theRequestTolerance)
++    : myFace(theFace),
++      myFaceTolerance(0.0),
++      myRequestTolerance(theRequestTolerance)
++{
++}
++
++BRepExtrema_PreparedFaceCF::~BRepExtrema_PreparedFaceCF() = default;
++
++bool BRepExtrema_PreparedFaceCF::Matches(const TopoDS_Face& theFace,
++                                        double theRequestTolerance) const
++{
++  return myFace.IsEqual(theFace) &&
++         (mySurface.IsNull() ||
++          myFaceTolerance == BRep_Tool::Tolerance(theFace)) &&
++         myRequestTolerance == theRequestTolerance;
++}
++
++//=================================================================================================
++
+@@ -35,0 +59,12 @@
++BRepExtrema_ExtCF::BRepExtrema_ExtCF(const TopoDS_Edge& E,
++                                   const TopoDS_Face& F,
++                                   BRepExtrema_PreparedFaceCF* thePrepared,
++                                   double theRequestTolerance)
++    : myPrepared(thePrepared), myRequestTolerance(theRequestTolerance)
++{
++  Initialize(E, F);
++  Perform(E, F);
++}
++
++//=================================================================================================
++
+@@ -37,0 +73,45 @@
++  if (myPrepared != nullptr && myPrepared->Matches(F, myRequestTolerance))
++  {
++    if (myPrepared->mySurface.IsNull())
++    {
++      BRepAdaptor_Surface Surf(F);
++      if (Surf.GetType() == GeomAbs_OtherSurface || !BRep_Tool::IsGeometric(E))
++      {
++        return;
++      }
++      BRepAdaptor_Curve aC(E);
++      myHS = new BRepAdaptor_Surface(Surf);
++      double aTolC, aTolS;
++      const double faceTolerance = BRep_Tool::Tolerance(F);
++      aTolS = std::min(faceTolerance, Precision::Confusion());
++      aTolS = std::min(Surf.UResolution(aTolS), Surf.VResolution(aTolS));
++      aTolS = std::max(aTolS, Precision::PConfusion());
++      aTolC = std::min(BRep_Tool::Tolerance(E), Precision::Confusion());
++      aTolC = aC.Resolution(aTolC);
++      aTolC = std::max(aTolC, Precision::PConfusion());
++      double U1, U2, V1, V2;
++      BRepTools::UVBounds(F, U1, U2, V1, V2);
++      myExtCS.Initialize(*myHS, U1, U2, V1, V2, aTolC, aTolS);
++      myPrepared->mySurface = myHS;
++      myPrepared->mySurfaceTolerance = aTolS;
++      myPrepared->myFaceTolerance = faceTolerance;
++      myPrepared->myU1 = U1;
++      myPrepared->myU2 = U2;
++      myPrepared->myV1 = V1;
++      myPrepared->myV2 = V2;
++      return;
++    }
++    if (!BRep_Tool::IsGeometric(E))
++    {
++      return;
++    }
++    BRepAdaptor_Curve aC(E);
++    double aTolC = std::min(BRep_Tool::Tolerance(E), Precision::Confusion());
++    aTolC = std::max(aC.Resolution(aTolC), Precision::PConfusion());
++    myHS = myPrepared->mySurface;
++    myExtCS.Initialize(*myHS,
++                       myPrepared->myU1, myPrepared->myU2,
++                       myPrepared->myV1, myPrepared->myV2,
++                       aTolC, myPrepared->mySurfaceTolerance);
++    return;
++  }
+@@ -93 +173,15 @@
+-    BRepTopAdaptor_FClass2d classifier(F2, Tol);
++    std::optional<BRepTopAdaptor_FClass2d> localClassifier;
++    BRepTopAdaptor_FClass2d* classifier;
++    if (myPrepared != nullptr && myPrepared->Matches(F2, myRequestTolerance))
++    {
++      if (!myPrepared->myClassifier)
++      {
++        myPrepared->myClassifier = std::make_unique<BRepTopAdaptor_FClass2d>(F2, Tol);
++      }
++      classifier = myPrepared->myClassifier.get();
++    }
++    else
++    {
++      localClassifier.emplace(F2, Tol);
++      classifier = &*localClassifier;
++    }
+@@ -108 +202 @@
+-      const TopAbs_State state = classifier.Perform(Puv, isAdjustPeriodic);
++      const TopAbs_State state = classifier->Perform(Puv, isAdjustPeriodic);
+--- a/src/ModelingAlgorithms/TKTopAlgo/BRepExtrema/BRepExtrema_DistanceSS.hxx
++++ b/src/ModelingAlgorithms/TKTopAlgo/BRepExtrema/BRepExtrema_DistanceSS.hxx
+@@ -28,0 +29 @@
++class BRepExtrema_PreparedFaceCF;
+@@ -62 +63,3 @@
+-        myAlgo(theExtAlgo)
++        myAlgo(theExtAlgo),
++        myPreparedFace(nullptr),
++        myRequestTolerance(0.0)
+@@ -66,0 +70,20 @@
++  //! GeoSpec-only opt-in for one invocation-local edge/face preparation.
++  BRepExtrema_DistanceSS(const TopoDS_Shape&          theS1,
++                         const TopoDS_Shape&          theS2,
++                         const Bnd_Box&               theBox1,
++                         const Bnd_Box&               theBox2,
++                         double                       theDstRef,
++                         double                       theDeflection,
++                         BRepExtrema_PreparedFaceCF* thePreparedFace,
++                         double                       theRequestTolerance)
++      : myDstRef(theDstRef),
++        myModif(false),
++        myEps(theDeflection),
++        myFlag(Extrema_ExtFlag_MINMAX),
++        myAlgo(Extrema_ExtAlgo_Grad),
++        myPreparedFace(thePreparedFace),
++        myRequestTolerance(theRequestTolerance)
++  {
++    Perform(theS1, theS2, theBox1, theBox2);
++  }
++
+@@ -131,0 +155,2 @@
++  BRepExtrema_PreparedFaceCF* myPreparedFace; //!< Owned by the invoking GeoSpec bridge call
++  double myRequestTolerance; //!< Match guard for that invocation
+--- a/src/ModelingAlgorithms/TKTopAlgo/BRepExtrema/BRepExtrema_DistanceSS.cxx
++++ b/src/ModelingAlgorithms/TKTopAlgo/BRepExtrema/BRepExtrema_DistanceSS.cxx
+@@ -1044 +1044,7 @@
+-  BRepExtrema_ExtCF Ext(theS1, theS2);
++  // The generic dispatcher has already replaced an infinite face, if needed.
++  // Never reuse preparation for a changed trim, orientation, pose or tolerance.
++  BRepExtrema_PreparedFaceCF* prepared =
++      myPreparedFace != nullptr && myPreparedFace->Matches(theS2, myRequestTolerance)
++          ? myPreparedFace
++          : nullptr;
++  BRepExtrema_ExtCF Ext(theS1, theS2, prepared, myRequestTolerance);

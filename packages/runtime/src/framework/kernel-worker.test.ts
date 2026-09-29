@@ -627,6 +627,54 @@ describe('KernelWorker lifecycle', () => {
       ).rejects.toMatchObject({ name: 'AbortError' });
     });
 
+    it.each(['missing', 'present'] as const)(
+      'should snapshot a normal %s optional middleware sidecar without unresolved inputs',
+      async (presence) => {
+        const sidecarPath = '.tau/parameters/main.ts.json';
+        const contents: Record<string, Uint8Array<ArrayBuffer>> = {
+          'main.ts': new Uint8Array([1, 2]),
+          'dep.ts': new Uint8Array([3, 4]),
+        };
+        if (presence === 'present') {
+          contents[sidecarPath] = new TextEncoder().encode(
+            JSON.stringify({ activeGroup: 'default', groups: { default: { values: {} } } }),
+          );
+        }
+        const filesystem = createMockFileSystem({ existsResult: (path) => path in contents });
+        filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) =>
+          Object.fromEntries(paths.map((path) => [path, contents[path]!])),
+        );
+        const middleware = defineMiddleware({
+          id: 'optional-sidecar',
+          name: 'OptionalSidecar',
+          getDependencies: () => [{ path: sidecarPath, affects: ['createGeometry'] }],
+        });
+        const worker = new DependencyKernelWorker({ middleware: [middleware], onLog: noopLog, filesystem });
+        try {
+          const result = await worker.snapshotSource({ file: createGeometryFile('main.ts') });
+          expect(result.success).toBe(true);
+          if (!result.success) {
+            return;
+          }
+          expect(result.issues).toEqual([]);
+          expect(result.data.unresolvedPaths).toEqual([]);
+          expect(result.data.files.map(({ path }) => path)).toEqual(Object.keys(contents).sort());
+          const sidecar = result.data.files.find(({ path }) => path === sidecarPath);
+          if (presence === 'present') {
+            expect(sidecar?.role).toBe('middleware-dependency');
+            expect(sidecar?.content).toEqual(contents[sidecarPath]);
+            expect(sidecar?.sha256).toMatch(/^[0-9a-f]{64}$/u);
+          } else {
+            expect(sidecar).toBeUndefined();
+          }
+          expect(filesystem.mocks.exists).toHaveBeenCalledWith(sidecarPath);
+          expect(worker.createGeometryCalls).toBe(0);
+        } finally {
+          await worker.cleanup();
+        }
+      },
+    );
+
     it('fails closed when a required file is absent or the dependency graph changes', async () => {
       const missingFilesystem = createMockFileSystem({ existsResult: (path) => path !== 'tau.json' });
       missingFilesystem.mocks.readFiles.mockResolvedValue({
@@ -2229,6 +2277,57 @@ describe('KernelWorker lifecycle', () => {
       expect(filesystem.mocks.mkdir).toHaveBeenCalledWith('sub', { recursive: true });
     });
 
+    it('should observe staged bytes the filesystem already holds without writing them again', async () => {
+      const stored = new Uint8Array([7, 8, 9]);
+      const filesystem = createMockFileSystem({ readFileResult: stored });
+      filesystem.mocks.readFiles.mockResolvedValue({ 'sub/main.ts': stored });
+      let watchHandler: ((event: WatchEvent) => void) | undefined;
+      Object.assign(filesystem, {
+        watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchHandler = handler;
+          return vi.fn();
+        }),
+      });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      // @ts-expect-error - install the watch-capable proxy seam exercised by production initialization
+      worker.fileSystem = filesystem;
+      const file = createGeometryFile('sub/main.ts');
+
+      try {
+        await worker.handleStageAndOpenFile({ renderId: previewId(201), stage: {}, file, parameters: {} });
+        await vi.waitFor(() => {
+          expect(watchHandler).toBeDefined();
+        });
+        const staged = new Uint8Array(stored);
+        await worker.handleStageAndOpenFile({
+          renderId: previewId(202),
+          stage: { 'sub/main.ts': staged },
+          file,
+          parameters: {},
+        });
+
+        expect(filesystem.mocks.writeFile).not.toHaveBeenCalled();
+        expect(filesystem.mocks.mkdir).not.toHaveBeenCalled();
+        // @ts-expect-error - white-box: the staged bytes are the path's observed revision.
+        expect(worker.fileContentCache.get('sub/main.ts')).toBe(staged);
+        expect(worker.createGeometryCalls).toBe(2);
+
+        const states: string[] = [];
+        worker.onStateChanged = ({ state }) => states.push(state);
+        const reads = filesystem.mocks.readFile.mock.calls.length;
+        watchHandler!({ type: 'change', path: 'sub/main.ts' });
+        await vi.waitFor(() => {
+          expect(filesystem.mocks.readFile.mock.calls.length).toBeGreaterThan(reads);
+        });
+        await flushMicrotasks();
+
+        expect(states).toEqual([]);
+        expect(worker.createGeometryCalls).toBe(2);
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
     it('opens the entry without staging when the stage map is empty', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
@@ -3235,7 +3334,8 @@ describe('preview admission invariants', () => {
       await stageWriteEntered.promise;
       await flushMicrotasks();
 
-      expect(filesystem.mocks.readFile).not.toHaveBeenCalled();
+      // Staging reads once to learn whether storage already holds the bytes; the write's own watch echo reads nothing.
+      expect(filesystem.mocks.readFile).toHaveBeenCalledTimes(1);
       releaseStageWrite.resolve();
       await expect(result).resolves.toMatchObject({ success: true });
       // @ts-expect-error - wait for the production watch reconciliation lane to settle

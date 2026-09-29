@@ -29,8 +29,6 @@ export type {
   HostJobProgress,
   HostJobRunnerRegistration,
 } from '#job-attempt-host.js';
-export { createSolverHatchetJobWorkerFactory } from '#solver-job-worker.js';
-export type { SolverHatchetJobWorkerFactoryOptions } from '#solver-job-worker.js';
 export type { HostCredential } from '#credential-store.js';
 export { defaultConfigDirectory } from '#credential-store.js';
 export { hostDescriptorPath, hostSessionCookieName, startAgentServer } from '#agent-server.js';
@@ -43,6 +41,8 @@ export {
   createProjectRevisionPort,
   createProjectRevisions,
   openProjectRevisions,
+  projectCloseMilliseconds,
+  projectReleaseMilliseconds,
   requireRevisionToolchain,
 } from '#revisions.js';
 export type {
@@ -53,6 +53,7 @@ export type {
   RevisionDiscardOutcome,
   RevisionOpenOutcome,
   RevisionPublishOutcome,
+  RevisionSaveOutcome,
   RevisionSwitchOutcome,
   TurnCheckout,
   TurnConflictedEvent,
@@ -61,6 +62,37 @@ export type {
 } from '#revisions.js';
 export { isolationHeaders, serveStaticUi } from '#static-ui.js';
 export type { StaticUiHandler, StaticUiOptions } from '#static-ui.js';
+export { createProjectHost, createProjectHostActor } from '#project-host.js';
+export type {
+  ProjectFileSystem,
+  ProjectHost,
+  ProjectHostActor,
+  ProjectHostActorOptions,
+  ProjectHostCommand,
+  ProjectHostOptions,
+  ProjectHostRuntimeClient,
+} from '#project-host.js';
+export { keyedResource } from '#keyed-resource.js';
+export type { KeyedIncarnation, KeyedResource } from '#keyed-resource.js';
+export {
+  createMachineSecretStore,
+  createNodeMachineRuntime,
+  localMachineFacet,
+  machineRouteGrants,
+  openMachineHostIdentity,
+  probeCertificateTrust,
+  readProjectId,
+} from '#machine-host.js';
+export type { CreateNodeMachineRuntimeOptions, MachineHostIdentity, MachineSecretStore } from '#machine-host.js';
+export { completeMachineBinding } from '#machine-binding-ceremony.js';
+export type { CompleteMachineBindingInput, MachineBindingCeremonyEvent } from '#machine-binding-ceremony.js';
+export {
+  createFileSecretVault,
+  createKeychainSecretVault,
+  createMemorySecretVault,
+  openSecretVault,
+} from '#secret-vault.js';
+export type { SecretVault, SecretVaultFacts, SecretVaultKind, SecretVaultWriteOptions } from '#secret-vault.js';
 export { createHostToolRegistry } from '#agent-tools.js';
 export type { HostToolRegistryOptions } from '#agent-tools.js';
 export {
@@ -93,6 +125,7 @@ export type {
   AcpExternalAgentPortOptions,
   AcpPromptTurn,
   AcpAgentFacts,
+  AcpLimitReset,
   AcpSession,
   AcpTurnOutcome,
   AcpWireFrame,
@@ -103,6 +136,7 @@ export {
   createHostMcpEndpoint,
   hostMcpAllowedTools,
   hostMcpCapabilityLifetime,
+  hostMcpLeaseCeiling,
   HostMcpCapabilityError,
   hostMcpCapabilityPrefix,
 } from '#mcp-server.js';

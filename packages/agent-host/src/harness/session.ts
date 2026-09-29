@@ -1,4 +1,5 @@
 import { Agent } from '@earendil-works/pi-agent-core';
+import type { ActorOptions, AnyActorLogic } from 'xstate';
 import type { AgentEvent, AgentMessage, AgentToolResult, StreamFn } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream, validateToolArguments } from '@earendil-works/pi-ai';
 import type {
@@ -18,6 +19,7 @@ import type {
   DurableEventLog,
   HostRunSnapshot,
   HostToolDefinition,
+  InvocationFunding,
   ModelInvocationBinding,
   ModelStreamEvent,
   MaterializedDocument,
@@ -25,6 +27,7 @@ import type {
   ToolRegistry,
 } from '#waist/ports.js';
 import type {
+  AgentLogEvent,
   AgentToolChoice,
   JsonObject,
   JsonValue,
@@ -44,7 +47,7 @@ import {
   latexDelimiterMiddleware,
 } from '#harness/cad-middleware.js';
 import type { ClientContext, RecentSkillsPort } from '#harness/cad-middleware.js';
-import { installCompaction } from '#harness/compaction.js';
+import { installCompaction, isCompactionSummary } from '#harness/compaction.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
 import { composeModelCallMiddleware } from '#harness/model-call-middleware.js';
 import type { ModelCallMiddleware } from '#harness/model-call-middleware.js';
@@ -68,6 +71,10 @@ import type { AttachmentReader, MessageIdentities, SessionLogEvent, SessionRecor
 import { applyHostToolResult, createAgentTools, normalizeToolInput } from '#harness/tools.js';
 import type { HostToolExecutionDetails, ToolResultSubstituter } from '#harness/tools.js';
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
+import { codedFailureDetail as codedFailure } from '#harness/coded-failure.js';
+import { emptyChatLedger, foldChatLedger, isForeignInvocation, unresolvedInvocations } from '#log/chat-ledger.js';
+import type { InvocationResolution } from '#wire/gateway.js';
+import type { RefusalCode } from '#wire/refusals.js';
 
 const zeroUsage: Usage = {
   input: 0,
@@ -123,6 +130,35 @@ const modelFor = (options: AgentSessionModel): Model<Api> => ({
   maxTokens: options.maxTokens ?? 8192,
 });
 
+/**
+ * Tool results in the order the assistant called them: the log keeps completion order (EQ6), which a resumed history
+ * reads back, and some wire families pair results to calls by position.
+ *
+ * @param messages - The history, as pi holds it.
+ * @returns The history with each batch's results reordered to their calls' order.
+ */
+const inCallOrder = (messages: readonly AgentMessage[]): readonly AgentMessage[] => {
+  const ordered = [...messages];
+  for (let index = 0; index < ordered.length; index++) {
+    const message = ordered[index];
+    if (message?.role !== 'assistant') {
+      continue;
+    }
+    const calls = message.content.flatMap((block) => (block.type === 'toolCall' ? [block.id] : []));
+    let end = index + 1;
+    while (ordered[end]?.role === 'toolResult') {
+      end++;
+    }
+    const batch = ordered.slice(index + 1, end);
+    const position = (result: AgentMessage): number =>
+      result.role === 'toolResult' && calls.includes(result.toolCallId)
+        ? calls.indexOf(result.toolCallId)
+        : calls.length;
+    ordered.splice(index + 1, batch.length, ...batch.toSorted((left, right) => position(left) - position(right)));
+  }
+  return ordered;
+};
+
 const providerHistory = (
   messages: readonly AgentMessage[],
   options: {
@@ -131,7 +167,7 @@ const providerHistory = (
     readonly createId: () => string;
   },
 ): ProviderMessage[] =>
-  messages.flatMap((message) => {
+  inCallOrder(messages).flatMap((message) => {
     const provider = piMessageToProvider(message, options.identities);
     if (message.role !== 'assistant') {
       return [provider];
@@ -201,8 +237,144 @@ type CreateTransportStreamOptions = {
     | ((purpose: 'generation' | 'compaction', modelId: string, signal: AbortSignal) => Promise<string>)
     | undefined;
   readonly bindInvocation?: ((attemptId: string, metadata: ProviderMessageMetadata) => Promise<void>) | undefined;
-  readonly completedAttempts?: Set<string> | undefined;
   readonly invocationPurpose?: 'generation' | 'compaction' | undefined;
+  /** E9: the longest silence between transport events before the call fails `MODEL_STREAM_STALLED`. */
+  readonly stallBound?: StreamStallBound | undefined;
+};
+
+/** The timers a stall bound runs on: an actor's clock, so the incarnation's (or a `StepClock`) fits. @public */
+export type HostClock = NonNullable<ActorOptions<AnyActorLogic>['clock']>;
+
+/** The model-stream stall bound (E9) and the clock it runs on: the incarnation's, so a test steps it. @public */
+export type StreamStallBound = Readonly<{ clock: HostClock; milliseconds: number }>;
+
+/** Settles when `value` does, never rejecting. */
+const settleQuietly = async (value: unknown): Promise<void> => {
+  try {
+    await value;
+  } catch {
+    /* Dropped by design: the caller already moved on. */
+  }
+};
+
+type StallWatch<T> = Readonly<{
+  iterator: AsyncIterator<T>;
+  bound: StreamStallBound;
+  onStall: () => void;
+  /** A frozen process is forgiven once per stream (RV7-F1). */
+  rearm: { used: boolean };
+}>;
+
+/** One event of a stall-bounded stream, or `MODEL_STREAM_STALLED` after a silence of the bound. */
+const nextWithin = async <T>(watch: StallWatch<T>): Promise<IteratorResult<T>> => {
+  const { iterator, bound, onStall, rearm } = watch;
+  const { clock, milliseconds } = bound;
+  const now = (): number => clock.now?.() ?? Date.now();
+  const pending = iterator.next();
+  /* A stalled call's late answer is dropped, not reported unhandled. */
+  void settleQuietly(pending);
+  let stallTimer: unknown;
+  const stalled = new Promise<never>((_resolve, reject) => {
+    const arm = (): void => {
+      const due = now() + milliseconds;
+      stallTimer = clock.setTimeout(() => {
+        if (!rearm.used && now() - due >= milliseconds) {
+          rearm.used = true;
+          arm();
+          return;
+        }
+        onStall();
+        void settleQuietly(iterator.return?.());
+        reject(
+          Object.assign(new Error(`The model sent nothing for ${String(milliseconds / 1000)} s; resume the turn.`), {
+            code: 'MODEL_STREAM_STALLED',
+          }),
+        );
+      }, milliseconds);
+    };
+    arm();
+  });
+  try {
+    return await Promise.race([pending, stalled]);
+  } finally {
+    clock.clearTimeout(stallTimer);
+  }
+};
+
+/**
+ * Bound the silence between a stream's events (E9, L4 D-105). A firing late by a whole bound means the process was
+ * frozen, not the stream silent: it re-arms once (W4 T9, RV7-F1).
+ *
+ * @param events - The transport's events.
+ * @param bound - The bound and its clock.
+ * @param onStall - Aborts the transport's request before the stream fails.
+ * @returns The events, failing `MODEL_STREAM_STALLED` after a silence of the bound.
+ */
+const stallBounded = <T>(events: AsyncIterable<T>, bound: StreamStallBound, onStall: () => void): AsyncIterable<T> => ({
+  async *[Symbol.asyncIterator]() {
+    const watch: StallWatch<T> = { iterator: events[Symbol.asyncIterator](), bound, onStall, rearm: { used: false } };
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- each event is bounded on its own.
+      const next = await nextWithin(watch);
+      if (next.done === true) {
+        return;
+      }
+      yield next.value;
+    }
+  },
+});
+
+/** Whether Tau's gateway ledger funds this provider's calls on this transport. */
+const isFunded = (transport: ModelTransport, providerKind: ModelProviderKind | undefined): boolean =>
+  transport.funding.type === 'funded' && transport.funding.usesBillingAttempt(providerKind);
+
+/**
+ * The row that records one resolved attempt (W11 GI-R4): the charge of a terminal answer, or a void.
+ *
+ * @param attemptId - The resolved attempt.
+ * @param resolution - The gateway's terminal or voided answer.
+ * @returns The `model.invocation-settled` body.
+ */
+export const settledRowOf = (
+  attemptId: string,
+  resolution: Extract<InvocationResolution, Readonly<{ status: 'terminal' | 'voided' }>>,
+): SessionLogEvent =>
+  resolution.status === 'voided'
+    ? { type: 'model.invocation-settled', attemptId, outcome: 'voided' }
+    : {
+        type: 'model.invocation-settled',
+        attemptId,
+        outcome: resolution.outcome,
+        operationId: resolution.operationId,
+        chargedCreditAtoms: resolution.chargedCreditAtoms,
+      };
+
+/**
+ * The account that funds a transport's calls (RV5-F2). A lookup that fails is coded `UNAUTHENTICATED`: the page asks
+ * the person to sign in again, then resume.
+ *
+ * @param funding - The funded transport's facet.
+ * @returns The funding principal, or `undefined` when it is unknown (a stamped attempt is then refused).
+ */
+export const fundingPrincipal = async (
+  funding: Extract<InvocationFunding, Readonly<{ type: 'funded' }>>,
+): Promise<string | undefined> => {
+  try {
+    return await funding.principal();
+  } catch (error) {
+    throw Object.assign(
+      new Error('Tau could not tell which account funds model requests; sign in again, then resume.', {
+        cause: error,
+      }),
+      { code: 'UNAUTHENTICATED' satisfies RefusalCode },
+    );
+  }
+};
+
+/** The run's current attempt, from its last stamped lifecycle row (W3); 1 before any. */
+const attemptOf = (events: readonly AgentLogEvent[], runId: string): number => {
+  const last = events.findLast((event) => event.runId === runId && event.type === 'run.lifecycle');
+  return last?.type === 'run.lifecycle' && typeof last.attempt === 'number' ? last.attempt : 1;
 };
 
 /** Adapt the W3 model transport into pi's provider event protocol. @public */
@@ -301,15 +473,24 @@ export const createTransportStreamFunction =
       };
 
       try {
+        /* An aborted run sends nothing more: pi's loop can ask again after a revoked tool answers (D13). */
+        signal.throwIfAborted();
         const invocationPurpose = options.invocationPurpose ?? 'generation';
-        const funded = options.transport.usesBillingAttempt?.(options.providerKind) === true;
+        const funded = isFunded(options.transport, options.providerKind);
         const attemptId =
           funded && options.prepareInvocation
             ? await options.prepareInvocation(invocationPurpose, model.id, signal)
             : options.createId();
+        signal.throwIfAborted();
         const committedContext = options.committedContext?.();
         const documents = options.documents?.();
-        const events = options.transport.stream({
+        /* The transport's own signal: pi's abort reaches it, and so does the stall bound's. */
+        const request = new AbortController();
+        const forward = (): void => {
+          request.abort(signal.reason);
+        };
+        signal.addEventListener('abort', forward, { once: true });
+        const streamed = options.transport.stream({
           attemptId,
           ...(options.chatId === undefined ? {} : { chatId: options.chatId }),
           invocationPurpose,
@@ -317,11 +498,7 @@ export const createTransportStreamFunction =
             ? {
                 onInvocationBound: async (binding: ModelInvocationBinding) => {
                   invocationMetadata = {
-                    tauInternal: {
-                      kind: 'billing-invocation',
-                      attemptId,
-                      ...binding,
-                    },
+                    tauInternal: { kind: 'billing-invocation', attemptId, operationId: binding.operationId },
                   };
                   await options.bindInvocation?.(attemptId, invocationMetadata);
                 },
@@ -346,8 +523,14 @@ export const createTransportStreamFunction =
           // A copy: the session's table grows with later turns while a transport may still hold this one.
           ...(documents === undefined || documents.size === 0 ? {} : { documents: new Map(documents) }),
           tools: hostTools(context),
-          signal,
+          signal: request.signal,
         });
+        const events =
+          options.stallBound === undefined
+            ? streamed
+            : stallBounded(streamed, options.stallBound, () => {
+                request.abort();
+              });
         for await (const event of events) {
           assertBeforeTerminal(event.type);
           if (event.type === 'message-metadata') {
@@ -619,7 +802,6 @@ export const createTransportStreamFunction =
         if (terminalReason === 'pending') {
           throw new Error('Model transport cannot complete with a pending stop reason.');
         }
-        options.completedAttempts?.add(attemptId);
         const stopReason = terminalReason;
         partial = {
           ...partial,
@@ -703,7 +885,6 @@ const compactionModelsWithTransport = (options: {
   readonly createId: () => string;
   readonly prepareInvocation?: CreateTransportStreamOptions['prepareInvocation'];
   readonly bindInvocation?: CreateTransportStreamOptions['bindInvocation'];
-  readonly completedAttempts?: Set<string> | undefined;
   /** The session's side table, so a summarised document keeps its name (P32). */
   readonly documents: () => ReadonlyMap<string, MaterializedDocument>;
 }): Models => {
@@ -714,11 +895,12 @@ const compactionModelsWithTransport = (options: {
       let stopReason: StopReason | undefined;
       const signal = streamOptions?.signal ?? new AbortController().signal;
       try {
-        const funded = options.transport.usesBillingAttempt?.(options.providerKind) === true;
+        const funded = isFunded(options.transport, options.providerKind);
         const attemptId =
           funded && options.prepareInvocation
             ? await options.prepareInvocation('compaction', model.id, signal)
             : options.createId();
+        signal.throwIfAborted();
         const documents = options.documents();
         const stream = options.transport.stream({
           attemptId,
@@ -729,11 +911,7 @@ const compactionModelsWithTransport = (options: {
             ? {
                 onInvocationBound: async (binding: ModelInvocationBinding) =>
                   options.bindInvocation?.(attemptId, {
-                    tauInternal: {
-                      kind: 'billing-invocation',
-                      attemptId,
-                      ...binding,
-                    },
+                    tauInternal: { kind: 'billing-invocation', attemptId, operationId: binding.operationId },
                   }),
               }
             : {}),
@@ -795,7 +973,6 @@ const compactionModelsWithTransport = (options: {
             timestamp: Date.now(),
           };
         }
-        options.completedAttempts?.add(attemptId);
         return {
           role: 'assistant',
           content: [{ type: 'text', text: summary }],
@@ -850,6 +1027,13 @@ export type CreateAgentSessionOptions = {
   readonly allowedTools?: readonly string[] | undefined;
   readonly snapshot?: JsonValue | undefined;
   readonly contextMessages?: readonly UserProviderMessage[] | undefined;
+  /**
+   * The turn context the admission journaled (M1's intent row). Present, `prompt` commits it as is; absent, the session
+   * composes it from the fields above.
+   */
+  readonly context?: TurnContextSnapshot | undefined;
+  /** The model row selected at Resume (D21): used before the committed turn's model, so a switch takes effect. */
+  readonly selection?: TurnModelConfig | undefined;
   readonly eventLog: DurableEventLog;
   /**
    * The owner's durable writer, when this session shares its log (I2).
@@ -872,47 +1056,111 @@ export type CreateAgentSessionOptions = {
   readonly attachments?: AttachmentReader | undefined;
   readonly createId?: (() => string) | undefined;
   readonly now?: (() => Date) | undefined;
+  /** The incarnation's clock, for the stream stall bound; the process's timers when absent. */
+  readonly clock?: HostClock | undefined;
+  /** E9: the longest silence between a model stream's events, 300 s by default (RA-Q3). */
+  readonly streamStall?: number | undefined;
   readonly onCompaction?: ((outcome: CompactionOutcome) => void) | undefined;
   readonly onLiveEvent?: ((event: AgentLiveEvent) => void | Promise<void>) | undefined;
 };
 
-/** Active pi session bound to Tau's portable waist. @public */
+/**
+ * How one run of the loop ended, as the session reports it to its owner (M1). The session never writes
+ * `run.lifecycle`: its owner maps this outcome to the ending row (RA-R1).
+ *
+ * @public
+ */
+export type AgentRunOutcome = Readonly<{
+  /** `aborted`: the owner stopped the loop, or the stream ended aborted. */
+  outcome: 'completed' | 'failed' | 'aborted';
+  failure?: RunFailureDetail | undefined;
+}>;
+
+/** Active pi session bound to Tau's portable waist; a driver its owner starts and stops (M1). @public */
 export type AgentSession = {
   readonly agent: Agent;
-  prompt(message: UserProviderMessage, onAdmitted?: () => void): Promise<void>;
-  steer(message: string): void;
+  /**
+   * Start mode: compact, commit the turn with its context, then run the loop. Resolves once the loop and every tool it
+   * started have settled; it never rejects.
+   *
+   * @param message - The turn's user message.
+   * @param onCommitted - Called once the commit row is durable, or the run ended before it.
+   */
+  prompt(message: UserProviderMessage, onCommitted?: () => void): Promise<AgentRunOutcome>;
+  /** Continue mode: run the loop from the durable history. Resolves like {@link AgentSession.prompt}. */
+  continue(): Promise<AgentRunOutcome>;
+  /**
+   * Queue steering on the live loop.
+   *
+   * @param message - The steering text.
+   * @param id - The durable message id, `steer:<commandId>` for a keyed steer, so its owner can answer on its row.
+   */
+  steer(message: string, id?: string): void;
   abort(): void;
   snapshot(): Promise<HostRunSnapshot>;
   close(): Promise<void>;
 };
 
-const lastLifecycleState = (
-  events: ReadonlyArray<{
-    readonly type: string;
-    readonly runId: string;
-    readonly state?: RunLifecycleState;
-  }>,
-  runId: string,
-): RunLifecycleState => {
-  for (let index = events.length - 1; index >= 0; index--) {
-    const event = events[index];
-    if (event?.runId === runId && event.type === 'run.lifecycle' && event.state) {
-      return event.state;
-    }
-  }
-  return 'admitted';
+/**
+ * The durable subset of a session model row: transport-only fields (`api`, `provider`) stay out of the log.
+ *
+ * @param model - The session's model row.
+ * @returns The row a turn context records.
+ */
+const turnModelOf = (model: AgentSessionModel): TurnModelConfig => ({
+  id: model.id,
+  contextWindow: model.contextWindow,
+  ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
+  ...(model.providerKind === undefined ? {} : { providerKind: model.providerKind }),
+  ...(model.cost === undefined ? {} : { cost: model.cost }),
+  ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
+});
+
+/** A tool output as the log compares it: its content and outcome, not the moment pi stamped on its copy. */
+const sameToolOutput = (left: ProviderMessage, right: ProviderMessage): boolean => {
+  const { metadata: _left, ...leftFacts } = left;
+  const { metadata: _right, ...rightFacts } = right;
+  return JSON.stringify(leftFacts) === JSON.stringify(rightFacts);
 };
 
 const appendAgentEvent = async (options: {
   readonly event: AgentEvent;
   readonly record: SessionRecord;
   readonly toolInputIds: Map<string, string>;
+  /** The output each call recorded as it completed, keyed by its call id (EQ6). */
+  readonly toolOutputs: Map<string, ProviderMessage>;
   readonly committedMessageIds: Set<string>;
   readonly createId: () => string;
 }): Promise<void> => {
   const { event, record } = options;
+  if (event.type === 'tool_execution_end') {
+    /* One durable result per call as it completes (L4 D-103): pi builds the batch's result messages only after the
+     * whole batch settles, so a crash would lose the completed ones. The message is pi's own shape. */
+    const result = event.result as AgentToolResult<unknown> | undefined;
+    const completed: AgentMessage = {
+      role: 'toolResult',
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      content: result?.content ?? [],
+      details: result?.details,
+      isError: event.isError,
+      timestamp: Date.now(),
+    };
+    const message = piMessageToProvider(completed, record.messages);
+    await record.append({ type: 'message.appended', message });
+    options.toolOutputs.set(event.toolCallId, message);
+    options.committedMessageIds.add(message.id);
+    return;
+  }
   if (event.type === 'message_end') {
+    const early = event.message.role === 'toolResult' ? options.toolOutputs.get(event.message.toolCallId) : undefined;
+    if (early !== undefined) {
+      record.messages.set(event.message, early.id);
+    }
     const message = piMessageToProvider(event.message, record.messages);
+    if (early !== undefined && sameToolOutput(early, message)) {
+      return;
+    }
     const committed = options.committedMessageIds.has(message.id);
     await record.append(
       committed
@@ -1013,9 +1261,13 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   const initialProjection = initialEvents.findLast(
     (event) => event.runId === options.runId && event.type === 'turn.history-projection-committed',
   );
+  /* A journaled admission's context is the one `prompt` commits: tool selection and model follow it from the start. */
+  const projected =
+    initialProjection?.type === 'turn.history-projection-committed' ? initialProjection.context : options.context;
+  /* A Resume's selection replaces the committed model on every request of this attempt (L4 D-087). */
   let committedContext =
-    initialProjection?.type === 'turn.history-projection-committed' ? initialProjection.context : undefined;
-  const effectiveModel = committedContext?.model ?? options.model;
+    projected === undefined || options.selection === undefined ? projected : { ...projected, model: options.selection };
+  const effectiveModel: AgentSessionModel = options.selection ?? committedContext?.model ?? options.model;
   const model = modelFor(effectiveModel);
   const hydrateHistory = (history: readonly ProviderMessage[]): AgentMessage[] =>
     history.flatMap((message) => {
@@ -1030,6 +1282,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     hydrateHistory(await materializeHistory(await record.history()));
   const initialMessages = hydrateHistory(await materializeHistory(initialHistory));
   const committedMessageIds = new Set(initialHistory.map((message) => message.id));
+  const toolOutputs = new Map<string, ProviderMessage>();
   const toolInputIds = new Map(
     initialHistory.flatMap((message) =>
       message.role === 'tool-input' ? [[message.toolCallId, message.id] as const] : [],
@@ -1177,12 +1430,9 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     if (binding?.['kind'] !== 'billing-invocation' || binding['attemptId'] !== attemptId) {
       return;
     }
-    const { operationId, status } = binding;
-    if (
-      typeof operationId !== 'string' ||
-      (status !== 'pending' && status !== 'terminal' && status !== 'unavailable')
-    ) {
-      throw new Error('Tau gateway returned malformed invocation metadata.');
+    const { operationId } = binding;
+    if (typeof operationId !== 'string') {
+      throw new TypeError('Tau gateway returned malformed invocation metadata.');
     }
     const currentEvents = await record.events();
     const prior = currentEvents.find(
@@ -1193,77 +1443,75 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       throw new Error(`Model invocation ${attemptId} has a conflicting operation binding.`);
     }
     if (!prior) {
-      await record.append({
-        type: 'model.invocation-bound',
-        attemptId,
-        operationId,
-        status,
-      });
+      /* Bind is the only producer, and it always says `pending`; older readers still read the field (GI-R6). */
+      await record.append({ type: 'model.invocation-bound', attemptId, operationId, status: 'pending' });
     }
   };
-  const completedAttempts = new Set<string>();
+  /**
+   * Prepare one funded call (RA-R11). A generation call first resolves every unresolved attempt in the chat and records
+   * each answer (`model.invocation-settled`), so a lost reply's charge is durable before the next attempt
+   * (ChargeAfterRecordedLoss, EQ1); a pending one ends the run `MODEL_ATTEMPT_PENDING`. The key is deterministic,
+   * `${runId}:${attempt}:${position}`, so a repeat is replayed by the gateway, never dispatched again (I16).
+   */
   const prepareInvocation = async (
     purpose: 'generation' | 'compaction',
     modelId: string,
     signal: AbortSignal,
   ): Promise<string> => {
-    const recordedEvents = await record.events();
-    const events = recordedEvents.filter((event) => event.runId === options.runId);
-    const prepared = events.findLast((event) => event.type === 'model.invocation-prepared');
-    if (prepared?.type === 'model.invocation-prepared') {
-      const preparedIndex = events.indexOf(prepared);
-      const bound = events.find(
-        (event) => event.type === 'model.invocation-bound' && event.attemptId === prepared.attemptId,
-      );
-      const completed =
-        completedAttempts.has(prepared.attemptId) ||
-        events.slice(preparedIndex + 1).some((event) => {
-          if (prepared.purpose === 'compaction') {
-            return event.type === 'history.compacted';
-          }
-          const message =
-            event.type === 'message.appended'
-              ? event.message
-              : event.type === 'message.envelope-replaced'
-                ? event.replacement
-                : undefined;
-          return (
-            message?.role === 'assistant' &&
-            message.metadata?.tauInternal?.['kind'] === 'billing-invocation' &&
-            message.metadata.tauInternal['attemptId'] === prepared.attemptId
+    const { funding } = options.modelTransport;
+    if (funding.type !== 'funded') {
+      throw new Error('An unfunded transport prepares no gateway attempt.');
+    }
+    const principal = await fundingPrincipal(funding);
+    /* One compaction's summarizer calls are closed together by its `history.compacted` row: only a generation call
+     * waits on the attempts before it (the gate's PrepareOnlyWhenResolved). */
+    if (purpose === 'generation') {
+      const ledger = foldChatLedger(emptyChatLedger, await record.events());
+      const unresolved = unresolvedInvocations(ledger);
+      /* Every attempt is checked before any is recorded: another account's attempt leaves the log untouched (RV5-F2). */
+      const foreign = unresolved.find((attemptId) => isForeignInvocation(ledger.invocations[attemptId]!, principal));
+      if (foreign !== undefined) {
+        throw Object.assign(
+          new Error(`Another Tau account funded model request ${foreign}; sign in to that account to continue.`),
+          { code: 'MODEL_ATTEMPT_OTHER_ACCOUNT' satisfies RefusalCode, details: { attemptId: foreign } },
+        );
+      }
+      for (const attemptId of unresolved) {
+        // oxlint-disable-next-line no-await-in-loop -- each answer is recorded before the next attempt is asked about.
+        const resolution = await funding.resolveInvocation({ attemptId, signal });
+        if (resolution.status === 'pending' || resolution.status === 'unavailable') {
+          throw Object.assign(
+            new Error(`The gateway has not finished model request ${attemptId}; resume the turn once it has.`),
+            { code: 'MODEL_ATTEMPT_PENDING', details: { attemptId } },
           );
-        });
-      if (!completed) {
-        const transport = options.modelTransport;
-        const recovered = await transport.lookupAttempt?.(prepared.attemptId, signal);
-        if (recovered && !bound) {
-          await record.append({
-            type: 'model.invocation-bound',
-            attemptId: prepared.attemptId,
-            operationId: recovered.operationId,
-            status: recovered.status,
-          });
         }
-        // The owner-scoped ledger has no operation for an unbound attempt only when admission refused it
-        // (for example a 402 before a top-up), so nothing was charged and a fresh attempt is safe.
-        const refused = transport.lookupAttempt !== undefined && recovered === undefined && !bound;
-        if (!refused) {
-          throw new Error(`Model invocation ${prepared.attemptId} has no durable result; it will not be sent again.`);
-        }
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        await record.append(settledRowOf(attemptId, resolution));
       }
     }
-    const attemptId = createId();
+    const events = await record.events();
+    const attempt = attemptOf(events, options.runId);
+    const prefix = `${options.runId}:${String(attempt)}:`;
+    const position = events.filter(
+      (event) => event.type === 'model.invocation-prepared' && event.attemptId.startsWith(prefix),
+    ).length;
+    const attemptId = `${prefix}${String(position)}`;
     await record.append({
       type: 'model.invocation-prepared',
       attemptId,
       purpose,
       modelId,
+      ...(principal === undefined ? {} : { principal }),
     });
     return attemptId;
   };
-  let restoreRecentSkillContent = false;
+  let restoreRecentSkillContent = initialMessages.some((message) => isCompactionSummary(message));
   const base = createTransportStreamFunction({
     transport: options.modelTransport,
+    stallBound: {
+      clock: options.clock ?? globalThis,
+      milliseconds: options.streamStall ?? 300_000,
+    },
     chatId: options.chatId,
     providerKind: effectiveModel.providerKind,
     reasoning: effectiveModel.reasoning,
@@ -1271,8 +1519,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     toolInputIds,
     createId,
     documents: () => documents,
-    ...(options.modelTransport.usesBillingAttempt ? { prepareInvocation, bindInvocation } : {}),
-    completedAttempts,
+    ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
     committedContext: () => committedContext,
     usePostCompactionContext: () => restoreRecentSkillContent,
     systemPromptBlocks: () => options.systemPromptBlocks,
@@ -1282,7 +1529,8 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         return;
       }
       const tool = baseTools.find((candidate) => candidate.name === toolCall.name);
-      if (!tool) {
+      /* A sequential tool waits for its batch's turn (EQ6): nothing starts it early. */
+      if (!tool || tool.executionMode === 'sequential') {
         return;
       }
       let input: Parameters<typeof tool.execute>[1];
@@ -1414,11 +1662,9 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           toolInputIds,
           createId,
           documents: () => documents,
-          ...(options.modelTransport.usesBillingAttempt ? { prepareInvocation, bindInvocation } : {}),
-          completedAttempts,
+          ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
         }),
     onSummary: () => {
-      completedAttempts.clear();
       restoreRecentSkillContent = true;
     },
     settleDiscardedToolCalls: settlePrestartedTools,
@@ -1436,20 +1682,15 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     latexDelimiterMiddleware,
   ]);
 
-  let state = lastLifecycleState(initialEvents, options.runId);
+  let state: RunLifecycleState = 'admitted';
   let turnId = initialHistory.findLast((message) => message.role === 'user')?.id ?? options.runId;
-  let terminalRecorded = state === 'completed' || state === 'failed' || state === 'cancelled';
   let abortRequested = false;
-  const runAbortController = new AbortController();
+  /* Read through a call: an abort lands while the turn awaits, which narrowing cannot see. */
   const wasAbortRequested = (): boolean => abortRequested;
-  const cancelBeforeRun = async (): Promise<void> => {
-    if (terminalRecorded) {
-      return;
-    }
-    state = 'cancelled';
-    await record.append({ type: 'run.lifecycle', state });
-    terminalRecorded = true;
-  };
+  let ran = false;
+  let lastFinal: AgentMessage | undefined;
+  const runAbortController = new AbortController();
+  const aborted = (): AgentRunOutcome => ({ outcome: 'aborted' });
   const prepareStartOfTurn = async (): Promise<boolean> => {
     try {
       await compaction.prepareTurn(runAbortController.signal);
@@ -1457,14 +1698,9 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       if (!runAbortController.signal.aborted) {
         throw error;
       }
-      await cancelBeforeRun();
       return false;
     }
-    if (runAbortController.signal.aborted) {
-      await cancelBeforeRun();
-      return false;
-    }
-    return true;
+    return !runAbortController.signal.aborted;
   };
   agent.continue = async () => {
     if (await prepareStartOfTurn()) {
@@ -1472,116 +1708,127 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     }
   };
   agent.subscribe(async (event) => {
-    await appendAgentEvent({ event, record, toolInputIds, committedMessageIds, createId });
-    if (event.type !== 'agent_end') {
+    if (
+      (event.type === 'tool_execution_end' && prestartedToolResults.has(event.toolCallId)) ||
+      (event.type === 'message_end' &&
+        event.message.role === 'toolResult' &&
+        prestartedToolResults.has(event.message.toolCallId))
+    ) {
+      /* Pi's abort result is provisional while the already-dispatched tool still owns the real result. */
       return;
     }
-    const final = [...event.messages].reverse().find((message) => message.role === 'assistant');
-    state =
-      abortRequested || (final?.role === 'assistant' && final.stopReason === 'aborted')
-        ? 'cancelled'
-        : final?.role === 'assistant' && final.stopReason === 'error'
-          ? 'failed'
-          : 'completed';
-    if (state === 'failed') {
-      await settlePrestartedTools();
+    await appendAgentEvent({ event, record, toolInputIds, toolOutputs, committedMessageIds, createId });
+    if (event.type === 'agent_end') {
+      lastFinal = [...event.messages].reverse().find((message) => message.role === 'assistant');
     }
-    // Without this the durable log said only "failed": the typed transport code
-    // and its message were stranded on the assistant message's diagnostics, and
-    // every client could render was a generic host-failure string.
-    const detail = state === 'failed' ? await runFailureDetail(final, record, options.runId) : undefined;
-    await record.append({
-      type: 'run.lifecycle',
-      state,
-      ...(detail === undefined ? {} : { detail }),
-    });
-    terminalRecorded = true;
   });
+
+  /**
+   * Run one loop to its end and report it. Every tool the stream started early is settled first, on every outcome
+   * (RA-R13), so the owner's ending row always follows the attempt's last tool result.
+   */
+  const settle = async (loop: () => Promise<boolean>): Promise<AgentRunOutcome> => {
+    if (ran) {
+      throw new Error(`Run ${options.runId}'s session already ran; its owner starts a new driver per attempt.`);
+    }
+    ran = true;
+    let outcome: AgentRunOutcome;
+    try {
+      const started = await loop();
+      if (started) {
+        const final = lastFinal;
+        const stop = final?.role === 'assistant' ? final.stopReason : undefined;
+        if (abortRequested || stop === 'aborted') {
+          outcome = aborted();
+        } else if (stop === 'error') {
+          outcome = { outcome: 'failed', failure: await runFailureDetail(final, record, options.runId) };
+        } else {
+          outcome = { outcome: 'completed' };
+        }
+      } else {
+        outcome = aborted();
+      }
+    } catch (error) {
+      outcome = abortRequested ? aborted() : { outcome: 'failed', failure: codedFailure(error) };
+    }
+    await settlePrestartedTools().catch(() => undefined);
+    state = outcome.outcome === 'completed' ? 'completed' : outcome.outcome === 'failed' ? 'failed' : 'cancelled';
+    return outcome;
+  };
 
   return {
     agent,
-    prompt: async (message, onAdmitted) => {
-      if (terminalRecorded) {
-        throw new Error(`Run ${options.runId} is already terminal.`);
-      }
+    prompt: async (message, onCommitted) => {
       turnId = message.id;
-      state = 'admitted';
-      await record.append({ type: 'run.lifecycle', state });
-      if (wasAbortRequested()) {
-        state = 'cancelled';
-        await record.append({ type: 'run.lifecycle', state });
-        terminalRecorded = true;
-        onAdmitted?.();
-        return;
+      let told = false;
+      const tell = (): void => {
+        if (!told) {
+          told = true;
+          onCommitted?.();
+        }
+      };
+      try {
+        return await settle(async () => {
+          if (abortRequested) {
+            return false;
+          }
+          const context =
+            options.context ??
+            (await createTurnContextSnapshot({
+              chatId: options.chatId,
+              systemPrompt: options.systemPrompt,
+              systemPromptBlocks: options.systemPromptBlocks,
+              model: turnModelOf(options.model),
+              toolChoice: options.toolChoice,
+              allowedTools: options.allowedTools,
+              snapshot: options.snapshot,
+              contextMessages: options.contextMessages,
+              clientContext: options.clientContext,
+              recentSkills: options.recentSkills,
+            }));
+          if (!(await prepareStartOfTurn())) {
+            return false;
+          }
+          const retainedHistory = await record.history();
+          await record.append({
+            type: 'turn.history-projection-committed',
+            retainedMessageIds: retainedHistory.map((retained) => retained.id),
+            message,
+            context,
+          });
+          committedContext = context;
+          state = 'running';
+          tell();
+          if (wasAbortRequested()) {
+            return false;
+          }
+          agent.state.systemPrompt = committedContext.systemPrompt;
+          agent.state.messages = hydrateHistory(await materializeHistory(await record.history()));
+          await continueWithoutPreparation();
+          return true;
+        });
+      } finally {
+        tell();
       }
-      const context = await createTurnContextSnapshot({
-        chatId: options.chatId,
-        systemPrompt: options.systemPrompt,
-        systemPromptBlocks: options.systemPromptBlocks,
-        // Project the session model onto the durable TurnModelConfig subset —
-        // AgentSessionModel carries transport-only fields (api, provider) the
-        // strict event schema deliberately excludes.
-        model: {
-          id: options.model.id,
-          contextWindow: options.model.contextWindow,
-          ...(options.model.maxTokens === undefined ? {} : { maxTokens: options.model.maxTokens }),
-          ...(options.model.providerKind === undefined ? {} : { providerKind: options.model.providerKind }),
-          ...(options.model.cost === undefined ? {} : { cost: options.model.cost }),
-          ...(options.model.reasoning === undefined ? {} : { reasoning: options.model.reasoning }),
-        },
-        toolChoice: options.toolChoice,
-        allowedTools: options.allowedTools,
-        snapshot: options.snapshot,
-        contextMessages: options.contextMessages,
-        clientContext: options.clientContext,
-        recentSkills: options.recentSkills,
-      });
-      if (!(await prepareStartOfTurn())) {
-        onAdmitted?.();
-        return;
-      }
-      const retainedHistory = await record.history();
-      const retainedMessageIds = retainedHistory.map((retained) => retained.id);
-      await record.append({
-        type: 'turn.history-projection-committed',
-        retainedMessageIds,
-        message,
-        context,
-      });
-      if (wasAbortRequested()) {
-        state = 'cancelled';
-        await record.append({ type: 'run.lifecycle', state });
-        terminalRecorded = true;
-        onAdmitted?.();
-        return;
-      }
-      const projectedEvents = await record.events();
-      const projection = projectedEvents.findLast(
-        (event) => event.runId === options.runId && event.type === 'turn.history-projection-committed',
-      );
-      committedContext = projection?.type === 'turn.history-projection-committed' ? projection.context : undefined;
-      if (!committedContext) {
-        throw new Error(`Run ${options.runId} has no committed turn context after admission.`);
-      }
-      state = 'running';
-      await record.append({ type: 'run.lifecycle', state });
-      onAdmitted?.();
-      if (wasAbortRequested()) {
-        state = 'cancelled';
-        await record.append({ type: 'run.lifecycle', state });
-        terminalRecorded = true;
-        return;
-      }
-      agent.state.systemPrompt = committedContext.systemPrompt;
-      agent.state.messages = hydrateHistory(await materializeHistory(await record.history()));
-      await continueWithoutPreparation();
     },
-    steer: (message) => {
-      agent.steer({
-        role: 'user',
-        content: message,
-        timestamp: now().getTime(),
-      });
+    continue: async () =>
+      settle(async () => {
+        if (abortRequested) {
+          return false;
+        }
+        state = 'running';
+        if (!(await prepareStartOfTurn())) {
+          return false;
+        }
+        await continueWithoutPreparation();
+        return true;
+      }),
+    steer: (message, id) => {
+      const steering: AgentMessage = { role: 'user', content: message, timestamp: now().getTime() };
+      if (id !== undefined) {
+        record.messages.set(steering, id);
+      }
+      agent.steer(steering);
     },
     abort: () => {
       abortRequested = true;

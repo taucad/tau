@@ -298,7 +298,10 @@ function StoryScene({
   }, [assets, backend]);
 
   useEffect(() => {
-    hasPlayingFrame.current = false;
+    // Playback's first frame has no earlier playing frame to measure its delta from.
+    if (isPlaying) {
+      hasPlayingFrame.current = false;
+    }
     invalidate();
   }, [invalidate, isPlaying]);
   useEffect(

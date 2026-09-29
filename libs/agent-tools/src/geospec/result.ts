@@ -18,6 +18,7 @@ import type { GeoSpecRunnerResult } from 'geospec/runner/worker';
 type RunGeoSpecTestsSuccess = Extract<RunGeoSpecTestsRpcResult, { success: true }>;
 type RunGeoSpecTestFailure = RunGeoSpecTestsSuccess['failures'][number];
 type RunGeoSpecTestDiagnostic = NonNullable<RunGeoSpecTestFailure['diagnostics']>[number];
+type RunGeoSpecNativeReport = NonNullable<RunGeoSpecTestFailure['reports']>[number];
 
 const fullGeoSpecTestName = (test: GeoSpecTestCase): string => [...test.suite, test.name].join(' > ');
 
@@ -78,6 +79,28 @@ const transportDiagnostics = (
     ...(diagnostic.details === undefined ? {} : { details: structuredClone(diagnostic.details) }),
   }));
 
+// The model reads claim, result and evidence as JSON; canonical engine bytes stay with the engine-side report.
+const transportNativeReports = (test: GeoSpecTestCase): RunGeoSpecNativeReport[] | undefined => {
+  const reports = test.assertions.flatMap((assertion): RunGeoSpecNativeReport[] => {
+    const report = assertion.nativeReport;
+    if (report === undefined) {
+      return [];
+    }
+    return [
+      {
+        claimId: report.claimId,
+        status: report.status,
+        polarity: report.polarity,
+        claim: structuredClone(report.claim),
+        result: structuredClone(report.result),
+        diagnostics: report.diagnostics.map((diagnostic) => structuredClone(diagnostic)),
+        ...(report.evidence === undefined ? {} : { evidence: structuredClone(report.evidence) }),
+      },
+    ];
+  });
+  return reports.length === 0 ? undefined : reports;
+};
+
 /** The `test_model` payload minus its success discriminant. @public */
 export type TestModelOutput = Omit<RunGeoSpecTestsSuccess, 'success'>;
 
@@ -114,7 +137,7 @@ export const runnerResultToTestModelOutput = (
         requirement: 'At least one GeoSpec test file must exist',
         reason: 'No *.geospec.ts or *.geospec.js files found in the project.',
         suggestion:
-          'Create a *.geospec.ts test file. Import describe, it, and expectGeo from geospec, and load models through geospec/model.',
+          'Create a *.geospec.ts test file using the selected API recipe in the test_model description. Keep its loader and matcher paired: loadModel with expectGeo for legacy, or loadNativeModel with expectNativeGeo for native.',
         targetFile: '*.geospec.ts',
       });
     }
@@ -149,6 +172,7 @@ export const runnerResultToTestModelOutput = (
       }
 
       const requirement = fullGeoSpecTestName(test);
+      const reports = transportNativeReports(test);
       if (test.status === 'failed') {
         const assertionDiagnostics = test.assertions.flatMap((assertion) => assertion.diagnostics ?? []);
         // The collector mirrors its thrown assertion's exact diagnostic objects.
@@ -168,6 +192,7 @@ export const runnerResultToTestModelOutput = (
             'Inspect the GeoSpec diagnostics and update the model or expected geometry assertion.',
           targetFile: fileResult.file,
           diagnostics: transportDiagnostics(diagnostics),
+          ...(reports === undefined ? {} : { reports }),
         });
         continue;
       }
@@ -176,6 +201,7 @@ export const runnerResultToTestModelOutput = (
         id: `${fileResult.file}:${requirement}`,
         requirement,
         targetFile: fileResult.file,
+        ...(reports === undefined ? {} : { reports }),
       });
     }
   }

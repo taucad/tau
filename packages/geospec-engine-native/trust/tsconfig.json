@@ -1,0 +1,17 @@
+{
+  "extends": "../tsconfig.lib.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "incremental": false,
+    "noEmit": true,
+    "paths": {
+      "@taucad/geospec-engine-native/trust": ["./index.d.mts"]
+    }
+  },
+  "files": ["index.d.mts", "type-consumer.ts"],
+  "include": ["*.mjs"]
+}

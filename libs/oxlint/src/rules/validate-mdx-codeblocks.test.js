@@ -84,7 +84,7 @@ describe('validate-mdx-codeblocks', () => {
 
     it('should exercise specifier shapes with packages the graph still classifies as private', () => {
       expect(bundledPrivatePackages).toEqual(
-        expect.arrayContaining(['@taucad/events', '@taucad/fs-bridge', '@taucad/rpc', '@taucad/types']),
+        expect.arrayContaining(['@taucad/events', '@taucad/fs-bridge', '@taucad/types']),
       );
     });
 

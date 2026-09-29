@@ -70,7 +70,8 @@ const asGeneration = (value: number): ComputeGeneration => value as ComputeGener
  */
 export const _hotPathSql = {
   getRecord:
-    'SELECT r.content_digest, r.media_type, r.determinism, r.action, c.bytes, c.byte_length ' +
+    'SELECT r.content_digest, r.media_type, r.determinism, r.action, ' +
+    'CASE WHEN c.byte_length <= ? THEN c.bytes ELSE NULL END AS bytes, c.byte_length ' +
     'FROM record r JOIN content c ON c.content_digest = r.content_digest ' +
     'WHERE r.action_digest = ? AND r.generation = ?',
   getPoison: 'SELECT 1 FROM poison WHERE action_digest = ?',
@@ -277,9 +278,9 @@ export const createSqliteComputeEngine = (options: SqliteComputeEngineOptions): 
     // commits; `busy_timeout` is what makes two processes on one file wait
     // instead of failing; `synchronous` is raised to FULL only for the required
     // barrier, so disposable commits do not pay an fsync each.
+    db.exec('PRAGMA busy_timeout = 5000');
     db.exec('PRAGMA journal_mode = WAL');
     db.exec('PRAGMA synchronous = NORMAL');
-    db.exec('PRAGMA busy_timeout = 5000');
     db.exec('PRAGMA foreign_keys = ON');
     db.exec('PRAGMA auto_vacuum = INCREMENTAL');
     for (const statement of schema) {
@@ -434,13 +435,16 @@ export const createSqliteComputeEngine = (options: SqliteComputeEngineOptions): 
               omitted.push({ digest, reason: 'poisoned' });
               continue;
             }
-            const row = recordStatement.get(digest, store.counters.generation) as
+            // Keep the indexed lookup to one statement, but leave oversized BLOBs
+            // inside SQLite instead of allocating them before the budget check.
+            const remainingBytes = entries.length >= request.maxEntries ? -1 : request.maxBytes - bytes;
+            const row = recordStatement.get(remainingBytes, digest, store.counters.generation) as
               | {
                   content_digest: string;
                   media_type: string;
                   determinism: string;
                   action: string;
-                  bytes: Uint8Array<ArrayBuffer>;
+                  bytes?: Uint8Array<ArrayBuffer>;
                   byte_length: number;
                 }
               | undefined;
@@ -460,6 +464,9 @@ export const createSqliteComputeEngine = (options: SqliteComputeEngineOptions): 
             if (entries.length >= request.maxEntries || bytes + row.byte_length > request.maxBytes) {
               omitted.push({ digest, reason: 'budget' });
               continue;
+            }
+            if (!row.bytes) {
+              throw new Error('An admitted compute record has no payload.');
             }
             entries.push({
               action: JSON.parse(row.action) as ComputeAction,

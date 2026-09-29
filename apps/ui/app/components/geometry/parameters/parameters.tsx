@@ -39,6 +39,8 @@ type ParametersProperties = {
   readonly parameterManifest: ParameterManifest;
   readonly parameterGroup?: ParameterGroup;
   readonly parameterEdit: ParameterEdit;
+  /** Render the root rows without the standalone catalog card. */
+  readonly presentation?: 'catalog' | 'embedded';
 };
 
 /* oxlint-disable react/set-state-in-effect -- The `use no memo` boundary preserves the existing controlled search reset and focus timing. */
@@ -50,7 +52,7 @@ export function Parameters({
   className,
   enableSearch = true,
   filterTerm,
-  searchPlaceholder = 'Filter parameters...',
+  searchPlaceholder = 'Filter parameters…',
   emptyMessage = 'No parameters available',
   emptyDescription = 'Parameters will appear here when they become available for this model',
   units,
@@ -59,6 +61,7 @@ export function Parameters({
   parameterManifest,
   parameterGroup,
   parameterEdit,
+  presentation = 'catalog',
 }: ParametersProperties): React.JSX.Element {
   'use no memo';
 
@@ -123,29 +126,33 @@ export function Parameters({
     setLocalFilterTerm('');
   }, []);
 
+  /* The term invalidates every field, so the search box paints first and the row pass follows as
+   * interruptible work that later keystrokes coalesce. */
+  const deferredFilterTerm = useDeferredValue(activeFilterTerm);
   const formContext = useMemo<RJSFContext>(
     () => ({
       idPrefix: rjsfIdPrefix,
-      rootPresentation: 'catalog',
+      rootPresentation: presentation,
       allExpanded,
-      searchTerm: activeFilterTerm,
+      searchTerm: deferredFilterTerm,
       resetSingleParameter,
       defaultParameters,
       shouldShowField(text) {
-        if (!activeFilterTerm) {
+        if (!deferredFilterTerm) {
           return true;
         }
 
-        return text.toLowerCase().includes(activeFilterTerm.toLowerCase());
+        return text.toLowerCase().includes(deferredFilterTerm.toLowerCase());
       },
       units,
       parameterManifest,
       parameterGroup,
       parameterEdit,
+      presentation,
     }),
     [
       allExpanded,
-      activeFilterTerm,
+      deferredFilterTerm,
       resetSingleParameter,
       defaultParameters,
       units,
@@ -182,7 +189,7 @@ export function Parameters({
   return (
     <div
       data-slot='parameters'
-      className={cn('group flex h-full w-full flex-col', className)}
+      className={cn('group flex w-full flex-col', presentation === 'catalog' && 'h-full', className)}
       style={
         {
           '--param-field-h': '1.5rem',
@@ -199,6 +206,7 @@ export function Parameters({
             <div className='flex w-full flex-row gap-1.5 border-b bg-sidebar px-2 py-1.5'>
               <SearchInput
                 ref={searchInputReference}
+                aria-label={searchPlaceholder}
                 placeholder={searchPlaceholder}
                 value={localFilterTerm}
                 className='h-6 w-full bg-background text-sm'

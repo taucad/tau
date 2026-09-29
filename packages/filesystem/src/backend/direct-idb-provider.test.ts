@@ -661,6 +661,17 @@ describe('DirectIdbProvider', () => {
   });
 
   describe('readdirWithStats', () => {
+    it('omits text counts in head mode and reuses warm metadata', async () => {
+      await provider.writeFile('large.txt', `${'x'.repeat(1024)}\nend`);
+      const get = vi.spyOn(IDBObjectStore.prototype, 'get');
+      const head = await provider.readdirWithStats('', { content: 'head' });
+      const exact = await provider.readdirWithStats('');
+      expect(head[0]).toMatchObject({ name: 'large.txt', contentKind: 'text', size: 1028 });
+      expect(head[0]).not.toHaveProperty('lineCount');
+      expect(exact[0]).toMatchObject({ contentKind: 'text', lineCount: 2 });
+      expect(get).not.toHaveBeenCalled();
+    });
+
     it('should list 10,000 entries with no stat calls and one IndexedDB transaction', async () => {
       const rows = 10_000;
       await Promise.all(

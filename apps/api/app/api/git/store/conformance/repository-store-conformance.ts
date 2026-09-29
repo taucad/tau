@@ -265,6 +265,15 @@ export const describeRepositoryStoreConformance = (name: string, getDriver: () =
       ).resolves.toStrictEqual(body.slice(8, 24));
     });
 
+    it('should refuse a read of a key that was never written as missing-pack, the hydrate’s only presence check', async () => {
+      const store = newStore();
+
+      await expect(store.getObject(newLocator(), 'packs/never-written.pack')).rejects.toMatchObject({
+        name: 'RepositoryStoreError',
+        code: 'missing-pack',
+      });
+    });
+
     it('should round-trip an object above the single-part ceiling through multipart', async () => {
       const store = newStore();
       const locator = newLocator();

@@ -1,5 +1,8 @@
 // oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for tests
 import 'fake-indexeddb/auto';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChangeEvent, FileSystemProvider } from '#types.js';
 import { ChangeEventBus } from '#change-event-bus.js';
@@ -18,6 +21,9 @@ import {
 import { WorkspaceFileService } from '#workspace-file-service.js';
 import type { RootedFileSystem } from '#rooted-views.js';
 import { WorkspaceMutationError } from '#workspace-errors.js';
+import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
+import { NodeFsProvider } from '#backend/node/provider.js';
+import { createMockRootHandle } from '#testing/mock-handle-factory.js';
 import type { FileStatEntry } from '@taucad/types';
 
 type IdbHarness = Awaited<ReturnType<typeof createIdbWorkspaceFileService>>;
@@ -66,6 +72,19 @@ const createService = async (): Promise<WorkspaceFileService> => {
 
 const view = (): RootedFileSystem => service.createRootedFileSystem(projectRoute);
 
+const composeRootedProvider = (provider: FileSystemProvider, backend: 'webaccess' | 'node') => {
+  const mountTable = new MountTable();
+  mountTable.mount('/', provider, { class: 'authored', backend, storageRootKey: `${backend}:head-test` });
+  const owner = new WorkspaceFileService({
+    providerRegistry: new ProviderRegistry(),
+    resourceQueue: new ResourceQueue(),
+    eventBus: new ChangeEventBus(),
+    mountTable,
+  });
+  openServices.push(owner);
+  return composeView({ filesystem: owner.createRootedFileSystem('/') }, { consumer: 'user', policy: tauPathPolicy });
+};
+
 beforeEach(async () => {
   service = await createService();
   for (const [path, content] of Object.entries({
@@ -86,6 +105,28 @@ afterEach(() => {
 });
 
 describe('rooted porcelain', () => {
+  it('forwards FSA head listings through the confined root', async () => {
+    const provider = new FileSystemAccessProvider(createMockRootHandle() as unknown as FileSystemDirectoryHandle);
+    await provider.writeFile('large.txt', `${'x'.repeat(1024)}\nend`);
+    const rows = await composeRootedProvider(provider, 'webaccess').readdirWithStats('', { content: 'head' });
+    expect(rows[0]).toMatchObject({ name: 'large.txt', contentKind: 'text', size: 1028 });
+    expect(rows[0]).not.toHaveProperty('lineCount');
+  });
+
+  it('forwards Node head listings through the confined root', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'tau-rooted-head-'));
+    try {
+      writeFileSync(join(root, 'large.txt'), `${'x'.repeat(1024)}\nend`);
+      const rows = await composeRootedProvider(new NodeFsProvider(root), 'node').readdirWithStats('', {
+        content: 'head',
+      });
+      expect(rows[0]).toMatchObject({ name: 'large.txt', contentKind: 'text', size: 1028 });
+      expect(rows[0]).not.toHaveProperty('lineCount');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('should copy a subtree inside the captured mount', async () => {
     const rooted = view();
 

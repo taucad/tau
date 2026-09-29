@@ -4,6 +4,7 @@ import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ShareProjectSnapshot, ShareSnapshotFileRole } from '@taucad/share/snapshot';
 import { parameterEntryPath, projectToManifest, serializeProjectManifest } from '@taucad/types';
+import { randomUuid } from '@taucad/utils/id';
 import { ProjectSharePanel } from '#components/publish/project-share-panel.js';
 import type { ShareMethod } from '#components/publish/project-share-panel.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -72,13 +73,11 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
   const [navigationIntent] = useState(() => parseProjectShareNavigationIntent(location.search));
-  const { parameterService, projectId, projectRef, editorRef } = useProject();
+  const { parameterService, projectId, projectRef, entriesRecord } = useProject();
   const { recordFiles: fileClient } = useFileManager();
   const { projects } = useProjects();
   const project = useSelector(projectRef, (state) => state.context.project);
-  /* The entry's CAD actor owns its render timeout; a unit spawned for the thumbnail is seeded from
-   * the durable per-entry record rather than left on the default (E1). */
-  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
+  /* The entry's CAD actor is seeded from the live record when a thumbnail needs a fresh unit. */
   const projectUpdatedAt = projects.find((candidate) => candidate.id === projectId)?.lastActivityAt;
 
   useEffect(() => {
@@ -95,84 +94,90 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
       }
       signal?.throwIfAborted();
       const { entryPath, thumbnail } = project.assets.main;
-      let geometryUnit = projectRef.getSnapshot().context.geometryUnits.get(entryPath);
-      if (!geometryUnit) {
-        projectRef.send({
-          type: 'createGeometryUnit',
-          entryPath,
-          renderTimeout: unitSettings[entryPath]?.renderTimeout,
-        });
-        const projectState = await waitFor(
-          projectRef,
-          (candidate) => candidate.context.geometryUnits.has(entryPath) || candidate.matches('error'),
+      const claimId = randomUuid();
+      projectRef.send({
+        type: 'claimGeometryUnit',
+        claimId,
+        entryPath,
+        renderTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
+      });
+      try {
+        let geometryUnit = projectRef.getSnapshot().context.geometryUnits.get(entryPath);
+        if (!geometryUnit) {
+          const projectState = await waitFor(
+            projectRef,
+            (candidate) => candidate.context.geometryUnits.has(entryPath) || candidate.matches('error'),
+            { signal },
+          );
+          geometryUnit = projectState.context.geometryUnits.get(entryPath);
+        }
+        if (!geometryUnit) {
+          throw new Error('The main runtime is unavailable.');
+        }
+        const state = await waitFor(
+          geometryUnit,
+          (candidate) => Boolean(candidate.context.kernelClient) || candidate.matches('error'),
           { signal },
         );
-        geometryUnit = projectState.context.geometryUnits.get(entryPath);
-      }
-      if (!geometryUnit) {
-        throw new Error('The main runtime is unavailable.');
-      }
-      const state = await waitFor(
-        geometryUnit,
-        (candidate) => Boolean(candidate.context.kernelClient) || candidate.matches('error'),
-        { signal },
-      );
-      const client = state.context.kernelClient;
-      if (!client) {
-        throw new Error('The main runtime could not be connected.');
-      }
-      const readmePath = await fileClient
-        .readdir(`/projects/${projectId}`)
-        .then((paths) => paths.find((path) => path.toLocaleLowerCase('en-US') === 'readme.md'))
-        .catch(() => undefined);
-      signal?.throwIfAborted();
-      const result = await client.snapshotSource({
-        source: { path: entryPath },
-        additionalPaths: [
-          { path: 'tau.json', required: true },
-          { path: 'package.json', required: false },
-          ...(readmePath ? [{ path: readmePath, required: false }] : []),
-          ...(thumbnail ? [{ path: thumbnail, required: false }] : []),
-        ],
-        signal,
-      });
-      if (!result.success) {
-        throw new Error(result.issues[0]?.message ?? 'The project source snapshot could not be collected.');
-      }
-      const role = (value: (typeof result.data.files)[number]['role']): ShareSnapshotFileRole =>
-        value === 'additional' ? 'project-metadata' : value;
-      const manifestContent = serializeProjectManifest(projectToManifest(project));
-      const parameterContent = await parameterService.readSettled(entryPath);
-      const files = result.data.files
-        .filter(
-          ({ path }) =>
-            path !== 'tau.json' && path !== '.tau' && !path.startsWith('.tau/') && !path.startsWith('node_modules/'),
-        )
-        .map((file) => ({ ...file, role: role(file.role) }));
-      files.push({
-        path: 'tau.json',
-        content: manifestContent,
-        sha256: await hashBytes(manifestContent),
-        role: 'project-metadata',
-      });
-      if (parameterContent !== undefined) {
+        const client = state.context.kernelClient;
+        if (!client) {
+          throw new Error('The main runtime could not be connected.');
+        }
+        const readmePath = await fileClient
+          .readdir(`/projects/${projectId}`)
+          .then((paths) => paths.find((path) => path.toLocaleLowerCase('en-US') === 'readme.md'))
+          .catch(() => undefined);
+        signal?.throwIfAborted();
+        const result = await client.snapshotSource({
+          source: { path: entryPath },
+          additionalPaths: [
+            { path: 'tau.json', required: true },
+            { path: 'package.json', required: false },
+            ...(readmePath ? [{ path: readmePath, required: false }] : []),
+            ...(thumbnail ? [{ path: thumbnail, required: false }] : []),
+          ],
+          signal,
+        });
+        if (!result.success) {
+          throw new Error(result.issues[0]?.message ?? 'The project source snapshot could not be collected.');
+        }
+        const role = (value: (typeof result.data.files)[number]['role']): ShareSnapshotFileRole =>
+          value === 'additional' ? 'project-metadata' : value;
+        const manifestContent = serializeProjectManifest(projectToManifest(project));
+        const parameterContent = await parameterService.readSettled(entryPath);
+        const files = result.data.files
+          .filter(
+            ({ path }) =>
+              path !== 'tau.json' && path !== '.tau' && !path.startsWith('.tau/') && !path.startsWith('node_modules/'),
+          )
+          .map((file) => ({ ...file, role: role(file.role) }));
         files.push({
-          path: parameterEntryPath(entryPath),
-          content: parameterContent,
-          sha256: await hashBytes(parameterContent),
+          path: 'tau.json',
+          content: manifestContent,
+          sha256: await hashBytes(manifestContent),
           role: 'project-metadata',
         });
+        if (parameterContent !== undefined) {
+          files.push({
+            path: parameterEntryPath(entryPath),
+            content: parameterContent,
+            sha256: await hashBytes(parameterContent),
+            role: 'project-metadata',
+          });
+        }
+        return {
+          entryPath: result.data.entryPath,
+          files,
+          warnings: result.data.unresolvedPaths.map((path) => ({
+            code: 'UNRESOLVED_DEPENDENCY',
+            message: `The runtime could not resolve ${path}.`,
+          })),
+        };
+      } finally {
+        projectRef.send({ type: 'releaseGeometryUnit', claimId });
       }
-      return {
-        entryPath: result.data.entryPath,
-        files,
-        warnings: result.data.unresolvedPaths.map((path) => ({
-          code: 'UNRESOLVED_DEPENDENCY',
-          message: `The runtime could not resolve ${path}.`,
-        })),
-      };
     },
-    [fileClient, parameterService, project, projectId, projectRef, unitSettings],
+    [entriesRecord, fileClient, parameterService, project, projectId, projectRef],
   );
 
   const entryPath = project?.assets.main.entryPath ?? '';

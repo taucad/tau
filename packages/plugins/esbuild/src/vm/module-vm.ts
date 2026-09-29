@@ -79,7 +79,7 @@ export type ModuleVm = {
  */
 export async function createEsbuildModuleVm(options: EsbuildModuleVmOptions): Promise<ModuleVm> {
   const builtinModules = new Map<string, BuiltinModule>();
-  const executeCache = new Map<string, unknown>();
+  const executeCache = new Map<string, { value: unknown; entryUrl?: string }>();
   await initializeEsbuild();
 
   const bundler = new EsbuildBundler({
@@ -93,11 +93,11 @@ export async function createEsbuildModuleVm(options: EsbuildModuleVmOptions): Pr
   const execute = async <T = unknown>(code: string, signal?: AbortSignal): Promise<VmExecuteResult<T>> => {
     const cached = options.cacheExecution === true ? executeCache.get(code) : undefined;
     if (cached !== undefined) {
-      return { success: true, value: cached as T };
+      return { success: true, value: cached.value as T, entryUrl: cached.entryUrl };
     }
     const result = await executeCode<T>(code, signal);
-    if (options.cacheExecution === true && result.success) {
-      executeCache.set(code, result.value);
+    if (options.cacheExecution === true && result.success && result.value !== undefined) {
+      executeCache.set(code, { value: result.value, entryUrl: result.entryUrl });
     }
     return result;
   };

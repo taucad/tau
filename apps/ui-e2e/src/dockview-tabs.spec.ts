@@ -42,7 +42,7 @@ const openSeededProject = async (): Promise<void> => {
   const searchButton = selectors.getByRole('button', { name: 'Search', exact: true });
   await target.expectVisible(searchButton);
   await target.click(searchButton);
-  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions...');
+  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
   await target.expectVisible(commandSearch);
   await target.fill(commandSearch, 'Open files');
   const openFilesCommand = selectors.getByText('Open files', { exact: true });
@@ -160,7 +160,7 @@ test('keeps fixed fading tabs usable across visual and interaction states', asyn
   await target.click(overflowPicker('package.json'));
   await target.expectAttribute(overflowPicker('package.json'), 'aria-expanded', 'true');
   const overflowPopover = selectors.getByCss('[data-slot="popover-content"]');
-  const overflowSearch = overflowPopover.getByPlaceholder('Search open tabs...');
+  const overflowSearch = overflowPopover.getByPlaceholder('Search open tabs…');
   await target.expectVisible(overflowSearch);
   await target.fill(overflowSearch, 'package.json');
   const packageOption = overflowPopover.getByRole('option', { name: /package\.json/u });
@@ -311,7 +311,7 @@ test('keeps fixed fading tabs usable across visual and interaction states', asyn
   await target.expectVisible(splitPopover.getByRole('option', { name: /box-corner\.js/u }));
   await target.expectVisible(splitPopover.getByRole('option', { name: /readme\.md/u }));
   await target.expectCount(splitPopover.getByRole('option', { name: /package\.json/u }), 0);
-  await target.press(splitPopover.getByPlaceholder('Search open tabs...'), 'Escape');
+  await target.press(splitPopover.getByPlaceholder('Search open tabs…'), 'Escape');
 
   const splitWheelState = await target.evaluateLocator(secondStrip, (strip) => {
     const firstStrip = strip.closest('[data-slot="omni-scroller"]')?.querySelector<HTMLElement>('.dv-tabs-container');
@@ -355,7 +355,7 @@ test('keeps fixed fading tabs usable across visual and interaction states', asyn
   const overflowDrawer = selectors.getByRole('dialog', { name: 'Open tabs' });
   await target.expectVisible(overflowDrawer);
   await target.expectCount(selectors.getByCss('[data-slot="popover-content"]'), 0);
-  const viewerSearch = overflowDrawer.getByPlaceholder('Search open tabs...');
+  const viewerSearch = overflowDrawer.getByPlaceholder('Search open tabs…');
   await target.fill(viewerSearch, 'public/models/nested/strainer.js');
   await target.click(overflowDrawer.getByRole('option', { name: /strainer\.js/u }));
   await target.expectAttribute(editorTab('public/models/nested/strainer.js'), 'aria-selected', 'true');

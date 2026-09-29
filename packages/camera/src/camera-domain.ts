@@ -366,7 +366,9 @@ export const orthographicCameraDistance = ({
   const foregroundExtent = Math.max(
     ...boundsCorners(validBounds).map((corner) => dot(subtract(corner, validTarget), validDirection)),
   );
-  return foregroundExtent + Math.max(diagonal, verticalSpan);
+  // A target in front of every corner (panned or dollied past the model) makes
+  // the extent negative; the camera must still sit in front of the target.
+  return Math.max(foregroundExtent, 0) + Math.max(diagonal, verticalSpan);
 };
 
 /**

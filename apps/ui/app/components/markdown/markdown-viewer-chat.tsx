@@ -5,11 +5,15 @@ import { cn } from '@taucad/ui/utils/cn';
 import { defaultMarkdownControls, MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { rehypeAtReferences } from '#components/markdown/rehype-at-references.js';
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
+import { useAtReferenceContext } from '#components/chat/at-reference-context.js';
+import { escapeDollarInvocations } from '#utils/at-reference.utils.js';
 import { ChatStreamingBlock, ChatStreamingFadeProvider } from '#components/markdown/chat-streaming-block.js';
+import { ChatMarkdownHyperlink, rehypeChatFileLinks } from '#components/markdown/chat-markdown-hyperlink.js';
 
 const chatMarkdownControls: ControlsConfig = { ...defaultMarkdownControls, table: false };
 
 const chatRehypePlugins: StreamdownProps['rehypePlugins'] = [rehypeAtReferences];
+const chatPreHardenPlugins: StreamdownProps['rehypePlugins'] = [rehypeChatFileLinks];
 
 type HeadingTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
 
@@ -63,12 +67,15 @@ export const MarkdownViewerChat = memo(function ({
   isStreamingFade = false,
   ...properties
 }: MarkdownViewerChatProps): React.JSX.Element {
+  const { knownTokens } = useAtReferenceContext();
+  const content = useMemo(() => escapeDollarInvocations(children, knownTokens), [children, knownTokens]);
   const memoizedComponents = useMemo<Components>(
     () =>
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Streamdown v2's string index signature conflicts with React Three Fiber's global JSX elements.
       ({
         ...chatHeaderComponents,
         mark: AtReferenceChip,
+        a: ChatMarkdownHyperlink,
         ...components,
       }) as Components,
     [components],
@@ -84,14 +91,15 @@ export const MarkdownViewerChat = memo(function ({
         components={memoizedComponents}
         controls={chatMarkdownControls}
         rehypePlugins={chatRehypePlugins}
+        rehypePluginsBeforeHarden={chatPreHardenPlugins}
       >
-        {children}
+        {content}
       </MarkdownViewer>
     );
   }
 
   return (
-    <ChatStreamingFadeProvider content={children}>
+    <ChatStreamingFadeProvider content={content}>
       {(parseBlocks) => (
         <MarkdownViewer
           {...properties}
@@ -101,10 +109,11 @@ export const MarkdownViewerChat = memo(function ({
           components={memoizedComponents}
           controls={chatMarkdownControls}
           rehypePlugins={chatRehypePlugins}
+          rehypePluginsBeforeHarden={chatPreHardenPlugins}
           BlockComponent={ChatStreamingBlock}
           parseMarkdownIntoBlocksFn={parseBlocks}
         >
-          {children}
+          {content}
         </MarkdownViewer>
       )}
     </ChatStreamingFadeProvider>

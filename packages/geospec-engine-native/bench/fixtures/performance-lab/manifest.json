@@ -1,0 +1,1667 @@
+{
+  "schemaVersion": 1,
+  "sourceSnapshot": "2026-09-24",
+  "fixtures": [
+    {
+      "id": "box-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/ap242-box.step",
+      "sha256": "9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf",
+      "bytes": 15465,
+      "tier": "ordinary",
+      "source": {
+        "kind": "retained-control",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/ap242-box.step",
+        "sha256": "9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "assembly-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/two-cube-assembly.step",
+      "sha256": "e6f67bab80f21b84b69e3434211abec4f987715963e2f0bf73a2f32fc2279028",
+      "bytes": 10961,
+      "tier": "ordinary",
+      "source": {
+        "kind": "retained-control",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/two-cube-assembly.step",
+        "sha256": "e6f67bab80f21b84b69e3434211abec4f987715963e2f0bf73a2f32fc2279028"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "inch-cube-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/inch-cube.step",
+      "sha256": "99a0b886b4aa9250f190bad6654e813f007fce8806d9abf3a27fbd9ebbcf58d5",
+      "bytes": 15758,
+      "tier": "ordinary",
+      "source": {
+        "kind": "retained-control",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/inch-cube.step",
+        "sha256": "99a0b886b4aa9250f190bad6654e813f007fce8806d9abf3a27fbd9ebbcf58d5"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "cylinder-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/ap242-radius1-height10.step",
+      "sha256": "f6ec68446611249aa5a517833150b70d7aac2fed7a22d27754ac8208db477356",
+      "bytes": 5623,
+      "tier": "ordinary",
+      "source": {
+        "kind": "retained-control",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/ap242-radius1-height10.step",
+        "sha256": "f6ec68446611249aa5a517833150b70d7aac2fed7a22d27754ac8208db477356"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "pmi-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/parallel-plane-distance-source.step",
+      "sha256": "15d6e6a8ed9d2cebc43a095469651e66395586f32537d45761f002e28243f5ad",
+      "bytes": 12672,
+      "tier": "ordinary",
+      "source": {
+        "kind": "retained-control",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/parallel-plane-distance-source.step",
+        "sha256": "15d6e6a8ed9d2cebc43a095469651e66395586f32537d45761f002e28243f5ad"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "nist-pmi-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/nist-pmi-bspline.step",
+      "sha256": "59bbc09a34621c03106e4c1b2a5bc909fdb67463117c16c4965ee7a6fe5c1521",
+      "bytes": 878030,
+      "tier": "ordinary",
+      "source": {
+        "kind": "retained-control",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/nist-pmi-bspline.step",
+        "sha256": "59bbc09a34621c03106e4c1b2a5bc909fdb67463117c16c4965ee7a6fe5c1521"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "through-bore-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/circular-bores/01-through.step",
+      "sha256": "00e2bacbcfafa1ac4ec56a2c1b1676cc772ced4ef376afb6424e6f4051016bd0",
+      "bytes": 20583,
+      "tier": "ordinary",
+      "source": {
+        "kind": "retained-control",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/circular-bores/01-through.step",
+        "sha256": "00e2bacbcfafa1ac4ec56a2c1b1676cc772ced4ef376afb6424e6f4051016bd0"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "blind-bore-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/circular-bores/02-blind.step",
+      "sha256": "a611c95e238d10a5a8e80d461b496be06f602a1a6772cb1007bef7152fcd8c7d",
+      "bytes": 20788,
+      "tier": "ordinary",
+      "source": {
+        "kind": "retained-control",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/circular-bores/02-blind.step",
+        "sha256": "a611c95e238d10a5a8e80d461b496be06f602a1a6772cb1007bef7152fcd8c7d"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "chamfer-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/edge-treatments/01-planar-chamfer.step",
+      "sha256": "4c0618de7cce3812a9fa0704db928f0667f7655ace102c87d4f35a8a45cf706f",
+      "bytes": 20804,
+      "tier": "ordinary",
+      "source": {
+        "kind": "retained-control",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/edge-treatments/01-planar-chamfer.step",
+        "sha256": "4c0618de7cce3812a9fa0704db928f0667f7655ace102c87d4f35a8a45cf706f"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "fillet-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/edge-treatments/02-cylindrical-fillet.step",
+      "sha256": "7f82ffa3bf0aa990d680cc42ce85839b25876727832bfbf2e77152216913c6ed",
+      "bytes": 20930,
+      "tier": "ordinary",
+      "source": {
+        "kind": "retained-control",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/edge-treatments/02-cylindrical-fillet.step",
+        "sha256": "7f82ffa3bf0aa990d680cc42ce85839b25876727832bfbf2e77152216913c6ed"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "planetary-gearbox-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox-assembly.step",
+      "sha256": "fad9ce950e1be230947b8329208c26a7b181c61145a36167c050ce33cc043ef4",
+      "bytes": 3364303,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/planetary-gearbox-system-1/MAIN ASSEMBLY.step",
+        "sha256": "fad9ce950e1be230947b8329208c26a7b181c61145a36167c050ce33cc043ef4"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "involute-gear-source",
+      "kind": "source",
+      "format": "ts",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/involute-gear.ts",
+      "sha256": "29f02c2983dfdede3e8433ebba8afe6e8f87720b74a232fed45f6f1153f29844",
+      "bytes": 3947,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/involute-gear-fork/main.ts",
+        "sha256": "29f02c2983dfdede3e8433ebba8afe6e8f87720b74a232fed45f6f1153f29844"
+      }
+    },
+    {
+      "id": "helical-gear-source",
+      "kind": "source",
+      "format": "ts",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/helical-gear.ts",
+      "sha256": "4b2bb8d7518e7ca83d818249f30c8b486d23454497e29d054b2f72da5499a8f6",
+      "bytes": 10487,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/helical-gear/main.ts",
+        "sha256": "4b2bb8d7518e7ca83d818249f30c8b486d23454497e29d054b2f72da5499a8f6"
+      }
+    },
+    {
+      "id": "flanged-housing-source",
+      "kind": "source",
+      "format": "ts",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/flanged-housing.ts",
+      "sha256": "a327db53d5a68faac6d83864b921b1484a2289de3b5ae2c1474d5ca85a31f416",
+      "bytes": 5397,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/flanged-mounting-housing/main.ts",
+        "sha256": "a327db53d5a68faac6d83864b921b1484a2289de3b5ae2c1474d5ca85a31f416"
+      }
+    },
+    {
+      "id": "elegant-vase-source",
+      "kind": "source",
+      "format": "scad",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/elegant-vase.scad",
+      "sha256": "8745b79be676223127310f9e344bd94becb081b62ea3f11c786addeae007e30b",
+      "bytes": 4267,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/elegant-vase/main.scad",
+        "sha256": "8745b79be676223127310f9e344bd94becb081b62ea3f11c786addeae007e30b"
+      }
+    },
+    {
+      "id": "rational-plate",
+      "kind": "artifact",
+      "format": "rational-plate",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/rational-plate.json",
+      "sha256": "e8f81bc96be92adb804d4805d95226654813c819d5e2e5689b4076072c115e29",
+      "bytes": 272,
+      "tier": "ordinary",
+      "source": {
+        "kind": "retained-control",
+        "path": "packages/geospec-engine-native/rust/tests/fixtures/portable-controls/f1-engine-fullwire.json",
+        "sha256": "b1b605506f72304ccec2484506a39786f203d89e793eaab5e0125d246388d5a3"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "bore-guide-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/nominal-bore-void/guide.step",
+      "sha256": "55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940",
+      "bytes": 29381,
+      "tier": "ordinary",
+      "source": {
+        "kind": "retained-control",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/nominal-bore-void/guide.step",
+        "sha256": "55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "elegant-vase-library",
+      "kind": "source",
+      "format": "scad",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/lib/vase_variant.scad",
+      "sha256": "dddf3842b4a4ae6c4c5aade5cf22bda76baefa0fcca0099b9b6abe1040195a28",
+      "bytes": 2578,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/elegant-vase/lib/vase_variant.scad",
+        "sha256": "dddf3842b4a4ae6c4c5aade5cf22bda76baefa0fcca0099b9b6abe1040195a28"
+      }
+    },
+    {
+      "id": "involute-gear-glb",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/involute-gear.glb",
+      "sha256": "acb05bacb473b4298134db868738218b2031b302207c29d4476e24047609af92",
+      "bytes": 53504,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/involute-gear.ts",
+        "sha256": "29f02c2983dfdede3e8433ebba8afe6e8f87720b74a232fed45f6f1153f29844"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "helical-gear-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/helical-gear.step",
+      "sha256": "1e014c7210d15ff79f48a3d8d11110e0560db23de2598dcb420676cf757f3542",
+      "bytes": 1816782,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/helical-gear.ts",
+        "sha256": "4b2bb8d7518e7ca83d818249f30c8b486d23454497e29d054b2f72da5499a8f6"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "helical-gear-glb",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/helical-gear.glb",
+      "sha256": "201d75c03e36c404d1aad4c3bf33bebdfb1f5cc242e95e35e5fe9a4d25e59b87",
+      "bytes": 3109436,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/helical-gear.ts",
+        "sha256": "4b2bb8d7518e7ca83d818249f30c8b486d23454497e29d054b2f72da5499a8f6"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "flanged-housing-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/flanged-housing.step",
+      "sha256": "5acf0f9f28f02e5d8e1ce1e94080b4cc3a90fd95434e344ca99e456c97d73590",
+      "bytes": 3247671,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/flanged-housing.ts",
+        "sha256": "a327db53d5a68faac6d83864b921b1484a2289de3b5ae2c1474d5ca85a31f416"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "flanged-housing-glb",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/flanged-housing.glb",
+      "sha256": "bec3e4e883e0832c5b4c653c1d3cddd2211e02ae3e614b993bc1f4144f6f5a05",
+      "bytes": 3853448,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/flanged-housing.ts",
+        "sha256": "a327db53d5a68faac6d83864b921b1484a2289de3b5ae2c1474d5ca85a31f416"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "elegant-vase-glb",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/elegant-vase.glb",
+      "sha256": "67d4b8ebd8719de484e233f0f8413455885227030b6840d49d529f299306572a",
+      "bytes": 341604,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/elegant-vase.scad",
+        "sha256": "8745b79be676223127310f9e344bd94becb081b62ea3f11c786addeae007e30b"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "planetary-gearbox-glb",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/planetary-gearbox.glb",
+      "sha256": "b4fb462d83f0e7419fa8e28b51e5199197a0cfb24098b58deb1f811a6fec30d8",
+      "bytes": 1786436,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox-assembly.step",
+        "sha256": "fad9ce950e1be230947b8329208c26a7b181c61145a36167c050ce33cc043ef4"
+      },
+      "role": "preview",
+      "frame": {
+        "coordinateSystem": "y-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "box-preview",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/box.glb",
+      "sha256": "6324916946f734f76f7cc82815beff04ac0b2c1403e997b437b9bef104736434",
+      "bytes": 1552,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/ap242-box.step",
+        "sha256": "9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf"
+      },
+      "role": "preview",
+      "frame": {
+        "coordinateSystem": "y-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "assembly-preview",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/assembly.glb",
+      "sha256": "01f041f001f0502764e04871a8b485a036a531bf825c4a7501f1f1f1b85e643d",
+      "bytes": 2808,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/two-cube-assembly.step",
+        "sha256": "e6f67bab80f21b84b69e3434211abec4f987715963e2f0bf73a2f32fc2279028"
+      },
+      "role": "preview",
+      "frame": {
+        "coordinateSystem": "y-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "inch-cube-preview",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/inch-cube.glb",
+      "sha256": "fe8fc442b87809cb1f480b6c633b43754c46d4f8e4ec8bbf21089175ef115bf4",
+      "bytes": 1648,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/inch-cube.step",
+        "sha256": "99a0b886b4aa9250f190bad6654e813f007fce8806d9abf3a27fbd9ebbcf58d5"
+      },
+      "role": "preview",
+      "frame": {
+        "coordinateSystem": "y-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "cylinder-preview",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/cylinder.glb",
+      "sha256": "3e5edb0259b7b98fc883f856727c48a0b620e4a3216ef4a8dcfc45974bb560b0",
+      "bytes": 6476,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/ap242-radius1-height10.step",
+        "sha256": "f6ec68446611249aa5a517833150b70d7aac2fed7a22d27754ac8208db477356"
+      },
+      "role": "preview",
+      "frame": {
+        "coordinateSystem": "y-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "pmi-preview",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/pmi.glb",
+      "sha256": "5ec4b5b869253f0c175687659fc7b7bf8a15b9925dcf4759182adfc4ce9c7013",
+      "bytes": 4072,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/parallel-plane-distance-source.step",
+        "sha256": "15d6e6a8ed9d2cebc43a095469651e66395586f32537d45761f002e28243f5ad"
+      },
+      "role": "preview",
+      "frame": {
+        "coordinateSystem": "y-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "nist-pmi-preview",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/nist-pmi.glb",
+      "sha256": "f89a59f3b2d70c37d41be3b1ba93a1e732d0a0b52044c35b067d86165a32c6e5",
+      "bytes": 210476,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/nist-pmi-bspline.step",
+        "sha256": "59bbc09a34621c03106e4c1b2a5bc909fdb67463117c16c4965ee7a6fe5c1521"
+      },
+      "role": "preview",
+      "frame": {
+        "coordinateSystem": "y-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "through-bore-preview",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/through-bore.glb",
+      "sha256": "a6a8554b13a93a21f761b68e91f27ada02dab6b7e787d4453238594eab4bc6aa",
+      "bytes": 5488,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/circular-bores/01-through.step",
+        "sha256": "00e2bacbcfafa1ac4ec56a2c1b1676cc772ced4ef376afb6424e6f4051016bd0"
+      },
+      "role": "preview",
+      "frame": {
+        "coordinateSystem": "y-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "blind-bore-preview",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/blind-bore.glb",
+      "sha256": "308be1c424da7bc9e7153c016d309750119b2a8e529d9f3431ae26916b72ed9c",
+      "bytes": 5460,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/circular-bores/02-blind.step",
+        "sha256": "a611c95e238d10a5a8e80d461b496be06f602a1a6772cb1007bef7152fcd8c7d"
+      },
+      "role": "preview",
+      "frame": {
+        "coordinateSystem": "y-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "chamfer-preview",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/chamfer.glb",
+      "sha256": "766c46693e091665ae621880a71e126ea8a66c9452993eb860970bb57e637120",
+      "bytes": 1748,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/edge-treatments/01-planar-chamfer.step",
+        "sha256": "4c0618de7cce3812a9fa0704db928f0667f7655ace102c87d4f35a8a45cf706f"
+      },
+      "role": "preview",
+      "frame": {
+        "coordinateSystem": "y-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "fillet-preview",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/fillet.glb",
+      "sha256": "f70b940a4c89d2cf5e02e2c07e9d98d2a7b89b6a1be534051514987f0490e2d4",
+      "bytes": 2964,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/edge-treatments/02-cylindrical-fillet.step",
+        "sha256": "7f82ffa3bf0aa990d680cc42ce85839b25876727832bfbf2e77152216913c6ed"
+      },
+      "role": "preview",
+      "frame": {
+        "coordinateSystem": "y-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "bore-guide-preview",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/bore-guide.glb",
+      "sha256": "da4092b707d7468fd5622052d9b33d48e6e9141f9af91dee83ea0d5b0f7a6de7",
+      "bytes": 10228,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/nominal-bore-void/guide.step",
+        "sha256": "55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940"
+      },
+      "role": "preview",
+      "frame": {
+        "coordinateSystem": "y-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "planetary-cad-source-lib-carrier",
+      "kind": "source",
+      "format": "ts",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/carrier.ts",
+      "sha256": "04410335406a66a7b8f44c00b620bd2829f2e570457de9e55330a23764919514",
+      "bytes": 1244,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/planetary-gearbox-system-1/lib/carrier.ts",
+        "sha256": "04410335406a66a7b8f44c00b620bd2829f2e570457de9e55330a23764919514"
+      }
+    },
+    {
+      "id": "planetary-cad-source-lib-cover",
+      "kind": "source",
+      "format": "ts",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/cover.ts",
+      "sha256": "6e52d10025a6c75502dc49c796cb546dcdc5fb78caa9e70525f58f527b065a55",
+      "bytes": 1504,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/planetary-gearbox-system-1/lib/cover.ts",
+        "sha256": "6e52d10025a6c75502dc49c796cb546dcdc5fb78caa9e70525f58f527b065a55"
+      }
+    },
+    {
+      "id": "planetary-cad-source-lib-gear",
+      "kind": "source",
+      "format": "ts",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/gear.ts",
+      "sha256": "004a54686f8a9eb670f5e9f50c3dfc3da0ae8322dc6d70892476c08ac2f08189",
+      "bytes": 3521,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/planetary-gearbox-system-1/lib/gear.ts",
+        "sha256": "004a54686f8a9eb670f5e9f50c3dfc3da0ae8322dc6d70892476c08ac2f08189"
+      }
+    },
+    {
+      "id": "planetary-cad-source-lib-housing",
+      "kind": "source",
+      "format": "ts",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/housing.ts",
+      "sha256": "94c2e33fcf65353f6ada250879a7e09e1bca10dd9ac4d79e1aa687531512347f",
+      "bytes": 1987,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/planetary-gearbox-system-1/lib/housing.ts",
+        "sha256": "94c2e33fcf65353f6ada250879a7e09e1bca10dd9ac4d79e1aa687531512347f"
+      }
+    },
+    {
+      "id": "planetary-cad-source-lib-params",
+      "kind": "source",
+      "format": "ts",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/params.ts",
+      "sha256": "fd90107990c58339aff52165f717a94a0c0a1ea5514bddc350c9a5389f118873",
+      "bytes": 2268,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/planetary-gearbox-system-1/lib/params.ts",
+        "sha256": "fd90107990c58339aff52165f717a94a0c0a1ea5514bddc350c9a5389f118873"
+      }
+    },
+    {
+      "id": "planetary-cad-source-lib-planet",
+      "kind": "source",
+      "format": "ts",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/planet.ts",
+      "sha256": "e09531acdc14c58912bcdf739eb9d4db107aa7847e33cb6a62f903b53c9fb791",
+      "bytes": 576,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/planetary-gearbox-system-1/lib/planet.ts",
+        "sha256": "e09531acdc14c58912bcdf739eb9d4db107aa7847e33cb6a62f903b53c9fb791"
+      }
+    },
+    {
+      "id": "planetary-cad-source-lib-ring",
+      "kind": "source",
+      "format": "ts",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/ring.ts",
+      "sha256": "a13cd086f887b25225f77224b82f8ec0c2b0cc98e061fb34b3b17a623eb23901",
+      "bytes": 599,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/planetary-gearbox-system-1/lib/ring.ts",
+        "sha256": "a13cd086f887b25225f77224b82f8ec0c2b0cc98e061fb34b3b17a623eb23901"
+      }
+    },
+    {
+      "id": "planetary-cad-source-lib-sun",
+      "kind": "source",
+      "format": "ts",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/sun.ts",
+      "sha256": "c3015005e5385f8d184a1e7aa2861c7aec1c6ec7246179df218a8a267f1f593a",
+      "bytes": 847,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/planetary-gearbox-system-1/lib/sun.ts",
+        "sha256": "c3015005e5385f8d184a1e7aa2861c7aec1c6ec7246179df218a8a267f1f593a"
+      }
+    },
+    {
+      "id": "planetary-cad-source-main",
+      "kind": "source",
+      "format": "ts",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/main.ts",
+      "sha256": "1d4264cae9755138e52bd985aa4c3edfa1afa193f7b3986f752565f76fecfcca",
+      "bytes": 2275,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-workspace",
+        "path": "tau-workspace/planetary-gearbox-system-1/main.ts",
+        "sha256": "1d4264cae9755138e52bd985aa4c3edfa1afa193f7b3986f752565f76fecfcca"
+      }
+    },
+    {
+      "id": "planetary-cad-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/planetary-gearbox-cad.step",
+      "sha256": "a4294f8fbb1e65c57489d2b358dc6db42225323a2f2d2790baf3f739048b7c6c",
+      "bytes": 29050037,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/main.ts",
+        "sha256": "1d4264cae9755138e52bd985aa4c3edfa1afa193f7b3986f752565f76fecfcca"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "planetary-cad-glb",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/planetary-gearbox-cad.glb",
+      "sha256": "9ff7fca30d3aeeabfa882aba4ecce268d12e1fcb3c588846466e3e42a0c6af63",
+      "bytes": 1861020,
+      "tier": "scale",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/main.ts",
+        "sha256": "1d4264cae9755138e52bd985aa4c3edfa1afa193f7b3986f752565f76fecfcca"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "m3-control-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/component-interference/original.step",
+      "sha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "bytes": 29458,
+      "tier": "ordinary",
+      "source": {
+        "kind": "m3-current-authority-v3",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/component-interference/original.step",
+        "sha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "m3-clearance-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/model.step",
+      "sha256": "cb7e827571bb7ca65e5aa48f8467b850bc4ea66ef07eb5b389ebd20005339de4",
+      "bytes": 33203,
+      "tier": "ordinary",
+      "source": {
+        "kind": "m3-current-authority-v3",
+        "path": "packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/model.step",
+        "sha256": "cb7e827571bb7ca65e5aa48f8467b850bc4ea66ef07eb5b389ebd20005339de4"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "m3-pmi-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/m3-pmi.step",
+      "sha256": "15d6e6a8ed9d2cebc43a095469651e66395586f32537d45761f002e28243f5ad",
+      "bytes": 12672,
+      "tier": "ordinary",
+      "source": {
+        "kind": "m3-current-authority-v3",
+        "path": "packages/geospec/host-tests/fixtures/data/15d6e6a8ed9d2cebc43a095469651e66395586f32537d45761f002e28243f5ad",
+        "sha256": "15d6e6a8ed9d2cebc43a095469651e66395586f32537d45761f002e28243f5ad"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "m3-control-preview",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/m3-control.glb",
+      "sha256": "ab9d737575803eb7ae23bdd46255c063d85b67346058e1f41876897883fe8c6c",
+      "bytes": 18172,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/component-interference/original.step",
+        "sha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2"
+      },
+      "role": "preview",
+      "frame": {
+        "coordinateSystem": "y-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "m3-clearance-preview",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/m3-clearance.glb",
+      "sha256": "af196f1b731db9c535e5f4cef027f9e119ce1af5d38649543a70c291f3f5d807",
+      "bytes": 18028,
+      "tier": "ordinary",
+      "source": {
+        "kind": "tau-cli-conversion",
+        "path": "packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/model.step",
+        "sha256": "cb7e827571bb7ca65e5aa48f8467b850bc4ea66ef07eb5b389ebd20005339de4"
+      },
+      "role": "preview",
+      "frame": {
+        "coordinateSystem": "y-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "many-occurrences-4096-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/many-occurrences-4096.step",
+      "sha256": "f8a2d6dd8a99852e8d1926f35a0c11695dd12162449ba0f8760edc54124383f1",
+      "bytes": 2489686,
+      "tier": "scale",
+      "source": {
+        "kind": "broad-generator",
+        "path": "packages/geospec-engine-native/bench/broad-fixtures.ts",
+        "sha256": "dede7f61e40c8ba458f3b4e2e96ddf5a5e2f4ae129fa45f72363bbee42533b79"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "large-mesh-48-glb",
+      "kind": "artifact",
+      "format": "glb",
+      "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/large-mesh-48.glb",
+      "sha256": "ff2ff7de0ee995d267f9d324b915eee27b56cd5dd49e902734b0fc8fae3f45a3",
+      "bytes": 26542792,
+      "tier": "scale",
+      "source": {
+        "kind": "broad-generator",
+        "path": "packages/geospec-engine-native/bench/broad-fixtures.ts",
+        "sha256": "dede7f61e40c8ba458f3b4e2e96ddf5a5e2f4ae129fa45f72363bbee42533b79"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "mm",
+        "outputUnit": "mm"
+      }
+    },
+    {
+      "id": "shared-bore-step",
+      "kind": "artifact",
+      "format": "step",
+      "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/circular-bores/07-shared-instance.step",
+      "sha256": "b399d155fe7255965be2e9cb5674a03838d830ded1caad358e2c672a7f343807",
+      "bytes": 21199,
+      "tier": "ordinary",
+      "source": {
+        "kind": "independent-analytic-construction",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/circular-bores/07-shared-instance.step",
+        "sha256": "b399d155fe7255965be2e9cb5674a03838d830ded1caad358e2c672a7f343807"
+      },
+      "role": "subject",
+      "frame": {
+        "coordinateSystem": "z-up",
+        "sourceUnit": "auto",
+        "outputUnit": "mm"
+      },
+      "previewGap": "Existing two-bore source admitted to the catalog without conversion in A2; no same-source GLB preview is available."
+    }
+  ],
+  "conversions": [
+    {
+      "id": "involute-gear-glb",
+      "source": "involute-gear-source",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/involute-gear.glb",
+      "options": {
+        "coordinateSystem": "z-up",
+        "unit": {
+          "length": "millimeter"
+        }
+      },
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/involute-gear.ts --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/involute-gear.glb --params='{}' --export-options='{\"coordinateSystem\":\"z-up\",\"unit\":{\"length\":\"millimeter\"}}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/involute-gear.ts",
+          "sha256": "29f02c2983dfdede3e8433ebba8afe6e8f87720b74a232fed45f6f1153f29844"
+        }
+      ],
+      "status": "generated",
+      "sha256": "acb05bacb473b4298134db868738218b2031b302207c29d4476e24047609af92",
+      "bytes": 53504
+    },
+    {
+      "id": "helical-gear-step",
+      "source": "helical-gear-source",
+      "format": "step",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/helical-gear.step",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/helical-gear.ts --ext=step --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/helical-gear.step --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/helical-gear.ts",
+          "sha256": "4b2bb8d7518e7ca83d818249f30c8b486d23454497e29d054b2f72da5499a8f6"
+        }
+      ],
+      "status": "generated",
+      "sha256": "1e014c7210d15ff79f48a3d8d11110e0560db23de2598dcb420676cf757f3542",
+      "bytes": 1816782
+    },
+    {
+      "id": "helical-gear-glb",
+      "source": "helical-gear-source",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/helical-gear.glb",
+      "options": {
+        "coordinateSystem": "z-up",
+        "unit": {
+          "length": "millimeter"
+        }
+      },
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/helical-gear.ts --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/helical-gear.glb --params='{}' --export-options='{\"coordinateSystem\":\"z-up\",\"unit\":{\"length\":\"millimeter\"}}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/helical-gear.ts",
+          "sha256": "4b2bb8d7518e7ca83d818249f30c8b486d23454497e29d054b2f72da5499a8f6"
+        }
+      ],
+      "status": "generated",
+      "sha256": "201d75c03e36c404d1aad4c3bf33bebdfb1f5cc242e95e35e5fe9a4d25e59b87",
+      "bytes": 3109436
+    },
+    {
+      "id": "flanged-housing-step",
+      "source": "flanged-housing-source",
+      "format": "step",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/flanged-housing.step",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/flanged-housing.ts --ext=step --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/flanged-housing.step --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/flanged-housing.ts",
+          "sha256": "a327db53d5a68faac6d83864b921b1484a2289de3b5ae2c1474d5ca85a31f416"
+        }
+      ],
+      "status": "generated",
+      "sha256": "5acf0f9f28f02e5d8e1ce1e94080b4cc3a90fd95434e344ca99e456c97d73590",
+      "bytes": 3247671
+    },
+    {
+      "id": "flanged-housing-glb",
+      "source": "flanged-housing-source",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/flanged-housing.glb",
+      "options": {
+        "coordinateSystem": "z-up",
+        "unit": {
+          "length": "millimeter"
+        }
+      },
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/flanged-housing.ts --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/flanged-housing.glb --params='{}' --export-options='{\"coordinateSystem\":\"z-up\",\"unit\":{\"length\":\"millimeter\"}}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/flanged-housing.ts",
+          "sha256": "a327db53d5a68faac6d83864b921b1484a2289de3b5ae2c1474d5ca85a31f416"
+        }
+      ],
+      "status": "generated",
+      "sha256": "bec3e4e883e0832c5b4c653c1d3cddd2211e02ae3e614b993bc1f4144f6f5a05",
+      "bytes": 3853448
+    },
+    {
+      "id": "elegant-vase-glb",
+      "source": "elegant-vase-source",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/elegant-vase.glb",
+      "options": {
+        "coordinateSystem": "z-up",
+        "unit": {
+          "length": "millimeter"
+        }
+      },
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/elegant-vase.scad --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/elegant-vase.glb --params='{}' --export-options='{\"coordinateSystem\":\"z-up\",\"unit\":{\"length\":\"millimeter\"}}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/elegant-vase.scad",
+          "sha256": "8745b79be676223127310f9e344bd94becb081b62ea3f11c786addeae007e30b"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/lib/vase_variant.scad",
+          "sha256": "dddf3842b4a4ae6c4c5aade5cf22bda76baefa0fcca0099b9b6abe1040195a28"
+        }
+      ],
+      "status": "generated",
+      "sha256": "67d4b8ebd8719de484e233f0f8413455885227030b6840d49d529f299306572a",
+      "bytes": 341604
+    },
+    {
+      "id": "planetary-gearbox-glb",
+      "source": "planetary-gearbox-step",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/planetary-gearbox.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox-assembly.step --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/planetary-gearbox.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox-assembly.step",
+          "sha256": "fad9ce950e1be230947b8329208c26a7b181c61145a36167c050ce33cc043ef4"
+        }
+      ],
+      "status": "generated",
+      "sha256": "b4fb462d83f0e7419fa8e28b51e5199197a0cfb24098b58deb1f811a6fec30d8",
+      "bytes": 1786436
+    },
+    {
+      "id": "box-preview",
+      "source": "box-step",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/box.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/native/occt/rust/tests/fixtures/ap242-box.step --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/box.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/ap242-box.step",
+          "sha256": "9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf"
+        }
+      ],
+      "status": "generated",
+      "sha256": "6324916946f734f76f7cc82815beff04ac0b2c1403e997b437b9bef104736434",
+      "bytes": 1552
+    },
+    {
+      "id": "assembly-preview",
+      "source": "assembly-step",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/assembly.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/native/occt/rust/tests/fixtures/two-cube-assembly.step --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/assembly.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/two-cube-assembly.step",
+          "sha256": "e6f67bab80f21b84b69e3434211abec4f987715963e2f0bf73a2f32fc2279028"
+        }
+      ],
+      "status": "generated",
+      "sha256": "01f041f001f0502764e04871a8b485a036a531bf825c4a7501f1f1f1b85e643d",
+      "bytes": 2808
+    },
+    {
+      "id": "inch-cube-preview",
+      "source": "inch-cube-step",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/inch-cube.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/native/occt/rust/tests/fixtures/inch-cube.step --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/inch-cube.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/inch-cube.step",
+          "sha256": "99a0b886b4aa9250f190bad6654e813f007fce8806d9abf3a27fbd9ebbcf58d5"
+        }
+      ],
+      "status": "generated",
+      "sha256": "fe8fc442b87809cb1f480b6c633b43754c46d4f8e4ec8bbf21089175ef115bf4",
+      "bytes": 1648
+    },
+    {
+      "id": "cylinder-preview",
+      "source": "cylinder-step",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/cylinder.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/native/occt/rust/tests/fixtures/ap242-radius1-height10.step --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/cylinder.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/ap242-radius1-height10.step",
+          "sha256": "f6ec68446611249aa5a517833150b70d7aac2fed7a22d27754ac8208db477356"
+        }
+      ],
+      "status": "generated",
+      "sha256": "3e5edb0259b7b98fc883f856727c48a0b620e4a3216ef4a8dcfc45974bb560b0",
+      "bytes": 6476
+    },
+    {
+      "id": "pmi-preview",
+      "source": "pmi-step",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/pmi.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/native/occt/rust/tests/fixtures/parallel-plane-distance-source.step --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/pmi.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/parallel-plane-distance-source.step",
+          "sha256": "15d6e6a8ed9d2cebc43a095469651e66395586f32537d45761f002e28243f5ad"
+        }
+      ],
+      "status": "generated",
+      "sha256": "5ec4b5b869253f0c175687659fc7b7bf8a15b9925dcf4759182adfc4ce9c7013",
+      "bytes": 4072
+    },
+    {
+      "id": "nist-pmi-preview",
+      "source": "nist-pmi-step",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/nist-pmi.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/native/occt/rust/tests/fixtures/nist-pmi-bspline.step --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/nist-pmi.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/nist-pmi-bspline.step",
+          "sha256": "59bbc09a34621c03106e4c1b2a5bc909fdb67463117c16c4965ee7a6fe5c1521"
+        }
+      ],
+      "status": "generated",
+      "sha256": "f89a59f3b2d70c37d41be3b1ba93a1e732d0a0b52044c35b067d86165a32c6e5",
+      "bytes": 210476
+    },
+    {
+      "id": "through-bore-preview",
+      "source": "through-bore-step",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/through-bore.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/native/occt/rust/tests/fixtures/circular-bores/01-through.step --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/through-bore.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/circular-bores/01-through.step",
+          "sha256": "00e2bacbcfafa1ac4ec56a2c1b1676cc772ced4ef376afb6424e6f4051016bd0"
+        }
+      ],
+      "status": "generated",
+      "sha256": "a6a8554b13a93a21f761b68e91f27ada02dab6b7e787d4453238594eab4bc6aa",
+      "bytes": 5488
+    },
+    {
+      "id": "blind-bore-preview",
+      "source": "blind-bore-step",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/blind-bore.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/native/occt/rust/tests/fixtures/circular-bores/02-blind.step --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/blind-bore.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/circular-bores/02-blind.step",
+          "sha256": "a611c95e238d10a5a8e80d461b496be06f602a1a6772cb1007bef7152fcd8c7d"
+        }
+      ],
+      "status": "generated",
+      "sha256": "308be1c424da7bc9e7153c016d309750119b2a8e529d9f3431ae26916b72ed9c",
+      "bytes": 5460
+    },
+    {
+      "id": "chamfer-preview",
+      "source": "chamfer-step",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/chamfer.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/native/occt/rust/tests/fixtures/edge-treatments/01-planar-chamfer.step --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/chamfer.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/edge-treatments/01-planar-chamfer.step",
+          "sha256": "4c0618de7cce3812a9fa0704db928f0667f7655ace102c87d4f35a8a45cf706f"
+        }
+      ],
+      "status": "generated",
+      "sha256": "766c46693e091665ae621880a71e126ea8a66c9452993eb860970bb57e637120",
+      "bytes": 1748
+    },
+    {
+      "id": "fillet-preview",
+      "source": "fillet-step",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/fillet.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/native/occt/rust/tests/fixtures/edge-treatments/02-cylindrical-fillet.step --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/fillet.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/edge-treatments/02-cylindrical-fillet.step",
+          "sha256": "7f82ffa3bf0aa990d680cc42ce85839b25876727832bfbf2e77152216913c6ed"
+        }
+      ],
+      "status": "generated",
+      "sha256": "f70b940a4c89d2cf5e02e2c07e9d98d2a7b89b6a1be534051514987f0490e2d4",
+      "bytes": 2964
+    },
+    {
+      "id": "bore-guide-preview",
+      "source": "bore-guide-step",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/bore-guide.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/native/occt/rust/tests/fixtures/nominal-bore-void/guide.step --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/bore-guide.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/nominal-bore-void/guide.step",
+          "sha256": "55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940"
+        }
+      ],
+      "status": "generated",
+      "sha256": "da4092b707d7468fd5622052d9b33d48e6e9141f9af91dee83ea0d5b0f7a6de7",
+      "bytes": 10228
+    },
+    {
+      "id": "planetary-cad-step",
+      "source": "planetary-cad-source-main",
+      "format": "step",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/planetary-gearbox-cad.step",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/main.ts --ext=step --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/planetary-gearbox-cad.step --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/carrier.ts",
+          "sha256": "04410335406a66a7b8f44c00b620bd2829f2e570457de9e55330a23764919514"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/cover.ts",
+          "sha256": "6e52d10025a6c75502dc49c796cb546dcdc5fb78caa9e70525f58f527b065a55"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/gear.ts",
+          "sha256": "004a54686f8a9eb670f5e9f50c3dfc3da0ae8322dc6d70892476c08ac2f08189"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/housing.ts",
+          "sha256": "94c2e33fcf65353f6ada250879a7e09e1bca10dd9ac4d79e1aa687531512347f"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/params.ts",
+          "sha256": "fd90107990c58339aff52165f717a94a0c0a1ea5514bddc350c9a5389f118873"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/planet.ts",
+          "sha256": "e09531acdc14c58912bcdf739eb9d4db107aa7847e33cb6a62f903b53c9fb791"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/ring.ts",
+          "sha256": "a13cd086f887b25225f77224b82f8ec0c2b0cc98e061fb34b3b17a623eb23901"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/sun.ts",
+          "sha256": "c3015005e5385f8d184a1e7aa2861c7aec1c6ec7246179df218a8a267f1f593a"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/main.ts",
+          "sha256": "1d4264cae9755138e52bd985aa4c3edfa1afa193f7b3986f752565f76fecfcca"
+        }
+      ],
+      "status": "generated",
+      "sha256": "a4294f8fbb1e65c57489d2b358dc6db42225323a2f2d2790baf3f739048b7c6c",
+      "bytes": 29050037
+    },
+    {
+      "id": "planetary-cad-glb",
+      "source": "planetary-cad-source-main",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/planetary-gearbox-cad.glb",
+      "options": {
+        "coordinateSystem": "z-up",
+        "unit": {
+          "length": "millimeter"
+        }
+      },
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/main.ts --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/planetary-gearbox-cad.glb --params='{}' --export-options='{\"coordinateSystem\":\"z-up\",\"unit\":{\"length\":\"millimeter\"}}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/carrier.ts",
+          "sha256": "04410335406a66a7b8f44c00b620bd2829f2e570457de9e55330a23764919514"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/cover.ts",
+          "sha256": "6e52d10025a6c75502dc49c796cb546dcdc5fb78caa9e70525f58f527b065a55"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/gear.ts",
+          "sha256": "004a54686f8a9eb670f5e9f50c3dfc3da0ae8322dc6d70892476c08ac2f08189"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/housing.ts",
+          "sha256": "94c2e33fcf65353f6ada250879a7e09e1bca10dd9ac4d79e1aa687531512347f"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/params.ts",
+          "sha256": "fd90107990c58339aff52165f717a94a0c0a1ea5514bddc350c9a5389f118873"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/planet.ts",
+          "sha256": "e09531acdc14c58912bcdf739eb9d4db107aa7847e33cb6a62f903b53c9fb791"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/ring.ts",
+          "sha256": "a13cd086f887b25225f77224b82f8ec0c2b0cc98e061fb34b3b17a623eb23901"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/lib/sun.ts",
+          "sha256": "c3015005e5385f8d184a1e7aa2861c7aec1c6ec7246179df218a8a267f1f593a"
+        },
+        {
+          "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/planetary-gearbox/main.ts",
+          "sha256": "1d4264cae9755138e52bd985aa4c3edfa1afa193f7b3986f752565f76fecfcca"
+        }
+      ],
+      "status": "generated",
+      "sha256": "9ff7fca30d3aeeabfa882aba4ecce268d12e1fcb3c588846466e3e42a0c6af63",
+      "bytes": 1861020
+    },
+    {
+      "id": "m3-control-preview",
+      "source": "m3-control-step",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/m3-control.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine-native/native/occt/rust/tests/fixtures/component-interference/original.step --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/m3-control.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/component-interference/original.step",
+          "sha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2"
+        }
+      ],
+      "status": "generated",
+      "sha256": "ab9d737575803eb7ae23bdd46255c063d85b67346058e1f41876897883fe8c6c",
+      "bytes": 18172
+    },
+    {
+      "id": "m3-clearance-preview",
+      "source": "m3-clearance-step",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/m3-clearance.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/model.step --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/m3-clearance.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/model.step",
+          "sha256": "cb7e827571bb7ca65e5aa48f8467b850bc4ea66ef07eb5b389ebd20005339de4"
+        }
+      ],
+      "status": "generated",
+      "sha256": "af196f1b731db9c535e5f4cef027f9e119ce1af5d38649543a70c291f3f5d807",
+      "bytes": 18028
+    },
+    {
+      "id": "large-mesh-48-glb",
+      "source": "broad-large-mesh-48-gltf",
+      "format": "glb",
+      "output": "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/large-mesh-48.glb",
+      "options": {},
+      "params": {},
+      "command": "node --import @oxc-node/core/register packages/cli/dist/bin/tau.mjs export node_modules/.cache/geospec-engine-native/matcher-full-broad-fixtures-a1/large-mesh-48.gltf --ext=glb --output=packages/geospec-engine-native/bench/fixtures/performance-lab/generated/large-mesh-48.glb --params='{}' --export-options='{}' --json",
+      "inputClosure": [
+        {
+          "path": "node_modules/.cache/geospec-engine-native/matcher-full-broad-fixtures-a1/large-mesh-48.gltf",
+          "sha256": "6a1e72cbffe582ec354245b37ae0ced8a7bd3f7a3ed0855c88d9b57d1abb4d21"
+        },
+        {
+          "path": "node_modules/.cache/geospec-engine-native/matcher-full-broad-fixtures-a1/large-mesh-48.bin",
+          "sha256": "97d85cacb79686c37cb4d6feedba21e9211ceda6ad3477bc1e034901e9ad6597"
+        }
+      ],
+      "status": "generated",
+      "sha256": "ff2ff7de0ee995d267f9d324b915eee27b56cd5dd49e902734b0fc8fae3f45a3",
+      "bytes": 26542792
+    }
+  ],
+  "toolchain": {
+    "sourceCommit": "a0da45d2894d3b3db28d666b84d07ad76c1b91da",
+    "cliBuiltSha256": "d6e04a8821f32a5b166ec1b6a2de9a9978d2089837c37cff442d7da0d1300ee4",
+    "node": "v26.8.1",
+    "pnpmLockSha256": "60a18d3b11735f742350e527172849773f4eeb014b921108f91567ea61f6fe81"
+  },
+  "frameNotes": {
+    "cadGlb": "Explicit CLI coordinateSystem z-up and millimeter output; these bytes are admissible by the native GeoSpec mesh profile.",
+    "stepPreviewGlb": "Default CLI STEP-to-GLB previews are Y-up and carry millimeter-scale numeric coordinates (verified against the retained box); native GeoSpec does not admit Y-up. Use the STEP source for claims.",
+    "involuteDefaultTrial": "Superseded default Y-up/meter GLB; no retained file.",
+    "stepZupTrial": "Discarded explicit Z-up/mm STEP-to-GLB output because a 10 mm box became 10000 coordinate units; no retained file."
+  },
+  "claimAuthority": {
+    "path": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+    "sha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+    "selectedMatcherRows": 52,
+    "selectedQueryRows": 5,
+    "casePath": "packages/geospec-engine-native/bench/fixtures/performance-lab/authority-cases.json",
+    "queryPath": "packages/geospec-engine-native/bench/fixtures/performance-lab/authority-queries.json"
+  },
+  "scaleAuthority": {
+    "sourceManifestPath": "node_modules/.cache/geospec-engine-native/matcher-full-broad-fixtures-a1/manifest.json",
+    "sourceManifestSha256": "9411d8c677efacc5c45feb1408fd88d23b87b3b1dad4555ccec19968900df652",
+    "generatorPath": "packages/geospec-engine-native/bench/broad-fixtures.ts",
+    "generatorSha256": "dede7f61e40c8ba458f3b4e2e96ddf5a5e2f4ae129fa45f72363bbee42533b79",
+    "stepGeneratorPath": "packages/geospec-engine-native/bench/generate-broad-step.cpp",
+    "stepGeneratorSha256": "241674cabe5caa50dd2b95e89f0ce2bb47b0a7dd085a32d44005801977012796",
+    "generatedInputHashes": {
+      "manyOccurrencesStep": "f8a2d6dd8a99852e8d1926f35a0c11695dd12162449ba0f8760edc54124383f1",
+      "largeMeshGltf": "6a1e72cbffe582ec354245b37ae0ced8a7bd3f7a3ed0855c88d9b57d1abb4d21",
+      "largeMeshBin": "97d85cacb79686c37cb4d6feedba21e9211ceda6ad3477bc1e034901e9ad6597"
+    },
+    "qualification": "Opt-in scale inputs only; broad generator does not certify engine correctness or timing."
+  },
+  "analyticAuthority": {
+    "attempt": "SIMD-P2/A2",
+    "casePath": "packages/geospec-engine-native/bench/fixtures/performance-lab/analytic-cases.json",
+    "sources": [
+      {
+        "id": "bores-intent.json",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/analytic-authority/bores/intent.json",
+        "sha256": "1b3086692e79b8cee191d1847f663619e5cade6e0b22be8cd0b95fb667391d7c",
+        "originalPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/hole-topology-fixtures/intent.json",
+        "bytes": 4421
+      },
+      {
+        "id": "bores-analytic-proof.json",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/analytic-authority/bores/analytic-proof.json",
+        "sha256": "7878b646b8f10226108cac6c312558559098b57380d94ce168527b09b7bfc7e3",
+        "originalPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/hole-topology-fixtures/analytic-proof.json",
+        "bytes": 2155
+      },
+      {
+        "id": "bores-fixture-manifest.json",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/analytic-authority/bores/fixture-manifest.json",
+        "sha256": "9f24395c10ae344db59a08204de86cd168f3fd15b2958e8f3bc8708c1179440d",
+        "originalPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/hole-topology-fixtures/fixture-manifest.json",
+        "bytes": 4232
+      },
+      {
+        "id": "bores-generate-read.cpp",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/analytic-authority/bores/generate-read.cpp",
+        "sha256": "da47d7565dfdbafc5f8e62260636415013a44d638cf48d50ac7a24a105c85483",
+        "originalPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/hole-topology-fixtures/generate-read.cpp",
+        "bytes": 27774
+      },
+      {
+        "id": "edges-intent.json",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/analytic-authority/edges/intent.json",
+        "sha256": "6591a7343ef3a89bda3c08aa430511efad2eed01210e442c24b32d477c041f2d",
+        "originalPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/edge-treatment-fixtures-a1/intent.json",
+        "bytes": 5650
+      },
+      {
+        "id": "edges-analytic-proof.json",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/analytic-authority/edges/analytic-proof.json",
+        "sha256": "a7257da809aefce14052d25a2f14a5d1094542d38b43bbde48d28be446b7ffe9",
+        "originalPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/edge-treatment-fixtures-a1/analytic-proof.json",
+        "bytes": 3514
+      },
+      {
+        "id": "edges-fixture-manifest.json",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/analytic-authority/edges/fixture-manifest.json",
+        "sha256": "9cb6e279ad1f203c9f6d80d831836f7f10427c9fb6a31513ddd6bd5fdb93bca9",
+        "originalPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/edge-treatment-fixtures-a1/fixture-manifest.json",
+        "bytes": 7412
+      },
+      {
+        "id": "edges-generate-read.cpp",
+        "path": "packages/geospec-engine-native/bench/fixtures/performance-lab/analytic-authority/edges/generate-read.cpp",
+        "sha256": "17b4c66c4749b8429d36eec5bed06c1ee0b7156c7ff5e10ca44c5f3a852f1891",
+        "originalPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/edge-treatment-fixtures-a1/generate-read.cpp",
+        "bytes": 29516
+      },
+      {
+        "id": "bore-test",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/circular_bores.rs",
+        "sha256": "38c9469f7f890a2bfbfb6b735b0006a347f6220b5c08a6e8376290014402e83e",
+        "bytes": 5739
+      },
+      {
+        "id": "edge-test",
+        "path": "packages/geospec-engine-native/native/occt/rust/tests/edge_treatments.rs",
+        "sha256": "2fd8e8bcf468945e1e0394cc41f41d7a6702a6b3747d511a9855ef30e790b28e",
+        "bytes": 34049
+      },
+      {
+        "id": "native-contract",
+        "path": "packages/geospec-engine-native/rust/src/matchers/brep.rs",
+        "sha256": "aad545c2f0b37e0d2bacb2934dfdc95fba1da343c611881dd047950500b36bae",
+        "bytes": 100193
+      },
+      {
+        "id": "public-contract",
+        "path": "packages/geospec/src/runner/types.ts",
+        "sha256": "20303ca36a5ae9531cdd035c10e108e92b70aec76bba1aca849306dbe3eed82d",
+        "bytes": 23352
+      },
+      {
+        "id": "native-defaults",
+        "path": "packages/geospec-engine-native/rust/src/prepared.rs",
+        "sha256": "184d67a68fa17d93fb42899e11c0e52c13a72bdb0ac78985bff602cd65cf1b22",
+        "bytes": 15534
+      }
+    ],
+    "m3CasesUnchangedSha256": "888ac99941d9d4dbcce8e5501723d09d36b9e0873c1133b6c07f98c17ced032f",
+    "m3QueriesUnchangedSha256": "a5ec73dd3eba91d0eeda883df2c0ce1af4d7eac7e87e05820e8303ad8bdc1a7c",
+    "caseCount": 10,
+    "candidateExecuted": false,
+    "conversionsRun": false
+  }
+}

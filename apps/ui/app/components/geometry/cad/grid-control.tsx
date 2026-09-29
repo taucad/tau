@@ -1,6 +1,5 @@
-import React, { useCallback, useState, useMemo } from 'react';
-import type { ClassValue } from 'clsx';
-import { Info, Lock, LockIcon, LockOpen } from 'lucide-react';
+import React, { useCallback, useRef, useState, useMemo } from 'react';
+import { Grid3X3, Info, Lock, LockOpen } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -13,36 +12,15 @@ import {
   DropdownMenuSwitchItem,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { cn } from '@taucad/ui/utils/cn';
 import { formatNumberEngineeringNotation } from '#utils/number.utils.js';
 import { gridUnitOptions, maxGridDigits } from '#components/geometry/cad/grid-unit-options.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 
-type GridSizeIndicatorProps = {
-  /**
-   * Optional className for styling
-   */
-  readonly className?: ClassValue;
-};
-
-const getTextSizeClass = (sizeText: string) => {
-  const { length } = sizeText;
-
-  if (length > 5) {
-    return 'text-[calc(var(--spacing)*1.8)] font-semibold';
-  }
-
-  if (length > 3) {
-    return 'text-[calc(var(--spacing)*2.2)] font-semibold';
-  }
-
-  return 'text-[calc(var(--spacing)*3)]';
-};
-
 /**
- * Component that displays the current grid size from the per-view GraphicsMachine via GraphicsProvider
+ * A one-line readout of the grid size from the per-view GraphicsMachine via GraphicsProvider, which opens the
+ * units and grid menu.
  */
-export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.ReactNode {
+export function GridSizeIndicator(): React.ReactNode {
   const graphicsRef = useGraphics();
   const gridSizes = useGraphicsSelector((state) => state.context.gridSizes);
   const isGridSizeLocked = useGraphicsSelector((state) => state.context.isGridSizeLocked);
@@ -50,6 +28,8 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
   const unit = useGraphicsSelector((state) => state.context.displayUnits.length.symbol);
 
   const [isOpen, setIsOpen] = useState(false);
+  // A press outside leaves focus with the pointer; a keyboard close returns it to the trigger.
+  const isClosingFromPointerRef = useRef(false);
 
   const handleLockToggle = useCallback(
     (checked: boolean) => {
@@ -79,6 +59,7 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
     () => formatNumberEngineeringNotation(displaySize, maxGridDigits),
     [displaySize],
   );
+  const gridLabel = `${localizedSmallGridSize} ${unit}`;
 
   // If there's no valid grid size, don't render
   if (!gridSizes.smallSize) {
@@ -91,32 +72,32 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <Button
-              variant='overlay'
-              size='icon'
-              aria-label={`Grid ${localizedSmallGridSize} ${unit}, unit settings`}
-              className={cn('relative font-mono [&>span]:leading-none', className)}
+              variant='ghost'
+              size='sm'
+              aria-label={`Grid ${gridLabel}, units and grid`}
+              className='h-7 gap-1 px-2 font-mono text-xs tabular-nums has-[>svg]:px-2'
             >
-              <span
-                className={cn(
-                  getTextSizeClass(localizedSmallGridSize),
-                  'absolute top-2.75 flex -translate-y-1/2 items-center justify-center',
-                )}
-              >
-                <span>{localizedSmallGridSize}</span>
-              </span>
-              <span className='absolute bottom-2.25 flex translate-y-1/2 items-center justify-center gap-0.25 text-xs tracking-wide'>
-                {unit}
-                {isGridSizeLocked ? <LockIcon className='size-2' strokeWidth={4} /> : null}
-              </span>
+              {/* Below 520 px of viewer width the readout keeps its value and drops its glyph. */}
+              <Grid3X3 className='hidden size-3.5 @min-[520px]/viewer:block' />
+              {gridLabel}
+              {isGridSizeLocked ? <Lock className='size-3' /> : null}
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent>Change unit settings</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
+        side='top'
+        align='start'
         className='w-72'
+        onPointerDownOutside={() => {
+          isClosingFromPointerRef.current = true;
+        }}
         onCloseAutoFocus={(event) => {
-          event.preventDefault();
+          if (isClosingFromPointerRef.current) {
+            event.preventDefault();
+          }
+          isClosingFromPointerRef.current = false;
         }}
       >
         <DropdownMenuLabel>Unit</DropdownMenuLabel>

@@ -3,9 +3,11 @@ import type { JsonValue, ProviderMessage } from '#log/event-types.js';
 import {
   absentAttachmentMarker,
   chatAttachmentPath,
+  createSessionRecord,
   documentSentinel,
   materializeAttachments,
 } from '#harness/session-record.js';
+import { createMemoryLogFile } from '#host/tau-agent-host.fixture.js';
 
 const imageHash = 'a'.repeat(64);
 const pdfHash = 'b'.repeat(64);
@@ -68,6 +70,21 @@ describe('materializeAttachments', () => {
     expect(outcome.messages[0]).not.toBe(input[0]);
     expect(outcome.messages[1]).toBe(input[1]);
     expect(outcome.messages[2]).toBe(input[2]);
+  });
+
+  it("materializes an external agent's image on its assistant and tool-output rows, and never a tool-input", async () => {
+    const reference = { type: 'file-ref', path: imagePath, mimeType: 'image/png' } as const;
+    const outcome = await materializeAttachments(
+      [
+        { id: 'assistant-image', role: 'assistant', content: [reference] },
+        { id: 'call', role: 'tool-input', toolCallId: 't', toolName: 'Read', content: [reference] },
+        { id: 'result', role: 'tool-output', toolCallId: 't', toolName: 'Read', content: [reference], isError: false },
+      ],
+      reader({ [imagePath]: imageBytes }),
+    );
+
+    const image = { type: 'image', mimeType: 'image/png', data: base64(imageBytes) };
+    expect(outcome.messages.map((message) => message.content)).toEqual([[image], [reference], [image]]);
   });
 
   it('omits a reference whose bytes are absent and reports its path instead of throwing', async () => {
@@ -168,5 +185,21 @@ describe('chatAttachmentPath', () => {
     ['chat-1', 'attachments/short.pdf'],
   ])('refuses chat %s path %s', (chatId, path) => {
     expect(() => chatAttachmentPath(chatId, path)).toThrow(expect.objectContaining({ code: 'STORAGE_PATH_INVALID' }));
+  });
+});
+
+describe('createSessionRecord', () => {
+  // RA-S10: the history is the appender's incremental reduction, not a re-read and re-reduction of the file.
+  it('should read history from the log it reduces as it appends', async () => {
+    const log = await createMemoryLogFile().open();
+    const record = await createSessionRecord({ log, runId: 'run-1', leaderEpoch: 'epoch-1' });
+    await record.append({
+      type: 'message.appended',
+      message: { id: 'user-1', role: 'user', content: 'Hello.' },
+    });
+    const read = vi.spyOn(log, 'read');
+
+    expect(await record.history()).toEqual(await log.messages());
+    expect(read).not.toHaveBeenCalled();
   });
 });

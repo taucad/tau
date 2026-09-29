@@ -1,0 +1,73 @@
+--- a/src/ModelingAlgorithms/TKTopAlgo/BRepGProp/BRepGProp_Gauss.hxx
++++ b/src/ModelingAlgorithms/TKTopAlgo/BRepGProp/BRepGProp_Gauss.hxx
+@@ -29,8 +29,6 @@
+ //! 2D Gauss integration algorithms.
+ class BRepGProp_Gauss
+ {
+-  using GaussFunc = std::function<double(double, double)>;
+-
+   //! Auxiliary structure for storing of inertial moments.
+   struct Inertia
+   {
+@@ -217,6 +215,12 @@
+ 
+   void multAndRestoreInertia(const double theValue, BRepGProp_Gauss::Inertia& theInertia);
+ 
++  //! Addition operation (infinity-aware after checkBounds() saw an infinite bound).
++  double add(const double theA, const double theB) const;
++
++  //! Multiplication operation (infinity-aware after checkBounds() saw an infinite bound).
++  double mult(const double theA, const double theB) const;
++
+   void convert(const BRepGProp_Gauss::Inertia& theInertia,
+                gp_Pnt&                         theOutGravityCenter,
+                gp_Mat&                         theOutMatrixOfInertia,
+@@ -230,9 +234,8 @@
+                double&                         theOutMass);
+ 
+ private:            //! @name private fields
+-  GaussType myType; //!< Type of geometric object
+-  GaussFunc add;    //!< Addition operation
+-  GaussFunc mult;   //!< Multiplication operation
++  GaussType myType;       //!< Type of geometric object
++  bool      myIsInfinite; //!< Use AddInf/MultInf instead of plain arithmetic
+ };
+ 
+ #endif
+--- a/src/ModelingAlgorithms/TKTopAlgo/BRepGProp/BRepGProp_Gauss.cxx
++++ b/src/ModelingAlgorithms/TKTopAlgo/BRepGProp/BRepGProp_Gauss.cxx
+@@ -242,9 +242,22 @@
+ 
+ BRepGProp_Gauss::BRepGProp_Gauss(const GaussType theType)
+     : myType(theType),
+-      add(::Add),
+-      mult(::Mult)
++      myIsInfinite(false)
++{
++}
++
++//=================================================================================================
++
++inline double BRepGProp_Gauss::add(const double theA, const double theB) const
++{
++  return myIsInfinite ? ::AddInf(theA, theB) : ::Add(theA, theB);
++}
++
++//=================================================================================================
++
++inline double BRepGProp_Gauss::mult(const double theA, const double theB) const
+ {
++  return myIsInfinite ? ::MultInf(theA, theB) : ::Mult(theA, theB);
+ }
+ 
+ //=================================================================================================
+@@ -377,8 +390,7 @@
+   if (Precision::IsInfinite(theU1) || Precision::IsInfinite(theU2) || Precision::IsInfinite(theV1)
+       || Precision::IsInfinite(theV2))
+   {
+-    add  = (::AddInf);
+-    mult = (::MultInf);
++    myIsInfinite = true;
+   }
+ }
+ 

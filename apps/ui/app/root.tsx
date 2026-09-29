@@ -1,4 +1,5 @@
 import type { LinksFunction, LoaderFunctionArgs, MetaFunction, ShouldRevalidateFunction } from 'react-router';
+import { lazy, Suspense } from 'react';
 import type { ReactNode } from 'react';
 import { throwRedirectIfSubdomain } from '#lib/react-router.lib.js';
 import { readThemeCookie } from '#theme-cookie.js';
@@ -16,9 +17,23 @@ import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
 import type { Handle } from '#types/matches.types.js';
 
+// Every route mounts the palette items, so the example catalog loads on its own
+// chunk instead of joining each route's entry.
+const ExampleCommandPaletteItems = lazy(async () => {
+  const m = await import('#components/nav/example-command-items.js');
+  return { default: m.ExampleCommandPaletteItems };
+});
+
 export const handle: Handle = {
   commandPalette(match) {
-    return <RootCommandPaletteItems match={match} />;
+    return (
+      <>
+        <RootCommandPaletteItems match={match} />
+        <Suspense fallback={null}>
+          <ExampleCommandPaletteItems />
+        </Suspense>
+      </>
+    );
   },
 };
 
@@ -51,8 +66,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
-export const shouldRevalidate: ShouldRevalidateFunction = ({ nextUrl, defaultShouldRevalidate }) =>
-  isOfflineShellPath(nextUrl.pathname) ? false : defaultShouldRevalidate;
+/**
+ * The root loader reads request headers, cookies and the pathname only, so a navigation
+ * that changes nothing but the query string (a gallery search, a filter) cannot change its
+ * result. Explicit revalidation and submissions keep the default.
+ */
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  currentUrl,
+  nextUrl,
+  formMethod,
+  defaultShouldRevalidate,
+}) => {
+  if (isOfflineShellPath(nextUrl.pathname)) {
+    return false;
+  }
+  const isQueryOnlyNavigation =
+    formMethod === undefined && currentUrl.pathname === nextUrl.pathname && currentUrl.search !== nextUrl.search;
+  return isQueryOnlyNavigation ? false : defaultShouldRevalidate;
+};
 
 export function Layout({ children }: { readonly children: ReactNode }): React.JSX.Element {
   return (

@@ -49,6 +49,7 @@ vi.mock('#hooks/use-project.js', () => ({
 vi.mock('#hooks/use-cookie.js', () => ({ useCookie: () => [true, vi.fn(), vi.fn()] }));
 vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeMap: () => treeSnapshot.current,
+  useFileTreeSelector: <T,>(select: (tree: typeof treeSnapshot.current) => T): T => select(treeSnapshot.current),
   useFileTreeEntry: () => undefined,
 }));
 vi.mock('#hooks/use-keyboard.js', () => ({ useKeybinding: () => ({ formattedKeyCombination: 'Enter' }) }));

@@ -6,7 +6,6 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { reactRouter } from '@react-router/dev/vite';
 import netlifyReactRouter from '@netlify/vite-plugin-react-router';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import devtoolsJson from '@silvenon/vite-plugin-devtools-json';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
@@ -17,6 +16,8 @@ import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration lives outside the app alias root.
 import { resolveTauCloudBuildEnabled } from './build-environment.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
+import { createGeoSpecMtAssets } from './geospec-mt-assets.vite-plugin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
@@ -116,6 +117,7 @@ const desktopSourceOverrides = new Map([
   ['#services/headless-image-backend.js', '#services/headless-image-backend.desktop.js'],
   ['#services/browser-agent-worker.js', '#services/browser-agent-worker.desktop.js'],
   ['#services/browser-geospec-worker.js', '#services/browser-geospec-worker.desktop.js'],
+  ['#workers/measurement-exact.transport.js', '#workers/measurement-exact.transport.desktop.js'],
   ['#components/layout/route-footer.js', '#components/layout/route-footer.desktop.js'],
 ]);
 
@@ -154,7 +156,11 @@ const normalizeProvenancePath = (moduleId: string): string => {
 export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = {}): Plugin => {
   let viteRoot = __dirname;
   let graphFileName: string | undefined;
-  let graphAssets: Array<{ fileName: string; sourcePath: string; sha256: string }> = [];
+  let graphAssets: Array<{
+    fileName: string;
+    sourcePath: string;
+    sha256: string;
+  }> = [];
   return {
     name: 'tau-ui-source-alias',
     enforce: 'pre',
@@ -177,14 +183,10 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
           return null;
         }
 
+        // Every other package, @taucad/ui included, answers its own `#` specifiers
+        // through its package.json imports map in Vite's core resolver.
         const uiRoot = `${path.resolve(__dirname)}${path.sep}`;
-        const designSystemRoot = `${path.resolve(__dirname, '../../packages/ui/src')}${path.sep}`;
-        const resolvedImporter = importer === undefined ? undefined : path.resolve(importer);
-        if (
-          resolvedImporter !== undefined &&
-          !resolvedImporter.startsWith(uiRoot) &&
-          !resolvedImporter.startsWith(designSystemRoot)
-        ) {
+        if (importer !== undefined && !path.resolve(importer).startsWith(uiRoot)) {
           return null;
         }
 
@@ -205,10 +207,7 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
           return null;
         }
 
-        const sourceRoot = resolvedImporter?.startsWith(designSystemRoot)
-          ? designSystemRoot
-          : path.resolve(__dirname, 'app');
-        const sourcePath = path.resolve(sourceRoot, specifier.slice(1));
+        const sourcePath = path.resolve(__dirname, 'app', specifier.slice(1));
         const candidatePaths = [sourcePath];
         if (specifier.endsWith('.js')) {
           const sourceBasePath = sourcePath.slice(0, -'.js'.length);
@@ -235,6 +234,14 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
       }
 
       const chunks = Object.values(bundle).filter((output) => output.type === 'chunk');
+      if (options.target !== 'desktop') {
+        const forbidden = chunks
+          .flatMap((chunk) => Object.keys(chunk.modules))
+          .find((moduleId) => /apps\/ui\/app\/.*\.desktop\.[jt]sx?(?:\?|$)/u.test(normalizeProvenancePath(moduleId)));
+        if (forbidden) {
+          this.error(`Desktop-only implementation in web bundle: ${normalizeProvenancePath(forbidden)}`);
+        }
+      }
       const assets = Object.values(bundle).filter((output) => output.type === 'asset');
       const emittedFileNames = new Set(Object.keys(bundle));
       graphAssets = assets.map((asset) => ({
@@ -249,9 +256,6 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
         name: 'tau-module-graph.json',
         source: JSON.stringify({
           chunks: chunks.map((chunk) => {
-            const renderedModuleIds = Object.entries(chunk.modules)
-              .filter(([moduleId, rendered]) => rendered.renderedLength > 0 || moduleId === chunk.facadeModuleId)
-              .map(([moduleId]) => moduleId);
             const importedChunks = chunk.imports
               .map((importPath) => {
                 const fromOutputRoot = path.posix.normalize(
@@ -272,13 +276,9 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
             );
             return {
               fileName: chunk.fileName,
-              // Rolldown reports renderedLength=0 for every module in some
-              // emitted wrapper chunks. Fall back only for that otherwise
-              // provenance-empty chunk; populated chunks keep the strict
-              // rendered/facade filter and exclude tree-shaken modules.
-              moduleIds: (renderedModuleIds.length > 0 ? renderedModuleIds : chunk.moduleIds).map((moduleId) =>
-                normalizeProvenancePath(moduleId),
-              ),
+              // Loaded modules still cross a target boundary when Rolldown inlines
+              // their exports and reports renderedLength=0.
+              moduleIds: chunk.moduleIds.map(normalizeProvenancePath),
               imports: importedChunks,
               forwardingOnly,
             };
@@ -329,15 +329,9 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
                   path.posix.normalize(path.posix.join(path.posix.dirname(chunk.fileName), importPath)),
                 )
                 .filter((fileName) => existsSync(path.resolve(outputRoot, fileName)));
-              const renderedModuleIds = Object.entries(chunk.modules)
-                .filter(([moduleId, rendered]) => rendered.renderedLength > 0 || moduleId === chunk.facadeModuleId)
-                .map(([moduleId]) => moduleId);
-
               return {
                 fileName: chunk.fileName,
-                moduleIds: (renderedModuleIds.length > 0 ? renderedModuleIds : chunk.moduleIds).map((moduleId) =>
-                  normalizeProvenancePath(moduleId),
-                ),
+                moduleIds: chunk.moduleIds.map(normalizeProvenancePath),
                 imports,
                 forwardingOnly: program.body.every(
                   (statement) =>
@@ -351,7 +345,10 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
         const assets = graphAssets.filter((asset) => existsSync(path.resolve(outputRoot, asset.fileName)));
         await writeFile(
           path.resolve(outputRoot, graphFileName),
-          JSON.stringify({ chunks: chunks.filter((chunk) => chunk !== undefined), assets }),
+          JSON.stringify({
+            chunks: chunks.filter((chunk) => chunk !== undefined),
+            assets,
+          }),
         );
       },
     },
@@ -389,6 +386,7 @@ export const createUiReactCompilerPlugin = (): Plugin => {
 };
 
 export default defineConfig(({ mode }) => {
+  const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   const isTest = mode === 'test';
   const isNetlify = process.env['NETLIFY'] === 'true';
   const buildFrontendUrl = resolveBuildFrontendUrl(process.env);
@@ -404,6 +402,7 @@ export default defineConfig(({ mode }) => {
       // granularity at which a tab's app-logic vintage can diverge.
       tauBuildId: JSON.stringify(Date.now()),
       tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
+      tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
       /*
        * Compile-time host seam (charter D2). `desktop/vite.config.ts` sets
        * `"desktop"`. Left undefined under `mode === 'test'` so unit tests can
@@ -423,6 +422,7 @@ export default defineConfig(({ mode }) => {
       ...(isTest ? {} : { 'import.meta.env.TAU_OFFLINE_SHELL': '"enabled"' }),
     },
     plugins: [
+      mtAssets.plugin,
       createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
 
       /*
@@ -447,9 +447,6 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284
 
-      // Paths - use nxViteTsPaths only (tsconfigPaths is redundant in Nx workspaces)
-      nxViteTsPaths(),
-
       // Browser DevTools JSON plugin.
       devtoolsJson(),
 
@@ -464,7 +461,7 @@ export default defineConfig(({ mode }) => {
     worker: {
       // Workers need their own plugins.
       // https://vite.dev/config/worker-options.html#worker-plugins
-      plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }), nxViteTsPaths()],
+      plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled })],
     },
     resolve: {
       alias: [
@@ -472,7 +469,6 @@ export default defineConfig(({ mode }) => {
         ...(isTest ? [{ find: testScriptsAlias, replacement: path.resolve(__dirname, 'scripts') }] : []),
       ],
     },
-
     ssr: uiSsrOptions,
 
     server: {

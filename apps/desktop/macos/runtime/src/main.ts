@@ -6,7 +6,7 @@ import { GLB_BUFFER, WebIO } from '@gltf-transform/core';
 import type { GLTF, JSONDocument } from '@gltf-transform/core';
 import { normals, prune } from '@gltf-transform/functions';
 import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
-import manifest from '#quick-look-manifest' with { type: 'json' };
+import manifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
 type NativeFile = { readonly path: string; readonly base64: string };
 type NativeRequest = {

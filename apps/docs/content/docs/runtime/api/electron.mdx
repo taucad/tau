@@ -1,0 +1,27 @@
+---
+title: Electron Runtime API
+description: Broker isolated utility hosts through main, preload, renderer, and utility process boundaries.
+docType: reference
+wordBudgetOverride: 700
+---
+
+# Electron Runtime API
+
+Electron entry points are process-specific: `@taucad/runtime/electron/main`, `/preload`, `/renderer`, and `/utility`. Main owns the utility fork and releases its lease; the renderer receives a transferred port rather than permission to spawn a process.
+
+Import `getIsolationStatus` from `@taucad/runtime/cross-origin-isolation` to check whether the host has the isolation needed for shared-memory capabilities before enabling such a topology.
+
+## Main broker and exits
+
+`registerElectronRuntimeMain` installs the IPC broker. An optional `ElectronRuntimeForkResolver` maps a sanitized renderer context to an application-owned utility entry, environment allowlist values, rooted filesystem port, and compute binding. `ElectronRuntimeMainConnectInput` is the privileged main-process request; the resulting `ElectronRuntimeMainConnection` owns a port, an exit promise, and idempotent disposal.
+
+`ElectronRuntimeHostExit` distinguishes a main-requested release from an unexplained process exit and may include bounded stderr. `ElectronRuntimeUtilityExit` adds the broker host id. `ElectronRuntimeUtilityLimitError` refuses a fork beyond the configured cap; it does not represent a crashed worker.
+
+## Port relay and utility client
+
+`relayElectronPorts` installs the preload bridge. `awaitElectronRelayedPort` waits for the renderer's matching request and transferred port. `electronUtilityMainClient` accepts `ElectronUtilityMainClientOptions` for a main-brokered port used by another utility; `electronUtilityMainTransport` wraps that client as a transport plugin. The `/utility` export `serveElectronFileSystemBridgePort` and the `/filesystem` export `createFileSystemBridgePort` connect a host-minted rooted filesystem capability over an admitted port. A port alone is not a filesystem path grant.
+
+## Related
+
+- [Transport API](./transport)
+- [Embedding in a host](../guides/embedding-in-a-host)

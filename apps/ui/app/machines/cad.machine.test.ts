@@ -1,17 +1,17 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { createActor, createCallbackLogic, setup, types, waitFor } from 'xstate';
+import { createActor, createCallbackLogic, setup, waitFor } from 'xstate';
 import type { EventObject } from 'xstate';
 import { RenderTimeoutError } from '@taucad/runtime/client';
-import type { CapabilitiesManifest, KernelIssue, RenderOutcome, TelemetryEntry } from '@taucad/runtime';
+import type { KernelIssue, RenderOutcome, TelemetryEntry } from '@taucad/runtime';
 import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { ParameterManifest } from '@taucad/parameters';
 import type { Geometry } from '@taucad/types';
 import type * as RuntimeFileSystem from '@taucad/runtime/filesystem';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
-import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
-import { cadMachine, disposeCadRuntime, selectCadFailureIssues } from '#machines/cad.machine.js';
+import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { cadMachine, disposeCadRuntime, selectCadFailureIssues, selectCadLoadingPhase } from '#machines/cad.machine.js';
 import type { CadContext } from '#machines/cad.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
 import type { AppRuntimeClient, KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -139,58 +139,6 @@ const stubFailureIssues: KernelIssue[] = [
     severity: 'error',
   },
 ];
-
-type AppRuntimeExportRoute = NonNullable<ReturnType<AppRuntimeClient['bestRouteFor']>>;
-
-const stubExportRoute = {
-  targetFormat: 'glb',
-  kernelId: 'replicad',
-  sourceFormat: 'gltf',
-  fidelity: 'mesh',
-  exportOptions: { schema: {}, defaults: {} },
-} satisfies AppRuntimeExportRoute;
-
-const stubCapabilities: CapabilitiesManifest = {
-  routes: [stubExportRoute],
-  renderCapabilities: {},
-  registrations: [],
-};
-
-type ExportAvailabilityEvent = {
-  type: 'geometryUnit.exportAvailabilityChanged';
-  actorId: string;
-  available: boolean;
-};
-
-function createParentActor() {
-  const parentMachine = setup({
-    schemas: {
-      context: types<{ events: ExportAvailabilityEvent[] }>(),
-      events: eventSchemas<ExportAvailabilityEvent>(),
-    },
-  }).createMachine({
-    context: { events: [] },
-    on: {
-      'geometryUnit.exportAvailabilityChanged': {
-        context: ({ context, event }) => ({ events: [...context.events, event] }),
-      },
-    },
-  });
-
-  return createActor(parentMachine).start();
-}
-
-function createExportableRuntimeClient(): AppRuntimeClient {
-  const client = createMockAppRuntimeClient();
-  Object.defineProperty(client, 'capabilities', {
-    value: stubCapabilities,
-    configurable: true,
-  });
-  vi.mocked(client.bestRouteFor).mockImplementation((format) =>
-    format === stubExportRoute.targetFormat ? stubExportRoute : undefined,
-  );
-  return client;
-}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -393,6 +341,18 @@ describe('cadMachine', () => {
   // State: idle
   // =========================================================================
   describe('idle', () => {
+    it.each(['jscad', 'replicad'])('should leave route-specific topology defaults to %s', async (kernelId) => {
+      const { actor, mockClient } = await startAndConnect();
+      actor.send({ type: 'activeKernelChanged', kernelId });
+
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      expect(mockClient.render).toHaveBeenCalledWith({
+        source: { path: stubEntryPath },
+        content: { includeEdges: true },
+      });
+      actor.stop();
+    });
+
     it('should forward setEntryPath to runtime client as render', async () => {
       const { actor, mockClient } = await startAndConnect();
 
@@ -493,6 +453,26 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
+    it('should re-assert a superseded commit without its staged bytes', async () => {
+      const { actor, mockClient } = await startAndConnect();
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      vi.mocked(mockClient.render).mockClear();
+      vi.mocked(mockClient.render).mockResolvedValueOnce({ superseded: true });
+      vi.mocked(mockClient.render).mockResolvedValueOnce(settledRender());
+
+      actor.send({ type: 'commitParameters', stage: { '.tau/parameters/main.ts.json': new Uint8Array([1, 2, 3]) } });
+
+      await vi.waitFor(() => {
+        expect(mockClient.render).toHaveBeenCalledTimes(2);
+      });
+      /* The first attempt staged the bytes; the re-assert renders what storage already holds. */
+      expect(vi.mocked(mockClient.render).mock.calls[1]?.[0]).toEqual({
+        source: { path: stubEntryPath },
+        content: { includeEdges: true },
+      });
+      actor.stop();
+    });
+
     it('should dispatch a drag sample as a transient render that stages nothing', async () => {
       const { actor, mockClient } = await startAndConnect();
       actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
@@ -537,6 +517,20 @@ describe('cadMachine', () => {
         content: { includeEdges: true },
       });
       expect(actor.getSnapshot().context.entryPath).toEqual(stubEntryPath);
+      actor.stop();
+    });
+
+    it('should stage the initial files on the first render only', async () => {
+      const { actor, mockClient } = await startAndConnect();
+      vi.mocked(mockClient.render).mockClear();
+      const stage = { 'main.ts': new Uint8Array([1]) };
+      const sidecar = { '.tau/parameters/main.ts.json': new Uint8Array([2]) };
+
+      actor.send({ type: 'initializeModel', entryPath: stubEntryPath, stage });
+      actor.send({ type: 'commitParameters', stage: sidecar });
+
+      // A kernel that cannot see the preview mount receives its bytes once; the commit carries only its own.
+      expect(vi.mocked(mockClient.render).mock.calls.map(([request]) => request.stage)).toEqual([stage, sidecar]);
       actor.stop();
     });
 
@@ -783,6 +777,20 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
+    it('should not publish a drag sample as the geometry the model evaluated', async () => {
+      const { actor } = await startAndConnect();
+      const emitted: unknown[] = [];
+      actor.on('geometryEvaluated', (event) => emitted.push(event));
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+
+      actor.send({ type: 'scrubParameters', parameters: { height: 21 } });
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
+
+      expect(emitted).toHaveLength(0);
+      expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
+      actor.stop();
+    });
+
     /* R4: the refusal has to leave the unit — the project machine is what the
      * live session, and through it the sidebar row, reads. */
     it('tells its parent why the kernel was refused, after saying it was trying', async () => {
@@ -810,151 +818,38 @@ describe('cadMachine', () => {
       parentRef.stop();
     });
 
-    it('should keep running availability-affecting transitions without a parentRef', async () => {
-      const mockClient = createExportableRuntimeClient();
-      const { actor } = await startAndConnect({
-        connectResult: async () => ({
-          type: 'kernelConnected',
-          client: mockClient,
-          cleanups: [],
-        }),
-      });
+    it('should record the active kernel alongside its geometry', async () => {
+      const { actor } = await startAndConnect();
 
       actor.send({ type: 'activeKernelChanged', kernelId: 'replicad' });
-      actor.send({
-        type: 'geometryComputed',
-        geometry: stubGeometry,
-        issues: [],
-      });
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
 
       expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
       expect(actor.getSnapshot().context.activeKernelId).toBe('replicad');
       actor.stop();
     });
 
-    it('should notify the parentRef when export availability becomes true', async () => {
-      const parentRef = createParentActor();
-      const mockClient = createExportableRuntimeClient();
-      const { actor } = await startAndConnect({
-        parentRef,
-        connectResult: async () => ({
-          type: 'kernelConnected',
-          client: mockClient,
-          cleanups: [],
-        }),
-      });
-
-      actor.send({ type: 'activeKernelChanged', kernelId: 'replicad' });
-      actor.send({
-        type: 'geometryComputed',
-        geometry: stubGeometry,
-        issues: [],
-      });
-
-      await waitFor(parentRef, (state) => state.context.events.some((event) => event.available));
-      const availableEvent = parentRef.getSnapshot().context.events.find((event) => event.available);
-      expect(availableEvent).toEqual({
-        type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: actor.id,
-        available: true,
-      });
-
-      actor.stop();
-      parentRef.stop();
-    });
-
-    it('should retain viewable geometry but disable export while initializeModel is pending', async () => {
-      const parentRef = createParentActor();
-      const mockClient = createExportableRuntimeClient();
-      const { actor } = await startAndConnect({
-        parentRef,
-        connectResult: async () => ({
-          type: 'kernelConnected',
-          client: mockClient,
-          cleanups: [],
-        }),
-      });
-
-      actor.send({ type: 'activeKernelChanged', kernelId: 'replicad' });
-      actor.send({
-        type: 'geometryComputed',
-        geometry: stubGeometry,
-        issues: [],
-      });
-      await waitFor(parentRef, (state) => state.context.events.some((event) => event.available));
+    it('should retain viewable geometry while initializeModel is pending', async () => {
+      const { actor } = await startAndConnect();
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
 
       actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
 
-      await waitFor(parentRef, (state) => state.context.events.at(-1)?.available === false);
-      expect(parentRef.getSnapshot().context.events.at(-1)).toEqual({
-        type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: actor.id,
-        available: false,
-      });
       expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
       expect(actor.getSnapshot().context.latestGeometryOutcome).toBeUndefined();
-
       actor.stop();
-      parentRef.stop();
     });
 
-    it('should disable export after failure without clearing viewable geometry', async () => {
-      const parentRef = createParentActor();
-      const mockClient = createExportableRuntimeClient();
-      const { actor } = await startAndConnect({
-        parentRef,
-        connectResult: async () => ({
-          type: 'kernelConnected',
-          client: mockClient,
-          cleanups: [],
-        }),
-      });
-
+    it('should keep viewable geometry after a failed render', async () => {
+      const { actor } = await startAndConnect();
       actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
-      actor.send({ type: 'activeKernelChanged', kernelId: 'replicad' });
-      actor.send({
-        type: 'geometryComputed',
-        geometry: stubGeometry,
-        issues: [],
-      });
-      await waitFor(parentRef, (state) => state.context.events.at(-1)?.available === true);
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
 
       actor.send({ type: 'geometryFailed', issues: stubFailureIssues });
 
-      await waitFor(parentRef, (state) => state.context.events.at(-1)?.available === false);
       expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
-      expect(parentRef.getSnapshot().context.events.at(-1)?.available).toBe(false);
+      expect(actor.getSnapshot().context.latestGeometryOutcome).toBe('failure');
       actor.stop();
-      parentRef.stop();
-    });
-
-    it('should not notify the parent when export availability is unchanged', async () => {
-      const parentRef = createParentActor();
-      const mockClient = createExportableRuntimeClient();
-      const { actor } = await startAndConnect({
-        parentRef,
-        connectResult: async () => ({
-          type: 'kernelConnected',
-          client: mockClient,
-          cleanups: [],
-        }),
-      });
-
-      actor.send({ type: 'activeKernelChanged', kernelId: 'replicad' });
-      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
-      await waitFor(parentRef, (state) => state.context.events.at(-1)?.available === true);
-      const notifications = parentRef.getSnapshot().context.events.length;
-
-      // Repeated results that leave availability at `true` must not mint a new
-      // parent snapshot for its 20-odd subscribers.
-      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
-      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
-      actor.send({ type: 'activeKernelChanged', kernelId: 'replicad' });
-      await Promise.resolve();
-
-      expect(parentRef.getSnapshot().context.events).toHaveLength(notifications);
-      actor.stop();
-      parentRef.stop();
     });
   });
 
@@ -1381,6 +1276,32 @@ describe('cadMachine', () => {
   // State: parked (R3)
   // =========================================================================
   describe('parked', () => {
+    it('should skip the first render when hidden before the kernel connects', async () => {
+      const client = createMockAppRuntimeClient();
+      let resolveConnect!: (value: {
+        type: 'kernelConnected';
+        client: AppRuntimeClient;
+        cleanups: Array<() => void>;
+      }) => void;
+      const connected = new Promise<{ type: 'kernelConnected'; client: AppRuntimeClient; cleanups: Array<() => void> }>(
+        (resolve) => {
+          resolveConnect = resolve;
+        },
+      );
+      const { actor } = createTestActor({ connectResult: async () => connected });
+      actor.start();
+      actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
+      actor.send({ type: 'parkRuntime' });
+
+      resolveConnect({ type: 'kernelConnected', client, cleanups: [] });
+      await waitFor(actor, (snapshot) => snapshot.value === 'parked');
+
+      expect(client.render).not.toHaveBeenCalled();
+      expect(client.terminate).toHaveBeenCalledOnce();
+      expect(actor.getSnapshot().context.entryPath).toBe(stubEntryPath);
+      actor.stop();
+    });
+
     it('releases the kernel process and keeps everything else', async () => {
       const cleanup = vi.fn();
       const client = createMockAppRuntimeClient();
@@ -1426,7 +1347,7 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
-    it('refuses to park a render in flight, and keeps its result', async () => {
+    it('defers park through a hidden parameter edit and renders the latest stage only on reveal', async () => {
       const client = createMockAppRuntimeClient();
       const { actor } = await startAndConnect({
         connectResult: async () => ({ type: 'kernelConnected', client, cleanups: [] }),
@@ -1436,13 +1357,44 @@ describe('cadMachine', () => {
       expect(actor.getSnapshot().matches('rendering')).toBe(true);
 
       actor.send({ type: 'parkRuntime' });
+      const stage: Record<string, Uint8Array<ArrayBuffer>> = {
+        '.tau/parameters/main.ts.json': new Uint8Array(new ArrayBuffer(1)),
+      };
+      stage['.tau/parameters/main.ts.json']![0] = 2;
+      const rendersBeforeEdit = vi.mocked(client.render).mock.calls.length;
+      actor.send({ type: 'commitParameters', stage });
 
       expect(actor.getSnapshot().matches('rendering')).toBe(true);
+      expect(actor.getSnapshot().context.parameterRender).toMatchObject({ kind: 'commit', stage });
+      expect(vi.mocked(client.render).mock.calls).toHaveLength(rendersBeforeEdit);
       expect(client.terminate).not.toHaveBeenCalled();
 
       actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
+      actor.send({ type: 'stateChanged', state: 'idle' });
+      expect(actor.getSnapshot().value).toBe('parked');
       expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
       expect(actor.getSnapshot().context.latestGeometryOutcome).toBe('success');
+
+      actor.send({ type: 'resumeRuntime' });
+      await vi.waitFor(() => {
+        expect(vi.mocked(client.render).mock.calls.some(([request]) => request.stage === stage)).toBe(true);
+      });
+      actor.stop();
+    });
+
+    it('should retain parameter intent while parked for the next resume', async () => {
+      const { actor } = await startAndConnect();
+      actor.send({ type: 'parkRuntime' });
+      const stage: Record<string, Uint8Array<ArrayBuffer>> = {
+        '.tau/parameters/main.ts.json': new Uint8Array(new ArrayBuffer(1)),
+      };
+      stage['.tau/parameters/main.ts.json']![0] = 1;
+
+      actor.send({ type: 'commitParameters', stage });
+
+      expect(actor.getSnapshot().value).toBe('parked');
+      expect(actor.getSnapshot().context.lastRequestedRenderId).toBeGreaterThan(0);
+      expect(actor.getSnapshot().context.parameterRender).toMatchObject({ kind: 'commit', stage });
       actor.stop();
     });
 
@@ -1925,6 +1877,20 @@ describe('cadMachine', () => {
       expect(connected.actor.getSnapshot().hasTag('cad-loading')).toBe(false);
       expect(connected.actor.getSnapshot().hasTag('cad-runtime-error')).toBe(true);
       connected.actor.stop();
+    });
+
+    it('shows a loading phase for a committed render but not for a drag sample', async () => {
+      const { actor } = await startAndConnect();
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      expect(selectCadLoadingPhase(actor.getSnapshot())).toBe('rendering');
+
+      actor.send({ type: 'scrubParameters', parameters: { height: 21 } });
+      expect(actor.getSnapshot().hasTag('cad-loading')).toBe(true);
+      expect(selectCadLoadingPhase(actor.getSnapshot())).toBeUndefined();
+
+      actor.send({ type: 'commitParameters', stage: { '.tau/parameters/main.ts.json': new Uint8Array([1]) } });
+      expect(selectCadLoadingPhase(actor.getSnapshot())).toBe('rendering');
+      actor.stop();
     });
 
     it('returns no failure for a successful render with diagnostics', async () => {

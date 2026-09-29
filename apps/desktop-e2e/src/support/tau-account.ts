@@ -44,19 +44,24 @@ export const tauBillingAccountArgs = (action: 'fund' | 'close', email: string): 
 /**
  * Read the billing environment this run's API is configured for.
  *
- * `undefined` means the API has no billing environment at all — the isolated
- * completed-artifact stack — so there is nothing to fund or close.
+ * `undefined` means the self-host completed-artifact API has no billing
+ * environment, so there is nothing to fund or close.
  */
 const tauBillingEnvironment = async (token: string): Promise<string | undefined> => {
   const response = await fetch(`${desktopE2EApiUrl}/v1/billing/credits`, {
     headers: { authorization: `Bearer ${token}`, origin: desktopE2EFrontendUrl },
   });
+  const selfHostedArtifact = desktopE2ECompletedArtifact && process.env['TAU_E2E_COMPLETED_CLOUD_GATEWAY'] !== 'true';
+  if (selfHostedArtifact && response.status === 404) {
+    // The self-hosted completed-artifact API does not register billing routes.
+    return undefined;
+  }
   if (response.status === 503) {
     /* The API answers 503 both without a billing environment (the isolated
      * completed-artifact stack, nothing to fund) and without a usable
      * `BILLING_USAGE_CURSOR_SECRET` (a misconfigured developer API, which must
      * not silently skip funding and fail later as insufficient credit). */
-    if (desktopE2ECompletedArtifact) {
+    if (selfHostedArtifact) {
       return undefined;
     }
     throw new Error(
@@ -66,18 +71,83 @@ const tauBillingEnvironment = async (token: string): Promise<string | undefined>
   if (!response.ok) {
     throw new Error(`Reading the Tau billing environment failed with HTTP ${String(response.status)}.`);
   }
-  return ((await response.json()) as { readonly environment?: string }).environment;
+  const { environment } = (await response.json()) as { readonly environment?: string };
+  if (desktopE2ECompletedArtifact && !selfHostedArtifact && environment !== 'development') {
+    throw new Error('Completed-artifact cloud billing requires the disposable development environment.');
+  }
+  return environment;
+};
+
+/** Recheck the exact disposable Compose database before a completed-package billing write. */
+const completedArtifactBillingDatabase = async (environment: string): Promise<string> => {
+  const databaseUrl = process.env['DATABASE_URL'];
+  const project = process.env['TAU_E2E_COMPOSE_PROJECT'];
+  const container = process.env['TAU_E2E_POSTGRES_CONTAINER'];
+  if (
+    process.env['TAU_E2E_COMPLETED_CLOUD_GATEWAY'] !== 'true' ||
+    environment !== 'development' ||
+    !databaseUrl ||
+    process.env['BILLING_DATABASE_URL'] !== databaseUrl ||
+    !project ||
+    !/^tau-desktop-e2e-[0-9a-f-]{36}$/u.test(project) ||
+    !container ||
+    !/^[a-f0-9]{12,64}$/u.test(container) ||
+    process.env['TAU_E2E_POSTGRES_DATABASE'] !== 'desktop_e2e' ||
+    process.env['TAU_E2E_POSTGRES_USER'] !== 'desktop_e2e'
+  ) {
+    throw new Error('Completed-artifact billing requires the verified disposable development database.');
+  }
+  const url = new URL(databaseUrl);
+  if (
+    url.protocol !== 'postgresql:' ||
+    url.hostname !== '127.0.0.1' ||
+    !url.port ||
+    url.port === '5432' ||
+    url.username !== 'desktop_e2e' ||
+    url.pathname !== '/desktop_e2e' ||
+    url.search !== '' ||
+    url.hash !== ''
+  ) {
+    throw new Error('Completed-artifact billing database must be the owned loopback PostgreSQL instance.');
+  }
+  const { stdout: publishedPort } = await execFileAsync('docker', ['port', container, '5432/tcp'], {
+    encoding: 'utf8',
+  });
+  if (publishedPort.trim() !== url.host) {
+    throw new Error('Completed-artifact billing URL does not match the owned container port.');
+  }
+  const statement = "select current_setting('cluster_name') || '|' || current_database() || '|' || current_user";
+  const { stdout } = await execFileAsync(
+    'docker',
+    ['exec', container, 'psql', '-U', 'desktop_e2e', '-d', 'desktop_e2e', '-At', '-c', statement],
+    { encoding: 'utf8' },
+  );
+  if (stdout.trim() !== `${project}|desktop_e2e|desktop_e2e`) {
+    throw new Error('Completed-artifact billing database ownership changed before the write.');
+  }
+  return databaseUrl;
 };
 
 const runTauBillingAccount = async (action: 'fund' | 'close', email: string, environment: string): Promise<void> => {
-  if (desktopE2ECompletedArtifact) {
-    throw new Error('Completed-artifact E2E cannot fund or close accounts through the developer database.');
-  }
-  await execFileAsync(process.execPath, tauBillingAccountArgs(action, email), {
+  const ownedDatabaseUrl = desktopE2ECompletedArtifact
+    ? await completedArtifactBillingDatabase(environment)
+    : undefined;
+  const arguments_ = tauBillingAccountArgs(action, email);
+  await execFileAsync(process.execPath, ownedDatabaseUrl ? arguments_.slice(1) : arguments_, {
     cwd: workspaceRoot,
     encoding: 'utf8',
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment contract
-    env: { ...process.env, BILLING_ENVIRONMENT: environment },
+    /* eslint-disable @typescript-eslint/naming-convention -- process environment contract */
+    env: ownedDatabaseUrl
+      ? {
+          PATH: process.env['PATH'],
+          HOME: process.env['HOME'],
+          DATABASE_URL: ownedDatabaseUrl,
+          BILLING_DATABASE_URL: ownedDatabaseUrl,
+          BILLING_ENVIRONMENT: environment,
+          NODE_ENV: 'development',
+        }
+      : { ...process.env, BILLING_ENVIRONMENT: environment },
+    /* eslint-enable @typescript-eslint/naming-convention -- process environment contract */
   });
 };
 

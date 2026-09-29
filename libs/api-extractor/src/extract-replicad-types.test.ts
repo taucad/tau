@@ -155,6 +155,15 @@ describe('Replicad model authoring types', () => {
         entry,
         source +
           `
+import { axis, face, frame, group, isValidInterfaceName } from '@taucad/replicad/annotations';
+import type { InterfaceDeclarations } from '@taucad/replicad/annotations';
+const declared: InterfaceDeclarations = {
+  top: face((finder) => finder.inPlane('XY', 0)),
+  bore: axis((finder) => finder.inPlane('XY', 0)),
+  origin: frame({ origin: [0, 0, 0] }),
+  mount: group([face((finder) => finder.inPlane('XY', 0))]),
+};
+const valid: boolean = isValidInterfaceName('motor.shaft');
 // @ts-expect-error Material factors require numbers.
 const invalid: Material = { extensions: { KHR_materials_anisotropy: { anisotropyStrength: 'bad' } } };
 // @ts-expect-error glTF alpha modes are a closed vocabulary.

@@ -51,9 +51,13 @@ vi.mock('react-router', () => ({
   useNavigation: () => ({ location: pendingLocation, state: pendingLocation ? 'loading' : 'idle' }),
 }));
 vi.mock('#components/nav/project-chat-list.js', () => ({
-  ProjectChatList: ({ project }: { readonly project: { readonly name: string } }) => (
-    <div data-testid={`chats-${project.name}`} />
-  ),
+  ProjectChatList: ({
+    project,
+    isExpanded,
+  }: {
+    readonly project: { readonly name: string };
+    readonly isExpanded: boolean;
+  }) => (isExpanded ? <div data-testid={`chats-${project.name}`} /> : null),
 }));
 vi.mock('#components/ui/sidebar.js', () => ({
   SidebarGroup: ({ children }: { readonly children: ReactNode }) => <section>{children}</section>,
@@ -114,14 +118,14 @@ vi.mock('#components/inline-text-editor.js', () => ({
     </div>
   ),
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { success: vi.fn() } }));
+vi.mock('#components/ui/sonner.js', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('@taucad/ui/components/alert-dialog', () => ({
   AlertDialog: ({ children, ...properties }: { readonly children: ReactNode } & Record<string, unknown>) =>
     properties['open'] === false ? null : <div role='dialog'>{children}</div>,
   AlertDialogContent: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   AlertDialogHeader: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   AlertDialogTitle: ({ children }: { readonly children: ReactNode }) => <h3>{children}</h3>,
-  AlertDialogDescription: ({ children }: { readonly children: ReactNode }) => <p>{children}</p>,
+  AlertDialogDescription: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   AlertDialogFooter: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   AlertDialogCancel: ({ children }: { readonly children: ReactNode }) => <button type='button'>{children}</button>,
   AlertDialogAction: ({ children, ...properties }: { readonly children: ReactNode } & Record<string, unknown>) => (
@@ -136,6 +140,7 @@ vi.mock('@taucad/ui/components/alert-dialog', () => ({
 const mockRow = vi.fn();
 const mockLiveNow = vi.fn();
 const mockCloseProject = vi.fn();
+const mockGetProjectClosePlan = vi.fn();
 let liveProjectIds: readonly string[] = [];
 vi.mock('#hooks/use-sessions.js', () => ({
   useLiveProjectIds: () => liveProjectIds,
@@ -150,6 +155,9 @@ vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => {
     useSidebarCommands: () => ({ closeProject: mockCloseProject, closeChat: vi.fn(), openProject: vi.fn() }),
   };
 });
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({ getProjectClosePlan: mockGetProjectClosePlan }),
+}));
 
 const closedRow = (projectId: string): SidebarStatusModule.ProjectSidebarRow => ({
   projectId,
@@ -184,7 +192,7 @@ const projectsResult = {
   projects: [firstProject, secondProject],
   isLoading: false,
   error: undefined,
-  deleteProject: vi.fn(),
+  deleteProject: vi.fn(async () => true),
   duplicateProject: vi.fn(),
   updateName: vi.fn(),
 };
@@ -208,6 +216,12 @@ describe('ProjectNavigation', () => {
     liveProjectIds = [];
     mockRow.mockImplementation((projectId: string) => closedRow(projectId));
     mockLiveNow.mockReturnValue({ projects: 0, idleProjectIds: [] });
+    mockGetProjectClosePlan.mockResolvedValue({
+      stoppableRunCount: 0,
+      stoppableChatIds: [],
+      liveChatIds: [],
+      continuingRuns: [],
+    });
   });
 
   it('renders one Projects group with every project in deterministic activity order', () => {
@@ -439,7 +453,7 @@ describe('ProjectNavigation', () => {
 
   /* Pin (f): the dialog is the question, and it is asked only when there is
    * something to interrupt (I24). */
-  it('closes an idle project outright and asks before stopping running agents', () => {
+  it('closes an idle project outright and asks before closing one with running work', async () => {
     liveProjectIds = ['proj_one', 'proj_two'];
     mockRow.mockImplementation((projectId: string) => ({
       ...closedRow(projectId),
@@ -453,34 +467,80 @@ describe('ProjectNavigation', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close Two' }));
-    expect(screen.getByRole('heading', { name: 'Stop 2 agents and close Two?' })).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'Their work so far is saved locally as revisions. If backup is unavailable, it stays queued for the next connection. You can reopen the project any time.',
-      ),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Stop and close' }));
+    expect(await screen.findByRole('heading', { name: 'Close Two?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(mockCloseProject).toHaveBeenLastCalledWith('proj_two');
   });
 
-  it('asks before trashing a project whose agents are running', async () => {
+  it('asks with the projected unseen-chat close plan before promising any stop', async () => {
+    liveProjectIds = ['proj_two'];
+    mockRow.mockImplementation((projectId: string) => ({
+      ...closedRow(projectId),
+      glyph: projectId === 'proj_two' ? 'busy' : 'none',
+      runs: projectId === 'proj_two' ? 3 : 0,
+    }));
+    mockGetProjectClosePlan.mockResolvedValue({
+      stoppableRunCount: 1,
+      stoppableChatIds: ['chat-unseen'],
+      liveChatIds: ['chat-unseen', 'chat-foreign', 'chat-background'],
+      continuingRuns: [
+        { id: 'run-foreign', label: 'Foreign chat', reason: 'other-build' },
+        { id: 'run-background', label: 'Background chat', reason: 'background-window' },
+      ],
+    });
+    render(<ProjectNavigation />);
+    fireEvent.click(screen.getByRole('button', { name: 'Close Two' }));
+    expect(await screen.findByRole('heading', { name: 'Stop 1 run and close Two?' })).toBeInTheDocument();
+    expect(screen.getByText(/Foreign chat.*another version of Tau/)).toBeInTheDocument();
+    expect(screen.getByText(/Background chat.*background/)).toBeInTheDocument();
+    expect(mockGetProjectClosePlan).toHaveBeenCalledWith('proj_two');
+    fireEvent.click(screen.getByRole('button', { name: 'Stop and close' }));
+    expect(mockCloseProject).toHaveBeenCalledWith('proj_two');
+  });
+
+  it('closes running work before a separate Delete gesture, without trashing it yet', async () => {
     mockRow.mockImplementation((projectId: string) => ({
       ...closedRow(projectId),
       glyph: projectId === 'proj_two' ? 'busy' : 'none',
       runs: projectId === 'proj_two' ? 2 : 0,
     }));
+    mockGetProjectClosePlan.mockResolvedValue({
+      stoppableRunCount: 1,
+      stoppableChatIds: ['chat-unseen'],
+      liveChatIds: ['chat-unseen'],
+      continuingRuns: [],
+    });
     render(<ProjectNavigation />);
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Move to Trash' })[0]!);
 
     expect(projectsResult.deleteProject).not.toHaveBeenCalled();
-    expect(screen.getByRole('heading', { name: 'Stop 2 agents and close Two?' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'Stop 1 run and close Two before deleting?' }),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Stop and close' }));
     await waitFor(() => {
       expect(mockCloseProject).toHaveBeenLastCalledWith('proj_two');
-      expect(projectsResult.deleteProject).toHaveBeenCalledExactlyOnceWith('proj_two');
+      expect(projectsResult.deleteProject).not.toHaveBeenCalled();
     });
+  });
+
+  it('blocks Move to Trash when another build still owns a run', async () => {
+    mockGetProjectClosePlan.mockResolvedValue({
+      stoppableRunCount: 0,
+      stoppableChatIds: [],
+      liveChatIds: ['chat-foreign'],
+      continuingRuns: [{ id: 'run-foreign', label: 'Foreign chat', reason: 'other-build' }],
+    });
+    render(<ProjectNavigation />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Move to Trash' })[0]!);
+    await waitFor(() => {
+      expect(mockGetProjectClosePlan).toHaveBeenCalledWith('proj_two');
+    });
+    expect(screen.queryByRole('heading', { name: /close Two before deleting/u })).not.toBeInTheDocument();
+    expect(projectsResult.deleteProject).not.toHaveBeenCalled();
+    expect(mockCloseProject).not.toHaveBeenCalled();
   });
 
   it('offers no Close on a project that is already closed', () => {

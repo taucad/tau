@@ -1,14 +1,12 @@
-import type { MachineActors } from '#lib/xstate.lib.js';
 import { Topic } from '@taucad/events';
 import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
 import type { FileOperation, PreparedFileOperation } from '@taucad/fs-client/file-content-service';
-import { createActor, createCallbackLogic, createAsyncLogic, waitFor } from 'xstate';
+import { waitFor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { fileParameterEntrySchema, parameterEntryPath, parametersDirectory } from '@taucad/types';
 import type { JSONValue } from '@taucad/types';
-import { loadParameterSnapshot, refreshParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
-import type { ParameterAuthority } from '@taucad/parameters/authority';
-import { parameterSetMachine, submitParameterRequest } from '@taucad/parameters/set-machine';
+import { createParameterSetActor, submitParameterRequest } from '@taucad/parameters/set-machine';
+import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { serializeParameterRecord } from '@taucad/parameters';
 import type {
   ParameterManifest,
@@ -78,7 +76,7 @@ export type ParameterSetService = Readonly<{
   draft(key: ParameterDraftKey): ParameterDraft | undefined;
   /** Retain or clear one row's draft; `undefined` clears it. */
   setDraft(key: ParameterDraftKey, draft: ParameterDraft | undefined): void;
-  /** Observe drafts being discarded elsewhere, so a mounted row re-reads its own. */
+  /** Observe drafts being cleared or discarded (never set), so a mounted row re-reads its own. */
   subscribeDrafts(listener: () => void): () => void;
   /**
    * Commit one field of one group against the authority's current record. `base` scopes the
@@ -259,55 +257,43 @@ export const createParameterSetService = (
       return existing;
     }
     const manifestRef = { current: manifest };
-    const authority: ParameterAuthority = {
-      path: () => absolutePath(filePath),
-      read: async (_target, signal) => {
-        signal.throwIfAborted();
-        const path = absolutePath(filePath);
-        return (await options.client.exists(path)) ? options.client.readFile(path) : null;
+    const rooted = (path: string): string => joinPath(options.rootDirectory, path);
+    const actor = createParameterSetActor({
+      target,
+      resolution: manifest.identity.resolution,
+      // The page is handed each manifest the runtime publishes, so a load reads against the held one.
+      resolve: async () => manifestRef.current,
+      files: {
+        watchReady: ({ paths }, onEvent) => {
+          const stops = paths.map((path) =>
+            options.subscribe(path, () => {
+              onEvent({ type: 'change' });
+            }),
+          );
+          return {
+            ready: Promise.resolve(),
+            /* The page's subscriptions end only when the service disposes the actor, so the watch never closes under it. */
+            closed: new Promise<void>(() => {
+              /* Never settles. */
+            }),
+            unsubscribe: () => {
+              for (const stop of stops) {
+                stop();
+              }
+            },
+          };
+        },
+        exists: async (path) => options.client.exists(rooted(path)),
+        readFile: async (path) => options.client.readFile(rooted(path)),
+        writeFileChecked: async ({ path, preconditions, ...write }) =>
+          options.client.writeFileChecked({
+            ...write,
+            path: rooted(path),
+            preconditions: preconditions.map((precondition) => ({ ...precondition, path: rooted(precondition.path) })),
+          }),
       },
-      writeChecked: async ({ signal, ...write }) => {
-        signal?.throwIfAborted();
-        return options.client.writeFileChecked(write);
-      },
-    };
-    const actor = createActor(
-      parameterSetMachine.provide({
-        actors: {
-          loadParameterSet: createAsyncLogic({
-            run: async ({ input, signal }) =>
-              input.current !== undefined && input.current.manifest.revision === manifestRef.current.revision
-                ? refreshParameterSnapshot({ current: input.current, authority, signal })
-                : loadParameterSnapshot({
-                    target,
-                    authority,
-                    manifest: async () => manifestRef.current,
-                    signal,
-                    resolution: input.resolution,
-                  }),
-          }),
-          commitParameterSet: createAsyncLogic({
-            run: async ({ input: change, signal }) => commitParameterChange({ change, authority, signal }),
-          }),
-          observeParameterSet: createCallbackLogic(({ sendBack }) => {
-            try {
-              return options.subscribe(parameterEntryPath(filePath), () => {
-                sendBack({ type: 'watch.changed' });
-              });
-            } catch (error) {
-              sendBack({
-                type: 'watch.error',
-                message: error instanceof Error ? error.message : 'Observation failed.',
-              });
-              return () => undefined;
-            }
-          }),
-        } satisfies Partial<MachineActors<typeof parameterSetMachine>>,
-      }),
-      { input: { target, resolution: manifest.identity.resolution } },
-    );
+    });
     const state: TargetState = { target, manifestRef, actor };
-    actor.start();
     clients.set(key, state);
     actorsChanged();
     return state;
@@ -605,14 +591,14 @@ export const createParameterSetService = (
     draft: (key) => drafts.get(draftKey(key))?.draft,
     setDraft: (key, draft) => {
       const mapKey = draftKey(key);
-      if (draft === undefined) {
-        if (!drafts.delete(mapKey)) {
-          return;
-        }
-      } else {
+      if (draft !== undefined) {
+        // Listeners act only on a cleared draft, so a keystroke notifies nobody.
         drafts.set(mapKey, { key, draft, label: draftLabel(key.group, key.pointer) });
+        return;
       }
-      draftChanges.emit();
+      if (drafts.delete(mapKey)) {
+        draftChanges.emit();
+      }
     },
     subscribeDrafts: (listener) => draftChanges.subscribe(listener),
     commitValue,

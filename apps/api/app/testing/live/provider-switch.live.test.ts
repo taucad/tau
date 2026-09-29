@@ -131,7 +131,7 @@ const scriptedResults = (invocation: HostToolInvocation): HostToolResult =>
         isError: true,
       };
 
-/** Anthropic's reasoning floor is a thinking budget rather than an effort word. */
+/** Manual Anthropic thinking uses a minimum budget rather than an effort word. */
 const economyThinkingBudget = 1024;
 /**
  * How much of the compacting leg's window the history it inherits fills.
@@ -160,9 +160,9 @@ const legModel = (modelId: string, contextWindow?: number, maxTokens?: number): 
   const reasoning: AgentSessionModel['reasoning'] =
     declared === undefined
       ? undefined
-      : identity.providerKind === 'anthropic'
-        ? { budgetTokens: economyThinkingBudget }
-        : { ...declared, effort: 'low' };
+      : declared.budgetTokens === undefined
+        ? { ...declared, effort: 'low' }
+        : { budgetTokens: economyThinkingBudget };
   return {
     ...identity,
     maxTokens: maxTokens ?? liveCompletionCeiling(modelId),
@@ -254,7 +254,7 @@ const runLeg = async (options: LegOptions): Promise<HostRunSnapshot> => {
     systemPrompt: liveCadSystemPrompt({ chatId: thread.chatId, modelId: options.modelId }),
     model: legModel(options.modelId, options.contextWindow, options.maxTokens),
     toolRegistry: createLiveToolRegistry({ results: scriptedResults }),
-    eventLog: await createNodeEventLog({ filePath: thread.filePath }),
+    eventLog: await createNodeEventLog({ filePath: thread.filePath, access: 'write' }),
     ...(options.onCompaction === undefined ? {} : { onCompaction: options.onCompaction }),
     ...(options.stopAfterToolResult === true ? { onLiveEvent: stopAfterToolResult } : {}),
   });
@@ -373,14 +373,14 @@ const recallTurn = `Without calling any tool, reply with the exact marker the ea
 const switchPairs: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
   { from: 'openai-gpt-5.6-luna', to: 'google-gemini-3.8-flash' },
   { from: 'google-gemini-3.8-flash', to: 'openai-gpt-5.6-luna' },
-  { from: 'openai-gpt-5.6-luna', to: 'anthropic-claude-haiku-4.5' },
-  { from: 'anthropic-claude-haiku-4.5', to: 'openai-gpt-5.6-luna' },
-  { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.8-flash' },
-  { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-haiku-4.5' },
+  { from: 'openai-gpt-5.6-luna', to: 'anthropic-claude-sonnet-5.5' },
+  { from: 'anthropic-claude-sonnet-5.5', to: 'openai-gpt-5.6-luna' },
+  { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-3.8-flash' },
+  { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-sonnet-5.5' },
   { from: 'xai-grok-4.7', to: 'google-gemini-3.8-flash' },
   { from: 'google-gemini-3.8-flash', to: 'xai-grok-4.7' },
-  { from: 'xai-grok-4.7', to: 'anthropic-claude-haiku-4.5' },
-  { from: 'anthropic-claude-haiku-4.5', to: 'xai-grok-4.7' },
+  { from: 'xai-grok-4.7', to: 'anthropic-claude-sonnet-5.5' },
+  { from: 'anthropic-claude-sonnet-5.5', to: 'xai-grok-4.7' },
   { from: 'google-gemini-3.8-flash', to: 'google-gemini-3.1-pro' },
   { from: 'google-gemini-3.1-pro', to: 'google-gemini-3.8-flash' },
 ];
@@ -494,9 +494,9 @@ for (const pair of switchPairs) {
  * the request carries two consecutive `user` messages (W4 pinned behaviour 3).
  */
 const orphanRows: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
-  { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-haiku-4.5' },
-  { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.8-flash' },
-  { from: 'anthropic-claude-haiku-4.5', to: 'openai-gpt-5.6-luna' },
+  { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-sonnet-5.5' },
+  { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-3.8-flash' },
+  { from: 'anthropic-claude-sonnet-5.5', to: 'openai-gpt-5.6-luna' },
 ];
 
 for (const { from, to } of orphanRows) {
@@ -534,8 +534,8 @@ for (const { from, to } of orphanRows) {
 
 /** Compaction then switch, once per target wire, so the summary is proven to replay everywhere. */
 const compactionRows: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
-  { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.8-flash' },
-  { from: 'openai-gpt-5.6-luna', to: 'anthropic-claude-haiku-4.5' },
+  { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-3.8-flash' },
+  { from: 'openai-gpt-5.6-luna', to: 'anthropic-claude-sonnet-5.5' },
   { from: 'google-gemini-3.8-flash', to: 'openai-gpt-5.6-luna' },
 ];
 
@@ -612,8 +612,8 @@ for (const { from, to } of compactionRows) {
 
 /** A parallel tool batch then a switch, on the two wires whose signature and id rules differ most. */
 const parallelRows: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
-  { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.8-flash' },
-  { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-haiku-4.5' },
+  { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-3.8-flash' },
+  { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-sonnet-5.5' },
 ];
 
 for (const { from, to } of parallelRows) {

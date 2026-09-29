@@ -396,7 +396,7 @@ const serializeRecord = (record: ChatRecordFields): Uint8Array<ArrayBuffer> =>
 /* Fields every device moves on every turn: the later instant is the answer. */
 const latestFields = new Set(['updatedAt', 'recencyAt']);
 /* Fields that only ever settle: the earlier instant is the answer, and a tombstone wins. */
-const earliestFields = new Set(['createdAt', 'deletedAt']);
+const earliestFields = new Set(['createdAt', 'deletedAt', 'purgedAt']);
 /* This device's own checkout binding and failure: they never travel (RV-W7 #3). */
 const localFields = ['checkoutId', 'error'] as const;
 

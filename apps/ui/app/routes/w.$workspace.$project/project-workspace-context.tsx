@@ -8,6 +8,8 @@ import { useLocation } from 'react-router';
 import { useSelector } from '@xstate/react';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
+import { searchParameterName } from '#constants/search-parameter.constants.js';
+import { flagParameter } from '#utils/search-parameter.codecs.js';
 
 export const projectWorkspaceKeyCombinations = {
   files: { key: 'f', ctrlKey: true },
@@ -180,6 +182,14 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
   );
 
   const shouldOpenChat = location.state?.openChat === true || location.state?.focusChatComposer === true;
+  const isArchiveOpen = flagParameter.parse(
+    new URLSearchParams(location.search).get(searchParameterName.archivedChats) ?? undefined,
+  );
+  useEffect(() => {
+    if (isEditorReady && isArchiveOpen) {
+      setChatOpen(true);
+    }
+  }, [isArchiveOpen, isEditorReady, setChatOpen]);
   const navigationKey = location.key;
   /* Each sidebar click is its own navigation, even onto the selected chat, so the
    * pane opens once per navigation and a pane the user closes afterwards stays closed. */

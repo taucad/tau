@@ -135,6 +135,61 @@ const createStoreWithFiles = (): {
 
 const createStore = (): ChatStorage => createStoreWithFiles().store;
 
+describe('chat file store — irreversible archive deletion', () => {
+  it('excludes purged chats from every list and direct open, retaining a durable tombstone after reload', async () => {
+    const files = createStoreWithFiles();
+    const chat = await files.store.createChat('proj_archive', { name: 'Archived', messages: [] });
+    const sibling = await files.store.createChat('proj_archive', { name: 'Kept', messages: [] });
+    await files.store.softDeleteChat(chat.id);
+    await files.store.purgeChat(chat.id);
+    const reopened = files.reopen();
+    await expect(reopened.getChat(chat.id)).resolves.toBeUndefined();
+    await Promise.all(
+      [false, true].map(async (includeDeleted) => {
+        await expect(reopened.getChatRecordsForResource('proj_archive', { includeDeleted })).resolves.toEqual([
+          expect.objectContaining({ id: sibling.id }),
+        ]);
+        await expect(reopened.getAllChatRecords({ includeDeleted })).resolves.toEqual([
+          expect.objectContaining({ id: sibling.id }),
+        ]);
+        await expect(reopened.getChatsForResource('proj_archive', { includeDeleted })).resolves.toEqual([
+          expect.objectContaining({ id: sibling.id }),
+        ]);
+        await expect(reopened.getAllChats({ includeDeleted })).resolves.toEqual([
+          expect.objectContaining({ id: sibling.id }),
+        ]);
+      }),
+    );
+    const retained: unknown = JSON.parse(await files.read(`/projects/proj_archive/.tau/chats/${chat.id}/chat.json`));
+    expect(retained).toHaveProperty('deletedAt', expect.any(Number));
+    expect(retained).toHaveProperty('purgedAt', expect.any(Number));
+  });
+
+  it('refuses active chat deletion and cannot restore or overwrite a purged chat', async () => {
+    const files = createStoreWithFiles();
+    const chat = await files.store.createChat('proj_archive', { name: 'Archived', messages: [] });
+    await expect(files.store.purgeChat(chat.id)).rejects.toThrow('Only archived chats');
+    await files.store.softDeleteChat(chat.id);
+    await files.store.purgeChat(chat.id);
+    await expect(files.store.patchChat(chat.id, 'deletedAt', undefined)).resolves.toBeUndefined();
+    await expect(files.store.updateChat(chat.id, chat)).resolves.toBeUndefined();
+    await files.store.putChatRecord(chat);
+    await expect(
+      files.store.createChat(chat.resourceId, { id: chat.id, name: chat.name, messages: [] }),
+    ).rejects.toThrow('cannot be recreated');
+    await expect(files.store.getChat(chat.id)).resolves.toBeUndefined();
+    await expect(files.store.purgeChat(chat.id)).resolves.toBeUndefined();
+  });
+
+  it('serializes purge and restoration so a stale restore cannot resurrect the record', async () => {
+    const files = createStoreWithFiles();
+    const chat = await files.store.createChat('proj_archive', { name: 'Archived', messages: [] });
+    await files.store.softDeleteChat(chat.id);
+    await Promise.all([files.store.purgeChat(chat.id), files.store.patchChat(chat.id, 'deletedAt', undefined)]);
+    await expect(files.reopen().getChat(chat.id)).resolves.toBeUndefined();
+  });
+});
+
 const userMessage = (text: string): MyUIMessage => ({
   id: `msg_${text}`,
   role: 'user',

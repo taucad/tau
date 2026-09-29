@@ -159,6 +159,73 @@ describe('createServicesBroker', () => {
     ]);
   });
 
+  it('keeps a geometry grant through an equivalent agent-host reconnect but revokes on compute change', () => {
+    const { broker, connectGeometry, revokeGeometry, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'widget', computeMode: 'durable' });
+    spawns[0]!.message({
+      type: 'geometry-port-request',
+      requestId: 'suite',
+      workspaceRoot: '/home/widget',
+      engine: 'native',
+    });
+    const grant = connectGeometry.mock.calls[0]?.[0];
+    expect(grant?.stillAuthorized()).toBe(true);
+    revokeGeometry.mockClear();
+
+    broker.retainAgentHost({ workspaceRoot: '/home/widget', projectId: 'widget', attachmentId: 'second-window' });
+    broker.connect('agentHost', { workspaceRoot: '/home/widget/.', projectId: 'widget', computeMode: 'durable' });
+    expect(grant?.stillAuthorized()).toBe(true);
+    expect(revokeGeometry).not.toHaveBeenCalled();
+
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'widget', computeMode: 'off' });
+    expect(grant?.stillAuthorized()).toBe(false);
+    expect(revokeGeometry).toHaveBeenCalledOnce();
+  });
+
+  it('revokes a geometry grant when an agent-host reconnect changes the project identity', () => {
+    const { broker, connectGeometry, revokeGeometry, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'widget-a', computeMode: 'durable' });
+    spawns[0]!.message({
+      type: 'geometry-port-request',
+      requestId: 'suite',
+      workspaceRoot: '/home/widget',
+      engine: 'native',
+    });
+    const grant = connectGeometry.mock.calls[0]?.[0];
+    revokeGeometry.mockClear();
+
+    broker.retainAgentHost({ workspaceRoot: '/home/widget', projectId: 'widget-b', attachmentId: 'new-project' });
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'widget-b', computeMode: 'durable' });
+    expect(grant?.stillAuthorized()).toBe(false);
+    expect(revokeGeometry).toHaveBeenCalledOnce();
+  });
+
+  it('does not treat a failed project-owner transfer as an admitted geometry grant', () => {
+    const { broker, connectGeometry, revokeGeometry, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'widget-a', computeMode: 'durable' });
+    spawns[0]!.message({
+      type: 'geometry-port-request',
+      requestId: 'suite',
+      workspaceRoot: '/home/widget',
+      engine: 'native',
+    });
+    const grant = connectGeometry.mock.calls[0]?.[0];
+    revokeGeometry.mockClear();
+    spawns[0]!.postMessage.mockImplementationOnce(() => {
+      throw new Error('transfer failed');
+    });
+
+    expect(() =>
+      broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'widget-b', computeMode: 'durable' }),
+    ).toThrow('transfer failed');
+    expect(grant?.stillAuthorized()).toBe(true);
+    expect(revokeGeometry).not.toHaveBeenCalled();
+
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'widget-b', computeMode: 'durable' });
+    expect(grant?.stillAuthorized()).toBe(false);
+    expect(revokeGeometry).toHaveBeenCalledOnce();
+  });
+
   it('signals geometry to abort an admitted suite when its candidate grant is released', () => {
     const { broker, connectGeometry, revokeGeometry, spawns } = brokerHarness();
     broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'project-widget', computeMode: 'durable' });

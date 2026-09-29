@@ -44,15 +44,16 @@ export const tauBillingAccountArgs = (action: 'fund' | 'close', email: string): 
 /**
  * Read the billing environment this run's API is configured for.
  *
- * `undefined` means the API has no billing environment at all — the isolated
- * completed-artifact stack — so there is nothing to fund or close.
+ * `undefined` means the self-host completed-artifact API has no billing
+ * environment, so there is nothing to fund or close.
  */
 const tauBillingEnvironment = async (token: string): Promise<string | undefined> => {
   const response = await fetch(`${desktopE2EApiUrl}/v1/billing/credits`, {
     headers: { authorization: `Bearer ${token}`, origin: desktopE2EFrontendUrl },
   });
-  if (response.status === 404 && desktopE2ECompletedArtifact) {
-    // The isolated self-host API does not install BillingModule, so this route is absent.
+  const selfHostedArtifact = desktopE2ECompletedArtifact && process.env['TAU_E2E_COMPLETED_CLOUD_GATEWAY'] !== 'true';
+  if (selfHostedArtifact && response.status === 404) {
+    // The self-hosted completed-artifact API does not register billing routes.
     return undefined;
   }
   if (response.status === 503) {
@@ -60,7 +61,7 @@ const tauBillingEnvironment = async (token: string): Promise<string | undefined>
      * completed-artifact stack, nothing to fund) and without a usable
      * `BILLING_USAGE_CURSOR_SECRET` (a misconfigured developer API, which must
      * not silently skip funding and fail later as insufficient credit). */
-    if (desktopE2ECompletedArtifact) {
+    if (selfHostedArtifact) {
       return undefined;
     }
     throw new Error(
@@ -70,7 +71,11 @@ const tauBillingEnvironment = async (token: string): Promise<string | undefined>
   if (!response.ok) {
     throw new Error(`Reading the Tau billing environment failed with HTTP ${String(response.status)}.`);
   }
-  return ((await response.json()) as { readonly environment?: string }).environment;
+  const { environment } = (await response.json()) as { readonly environment?: string };
+  if (desktopE2ECompletedArtifact && !selfHostedArtifact && environment !== 'development') {
+    throw new Error('Completed-artifact cloud billing requires the disposable development environment.');
+  }
+  return environment;
 };
 
 /** Recheck the exact disposable Compose database before a completed-package billing write. */

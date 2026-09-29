@@ -726,7 +726,7 @@ function buildGraph(geometry: THREE.BufferGeometry, revision: string): MeshFeatu
   };
 }
 
-type TopologyAssociation = {
+export type TopologyAssociation = {
   occurrenceId?: string;
   componentId?: string;
   kind: 'surface' | 'line';
@@ -907,16 +907,52 @@ function addTopologyFaces(base: MeshFeatureGraph, association: TopologyAssociati
   };
 }
 
+/** Return a prepared graph without running the potentially expensive geometry analysis. */
+export function getCachedMeshMeasurementFeatures(mesh: THREE.Mesh): MeshFeatureGraph | undefined {
+  const { geometry } = mesh;
+  const signature = geometrySignature(geometry);
+  const association = mesh.userData['measurementFeatures'] as TopologyAssociation | undefined;
+  if (association?.faces?.length) {
+    const occurrence = occurrenceGraphs.get(mesh);
+    return occurrence?.signature === `${signature}:${objectId(association)}` ? occurrence.graph : undefined;
+  }
+  const cached = graphs.get(geometry);
+  return cached?.signature === signature ? cached.graph : undefined;
+}
+
+/** Install a fully received worker graph only if its geometry and occurrence still match. */
+export function installMeshMeasurementFeatures(mesh: THREE.Mesh, signature: string, graph: MeshFeatureGraph): boolean {
+  if (geometrySignature(mesh.geometry) !== signature || graph.geometry !== mesh.geometry) {
+    return false;
+  }
+  const association = mesh.userData['measurementFeatures'] as TopologyAssociation | undefined;
+  if (association?.faces?.length) {
+    occurrenceGraphs.set(mesh, { signature: `${signature}:${objectId(association)}`, graph });
+  } else {
+    graphs.set(mesh.geometry, { signature, graph });
+  }
+  return true;
+}
+
+/** Capture the same revision used by the synchronous cache and worker result. */
+export function getMeshMeasurementSignature(mesh: THREE.Mesh): string {
+  return geometrySignature(mesh.geometry);
+}
+
 /** Analyze local mesh geometry once per attribute/index revision; occurrence transforms remain outside the cache. */
 export function getMeshMeasurementFeatures(mesh: THREE.Mesh): MeshFeatureGraph {
   const { geometry } = mesh;
   const signature = geometrySignature(geometry);
+  const association = mesh.userData['measurementFeatures'] as TopologyAssociation | undefined;
+  const ready = getCachedMeshMeasurementFeatures(mesh);
+  if (ready) {
+    return ready;
+  }
   const cached = graphs.get(geometry);
   const base = cached?.signature === signature ? cached.graph : buildGraph(geometry, `${geometry.id}:${signature}`);
   if (base !== cached?.graph) {
     graphs.set(geometry, { signature, graph: base });
   }
-  const association = mesh.userData['measurementFeatures'] as TopologyAssociation | undefined;
   if (!association?.faces?.length) {
     return base;
   }
@@ -1020,16 +1056,23 @@ function closestOnPolyline(
   return best;
 }
 
-function virtualSupport(feature: MeshFeature, graph: MeshFeatureGraph): THREE.Vector3[] {
+function virtualSupportSome(
+  feature: MeshFeature,
+  graph: MeshFeatureGraph,
+  predicate: (point: THREE.Vector3) => boolean,
+): boolean {
   if (feature.kind === 'circle' || feature.kind === 'edge' || feature.kind === 'body') {
-    return feature.points;
+    return feature.points.some(predicate);
   }
   const attribute = graph.geometry.getAttribute('position');
   const index = graph.geometry.getIndex();
-  return feature.triangleIndices.map((triangle) => {
+  for (const triangle of feature.triangleIndices) {
     const offset = triangle * 3;
-    return new THREE.Vector3().fromBufferAttribute(attribute, index?.getX(offset) ?? offset);
-  });
+    if (predicate(new THREE.Vector3().fromBufferAttribute(attribute, index?.getX(offset) ?? offset))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function findMeasurementTargets(
@@ -1236,15 +1279,22 @@ export function findMeasurementTargets(
     return priority(a) - priority(b) || a.id.localeCompare(b.id);
   });
   const eligible = (candidate: MeasurementTarget): boolean => {
-    const support = isVirtual(candidate.kind) ? virtualSupport(candidate.feature, graph) : [candidate.localPosition];
-    return (
-      support.some((point) => visibleClip(point, matrix)) &&
-      (isKept === undefined || support.some((point) => isKept(point.clone().applyMatrix4(mesh.matrixWorld)))) &&
-      isVisible?.(candidate.position, candidate.feature, candidate.kind) !== false
-    );
+    const virtual = isVirtual(candidate.kind);
+    const visible = virtual
+      ? virtualSupportSome(candidate.feature, graph, (point) => visibleClip(point, matrix))
+      : visibleClip(candidate.localPosition, matrix);
+    if (!visible) {
+      return false;
+    }
+    const kept =
+      isKept === undefined ||
+      (virtual
+        ? virtualSupportSome(candidate.feature, graph, (point) => isKept(point.clone().applyMatrix4(mesh.matrixWorld)))
+        : isKept(candidate.localPosition.clone().applyMatrix4(mesh.matrixWorld)));
+    return kept && isVisible?.(candidate.position, candidate.feature, candidate.kind) !== false;
   };
   // A hover needs only a few visible results. Keep raycast-heavy occlusion off the full candidate cloud.
-  // The explicit keyboard catalog requests MAX_VALUE and deliberately enumerates every visible target.
+  // The keyboard catalog passes bounded graph slices and checks occlusion between scheduled tasks.
   const visibilityBudget =
     isVisible === undefined || maxResults === Number.MAX_VALUE ? Infinity : Math.max(32, maxResults * 4);
   let checked = 0;

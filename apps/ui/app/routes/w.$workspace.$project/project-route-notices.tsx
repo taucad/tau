@@ -7,7 +7,7 @@
  * learns an effect and the wrapper never learns a state kind, so a future state
  * is a union member, a case in `describeProjectRouteNotice` and a test row.
  */
-import { createContext, useCallback, useContext } from 'react';
+import { useCallback, useContext } from 'react';
 import { useNavigate } from 'react-router';
 import {
   ArrowLeft,
@@ -37,6 +37,7 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { projectSessionIdleWindowMilliseconds } from '#machines/project-session.machine.js';
 import type { ProjectSessionCloseReason } from '#machines/project-session.machine.js';
+import { ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { ProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 import type { PendingProjectRecoveryReason } from '#types/pending-project-operation.types.js';
@@ -251,12 +252,6 @@ const restoreFromTrash = async (
     console.error('Error restoring project:', error);
   }
 };
-
-/**
- * How a notice retries: the gate owns the attempt counter, so it supplies the
- * callback. The default is a no-op so the notice renders anywhere. @public
- */
-export const ProjectRouteRetryContext = createContext<() => void>(() => undefined);
 
 /**
  * Bind the table's verbs to their effects.

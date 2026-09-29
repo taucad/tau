@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectManifestSchemaUrl } from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
 import type { ProjectSessionCloseReason } from '#machines/project-session.machine.js';
+import { ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { ProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { PendingProjectRecoveryReason } from '#types/pending-project-operation.types.js';
 
@@ -21,7 +22,7 @@ vi.mock('#hooks/use-sessions.js', () => ({
 const restoreProject = vi.fn(async () => true);
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ restoreProject }) }));
 
-const { ProjectRouteNotice, ProjectRouteRetryContext, describeProjectRouteNotice } =
+const { ProjectRouteNotice, describeProjectRouteNotice } =
   await import('#routes/w.$workspace.$project/project-route-notices.js');
 
 const projectId = 'proj_0123456789ABCDEFGHIJK';

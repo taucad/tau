@@ -204,6 +204,8 @@ export type GraphicsContext = {
   measureChosenCandidateId?: string;
   measureCommitRequest: number;
   measureCatalogRequest: number;
+  measureCatalogAppend: boolean;
+  measureCatalogHasMore: boolean;
   measureMessage?: string;
   measurePreviewDistance?: number;
   measureSnapDistance: number; // Pixels
@@ -284,11 +286,16 @@ export type GraphicsEvent =
   | { type: 'setMeasureSnapEnabled'; enabled: boolean }
   | { type: 'setMeasureOperation'; operation: MeasurementOperation }
   | { type: 'setMeasureFilter'; filter: GraphicsContext['measureFilter'] }
-  | { type: 'setMeasureCandidates'; candidates: GraphicsContext['measureCandidates']; activeId?: string }
+  | {
+      type: 'setMeasureCandidates';
+      candidates: GraphicsContext['measureCandidates'];
+      activeId?: string;
+      hasMore?: boolean;
+    }
   | { type: 'chooseMeasureCandidate'; id: string }
   | { type: 'clearMeasureChosenCandidate' }
   | { type: 'requestMeasureCandidateCommit' }
-  | { type: 'requestMeasureCatalog' }
+  | { type: 'requestMeasureCatalog'; append?: boolean }
   | { type: 'setMeasureMessage'; message?: string }
   | { type: 'setMeasurePreviewDistance'; distance?: number }
   | { type: 'setMeasureLockedTarget'; id?: string }
@@ -794,6 +801,8 @@ export const graphicsMachine = setup({
       measureChosenCandidateId: undefined,
       measureCommitRequest: 0,
       measureCatalogRequest: 0,
+      measureCatalogAppend: false,
+      measureCatalogHasMore: false,
       measureMessage: undefined,
       measurePreviewDistance: undefined,
       measureSnapDistance: input.measureSnapDistance ?? 10,
@@ -1301,6 +1310,7 @@ export const graphicsMachine = setup({
         setMeasureMode: {
           context: ({ event }) => ({
             measureMode: event.mode,
+            measureCatalogHasMore: false,
             measureLockedTargetId: undefined,
             measureChosenCandidateId: undefined,
           }),
@@ -1317,6 +1327,7 @@ export const graphicsMachine = setup({
         setMeasureFilter: {
           context: ({ event }) => ({
             measureFilter: event.filter,
+            measureCatalogHasMore: false,
             measureLockedTargetId: undefined,
             measureChosenCandidateId: undefined,
           }),
@@ -1324,6 +1335,7 @@ export const graphicsMachine = setup({
         setMeasureCandidates: {
           context: ({ context, event }) => ({
             measureCandidates: event.candidates,
+            measureCatalogHasMore: event.hasMore ?? (event.candidates.length > 0 && context.measureCatalogHasMore),
             measureChosenCandidateId: event.candidates.some(
               (candidate) => candidate.id === context.measureChosenCandidateId,
             )
@@ -1352,7 +1364,10 @@ export const graphicsMachine = setup({
           context: ({ context }) => ({ measureCommitRequest: context.measureCommitRequest + 1 }),
         },
         requestMeasureCatalog: {
-          context: ({ context }) => ({ measureCatalogRequest: context.measureCatalogRequest + 1 }),
+          context: ({ context, event }) => ({
+            measureCatalogRequest: context.measureCatalogRequest + 1,
+            measureCatalogAppend: event.append ?? false,
+          }),
         },
         setMeasureMessage: { context: ({ event }) => ({ measureMessage: event.message }) },
         setMeasurePreviewDistance: { context: ({ event }) => ({ measurePreviewDistance: event.distance }) },
@@ -1477,6 +1492,7 @@ export const graphicsMachine = setup({
                           currentMeasurementStart: undefined,
                           currentMeasurementAnchor: undefined,
                           measureCandidates: [],
+                          measureCatalogHasMore: false,
                           measureActiveCandidateId: undefined,
                           measureChosenCandidateId: undefined,
                           measureLockedTargetId: undefined,

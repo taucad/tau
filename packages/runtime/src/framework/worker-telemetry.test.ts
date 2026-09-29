@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { WorkerTelemetryCollector, toAbsoluteTime } from '#framework/worker-telemetry.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createTelemetryOrigin, WorkerTelemetryCollector, toAbsoluteTime } from '#framework/worker-telemetry.js';
 import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
 
 const entry = (name: string): TelemetryEntry => ({
@@ -7,6 +7,17 @@ const entry = (name: string): TelemetryEntry => ({
   startTime: 100,
   duration: 50,
   workerTimeOrigin: 1_000_000,
+});
+
+afterEach(() => vi.unstubAllGlobals());
+
+it('puts a utility PID in its otherwise opaque producer identity', () => {
+  vi.stubGlobal('process', { type: 'utility', pid: 42 });
+  const first = createTelemetryOrigin();
+  const second = createTelemetryOrigin();
+  expect(first.label).toBe('utility');
+  expect(first.instance).toMatch(/^pid-42-[\da-f-]+$/u);
+  expect(second.instance).not.toBe(first.instance);
 });
 
 describe('toAbsoluteTime', () => {

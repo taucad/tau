@@ -12,12 +12,30 @@ afterEach(() => {
 
 describe('test-account billing discovery', () => {
   it.each([
-    { completedArtifact: true, acceptsAbsentRoute: true },
-    { completedArtifact: false, acceptsAbsentRoute: false },
+    { completedArtifact: true, cloudGateway: false, status: 404, acceptsAbsentRoute: true },
+    { completedArtifact: true, cloudGateway: false, status: 503, acceptsAbsentRoute: true },
+    { completedArtifact: true, cloudGateway: true, status: 404, acceptsAbsentRoute: false },
+    { completedArtifact: true, cloudGateway: true, status: 503, acceptsAbsentRoute: false },
+    {
+      completedArtifact: true,
+      cloudGateway: true,
+      status: 200,
+      billingEnvironment: undefined,
+      acceptsAbsentRoute: false,
+    },
+    {
+      completedArtifact: true,
+      cloudGateway: true,
+      status: 200,
+      billingEnvironment: 'production',
+      acceptsAbsentRoute: false,
+    },
+    { completedArtifact: false, cloudGateway: false, status: 404, acceptsAbsentRoute: false },
   ])(
-    'handles a missing billing route only in completed-artifact mode: %j',
-    async ({ completedArtifact, acceptsAbsentRoute }) => {
+    'accepts absent billing only in self-host completed-artifact mode: %j',
+    async ({ completedArtifact, cloudGateway, status, billingEnvironment, acceptsAbsentRoute }) => {
       vi.resetModules();
+      vi.stubEnv('TAU_E2E_COMPLETED_CLOUD_GATEWAY', cloudGateway ? 'true' : 'false');
       vi.doMock('#support/config.js', () => ({
         // eslint-disable-next-line @typescript-eslint/naming-convention -- actual config export
         desktopE2EApiUrl: 'http://127.0.0.1:4014',
@@ -36,7 +54,9 @@ describe('test-account billing discovery', () => {
         .fn()
         .mockResolvedValueOnce(new Response('{}', { status: 200 }))
         .mockResolvedValueOnce(new Response('{}', { status: 200, headers: { 'set-auth-token': 'test-bearer' } }))
-        .mockResolvedValueOnce(new Response('', { status: 404 }));
+        .mockResolvedValueOnce(
+          new Response(status === 200 ? JSON.stringify({ environment: billingEnvironment }) : '', { status }),
+        );
       vi.stubGlobal('fetch', fetchMock);
       const { seedTauTestUser } = await import('#support/tau-account.js');
       const account = { email: 'tau-desktop-billing-route@example.test', name: 'Test', password: 'test' };
@@ -44,7 +64,13 @@ describe('test-account billing discovery', () => {
       const result = expect(seedTauTestUser(account));
       await (acceptsAbsentRoute
         ? result.resolves.toBe('test-bearer')
-        : result.rejects.toThrow('Reading the Tau billing environment failed with HTTP 404.'));
+        : result.rejects.toThrow(
+            status === 404
+              ? 'Reading the Tau billing environment failed with HTTP 404.'
+              : status === 503
+                ? 'reports billing unavailable'
+                : 'requires the disposable development environment',
+          ));
       expect(fetchMock).toHaveBeenCalledTimes(3);
     },
   );

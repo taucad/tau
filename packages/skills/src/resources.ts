@@ -15,6 +15,7 @@ import openrscad from '@taucad/openrscad/agent/resources.js';
 import picogk from '@taucad/picogk/agent/resources.js';
 import picovoxel from '@taucad/picovoxel/agent/resources.js';
 import replicad from '@taucad/replicad/agent/resources.js';
+import workbench from '@taucad/workbench/agent/resources.js';
 import zoo from '@taucad/zoo/agent/resources.js';
 import geospec from 'geospec/agent/resources.js';
 
@@ -50,6 +51,7 @@ export type ReadSkillResource = (
 /** Every package-owned Tau system skill, in stable owner order. @public */
 export const systemSkillBundles: readonly SystemSkillBundle[] = Object.freeze([
   ...replicad,
+  ...workbench,
   ...jscad,
   ...manifold,
   ...opencascade,

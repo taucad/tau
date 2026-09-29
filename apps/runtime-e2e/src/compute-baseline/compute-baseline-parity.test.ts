@@ -92,8 +92,10 @@ describe('compute-baseline fault injection', () => {
   it('work counters: the wrong cache collapses native solve work and publication', () => {
     // T10: hit counts never stand alone -- the avoided native work is the claim.
     expect(honest.records.staged).toBeGreaterThan(0);
+    expect(honest.counters['native.solve']!.calls).toBeGreaterThan(0);
     expect(honest.spans['create.runOcMain']!.ms).toBeGreaterThan(0);
     expect(poisoned.records.staged).toBe(0);
+    expect(poisoned.counters['native.solve']).toBeUndefined();
     expect(poisoned.spans['create.runOcMain']!.ms).toBeLessThan(honest.spans['create.runOcMain']!.ms / 2);
     expect(poisoned.counters['brep.serialize']).toBeUndefined();
   });

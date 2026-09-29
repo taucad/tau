@@ -284,6 +284,8 @@ const createTestClient = (
     openFileSystemBridge: () => ({ port: channel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
     openProjectRootBridge: () =>
       ({ port: projectRootChannel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
+    openWorkbenchRootBridge: () =>
+      ({ port: new MessageChannel().port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
     projectStorage: { projectId: 'project-one', backend: 'opfs', providerBasePath: 'project-one' },
     durability: 'exclusive-append',
     authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
@@ -302,6 +304,60 @@ const createTestClient = (
 };
 
 describe('createBrowserAgentHostClient', () => {
+  it('disposes all three rooted bridges when worker construction fails', () => {
+    const candidateDispose = vi.fn();
+    const selectedDispose = vi.fn();
+    const liveDispose = vi.fn();
+    const bridge = (dispose: () => void): FileSystemBridgeConnection =>
+      ({ port: new MessageChannel().port1, dispose }) as unknown as FileSystemBridgeConnection;
+
+    expect(() => createTestClient(new FakeAgentHostWorker(), {
+      openFileSystemBridge: () => bridge(candidateDispose),
+      openProjectRootBridge: () => bridge(selectedDispose),
+      openWorkbenchRootBridge: () => bridge(liveDispose),
+      createWorker: () => { throw new Error('worker unavailable'); },
+    })).toThrow('worker unavailable');
+    expect(candidateDispose).toHaveBeenCalledOnce();
+    expect(selectedDispose).toHaveBeenCalledOnce();
+    expect(liveDispose).toHaveBeenCalledOnce();
+  });
+
+  it('disposes candidate and selected bridges when the live workbench bridge cannot open', () => {
+    const candidateDispose = vi.fn();
+    const selectedDispose = vi.fn();
+    const bridge = (dispose: () => void): FileSystemBridgeConnection =>
+      ({ port: new MessageChannel().port1, dispose }) as unknown as FileSystemBridgeConnection;
+
+    expect(() => createTestClient(new FakeAgentHostWorker(), {
+      openFileSystemBridge: () => bridge(candidateDispose),
+      openProjectRootBridge: () => bridge(selectedDispose),
+      openWorkbenchRootBridge: () => { throw new Error('live root unavailable'); },
+    })).toThrow('live root unavailable');
+    expect(candidateDispose).toHaveBeenCalledOnce();
+    expect(selectedDispose).toHaveBeenCalledOnce();
+  });
+
+  it('disposes all three rooted bridges when durable compute has no authority port', () => {
+    const worker = new FakeAgentHostWorker();
+    const candidateDispose = vi.fn();
+    const selectedDispose = vi.fn();
+    const liveDispose = vi.fn();
+    const bridge = (dispose: () => void): FileSystemBridgeConnection =>
+      ({ port: new MessageChannel().port1, dispose }) as unknown as FileSystemBridgeConnection;
+
+    expect(() => createTestClient(worker, {
+      openFileSystemBridge: () => bridge(candidateDispose),
+      openProjectRootBridge: () => bridge(selectedDispose),
+      openWorkbenchRootBridge: () => bridge(liveDispose),
+      computeMode: 'durable',
+      openComputeStorePort: undefined,
+    })).toThrow(expect.objectContaining({ code: 'COMPUTE_AUTHORITY_UNAVAILABLE' }));
+    expect(candidateDispose).toHaveBeenCalledOnce();
+    expect(selectedDispose).toHaveBeenCalledOnce();
+    expect(liveDispose).toHaveBeenCalledOnce();
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
   it('keeps the capability seam closed when OPFS is unavailable', () => {
     vi.stubGlobal('Worker', vi.fn());
     vi.stubGlobal('BroadcastChannel', vi.fn());
@@ -376,11 +432,13 @@ describe('createBrowserAgentHostClient', () => {
       vi.stubGlobal('navigator', { locks: {}, storage: { getDirectory: vi.fn() } });
       const openFileSystemBridge = vi.fn();
       const openProjectRootBridge = vi.fn();
+      const openWorkbenchRootBridge = vi.fn();
 
       expect(() =>
         createBrowserAgentHostClient({
           openFileSystemBridge,
           openProjectRootBridge,
+          openWorkbenchRootBridge,
           projectStorage: { projectId: 'project-one', backend: 'opfs', providerBasePath: 'project-one' },
           durability: 'exclusive-append',
           authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
@@ -397,6 +455,7 @@ describe('createBrowserAgentHostClient', () => {
       ).toThrow(expect.objectContaining({ code: 'MODEL_PROVIDER_UNSUPPORTED' }));
       expect(openFileSystemBridge).not.toHaveBeenCalled();
       expect(openProjectRootBridge).not.toHaveBeenCalled();
+      expect(openWorkbenchRootBridge).not.toHaveBeenCalled();
     },
   );
 
@@ -411,6 +470,8 @@ describe('createBrowserAgentHostClient', () => {
       openFileSystemBridge: () => ({ port: channel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
       openProjectRootBridge: () =>
         ({ port: projectRootChannel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
+      openWorkbenchRootBridge: () =>
+        ({ port: new MessageChannel().port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
       projectStorage: { projectId: 'project-one', backend: 'opfs', providerBasePath: 'project-one' },
       durability: 'exclusive-append',
       authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
@@ -428,7 +489,7 @@ describe('createBrowserAgentHostClient', () => {
 
     await expect(client.close()).resolves.toBeUndefined();
     // The Worker leg transfers only the dedicated Channel port; bridge ports are then carried by
-    // the validated initialize call, preserving the same two zero-copy transfers without treating Worker as a Port.
+    // the validated initialize call, preserving the three zero-copy transfers without treating Worker as a Port.
     expect(worker.postMessage.mock.calls[0]?.[0]).toMatchObject({ type: 'agent-host/connect' });
     expect(worker.postMessage.mock.calls[0]?.[1]).toHaveLength(1);
     const initializeRequest = worker.requests[0];
@@ -438,6 +499,7 @@ describe('createBrowserAgentHostClient', () => {
     }
     expect(initializeRequest.fileSystemPort).toBeInstanceOf(MessagePort);
     expect(initializeRequest.projectRootPort).toBeInstanceOf(MessagePort);
+    expect(initializeRequest.workbenchRootPort).toBeInstanceOf(MessagePort);
   });
 
   /* Offline the catalog names no model; opening a chat still attaches and replays its log. */
@@ -452,6 +514,8 @@ describe('createBrowserAgentHostClient', () => {
       openFileSystemBridge: () => ({ port: channel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
       openProjectRootBridge: () =>
         ({ port: projectRootChannel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
+      openWorkbenchRootBridge: () =>
+        ({ port: new MessageChannel().port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
       projectStorage: { projectId: 'project-one', backend: 'opfs', providerBasePath: 'project-one' },
       durability: 'exclusive-append',
       authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
@@ -472,13 +536,14 @@ describe('createBrowserAgentHostClient', () => {
     expect(initializeRequest).not.toHaveProperty('model', expect.anything());
   });
 
-  it('transfers workspace and project-root ports and drives start, steer, cancel, resume, events, and close', async () => {
+  it('transfers all three filesystem ports and drives start, steer, cancel, resume, events, and close', async () => {
     vi.stubGlobal('Worker', vi.fn());
     vi.stubGlobal('BroadcastChannel', vi.fn());
     vi.stubGlobal('navigator', { locks: {}, storage: { getDirectory: vi.fn() } });
     const worker = new FakeAgentHostWorker();
     const bridgeDispose = vi.fn();
     const projectRootDispose = vi.fn();
+    const workbenchRootDispose = vi.fn();
     const channel = new MessageChannel();
     const projectRootChannel = new MessageChannel();
     const openComputeStorePort = vi.fn();
@@ -488,6 +553,8 @@ describe('createBrowserAgentHostClient', () => {
         ({ port: channel.port1, dispose: bridgeDispose }) as unknown as FileSystemBridgeConnection,
       openProjectRootBridge: () =>
         ({ port: projectRootChannel.port1, dispose: projectRootDispose }) as unknown as FileSystemBridgeConnection,
+      openWorkbenchRootBridge: () =>
+        ({ port: new MessageChannel().port1, dispose: workbenchRootDispose }) as unknown as FileSystemBridgeConnection,
       computeMode: 'off',
       openComputeStorePort,
       projectStorage: { projectId: 'project-one', backend: 'opfs', providerBasePath: 'project-one' },
@@ -574,6 +641,7 @@ describe('createBrowserAgentHostClient', () => {
     }
     expect(initialize.fileSystemPort).toBeInstanceOf(MessagePort);
     expect(initialize.projectRootPort).toBeInstanceOf(MessagePort);
+    expect(initialize.workbenchRootPort).toBeInstanceOf(MessagePort);
     expect(initialize.computeStorePort).toBeUndefined();
     expect(openComputeStorePort).not.toHaveBeenCalled();
     expect(start).toMatchObject({
@@ -600,6 +668,7 @@ describe('createBrowserAgentHostClient', () => {
     expect(worker.terminate).toHaveBeenCalledOnce();
     expect(bridgeDispose).toHaveBeenCalledOnce();
     expect(projectRootDispose).toHaveBeenCalledOnce();
+    expect(workbenchRootDispose).toHaveBeenCalledOnce();
   });
 
   it('bounds a command response deadline when the worker stops answering', async () => {
@@ -613,6 +682,8 @@ describe('createBrowserAgentHostClient', () => {
       openFileSystemBridge: () => ({ port: channel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
       openProjectRootBridge: () =>
         ({ port: projectRootChannel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
+      openWorkbenchRootBridge: () =>
+        ({ port: new MessageChannel().port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
       projectStorage: { projectId: 'project-one', backend: 'opfs', providerBasePath: 'project-one' },
       durability: 'exclusive-append',
       authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
@@ -788,6 +859,7 @@ describe('createBrowserAgentHostClient', () => {
     worker.dropClose = true;
     const bridgeDispose = vi.fn();
     const projectRootDispose = vi.fn();
+    const workbenchRootDispose = vi.fn();
     const channel = new MessageChannel();
     const projectRootChannel = new MessageChannel();
     const client = createBrowserAgentHostClient({
@@ -795,6 +867,8 @@ describe('createBrowserAgentHostClient', () => {
         ({ port: channel.port1, dispose: bridgeDispose }) as unknown as FileSystemBridgeConnection,
       openProjectRootBridge: () =>
         ({ port: projectRootChannel.port1, dispose: projectRootDispose }) as unknown as FileSystemBridgeConnection,
+      openWorkbenchRootBridge: () =>
+        ({ port: new MessageChannel().port1, dispose: workbenchRootDispose }) as unknown as FileSystemBridgeConnection,
       projectStorage: { projectId: 'project-one', backend: 'opfs', providerBasePath: 'project-one' },
       durability: 'exclusive-append',
       authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
@@ -825,6 +899,7 @@ describe('createBrowserAgentHostClient', () => {
       expect(worker.terminate).toHaveBeenCalledOnce();
       expect(bridgeDispose).toHaveBeenCalledOnce();
       expect(projectRootDispose).toHaveBeenCalledOnce();
+      expect(workbenchRootDispose).toHaveBeenCalledOnce();
     } finally {
       worker.terminate();
       await closing;
@@ -843,6 +918,8 @@ describe('createBrowserAgentHostClient', () => {
       openFileSystemBridge: () => ({ port: channel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
       openProjectRootBridge: () =>
         ({ port: projectRootChannel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
+      openWorkbenchRootBridge: () =>
+        ({ port: new MessageChannel().port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
       projectStorage: { projectId: 'project-one', backend: 'opfs', providerBasePath: 'project-one' },
       durability: 'exclusive-append',
       authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
@@ -873,6 +950,8 @@ describe('createBrowserAgentHostClient', () => {
       openFileSystemBridge: () => ({ port: channel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
       openProjectRootBridge: () =>
         ({ port: projectRootChannel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
+      openWorkbenchRootBridge: () =>
+        ({ port: new MessageChannel().port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
       projectStorage: { projectId: 'project-one', backend: 'opfs', providerBasePath: 'project-one' },
       durability: 'exclusive-append',
       authority: { projectId: 'project-one', workspaceId: 'workspace-one' },

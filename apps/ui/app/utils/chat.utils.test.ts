@@ -279,6 +279,14 @@ describe('serializeMessage', () => {
   });
 
   describe('tool parts', () => {
+    it('serializes the arrange call keys and written record paths', () => {
+      const message = baseMessage([{
+        type: 'tool-arrange_workbench', toolCallId: 'arrange-1', state: 'output-available',
+        input: { open: [{ kind: 'pane', pane: 'details' }], lanes: { workbench: true } },
+        output: { status: 'written', revisions: [{ path: '.tau/workbench/layout.json', digest: 'missing', previousDigest: 'missing' }], visible: [{ kind: 'pane', pane: 'details' }] },
+      }]);
+      expect(serializeMessage(message)).toBe('<tool_call name="arrange_workbench">\narrange_workbench(open, lanes)\n</tool_call>\n<tool_result>\n-> .tau/workbench/layout.json\n</tool_result>');
+    });
     it('serializes tool-web_search output-available', () => {
       const message = baseMessage([
         {

@@ -1,7 +1,7 @@
 [
   {
-    "name": "measure before release — placeholder budget",
+    "name": "total (ESM JS) — measured 128.87 kB brotli on 2026-09-29",
     "path": "dist/**/*.mjs",
-    "limit": "100 kB"
+    "limit": "130 kB"
   }
 ]

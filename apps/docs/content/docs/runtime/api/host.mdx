@@ -1,0 +1,36 @@
+---
+title: Host Authority API
+description: Admit scoped jobs and machines sessions, advertise capabilities, and own a Node machine host.
+docType: reference
+wordBudgetOverride: 1100
+---
+
+# Host Authority API
+
+Import portable admission contracts from `@taucad/runtime/host`; Node machine hosting lives at `@taucad/runtime/host/node`. The host credential boundary establishes the actor and issues a local session. An advertised capability is discovery data, never an authorization grant.
+
+## Sessions and admission
+
+`createHostAdmissionAuthority` takes `CreateHostAdmissionAuthorityInput` with a host id and returns a `HostAdmissionAuthority`. Trusted code issues an `IssueHostSessionInput` for a `HostActor`, authority and workspace ids, and exact `HostRouteGrant` values. The opaque `HostSessionHandle` is authority-local; do not serialize or treat it as a bearer token.
+
+`HostAdmissionRoute` is `jobs` or `machines`; `HostAdmissionOperation` names an allowed operation on one route. `AdmitHostRouteInput` checks entry to a route and yields `AdmittedHostRoute`, but does not authorize every operation on it. `AdmitHostOperationInput` checks the exact operation and yields `AdmittedHostOperation`. Call its current-authority fence after awaits and before an effect. `HostAdmissionRefusal` carries a `HostAdmissionRefusalCode` for fail-closed cases such as revoked or mismatched authority.
+
+## Capability manifest
+
+`HostManifestV2` advertises versioned `HostCapabilityDescriptor` entries. `HostCapabilityRole` names known services and `HostCapabilityEndpoint` names a local route or brokered port. `parseHostManifest` bounds untrusted input and returns `AdmittedHostManifestV2` with known and inert unknown projections. `matchHostCapabilities` compares a `MatchHostCapabilitiesInput` set of `HostCapabilityRequirement` values against the manifest, returning `HostCapabilityMatch` values with a `HostCapabilityValue` for each match. Discovery does not bypass admission.
+
+`RuntimeHostDefinitionInput` and `RuntimeHostDefinition` describe the trusted host composition produced by `defineRuntime`; they are not a route grant.
+
+## Node machine owner
+
+`createNodeMachineHost` opens one exclusive store root using `CreateNodeMachineHostInput`: host and authority ids, admission authority, provider definitions, optional `NodeMachineRuntime`, and error handling. It returns a `NodeMachineHost` that issues machines-route sessions, serves channels, completes and removes bindings, and closes its store. A second writer cannot silently share the root.
+
+`IssueNodeMachineSessionInput` carries actor and machine-route grants. `ServeNodeMachineChannelInput` pairs an authenticated session with a channel endpoint; `NodeMachineChannelHandle` reports closure and supports disposal. `CompleteNodeMachineBindingInput` supplies trusted native credential and service trust for a pending ceremony; `RemoveNodeMachineBindingInput` names the binding to remove. These trusted inputs are not browser request payloads.
+
+`exposeMachineChannel` and `MachineChannelHostOperations` are host exports; they serve a `MachineChannelEndpoint`. Import `connectMachineChannel`, `MachineChannelEndpoint`, and `MachineChannelClient` from `@taucad/runtime/machine` for the client side with explicit readiness and close. The endpoint can be a port or WebSocket. A channel shape does not replace session and per-operation checks.
+
+## Related
+
+- [Machines API](./machines)
+- [Jobs API](./jobs)
+- [Embedding in a host](../guides/embedding-in-a-host)

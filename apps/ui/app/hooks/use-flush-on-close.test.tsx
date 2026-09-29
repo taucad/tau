@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { render, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UnloadProvider, useFlushOnClose, useFlushProducers } from '#hooks/use-flush-on-close.js';
 
 let visibility: DocumentVisibilityState = 'visible';
@@ -105,5 +105,34 @@ describe('UnloadProvider', () => {
     producer.resolve();
     await flushing;
     expect(sequence).toEqual(['producer:hidden:start', 'producer:hidden:done']);
+  });
+
+  it('keeps session teardown behind a failed producer and permits a successful retry', async () => {
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const sequence: string[] = [];
+      let offline = true;
+      let flushProducers: (() => Promise<void>) | undefined;
+      const Probe = (): undefined => { flushProducers = useFlushProducers(); return undefined; };
+      render(<UnloadProvider>
+        <Registration stage='producer' callback={async () => {
+          sequence.push('producer');
+          if (offline) { throw new Error('checked write unavailable'); }
+        }} />
+        <Registration stage='session' callback={() => { sequence.push('session'); }} />
+        <Probe />
+      </UnloadProvider>);
+      await expect(flushProducers?.()).rejects.toThrow('producer flush failed');
+      expect(sequence).toEqual(['producer']);
+      visibility = 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
+      await waitFor(() =>{  expect(reported).toHaveBeenCalledTimes(1); });
+      expect(sequence).toEqual(['producer', 'producer']);
+      offline = false;
+      await flushProducers?.();
+      expect(sequence).toEqual(['producer', 'producer', 'producer']);
+      document.dispatchEvent(new Event('visibilitychange'));
+      await waitFor(() =>{  expect(sequence.at(-1)).toBe('session'); });
+    } finally { reported.mockRestore(); }
   });
 });

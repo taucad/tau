@@ -1,5 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { DirectIdbProvider, OPFSProvider } from '@taucad/filesystem/backend';
+import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
+import { DirectIdbProvider, MemoryProvider, OPFSProvider } from '@taucad/filesystem/backend';
+import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import { createBrowserAgentHostClient } from '#services/agent-host-client.js';
 import { agentHostTailBatchLimit } from '#workers/agent-host.contract.js';
 import { agentHostAuthorityName, agentHostProtocolVersion } from '#workers/agent-host-leader.js';
@@ -57,6 +59,7 @@ it('runs a gateway turn in the dedicated launcher and commits its OPFS event log
   const clientOptions = {
     openFileSystemBridge: () => createFileSystemBridgePort(fileSystemProvider),
     openProjectRootBridge: () => createFileSystemBridgePort(rootedProvider(fileSystemProvider, providerBasePath)),
+    openWorkbenchRootBridge: () => createFileSystemBridgePort(rootedProvider(fileSystemProvider, providerBasePath)),
     projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
     durability: 'exclusive-append',
     authority: { projectId: providerBasePath, workspaceId: providerBasePath },
@@ -157,6 +160,7 @@ it('refuses initialization when the persisted project root is missing', async ()
   const client = createBrowserAgentHostClient({
     openFileSystemBridge: () => createFileSystemBridgePort(fileSystemProvider),
     openProjectRootBridge: () => createFileSystemBridgePort(rootedProvider(fileSystemProvider, providerBasePath)),
+    openWorkbenchRootBridge: () => createFileSystemBridgePort(rootedProvider(fileSystemProvider, providerBasePath)),
     projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
     durability: 'exclusive-append',
     authority: { projectId: providerBasePath, workspaceId: providerBasePath },
@@ -222,6 +226,7 @@ it('reclaims an abandoned transactional writer lock after winning attach takeove
   const client = createBrowserAgentHostClient({
     openFileSystemBridge: () => createFileSystemBridgePort(fileSystemProvider),
     openProjectRootBridge: () => createFileSystemBridgePort(rootedProvider(fileSystemProvider, providerBasePath)),
+    openWorkbenchRootBridge: () => createFileSystemBridgePort(rootedProvider(fileSystemProvider, providerBasePath)),
     projectStorage: { projectId: providerBasePath, backend: 'indexeddb', providerBasePath },
     durability: 'transactional-rewrite',
     authority: { projectId: providerBasePath, workspaceId: providerBasePath },
@@ -257,6 +262,7 @@ it('detects a dead leader, takes its log over and records the run it left as aba
   const clientOptions = {
     openFileSystemBridge: () => createFileSystemBridgePort(fileSystemProvider),
     openProjectRootBridge: () => createFileSystemBridgePort(rootedProvider(fileSystemProvider, providerBasePath)),
+    openWorkbenchRootBridge: () => createFileSystemBridgePort(rootedProvider(fileSystemProvider, providerBasePath)),
     projectStorage: { projectId: providerBasePath, backend: 'indexeddb', providerBasePath },
     durability: 'transactional-rewrite',
     authority: { projectId: providerBasePath, workspaceId: providerBasePath },
@@ -396,6 +402,7 @@ it('runs the file tools over the one relayed workspace provider and refuses a no
         type: 'initialize',
         fileSystemPort: createFileSystemBridgePort(workspace).port,
         projectRootPort: createFileSystemBridgePort(workspace).port,
+        workbenchRootPort: createFileSystemBridgePort(workspace).port,
         projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
         authority: { projectId: providerBasePath, workspaceId: providerBasePath },
         gatewayBaseUrl: location.origin,
@@ -456,6 +463,137 @@ it('runs the file tools over the one relayed workspace provider and refuses a no
   }
 });
 
+it('routes arrange_workbench to the live project root while ordinary file tools keep the candidate root', async () => {
+  const liveProvider = new OPFSProvider();
+  provider = liveProvider;
+  await liveProvider.initialize();
+  const candidateProvider = new MemoryProvider();
+  const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
+  const providerBasePath = `agent-host-live-workbench-${crypto.randomUUID()}`;
+  const mountTable = new MountTable();
+  mountTable.mount('/live', liveProvider, {
+    class: 'authored',
+    backend: 'opfs',
+    providerBasePath,
+    storageRootKey: `opfs:${providerBasePath}`,
+  });
+  mountTable.mount('/candidate', candidateProvider, {
+    class: 'authored',
+    backend: 'memory',
+    storageRootKey: `memory:${providerBasePath}`,
+  });
+  const service = new WorkspaceFileService({
+    providerRegistry: new ProviderRegistry(),
+    resourceQueue: new ResourceQueue(),
+    eventBus: new ChangeEventBus(),
+    mountTable,
+  });
+  const live = service.createRootedFileSystem('/live');
+  const candidate = service.createRootedFileSystem('/candidate');
+  const originalLayout = workbenchRecords.layout.serialize({
+    version: 1,
+    lanes: { chat: true, workbench: true },
+    viewer: { kind: 'group', tabs: [] },
+    workbench: { kind: 'group', tabs: [] },
+  });
+  await live.writeFile(workbenchPaths.layout, originalLayout);
+  await candidate.writeFile(workbenchPaths.layout, originalLayout);
+  const sessionId = `session-${crypto.randomUUID()}`;
+  const toolTurn = (id: string, name: string, input: Readonly<Record<string, unknown>>): readonly string[] => {
+    const toolCall = JSON.stringify({ index: 0, id, function: { name, arguments: JSON.stringify(input) } });
+    return [
+      `data: {"choices":[{"delta":{"tool_calls":[${toolCall}]},"finish_reason":"tool_calls"}]}\n\n`,
+      'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4}}\n\n',
+      'data: [DONE]\n\n',
+    ];
+  };
+  const turns = [
+    toolTurn('call-arrange', 'arrange_workbench', { lanes: { chat: false } }),
+    toolTurn('call-create', 'create_file', { targetFile: 'candidate-only.ts', content: 'export const candidate = true;\n' }),
+    [
+      'data: {"choices":[{"delta":{"content":"Arrangement done."},"finish_reason":"stop"}]}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":20,"completion_tokens":4}}\n\n',
+      'data: [DONE]\n\n',
+    ],
+  ];
+  let served = 0;
+  const realFetch = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (!url.includes('/v1/llm/')) {
+      return realFetch(input, init);
+    }
+    return new Response((turns[Math.min(served++, turns.length - 1)] ?? []).join(''), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-live-workbench-fixture' },
+    });
+  };
+
+  try {
+    await handleAgentHostWorkerRequest(
+      {
+        type: 'initialize',
+        fileSystemPort: createFileSystemBridgePort(candidate).port,
+        projectRootPort: createFileSystemBridgePort(candidate).port,
+        workbenchRootPort: createFileSystemBridgePort(live).port,
+        projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
+        authority: { projectId: providerBasePath, workspaceId: providerBasePath },
+        gatewayBaseUrl: location.origin,
+        systemPrompt: 'Browser live workbench fixture.',
+        systemPromptBlocks: [
+          { type: 'text', text: 'Browser live workbench fixture.' },
+          { type: 'text', text: 'Dynamic fixture.' },
+        ],
+        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+        runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
+      },
+      sessionId,
+    );
+    await handleAgentHostWorkerRequest(
+      {
+        type: 'start',
+        chatId: 'chat-live-workbench',
+        runId: 'run-live-workbench',
+        trigger: 'submit',
+        message: { id: 'user-live-workbench', role: 'user', content: 'Hide chat and create a candidate file.' },
+      },
+      sessionId,
+    );
+    const snapshot = await vi.waitFor(
+      async () => {
+        const attached = await handleAgentHostWorkerRequest(
+          { type: 'attach', chatId: 'chat-live-workbench', cursor: 0, limit: agentHostTailBatchLimit },
+          sessionId,
+        );
+        const settled = attached.type === 'attach' ? attached.snapshot : undefined;
+        if (settled?.state !== 'completed') {
+          throw new Error(`Run is ${settled?.state ?? 'unknown'}.`);
+        }
+        return settled;
+      },
+      { timeout: 20_000, interval: 50 },
+    );
+    expect(snapshot.messages.find((message) => message.role === 'tool-output' && message.toolName === 'arrange_workbench'))
+      .toMatchObject({ role: 'tool-output' });
+    expect(await live.readFile(workbenchPaths.layout)).toEqual(
+      new TextEncoder().encode(workbenchRecords.layout.serialize({
+        version: 1,
+        lanes: { chat: false, workbench: true },
+        viewer: { kind: 'group', tabs: [] },
+        workbench: { kind: 'group', tabs: [] },
+      })),
+    );
+    expect(await candidate.readFile(workbenchPaths.layout, 'utf8')).toBe(originalLayout);
+    expect(await candidate.readFile('candidate-only.ts', 'utf8')).toBe('export const candidate = true;\n');
+    expect(await live.exists('candidate-only.ts')).toBe(false);
+  } finally {
+    globalThis.fetch = realFetch;
+    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+    service.dispose();
+    candidateProvider.dispose();
+  }
+});
+
 /*
  * An `acp` agent is a daemon placement: the browser worker has no external
  * runner to give it to. Answering the wire with the same typed refusal the
@@ -477,6 +615,7 @@ it('refuses a start that names an external agent instead of running it on Tau', 
         type: 'initialize',
         fileSystemPort: createFileSystemBridgePort(workspace).port,
         projectRootPort: createFileSystemBridgePort(workspace).port,
+        workbenchRootPort: createFileSystemBridgePort(workspace).port,
         projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
         authority: { projectId: providerBasePath, workspaceId: providerBasePath },
         gatewayBaseUrl: location.origin,
@@ -547,6 +686,7 @@ it('answers a duplicate start under a settled run id with that run, not a confli
         type: 'initialize',
         fileSystemPort: createFileSystemBridgePort(workspace).port,
         projectRootPort: createFileSystemBridgePort(workspace).port,
+        workbenchRootPort: createFileSystemBridgePort(workspace).port,
         projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
         authority: { projectId: providerBasePath, workspaceId: providerBasePath },
         gatewayBaseUrl: location.origin,
@@ -647,6 +787,7 @@ const initializeSeededSession = async (
       type: 'initialize',
       fileSystemPort: createFileSystemBridgePort(workspace).port,
       projectRootPort: createFileSystemBridgePort(workspace).port,
+      workbenchRootPort: createFileSystemBridgePort(workspace).port,
       projectStorage: {
         projectId: input.providerBasePath,
         backend: 'indexeddb',

@@ -14,8 +14,10 @@ import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import { ProjectChatRunSettlement } from '#routes/w.$workspace.$project/project-chat-run-settlement.js';
 import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { WorkbenchRecordHost } from '#routes/w.$workspace.$project/workbench-record-host.js';
 import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
 import { ViewSettingsSyncHost } from '#routes/w.$workspace.$project/view-settings-sync-host.js';
+import { EntriesSyncHost } from '#routes/w.$workspace.$project/entries-sync-host.js';
 import { HomeFileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
 import { RevisionConflictChat } from '#routes/w.$workspace.$project/revision-conflict-chat.js';
@@ -82,6 +84,7 @@ export async function flushProjectSessionPersistence({
   parameterService,
   projectRef,
   editorRef,
+  flushWorkbenchRecords,
   closeFlushMilliseconds,
 }: Readonly<{
   /** The project closing: refused, before anything is torn down, while an editor's conflict is being recorded. */
@@ -89,12 +92,14 @@ export async function flushProjectSessionPersistence({
   parameterService: ParameterSetService;
   projectRef: ActorRefFrom<typeof projectMachine>;
   editorRef: ActorRefFrom<typeof editorMachine>;
+  flushWorkbenchRecords?: () => Promise<void>;
   closeFlushMilliseconds: number;
 }>): Promise<void> {
   if (projectId !== undefined) {
     refuseCloseWhileRecording(projectId);
   }
   await parameterService.close();
+  await flushWorkbenchRecords?.();
   projectRef.send({ type: 'flushNow' });
   editorRef.send({ type: 'flushNow' });
   const [projectSnapshot, editorSnapshot] = await Promise.all([
@@ -136,7 +141,7 @@ function ProjectSessionBinding({
   readonly shouldOpenFromTauCloud?: boolean;
 }): React.JSX.Element {
   const { fileManagerRef } = useFileManager();
-  const { parameterService, projectRef, editorRef } = useProject();
+  const { parameterService, projectRef, editorRef, flushWorkbenchRecordProducers } = useProject();
   const client = useRevisionClientLifecycle();
   const revisionCommands = useRevisionCommands();
   const { connectRemote } = revisionCommands;
@@ -218,6 +223,7 @@ function ProjectSessionBinding({
           parameterService,
           projectRef,
           editorRef,
+          flushWorkbenchRecords: flushWorkbenchRecordProducers,
           closeFlushMilliseconds: editorFlushTimeoutMilliseconds,
         }),
       /* W13's seam, called: the worker's `release()` takes the close cut and
@@ -246,7 +252,7 @@ function ProjectSessionBinding({
        * because a host whose leases outlive its tree has one to implement. */
       releaseLeases: async () => undefined,
     });
-  }, [chatSessions, client, editorRef, parameterService, projectId, projectRef]);
+  }, [chatSessions, client, editorRef, flushWorkbenchRecordProducers, parameterService, projectId, projectRef]);
 
   /* Every live project registers its session, not only the focused one (R2):
    * a run that settles after the person navigates away must reach the project
@@ -409,6 +415,7 @@ function ProjectSession({
         >
           <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
           <ViewSettingsSyncHost />
+          <EntriesSyncHost />
           <ProjectSessionBinding
             projectId={projectId}
             isFocused={focused}
@@ -420,6 +427,7 @@ function ProjectSession({
               <MonacoModelServiceProvider>
                 <ChatWorkspaceAuthorityProvider>
                   <ProjectWorkspaceProvider>
+                    <WorkbenchRecordHost />
                     <ProjectShareRouteIntent />
                     <RevisionRestore />
                     {/* AC14: *Ask chat to resolve* seeds one chat, bound to the
@@ -541,10 +549,11 @@ function ProjectPersistenceGuard({
   readonly projectId: string;
   readonly onFlushRegistration: (registration: ProjectSessionFlushRegistration | undefined) => void;
 }): React.JSX.Element {
-  const { projectRef, editorRef } = useProject();
+  const { projectRef, editorRef, flushWorkbenchRecordProducers } = useProject();
 
   useFlushOnClose(
     async () => {
+      await flushWorkbenchRecordProducers();
       projectRef.send({ type: 'flushNow' });
       editorRef.send({ type: 'flushNow' });
       await Promise.all([
@@ -563,6 +572,7 @@ function ProjectPersistenceGuard({
     const registration: ProjectSessionFlushRegistration = {
       projectId,
       async flush() {
+        await flushWorkbenchRecordProducers();
         editorRef.send({ type: 'flushNow' });
         await waitFor(editorRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
           timeout: editorFlushTimeoutMilliseconds,
@@ -573,7 +583,7 @@ function ProjectPersistenceGuard({
     return () => {
       onFlushRegistration(undefined);
     };
-  }, [editorRef, onFlushRegistration, projectId]);
+  }, [editorRef, flushWorkbenchRecordProducers, onFlushRegistration, projectId]);
 
   // oxlint-disable-next-line react/jsx-no-useless-fragment -- Headless component
   return <></>;

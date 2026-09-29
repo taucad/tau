@@ -86,6 +86,8 @@ const memoryFileSystem = (files: Map<string, string>): RpcFileSystem => ({
   writeFile: async (path, content) => {
     files.set(path, content);
   },
+  writeFileChecked: async () => { throw new Error('No checked authority in this fixture.'); },
+  deleteFileChecked: async () => { throw new Error('No checked authority in this fixture.'); },
   writeBinaryFile: async () => undefined,
   deleteFile: async (path) => {
     files.delete(path);

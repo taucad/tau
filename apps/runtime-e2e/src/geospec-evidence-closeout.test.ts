@@ -6,8 +6,7 @@ import '@taucad/geospec-engine/register/node';
 import { createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
 import { runnerResultToTestModelOutput } from '@taucad/agent-tools/geospec';
 import type { TestModelOutput } from '@taucad/agent-tools/geospec';
-import { toPiToolContent, trimToolResultContext } from '@taucad/agent-host';
-import type { JsonValue } from '@taucad/agent-host';
+import { trimToolResultContext } from '@taucad/agent-host';
 import { assertGeoSpecJsonValue } from 'geospec/engine';
 import { rpcSchemasRegistry } from '@taucad/chat';
 import { rpcName, toolName } from '@taucad/chat/constants';
@@ -138,14 +137,22 @@ describe('GeoSpec evidence to LLM closeout', () => {
           toolCallId: 'evidence-closeout',
         });
         expect(mcp.structuredContent).toStrictEqual(output);
-        expect(mcp.content).toContainEqual({ type: 'text', text: JSON.stringify(output) });
+        expect(mcp.content).toHaveLength(1);
+        const [summary] = mcp.content;
+        if (summary?.type !== 'text') {
+          throw new Error('missing MCP summary text');
+        }
+        expect(summary.text).toContain('GeoSpec passed 1 of 5 requirements.');
+        for (const failure of output.failures) {
+          expect(summary.text).toContain(failure.id);
+        }
         assertGeoSpecJsonValue(output);
         const [trimmed] = trimToolResultContext([
           {
             role: 'toolResult',
             toolCallId: 'evidence-closeout',
             toolName: 'test_model',
-            content: toPiToolContent(output as JsonValue),
+            content: [{ type: 'text', text: summary.text }],
             details: { content: output },
             isError: false,
             timestamp: 0,
@@ -155,6 +162,7 @@ describe('GeoSpec evidence to LLM closeout', () => {
           throw new Error('missing provider text');
         }
         expect(JSON.parse(trimmed.content[0].text)).toStrictEqual({ failures: output.failures, total: 5 });
+        expect(trimmed.details).toMatchObject({ content: trimmed.content });
       } finally {
         await serial.close();
         await pool.close();

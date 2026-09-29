@@ -28,6 +28,7 @@ import {
   ChatWorkspaceAuthorityProvider,
   browserWorkspaceAuthorityTestApi,
   createPreparedWorkspaceFileSystems,
+  createRootedBridgeFileSystem,
   readRootedBridgeCapabilities,
   useChatWorkspaceAuthority,
   usePreparedChatWorkspace,
@@ -1097,6 +1098,39 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
 });
 
 describe('the project working copy the page hands the browser agent host', () => {
+  it('should forward checked deletion through the rooted authority bridge', async () => {
+    const { project } = fixture();
+    const deleteFileChecked = vi.spyOn(project, 'deleteFileChecked').mockResolvedValue({
+      status: 'conflict', conflicts: [{ path: 'main.scad', actual: null }],
+    });
+    const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+    const proxy = createFileSystemBridgeProxy(createBridgePort(project));
+    await proxy.ready;
+    const files = createRootedBridgeFileSystem({
+      client: client(vi.fn(async () => true)),
+      rootDirectory: '/projects/project_test',
+      backend: 'memory',
+      capabilities,
+      connection: Promise.resolve(proxy),
+      openConnection: async () => proxy,
+    });
+
+    await expect(files.deleteFileChecked({
+      path: 'main.scad',
+      preconditions: [{ path: 'main.scad', expected: 'cube(10);' }],
+    })).resolves.toMatchObject({ status: 'conflict' });
+    expect(deleteFileChecked).toHaveBeenCalledWith({
+      path: 'main.scad', preconditions: [{ path: 'main.scad', expected: 'cube(10);' }],
+    });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(files.deleteFileChecked({
+      path: 'main.scad', preconditions: [{ path: 'main.scad', expected: null }], signal: controller.signal,
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(deleteFileChecked).toHaveBeenCalledTimes(1);
+    proxy.dispose();
+  });
+
   it('should bridge an already-rooted filesystem without rebuilding a path', async () => {
     const { project } = fixture();
     await project.writeFile('main.scad', 'cube(10);');

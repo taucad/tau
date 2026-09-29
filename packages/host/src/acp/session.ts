@@ -99,6 +99,8 @@ import {
   screenshotMcpOutputSchema,
   testModelInputSchema,
   testModelOutputSchema,
+  arrangeWorkbenchInputSchema,
+  arrangeWorkbenchOutputSchema,
 } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import { rpcClientErrorCodeSchema } from '@taucad/chat/schemas/rpc';
@@ -557,6 +559,7 @@ type JsonSchema = {
 };
 
 const tauMcpSchemas = {
+  [toolName.arrangeWorkbench]: { input: arrangeWorkbenchInputSchema, output: arrangeWorkbenchOutputSchema },
   [toolName.getKernelResult]: { input: getKernelResultInputSchema, output: getKernelResultOutputSchema },
   [toolName.testModel]: { input: testModelInputSchema, output: testModelOutputSchema },
   [toolName.screenshot]: { input: screenshotInputSchema, output: screenshotMcpOutputSchema },
@@ -860,14 +863,14 @@ export type AcpSession = {
   readonly agent: AcpAgentFacts;
   /** Config options as the session last reported them, `config_option_update` included. */
   readonly configOptions: readonly SessionConfigOption[] | undefined;
-  /** Select a model on a throwaway discovery session to read that model's own configuration options. */
-  probeModel(model: string): Promise<readonly SessionConfigOption[] | undefined>;
   /** The mode the agent last reported, when it pushed one. */
   readonly modeId: string | undefined;
   /** `true` when a requested session could be neither resumed nor loaded. */
   readonly contextLost: boolean;
   /** Resolves when the connection is gone, however it went. */
   readonly closed: Promise<void>;
+  /** Select a model on a throwaway discovery session to read that model's own configuration options. */
+  probeModel(model: string): Promise<readonly SessionConfigOption[] | undefined>;
   /**
    * Run one turn against this session.
    *

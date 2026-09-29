@@ -7,11 +7,11 @@
  * deflates its object.
  */
 import { MemoryProvider } from '@taucad/filesystem/backend';
+import { revisionId } from '@taucad/project-core/revision-id';
 import type * as isomorphicGit from 'isomorphic-git';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { captureRevisionTree } from '#algorithms/revision-capture.js';
-import { revisionId } from '#algorithms/revision-tree.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { revisionTreeId } from '#git-tree-id.js';
 

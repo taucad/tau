@@ -102,10 +102,14 @@ export function useCameraFraming<
     };
 
     if (!framing.initialized) {
-      frame({ enableConfiguredAngles: true });
+      frame({ enableConfiguredAngles: !framing.preserveOrientationOnFirstFrame });
       if (framing.pendingView) {
         rig.actorRef.send({ type: 'setView', ...framing.pendingView });
       }
+      // oxlint-disable-next-line react/immutability -- This is the session-owned first-frame result, consumed by record persistence.
+      framing.firstFrameView = rig.actorRef.getSnapshot().context.view;
+      // oxlint-disable-next-line react/immutability -- The first frame consumes this actor-owned marker once.
+      framing.preserveOrientationOnFirstFrame = false;
       // oxlint-disable-next-line react/immutability -- the framing record is session state the canvas consumes exactly once; its owner is the graphics actor, not this mount.
       framing.initialized = true;
       commit();

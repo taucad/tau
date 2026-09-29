@@ -67,6 +67,7 @@ const readCacheBytes = 64 * 1024 * 1024;
 type PublicationSource = {
   readonly action: ComputeAction;
   readonly determinism: 'byte-exact' | 'equivalent';
+  callers: number;
 };
 
 type PendingEntry = {
@@ -315,7 +316,7 @@ export const createComputeCapabilityHost = (input: {
     return sessionPromise;
   };
 
-  /** Bounded by the evaluations in flight: each entry is deleted when its caller settles. */
+  /** Bounded by actions in flight: each entry remains until its last caller settles. */
   const publications = new Map<ActionDigest, PublicationSource>();
   let servicePromise: Promise<ComputeReuseService> | undefined;
   const openService = async (): Promise<ComputeReuseService> => {
@@ -682,14 +683,23 @@ export const createComputeCapabilityHost = (input: {
         evaluate: async (evaluation) => {
           const service = await openService();
           const digest = await digestAction({ action: evaluation.action });
-          publications.set(digest, {
-            action: evaluation.action,
-            determinism: evaluation.codec.determinism ?? 'byte-exact',
-          });
+          const existing = publications.get(digest);
+          if (existing) {
+            existing.callers += 1;
+          } else {
+            publications.set(digest, {
+              action: evaluation.action,
+              determinism: evaluation.codec.determinism ?? 'byte-exact',
+              callers: 1,
+            });
+          }
           try {
             return await service.evaluate({ ...evaluation, signal: evaluation.signal ?? signal });
           } finally {
-            publications.delete(digest);
+            const source = publications.get(digest);
+            if (source && --source.callers === 0) {
+              publications.delete(digest);
+            }
           }
         },
         openScope: (open) =>

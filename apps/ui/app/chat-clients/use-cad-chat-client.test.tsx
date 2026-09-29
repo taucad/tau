@@ -60,7 +60,8 @@ const browserHostHarness = vi.hoisted(() => ({
   }),
   resolveInterrupt: vi.fn().mockResolvedValue(undefined),
   syncProjectRoots: vi.fn().mockResolvedValue(undefined),
-  openProjectRootBridge: vi.fn(() => ({ port: new MessageChannel().port1, dispose: vi.fn() })),
+  selectedRoot: '/projects/proj_test',
+  openProjectRootBridge: vi.fn((_root: string, _plane: string) => ({ port: new MessageChannel().port1, dispose: vi.fn() })),
   // The daemon leg: `openAgentHostChannel` → `createDaemonAgentHostTransport`
   // → `createAgentHostClient`, with no worker, bridge or workspace claim.
   openAgentHostChannel: vi.fn(async (hostId: string) => ({ hostId })),
@@ -177,7 +178,7 @@ vi.mock('#hooks/use-file-manager.js', () => {
     fileManagerRef: {
       getSnapshot: () => ({
         context: {
-          rootDirectory: '/projects/proj_test',
+          rootDirectory: browserHostHarness.selectedRoot,
           openFileSystemBridge: browserHostHarness.openProjectRootBridge,
         },
       }),
@@ -455,6 +456,7 @@ beforeEach(() => {
   resetChatTurnServices();
   admittedTurns.length = 0;
   browserHostHarness.registration = undefined;
+  browserHostHarness.selectedRoot = '/projects/proj_test';
   browserHostHarness.registrations = 0;
   browserHostHarness.run = undefined;
   browserHostHarness.placed = false;
@@ -694,6 +696,30 @@ describe('useCadChatClient', () => {
     expect(options?.systemPromptBlocks[0]?.cacheControl).toEqual({ type: 'ephemeral' });
     expect(options?.systemPromptBlocks[1]?.text).toContain('<environment>');
     expect(options?.systemPromptBlocks[1]?.cacheControl).toBeUndefined();
+  });
+
+  it('opens a stable live workbench root while the selected checkout remains the project-root bridge', async () => {
+    browserHostHarness.selectedRoot = '/checkouts/co-test';
+    const candidateBridge = () => ({ port: new MessageChannel().port1, dispose: vi.fn() });
+    workspaceHarness.attachment.mockResolvedValue({ ...workspaceHarness.current, openFileSystemBridge: candidateBridge });
+    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    installActions(buildActions());
+
+    renderClient();
+    await bindChatHost();
+    await browserHostHarness.registration!.createClient();
+
+    const options = browserHostHarness.createClient.mock.calls[0]?.[0];
+    expect(options?.openFileSystemBridge).toBe(candidateBridge);
+    const selected = options?.openProjectRootBridge();
+    const live = options?.openWorkbenchRootBridge();
+    selected?.dispose();
+    live?.dispose();
+    expect(browserHostHarness.openProjectRootBridge).toHaveBeenCalledWith('/checkouts/co-test', 'working-copy');
+    expect(browserHostHarness.openProjectRootBridge).toHaveBeenCalledWith('/projects/proj_test', 'working-copy');
   });
 
   /*

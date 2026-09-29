@@ -5,6 +5,7 @@ import {
   chatAttachmentPath,
   documentSentinel,
   materializeAttachments,
+  toolInputToProvider,
 } from '#harness/session-record.js';
 
 const imageHash = 'a'.repeat(64);
@@ -183,5 +184,14 @@ describe('chatAttachmentPath', () => {
     ['chat-1', 'attachments/short.pdf'],
   ])('refuses chat %s path %s', (chatId, path) => {
     expect(() => chatAttachmentPath(chatId, path)).toThrow(expect.objectContaining({ code: 'STORAGE_PATH_INVALID' }));
+  });
+});
+
+describe('arrange_workbench durable fact', () => {
+  it('records an ACP edit call with the input intact', () => {
+    const input = { open: [{ kind: 'pane', pane: 'parameters' }] };
+    const message = toolInputToProvider({ id: 'input-1', toolCallId: 'call-1', toolName: 'arrange_workbench', input });
+    expect(message.call).toEqual({ toolCallId: 'call-1', kind: 'edit', nativeName: 'arrange_workbench' });
+    expect(message.content).toEqual(input);
   });
 });

@@ -54,7 +54,7 @@ vi.mock('xstate', async (importOriginal) => {
 });
 
 const editorRef = {
-  getSnapshot: () => ({ context: { unitSettings: { 'main.ts': { renderTimeout: 30_000 } } } }),
+  getSnapshot: () => ({ context: {} }),
 };
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -63,6 +63,7 @@ vi.mock('#hooks/use-project.js', () => ({
     projectId: project.id,
     projectRef,
     editorRef,
+    entriesRecord: { version: 1, entries: { 'main.ts': { renderTimeout: 30_000 } } },
   }),
 }));
 

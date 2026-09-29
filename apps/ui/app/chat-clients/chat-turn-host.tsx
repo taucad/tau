@@ -218,6 +218,13 @@ export function ChatTurnHost(): ReactNode {
          * checkout, not the overlays above it (G6, architecture V6). */
         return openFileSystemBridge(rootDirectory, 'working-copy');
       };
+      const openWorkbenchRootBridge = () => {
+        const { openFileSystemBridge } = fileManagerRef.getSnapshot().context;
+        if (!openFileSystemBridge) {
+          throw new Error('The live project filesystem bridge is unavailable.');
+        }
+        return openFileSystemBridge(`/projects/${projectId}`, 'working-copy');
+      };
       return {
         projectStorage: resolveProjectStorage,
         markRunId: async (runId) => workspaceAuthority.markRunId(activeChatId, runId),
@@ -257,6 +264,7 @@ export function ChatTurnHost(): ReactNode {
           return createBrowserAgentHostClient({
             openFileSystemBridge: prepared.openFileSystemBridge,
             openProjectRootBridge,
+            openWorkbenchRootBridge,
             computeMode,
             openComputeStorePort: () => {
               const opener = fileManagerRef.getSnapshot().context.openComputeStorePort;

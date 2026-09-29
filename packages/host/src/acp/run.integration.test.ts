@@ -34,6 +34,7 @@ import { reduceEventLog } from '@taucad/agent-host';
 
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import workbenchBundles from '@taucad/workbench/agent/resources.js';
 
 import { acpCapabilityRenewalMargin, createAcpExternalAgentPort } from '#acp/run.js';
 import { openAcpSession, readSessionTextFile, writeSessionTextFile } from '#acp/session.js';
@@ -148,13 +149,14 @@ const startHarness = async (
     /** Wrap the launcher the way a daemon does, so external turns are recorded (V19). */
     readonly revisions?: boolean;
     readonly systemSkillBundles?: readonly HostSystemSkillBundle[];
+    readonly mcpRegistry?: ToolRegistry;
   } = {},
 ): Promise<Harness> => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-run-'));
   roots.push(workspaceRoot);
   await writeFile(join(workspaceRoot, 'main.scad'), 'cube(10);\n', 'utf8');
   const api = await startStubApi();
-  const mcp = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry, workspaceRoot });
+  const mcp = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry: options.mcpRegistry ?? registry, workspaceRoot });
   closers.push(async () => mcp.close());
 
   const launcherRef: { current?: NodeAgentLauncher } = {};
@@ -180,7 +182,7 @@ const startHarness = async (
     gatewayBaseUrl: `http://127.0.0.1:${String(api.port)}/`,
     model: { id: 'unused-by-external-runs', contextWindow: 1000 },
     systemPrompt: 'unused by external runs',
-    toolRegistry: registry,
+    toolRegistry: options.mcpRegistry ?? registry,
     externalAgents: createAcpExternalAgentPort({
       agents: options.agents ?? [fakeAgent, otherFakeAgent],
       workspaceRoot,
@@ -412,7 +414,7 @@ describe('the external agent run kind', () => {
         sha256: createHash('sha256').update(body).digest('hex'),
       })),
     };
-    const harness = await startHarness({ systemSkillBundles: [bundle], idleTimeout: 50 });
+    const harness = await startHarness({ systemSkillBundles: [bundle, ...workbenchBundles], idleTimeout: 50 });
 
     await runTurn(harness, { chatId: 'chat-skills', runId: 'run-skills', text: 'inspect skills noask' });
 
@@ -427,6 +429,7 @@ describe('the external agent run kind', () => {
     expect(published[0]?.files).toEqual({
       'fixture-skill/SKILL.md': files[0][1],
       'fixture-skill/references/guide.md': files[1][1],
+      'workbench/SKILL.md': workbenchBundles[0]?.body,
     });
     const opened = harness.frames.find(
       (frame) => frame.direction === 'client->agent' && frame.frame.includes('"method":"session/new"'),
@@ -438,6 +441,9 @@ describe('the external agent run kind', () => {
     await until(async () => sent(harness.frames, 'session/close') === 1, 'skill session eviction');
     await expect(readFile(join(publication, '.agents/skills/fixture-skill/references/guide.md'), 'utf8')).resolves.toBe(
       files[1][1],
+    );
+    await expect(readFile(join(publication, '.agents/skills/workbench/SKILL.md'), 'utf8')).resolves.toBe(
+      workbenchBundles[0]?.body,
     );
     await runTurn(harness, { chatId: 'chat-skills', runId: 'run-skills-restored', text: 'inspect skills noask' });
     const restored = harness.frames.find(
@@ -2030,6 +2036,36 @@ describe('one ACP session per chat', () => {
     /* One session, so one server list, so one capability: it was minted at the
      * open and never re-issued under the live session (V7). */
     expect(harness.frames.filter((frame) => frame.frame.includes('tau-mcp-host-v1.'))).toHaveLength(1);
+  }, 90_000);
+
+  it('makes two distinct MCP arrangement calls for the stale-digest fixture prompt', async () => {
+    const inputs: unknown[] = [];
+    const mcpRegistry: ToolRegistry = {
+      list: () => [{ name: 'arrange_workbench', description: 'Arrange the workbench.', inputSchema: { type: 'object' } }],
+      invoke: async (invocation): ReturnType<ToolRegistry['invoke']> => {
+        inputs.push(invocation.input);
+        return inputs.length === 1
+          ? { content: { status: 'written', revisions: [{ path: '.tau/workbench/layout.json', digest: `sha256:${'a'.repeat(64)}`, previousDigest: 'missing' }], visible: [{ kind: 'view', view: 'front' }] }, isError: false }
+          : { content: { errorCode: 'RECORD_CONFLICT', message: 'The workbench arrangement changed.' }, isError: true };
+      },
+    };
+    const harness = await startHarness({ mcpRegistry });
+    const chatId = 'chat-mcp-arrange-conflict';
+
+    await runTurn(harness, { chatId, runId: 'run-arrange-conflict', text: 'noask mcp-arrange-conflict' });
+
+    expect(inputs).toEqual([
+      { views: [{ id: 'front', name: 'Front', entryPath: 'main.scad', camera: { kind: 'preset', preset: 'front' } }] },
+      { basedOn: 'missing', open: [{ kind: 'pane', pane: 'parameters' }] },
+    ]);
+    const messages = messagesOf(await readLog(harness.workspaceRoot, chatId));
+    const arrangementInputs = messages.filter((message) => message.role === 'tool-input' && message.toolName === 'arrange_workbench');
+    const arrangementOutputs = messages.filter((message) => message.role === 'tool-output' && message.toolName === 'arrange_workbench');
+    expect(arrangementInputs.map((message) => message.role === 'tool-input' ? message.call?.toolCallId : undefined)).toEqual([
+      'mcp-arrange-1', 'mcp-arrange-conflict-2',
+    ]);
+    expect(arrangementOutputs).toHaveLength(2);
+    expect(JSON.stringify(arrangementOutputs.at(-1)?.content)).toContain('RECORD_CONFLICT');
   }, 90_000);
 
   it('gives a second agent in the same chat its own session', async () => {

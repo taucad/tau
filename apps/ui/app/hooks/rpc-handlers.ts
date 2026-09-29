@@ -1,3 +1,4 @@
+import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 /**
  * RPC Handlers Browser Adapter
  *
@@ -9,7 +10,6 @@
  */
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { awaitFreshRender, AwaitFreshRenderTimeoutError } from '#machines/await-fresh-render.js';
-import type { editorMachine } from '#machines/editor.machine.js';
 import type {
   RpcCall,
   RpcClientErrorCode,
@@ -33,7 +33,8 @@ import type {
   RpcGraphicsExportGeometryResult,
   RpcDirectoryEntry,
 } from '@taucad/chat/rpc';
-import type { FileExtension, FileStat } from '@taucad/types';
+import type { CheckedFileWrite, CheckedFileWriteResult, FileExtension, FileStat, FileWritePrecondition } from '@taucad/types';
+import { assertRootedPath, resolveAuthorityPath } from '@taucad/utils/path';
 import type { KernelIssue } from '@taucad/runtime';
 import { DirectoryListingFailedError, DirectoryListingErrorCode } from '@taucad/fs-client/directory-listing';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
@@ -91,6 +92,11 @@ export type RpcHandlerDependencies = {
   /** Active chat thread identifier (ledger + Socket.IO room correlation). */
   chatId: string;
   fileManager: {
+    fileManagerRef: { getSnapshot(): { context: { rootDirectory: string } } };
+    workbenchFiles: {
+      writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+      deleteFileChecked(input: { path: string; preconditions: readonly FileWritePrecondition[] }): Promise<CheckedFileWriteResult>;
+    };
     readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
     writeFile: (path: string, data: Uint8Array<ArrayBuffer>, options: { source: FileWriteSource }) => Promise<void>;
     deleteFile: (path: string, options: { source: FileWriteSource }) => Promise<void>;
@@ -99,8 +105,6 @@ export type RpcHandlerDependencies = {
     runtimeFileSystem: RuntimeFileSystem;
   };
   projectRef?: ActorRefFrom<typeof projectMachine>;
-  /** Durable per-entry settings live here; a unit this adapter spawns is seeded from them (E1). */
-  editorRef?: ActorRefFrom<typeof editorMachine>;
   /** Headless overrides retained independently of the visible project route. */
   kernelClient?: RpcRuntimeClient;
   graphicsClient?: RpcGraphicsClient;
@@ -140,6 +144,9 @@ const mutationQueueFor = (authority: RuntimeFileSystem): ResourceQueue => {
 
 function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileManager']): RpcFileSystem {
   const mutationQueue = mutationQueueFor(fileManager.runtimeFileSystem);
+  const absolute = (path: string): string => resolveAuthorityPath(`${fileManager.fileManagerRef.getSnapshot().context.rootDirectory}/${assertRootedPath(path)}`);
+  const absolutePreconditions = (preconditions: readonly FileWritePrecondition[]): FileWritePrecondition[] =>
+    preconditions.map((precondition) => ({ ...precondition, path: absolute(precondition.path) }));
   const readFileBytes = async (path: string): Promise<Uint8Array<ArrayBuffer>> =>
     new Uint8Array(await fileManager.readFile(path));
   const writeFileIfUnchanged = async (
@@ -193,7 +200,12 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
   return {
     async readFile(path: string): Promise<string> {
       const data = await fileManager.readFile(path);
-      return decodeTextFile(data);
+      try {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- `ignoreBOM` is the native TextDecoder option name.
+        return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(data);
+      } catch {
+        throw Object.assign(new Error(`File '${path}' is not valid UTF-8 text.`), { code: rpcClientErrorCode.invalidTextEncoding });
+      }
     },
     async writeFile(path: string, content: string): Promise<void> {
       const data = encodeTextFile(content);
@@ -202,6 +214,19 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
           source: 'machine',
         }),
       );
+    },
+    async writeFileChecked(input) {
+      return fileManager.workbenchFiles.writeFileChecked({
+        path: absolute(input.path),
+        data: input.data,
+        preconditions: absolutePreconditions(input.preconditions),
+      });
+    },
+    async deleteFileChecked(input) {
+      return fileManager.workbenchFiles.deleteFileChecked({
+        path: absolute(input.path),
+        preconditions: absolutePreconditions(input.preconditions),
+      });
     },
     async writeBinaryFile(path: string, data: Uint8Array<ArrayBuffer>): Promise<void> {
       const ownedData = new Uint8Array(data);
@@ -314,7 +339,7 @@ export type EnsureGeometryUnitResult =
 async function ensureGeometryUnit(
   projectRef: ActorRefFrom<typeof projectMachine>,
   targetFile: string,
-  editorRef: ActorRefFrom<typeof editorMachine> | undefined,
+  renderTimeoutForFile: (path: string) => Promise<number | undefined>,
 ): Promise<EnsureGeometryUnitResult> {
   try {
     const projectSnapshot = projectRef.getSnapshot();
@@ -325,7 +350,7 @@ async function ensureGeometryUnit(
       projectRef.send({
         type: 'createGeometryUnit',
         entryPath: targetFile,
-        renderTimeout: editorRef?.getSnapshot().context.unitSettings[targetFile]?.renderTimeout,
+        renderTimeout: await renderTimeoutForFile(targetFile),
       });
       const refreshed = projectRef.getSnapshot();
       cadUnit = refreshed.context.geometryUnits.get(targetFile);
@@ -364,11 +389,11 @@ function geometryFailureMessage(issues: readonly KernelIssue[]): string {
 
 function createBrowserRuntimeClient(
   projectRef: ActorRefFrom<typeof projectMachine>,
-  editorRef: ActorRefFrom<typeof editorMachine> | undefined,
+  renderTimeoutForFile: (path: string) => Promise<number | undefined>,
 ): RpcRuntimeClient {
   return {
     async getKernelResult(targetFile: string): Promise<GetKernelResultRpcResult> {
-      const resolved = await ensureGeometryUnit(projectRef, targetFile, editorRef);
+      const resolved = await ensureGeometryUnit(projectRef, targetFile, renderTimeoutForFile);
       if (!resolved.ok) {
         return { success: false, errorCode: resolved.errorCode, message: resolved.message };
       }
@@ -408,7 +433,7 @@ function createBrowserGeoSpecClient(createGeoSpecClient: (() => RpcGeoSpecClient
 
 function createBrowserGraphicsClient(
   projectRef: ActorRefFrom<typeof projectMachine>,
-  editorRef: ActorRefFrom<typeof editorMachine> | undefined,
+  renderTimeoutForFile: (path: string) => Promise<number | undefined>,
 ): RpcGraphicsClient {
   return {
     async exportGeometry({
@@ -420,7 +445,7 @@ function createBrowserGraphicsClient(
       format: string;
       exportOptions?: Record<string, unknown>;
     }): Promise<RpcGraphicsExportGeometryResult> {
-      const resolved = await ensureGeometryUnit(projectRef, targetFile, editorRef);
+      const resolved = await ensureGeometryUnit(projectRef, targetFile, renderTimeoutForFile);
       if (!resolved.ok) {
         return { success: false, errorCode: resolved.errorCode, message: resolved.message };
       }
@@ -486,7 +511,7 @@ function createBrowserGraphicsClient(
 function createBrowserImageClient(
   projectRef: ActorRefFrom<typeof projectMachine>,
   imageService: Pick<HeadlessImageService, 'export'>,
-  editorRef: ActorRefFrom<typeof editorMachine> | undefined,
+  renderTimeoutForFile: (path: string) => Promise<number | undefined>,
 ): RpcImageClient {
   const findGraphicsRef = (targetFile: string): ActorRefFrom<typeof graphicsMachine> | undefined => {
     const unitId = createSourceModelInteractionUnitId(targetFile);
@@ -500,7 +525,7 @@ function createBrowserImageClient(
 
   return {
     async captureImages(input: CaptureImagesRpcInput): Promise<CaptureImagesRpcResult> {
-      const resolved = await ensureGeometryUnit(projectRef, input.targetFile, editorRef);
+      const resolved = await ensureGeometryUnit(projectRef, input.targetFile, renderTimeoutForFile);
       if (!resolved.ok) {
         return { success: false, errorCode: resolved.errorCode, message: resolved.message };
       }
@@ -558,7 +583,18 @@ function createBrowserImageClient(
  * to createRpcDispatcher from @taucad/chat/rpc.
  */
 export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
-  const { chatId, fileManager, projectRef, editorRef, headlessImageService, createGeoSpecClient } = deps;
+  const { chatId, fileManager, projectRef, headlessImageService, createGeoSpecClient } = deps;
+  const renderTimeoutForFile = async (path: string): Promise<number | undefined> => {
+    let bytes: Uint8Array<ArrayBuffer>;
+    try { bytes = await fileManager.readFile(workbenchPaths.entries); }
+    catch (error) {
+      if (error instanceof FileNotFoundError || getErrno(error) === 'ENOENT') { return undefined; }
+      throw error;
+    }
+    const read = workbenchRecords.entries.read(bytes);
+    if (read.status !== 'current') { throw new Error('Workbench entry settings need repair before rendering.'); }
+    return read.record.entries[path]?.renderTimeout;
+  };
   const fileSystem = createBrowserRpcFileSystem(fileManager);
   const skillResolver = createSkillResolver({
     async readFile(path) {
@@ -575,7 +611,7 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
     kernelClient:
       deps.kernelClient ??
       (projectRef
-        ? createBrowserRuntimeClient(projectRef, editorRef)
+        ? createBrowserRuntimeClient(projectRef, renderTimeoutForFile)
         : {
             getKernelResult: async () => ({
               success: false,
@@ -585,11 +621,11 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
           }),
     geospec: deps.geoSpecClient ?? createBrowserGeoSpecClient(createGeoSpecClient),
     skillResolver,
-    graphics: deps.graphicsClient ?? (projectRef ? createBrowserGraphicsClient(projectRef, editorRef) : undefined),
+    graphics: deps.graphicsClient ?? (projectRef ? createBrowserGraphicsClient(projectRef, renderTimeoutForFile) : undefined),
     images:
       deps.imageClient ??
       (projectRef && headlessImageService
-        ? createBrowserImageClient(projectRef, headlessImageService, editorRef)
+        ? createBrowserImageClient(projectRef, headlessImageService, renderTimeoutForFile)
         : undefined),
   };
 

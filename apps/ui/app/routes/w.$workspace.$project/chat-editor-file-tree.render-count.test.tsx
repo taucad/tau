@@ -63,6 +63,9 @@ vi.mock('#hooks/use-keyboard.js', () => ({
   useKeybinding: () => ({ formattedKeyCombination: 'Enter' }),
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));
+vi.mock('#workbench-records/view-actions.js', () => ({ useWorkbenchViewCommands: () => ({
+  edit: async () => true, remove: async () => true,
+}) }));
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectRef: actorStub, editorRef: { ...actorStub, send: vi.fn() } }),
 }));

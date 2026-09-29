@@ -15,7 +15,7 @@ import type { MessageChannelMain, MessagePortMain, UtilityProcess } from 'electr
 import type { MachineBindingOutcome } from '@taucad/runtime/machine';
 
 /** Concerns the services utility serves, one dedicated port each. */
-export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'geospecPerformance', 'machines'] as const;
+export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'geospecPerformance', 'exactMeasurement', 'machines'] as const;
 
 /**
  * A concern the renderer may ask for a port to.
@@ -33,6 +33,7 @@ export const rendererServicesConcerns: readonly ServicesConcern[] = [
   'nodeFs',
   'agentHost',
   'geospecPerformance',
+  'exactMeasurement',
   'machines',
 ];
 

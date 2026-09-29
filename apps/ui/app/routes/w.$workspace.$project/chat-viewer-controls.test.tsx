@@ -278,8 +278,8 @@ describe('ChatViewerControls', () => {
 
       await user.click(screen.getByRole('button', { name: 'Measure' }));
 
-      // Clear all is disabled with nothing measured, so Done is the row's first control.
-      expect(within(measuringRow()).getByRole('button', { name: 'Done with measure' })).toHaveFocus();
+      // The Targets control opens the row before disabled Clear all and Done.
+      expect(within(measuringRow()).getByRole('button', { name: /^Targets:/u })).toHaveFocus();
     });
 
     it('should move focus into the row when Enter starts the tool', async () => {
@@ -291,7 +291,7 @@ describe('ChatViewerControls', () => {
       });
       await user.keyboard('{Enter}');
 
-      expect(within(measuringRow()).getByRole('button', { name: 'Done with measure' })).toHaveFocus();
+      expect(within(measuringRow()).getByRole('button', { name: /^Targets:/u })).toHaveFocus();
     });
 
     it('should leave focus where it is when S or M starts a tool', async () => {

@@ -47,6 +47,7 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
 }));
 let chats = [{ id: 'chat-1', name: 'Initial design', checkoutId: 'live' }];
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
+vi.mock('#hooks/use-chat-records.js', () => ({ useChatRecords: () => ({ chats, isLoading: false, error: undefined }) }));
 /* D19: the card's Backup row asks about the account; these rows are signed in and entitled. */
 vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),

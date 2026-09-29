@@ -27,6 +27,8 @@ import type { RuntimeAgentClient } from '#runtime/runtime-agent-clients.js';
 const emptyFileSystem = (): RpcFileSystem => ({
   readFile: async () => 'export const main = 1;\n',
   writeFile: async () => undefined,
+  writeFileChecked: async () => { throw new Error('No checked authority in this fixture.'); },
+  deleteFileChecked: async () => { throw new Error('No checked authority in this fixture.'); },
   writeBinaryFile: async () => undefined,
   deleteFile: async () => undefined,
   readdir: async () => [],
@@ -88,6 +90,9 @@ const fileTools = [
 ];
 
 describe('createChatToolRegistry listing', () => {
+  it('offers arrange_workbench with only a filesystem', () => {
+    expect(listOf()).toContain('arrange_workbench');
+  });
   it.each([undefined, 'legacy', 'native'] as const)(
     'should advertise the selected %s authoring API before any tool invocation',
     (geospecAuthoringMode) => {
@@ -175,6 +180,7 @@ describe('createChatToolRegistry listing', () => {
     });
     expect(names.toSorted()).toStrictEqual(
       [
+        'arrange_workbench',
         'create_file',
         'delete_file',
         'edit_file',
@@ -243,6 +249,104 @@ describe('createChatToolRegistry listing', () => {
   });
 });
 
+describe('arrange_workbench routing', () => {
+  it('accepts basedOn for the exact bytes of a BOM-prefixed layout and checks the edit', async () => {
+    const provider = new MemoryProvider();
+    const layoutPath = '.tau/workbench/layout.json';
+    const original = JSON.stringify({
+      version: 1,
+      lanes: { chat: true, workbench: true },
+      viewer: { kind: 'group', tabs: [] },
+      workbench: { kind: 'group', tabs: [] },
+    });
+    const originalBytes = new TextEncoder().encode(`\uFEFF${original}`);
+    await provider.writeFile(layoutPath, originalBytes);
+    const view = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
+    const mutations = new ResourceQueue();
+    const fileSystemFor = (signal?: AbortSignal) => createProviderRpcFileSystem({ provider: view, mutations, signal });
+    const registry = build({ fileSystemFor, workbenchFileSystemFor: fileSystemFor });
+    const before = `sha256:${createHash('sha256').update(originalBytes).digest('hex')}`;
+
+    const result = await invoke(registry, 'arrange_workbench', {
+      input: { basedOn: before, lanes: { chat: false } },
+    });
+
+    expect(result).toMatchObject({
+      isError: false,
+      content: { success: true, status: 'written', revisions: [{ path: layoutPath, previousDigest: before }] },
+    });
+    expect(await provider.readFile(layoutPath)).not.toEqual(originalBytes);
+    provider.dispose();
+  });
+
+  it('selects the live-root filesystem during a candidate invocation', async () => {
+    const candidate = vi.fn(() => emptyFileSystem());
+    const live = vi.fn(() => emptyFileSystem());
+    const registry = build({ fileSystemFor: candidate, workbenchFileSystemFor: live });
+    await invoke(registry, 'arrange_workbench', { input: { lanes: { chat: true } } });
+    expect(live).toHaveBeenCalledOnce();
+    expect(candidate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: 'two-number look direction', input: { views: [{ id: 'front', entryPath: 'main.ts', camera: { kind: 'look', direction: [0, -1] } }] }, field: 'views[0].camera.direction', exact: 'views[0].camera.direction: expected 3 numbers, received 2. Nothing was written.' },
+    { label: 'third split level', input: {
+      viewer: { kind: 'split', direction: 'row', children: [
+        { kind: 'group', tabs: [] },
+        { kind: 'split', direction: 'column', children: [
+          { kind: 'group', tabs: [] },
+          { kind: 'split', direction: 'row', children: [
+            { kind: 'group', tabs: [] }, { kind: 'group', tabs: [] },
+          ] },
+        ] },
+      ] },
+    }, field: 'viewer.children[1].children[1]' },
+    { label: 'unknown pane', input: { open: [{ kind: 'pane', pane: 'settings' }] }, field: 'open[0].pane' },
+    { label: 'unknown preset', input: { views: [{ id: 'front', entryPath: 'main.ts', camera: { kind: 'preset', preset: 'iso' } }] }, field: 'views[0].camera.preset' },
+    { label: 'view tab in workbench lane', input: { workbench: { kind: 'group', tabs: [{ kind: 'view', view: 'front' }] } }, field: 'workbench.tabs[0].kind' },
+    { label: 'pane tab in viewer lane', input: { viewer: { kind: 'group', tabs: [{ kind: 'pane', pane: 'model' }] } }, field: 'viewer.tabs[0]' },
+    { label: 'duplicate view', input: { views: [{ id: 'front', entryPath: 'main.ts' }, { id: 'front', entryPath: 'main.ts' }] }, field: 'views[1].id' },
+    { label: 'duplicate entry', input: { entries: [{ path: 'main.ts', renderTimeout: 100 }, { path: 'main.ts', renderTimeout: 200 }] }, field: 'entries[1].path' },
+    { label: 'duplicate viewer tab', input: { viewer: { kind: 'group', tabs: [{ kind: 'view', view: 'front' }, { kind: 'view', view: 'front' }] } }, field: 'viewer' },
+    { label: 'duplicate workbench tab', input: { workbench: { kind: 'group', tabs: [{ kind: 'pane', pane: 'model' }, { kind: 'pane', pane: 'model' }] } }, field: 'workbench' },
+    { label: 'basedOn alone', input: { basedOn: 'missing' }, field: 'input' },
+    { label: 'new view without entry', input: { views: [{ id: 'front' }] }, field: 'views[0].entryPath' },
+    { label: 'zero look', input: { views: [{ id: 'front', entryPath: 'main.ts', camera: { kind: 'look', direction: [0, 0, 0] } }] }, field: 'direction' },
+    { label: 'hidden opened lane', input: { open: [{ kind: 'pane', pane: 'model' }], lanes: { workbench: false } }, field: 'lanes.workbench' },
+    { label: 'forbidden mode', input: { mode: 'replace', lanes: { chat: false } }, field: 'input' },
+    { label: 'device lane width', input: { lanes: { chat: true, chatWidth: 320 } }, field: 'lanes' },
+    { label: 'stored camera pose', input: { views: [{ id: 'front', camera: { kind: 'pose', frameId: 'tau:root', target: [0, 0, 0], direction: [0, -1, 0], up: [0, 0, 1], verticalSpan: 1, perspectiveZoom: 1 } }] }, field: 'views[0].camera.kind' },
+    { label: 'components on view', input: { views: [{ id: 'front', components: { hidden: ['lid'] } }] }, field: 'views[0]' },
+    { label: 'kinematics on view', input: { views: [{ id: 'front', kinematics: { coordinates: { hinge: 30 } } }] }, field: 'views[0]' },
+    { label: 'null view entry', input: { views: [{ id: 'front', entryPath: null }] }, field: 'views[0].entryPath' },
+    { label: 'derived measurement distance', input: { views: [{ id: 'front', measurements: [{ id: 'm1', startPoint: [0, 0, 0], endPoint: [0.02, 0, 0], distance: 0.02 }] }] }, field: 'views[0].measurements[0]' },
+  ])('refuses $label at the actual registry boundary without writing', async ({ label, input, field, exact }) => {
+    const viewPath = '.tau/workbench/views/front.json';
+    const fileSystem = {
+      ...emptyFileSystem(),
+      exists: vi.fn(async (path: string) => path === 'main.ts' || (label === 'duplicate viewer tab' && path === viewPath)),
+      readFile: vi.fn(async (path: string) => path === viewPath
+        ? JSON.stringify({ version: 1, entryPath: 'main.ts' })
+        : 'export const main = 1;\n'),
+      writeFile: vi.fn(async () => undefined),
+      writeFileChecked: vi.fn(async () => { throw new Error('unexpected checked write'); }),
+      deleteFileChecked: vi.fn(async () => { throw new Error('unexpected checked delete'); }),
+    };
+    const registry = build({ fileSystemFor: () => fileSystem, workbenchFileSystemFor: () => fileSystem,
+      workbench: { isModelFile: async () => true } });
+    const result = await invoke(registry, 'arrange_workbench', { input });
+    expect(result).toMatchObject({ isError: true, content: { success: false, errorCode: 'VALIDATION_ERROR' } });
+    expect(result.content).toHaveProperty('message', expect.stringContaining(field));
+    expect(result.content).toHaveProperty('message', expect.stringContaining('Nothing was written.'));
+    if (exact !== undefined) {
+      expect(result.content).toEqual({ success: false, errorCode: 'VALIDATION_ERROR', message: exact });
+    }
+    expect(fileSystem.writeFile).not.toHaveBeenCalled();
+    expect(fileSystem.writeFileChecked).not.toHaveBeenCalled();
+    expect(fileSystem.deleteFileChecked).not.toHaveBeenCalled();
+  });
+});
+
 describe('createChatToolRegistry invocation', () => {
   it('refuses a tool it does not list rather than dispatching it', async () => {
     const registry = build();
@@ -264,6 +368,7 @@ describe('createChatToolRegistry invocation', () => {
       isError: true,
       content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' },
     });
+    expect(result.content).not.toHaveProperty('success');
   });
 
   it('dispatches a validated call to the RPC handler', async () => {

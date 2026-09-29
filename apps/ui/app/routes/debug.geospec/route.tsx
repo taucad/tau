@@ -29,7 +29,7 @@ import type {
   PerformanceLabRunInput,
   PerformanceLabRunResult,
   PerformanceLabWasmExecution,
-} from '../../../../../packages/geospec-engine-native/bench/performance-lab-runner.js';
+} from '../../../../../packages/geospec-engine/experiments/performance-lab/performance-lab-runner.js';
 /* oxlint-enable no-restricted-imports */
 
 const engines = ['legacy-wasm', 'combined-st', 'combined-mt', 'native-desktop'] as const;
@@ -135,7 +135,7 @@ function GeoSpecLab(): React.JSX.Element {
     return () => {
       active = false;
     };
-  }, [mt?.receipt, permits]);
+  }, [mt?.receipt, mt?.permits]);
 
   useEffect(() => {
     service.current = new GeoSpecPerformanceService();

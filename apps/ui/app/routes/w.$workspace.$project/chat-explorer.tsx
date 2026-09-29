@@ -228,17 +228,16 @@ function ChatGeometryExplorerContent({
   readonly query: string;
   readonly revealTarget: ModelComponentRevealTarget | undefined;
 }): React.JSX.Element {
-  const viewSettings = useSelector(project.editorRef, (state) => state.context.viewSettings);
   const resolveGraphicsForFile = useCallback(
     (entryPath: string): GraphicsActorRef | undefined => {
       for (const [viewId, graphicsRef] of project.viewGraphics) {
-        if (viewSettings[viewId]?.entryPath === entryPath) {
+        if (project.viewRecords.get(viewId)?.entryPath === entryPath) {
           return graphicsRef;
         }
       }
       return undefined;
     },
-    [project.viewGraphics, viewSettings],
+    [project.viewGraphics, project.viewRecords],
   );
   const entries = useMemo(
     () =>

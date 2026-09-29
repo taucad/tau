@@ -11,16 +11,14 @@ const lab = vi.hoisted(() => {
     construct,
     native: {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Mock of the native module export.
-      Engine: class {
-        public constructor(...args: unknown[]) {
-          construct(...args);
-        }
+      Engine: function MockEngine(...args: unknown[]) {
+        construct(...args);
       },
       canonicalize: vi.fn(),
     },
   };
 });
-vi.mock('../../../../packages/geospec-engine-native/bench/performance-lab-runner.js', () => ({
+vi.mock('../../../../packages/geospec-engine/experiments/performance-lab/performance-lab-runner.js', () => ({
   parsePerformanceLabRunInput: lab.parse,
   runPerformanceLabCell: lab.run,
 }));
@@ -48,7 +46,8 @@ describe('desktop GeoSpec performance concern', () => {
         expect(actual).toEqual({ ...input, cache: 'host-module-cache' });
         const native = await modules.native();
         expect(native.canonicalize).toBe(lab.native.canonicalize);
-        new native.Engine({ variant: 'st' });
+        const engine = new native.Engine({ variant: 'st' });
+        expect(engine).toBeInstanceOf(lab.native.Engine);
         expect(lab.construct).toHaveBeenCalledExactlyOnceWith();
         started.resolve();
         await finish.promise;

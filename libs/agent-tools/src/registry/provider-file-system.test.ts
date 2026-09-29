@@ -3,7 +3,7 @@ import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createProviderRpcFileSystem } from '#registry/provider-file-system.js';
 
@@ -103,6 +103,18 @@ describe('createProviderRpcFileSystem', () => {
     expect(new Date(stat.modifiedAt).getTime()).toBeGreaterThan(0);
   });
 
+  it('reports malformed UTF-8 distinctly from an I/O failure', async () => {
+    await provider.writeFile('views/bad.json', new Uint8Array([0xc3, 0x28]));
+    await expect(fileSystemFor().readFile('views/bad.json')).rejects.toMatchObject({ code: 'INVALID_TEXT_ENCODING' });
+    await expect(fileSystemFor().readFile('views/missing.json')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('preserves a UTF-8 BOM in text reads so checked expected bytes remain exact', async () => {
+    const content = '\uFEFF{"version":1}';
+    await provider.writeFile('views/bom.json', new TextEncoder().encode(content));
+    await expect(fileSystemFor().readFile('views/bom.json')).resolves.toBe(content);
+  });
+
   it('lists a directory as typed entries with basenames only', async () => {
     await provider.writeFile('src/a.ts', 'a\n');
     await provider.mkdir('src/nested', { recursive: true });
@@ -134,6 +146,103 @@ describe('createProviderRpcFileSystem', () => {
 
     await expect(fileSystem.deleteFile('doomed')).rejects.toThrow();
     expect(await provider.exists('doomed/child.ts')).toBe(true);
+  });
+
+  it('checks bytes for write and delete, returning applied, unchanged and conflict', async () => {
+    const fileSystem = fileSystemFor();
+    const before = await provider.readFile('main.ts');
+    expect(await fileSystem.writeFileChecked({
+      path: 'main.ts', data: before, preconditions: [{ path: 'main.ts', expected: before }],
+    })).toMatchObject({ status: 'unchanged' });
+    expect(await fileSystem.writeFileChecked({
+      path: 'main.ts', data: 'next', preconditions: [{ path: 'main.ts', expected: before }],
+    })).toMatchObject({ status: 'applied' });
+    expect(await fileSystem.deleteFileChecked({
+      path: 'main.ts', preconditions: [{ path: 'main.ts', expected: before }],
+    })).toMatchObject({ status: 'conflict' });
+    expect(await fileSystem.deleteFileChecked({
+      path: 'main.ts', preconditions: [{ path: 'main.ts', expected: 'next' }],
+    })).toMatchObject({ status: 'applied' });
+    expect(await fileSystem.deleteFileChecked({
+      path: 'main.ts', preconditions: [{ path: 'main.ts', expected: null }],
+    })).toMatchObject({ status: 'unchanged' });
+  });
+
+  it('does not fall back after a genuine provider error', async () => {
+    Object.assign(provider, { writeFileChecked: async () => { throw Object.assign(new Error('disk failed'), { code: 'EIO' }); } });
+    const before = await provider.readFile('main.ts');
+    await expect(fileSystemFor().writeFileChecked({
+      path: 'main.ts', data: 'wrong', preconditions: [{ path: 'main.ts', expected: before }],
+    })).rejects.toMatchObject({ code: 'EIO' });
+    expect(await provider.readFile('main.ts')).toEqual(before);
+  });
+
+  it('falls back only when both checked provider methods explicitly refuse support', async () => {
+    const unsupported = () => { throw Object.assign(new Error('no authority'), { code: 'CHECKED_WRITE_UNSUPPORTED' }); };
+    const writeFileChecked = vi.fn(unsupported);
+    const deleteFileChecked = vi.fn(() => { throw Object.assign(new Error('no authority'), {
+      code: 'CHECKED_WRITE_UNSUPPORTED', applicationState: 'known-not-applied',
+    }); });
+    Object.assign(provider, { writeFileChecked, deleteFileChecked });
+    const fileSystem = fileSystemFor();
+    const before = await provider.readFile('main.ts');
+    expect(await fileSystem.writeFileChecked({ path: 'main.ts', data: 'next', preconditions: [{ path: 'main.ts', expected: before }] })).toMatchObject({ status: 'applied' });
+    expect(await fileSystem.deleteFileChecked({ path: 'main.ts', preconditions: [{ path: 'main.ts', expected: 'next' }] })).toMatchObject({ status: 'applied' });
+    expect(writeFileChecked).toHaveBeenCalledOnce();
+    expect(deleteFileChecked).toHaveBeenCalledOnce();
+    expect(await provider.exists('main.ts')).toBe(false);
+  });
+
+  it('keeps a genuine checked-delete error and preserves the original bytes', async () => {
+    Object.assign(provider, { deleteFileChecked: async () => { throw Object.assign(new Error('disk failed'), { code: 'EIO' }); } });
+    const before = await provider.readFile('main.ts');
+    await expect(fileSystemFor().deleteFileChecked({ path: 'main.ts', preconditions: [{ path: 'main.ts', expected: before }] })).rejects.toMatchObject({ code: 'EIO' });
+    expect(await provider.readFile('main.ts')).toEqual(before);
+  });
+
+  it('does not retry an unsupported checked mutation whose application may already have occurred', async () => {
+    const uncertain = Object.assign(new Error('native outcome unknown'), {
+      code: 'CHECKED_WRITE_UNSUPPORTED', applicationState: 'potentially-applied',
+    });
+    const writeFile = vi.spyOn(provider, 'writeFile');
+    const unlink = vi.spyOn(provider, 'unlink');
+    Object.assign(provider, {
+      writeFileChecked: async () => { throw uncertain; },
+      deleteFileChecked: async () => { throw uncertain; },
+    });
+    const before = await provider.readFile('main.ts');
+    const fileSystem = fileSystemFor();
+
+    await expect(fileSystem.writeFileChecked({
+      path: 'main.ts', data: 'next', preconditions: [{ path: 'main.ts', expected: before }],
+    })).rejects.toBe(uncertain);
+    await expect(fileSystem.deleteFileChecked({
+      path: 'main.ts', preconditions: [{ path: 'main.ts', expected: before }],
+    })).rejects.toBe(uncertain);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(unlink).not.toHaveBeenCalled();
+    expect(await provider.readFile('main.ts')).toEqual(before);
+  });
+
+  it('rejects checked mutations at the mask and an aborted invocation before writing', async () => {
+    const fileSystem = fileSystemFor();
+    await expect(fileSystem.writeFileChecked({ path: '.tau/chats/log.jsonl', data: 'x', preconditions: [{ path: '.tau/chats/log.jsonl', expected: null }] })).rejects.toMatchObject({ code: 'EROFS' });
+    await expect(fileSystem.deleteFileChecked({ path: 'tau.json', preconditions: [{ path: 'tau.json', expected: null }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    const controller = new AbortController();
+    controller.abort(new Error('stopped'));
+    const before = await provider.readFile('main.ts');
+    await expect(fileSystemFor(controller.signal).deleteFileChecked({ path: 'main.ts', preconditions: [{ path: 'main.ts', expected: before }] })).rejects.toThrow('stopped');
+    expect(await provider.readFile('main.ts')).toEqual(before);
+  });
+
+  it('refuses oversized checked requests before provider dispatch', async () => {
+    const checked = vi.fn(async () => ({ status: 'applied', content: new Uint8Array() } as const));
+    Object.assign(provider, { writeFileChecked: checked, deleteFileChecked: checked });
+    const fileSystem = fileSystemFor();
+    const preconditions = Array.from({ length: 33 }, () => ({ path: 'main.ts', expected: 'same' }));
+    await expect(fileSystem.writeFileChecked({ path: 'main.ts', data: 'x', preconditions })).rejects.toThrow('1-32');
+    await expect(fileSystem.deleteFileChecked({ path: 'main.ts', preconditions })).rejects.toThrow('1-32');
+    expect(checked).not.toHaveBeenCalled();
   });
 
   it('refuses a mutation once its invocation is aborted', async () => {

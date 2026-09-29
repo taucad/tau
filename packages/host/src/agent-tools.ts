@@ -34,6 +34,7 @@ import type { RpcGeoSpecClient, RpcSkillResolver } from '@taucad/chat/rpc';
 import {
   createChatToolRegistry,
   createProviderRpcFileSystem,
+  createRuntimeWorkbenchClient,
   createSkillBundleOverlay,
   createSkillBundleRegistry,
 } from '@taucad/agent-tools/registry';
@@ -97,7 +98,7 @@ export type HostExportFile = ExportFile;
  *
  * @public
  */
-export type HostRuntimeClient = Pick<RuntimeClient, 'evaluate' | 'export' | 'transcode'>;
+export type HostRuntimeClient = Pick<RuntimeClient, 'evaluate' | 'export' | 'transcode' | 'connect' | 'capabilities'>;
 
 /** Filesystem capability the host tool registry consumes. @public */
 export type HostToolFileSystem = Omit<RuntimeFileSystemBase, 'watch'>;
@@ -226,8 +227,8 @@ let nativeSession: Promise<NativeGeoSpecSession> | undefined;
 
 const openNativeGeoSpecSession = async (): Promise<NativeGeoSpecSession> => {
   nativeSession ??= (async () => {
-    const { Engine } = await import('@taucad/geospec-engine-native/node');
-    return { engine: new Engine(), carried: new Map<string, unknown>(), tail: Promise.resolve() };
+    const native = await import('@taucad/geospec-engine-native/node');
+    return { engine: new native.Engine(), carried: new Map<string, unknown>(), tail: Promise.resolve() };
   })();
   try {
     return await nativeSession;
@@ -415,6 +416,9 @@ export type HostToolRegistryOptions = {
  */
 export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRegistry => {
   const rooted = new Map<string, ToolRegistry>();
+  const liveProvider = options.filesystem?.(options.workspaceRoot) ?? new NodeFsProvider(options.workspaceRoot, { policy: tauPathPolicy });
+  const liveWorkbenchView = composeView({ filesystem: liveProvider }, { consumer: 'user', policy: tauPathPolicy });
+  const liveMutations = new ResourceQueue();
   const skillRegistry =
     options.systemSkillBundles === undefined ? undefined : createSkillBundleRegistry(options.systemSkillBundles);
   const systemSkills = skillRegistry?.bundles.map((bundle) => ({
@@ -446,8 +450,9 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * D1): this provider is the checkout, and what the agent sees over it is
      * the composed view. The skill resolver below reads the disk directly and
      * mutates nothing. */
-    const provider =
-      options.filesystem?.(workspaceRoot) ?? new NodeFsProvider(workspaceRoot, { policy: tauPathPolicy });
+    const provider = workspaceRoot === options.workspaceRoot
+      ? liveProvider
+      : options.filesystem?.(workspaceRoot) ?? new NodeFsProvider(workspaceRoot, { policy: tauPathPolicy });
     const view = composeView(
       { filesystem: provider },
       {
@@ -457,7 +462,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       },
     );
     const recordView = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
-    const mutations = new ResourceQueue();
+    const mutations = workspaceRoot === options.workspaceRoot ? liveMutations : new ResourceQueue();
     const { runtimeClient } = options;
 
     const requireRuntime = async (input: { readonly signal?: AbortSignal } = {}): Promise<HostRuntimeClient> => {
@@ -601,6 +606,11 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
     return createChatToolRegistry({
       fileSystemFor: (signal) => createProviderRpcFileSystem({ provider: view, mutations, signal }),
       recordFileSystemFor: (signal) => createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
+      workbenchFileSystemFor: (signal) =>
+        createProviderRpcFileSystem({ provider: liveWorkbenchView, mutations: liveMutations, signal }),
+      workbench: createRuntimeWorkbenchClient(
+        runtimeClient === undefined ? undefined : async () => runtimeClient(options.workspaceRoot),
+      ),
       ...(runtimeClient === undefined ? {} : { kernelClient, graphics, images }),
       ...(parameters === undefined ? {} : { parameters }),
       ...(geospec === undefined ? {} : { geospec }),

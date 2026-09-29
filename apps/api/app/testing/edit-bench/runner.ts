@@ -77,6 +77,35 @@ const createReplayFileSystem = (
     async writeFile(path, content) {
       files.set(path, new TextEncoder().encode(content));
     },
+    async writeFileChecked(input) {
+      const conflicts = input.preconditions.flatMap(({ path, expected }) => {
+        const actual = files.get(path) ?? null;
+        const matches = actual === null ? expected === null : expected !== null && bytesEqual(actual, typeof expected === 'string' ? new TextEncoder().encode(expected) : expected);
+        return matches ? [] : [{ path, actual: actual === null ? null : cloneBytes(actual) }];
+      });
+      if (conflicts.length > 0) {
+        return { status: 'conflict', conflicts };
+      }
+      const next = typeof input.data === 'string' ? new TextEncoder().encode(input.data) : cloneBytes(input.data);
+      const current = files.get(input.path);
+      if (current && bytesEqual(current, next)) {
+        return { status: 'unchanged', content: cloneBytes(current) };
+      }
+      files.set(input.path, cloneBytes(next));
+      return { status: 'applied', content: cloneBytes(next) };
+    },
+    async deleteFileChecked(input) {
+      const conflicts = input.preconditions.flatMap(({ path, expected }) => {
+        const actual = files.get(path) ?? null;
+        const matches = actual === null ? expected === null : expected !== null && bytesEqual(actual, typeof expected === 'string' ? new TextEncoder().encode(expected) : expected);
+        return matches ? [] : [{ path, actual: actual === null ? null : cloneBytes(actual) }];
+      });
+      if (conflicts.length > 0) {
+        return { status: 'conflict', conflicts };
+      }
+      const status = files.delete(input.path) ? 'applied' : 'unchanged';
+      return { status, content: new Uint8Array() };
+    },
     async writeBinaryFile(path, data) {
       files.set(path, cloneBytes(data));
     },

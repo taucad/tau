@@ -3,7 +3,7 @@ title: 'Lint Policy'
 description: 'Hybrid oxlint + ESLint architecture, performance principles, rule-specific decisions, and caching for the Tau monorepo.'
 status: active
 created: '2026-03-04'
-updated: '2026-09-05'
+updated: '2026-09-29'
 related:
   - nx.json
   - .oxlintrc.json
@@ -29,6 +29,8 @@ This project uses a **hybrid linting** setup where **oxlint** runs first as a fa
 2. `.oxlintrc.json` owns native and JavaScript-plugin rules. `eslint.config.mjs` explicitly configures the remaining ESLint rules; it does not load `eslint-plugin-oxlint` or automatically disable overlapping rules.
 3. In VS Code, the Oxc extension provides real-time oxlint diagnostics, formatting via oxfmt, and the ESLint extension handles residual rules. Both support fix-on-save.
 4. CI (`pnpm nx affected -t lint`) chains both tools transparently via the Nx lint target.
+
+For focused lint, verify that both engines scanned the intended files. An unmatched basename glob can exit successfully without checking them. Use existing project-relative paths and preserve literal `$` in route names through both the invoking shell and Nx's command shell.
 
 ### What each tool handles
 

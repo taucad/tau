@@ -344,6 +344,12 @@ export const createRootedBridgeFileSystem = (binding: WorkspaceFileSystemBinding
       signal?.throwIfAborted();
       return proxy.writeFileChecked(input);
     },
+    deleteFileChecked: async ({ signal, ...input }) => {
+      signal?.throwIfAborted();
+      const proxy = await connect();
+      signal?.throwIfAborted();
+      return proxy.deleteFileChecked(input);
+    },
     appendFile: async (path, data) => {
       const proxy = await connect();
       return proxy.appendFile(path, data);

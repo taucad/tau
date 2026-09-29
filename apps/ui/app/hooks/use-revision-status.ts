@@ -355,6 +355,11 @@ export const createHostRevisionClient = (input: {
     opening = pending;
     try {
       return await pending;
+    } catch (error) {
+      if (generation !== connectionGeneration) {
+        throw staleConnection();
+      }
+      throw error;
     } finally {
       if (opening === pending) {
         opening = undefined;
@@ -362,13 +367,24 @@ export const createHostRevisionClient = (input: {
     }
   };
   const ask = async (request: JsonValue): Promise<JsonValue> => {
-    const connected = await opened();
-    const response = await connected.execute({ type: 'revision', request });
-    if (response.type !== 'revision') {
-      throw new Error('The host answered a revision request with an agent response.');
+    const generation = connectionGeneration;
+    try {
+      const connected = await opened();
+      const response = await connected.execute({ type: 'revision', request });
+      if (generation !== connectionGeneration) {
+        throw staleConnection();
+      }
+      if (response.type !== 'revision') {
+        throw new Error('The host answered a revision request with an agent response.');
+      }
+      applyStatus(response.status);
+      return response.result;
+    } catch (error) {
+      if (generation !== connectionGeneration) {
+        throw staleConnection();
+      }
+      throw error;
     }
-    applyStatus(response.status);
-    return response.result;
   };
   const send = (request: WorkerRevisionCommand): void => {
     // Only a browser-owned replica adopts host settlements. This client already
@@ -412,6 +428,9 @@ export const createHostRevisionClient = (input: {
         try {
           await ask({ command: 'remoteCredential', ...credential });
         } catch (error) {
+          if (isStaleConnection(error)) {
+            return;
+          }
           toasts.emit({
             type: 'error',
             subject: 'save',

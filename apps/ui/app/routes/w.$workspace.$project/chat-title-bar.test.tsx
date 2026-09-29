@@ -64,7 +64,13 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
   TooltipContent: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
 }));
 vi.mock('#components/ui/floating-panel.js', () => ({
-  FloatingPanelContentHeaderActions: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
+  FloatingPanelContentHeaderActions: ({
+    children,
+    className,
+  }: {
+    readonly children: ReactNode;
+    readonly className?: string;
+  }) => <div className={className}>{children}</div>,
   FloatingPanelButtonGroup: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
 }));
 
@@ -103,7 +109,9 @@ describe('ChatTitleBar', () => {
       expect(name).toHaveClass('[app-region:no-drag]');
       expect(name.parentElement).not.toHaveClass('truncate');
       expect(name).not.toHaveClass('truncate');
-      expect(screen.getByRole('button', { name: 'Chat options' })).toBeInTheDocument();
+      const options = screen.getByRole('button', { name: 'Chat options' });
+      expect(name.parentElement?.parentElement).toContainElement(options);
+      expect(options.parentElement?.parentElement).toHaveClass('md:absolute', 'md:right-0');
       expect(screen.queryByText(/search chats/i)).not.toBeInTheDocument();
     });
 

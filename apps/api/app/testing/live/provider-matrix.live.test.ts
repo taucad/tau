@@ -65,7 +65,7 @@ const vertexModelIds = Object.values(modelList.vertexai)
 /** One current model per remaining provider wire, beside every Vertex row. */
 const matrixModelIds: readonly string[] = [
   ...vertexModelIds,
-  'anthropic-claude-haiku-4.5',
+  'anthropic-claude-sonnet-5.5',
   'openai-gpt-5.6-luna',
   'xai-grok-4.7',
 ];

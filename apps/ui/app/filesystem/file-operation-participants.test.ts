@@ -4,8 +4,7 @@ import { mountFileOperationParticipants } from '#filesystem/file-operation-parti
 
 type EditorEvent =
   | { type: 'renameFile'; oldPath: string; newPath: string }
-  | { type: 'closeFile'; path: string }
-  | { type: 'pruneComponentDisplayForDeletedPath'; path: string };
+  | { type: 'closeFile'; path: string };
 type ProjectEvent =
   | { type: 'fileMoved'; oldPath: string; newPath: string }
   | { type: 'fileDeleted'; path: string }
@@ -66,6 +65,28 @@ function makeContentService(): {
 }
 
 describe('mountFileOperationParticipants', () => {
+  it('fans file and directory path changes into the single workbench record owner in event order', async () => {
+    const { editorRef, projectRef } = makeReferences();
+    const { service, emit } = makeContentService();
+    const gate = Promise.withResolvers<void>();
+    const onWorkbenchPathChange = vi.fn(async (_change: Parameters<NonNullable<Parameters<typeof mountFileOperationParticipants>[0]['onWorkbenchPathChange']>>[0]) => {
+      if (onWorkbenchPathChange.mock.calls.length === 1) { await gate.promise; }
+    });
+    mountFileOperationParticipants({ contentService: service, editorRef, projectRef, onWorkbenchPathChange });
+    emit({ type: 'renamed', oldPath: 'src/a.ts', newPath: 'src/b.ts' });
+    emit({ type: 'directoryRenamed', oldPath: 'src/dir', newPath: 'src/next' });
+    emit({ type: 'deleted', path: 'src/b.ts', source: 'user' });
+    emit({ type: 'directoryDeleted', path: 'src/next' });
+    await vi.waitFor(() => { expect(onWorkbenchPathChange).toHaveBeenCalledTimes(1); });
+    gate.resolve();
+    await vi.waitFor(() => { expect(onWorkbenchPathChange).toHaveBeenCalledTimes(4); });
+    expect(onWorkbenchPathChange.mock.calls.map(([change]) => change)).toEqual([
+      { type: 'rename', oldPath: 'src/a.ts', newPath: 'src/b.ts' },
+      { type: 'rename', oldPath: 'src/dir', newPath: 'src/next' },
+      { type: 'delete', path: 'src/b.ts' },
+      { type: 'delete', path: 'src/next' },
+    ]);
+  });
   it('should dispatch renameFile + fileMoved on file rename', () => {
     const { editorRef, projectRef, editorSent, projectSent } = makeReferences();
     const { service, emit } = makeContentService();
@@ -117,7 +138,6 @@ describe('mountFileOperationParticipants', () => {
     emit({ type: 'deleted', path: 'src/x.ts', source: 'user' });
     expect(editorSent).toEqual([
       { type: 'closeFile', path: 'src/x.ts' },
-      { type: 'pruneComponentDisplayForDeletedPath', path: 'src/x.ts' },
     ]);
     expect(projectSent).toEqual([
       { type: 'fileDeleted', path: 'src/x.ts' },
@@ -145,7 +165,6 @@ describe('mountFileOperationParticipants', () => {
     expect(editorSent.map((event) => event)).toEqual([
       { type: 'closeFile', path: 'src/foo/a.ts' },
       { type: 'closeFile', path: 'src/foo/nested/b.ts' },
-      { type: 'pruneComponentDisplayForDeletedPath', path: 'src/foo' },
     ]);
     expect(projectSent).toEqual([
       { type: 'directoryDeleted', path: 'src/foo' },

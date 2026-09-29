@@ -12,6 +12,13 @@
       },
       "cache": false
     },
+    "test-performance-lab-node": {
+      "command": "node --test experiments/performance-lab/performance-lab.test.ts experiments/performance-lab/performance-lab-cli.test.ts experiments/performance-lab/performance-lab-focus.test.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    },
     "generate-provenance": {
       "command": "node scripts/generate-provenance.mjs",
       "options": {

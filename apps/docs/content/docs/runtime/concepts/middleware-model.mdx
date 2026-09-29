@@ -40,15 +40,7 @@ flowchart TB
     S2 --> S1
 ```
 
-For `[A, B, C]` with A outermost: A pre, B pre, C pre, kernel; then C post, B post, A post, result to caller.
-
-### The three hooks
-
-- **wrapCreateGeometry** -- wraps geometry computation. Use for caching (short-circuit on a hit), coordinate transforms, or edge detection.
-- **wrapGetParameters** -- wraps parameter extraction. Use for parameter caching or schema transformation.
-- **wrapExportGeometry** -- wraps export. Use for format conversion or post-processing of export blobs.
-
-Each hook has typed input and output mirroring its kernel operation. A middleware implements any subset; unimplemented hooks pass straight through to the next layer that implements them.
+The hooks wrap geometry creation, parameter extraction, and export respectively. Implement any subset; an absent hook passes through.
 
 ### Parameters at the create boundary
 
@@ -85,18 +77,10 @@ Every hook receives a `KernelMiddlewareRuntime` as its third argument:
 
 A middleware that persists data during an operation declares `stateSchema` (a Zod object schema). The framework creates a fresh `state` per operation and validates every `update` against the schema. State is scoped to one operation; it does not survive across renders. Options follow the same pattern through `optionsSchema`.
 
-### Comparison to Express and Koa
-
-Express and Koa use `(req, res, next)`. The runtime model differs in two ways:
-
-1. **Wrap style** -- instead of `next()`, the hook receives `handler` and the return value flows back through the chain, which makes async composition and result transformation natural.
-2. **Typed input/output** -- no generic request/response object; each hook's types reflect its operation.
-
 ## Key Relationships
 
-- **Middleware and kernel:** middleware never calls the kernel directly. `handler(input)` eventually reaches it; the kernel is unaware of middleware.
-- **Ordering:** registration order determines wrapping order -- first registered is outermost. Put caches early (outer) so they wrap the expensive inner computation.
-- **Parameter values:** create middleware receives caller overrides plus values composed by outer middleware. Defaults are absent until the kernel boundary.
+- **Ordering:** first registered is outermost. Put caches early so they wrap expensive computation.
+- **Parameter values:** create middleware receives caller overrides and outer middleware values; defaults arrive at the kernel boundary.
 
 ## Implications
 

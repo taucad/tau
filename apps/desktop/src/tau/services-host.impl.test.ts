@@ -1263,6 +1263,10 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     const [skillBundle] = wired!.systemSkillBundles ?? [];
     expect(typeof skillBundle?.slug).toBe('string');
     expect(skillBundle?.files.some(({ path }) => path === 'SKILL.md')).toBe(true);
+    const workbench = wired!.systemSkillBundles?.find(({ slug }) => slug === 'workbench');
+    expect(workbench?.body).toContain('Read before you rearrange');
+    expect(workbench?.body).toContain('arrange_workbench');
+    expect(await readFile(new URL(workbench!.files[0]!.url), 'utf8')).toBe(workbench?.body);
     expect(wired!.mcp?.activate).toEqual(expect.any(Function));
     /* A capability, not the channel token (VI4): a distinct prefix, a distinct
      * secret, and a grant of the four CAD tools. */

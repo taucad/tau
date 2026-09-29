@@ -1,0 +1,17 @@
+---
+title: Runtime Protocol API
+description: Typed runtime calls, event names, telemetry, and client closure data for custom transports.
+docType: reference
+wordBudgetOverride: 400
+---
+
+# Runtime Protocol API
+
+Custom transports use `runtimeProtocolSchemas` from `@taucad/runtime/transport` to validate messages at both channel boundaries. Import `runtimeProtocolListenNames`, `RuntimeEvaluateModelArgs`, and `RuntimeResolveParametersArgs` from `@taucad/runtime/types`; they describe the empty core listen-name tuple and two typed calls. Ordinary consumers use the higher-level [client](./client).
+
+The `/types` exports `TelemetryOrigin`, `TelemetrySpanRecord`, and `TelemetryBatch` identify a source, correlate a span, and transfer bounded observations. Import `RuntimeEvaluateInput` and `RuntimeTerminatedDetail` from `@taucad/runtime/client` for evaluation source/options and the reason an isolated host closed. Preserve that cause in diagnostics rather than recasting a host exit as a requested close.
+
+## Related
+
+- [Transport API](./transport)
+- [Runtime architecture](../concepts/architecture)

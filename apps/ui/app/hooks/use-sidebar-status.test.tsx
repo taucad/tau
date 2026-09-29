@@ -48,6 +48,9 @@ vi.mock('#hooks/use-chats.js', () => ({
     deleteChat: vi.fn(),
   }),
 }));
+vi.mock('#hooks/use-chat-records.js', () => ({
+  useChatRecords: () => ({ chats: sidebarChats, isLoading: false, error: undefined }),
+}));
 vi.mock('#hooks/use-projects.js', () => ({
   useProjects: () => ({
     projects: [sidebarProject],

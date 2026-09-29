@@ -46,6 +46,8 @@ import type {
 import { positionToDirection } from 'dockview-react';
 import { toast } from 'sonner';
 import { generatePrefixedId } from '@taucad/utils/id';
+import type { WorkbenchLaneNode } from '@taucad/workbench';
+import { fromDockview, toDockview } from '#workbench-records/converters.js';
 import {
   languageFromExtension,
   tauFileDragMime,
@@ -327,11 +329,13 @@ function DetailsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element 
 }
 
 function TelemetryWorkbenchPanel(): React.JSX.Element {
-  return <TelemetryPanelContent />;
+  const enabled = useFeature('tauDebug');
+  return enabled ? <TelemetryPanelContent /> : <p className='p-4 text-muted-foreground'>Kernel diagnostics require debug mode.</p>;
 }
 
 function ConsoleWorkbenchPanel(): React.JSX.Element {
-  return <ChatConsole />;
+  const enabled = useFeature('tauDebug');
+  return enabled ? <ChatConsole /> : <p className='p-4 text-muted-foreground'>Console requires debug mode.</p>;
 }
 
 type WorkbenchSurface = {
@@ -948,8 +952,6 @@ export function handleWorkbenchPanelRemoved({
 export function reconcileWorkbenchFiles({
   api,
   openFiles,
-  activePaneId,
-  isMobile,
   pendingUserFilePath,
   pendingFilePlacements,
 }: {
@@ -1022,7 +1024,7 @@ export function reconcileWorkbenchFiles({
 
   const target = api.panels.find((panel) => {
     const parameters = getFileParameters(panel);
-    return pendingUserFilePath ? parameters?.filePath === pendingUserFilePath : isMobile && panel.id === activePaneId;
+    return pendingUserFilePath ? parameters?.filePath === pendingUserFilePath : false;
   });
   if (target) {
     target.api.setActive();
@@ -1101,8 +1103,10 @@ function FileWorkbenchPane({
   readonly children: ReactNode;
 }): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
+  const { editorRef } = useProject();
   const regionId = useId();
-  const paneState = normalizeFilePaneState({ parameters, requestsFiles: shouldRenderFiles, presentation });
+  const savedWidth = useSelector(editorRef, (state) => filePath ? state.context.fileSidebars[filePath] : undefined);
+  const paneState = normalizeFilePaneState({ parameters: { ...parameters, filesWidth: savedWidth ?? parameters.filesWidth }, requestsFiles: shouldRenderFiles, presentation });
   const [filesWidth, setFilesWidth] = useState(paneState.filesWidth);
   const [fileActionsContainer, setFileActionsContainer] = useState<HTMLDivElement>();
   const alternateView = presentation?.views.find((view) => view.id !== paneState.viewId);
@@ -1177,6 +1181,7 @@ function FileWorkbenchPane({
               onWidthChange={setFilesWidth}
               onWidthCommit={(width) => {
                 panelApi.updateParameters({ filesWidth: width });
+                if (filePath && profile !== 'shared') { editorRef.send({ type: 'setFileSidebarWidth', path: filePath, width }); }
               }}
               onOpenChange={(open) => {
                 panelApi.updateParameters({ filesOpen: open });
@@ -1636,17 +1641,17 @@ export const WorkbenchDockview = memo(function ({
   readonly profile?: WorkbenchProfile;
 } = {}): React.JSX.Element {
   const { editorRef } = useProject();
-  const { connectWorkbench, setWorkbenchOpen } = useProjectWorkspace();
+  const { connectWorkbench, setWorkbenchOpen, layoutController } = useProjectWorkspace();
   const isMobile = useIsMobile();
   const isTauDebugEnabled = useFeature('tauDebug');
   const monaco = useConfiguredMonaco();
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
+  const adoptedProjectionRef = useRef<string | undefined>(undefined);
   const pendingUserFilePathRef = useRef<string | undefined>(undefined);
   const pendingFilePlacementRef = useRef(new Map<string, PendingFilePlacement>());
+  const pendingRecordNodeRef = useRef<WorkbenchLaneNode | undefined>(undefined);
 
-  // Read persisted layout from editor machine
-  const workbenchLayout = useSelector(editorRef, (state) => state.context.workbenchLayout);
   // Reconciler inputs: the open-tab set and active tab from the machine.
   // The editor machine is the single source of truth — Dockview is a
   // pure reconciler that diffs its current panels against this state.
@@ -1654,9 +1659,9 @@ export const WorkbenchDockview = memo(function ({
   const activePaneId = useSelector(editorRef, (state) => state.context.activePaneId);
   const workbenchOpen = useSelector(editorRef, (state) => state.context.panelState.desktopLayout.workbenchOpen);
 
-  // Save layout to editor machine on layout changes
+  // Only a person-edited semantic projection writes layout.json.
   useEffect(() => {
-    if (!api) {
+    if (!api || profile === 'shared') {
       return;
     }
 
@@ -1664,14 +1669,67 @@ export const WorkbenchDockview = memo(function ({
       if (isRestoringLayout.current) {
         return;
       }
-
-      editorRef.send({ type: 'setWorkbenchLayout', layout: api.toJSON() });
+      try {
+        const node = fromDockview('workbench', api.toJSON());
+        if (JSON.stringify(node) === adoptedProjectionRef.current) { return; }
+        adoptedProjectionRef.current = undefined;
+        layoutController.personWorkbenchChanged(node);
+      } catch {
+        // Dockview can emit while a drag has a temporary unsupported intermediate group.
+      }
     });
 
     return () => {
       disposable.dispose();
     };
-  }, [api, editorRef]);
+  }, [api, layoutController, profile]);
+
+  const pendingRecordAppliedRef = useRef<(() => void) | undefined>(undefined);
+  const applyRecordNode = useCallback((node: WorkbenchLaneNode, applied?: () => void) => {
+    if (!api || profile === 'shared') { return; }
+    pendingRecordNodeRef.current = node;
+    pendingRecordAppliedRef.current = applied ?? pendingRecordAppliedRef.current;
+    const device = editorRef.getSnapshot().context;
+    const files = Object.fromEntries(device.openFiles.map((file) => [file.path, {
+      paneId: file.paneId, filesWidth: device.fileSidebars[file.path],
+    }]));
+    const tabs = (current: WorkbenchLaneNode): string[] => current.kind === 'group'
+      ? current.tabs.filter((tab) => tab.kind === 'file').map((tab) => tab.path)
+      : current.children.flatMap(tabs);
+    const missing = tabs(node).filter((path) => files[path] === undefined);
+    if (missing.length > 0) {
+      for (const path of missing) { editorRef.send({ type: 'openFile', path, source: 'record' }); }
+      return;
+    }
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+    isRestoringLayout.current = true;
+    try {
+      api.fromJSON(toDockview('workbench', node, {
+        dimensions: { width: Math.max(1, api.width), height: Math.max(1, api.height) }, files,
+      }), { reuseExistingPanels: true });
+      adoptedProjectionRef.current = JSON.stringify(fromDockview('workbench', api.toJSON()));
+      pendingRecordNodeRef.current = undefined;
+      pendingRecordAppliedRef.current?.();
+      pendingRecordAppliedRef.current = undefined;
+    } finally {
+      isRestoringLayout.current = false;
+      active?.focus({ preventScroll: true });
+    }
+  }, [api, editorRef, profile]);
+
+  useEffect(() => {
+    if (!api || profile === 'shared') { return; }
+    return layoutController.registerWorkbench(applyRecordNode);
+  }, [api, applyRecordNode, layoutController, profile]);
+
+  useEffect(() => {
+    const pending = pendingRecordNodeRef.current;
+    if (!pending) { return; }
+    const filePaths = (node: WorkbenchLaneNode): string[] => node.kind === 'group'
+      ? node.tabs.filter((tab) => tab.kind === 'file').map((tab) => tab.path)
+      : node.children.flatMap(filePaths);
+    if (filePaths(pending).every((path) => openFiles.some((file) => file.path === path))) { applyRecordNode(pending); }
+  }, [applyRecordNode, openFiles]);
 
   // ─────────────────────────────────────────────────────────────────
   // Reconciler: editor machine state → Dockview panels
@@ -1715,7 +1773,7 @@ export const WorkbenchDockview = memo(function ({
           pendingUserFilePathRef.current = event.path;
         }
       }
-      if (monaco && event.lineNumber) {
+      if (event.source !== 'record' && monaco && event.lineNumber) {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             const uri = createMonacoUri(monaco, event.path);
@@ -1863,7 +1921,7 @@ export const WorkbenchDockview = memo(function ({
       try {
         restoreWorkbenchLayout({
           api: dockApi,
-          layout: profile === 'shared' ? undefined : workbenchLayout,
+          layout: undefined,
           isTauDebugEnabled,
         });
       } finally {
@@ -1871,7 +1929,7 @@ export const WorkbenchDockview = memo(function ({
       }
       seedWorkbenchFromState(dockApi);
     },
-    [isTauDebugEnabled, profile, seedWorkbenchFromState, workbenchLayout],
+    [isTauDebugEnabled, seedWorkbenchFromState],
   );
 
   useEffect(() => {
@@ -1885,7 +1943,7 @@ export const WorkbenchDockview = memo(function ({
     if (!api) {
       return;
     }
-    if (!isTauDebugEnabled) {
+    if (!isTauDebugEnabled && profile === 'shared') {
       for (const panelId of [workbenchPanels.kernel.id, workbenchPanels.console.id]) {
         const debugPanel = api.panels.find((panel) => panel.id === panelId);
         if (debugPanel) {
@@ -1893,7 +1951,7 @@ export const WorkbenchDockview = memo(function ({
         }
       }
     }
-  }, [api, isTauDebugEnabled]);
+  }, [api, isTauDebugEnabled, profile]);
 
   useEffect(() => {
     if (!api) {

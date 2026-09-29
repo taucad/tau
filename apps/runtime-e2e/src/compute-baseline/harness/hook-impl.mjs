@@ -54,8 +54,14 @@ const patches = {
     );
     code = replaceOnce(
       code,
+      'const result = input.compute();',
+      'const result = globalThis.__laneB ? globalThis.__laneB.time("native.solve", input.compute) : input.compute();',
+      url,
+    );
+    code = replaceOnce(
+      code,
       'async run(scope, operation) {',
-      'async run(scope, operation) { globalThis.__laneB?.note("session.open", 0);',
+      'async run(scope, operation) { if (globalThis.__laneB) { const originalWarm = scope.warm.bind(scope); const originalAnnounce = scope.announce.bind(scope); scope = new Proxy(scope, { get(target, property, receiver) { if (property === "warm") return (input) => globalThis.__laneB.time("session.warm", async () => { const result = await originalWarm(input); if (result.status === "imported") globalThis.__laneB.note("session.prepared.entries", 0, result.imported.length); return result; }); if (property === "announce") return (input) => { const result = originalAnnounce(input); globalThis.__laneB.note("session.admitted", 0, result.admitted.length); return result; }; return Reflect.get(target, property, receiver); } }); globalThis.__laneB.note("session.open", 0); }',
       url,
     );
     return code;

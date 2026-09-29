@@ -95,6 +95,7 @@ const parameterService = {
   close: vi.fn(async () => undefined),
   subscribeUnsavedDrafts: () => () => undefined,
 };
+const flushWorkbenchRecords = async (): Promise<void> => undefined;
 
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => projectManager,
@@ -145,8 +146,12 @@ vi.mock('#hooks/use-project.js', () => ({
     projectProviderChatInputs.push({ requestedChatId, createdChatId });
     return <div>{children}</div>;
   },
-  useProject: () => ({ projectRef, editorRef, parameterService, viewGraphics }),
+  useProject: () => ({ projectRef, editorRef, parameterService, viewGraphics,
+    flushWorkbenchRecordProducers: flushWorkbenchRecords }),
 }));
+vi.mock('./workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
+vi.mock('./view-settings-sync-host.js', () => ({ ViewSettingsSyncHost: () => null }));
+vi.mock('./entries-sync-host.js', () => ({ EntriesSyncHost: () => null }));
 vi.mock('#hooks/use-flush-on-close.js', () => {
   const flushProducers = async (): Promise<void> => undefined;
   return { useFlushOnClose: () => undefined, useFlushProducers: () => flushProducers };
@@ -434,6 +439,36 @@ describe('project route session identity', () => {
     ).rejects.toThrow('checked parameter flush failed');
     expect(project.send).not.toHaveBeenCalled();
     expect(editor.send).not.toHaveBeenCalled();
+  });
+
+  it('keeps project close retryable until workbench record producers save their latest bytes', async () => {
+    const order: string[] = [];
+    let offline = true;
+    const parameters = mock<ParameterSetService>();
+    const project = mock<ActorRefFrom<typeof projectMachine>>();
+    const editor = mock<ActorRefFrom<typeof editorMachine>>();
+    const projectSnapshot = mock<ReturnType<ActorRefFrom<typeof projectMachine>['getSnapshot']>>();
+    const editorSnapshot = mock<ReturnType<ActorRefFrom<typeof editorMachine>['getSnapshot']>>();
+    projectSnapshot.matches.mockReturnValue(true);
+    editorSnapshot.matches.mockReturnValue(true);
+    project.getSnapshot.mockReturnValue(projectSnapshot);
+    editor.getSnapshot.mockReturnValue(editorSnapshot);
+    parameters.close.mockImplementation(async () => { order.push('parameters'); });
+    project.send.mockImplementation(() => { order.push('project'); });
+    editor.send.mockImplementation(() => { order.push('editor'); });
+    const flushWorkbenchRecords = async (): Promise<void> => {
+      order.push('workbench');
+      if (offline) { throw new Error('checked workbench write unavailable'); }
+    };
+    const flush = async () => sessionsModule.flushProjectSessionPersistence({
+      parameterService: parameters, projectRef: project, editorRef: editor,
+      flushWorkbenchRecords, closeFlushMilliseconds: 100,
+    });
+    await expect(flush()).rejects.toThrow('checked workbench write unavailable');
+    expect(order).toEqual(['parameters', 'workbench']);
+    offline = false;
+    await flush();
+    expect(order).toEqual(['parameters', 'workbench', 'parameters', 'workbench', 'project', 'editor']);
   });
 
   it('should refuse the close flush while an editor conflict is being recorded, before anything is torn down (RV-W5b2 R2-1)', async () => {

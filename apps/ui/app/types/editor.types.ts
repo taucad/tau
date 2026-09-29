@@ -1,10 +1,15 @@
-import type { SerializedDockview } from 'dockview-react';
+import type { WorkbenchLayout, WorkbenchView } from '@taucad/workbench';
+
 import type {
   MobilePanelId,
-  GraphicsViewSettings,
-  PersistedModelComponentDisplayState,
-  PersistedUnitSettings,
+  GraphicsBackendPreference,
 } from '#constants/editor.constants.js';
+
+/** Device-local Restore payload; view seeds recreate only records deleted with a closed tab. */
+export type PreviousWorkbenchLayout = Readonly<{
+  layout: WorkbenchLayout;
+  views: Readonly<Record<string, WorkbenchView>>;
+}>;
 
 // ============================================================================
 // File Types
@@ -35,7 +40,7 @@ export type OpenFile = {
  * - 'user': User-initiated action (e.g., clicked on file in tree, breadcrumb, link) - should open editor panel
  * - 'machine': Programmatic action (e.g., project load, chat tool) - should not auto-open editor panel
  */
-export type FileOpenSource = 'user' | 'machine';
+export type FileOpenSource = 'user' | 'machine' | 'record';
 
 /**
  * Represents a file or directory item in the file tree.
@@ -82,21 +87,6 @@ export type PanelState = {
 };
 
 // ============================================================================
-// View State Types
-// ============================================================================
-
-/**
- * Per-viewer-panel state. Each viewer panel in the Dockview layout has its own
- * entry path binding and graphics settings.
- */
-export type ViewState = {
-  /** Which file this viewer panel is displaying (undefined = no file selected, show empty state) */
-  entryPath: string | undefined;
-  /** Per-view graphics settings (surfaces, lines, grid, FOV, etc.) */
-  graphicsSettings: GraphicsViewSettings;
-};
-
-// ============================================================================
 // Editor State Types
 // ============================================================================
 
@@ -118,16 +108,12 @@ export type EditorState = {
   focusedChatId: string | undefined;
   /** Panel layout state (open/close, sizes, mobile tab) */
   panelState: PanelState;
-  /** Serialized mixed file/utility Workbench Dockview layout */
-  workbenchLayout: SerializedDockview | undefined;
-  /** Serialized DockviewReact layout for the geometry viewer area */
-  viewerLayout: SerializedDockview | undefined;
-  /** Per-viewer-panel state, keyed by Dockview panel ID */
-  viewSettings: Record<string, ViewState>;
-  /** Project-scoped model appearance shared by all viewer panels. */
-  modelComponentDisplay?: PersistedModelComponentDisplayState;
-  /** Per-entry-path settings whose live owner is the entry's CAD actor. Added in schema v11. */
-  unitSettings?: Record<string, PersistedUnitSettings>;
+  /** Pixel width of each file tab's sidebar on this device, keyed by project path. */
+  fileSidebars: Record<string, number>;
+  /** Rendering API selected on this device. */
+  graphicsBackendPreferences: Record<string, GraphicsBackendPreference>;
+  /** Device-local prior portable projection for Restore previous arrangement. */
+  previousLayout?: PreviousWorkbenchLayout;
   /** Timestamp of last update */
   updatedAt: number;
 };

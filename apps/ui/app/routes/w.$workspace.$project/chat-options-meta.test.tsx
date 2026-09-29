@@ -20,6 +20,10 @@ const chatSelectorState: {
 };
 const cookie = vi.hoisted(() => ({ showCredits: true }));
 const cloud = vi.hoisted(() => ({ enabled: true }));
+const chats = [{
+  id: 'chat_test', resourceId: 'project_test', name: 'Bracket design', messages: [],
+  createdAt: 1, updatedAt: 999, recencyAt: Date.now() - 5 * 60_000,
+}];
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: <T,>(selector: (state: typeof chatSelectorState) => T): T => selector(chatSelectorState),
@@ -57,19 +61,12 @@ vi.mock('@xstate/react', () => ({
 
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({
-    chats: [
-      {
-        id: 'chat_test',
-        resourceId: 'project_test',
-        name: 'Bracket design',
-        messages: [],
-        createdAt: 1,
-        updatedAt: 999,
-        recencyAt: Date.now() - 5 * 60_000,
-      },
-    ],
+    chats,
     isLoading: false,
   }),
+}));
+vi.mock('#hooks/use-chat-records.js', () => ({
+  useChatRecords: () => ({ chats, isLoading: false, error: undefined }),
 }));
 
 vi.mock('#components/icons/svg-icon.js', () => ({

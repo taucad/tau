@@ -1,778 +1,271 @@
 // @vitest-environment jsdom
-import { useLayoutEffect } from 'react';
+/* oxlint-disable typescript/no-confusing-void-expression -- Testing Library waitFor callbacks are assertions. */
 import { act, render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createActor, createAsyncLogic } from 'xstate';
-import type { Actor, ActorRefFrom } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
 import { mock } from 'vitest-mock-extended';
-import type { GeometryComponentManifest } from '@taucad/types';
-import type { ThreeCameraRig } from '@taucad/three/camera';
-import { GraphicsProvider, useCameraRig } from '#hooks/use-graphics.js';
-import {
-  acquireViewCameraSession,
-  getViewCameraSession,
-  notifyViewCameraSession,
-} from '#services/graphics-camera-registry.js';
+import { workbenchRecords } from '@taucad/workbench';
+import type { WorkbenchView } from '@taucad/workbench';
+import { GraphicsProvider } from '#hooks/use-graphics.js';
 import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
-import type { cadMachine } from '#machines/cad.machine.js';
+import { cadMachine } from '#machines/cad.machine.js';
+import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { createMockRuntimeClient } from '@taucad/runtime-testing';
+import type { KernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { editorMachine } from '#machines/editor.machine.js';
-import { deriveModelInteractionUnitId } from '#machines/model-interaction.machine.js';
-import { toSnapshotCallback } from '#lib/xstate-test.utils.js';
-import type { SnapshotListener } from '#lib/xstate-test.utils.js';
+import { getViewCameraSession } from '#services/graphics-camera-registry.js';
+import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
+import { Box3, Vector3 } from 'three';
 
-const componentId = 'component:Housing';
-const unitId = deriveModelInteractionUnitId({ sourceFile: 'src/main.ts' });
-type EditorSendEvent = Parameters<ActorRefFrom<typeof editorMachine>['send']>[0];
-const capabilities: GeometryComponentManifest['capabilities'] = {
-  canHide: true,
-  canIsolate: true,
-  canFocus: true,
-  canAdjustOpacity: true,
-  hasDrawings: false,
-  hasPreciseTopology: false,
-  exports: [{ fidelity: 'mesh', formats: ['glb'], available: true }],
-};
+vi.mock('@react-three/fiber', () => ({ useThree: () => ({ size: { width: 800, height: 600 } }) }));
 
-function createManifest(): GeometryComponentManifest {
-  return {
-    schemaVersion: 1,
-    sourceFile: 'src/main.ts',
-    rootId: 'root',
-    nodeOrder: ['root', componentId],
-    capabilities,
-    nodesById: {
-      root: {
-        id: 'root',
-        name: 'Model',
-        kind: 'model',
-        selector: 'root',
-        childIds: [componentId],
-        depth: 0,
-        path: ['Model'],
-        meshNodeIndices: [],
-        primitiveIndices: [],
-        materialIndices: [],
-        capabilities,
-      },
-      [componentId]: {
-        id: componentId,
-        name: 'Housing',
-        kind: 'part',
-        selector: 'node/0',
-        parentId: 'root',
-        childIds: [],
-        depth: 1,
-        path: ['Model', 'Housing'],
-        meshNodeIndices: [0],
-        primitiveIndices: [0],
-        materialIndices: [0],
-        capabilities,
-      },
-    },
-  };
-}
+const initial = (): WorkbenchView => workbenchRecords.view.schema.parse({
+  version: 1, entryPath: 'src/main.ts', camera: { kind: 'preset', preset: 'isometric' },
+});
 
-/** Minimal stand-in for the entry's CAD actor: the hook reads its render timeout and its format. */
-function createEntryCad(initial: { renderTimeout?: number; format?: 'gltf' | 'svg' }): {
-  ref: ActorRefFrom<typeof cadMachine>;
-  setRenderTimeout: (next: number) => void;
-  setFormat: (next: 'gltf' | 'svg') => void;
-} {
-  let renderTimeout = initial.renderTimeout ?? 30_000;
-  let geometry = initial.format === undefined ? undefined : { format: initial.format };
-  const listeners = new Set<(snapshot: unknown) => void>();
-  const actor = {
-    getSnapshot: () => ({ context: { renderTimeout, geometry } }),
-    subscribe: (listener: SnapshotListener<unknown>) => {
-      const callback = toSnapshotCallback(listener);
-      listeners.add(callback);
-      return { unsubscribe: () => listeners.delete(callback) };
-    },
-    send: vi.fn(),
-  };
-  const emit = (): void => {
-    for (const listener of listeners) {
-      listener(actor.getSnapshot());
-    }
-  };
-  return {
-    ref: actor as unknown as ActorRefFrom<typeof cadMachine>,
-    setRenderTimeout(next: number) {
-      renderTimeout = next;
-      emit();
-    },
-    setFormat(next: 'gltf' | 'svg') {
-      geometry = { format: next };
-      emit();
-    },
-  };
-}
-
-/** Stands in for the canvas: framing the first geometry is what consumes the camera seed. */
-function markSeedConsumed(graphicsRef: ActorRefFrom<typeof graphicsMachine>): void {
-  const session = getViewCameraSession(graphicsRef);
-  expect(session).toBeDefined();
-  session!.framing.initialized = true;
-}
-
-/** A graphics actor with the WebGPU probe stubbed out, started, ready for events. */
-function createGraphicsActor(): Actor<typeof graphicsMachine> {
-  return createActor(
-    graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
-    {
-      input: {},
-    },
-  ).start();
-}
-
-function SyncHarness({
-  graphicsRef,
-  editorRef,
-  onRig,
-  cadRef,
-  entryPath,
+function Harness({
+  graphicsRef, cadRef, editorRef, record, writeRecord, onRecordApplied,
 }: {
   readonly graphicsRef: ActorRefFrom<typeof graphicsMachine>;
-  readonly editorRef: ActorRefFrom<typeof editorMachine>;
-  readonly onRig?: (rig: ThreeCameraRig) => void;
   readonly cadRef?: ActorRefFrom<typeof cadMachine>;
-  readonly entryPath?: string;
-}): React.JSX.Element {
-  const cameraRig = useCameraRig();
-  useViewSettingsSync({ viewId: 'view-1', entryPath, graphicsRef, cadRef, editorRef });
-  useLayoutEffect(() => {
-    onRig?.(cameraRig);
-  }, [cameraRig, onRig]);
-  return <div data-testid='sync-harness' />;
-}
-
-/** The hook with no camera session at all: the view is live, its pane is not mounted. */
-function PaneLessHarness({
-  graphicsRef,
-  editorRef,
-}: {
-  readonly graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   readonly editorRef: ActorRefFrom<typeof editorMachine>;
+  readonly record: WorkbenchView;
+  readonly writeRecord: (record: WorkbenchView) => Promise<boolean>;
+  readonly onRecordApplied?: (record: WorkbenchView) => void;
 }): React.JSX.Element {
-  useViewSettingsSync({ viewId: 'view-1', entryPath: undefined, graphicsRef, cadRef: undefined, editorRef });
-  return <div data-testid='pane-less-harness' />;
+  useViewSettingsSync({
+    viewId: 'v-1234abcd', entryPath: 'src/main.ts', graphicsRef, cadRef,
+    editorRef, record, recordReady: true, writeRecord, onRecordApplied,
+  });
+  return <div data-testid='view-sync' />;
 }
 
-describe('useViewSettingsSync', () => {
-  it('should keep model display mutations out of per-view settings', async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
+const graphics = () => createActor(graphicsMachine.provide({
+  actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) },
+}), { input: {} }).start();
 
-    render(
-      <GraphicsProvider graphicsRef={graphicsRef}>
-        <SyncHarness graphicsRef={graphicsRef} editorRef={editorRef} />
-      </GraphicsProvider>,
-    );
+const cad = () => createActor(cadMachine.provide({
+  actors: { connectKernelActor: fromSafeAsync(async (): Promise<{
+    type: 'kernelConnected'; client: ReturnType<typeof createMockRuntimeClient>; cleanups: Array<() => void>;
+  }> => ({ type: 'kernelConnected', client: createMockRuntimeClient(), cleanups: [] })) },
+}), { input: {
+  shouldInitializeKernelOnStart: false,
+  kernelOptionsFactory: async () => () => mock<ReturnType<KernelOptionsFactory>>(),
+  fileSystemRoot: '/projects/test',
+} }).start();
 
-    // The mount publishes what the owners hold; everything below is about what a mutation adds.
-    await waitFor(() => {
-      expect(editorSend).toHaveBeenCalledTimes(1);
-    });
-    editorSend.mockClear();
+const editor = () => mock<ActorRefFrom<typeof editorMachine>>({ send: vi.fn(),
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- Only the selected context field is used by this actor fixture.
+  getSnapshot: () => ({ context: { graphicsBackendPreferences: {} } }) as ReturnType<ActorRefFrom<typeof editorMachine>['getSnapshot']>,
+});
 
-    act(() => {
-      graphicsRef.send({ type: 'loadModelComponentManifest', unitId, manifest: createManifest(), source: 'viewer' });
-      graphicsRef.send({ type: 'setHoveredModelComponent', unitId, componentId, source: 'viewer' });
-    });
-    expect(editorSend).not.toHaveBeenCalled();
-
-    act(() => {
-      graphicsRef.send({ type: 'hideModelComponent', unitId, componentId, source: 'explorer' });
-    });
-    expect(editorSend).not.toHaveBeenCalled();
-
-    act(() => {
-      graphicsRef.send({ type: 'setGridVisibility', payload: false });
-    });
-
-    await waitFor(() => {
-      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
-        type: 'updateViewSettings',
-        viewId: 'view-1',
-        settings: { schemaVersion: 12, enableGrid: false },
-      });
-    });
-    expect(editorSend.mock.calls.at(-1)?.[0]).not.toHaveProperty('settings.componentDisplay');
-    expect(editorSend.mock.calls.at(-1)?.[0]).not.toHaveProperty(`settings.${['environment', 'Preset'].join('')}`);
-    graphicsRef.stop();
-  });
-
-  /* R6: there is no first-emission skip. A setting the person changes before any geometry arrives is
-   * theirs, and the camera keys -- the only ones a premature publish could damage -- are withheld
-   * until the seed has been consumed rather than the whole record being withheld with them. */
-  it('writes a change made before the first geometry reaches the store, without touching the pose', async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
-
-    render(
-      <GraphicsProvider graphicsRef={graphicsRef}>
-        <SyncHarness graphicsRef={graphicsRef} editorRef={editorRef} cadRef={createEntryCad({}).ref} />
-      </GraphicsProvider>,
-    );
-
-    act(() => {
-      graphicsRef.send({ type: 'setGridVisibility', payload: false });
-    });
-
-    await waitFor(() => {
-      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
-        type: 'updateViewSettings',
-        settings: { enableGrid: false },
-      });
-    });
-    for (const [event] of editorSend.mock.calls) {
-      expect(event).not.toHaveProperty('settings.cameraView');
+describe('view record owner synchronization', () => {
+  it.each([
+    { instruction: 'look', camera: { kind: 'look', direction: [0, -1, 0] } },
+    { instruction: 'front preset', camera: { kind: 'preset', preset: 'front' } },
+  ] as const)('keeps a $instruction instruction through the first real geometry frame', async ({ camera }) => {
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const record = workbenchRecords.view.schema.parse({ ...initial(), camera });
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const bounds = new Box3(new Vector3(-2, -2, -2), new Vector3(2, 2, 2));
+    function Frame({ radius }: { readonly radius: number }): React.JSX.Element {
+      useCameraFraming({ geometryRadius: radius, geometryBounds: bounds });
+      return <div />;
     }
+    const draw = (radius: number) => <GraphicsProvider graphicsRef={graphicsRef}>
+      <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={record} writeRecord={writeRecord} />
+      <Frame radius={radius} />
+    </GraphicsProvider>;
+    const view = render(draw(0));
+    const session = getViewCameraSession(graphicsRef)!;
+    await waitFor(() => { expect(session.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]); });
+    view.rerender(draw(4));
+    expect(session.framing.initialized).toBe(true);
+    expect(session.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
+    expect(session.rig.actorRef.getSnapshot().context.view.verticalSpan).toBeGreaterThan(4);
+    view.unmount();
     graphicsRef.stop();
   });
-
-  /* A live view whose pane is closed still has owners, and they still write. */
-  it('writes a view with no mounted pane and leaves its camera keys alone', async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
-
-    render(<PaneLessHarness graphicsRef={graphicsRef} editorRef={editorRef} />);
-
-    act(() => {
-      graphicsRef.send({ type: 'setGridVisibility', payload: false });
-    });
-
-    await waitFor(() => {
-      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
-        type: 'updateViewSettings',
-        settings: { enableGrid: false },
-      });
-    });
-    expect(getViewCameraSession(graphicsRef)).toBeUndefined();
-    for (const [event] of editorSend.mock.calls) {
-      expect(event).not.toHaveProperty('settings.cameraView');
-      expect(event).not.toHaveProperty('settings.cameraFovAngle');
+  it.each([
+    { instruction: 'look', camera: { kind: 'look', direction: [0, -1, 0] } },
+    { instruction: 'front preset', camera: { kind: 'preset', preset: 'front' } },
+  ] as const)('does not persist the first glTF frame over an adopted $instruction but persists a later orbit', async ({ camera }) => {
+    const graphicsRef = graphics();
+    const cadRef = cad();
+    await vi.waitFor(() => { expect(cadRef.getSnapshot().value).not.toBe('connecting'); });
+    const editorRef = editor();
+    const record = workbenchRecords.view.schema.parse({ ...initial(), camera });
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const bounds = new Box3(new Vector3(-2, -2, -2), new Vector3(2, 2, 2));
+    function Frame({ radius }: { readonly radius: number }): React.JSX.Element {
+      useCameraFraming({ geometryRadius: radius, geometryBounds: bounds });
+      return <div />;
     }
+    const draw = (radius: number) => <GraphicsProvider graphicsRef={graphicsRef}>
+      <Harness graphicsRef={graphicsRef} cadRef={cadRef} editorRef={editorRef} record={record} writeRecord={writeRecord} />
+      <Frame radius={radius} />
+    </GraphicsProvider>;
+    const view = render(draw(0));
+    const session = getViewCameraSession(graphicsRef)!;
+    await waitFor(() => { expect(session.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]); });
+    act(() => {
+      cadRef.send({ type: 'setEntryPath', entryPath: 'src/main.ts' });
+      cadRef.send({ type: 'geometryComputed', geometry: { format: 'gltf', content: new Uint8Array(0), hash: 'test' }, issues: [] });
+    });
+    await waitFor(() => { expect(cadRef.getSnapshot().context.geometry?.format).toBe('gltf'); });
+    view.rerender(draw(4));
+    expect(session.framing.initialized).toBe(true);
+    expect(session.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
+    const firstFrame = session.rig.actorRef.getSnapshot().context.view;
+    await new Promise((resolve) => { setTimeout(resolve, 350); });
+    expect(writeRecord.mock.calls.map(([next]) => next.camera).filter((next) =>
+      JSON.stringify(next) !== JSON.stringify(record.camera))).toEqual([]);
+    writeRecord.mockClear();
+    act(() => session.rig.actorRef.send({ type: 'setView', target: [1, 2, 3], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 5 }));
+    await waitFor(() => { expect(writeRecord.mock.calls.some(([next]) =>
+      next.camera.kind === 'pose' && JSON.stringify(next.camera.target) === JSON.stringify([1, 2, 3]))).toBe(true); });
+    writeRecord.mockClear();
+    act(() => session.rig.actorRef.send({ type: 'setView', target: firstFrame.target, direction: firstFrame.direction,
+      up: firstFrame.up, verticalSpan: firstFrame.verticalSpan, perspectiveZoom: firstFrame.perspectiveZoom }));
+    await waitFor(() => { expect(writeRecord.mock.calls.some(([next]) =>
+      next.camera.kind === 'pose' && next.camera.verticalSpan === firstFrame.verticalSpan)).toBe(true); });
+    view.unmount();
+    cadRef.stop();
     graphicsRef.stop();
   });
-
-  /* The pane opens after the project does, so the host's first render sees no session at all. The
-   * camera keys have to start being written when one appears -- a reader that caches the first
-   * `undefined` writes a record with no pose in it for the life of the actor. */
-  it('starts writing the camera keys when a pane opens after the host has mounted', async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
-
-    render(<PaneLessHarness graphicsRef={graphicsRef} editorRef={editorRef} />);
-    expect(getViewCameraSession(graphicsRef)).toBeUndefined();
-
-    const session = acquireViewCameraSession(graphicsRef, { camera: { cameraFovAngle: 42 } });
-    act(() => {
-      notifyViewCameraSession(session);
+  it('waits for camera settle before acknowledging combined camera and section adoption', async () => {
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const onRecordApplied = vi.fn();
+    const base = initial();
+    const draw = (record: WorkbenchView) => <GraphicsProvider graphicsRef={graphicsRef}>
+      <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={record}
+        writeRecord={writeRecord} onRecordApplied={onRecordApplied} />
+    </GraphicsProvider>;
+    const { rerender, unmount } = render(draw(base));
+    const rig = getViewCameraSession(graphicsRef)!.rig.actorRef;
+    await waitFor(() => { expect(onRecordApplied).toHaveBeenCalledWith(base); });
+    onRecordApplied.mockClear();
+    act(() => rig.send({ type: 'setView', target: [0, 0, 0], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 5 }));
+    const changed = workbenchRecords.view.schema.parse({ ...base,
+      camera: { kind: 'preset', preset: 'front' },
+      section: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: false }] },
     });
-    markSeedConsumed(graphicsRef);
-    act(() => {
-      session.rig.actorRef.send({
-        type: 'setView',
-        target: [3, 4, 5],
-        direction: [1, 0, 0],
-        up: [0, 0, 1],
-        verticalSpan: 12,
-        perspectiveZoom: 1,
-      });
+    rerender(draw(changed));
+    expect(onRecordApplied).not.toHaveBeenCalledWith(changed);
+    await waitFor(() => { expect(onRecordApplied).toHaveBeenCalledWith(changed); });
+    expect(rig.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
+    unmount();
+    graphicsRef.stop();
+  });
+  it('adopts a watched front view, display, grid, section and pinned measurements through live owners', async () => {
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const record = workbenchRecords.view.schema.parse({
+      ...initial(), camera: { kind: 'preset', preset: 'front' },
+      display: { ...initial().display, grid: false }, grid: { unit: 'in' },
+      section: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: false }] },
+      measurements: [{ id: 'm1', frameId: 'tau:root', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
     });
-
+    render(<GraphicsProvider graphicsRef={graphicsRef}>
+      <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={record} writeRecord={writeRecord} />
+    </GraphicsProvider>);
     await waitFor(() => {
-      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
-        type: 'updateViewSettings',
-        settings: { cameraFovAngle: 42, cameraView: { target: [3, 4, 5], verticalSpan: 12 } },
-      });
+      const { context } = graphicsRef.getSnapshot();
+      expect(context.enableGrid).toBe(false);
+      expect(context.displayUnits.length.symbol).toBe('in');
+      expect(context.isSectionViewActive).toBe(true);
+      expect(context.sectionCuts).toMatchObject([{ kind: 'plane', plane: 'xz', offset: 2 }]);
+      expect(context.measurements).toMatchObject([{ id: 'm1', isPinned: true }]);
+      expect(getViewCameraSession(graphicsRef)?.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
     });
     graphicsRef.stop();
   });
 
-  /* The cuts are durable, so revisit and reload restore the same state. Their ids are made anew at every
-   * load and are never written. */
-  it('should write the cuts and whether the section is on, without cut ids', async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
+  it('writes the person-selected grid unit to the view record and never mirrors portable state to editor', async () => {
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const record = initial();
+    const { unmount } = render(<GraphicsProvider graphicsRef={graphicsRef}>
+      <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={record} writeRecord={writeRecord} />
+    </GraphicsProvider>);
+    await waitFor(() => expect(graphicsRef.getSnapshot().context.displayUnits.length.symbol).toBe('mm'));
+    writeRecord.mockClear();
+    act(() => graphicsRef.send({ type: 'setGridUnit', payload: { unit: 'ft' } }));
+    await waitFor(() => expect(writeRecord).toHaveBeenCalledWith(expect.objectContaining({ grid: { unit: 'ft' } })));
+    expect(editorRef.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'updateViewSettings' }));
+    const persisted = writeRecord.mock.lastCall?.[0];
+    expect(persisted).toBeDefined();
+    unmount();
+    graphicsRef.stop();
+    const reloaded = graphics();
+    const replay = render(<GraphicsProvider graphicsRef={reloaded}>
+      <Harness graphicsRef={reloaded} editorRef={editorRef} record={persisted!} writeRecord={writeRecord} />
+    </GraphicsProvider>);
+    await waitFor(() => expect(reloaded.getSnapshot().context.displayUnits.length.symbol).toBe('ft'));
+    replay.unmount();
+    reloaded.stop();
+  });
 
-    render(
-      <GraphicsProvider graphicsRef={graphicsRef}>
-        <SyncHarness graphicsRef={graphicsRef} editorRef={editorRef} />
-      </GraphicsProvider>,
-    );
-
-    act(() => {
-      graphicsRef.send({ type: 'sceneRadiusUpdated', radius: 0.1, centerMeters: [1, 2, 3] });
-      graphicsRef.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
-      graphicsRef.send({ type: 'addSectionCut', payload: { kind: 'revolution' } });
-    });
-
-    await waitFor(() => {
-      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
-        type: 'updateViewSettings',
-        settings: {
-          schemaVersion: 12,
-          sectionView: {
-            active: true,
-            cuts: [
-              { kind: 'plane', plane: 'xz', offset: 2, isFlipped: false },
-              { kind: 'revolution', axis: 'z', origin: [1, 2, 3], start: 0, sweep: 90 },
-            ],
-          },
-        },
-      });
-    });
-    const lastCall = editorSend.mock.calls.at(-1)?.[0];
-    expect(lastCall).not.toHaveProperty('settings.sectionView.cuts.0.id');
-    expect(lastCall).not.toHaveProperty('settings.sectionDisplay');
+  it('keeps a preset camera instruction through adoption instead of bouncing it into a pose write', async () => {
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const record = workbenchRecords.view.schema.parse({ ...initial(), camera: { kind: 'look', direction: [0, -1, 0] } });
+    render(<GraphicsProvider graphicsRef={graphicsRef}>
+      <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={record} writeRecord={writeRecord} />
+    </GraphicsProvider>);
+    await waitFor(() => expect(getViewCameraSession(graphicsRef)?.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]));
+    await new Promise((resolve) => { setTimeout(resolve, 300); });
+    expect(writeRecord.mock.calls.every(([next]) => next.camera.kind === 'look')).toBe(true);
     graphicsRef.stop();
   });
 
-  /* A drag sends a step on every pointer move, often to where the cut already is. Such a step keeps the cut list, so
-   * it must not send an editor event per frame -- re-rendering every editor subscriber with it. */
-  it('should not write a section drag that lands on the cut already stored', async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
-
-    render(
-      <GraphicsProvider graphicsRef={graphicsRef}>
-        <SyncHarness graphicsRef={graphicsRef} editorRef={editorRef} />
-      </GraphicsProvider>,
-    );
-
-    act(() => {
-      graphicsRef.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
-    });
-    const [cut] = graphicsRef.getSnapshot().context.sectionCuts;
-    act(() => {
-      graphicsRef.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.25 } } });
-    });
-    await waitFor(() => {
-      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
-        type: 'updateViewSettings',
-        settings: { sectionView: { cuts: [{ plane: 'xz', offset: 0.25 }] } },
-      });
-    });
-
-    editorSend.mockClear();
-    act(() => {
-      // Ten frames of a drag that never leaves the position it is already at.
-      for (let frame = 0; frame < 10; frame++) {
-        graphicsRef.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.25 } } });
-      }
-    });
-    await new Promise((resolve) => {
-      setTimeout(resolve, 400);
-    });
-    expect(editorSend).not.toHaveBeenCalled();
+  it('does not reset a live orbit when a foreign grid-only view edit arrives', async () => {
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const front = workbenchRecords.view.schema.parse({ ...initial(), camera: { kind: 'preset', preset: 'front' } });
+    const renderHarness = (record: WorkbenchView) => <GraphicsProvider graphicsRef={graphicsRef}>
+      <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={record} writeRecord={writeRecord} />
+    </GraphicsProvider>;
+    const { rerender, unmount } = render(renderHarness(front));
+    const rig = getViewCameraSession(graphicsRef)!.rig.actorRef;
+    await waitFor(() => expect(rig.getSnapshot().context.view.direction).toEqual([0, -1, 0]));
+    act(() => rig.send({ type: 'setView', target: [0, 0, 0], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 5 }));
+    rerender(renderHarness({ ...front, grid: { unit: 'in' } }));
+    expect(rig.getSnapshot().context.view.direction).toEqual([1, 0, 0]);
+    await new Promise((resolve) => { setTimeout(resolve, 300); });
+    expect(rig.getSnapshot().context.view.direction).toEqual([1, 0, 0]);
+    unmount();
     graphicsRef.stop();
   });
 
-  /* A drag that comes back to where it started makes new cut lists, so the settle runs. Only comparing the cuts by
-   * value keeps it from writing the cut already stored again. */
-  it('should not write a section drag that returns to the cut already stored', async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
-
-    render(<PaneLessHarness graphicsRef={graphicsRef} editorRef={editorRef} />);
-
-    act(() => {
-      graphicsRef.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
-    });
-    const [cut] = graphicsRef.getSnapshot().context.sectionCuts;
-    act(() => {
-      graphicsRef.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.25 } } });
-    });
-    await waitFor(() => {
-      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
-        settings: { sectionView: { cuts: [{ plane: 'xz', offset: 0.25 }] } },
-      });
-    });
-    const stored = graphicsRef.getSnapshot().context.sectionCuts;
-
-    editorSend.mockClear();
-    act(() => {
-      graphicsRef.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.3 } } });
-      graphicsRef.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.25 } } });
-    });
-    expect(graphicsRef.getSnapshot().context.sectionCuts).not.toBe(stored);
-    // Past the settle, which was started before this wait and so has run by its end.
-    await new Promise((resolve) => {
-      setTimeout(resolve, 400);
-    });
-    expect(editorSend).not.toHaveBeenCalled();
-    graphicsRef.stop();
-  });
-
-  /* A drag moves a cut on every pointer move. Each editor event rebuilds the whole view-settings map and
-   * re-renders every editor subscriber, so the cuts are written once they settle, like the camera pose. */
-  it('should persist the cuts once they settle instead of once per drag step', async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
-
-    render(<PaneLessHarness graphicsRef={graphicsRef} editorRef={editorRef} />);
-
-    act(() => {
-      graphicsRef.send({ type: 'setSectionViewActive', payload: true });
-    });
-    // Turning the section on is a click, not a drag, so it is written at once.
-    await waitFor(() => {
-      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
-        type: 'updateViewSettings',
-        settings: { sectionView: { active: true, cuts: [{ plane: 'xz' }] } },
-      });
-    });
-    const [cut] = graphicsRef.getSnapshot().context.sectionCuts;
-
-    editorSend.mockClear();
-    // Each pointer move is its own task, so each step commits on its own.
-    for (let step = 1; step <= 5; step++) {
-      act(() => {
-        graphicsRef.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: step / 1000 } } });
-      });
-    }
-
-    expect(editorSend).not.toHaveBeenCalled();
-
-    await waitFor(() => {
-      expect(editorSend).toHaveBeenCalledTimes(1);
-    });
-    // The one write is exactly the cut the drag settled on.
-    expect(editorSend.mock.calls[0]?.[0]).toMatchObject({
-      type: 'updateViewSettings',
-      settings: { sectionView: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 0.005 }] } },
-    });
-    graphicsRef.stop();
-  });
-
-  it('should write the last cut when the view goes away inside the settle window', async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
-
-    const view = render(<PaneLessHarness graphicsRef={graphicsRef} editorRef={editorRef} />);
-
-    act(() => {
-      graphicsRef.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
-    });
-    await waitFor(() => {
-      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
-        settings: { sectionView: { cuts: [{ plane: 'xz' }] } },
-      });
-    });
-    const [cut] = graphicsRef.getSnapshot().context.sectionCuts;
-
-    editorSend.mockClear();
-    act(() => {
-      graphicsRef.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.004 } } });
-    });
-    expect(editorSend).not.toHaveBeenCalled();
-    // Closing the view, or the project, inside the settle window must not lose the cut just moved.
-    act(() => {
-      view.unmount();
-    });
-
-    expect(editorSend).toHaveBeenCalledTimes(1);
-    expect(editorSend.mock.calls[0]?.[0]).toMatchObject({
-      type: 'updateViewSettings',
-      settings: { sectionView: { cuts: [{ plane: 'xz', offset: 0.004 }] } },
-    });
-    graphicsRef.stop();
-  });
-
-  /* E1: the render timeout is owned per file, so it is written to the entry's record and never into
-   * the per-view one. The value observed at mount is the seed the spawn applied, not a person's edit. */
-  it('writes a render timeout change to the per-entry record and never to the view record', async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
-    const cad = createEntryCad({ renderTimeout: 30_000 });
-
-    render(
-      <GraphicsProvider graphicsRef={graphicsRef}>
-        <SyncHarness graphicsRef={graphicsRef} editorRef={editorRef} cadRef={cad.ref} entryPath='src/main.ts' />
-      </GraphicsProvider>,
-    );
-
-    expect(editorSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setUnitSettings' }));
-
-    act(() => {
-      cad.setRenderTimeout(90_000);
-    });
-
-    await waitFor(() => {
-      expect(editorSend).toHaveBeenCalledWith({
-        type: 'setUnitSettings',
-        entryPath: 'src/main.ts',
-        settings: { renderTimeout: 90_000 },
-      });
-    });
-    for (const [event] of editorSend.mock.calls) {
-      if (event.type === 'updateViewSettings') {
-        expect(event.settings).not.toHaveProperty('renderTimeout');
-      }
-    }
-    graphicsRef.stop();
-  });
-
-  /* A file switch hands the same view another entry's unit. That unit's first reading is its own
-   * seed, so comparing it with the previous entry's value would write one file's timeout into the
-   * next file's record -- and a unit an agent tool spawned unseeded would overwrite a real one. */
-  it("does not carry one entry's render timeout into the next entry's record", async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
-    const first = createEntryCad({ renderTimeout: 60_000 });
-    const second = createEntryCad({ renderTimeout: 10_000 });
-
-    const view = render(
-      <GraphicsProvider graphicsRef={graphicsRef}>
-        <SyncHarness graphicsRef={graphicsRef} editorRef={editorRef} cadRef={first.ref} entryPath='src/other.ts' />
-      </GraphicsProvider>,
-    );
-
-    act(() => {
-      first.setRenderTimeout(60_000);
-    });
-    view.rerender(
-      <GraphicsProvider graphicsRef={graphicsRef}>
-        <SyncHarness graphicsRef={graphicsRef} editorRef={editorRef} cadRef={second.ref} entryPath='src/part.ts' />
-      </GraphicsProvider>,
-    );
-    await act(async () => undefined);
-
-    expect(editorSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setUnitSettings' }));
-    graphicsRef.stop();
-  });
-
-  it('persists canonical camera changes without writing viewport-only revisions', async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
-    let cameraRig: ThreeCameraRig | undefined;
-
-    render(
-      <GraphicsProvider graphicsRef={graphicsRef}>
-        <SyncHarness
-          graphicsRef={graphicsRef}
-          editorRef={editorRef}
-          onRig={(rig) => {
-            cameraRig = rig;
-          }}
-        />
-      </GraphicsProvider>,
-    );
-
-    expect(cameraRig).toBeDefined();
-    markSeedConsumed(graphicsRef);
-    act(() => {
-      cameraRig!.actorRef.send({
-        type: 'setView',
-        target: [3, 4, 5],
-        direction: [1, 0, 0],
-        up: [0, 0, 1],
-        verticalSpan: 12,
-        perspectiveZoom: 1.75,
-      });
-    });
-
-    await waitFor(() => {
-      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
-        type: 'updateViewSettings',
-        settings: {
-          schemaVersion: 12,
-          cameraView: {
-            target: [3, 4, 5],
-            direction: [1, 0, 0],
-            up: [0, 0, 1],
-            verticalSpan: 12,
-            perspectiveZoom: 1.75,
-          },
-        },
-      });
-    });
-
-    editorSend.mockClear();
-    act(() => {
-      cameraRig!.actorRef.send({ type: 'setViewport', viewport: { width: 1200, height: 800, pixelRatio: 2 } });
-      cameraRig!.actorRef.send({ type: 'setBounds', bounds: { min: [-2, -2, -2], max: [2, 2, 2] } });
-    });
-    await act(async () => undefined);
-    expect(editorSend).not.toHaveBeenCalled();
-    graphicsRef.stop();
-  });
-
-  /* Law 2: the seed is the record until the canvas has framed the first geometry. Writing the rig's
-   * opening pose before that is how a restored view lost the pose the person left it in. */
-  it('leaves the persisted pose alone until the seed has been consumed', async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
-    let cameraRig: ThreeCameraRig | undefined;
-
-    render(
-      <GraphicsProvider graphicsRef={graphicsRef}>
-        <SyncHarness
-          graphicsRef={graphicsRef}
-          editorRef={editorRef}
-          onRig={(rig) => {
-            cameraRig = rig;
-          }}
-        />
-      </GraphicsProvider>,
-    );
-
-    act(() => {
-      cameraRig!.actorRef.send({
-        type: 'setView',
-        target: [3, 4, 5],
-        direction: [1, 0, 0],
-        up: [0, 0, 1],
-        verticalSpan: 12,
-        perspectiveZoom: 1,
-      });
-    });
-    await act(async () => undefined);
-    await waitFor(() => {
-      expect(editorSend).toHaveBeenCalled();
-    });
-
-    for (const [event] of editorSend.mock.calls) {
-      expect(event).not.toHaveProperty('settings.cameraView');
-    }
-    graphicsRef.stop();
-  });
-
-  it('persists the camera pose once it settles instead of once per frame', async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
-    let cameraRig: ThreeCameraRig | undefined;
-
-    render(
-      <GraphicsProvider graphicsRef={graphicsRef}>
-        <SyncHarness
-          graphicsRef={graphicsRef}
-          editorRef={editorRef}
-          onRig={(rig) => {
-            cameraRig = rig;
-          }}
-        />
-      </GraphicsProvider>,
-    );
-
-    expect(cameraRig).toBeDefined();
-    markSeedConsumed(graphicsRef);
-    editorSend.mockClear();
-    act(() => {
-      // An orbit: the pose changes every frame.
-      for (let frame = 0; frame < 10; frame++) {
-        cameraRig!.actorRef.send({
-          type: 'setView',
-          target: [frame, 0, 0],
-          direction: [1, 0, 0],
-          up: [0, 0, 1],
-          verticalSpan: 10 + frame,
-          perspectiveZoom: 1,
-        });
-      }
-    });
-
-    // No editor event -- and therefore no editor-subscriber fan-out -- while the
-    // camera is moving.
-    expect(editorSend).not.toHaveBeenCalled();
-
-    await waitFor(() => {
-      expect(editorSend).toHaveBeenCalledTimes(1);
-    });
-    expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
-      type: 'updateViewSettings',
-      settings: { cameraView: { target: [9, 0, 0], verticalSpan: 19 } },
-    });
-    graphicsRef.stop();
-  });
-
-  it('writes the last pose when the view goes away inside the settle window', () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
-    let cameraRig: ThreeCameraRig | undefined;
-
-    const view = render(
-      <GraphicsProvider graphicsRef={graphicsRef}>
-        <SyncHarness
-          graphicsRef={graphicsRef}
-          editorRef={editorRef}
-          onRig={(rig) => {
-            cameraRig = rig;
-          }}
-        />
-      </GraphicsProvider>,
-    );
-
-    markSeedConsumed(graphicsRef);
-    editorSend.mockClear();
-    act(() => {
-      cameraRig!.actorRef.send({
-        type: 'setView',
-        target: [4, 0, 0],
-        direction: [1, 0, 0],
-        up: [0, 0, 1],
-        verticalSpan: 14,
-        perspectiveZoom: 1,
-      });
-    });
-    // Closing the pane, switching file or navigating away all land here, and the settle timer that
-    // would have written the pose is cancelled with the effect. Losing the orbit the user just made
-    // is not an acceptable price for batching the writes.
-    act(() => {
-      view.unmount();
-    });
-
-    expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
-      type: 'updateViewSettings',
-      settings: { cameraView: { target: [4, 0, 0], verticalSpan: 14 } },
-    });
-    graphicsRef.stop();
-  });
-
-  it('clears a stale pose once the entry turns out not to be rendering glTF', async () => {
-    const graphicsRef = createGraphicsActor();
-    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
-    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
-    const cad = createEntryCad({});
-
-    render(
-      <GraphicsProvider graphicsRef={graphicsRef}>
-        <SyncHarness graphicsRef={graphicsRef} editorRef={editorRef} cadRef={cad.ref} entryPath='src/plan.ts' />
-      </GraphicsProvider>,
-    );
-
-    for (const [event] of editorSend.mock.calls) {
-      expect(event).not.toHaveProperty('settings.cameraView');
-    }
-
-    act(() => {
-      cad.setFormat('svg');
-    });
-
-    await waitFor(() => {
-      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
-        type: 'updateViewSettings',
-        settings: { schemaVersion: 12, cameraView: undefined },
-      });
-    });
+  it('keeps a deferred foreign camera instruction through a later grid edit', async () => {
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const initialRecord = initial();
+    const draw = (record: WorkbenchView) => <GraphicsProvider graphicsRef={graphicsRef}>
+      <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={record} writeRecord={writeRecord} />
+    </GraphicsProvider>;
+    const { rerender, unmount } = render(draw(initialRecord));
+    const rig = getViewCameraSession(graphicsRef)!.rig.actorRef;
+    await waitFor(() => expect(rig.getSnapshot().context.view.direction[1]).toBeLessThan(-0.6));
+    act(() => rig.send({ type: 'setView', target: [0, 0, 0], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 5 }));
+    const front: WorkbenchView = { ...initialRecord, camera: { kind: 'preset', preset: 'front' } };
+    rerender(draw(front));
+    expect(rig.getSnapshot().context.view.direction).toEqual([1, 0, 0]);
+    rerender(draw({ ...front, grid: { unit: 'in' } }));
+    await waitFor(() => expect(graphicsRef.getSnapshot().context.displayUnits.length.symbol).toBe('in'));
+    await waitFor(() => expect(rig.getSnapshot().context.view.direction).toEqual([0, -1, 0]), { timeout: 1000 });
+    unmount();
     graphicsRef.stop();
   });
 });

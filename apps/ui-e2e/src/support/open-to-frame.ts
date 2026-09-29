@@ -448,6 +448,7 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
           TAU_DEBUG: 'true',
           TAU_DESKTOP_CLIENT_ROOT: clientRoot!,
           TAU_E2E_PICK_DIRECTORY: picked,
+          TAU_E2E_HIDE_WINDOW: '1',
         },
         /* eslint-enable @typescript-eslint/naming-convention -- environment scope ends here. */
       });

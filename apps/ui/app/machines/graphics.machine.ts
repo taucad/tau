@@ -9,6 +9,8 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import type {
   GraphicsBackendPreference,
   GraphicsOwnedSettings,
+  PersistedSectionView,
+  PinnedMeasurement,
   ResolvedGraphicsBackend,
 } from '#constants/editor.constants.js';
 import {
@@ -253,6 +255,7 @@ export type GraphicsEvent =
   // Section view events
   /** Turning the section on with no cuts adds the default plane, removing the side `viewDirection` faces. */
   | { type: 'setSectionViewActive'; payload: boolean; viewDirection?: SectionVector }
+  | { type: 'adoptSectionView'; section: PersistedSectionView }
   /** Adds a cut with the defaults, selects it and turns the section on. Refused at `maxSectionCuts`. */
   | { type: 'addSectionCut'; payload: AddSectionCutPayload }
   /** A patch that changes no value keeps the snapshot. */
@@ -268,6 +271,7 @@ export type GraphicsEvent =
     }
   // Measure events
   | { type: 'setMeasureActive'; payload: boolean }
+  | { type: 'adoptPinnedMeasurements'; measurements: readonly PinnedMeasurement[] }
   | { type: 'startMeasurement'; payload: [number, number, number]; anchor?: MeasurementAnchor }
   | {
       type: 'completeMeasurement';
@@ -550,6 +554,12 @@ function createSectionViewSeed(
     hoveredSectionCutId: undefined,
   };
 }
+
+const adoptedSection = (context: GraphicsContext, section: PersistedSectionView) => {
+  const unchanged = context.isSectionViewActive === (section.active && section.cuts.length > 0) &&
+    JSON.stringify(context.sectionCuts.map(({ id: _id, ...cut }) => cut)) === JSON.stringify(section.cuts);
+  return unchanged ? undefined : createSectionViewSeed(section);
+};
 
 const graphicsActors = {
   probeWebGpu: createAsyncLogic({ run: async () => probeWebGpuSupport() }),
@@ -1277,6 +1287,15 @@ export const graphicsMachine = setup({
         clearUnpinnedMeasurements: {
           context: ({ context }) => ({ measurements: context.measurements.filter((m) => m.isPinned) }),
         },
+        adoptPinnedMeasurements: ({ context, event }) => {
+          const current = context.measurements.filter((measurement) => measurement.isPinned);
+          if (JSON.stringify(current.map(({ isPinned: _pinned, status: _status, quality: _quality, ...rest }) => rest)) ===
+            JSON.stringify(event.measurements)) { return {}; }
+          return { context: { measurements: [
+            ...context.measurements.filter((measurement) => !measurement.isPinned),
+            ...event.measurements.map((measurement) => ({ ...measurement, isPinned: true, status: 'snapshot', quality: 'snapshot' } as const)),
+          ] } };
+        },
         addMeasurementRecord: {
           context: ({ context, event }) => ({ measurements: [...context.measurements, event.record] }),
         },
@@ -1403,6 +1422,10 @@ export const graphicsMachine = setup({
           states: {
             off: {
               on: {
+                adoptSectionView: ({ context, event }) => {
+                  const patch = adoptedSection(context, event.section);
+                  return patch ? { target: patch.isSectionViewActive ? 'on' : 'off', context: patch } : {};
+                },
                 setSectionViewActive: ({ context, event }) => {
                   if (!event.payload) {
                     return undefined;
@@ -1428,6 +1451,10 @@ export const graphicsMachine = setup({
 
             on: {
               on: {
+                adoptSectionView: ({ context, event }) => {
+                  const patch = adoptedSection(context, event.section);
+                  return patch ? { target: patch.isSectionViewActive ? 'on' : 'off', context: patch } : {};
+                },
                 setSectionViewActive: ({ event }) =>
                   event.payload ? undefined : { target: 'off', context: { ...sectionOffContext } },
                 addSectionCut: ({ context, event }) =>

@@ -92,7 +92,11 @@ type Adapter = ReturnType<typeof createReplicadComputeReuse>;
  * A minimal stand-in for the runtime's scope: it records announcements and, on
  * a delivered close, exports the adapter's residency into the shared store.
  */
-const createScope = (adapter: Adapter, cache: Map<ActionDigest, CacheEntry>) => {
+const createScope = (
+  adapter: Adapter,
+  cache: Map<ActionDigest, CacheEntry>,
+  warmFailure?: 'unavailable' | 'stale-generation',
+) => {
   const announced: ActionDigest[] = [];
   const announce = vi.fn<ComputeReuseScope['announce']>(({ entries }) => {
     const admitted: ActionDigest[] = [];
@@ -106,7 +110,22 @@ const createScope = (adapter: Adapter, cache: Map<ActionDigest, CacheEntry>) => 
   });
   const scope: ComputeReuseScope = {
     generation: 1 as ComputeGeneration,
-    warm: async () => ({ status: 'imported', imported: [], omitted: [], bytes: 0 }),
+    warm: async () => {
+      if (warmFailure === 'unavailable') {
+        return { status: 'unavailable', reason: 'store unavailable' };
+      }
+      if (warmFailure === 'stale-generation') {
+        return { status: 'stale-generation' };
+      }
+      const entries = [...cache.values()];
+      const imported = await adapter.resident.importEntries({ entries, signal: new AbortController().signal });
+      return {
+        status: 'imported',
+        imported: imported.imported,
+        omitted: imported.omitted,
+        bytes: entries.reduce((total, entry) => total + entry.bytes.byteLength, 0),
+      };
+    },
     announce,
     close: ({ outcome }) => ({
       settled: (async () => {
@@ -185,6 +204,34 @@ const createFixture = (
 };
 
 describe('Replicad semantic compute reuse', () => {
+  it('warms a fresh adapter from published actions before running user code', async () => {
+    const cache = new Map<ActionDigest, CacheEntry>();
+    const seed = createFixture();
+    const seedScope = createScope(seed.adapter, cache);
+    const seedLibrary = seed.adapter.library as typeof seed.adapter.library & { makeSphere(radius: number): FakeShape };
+    await seed.adapter.run(seedScope.scope, async () => seedLibrary.makeSphere(7));
+    await seedScope.publish();
+    expect(cache.size).toBe(1);
+
+    const fresh = createFixture();
+    const freshScope = createScope(fresh.adapter, cache);
+    const library = fresh.adapter.library as typeof fresh.adapter.library & { makeSphere(radius: number): FakeShape };
+    const restored = await fresh.adapter.run(freshScope.scope, async () => library.makeSphere(7));
+    expect(restored.serialize()).toBe('sphere(7)');
+    expect(fresh.calls.sphere).toBe(0);
+    expect(fresh.calls.deserialize).toBe(1);
+  });
+
+  it.each(['unavailable', 'stale-generation'] as const)('computes when warm discovery is %s', async (failure) => {
+    const cache = new Map<ActionDigest, CacheEntry>();
+    const fixture = createFixture();
+    const scope = createScope(fixture.adapter, cache, failure);
+    const library = fixture.adapter.library as typeof fixture.adapter.library & { makeSphere(radius: number): FakeShape };
+    const result = await fixture.adapter.run(scope.scope, async () => library.makeSphere(8));
+    expect(result.serialize()).toBe('sphere(8)');
+    expect(fixture.calls.sphere).toBe(1);
+  });
+
   it('preserves destructured synchronous syntax, hits exact actions, and restores fresh shapes', async () => {
     const cache = new Map<ActionDigest, CacheEntry>();
     const { adapter, calls } = createFixture();

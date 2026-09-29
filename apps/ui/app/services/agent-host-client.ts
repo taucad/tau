@@ -153,6 +153,7 @@ export class AgentHostWorkerError extends Error {
 export type AgentHostClientOptions = {
   readonly openFileSystemBridge: () => FileSystemBridgeConnection;
   readonly openProjectRootBridge: () => FileSystemBridgeConnection;
+  readonly openWorkbenchRootBridge: () => FileSystemBridgeConnection;
   readonly computeMode?: 'off' | 'memory' | 'durable' | undefined;
   readonly openComputeStorePort?: (() => MessagePort) | undefined;
   readonly projectStorage: ProjectFileSystemConfig;
@@ -628,7 +629,7 @@ export const createAgentHostClient = (
 
 /**
  * The dedicated-worker transport: one per-tab worker, initialized over the wire
- * with the two transferred filesystem bridge ports.
+ * with three transferred filesystem bridge ports.
  *
  * @param options - Everything the worker needs to admit a run in this project.
  * @returns A transport bound to a freshly created worker.
@@ -661,12 +662,21 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
     bridge.dispose();
     throw error;
   }
+  let workbenchRootBridge: FileSystemBridgeConnection;
+  try {
+    workbenchRootBridge = options.openWorkbenchRootBridge();
+  } catch (error) {
+    bridge.dispose();
+    projectRootBridge.dispose();
+    throw error;
+  }
   let worker: Worker;
   try {
     worker = (options.createWorker ?? createBrowserAgentWorker)();
   } catch (error) {
     bridge.dispose();
     projectRootBridge.dispose();
+    workbenchRootBridge.dispose();
     throw error;
   }
   const sessionId = randomUuid();
@@ -701,6 +711,7 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
     worker.terminate();
     bridge.dispose();
     projectRootBridge.dispose();
+    workbenchRootBridge.dispose();
   };
 
   const rawCall = async (
@@ -714,18 +725,25 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
     return channel.call('request', args, signal);
   };
 
-  // Issued eagerly, before anything awaits readiness: the two bridge ports are
+  // Issued eagerly, before anything awaits readiness: the three bridge ports are
   // transferred with it, and a later issue would race a command that queued.
   const computeMode = options.computeMode ?? 'memory';
-  const computeStorePort = computeMode === 'durable' ? options.openComputeStorePort?.() : undefined;
-  if (computeMode === 'durable' && !computeStorePort) {
-    throw new AgentHostWorkerError('COMPUTE_AUTHORITY_UNAVAILABLE', 'Durable compute requires the project authority.');
+  let computeStorePort: MessagePort | undefined;
+  try {
+    computeStorePort = computeMode === 'durable' ? options.openComputeStorePort?.() : undefined;
+    if (computeMode === 'durable' && !computeStorePort) {
+      throw new AgentHostWorkerError('COMPUTE_AUTHORITY_UNAVAILABLE', 'Durable compute requires the project authority.');
+    }
+  } catch (error) {
+    dispose();
+    throw error;
   }
   const initialize = rawCall(
     {
       type: 'initialize',
       fileSystemPort: bridge.port,
       projectRootPort: projectRootBridge.port,
+      workbenchRootPort: workbenchRootBridge.port,
       computeMode,
       computeStorePort,
       projectStorage: options.projectStorage,
@@ -738,7 +756,7 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
       geoSpecEngine: options.geoSpecEngine ?? 'legacy',
       testingEnabled: options.testingEnabled,
     },
-    [bridge.port, projectRootBridge.port, ...(computeStorePort ? [computeStorePort] : [])],
+    [bridge.port, projectRootBridge.port, workbenchRootBridge.port, ...(computeStorePort ? [computeStorePort] : [])],
   );
   const initializeWorker = async (): Promise<void> => {
     const deadline = new AbortController();

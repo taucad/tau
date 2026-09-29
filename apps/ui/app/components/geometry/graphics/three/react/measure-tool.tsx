@@ -291,6 +291,18 @@ export function MeasureTool(): React.JSX.Element {
   const handledCatalogRequestRef = useRef(measureCatalogRequest);
   const [cameraRevision, setCameraRevision] = useState(0);
   const [poseRevision, setPoseRevision] = useState(0);
+  const candidateSourceRef = useRef<
+    | {
+        cameraRevision: number;
+        geometryKey: typeof geometryKey;
+        graphicsActor: typeof graphicsActor;
+        isMeasureActive: boolean;
+        modelDisplayRevision: typeof modelDisplayRevision;
+        pickableMeshesVersion: typeof pickableMeshesVersion;
+        poseRevision: number;
+      }
+    | undefined
+  >(undefined);
   const cameraMatrixRef = useRef('');
   useFrame(() => {
     if (!isMeasureActive) {
@@ -555,6 +567,17 @@ export function MeasureTool(): React.JSX.Element {
       snapDistance,
     ],
   );
+  const hoverSourceRef = useRef({
+    camera,
+    cameraRevision,
+    geometryKey,
+    element: gl.domElement,
+    isMeasureActive,
+    modelDisplayRevision,
+    pickableMeshesVersion,
+    poseRevision,
+    updatePointerSnapshot,
+  });
 
   const commitTarget = useCallback(
     (snapshot: MeasurePointerSnapshot): void => {
@@ -966,7 +989,29 @@ export function MeasureTool(): React.JSX.Element {
   }, [graphicsActor, kinematicsRef]);
 
   useEffect(() => {
+    const previous = candidateSourceRef.current;
+    candidateSourceRef.current = {
+      cameraRevision,
+      geometryKey,
+      graphicsActor,
+      isMeasureActive,
+      modelDisplayRevision,
+      pickableMeshesVersion,
+      poseRevision,
+    };
     if (!isMeasureActive) {
+      return;
+    }
+    if (
+      previous &&
+      previous.cameraRevision === cameraRevision &&
+      previous.geometryKey === geometryKey &&
+      previous.graphicsActor === graphicsActor &&
+      previous.isMeasureActive === isMeasureActive &&
+      previous.modelDisplayRevision === modelDisplayRevision &&
+      previous.pickableMeshesVersion === pickableMeshesVersion &&
+      previous.poseRevision === poseRevision
+    ) {
       return;
     }
     const { context } = graphicsActor.getSnapshot();
@@ -1045,9 +1090,7 @@ export function MeasureTool(): React.JSX.Element {
     graphicsActor.send({ type: 'setMeasureCandidates', candidates, activeId: candidates[0]?.id });
   }, [
     camera,
-    cameraRevision,
     describeTarget,
-    geometryKey,
     getCachedLines,
     getCachedMeshes,
     gl.domElement,
@@ -1056,14 +1099,36 @@ export function MeasureTool(): React.JSX.Element {
     measureCatalogRequest,
     measureFilter,
     measureMode,
-    modelDisplayRevision,
-    pickableMeshesVersion,
-    poseRevision,
     renderFrame,
   ]);
 
   useEffect(() => {
+    const previous = hoverSourceRef.current;
+    hoverSourceRef.current = {
+      camera,
+      cameraRevision,
+      geometryKey,
+      element: gl.domElement,
+      isMeasureActive,
+      modelDisplayRevision,
+      pickableMeshesVersion,
+      poseRevision,
+      updatePointerSnapshot,
+    };
     if (!isMeasureActive || !lastPointerRef.current) {
+      return;
+    }
+    if (
+      previous.camera === camera &&
+      previous.cameraRevision === cameraRevision &&
+      previous.geometryKey === geometryKey &&
+      previous.element === gl.domElement &&
+      previous.isMeasureActive === isMeasureActive &&
+      previous.modelDisplayRevision === modelDisplayRevision &&
+      previous.pickableMeshesVersion === pickableMeshesVersion &&
+      previous.poseRevision === poseRevision &&
+      previous.updatePointerSnapshot === updatePointerSnapshot
+    ) {
       return;
     }
     updatePointerSnapshot(lastPointerRef.current);

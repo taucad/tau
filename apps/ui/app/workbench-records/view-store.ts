@@ -2,6 +2,7 @@
 /* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 /* oxlint-disable eslint/no-await-in-loop -- Checked conflicts must be retried sequentially. */
 /* oxlint-disable promise/prefer-await-to-then -- Per-file write queues must serialize asynchronous callbacks. */
+/* oxlint-disable eslint/max-params -- Record publication carries source, forced retry notice, and exact authored fields. */
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
@@ -12,7 +13,10 @@ type Files = Readonly<{
   writeFileChecked: (input: {
     path: string;
     data: string;
-    preconditions: ReadonlyArray<{ path: string; expected: Uint8Array<ArrayBuffer> | null }>;
+    preconditions: ReadonlyArray<{
+      path: string;
+      expected: Uint8Array<ArrayBuffer> | null;
+    }>;
   }) => Promise<CheckedFileWriteResult>;
 }>;
 
@@ -55,6 +59,7 @@ type Patch = Partial<Pick<WorkbenchView, Exclude<ViewField, 'display' | 'grid'>>
   display?: Partial<WorkbenchView['display']>;
   grid?: Partial<WorkbenchView['grid']>;
 };
+export type ViewRecordPatch = Patch;
 
 const same = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
 const sameBytes = (left: Uint8Array<ArrayBuffer> | null, right: Uint8Array<ArrayBuffer> | null): boolean =>
@@ -66,7 +71,7 @@ export function createWorkbenchViewStore(
     root: string;
     viewId: string;
     files: Files;
-    onChange: (state: ViewRecordState, source: 'read' | 'write') => void;
+    onChange: (state: ViewRecordState, source: 'read' | 'write', locallyAuthored: ViewRecordPatch | undefined) => void;
     onError: (error: unknown) => void;
     /** Milliseconds. */
     editDebounce?: number;
@@ -94,7 +99,11 @@ export function createWorkbenchViewStore(
     }
     return false;
   };
-  let state: ViewRecordState = { record: undefined, bytes: null, refusal: undefined };
+  let state: ViewRecordState = {
+    record: undefined,
+    bytes: null,
+    refusal: undefined,
+  };
   let observed = false;
   let disposed = false;
   let generation = 0;
@@ -107,8 +116,17 @@ export function createWorkbenchViewStore(
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let retryDelay = 250;
   let editTimer: ReturnType<typeof setTimeout> | undefined;
+  const inFlightWriteBytes = new Set<{
+    bytes: Uint8Array<ArrayBuffer>;
+    patch: ViewRecordPatch | undefined;
+  }>();
   let queuedEdit:
-    | { next: WorkbenchView; patch: Patch; sequence: number; resolve: Array<(saved: boolean) => void> }
+    | {
+        next: WorkbenchView;
+        patch: Patch;
+        sequence: number;
+        resolve: Array<(saved: boolean) => void>;
+      }
     | undefined;
   const combine = (earlier: Patch | undefined, later: Patch): Patch => ({
     ...earlier,
@@ -117,7 +135,12 @@ export function createWorkbenchViewStore(
     ...((earlier?.grid ?? later.grid) ? { grid: { ...earlier?.grid, ...later.grid } } : {}),
   });
 
-  const publish = (bytes: Uint8Array<ArrayBuffer> | null, source: 'read' | 'write', notify = false): void => {
+  const publish = (
+    bytes: Uint8Array<ArrayBuffer> | null,
+    source: 'read' | 'write',
+    notify = false,
+    locallyAuthored?: ViewRecordPatch,
+  ): void => {
     if (observed && sameBytes(state.bytes, bytes) && !notify) {
       return;
     }
@@ -129,9 +152,13 @@ export function createWorkbenchViewStore(
       state =
         result.status === 'current'
           ? { record: result.record, bytes, refusal: undefined }
-          : { ...state, bytes, refusal: { code: result.code, message: result.message } };
+          : {
+              ...state,
+              bytes,
+              refusal: { code: result.code, message: result.message },
+            };
     }
-    input.onChange(state, source);
+    input.onChange(state, source, locallyAuthored);
     if (source === 'read' && state.record && editSequence === settledSequence && !deferred) {
       intended = state.record;
     }
@@ -146,7 +173,8 @@ export function createWorkbenchViewStore(
       if (current === generation && !closed()) {
         const recovered = readError;
         readError = false;
-        publish(bytes, 'read', notify || recovered);
+        const ownWrite = bytes && [...inFlightWriteBytes].find((written) => sameBytes(written.bytes, bytes));
+        publish(bytes, ownWrite ? 'write' : 'read', notify || recovered, ownWrite?.patch);
       }
       return observed;
     } catch (error) {
@@ -216,7 +244,11 @@ export function createWorkbenchViewStore(
             ...next,
             ...state.record,
             ...editPatch,
-            display: { ...next.display, ...state.record?.display, ...editPatch.display },
+            display: {
+              ...next.display,
+              ...state.record?.display,
+              ...editPatch.display,
+            },
             grid: { ...next.grid, ...state.record?.grid, ...editPatch.grid },
             version: 1,
             entryPath: editPatch.entryPath === undefined ? (state.record?.entryPath ?? null) : editPatch.entryPath,
@@ -225,11 +257,19 @@ export function createWorkbenchViewStore(
       const expected = reset ? (resetBytes ?? null) : state.bytes;
       const generationAtWrite = generation;
       try {
-        const operation = input.files.writeFileChecked({
-          path,
-          data: workbenchRecords.view.serialize(merged),
-          preconditions: [{ path, expected }],
-        });
+        const data = workbenchRecords.view.serialize(merged);
+        const attempted = {
+          bytes: new TextEncoder().encode(data),
+          patch: reset ? undefined : editPatch,
+        };
+        inFlightWriteBytes.add(attempted);
+        const operation = Promise.resolve().then(async () =>
+          input.files.writeFileChecked({
+            path,
+            data,
+            preconditions: [{ path, expected }],
+          }),
+        );
         const writes = activeWrites.get(path) ?? new Set<Promise<CheckedFileWriteResult>>();
         writes.add(operation);
         activeWrites.set(path, writes);
@@ -237,6 +277,7 @@ export function createWorkbenchViewStore(
         try {
           result = await operation;
         } finally {
+          inFlightWriteBytes.delete(attempted);
           writes.delete(operation);
           if (writes.size === 0) {
             activeWrites.delete(path);
@@ -245,7 +286,7 @@ export function createWorkbenchViewStore(
         if (result.status !== 'conflict') {
           if (generation === generationAtWrite) {
             generation++;
-            publish(result.content, 'write');
+            publish(result.content, 'write', false, attempted.patch);
           } else {
             // A watch overlapped the write. Read the live bytes after acknowledgement:
             // that watch may have captured either the old base or a newer foreign edit.
@@ -253,7 +294,8 @@ export function createWorkbenchViewStore(
             try {
               const latest = (await input.files.exists(path)) ? await input.files.readFile(path) : null;
               if (refresh === generation) {
-                publish(latest, sameBytes(latest, result.content) ? 'write' : 'read');
+                const ownWrite = sameBytes(latest, result.content);
+                publish(latest, ownWrite ? 'write' : 'read', false, ownWrite ? attempted.patch : undefined);
               }
             } catch (error) {
               input.onError(error);
@@ -349,7 +391,12 @@ export function createWorkbenchViewStore(
       }
       return new Promise<boolean>((resolve) => {
         queuedEdit = queuedEdit
-          ? { next, patch: combine(queuedEdit.patch, patch), sequence, resolve: [...queuedEdit.resolve, resolve] }
+          ? {
+              next,
+              patch: combine(queuedEdit.patch, patch),
+              sequence,
+              resolve: [...queuedEdit.resolve, resolve],
+            }
           : { next, patch, sequence, resolve: [resolve] };
         if (editTimer) {
           clearTimeout(editTimer);

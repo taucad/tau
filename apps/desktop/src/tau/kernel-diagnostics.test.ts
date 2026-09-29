@@ -21,6 +21,7 @@ describe('kernelEngineRecord', () => {
         versions: { electron: '43.5.0', node: '24.19.0' },
       }),
     ).toEqual({
+      pid: process.pid,
       kernelId: 'openrscad',
       version: '0.11.0-beta.4',
       backend: 'native',

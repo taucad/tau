@@ -22,6 +22,8 @@ export const kernelEngineEvent = 'kernel.engine';
 
 /** The detail object logged under {@link kernelEngineEvent}. */
 export type KernelEngineRecord = {
+  /** PID of the utility process that loaded the engine, never the desktop main PID. */
+  readonly pid: number;
   /** Capability id — `openrscad`, whichever payload bound. */
   readonly kernelId: string;
   /** Resolved kernel version, e.g. `0.11.0-beta.4` — the engine release, which
@@ -64,6 +66,7 @@ export const kernelEngineRecord = (input: {
   readonly backend: string;
   readonly versions: { readonly electron?: string | undefined; readonly node: string };
 }): KernelEngineRecord => ({
+  pid: process.pid,
   kernelId: input.kernelId,
   version: input.version,
   backend: input.backend,

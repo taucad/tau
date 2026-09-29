@@ -78,10 +78,6 @@ vi.mock('#hooks/use-skills-catalog.js', () => ({
   useSkillsCatalog: () => mockSkillsCatalog,
 }));
 
-vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
-  useWorkbenchLayoutController: () => workbenchController,
-}));
-
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ appliedWorkbenchRevisions: new Map(), appliedEntryRevisions: new Map() }),
 }));

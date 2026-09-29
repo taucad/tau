@@ -99,7 +99,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
         type: 'claimGeometryUnit',
         claimId,
         entryPath,
-        renderTimeout: unitSettings[entryPath]?.renderTimeout,
+        renderTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
       });
       try {
         let geometryUnit = projectRef.getSnapshot().context.geometryUnits.get(entryPath);

@@ -1066,6 +1066,16 @@ export function MeasureTool(): React.JSX.Element {
   }, [graphicsActor, kinematicsRef]);
 
   useEffect(() => {
+    const previous = candidateSourceRef.current;
+    candidateSourceRef.current = {
+      cameraRevision,
+      geometryKey,
+      graphicsActor,
+      isMeasureActive,
+      modelDisplayRevision,
+      pickableMeshesVersion,
+      poseRevision,
+    };
     catalogVersionRef.current++;
     catalogScanRef.current = undefined;
     if (!isMeasureActive) {

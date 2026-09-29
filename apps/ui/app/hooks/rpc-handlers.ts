@@ -362,7 +362,7 @@ async function ensureGeometryUnit(
       type: 'claimGeometryUnit',
       claimId,
       entryPath: targetFile,
-      renderTimeout: editorRef?.getSnapshot().context.unitSettings[targetFile]?.renderTimeout,
+      renderTimeout: await renderTimeoutForFile(targetFile),
     });
     const cadUnit = projectRef.getSnapshot().context.geometryUnits.get(targetFile);
 

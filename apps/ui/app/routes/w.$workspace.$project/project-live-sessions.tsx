@@ -173,7 +173,7 @@ function ProjectSessionBinding({
   useEffect(() => {
     choices.current = { defaultExecution, defaultKernel, testingEnabled, computeMode, nativeGeoSpec, resolveModel };
   }, [defaultExecution, defaultKernel, testingEnabled, computeMode, nativeGeoSpec, resolveModel]);
-  const { parameterService, projectRef, editorRef } = useProject();
+  const { parameterService, projectRef, editorRef, flushWorkbenchRecordProducers } = useProject();
   const client = useRevisionClientLifecycle();
   const revisionCommands = useRevisionCommands();
   const { connectRemote } = revisionCommands;

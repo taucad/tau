@@ -450,7 +450,7 @@ export const ViewerDockview = memo(function ({
 }: {
   readonly profile?: ViewerProfile;
 } = {}): React.JSX.Element {
-  const { projectRef, editorRef, mainEntryPath, viewRecords, entriesRecord, setViewEntryPath } = useProject();
+  const { projectRef, mainEntryPath, viewRecords, entriesRecord, setViewEntryPath } = useProject();
   const viewCommands = useWorkbenchViewCommands();
   // oxlint-disable-next-line typescript/no-unnecessary-condition -- The optional workspace is absent in shared-profile embeds.
   const layoutController = useProjectWorkspace({ enableNoContext: true })?.layoutController;
@@ -577,7 +577,7 @@ export const ViewerDockview = memo(function ({
     return () => {
       removeDisposable.dispose();
     };
-  }, [api, projectRef, editorRef]);
+  }, [api, projectRef, profile, setViewEntryPath, viewCommands]);
 
   useEffect(() => {
     if (!api || profile === 'shared') {
@@ -686,11 +686,9 @@ export const ViewerDockview = memo(function ({
         }
         return;
       }
-      const settings = viewSettings[panelViewId];
+      const settings = viewRecords.get(panelViewId);
 
-      const validatedSettings = settings?.graphicsSettings
-        ? parseGraphicsViewSettings(settings.graphicsSettings)
-        : defaultGraphicsSettings;
+      const validatedSettings = settings ? graphicsSettingsForView(settings) : defaultGraphicsSettings;
 
       if (!admittedGraphics.current.has(panelViewId)) {
         admittedGraphics.current.add(panelViewId);
@@ -762,7 +760,17 @@ export const ViewerDockview = memo(function ({
         subscription.dispose();
       }
     };
-  }, [api, projectIsReady, projectRef, editorRef, mainEntryPath, viewSettings, unitSettings]);
+  }, [
+    api,
+    projectIsReady,
+    projectRef,
+    mainEntryPath,
+    viewRecords,
+    entriesRecord,
+    setViewEntryPath,
+    profile,
+    viewCommands,
+  ]);
 
   // Listen for "open in viewer" requests from file tree or editor tab context menus.
   // Creates a new viewer panel for the requested file if one doesn't already exist.

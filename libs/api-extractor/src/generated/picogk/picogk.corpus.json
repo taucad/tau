@@ -4,11 +4,11 @@
     "packageName": "PicoGK",
     "packageVersion": "2.3.0.0",
     "extractor": "Roslyn 5.9.0",
-    "extractionDate": "2026-09-10T11:05:17.810Z",
-    "totalEntries": 2083,
+    "extractionDate": "2026-09-29T12:00:49.003Z",
+    "totalEntries": 2085,
     "breakdown": {
       "class": 85,
-      "method": 1377,
+      "method": 1379,
       "constructor": 96,
       "interface": 18,
       "enum": 12,
@@ -6966,6 +6966,35 @@
             {
               "parameters": [
                 {
+                  "name": "vox",
+                  "type": {
+                    "text": "Voxels"
+                  },
+                  "optional": false
+                },
+                {
+                  "name": "name",
+                  "type": {
+                    "text": "string"
+                  },
+                  "optional": false
+                },
+                {
+                  "name": "nGroupID",
+                  "type": {
+                    "text": "int"
+                  },
+                  "optional": false
+                }
+              ],
+              "returnType": {
+                "text": "void"
+              },
+              "text": "void Add(Voxels vox, string name, int nGroupID)"
+            },
+            {
+              "parameters": [
+                {
                   "name": "msh",
                   "type": {
                     "text": "Mesh"
@@ -6988,6 +7017,35 @@
             {
               "parameters": [
                 {
+                  "name": "msh",
+                  "type": {
+                    "text": "Mesh"
+                  },
+                  "optional": false
+                },
+                {
+                  "name": "name",
+                  "type": {
+                    "text": "string"
+                  },
+                  "optional": false
+                },
+                {
+                  "name": "nGroupID",
+                  "type": {
+                    "text": "int"
+                  },
+                  "optional": false
+                }
+              ],
+              "returnType": {
+                "text": "void"
+              },
+              "text": "void Add(Mesh msh, string name, int nGroupID)"
+            },
+            {
+              "parameters": [
+                {
                   "name": "poly",
                   "type": {
                     "text": "PolyLine"
@@ -7006,6 +7064,35 @@
                 "text": "void"
               },
               "text": "void Add(PolyLine poly, int nGroupID)"
+            },
+            {
+              "parameters": [
+                {
+                  "name": "poly",
+                  "type": {
+                    "text": "PolyLine"
+                  },
+                  "optional": false
+                },
+                {
+                  "name": "name",
+                  "type": {
+                    "text": "string"
+                  },
+                  "optional": false
+                },
+                {
+                  "name": "nGroupID",
+                  "type": {
+                    "text": "int"
+                  },
+                  "optional": false
+                }
+              ],
+              "returnType": {
+                "text": "void"
+              },
+              "text": "void Add(PolyLine poly, string name, int nGroupID)"
             }
           ],
           "visibility": "public",
@@ -7073,7 +7160,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 24
+            "line": 25
           },
           "languageSpecific": {
             "language": "csharp",
@@ -7156,7 +7243,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 25
+            "line": 26
           },
           "languageSpecific": {
             "language": "csharp",
@@ -7180,13 +7267,45 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 32
+            "line": 35
           },
           "languageSpecific": {
             "language": "csharp",
             "documentationId": "M:PicoGK.IViewerBackend.RemoveAllObjects"
           },
           "id": "csharp:PicoGK.IViewerBackend.RemoveAllObjects"
+        },
+        {
+          "name": "SetMechanism",
+          "kind": "method",
+          "path": "PicoGK.IViewerBackend",
+          "signatures": [
+            {
+              "parameters": [
+                {
+                  "name": "source",
+                  "type": {
+                    "text": "object"
+                  },
+                  "optional": false
+                }
+              ],
+              "returnType": {
+                "text": "void"
+              },
+              "text": "void SetMechanism(object source)"
+            }
+          ],
+          "visibility": "public",
+          "source": {
+            "file": "Viewer/ViewerBackend.cs",
+            "line": 36
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "M:PicoGK.IViewerBackend.SetMechanism(System.Object)"
+          },
+          "id": "csharp:PicoGK.IViewerBackend.SetMechanism"
         },
         {
           "name": "RequestScreenShot",
@@ -7212,7 +7331,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 33
+            "line": 37
           },
           "languageSpecific": {
             "language": "csharp",
@@ -7244,7 +7363,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 34
+            "line": 38
           },
           "languageSpecific": {
             "language": "csharp",
@@ -7283,7 +7402,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 35
+            "line": 39
           },
           "languageSpecific": {
             "language": "csharp",
@@ -7336,7 +7455,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 36
+            "line": 40
           },
           "languageSpecific": {
             "language": "csharp",
@@ -7375,7 +7494,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 37
+            "line": 41
           },
           "languageSpecific": {
             "language": "csharp",
@@ -7421,7 +7540,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 38
+            "line": 42
           },
           "languageSpecific": {
             "language": "csharp",
@@ -7453,7 +7572,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 39
+            "line": 43
           },
           "languageSpecific": {
             "language": "csharp",
@@ -7477,7 +7596,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 40
+            "line": 44
           },
           "languageSpecific": {
             "language": "csharp",
@@ -28968,7 +29087,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 85
+            "line": 91
           },
           "languageSpecific": {
             "language": "csharp",
@@ -28989,7 +29108,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 758
+            "line": 791
           },
           "languageSpecific": {
             "language": "csharp",
@@ -29007,7 +29126,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 773
+            "line": 806
           },
           "languageSpecific": {
             "language": "csharp",
@@ -29025,7 +29144,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 774
+            "line": 807
           },
           "languageSpecific": {
             "language": "csharp",
@@ -29043,7 +29162,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 775
+            "line": 808
           },
           "languageSpecific": {
             "language": "csharp",
@@ -29061,7 +29180,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 776
+            "line": 809
           },
           "languageSpecific": {
             "language": "csharp",
@@ -29079,7 +29198,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 777
+            "line": 810
           },
           "languageSpecific": {
             "language": "csharp",
@@ -29097,7 +29216,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 778
+            "line": 811
           },
           "languageSpecific": {
             "language": "csharp",
@@ -29115,7 +29234,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 779
+            "line": 812
           },
           "languageSpecific": {
             "language": "csharp",
@@ -31851,6 +31970,42 @@
           "id": "csharp:PicoGK.Viewer.Viewer"
         },
         {
+          "name": "SetMechanism",
+          "kind": "method",
+          "path": "PicoGK.Viewer",
+          "signatures": [
+            {
+              "parameters": [
+                {
+                  "name": "source",
+                  "type": {
+                    "text": "object"
+                  },
+                  "optional": false
+                }
+              ],
+              "returnType": {
+                "text": "void"
+              },
+              "text": "public void SetMechanism(object source)",
+              "description": "Capture an application-defined mechanism on a hosted viewer."
+            }
+          ],
+          "docs": {
+            "summary": "Capture an application-defined mechanism on a hosted viewer."
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Viewer/Viewer.cs",
+            "line": 85
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "M:PicoGK.Viewer.SetMechanism(System.Object)"
+          },
+          "id": "csharp:PicoGK.Viewer.SetMechanism"
+        },
+        {
           "name": "bPoll",
           "kind": "method",
           "path": "PicoGK.Viewer",
@@ -31870,7 +32025,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 235
+            "line": 241
           },
           "languageSpecific": {
             "language": "csharp",
@@ -31898,7 +32053,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 303
+            "line": 309
           },
           "languageSpecific": {
             "language": "csharp",
@@ -31950,7 +32105,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 319
+            "line": 325
           },
           "languageSpecific": {
             "language": "csharp",
@@ -31973,6 +32128,13 @@
                   "optional": false
                 },
                 {
+                  "name": "name",
+                  "type": {
+                    "text": "string"
+                  },
+                  "optional": false
+                },
+                {
                   "name": "nGroupID",
                   "type": {
                     "text": "int"
@@ -31984,7 +32146,61 @@
               "returnType": {
                 "text": "void"
               },
-              "text": "public void Add(in Voxels vox, int nGroupID = 0)",
+              "text": "public void Add(in Voxels vox, string name, int nGroupID = 0)",
+              "description": "Add the object to the viewer, using the specified viewer group"
+            },
+            {
+              "parameters": [
+                {
+                  "name": "vox",
+                  "type": {
+                    "text": "Voxels"
+                  },
+                  "optional": false
+                },
+                {
+                  "name": "nGroupID",
+                  "type": {
+                    "text": "int"
+                  },
+                  "optional": true,
+                  "defaultValue": "0"
+                }
+              ],
+              "returnType": {
+                "text": "void"
+              },
+              "text": "public void Add(in Voxels vox, int nGroupID = 0)"
+            },
+            {
+              "parameters": [
+                {
+                  "name": "msh",
+                  "type": {
+                    "text": "Mesh"
+                  },
+                  "optional": false
+                },
+                {
+                  "name": "name",
+                  "type": {
+                    "text": "string"
+                  },
+                  "optional": false
+                },
+                {
+                  "name": "nGroupID",
+                  "type": {
+                    "text": "int"
+                  },
+                  "optional": true,
+                  "defaultValue": "0"
+                }
+              ],
+              "returnType": {
+                "text": "void"
+              },
+              "text": "public void Add(Mesh msh, string name, int nGroupID = 0)",
               "description": "Add the object to the viewer, using the specified viewer group"
             },
             {
@@ -32008,7 +32224,37 @@
               "returnType": {
                 "text": "void"
               },
-              "text": "public void Add(Mesh msh, int nGroupID = 0)",
+              "text": "public void Add(Mesh msh, int nGroupID = 0)"
+            },
+            {
+              "parameters": [
+                {
+                  "name": "oPoly",
+                  "type": {
+                    "text": "PolyLine"
+                  },
+                  "optional": false
+                },
+                {
+                  "name": "name",
+                  "type": {
+                    "text": "string"
+                  },
+                  "optional": false
+                },
+                {
+                  "name": "nGroupID",
+                  "type": {
+                    "text": "int"
+                  },
+                  "optional": true,
+                  "defaultValue": "0"
+                }
+              ],
+              "returnType": {
+                "text": "void"
+              },
+              "text": "public void Add(PolyLine oPoly, string name, int nGroupID = 0)",
               "description": "Add the object to the viewer, using the specified viewer group"
             },
             {
@@ -32032,8 +32278,7 @@
               "returnType": {
                 "text": "void"
               },
-              "text": "public void Add(PolyLine oPoly, int nGroupID = 0)",
-              "description": "Add the object to the viewer, using the specified viewer group"
+              "text": "public void Add(PolyLine oPoly, int nGroupID = 0)"
             }
           ],
           "docs": {
@@ -32042,14 +32287,14 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 391
+            "line": 398
           },
           "languageSpecific": {
             "language": "csharp",
             "refKinds": {
               "vox": "in"
             },
-            "documentationId": "M:PicoGK.Viewer.Add(PicoGK.Voxels@,System.Int32)"
+            "documentationId": "M:PicoGK.Viewer.Add(PicoGK.Voxels@,System.String,System.Int32)"
           },
           "id": "csharp:PicoGK.Viewer.Add"
         },
@@ -32113,7 +32358,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 408
+            "line": 423
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32202,7 +32447,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 424
+            "line": 439
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32233,7 +32478,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 541
+            "line": 574
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32269,7 +32514,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 558
+            "line": 591
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32305,7 +32550,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 574
+            "line": 607
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32348,7 +32593,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 587
+            "line": 620
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32409,7 +32654,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 608
+            "line": 641
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32452,7 +32697,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 630
+            "line": 663
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32538,7 +32783,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 651
+            "line": 684
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32574,7 +32819,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 688
+            "line": 721
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32602,7 +32847,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 704
+            "line": 737
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32638,7 +32883,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 716
+            "line": 749
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32666,7 +32911,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 730
+            "line": 763
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32702,7 +32947,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 744
+            "line": 777
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32730,7 +32975,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 787
+            "line": 820
           },
           "languageSpecific": {
             "language": "csharp",

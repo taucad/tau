@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
@@ -241,8 +242,8 @@ static class Second
         var arguments = new[] { "--workspace", root, "--artifacts", Path.Combine(root, "artifacts"), "--parent-pid", Environment.ProcessId.ToString() };
 
         var output = Run(arguments, """
-{"protocolVersion":5,"requestId":"1","method":"resolve","params":{"entryPath":"./regions/other.cs"}}
-{"protocolVersion":5,"requestId":"2","method":"resolve","params":{"entryPath":"Shared.cs"}}
+{"protocolVersion":6,"requestId":"1","method":"resolve","params":{"entryPath":"./regions/other.cs"}}
+{"protocolVersion":6,"requestId":"2","method":"resolve","params":{"entryPath":"Shared.cs"}}
 """);
 
         Assert.Contains("\"sources\":[\"Shared.cs\",\"regions/other.cs\"]", output);
@@ -697,7 +698,7 @@ Library.Go(2f, () => Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3)));
             Assert.True(bounds.vecMin.X >= -2);
             var captured = backend.Extract();
             Assert.Equal(3, captured.Components.Count);
-            Assert.Equal("group-0-object-1", captured.Components[0].Name);
+            Assert.Null(captured.Components[0].Name);
             backend.Remove(voxels);
             backend.Remove(voxels);
             backend.Remove(line);
@@ -739,9 +740,9 @@ Library.Go(2f, () => Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3)));
             var duplicate = backend.Extract();
 
             Assert.Equal(2, duplicate.Components.Count);
-            Assert.Equal("group-2-object-2", duplicate.Components[0].Name);
+            Assert.Null(duplicate.Components[0].Name);
             Assert.Equal("component:picogk-2", duplicate.Components[0].Id);
-            Assert.Equal("group-3-object-1", duplicate.Components[1].Name);
+            Assert.Null(duplicate.Components[1].Name);
             Assert.Equal("component:picogk-1", duplicate.Components[1].Id);
             Assert.True(duplicate.Components[1].Positions.Max() < 100);
 
@@ -756,6 +757,152 @@ Library.Go(2f, () => Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3)));
             var transformed = backend.Extract();
             Assert.True(transformed.Components[1].Positions.Max() >= 10);
             backend.Dispose();
+        }
+        finally
+        {
+            Library.UnregisterGlobalLibrary();
+        }
+    }
+
+    [Fact]
+    public void NamedOverloadsAndMechanismCaptureFinalSceneWithoutRetainingSource()
+    {
+        Write("main.cs", """
+using System.Numerics;
+using PicoGK;
+Library.Go(1f, () => {
+    var viewer = Library.oViewer();
+    var mesh = Utils.mshCreateCube(Vector3.One);
+    viewer.Add(mesh, "Assembly/Rotor", 2);
+    viewer.Add(mesh, 2); // An unnamed re-add keeps the authored label and object id.
+    var line = new PolyLine("abcdef");
+    line.Add([Vector3.Zero, Vector3.UnitX]);
+    viewer.Add(line, "Assembly/Axis");
+    viewer.Add(Voxels.voxSphere(Vector3.Zero, 2), "Assembly/Ball");
+    viewer.SetMechanism(new { joints = new[] { new { name = "spin", parent = "Assembly/Rotor" } } });
+});
+""");
+        var result = ModelRunner.Execute(CompilationService.Compile(root, "main.cs"), Path.Combine(root, "named-artifacts"));
+        Assert.Equal(["Assembly/Rotor", "Assembly/Axis", "Assembly/Ball"], result.Components.Select(component => component.Name));
+        Assert.Equal(["triangles", "lines", "triangles"], result.Components.Select(component => component.Kind));
+        Assert.Equal("component:picogk-1", result.Components[0].Id);
+        Assert.Equal("spin", result.Mechanism?.GetProperty("joints")[0].GetProperty("name").GetString());
+        Assert.Empty(result.Warnings);
+        Assert.Equal(["Assembly/Rotor", "Assembly/Axis", "Assembly/Ball"],
+            MeshArtifactWriter.Write(Path.Combine(root, "named-artifacts"), result,
+                new WorkerDiagnostics(new WorkerTimings(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new WorkerMetrics(0, 0, 0)))
+                .Components.Select(component => component.Name));
+        Write("main.cs", "using PicoGK; Library.Go(1f, () => { });");
+        var next = ModelRunner.Execute(CompilationService.Compile(root, "main.cs"), Path.Combine(root, "next-artifacts"));
+        Assert.False(next.RecycleAfterResponse); // The source type did not root its collectible assembly.
+    }
+
+    [Fact]
+    public void NamesAndMechanismFollowRemovalClearAndFailureRules()
+    {
+        using var library = new Library(1f);
+        Library.RegisterGlobalLibrary(library);
+        try
+        {
+            using var backend = new CaptureViewerBackend(Path.Combine(root, "name-lifecycle"));
+            using var first = Utils.mshCreateCube(Vector3.One);
+            using var second = Utils.mshCreateCube(Vector3.One);
+            backend.Add(first, "Part/One", 0);
+            backend.Add(second, "Part/One", 0);
+            Assert.Equal("CS_TAU_INVALID_NAME", Assert.Throws<WorkerException>(backend.Extract).Issues[0].Code);
+            backend.Remove(second);
+            backend.Add(first, 0);
+            Assert.Equal("Part/One", Assert.Single(backend.Extract().Components).Name);
+            var stableId = Assert.Single(backend.Extract().Components).Id;
+            backend.Add(first, "Part/Renamed", 0);
+            var renamed = Assert.Single(backend.Extract().Components);
+            Assert.Equal("Part/Renamed", renamed.Name);
+            Assert.Equal(stableId, renamed.Id);
+            Assert.Equal("CS_TAU_INVALID_NAME", Assert.Throws<WorkerException>(() => backend.Add(second, " ", 0)).Issues[0].Code);
+            var source = new Dictionary<string, int> { ["value"] = 1 };
+            backend.SetMechanism(source);
+            source["value"] = 99;
+            Assert.Equal(1, backend.Extract().Mechanism?.GetProperty("value").GetInt32());
+            backend.SetMechanism(new ThrowingMechanism());
+            var invalid = backend.Extract();
+            Assert.Null(invalid.Mechanism);
+            Assert.Equal("CS_TAU_MECHANISM_SERIALIZATION", Assert.Single(invalid.Warnings).Code);
+            backend.SetMechanism(new { value = 2 });
+            Assert.Equal(2, backend.Extract().Mechanism?.GetProperty("value").GetInt32());
+            backend.RemoveAllObjects();
+            backend.Add(first, 0);
+            var cleared = backend.Extract();
+            Assert.Null(Assert.Single(cleared.Components).Name);
+            Assert.Null(cleared.Mechanism);
+        }
+        finally
+        {
+            Library.UnregisterGlobalLibrary();
+        }
+    }
+
+    private sealed class ThrowingMechanism
+    {
+        public int Value => throw new InvalidOperationException("broken getter");
+    }
+
+    private sealed class IndexedMechanism
+    {
+        public int Value { get; } = 3;
+        public int this[int index] => index;
+        public int WriteOnly { set { } }
+    }
+
+    private enum MechanismMode { Active = 3 }
+
+    private static IEnumerable<int> InfiniteMechanism()
+    {
+        while (true) yield return 1;
+    }
+
+    [Fact]
+    public void MechanismProjectionRejectsMalformedJsonAndKeepsSerializableValues()
+    {
+        using var backend = new CaptureViewerBackend(Path.Combine(root, "mechanism-validation"));
+        using var library = new Library(1f);
+        Library.RegisterGlobalLibrary(library);
+        try
+        {
+            using var mesh = Utils.mshCreateCube(Vector3.One);
+            backend.Add(mesh, "Still/Here", 0);
+            backend.SetMechanism(new { mode = MechanismMode.Active, details = new IndexedMechanism() });
+            Assert.Equal(3, backend.Extract().Mechanism?.GetProperty("mode").GetInt32());
+            Assert.Equal(3, backend.Extract().Mechanism?.GetProperty("details").GetProperty("Value").GetInt32());
+            backend.SetMechanism(System.Text.Json.Nodes.JsonNode.Parse("{\"joints\":[{\"name\":\"spin\"}]}")!);
+            Assert.Equal("spin", backend.Extract().Mechanism?.GetProperty("joints")[0].GetProperty("name").GetString());
+            dynamic expando = new System.Dynamic.ExpandoObject();
+            expando.joints = new[] { "spin" };
+            backend.SetMechanism((object)expando);
+            Assert.Equal("spin", backend.Extract().Mechanism?.GetProperty("joints")[0].GetString());
+
+            var cycle = new List<object>();
+            cycle.Add(cycle);
+            backend.SetMechanism(cycle);
+            Assert.Null(backend.Extract().Mechanism);
+            backend.SetMechanism(new Hashtable { [1] = "invalid key" });
+            Assert.Equal(2, backend.Extract().Warnings.Count);
+
+            object nested = 1;
+            for (var index = 0; index < 66; index++) nested = new[] { nested };
+            backend.SetMechanism(nested);
+            backend.SetMechanism(InfiniteMechanism());
+            backend.SetMechanism(new { text = new string('x', 270_000) });
+            var invalid = backend.Extract();
+            Assert.True(invalid.Warnings.Count == 5, string.Join(" | ", invalid.Warnings.Select(issue => issue.Message)));
+            Assert.Null(invalid.Mechanism);
+            Assert.Equal("Still/Here", Assert.Single(invalid.Components).Name);
+
+            var execution = new ModelExecutionResult(invalid.Components, 0, false, new ModelTimings(0, 0, 0, 0, 0, 0), invalid.Mechanism, invalid.Warnings);
+            var written = MeshArtifactWriter.Write(Path.Combine(root, "mechanism-validation"), execution,
+                new WorkerDiagnostics(new WorkerTimings(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new WorkerMetrics(0, 0, 0)));
+            Assert.Equal(5, written.Warnings?.Count);
+            backend.Cancel();
+            Assert.Throws<OperationCanceledException>(() => backend.SetMechanism(InfiniteMechanism()));
         }
         finally
         {
@@ -823,7 +970,7 @@ Library.Go(1f, () =>
             new ExtractedComponent("component:picogk-1", "triangles", "triangle", [1, 0, 0, 1], 0.2f, 0.8f, positions[..9], normals[..9], [0, 1, 2]),
             new ExtractedComponent("component:picogk-2", "lines", "line", [0, 1, 0, 1], 0, 1, [0, 0, 0, 1, 1, 1], [], [0, 1]),
         };
-        var execution = new ModelExecutionResult(components, 2, true, new ModelTimings(0, 0, 0, 0, 0, 0));
+        var execution = new ModelExecutionResult(components, 2, true, new ModelTimings(0, 0, 0, 0, 0, 0), null, []);
         var result = MeshArtifactWriter.Write(
             root,
             execution,
@@ -872,9 +1019,9 @@ Library.Go(2f, () =>
         Assert.Throws<KeyNotFoundException>(() => Program.ParseArguments(["--workspace", root]));
 
         var output = Run(arguments, """
-{"protocolVersion":5,"requestId":"1","method":"analyze","params":{"entryPath":"main.cs"}}
-{"protocolVersion":5,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{}}}
-{"protocolVersion":5,"requestId":"3","method":"shutdown","params":{}}
+{"protocolVersion":6,"requestId":"1","method":"analyze","params":{"entryPath":"main.cs"}}
+{"protocolVersion":6,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{}}}
+{"protocolVersion":6,"requestId":"3","method":"shutdown","params":{}}
 """);
         Assert.Contains("\"type\":\"ready\"", output);
         Assert.Contains("\"defaultParameters\":{}", output);
@@ -902,9 +1049,9 @@ Library.Go(2f, () =>
         Assert.Equal(2, Program.Run(arguments, new StringReader("{\"protocolVersion\":3,\"requestId\":\"1\",\"method\":\"x\",\"params\":{}}"), new StringWriter(), new StringWriter()));
         Assert.Equal(2, Program.Run(arguments, new StringReader(new string('x', 1_048_577)), new StringWriter(), new StringWriter()));
 
-        var output = Run(arguments, "{\"protocolVersion\":5,\"requestId\":\"2\",\"method\":\"unknown\",\"params\":{}}");
+        var output = Run(arguments, "{\"protocolVersion\":6,\"requestId\":\"2\",\"method\":\"unknown\",\"params\":{}}");
         Assert.Contains("CS_TAU_PROTOCOL", output);
-        output = Run(arguments, "{\"protocolVersion\":5,\"requestId\":\"3\",\"method\":\"analyze\",\"params\":{}}");
+        output = Run(arguments, "{\"protocolVersion\":6,\"requestId\":\"3\",\"method\":\"analyze\",\"params\":{}}");
         Assert.Contains("CS_TAU_RUNTIME", output);
         Assert.DoesNotContain("\"location\":null", output);
 
@@ -915,11 +1062,11 @@ Library.Go(2f, () =>
         {
             Assert.ThrowsAny<Exception>(() => Program.ValidateEntryPath(Json(json), root));
         }
-        output = Run(arguments, "{\"protocolVersion\":5,\"requestId\":\"3a\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
+        output = Run(arguments, "{\"protocolVersion\":6,\"requestId\":\"3a\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
         Assert.Contains("CS_TAU_NO_SCENE", output);
 
         Write("main.cs", "using System; using System.Numerics; using PicoGK; Library.Go(1f, () => { Library.oViewer().Add(Utils.mshCreateCube(Vector3.One)); throw new InvalidOperationException(\"failed after start\"); });");
-        output = Run(arguments, "{\"protocolVersion\":5,\"requestId\":\"4\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
+        output = Run(arguments, "{\"protocolVersion\":6,\"requestId\":\"4\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
         Assert.Contains("failed after start", output);
     }
 
@@ -957,11 +1104,11 @@ public static class Params
         var frames = new[]
         {
             // A cancel with nothing in flight has nothing to stop.
-            """{"protocolVersion":5,"requestId":"0","method":"cancel"}""",
-            """{"protocolVersion":5,"requestId":"1","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":100,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
-            """{"protocolVersion":5,"requestId":"1","method":"cancel"}""",
-            """{"protocolVersion":5,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":0,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
-            """{"protocolVersion":5,"requestId":"3","method":"shutdown","params":{}}""",
+            """{"protocolVersion":6,"requestId":"0","method":"cancel"}""",
+            """{"protocolVersion":6,"requestId":"1","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":100,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
+            """{"protocolVersion":6,"requestId":"1","method":"cancel"}""",
+            """{"protocolVersion":6,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":0,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
+            """{"protocolVersion":6,"requestId":"3","method":"shutdown","params":{}}""",
         };
 
         // The cancel is held back until the model is demonstrably running, so it stops a build in flight.
@@ -1038,7 +1185,7 @@ public static class Params
         var originalError = Console.Error;
         try
         {
-            Console.SetIn(new StringReader("{\"protocolVersion\":5,\"requestId\":\"main\",\"method\":\"shutdown\",\"params\":{}}"));
+            Console.SetIn(new StringReader("{\"protocolVersion\":6,\"requestId\":\"main\",\"method\":\"shutdown\",\"params\":{}}"));
             var output = new StringWriter();
             Console.SetOut(output);
             Console.SetError(new StringWriter());

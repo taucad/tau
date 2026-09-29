@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { PicogkSession, PicogkWorkerError } from '#picogk-session.js';
+import { picogkProtocolVersion } from '#picogk.protocol.js';
 
 const sessionMock = vi.hoisted(() => ({
   cleanup: vi.fn(),
@@ -62,19 +63,35 @@ describe('PicogkSession', () => {
       String(process.pid),
     ]);
     expect(() => {
-      configured.parseReady({ protocolVersion: 5, type: 'ready', dotnetVersion: '10', picogkVersion: '2' });
+      configured.parseReady({
+        protocolVersion: picogkProtocolVersion,
+        type: 'ready',
+        dotnetVersion: '10',
+        picogkVersion: '2',
+      });
     }).not.toThrow();
-    expect(configured.parseResponse({ protocolVersion: 5, requestId: '1', result: { ok: true } })).toEqual({
+    expect(
+      configured.parseResponse({ protocolVersion: picogkProtocolVersion, requestId: '1', result: { ok: true } }),
+    ).toEqual({
       requestId: '1',
       result: { ok: true },
     });
-    expect(configured.parseResponse({ protocolVersion: 5, requestId: '2', error: { issues: [issue] } })).toEqual({
+    expect(
+      configured.parseResponse({ protocolVersion: picogkProtocolVersion, requestId: '2', error: { issues: [issue] } }),
+    ).toEqual({
       requestId: '2',
       issues: [issue],
     });
-    expect(() => configured.parseResponse({ protocolVersion: 5, requestId: '3' })).toThrow(/exactly one/);
+    expect(() => configured.parseResponse({ protocolVersion: picogkProtocolVersion, requestId: '3' })).toThrow(
+      /exactly one/,
+    );
     expect(() =>
-      configured.parseResponse({ protocolVersion: 5, requestId: '4', result: {}, error: { issues: [issue] } }),
+      configured.parseResponse({
+        protocolVersion: picogkProtocolVersion,
+        requestId: '4',
+        result: {},
+        error: { issues: [issue] },
+      }),
     ).toThrow(/exactly one/);
     expect(configured.shutdown.parseResult({ shutdown: true })).toEqual({ shutdown: true });
 

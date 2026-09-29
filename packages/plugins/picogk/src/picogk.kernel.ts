@@ -56,7 +56,7 @@ export const picogkKernel = defineKernel({
   id: 'picogk',
   extensions: ['cs'],
   name: 'PicogkKernel',
-  version: '2.4.0+dotnet10.roslyn5.9.host2.protocol5.topology1',
+  version: '2.5.0+dotnet10.roslyn5.9.host3.protocol6.mechanism1',
   optionsSchema: picogkOptionsSchema,
   // D2: `cancel` stops an in-flight build at the model's next viewer call and keeps the worker warm.
   cancellation: 'cooperative',
@@ -161,8 +161,16 @@ export const picogkKernel = defineKernel({
         }
         const transformSpan = runtime.tracer.startSpan('picogk.glb-transform');
         let glb;
+        const issues: KernelIssue[] = (result.warnings ?? []).map(
+          ({ code: workerCode, type: workerType, ...warning }) => ({
+            ...warning,
+            code: 'INVALID_ANNOTATION',
+            type: 'kernel',
+            details: { producer: { kernelId: 'picogk' }, workerCode, workerType },
+          }),
+        );
         try {
-          glb = picogkArtifactToGlb(artifact, result);
+          glb = picogkArtifactToGlb(artifact, result, (mechanismIssues) => issues.push(...mechanismIssues));
         } finally {
           transformSpan.end();
         }
@@ -171,6 +179,7 @@ export const picogkKernel = defineKernel({
         return {
           geometry: { format: 'gltf', content: glb },
           nativeHandle: { glb },
+          issues,
         };
       } finally {
         if (result.recycleAfterResponse) {
@@ -189,6 +198,7 @@ export const picogkKernel = defineKernel({
       const bytes = await transformGltfExportBytes(input.nativeHandle.glb, {
         format: 'glb',
         ...input.options,
+        preserveMeshTopology: true,
       });
       return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(bytes))]);
     } catch (error) {

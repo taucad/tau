@@ -1,89 +1,28 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, unlink, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
 import { expect } from 'vitest';
 import type { DesktopSession } from '#support/desktop-app.js';
 
 /** Product geometry utility events, observed in packaged main without replacing its fork. */
 export type GeometryHostEvent = Readonly<{
-  kind: 'spawn' | 'run' | 'cancel' | 'event' | 'native-entry' | 'native-return' | 'result' | 'exit';
+  kind: 'spawn' | 'run' | 'cancel' | 'event' | 'result' | 'exit';
   pid: number;
   at: number;
   root?: string;
+  engine?: 'native' | 'legacy';
   eventType?: string;
-  capability?: string;
-  count?: number;
-  toleranceMm?: number;
 }>;
-
-/* Executed only through the geometry utility's test-only --require, before its real bundle. */
-const nativeEntryPreload = String.raw`const Module = require('node:module');
-const load = Module._load;
-Module._load = function(request, parent, isMain) {
-  const binding = load.apply(this, arguments);
-  let resolved;
-  try { resolved = Module._resolveFilename(request, parent, isMain); } catch { return binding; }
-  if (typeof resolved !== 'string' || !/geospec-engine-native.*\.node$/u.test(resolved) ||
-      typeof binding?.Engine?.prototype?.evaluateClaim !== 'function') return binding;
-  const original = binding.Engine.prototype.evaluateClaim;
-  if (original.__tauE2eNativeEntryWrapped) return binding;
-  function observedEvaluateClaim(bytes) {
-    let observed = false;
-    try {
-      const request = JSON.parse(Buffer.from(bytes).toString('utf8'));
-      const claim = request?.plan?.claims?.[0];
-      if (request?.method === 'submitClaims' && typeof claim?.capability === 'string') {
-        observed = true;
-        const expected = claim.payload?.arguments?.[0];
-        process.parentPort?.postMessage({
-          type: 'tau-e2e-native-entry', capability: claim.capability,
-          count: expected?.count,
-          toleranceMm: expected?.toleranceMm,
-        });
-      }
-    } catch { /* Observation cannot alter the native call's return or throw. */ }
-    try {
-      return original.apply(this, arguments);
-    } finally {
-      if (observed) {
-        try { process.parentPort?.postMessage({ type: 'tau-e2e-native-return' }); } catch {}
-      }
-    }
-  }
-  observedEvaluateClaim.__tauE2eNativeEntryWrapped = true;
-  binding.Engine.prototype.evaluateClaim = observedEvaluateClaim;
-  return binding;
-};
-`;
-
-const preloadRoot = resolve(
-  import.meta.dirname,
-  '../../../../out/research/geospec-native-closeout-blueprint/2026-09-29-implementation/lanes/arch02-product-host-b1',
-);
-let preloadPath: string | undefined;
-
-/** Create the exact test-only preload used by the packaged utility or a tiny addon check. */
-export const writeNativeEntryPreload = async (): Promise<string> => {
-  await mkdir(preloadRoot, { recursive: true });
-  const path = join(preloadRoot, `native-entry-${randomUUID()}.cjs`);
-  await writeFile(path, nativeEntryPreload);
-  return path;
-};
 
 /** Install before the first geometry request; the real broker still owns every fork and message. */
 export const observeGeometryHost = async (session: DesktopSession): Promise<void> => {
-  preloadPath = await writeNativeEntryPreload();
-  await session.application.evaluate(({ utilityProcess }, entryPreload) => {
+  await session.application.evaluate(({ utilityProcess }) => {
     const state = globalThis as typeof globalThis & {
       tauE2eGeometryEvents?: Array<{
-        kind: 'spawn' | 'run' | 'cancel' | 'event' | 'native-entry' | 'native-return' | 'result' | 'exit';
+        kind: 'spawn' | 'run' | 'cancel' | 'event' | 'result' | 'exit';
         pid: number;
         at: number;
         root?: string;
+        engine?: 'native' | 'legacy';
         eventType?: string;
-        capability?: string;
-        count?: number;
-        toleranceMm?: number;
       }>;
       tauE2eRestoreGeometryFork?: () => void;
     };
@@ -93,11 +32,7 @@ export const observeGeometryHost = async (session: DesktopSession): Promise<void
     const originalFork = utilityProcess.fork;
     state.tauE2eGeometryEvents = [];
     utilityProcess.fork = ((...args: Parameters<typeof originalFork>) => {
-      const options = args[2];
-      const geometry = options?.serviceName === 'tau-geometry-host';
-      if (geometry) {
-        args[2] = { ...options, execArgv: [...(options.execArgv ?? []), '--require', entryPreload] };
-      }
+      const geometry = args[2]?.serviceName === 'tau-geometry-host';
       const child = originalFork(...args);
       if (geometry) {
         let spawnedPid: number | undefined;
@@ -119,9 +54,9 @@ export const observeGeometryHost = async (session: DesktopSession): Promise<void
         }
         const originalPost = child.postMessage.bind(child);
         child.postMessage = ((message: unknown, transfer?: Parameters<typeof originalPost>[1]) => {
-          const frame = message as { type?: string; root?: string } | undefined;
+          const frame = message as { type?: string; root?: string; engine?: 'native' | 'legacy' } | undefined;
           if (frame?.type === 'geometry-run') {
-            record('run', { root: frame.root });
+            record('run', { root: frame.root, engine: frame.engine });
           }
           if (frame?.type === 'geometry-cancel') {
             record('cancel');
@@ -132,17 +67,6 @@ export const observeGeometryHost = async (session: DesktopSession): Promise<void
           const frame = message as { type?: string; event?: { type?: string } } | undefined;
           if (frame?.type === 'geometry-event') {
             record('event', { eventType: frame.event?.type });
-          }
-          if (frame?.type === 'tau-e2e-native-entry') {
-            const entry = frame as typeof frame & { capability?: string; count?: number; toleranceMm?: number };
-            record('native-entry', {
-              capability: entry.capability,
-              count: entry.count,
-              toleranceMm: entry.toleranceMm,
-            });
-          }
-          if (frame?.type === 'tau-e2e-native-return') {
-            record('native-return');
           }
           if (frame?.type === 'geometry-result') {
             record('result');
@@ -158,8 +82,22 @@ export const observeGeometryHost = async (session: DesktopSession): Promise<void
       utilityProcess.fork = originalFork;
       delete state.tauE2eRestoreGeometryFork;
     };
-  }, preloadPath);
+  });
 };
+
+/** Cumulative CPU seconds and creation identity for one actual geometry utility. */
+export const geometryHostCpuSeconds = async (
+  session: DesktopSession,
+  pid: number,
+): Promise<Readonly<{ seconds: number; creationTime: number }>> =>
+  session.application.evaluate(({ app }, expectedPid) => {
+    const metric = app.getAppMetrics().find((entry) => entry.pid === expectedPid);
+    const seconds = metric?.cpu.cumulativeCPUUsage;
+    if (metric?.type !== 'Utility' || seconds === undefined || !Number.isFinite(seconds)) {
+      throw new Error(`No cumulative CPU observation for geometry utility ${String(expectedPid)}.`);
+    }
+    return { seconds, creationTime: metric.creationTime };
+  }, pid);
 
 /** Snapshot retained by packaged main, not inferred from a separate miniapp. */
 export const geometryHostEvents = async (session: DesktopSession): Promise<readonly GeometryHostEvent[]> =>
@@ -173,17 +111,10 @@ export const geometryHostEvents = async (session: DesktopSession): Promise<reado
 
 /** Undo the test-only observer before Electron teardown. */
 export const restoreGeometryHost = async (session: DesktopSession): Promise<void> => {
-  try {
-    await session.application.evaluate(() => {
-      const state = globalThis as typeof globalThis & { tauE2eRestoreGeometryFork?: () => void };
-      state.tauE2eRestoreGeometryFork?.();
-    });
-  } finally {
-    if (preloadPath) {
-      await unlink(preloadPath);
-      preloadPath = undefined;
-    }
-  }
+  await session.application.evaluate(() => {
+    const state = globalThis as typeof globalThis & { tauE2eRestoreGeometryFork?: () => void };
+    state.tauE2eRestoreGeometryFork?.();
+  });
 };
 
 /** The machines hello is emitted by the independent real services utility. */

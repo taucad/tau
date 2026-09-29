@@ -60,9 +60,9 @@ Kernels reach the bundler through `runtime.bundler` and `runtime.execute`; the k
 A custom JS/TS kernel registers its built-in modules from the operation runtime before bundling:
 
 ```typescript
-import type { KernelRuntime } from '@taucad/runtime/types';
+import type { KernelServices } from '@taucad/runtime/types';
 
-export const registerMyLibrary = (runtime: KernelRuntime): void => {
+export const registerMyLibrary = (runtime: KernelServices): void => {
   runtime.bundler.registerModule('my-library', {
     code: 'export const greet = (name) => `hello, ${name}`;',
     version: '1.0.0',
@@ -71,11 +71,11 @@ export const registerMyLibrary = (runtime: KernelRuntime): void => {
 };
 ```
 
-Call it inside `createGeometry` (or wherever the module must exist) — the Replicad and JSCAD kernel sources show complete implementations.
+Call it inside `evaluate` (or wherever the module must exist) — the Replicad and JSCAD kernel sources show complete implementations.
 
 ### 5. Define a custom bundler
 
-For a different transpiler or execution model, use [`defineBundler`](../api/bundler). The definition requires `id`, `name`, `version`, `extensions`, `initialize`, `detectImports`, `bundle`, `execute`, and `registerModule`; `cleanup` is optional:
+For a different transpiler or execution model, use [`defineBundler`](../api/bundler). The definition requires `id`, `name`, `version`, `extensions`, `initialize`, `detectImports`, `bundle`, `execute`, and `registerModule`; `onDispose` is optional:
 
 ```typescript
 import { defineBundler, type BuiltinModule } from '@taucad/runtime/bundler';
@@ -128,7 +128,7 @@ export const runtime = defineRuntime({
 });
 ```
 
-`detectImports`, `bundle`, and dependency-resolution methods receive `entryPath` as a normalized [runtime path](../concepts/path-namespaces), never a host operating-system path, and must return dependencies in the same namespace. Operation methods also receive a fresh `BundlerRuntime.signal` on their second argument — see [Cooperate with Cancellation](./cooperate-with-cancellation).
+`detectImports`, `bundle`, and dependency-resolution methods receive `entryPath` as a normalized [runtime path](../concepts/path-namespaces), never a host operating-system path, and must return dependencies in the same namespace. Operation methods also receive a fresh `BundlerServices.signal` on their second argument — see [Cooperate with Cancellation](./cooperate-with-cancellation).
 
 ## Variations
 

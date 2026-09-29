@@ -1,71 +1,52 @@
 import {
-  createKernelError,
   createKernelParameterDeclaration,
   createKernelSuccess,
   defineKernel,
-  finalizeRenderOutput,
+  nonemptyExportFiles,
 } from '@taucad/runtime/kernel';
-import type { GeometryResponse } from '@taucad/runtime/types';
-import { z } from 'zod';
 
-type MyContext = {
-  engine: unknown;
-};
-
-type MyNativeHandle = null;
+const toSvg = (source: string): string =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><text>${source.length}</text></svg>`;
 
 export const myKernel = defineKernel({
   id: 'my-kernel',
   extensions: ['myformat'],
   name: 'MyKernel',
   version: '1.0.0',
-  exportFormats: {
-    glb: { optionsSchema: z.object({}).strict() },
-  },
+  views: { drawing: { title: 'Drawing', mimeType: 'image/svg+xml' } },
+  exports: { drawing: { title: 'Drawing', mimeType: 'image/svg+xml', extension: 'svg' } },
 
-  async initialize(_options, _runtime): Promise<MyContext> {
-    return { engine: null };
+  async initialize() {
+    return {};
   },
-
-  async getDependencies({ entryPath }, _runtime, _context) {
+  async resolve({ entryPath }) {
     return { resolved: [entryPath], unresolved: [] };
   },
-
-  async getParameters() {
-    return createKernelSuccess(
-      createKernelParameterDeclaration(
+  async describe() {
+    return createKernelSuccess({
+      parameters: createKernelParameterDeclaration(
         {},
-        {
-          type: 'object',
-          properties: {},
-          additionalProperties: false,
-        },
+        { type: 'object', properties: {}, additionalProperties: false },
         { id: 'urn:taucad:docs:my-kernel', name: 'MyKernelParameters' },
       ),
-    );
+    });
   },
-
-  async createGeometry({ entryPath }, { filesystem }, _context) {
-    const code = await filesystem.readFile(entryPath, 'utf8');
-    const geometry: GeometryResponse = {
-      format: 'svg',
-      content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><text>${code.length}</text></svg>`,
-    };
-    const nativeHandle: MyNativeHandle = null;
-    return finalizeRenderOutput({ artifacts: [geometry], nativeHandle });
+  async evaluate({ entryPath }, services) {
+    const source = await services.filesystem.readFile(entryPath, 'utf8');
+    return { handle: { source }, views: ['drawing'], exports: ['drawing'] };
   },
-
-  async exportGeometry({ format }) {
-    if (format !== 'glb') {
-      return createKernelError([
+  async render({ handle }) {
+    return { content: toSvg(handle.source) };
+  },
+  async write({ handle }) {
+    return {
+      files: nonemptyExportFiles([
         {
-          message: `Unsupported export format: ${format}`,
-          code: 'RUNTIME',
-          type: 'runtime',
-          severity: 'error',
+          name: 'model.svg',
+          mimeType: 'image/svg+xml',
+          bytes: new TextEncoder().encode(toSvg(handle.source)),
         },
-      ]);
-    }
-    return createKernelSuccess([{ name: 'model.glb', bytes: new Uint8Array(), mimeType: 'model/gltf-binary' }]);
+      ]),
+    };
   },
 });

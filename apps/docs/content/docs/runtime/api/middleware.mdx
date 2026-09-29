@@ -11,19 +11,25 @@ Middleware wraps kernel operations in an onion-model pipeline for caching, coord
 
 <auto-type-table path='./props/middleware.ts' name='MiddlewareState' />
 
-<auto-type-table path='./props/middleware.ts' name='KernelMiddlewareRuntime' />
+<auto-type-table path='./props/middleware.ts' name='KernelMiddlewareServices' />
 
-<auto-type-table path='./props/middleware.ts' name='MiddlewareDependencyRuntime' />
+<auto-type-table path='./props/middleware.ts' name='MiddlewareDependencyServices' />
 
 <auto-type-table path='./props/middleware.ts' name='MiddlewarePlugin' />
 
+<auto-type-table path='./props/middleware.ts' name='MiddlewareDependency' />
+
+<auto-type-table path='./props/middleware.ts' name='RenderRequest' />
+
+<auto-type-table path='./props/middleware.ts' name='WriteRequest' />
+
 ## defineMiddleware
 
-`defineMiddleware` returns a `MiddlewarePluginFactory`; calling the factory yields the `MiddlewarePluginRegistration` (a `KernelMiddleware` carrier) that plugin expansion registers. The optional wrap hooks are `WrapGetParametersHook`, `WrapCreateGeometryHook`, `WrapMeshGeometryHook`, and `WrapExportGeometryHook`. Each receives `(input, handler, runtime)`: a request such as `MiddlewareCreateGeometryRequest` or `MiddlewareExportGeometryRequest`, the next handler (`CreateGeometryHandler`, `MeshGeometryHandler`, `ExportGeometryHandler`), and a `KernelMiddlewareRuntime`.
+`defineMiddleware` returns a `MiddlewarePluginFactory`; calling it yields serializable registration metadata with a private executable definition. Optional hooks are `wrapDescribe`, `wrapEvaluate`, `wrapRender`, and `wrapWrite`. Each receives `(input, next, services)`; `next(input)` continues the chain. Evaluation is independent of any view. Render and write requests name the selected view or export and its declared MIME type; write also carries the extension.
 
-Middleware is assumed to mutate artifact bytes and therefore participates in cache identity. A pure telemetry/logging tap may declare `mutates: false`; it must then return successful artifacts unchanged and declare no geometry dependencies.
+Middleware is assumed to mutate results and therefore participates in cache identity. A pure telemetry/logging tap may declare `mutates: false`; it must return successful results unchanged and declare no dependencies.
 
-A middleware that can fulfill framework content declares the exact logical routes it supports. The bundled edge-detection middleware is one such provider:
+A middleware that fulfills framework content declares it by view MIME type or export extension. The bundled edge-detection middleware is one such provider:
 
 ```typescript @ts-nocheck
 // @ts-nocheck: the docs site does not install `@taucad/middleware`.
@@ -32,9 +38,9 @@ import { gltfEdgeDetection } from '@taucad/middleware';
 export const gltfEdges = gltfEdgeDetection();
 ```
 
-The declaration makes the property available only on composed routes where the middleware can actually run. Middleware receives only its declared content subset.
+The declaration makes a property available only on composed routes where the middleware can run. The runtime projects only the selected MIME or extension's content keys into that hook.
 
-Middleware file inputs are declarative: `entryPath` and dependency `path` values are normalized [runtime paths](../concepts/path-namespaces). The `getDependencies` hook (`GetMiddlewareDependenciesHook`) returns `MiddlewareDependencyDeclaration` values; the same declaration participates in operation hashing and, for the current preview, rerender ownership:
+Middleware file inputs are declarative: `entryPath` and dependency `path` values are normalized [runtime paths](../concepts/path-namespaces). The `resolve` hook returns `MiddlewareDependency` values with explicit `affects` operation names. The declaration participates in hashing and, for the current preview, rerender ownership:
 
 ```typescript
 import { defineMiddleware } from '@taucad/runtime/middleware';
@@ -42,15 +48,15 @@ import { defineMiddleware } from '@taucad/runtime/middleware';
 export const settingsFiles = defineMiddleware({
   id: 'settings',
   name: 'settings',
-  getDependencies({ entryPath }) {
-    return [{ path: `.tau/settings/${entryPath}.json`, watchDebounce: 0 }];
+  resolve({ entryPath }) {
+    return [{ path: `.tau/settings/${entryPath}.json`, affects: ['evaluate'], watchDebounce: 0 }];
   },
 });
 ```
 
 Middleware does not register watchers imperatively. A missing declaration is retained as an unresolved dependency so creating the file can heal the preview; non-not-found filesystem failures propagate.
 
-Every wrap hook receives a fresh operation-scoped `signal` on `KernelMiddlewareRuntime`; dependency hooks receive the same primitive on `MiddlewareDependencyRuntime`. Pass it to cancellable APIs and do not retain it after the hook settles. See [Cooperate with Cancellation](../guides/cooperate-with-cancellation).
+Every wrap hook receives a fresh operation-scoped `signal` on `KernelMiddlewareServices`; dependency hooks receive the same primitive on `MiddlewareDependencyServices`. Pass it to cancellable APIs and do not retain it after the hook settles. See [Cooperate with Cancellation](../guides/cooperate-with-cancellation).
 
 ## Factories
 

@@ -92,34 +92,17 @@ it('exposes parameters and geometry', async () => {
 
 ### 3. Unit-test plugin definitions
 
-`resolveRuntimePluginDefinition` from `@taucad/runtime/plugin` with `createMockKernelRuntime` or `createMockRuntime` tests a plugin's own hooks in isolation. Runtime worker cache, filesystem watch, disposal, and transport invariants stay runtime-owned tests:
+`resolveRuntimePluginDefinition` from `@taucad/runtime/plugin` exposes the definition behind a public factory for focused hook tests. Assert v2 inputs and outputs directly: `evaluate` must offer only declared view/export IDs; `render` must return content without changing the handle; `write` must return at least one file; and `onDispose` releases context resources. Use `createMockKernelRuntime` from `@taucad/runtime-testing` for kernel services, and pass a fresh operation signal to each call. Keep caching, watch, disposal ordering, and transport invariants in runtime-owned integration tests.
 
 ```typescript
 import { expect, it } from 'vitest';
-import { defineMiddleware } from '@taucad/runtime/middleware';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import {
-  createMockCreateGeometryHandler,
-  createMockInput,
-  createMockRuntime,
-  createSuccessResult,
-} from '@taucad/runtime-testing';
+import { myKernel } from './examples/my-kernel.kernel';
 
-const passThrough = defineMiddleware({
-  id: 'pass-through',
-  name: 'PassThrough',
-  async wrapCreateGeometry(input, handler) {
-    return handler(input);
-  },
-});
-
-it('passes geometry through unchanged', async () => {
-  const definition = await resolveRuntimePluginDefinition('middleware', passThrough());
-  const runtime = createMockRuntime();
-  const input = createMockInput();
-  const expected = createSuccessResult({ format: 'gltf', content: new Uint8Array() });
-  const result = await definition.wrapCreateGeometry!(input, createMockCreateGeometryHandler(expected), runtime);
-  expect(result).toBe(expected);
+it('declares the routes evaluated models can offer', async () => {
+  const definition = await resolveRuntimePluginDefinition('kernel', myKernel());
+  expect(Object.keys(definition.views)).toEqual(['drawing']);
+  expect(Object.keys(definition.exports)).toEqual(['drawing']);
 });
 ```
 

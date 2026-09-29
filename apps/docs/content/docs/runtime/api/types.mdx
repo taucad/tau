@@ -69,7 +69,27 @@ The `Dependency` union records what a kernel's geometry depends on, for cache ke
 
 <auto-type-table path='./props/types.ts' name='KernelDefinition' />
 
-<auto-type-table path='./props/types.ts' name='KernelRuntime' />
+<auto-type-table path='./props/types.ts' name='KernelServices' />
+
+<auto-type-table path='./props/types.ts' name='ViewDeclaration' />
+
+<auto-type-table path='./props/types.ts' name='ExportDeclaration' />
+
+<auto-type-table path='./props/types.ts' name='ViewInstance' />
+
+`evaluate` returns an opaque handle plus the ordered view and export IDs this result offers. The first offered view is the current client's default. A declared view can expose named instances; `render` selects one view and optional instance without re-evaluating the source.
+
+<auto-type-table path='./props/types.ts' name='EvaluateInput' />
+
+<auto-type-table path='./props/types.ts' name='EvaluateOutput' />
+
+<auto-type-table path='./props/types.ts' name='RenderInput' />
+
+<auto-type-table path='./props/types.ts' name='RenderOutput' />
+
+<auto-type-table path='./props/types.ts' name='WriteInput' />
+
+<auto-type-table path='./props/types.ts' name='WriteOutput' />
 
 ## Bundler Types
 
@@ -89,15 +109,25 @@ The `Dependency` union records what a kernel's geometry depends on, for cache ke
 
 ## Geometry and Export Types
 
-<auto-type-table path='./props/types.ts' name='CreateGeometryResult' />
+<auto-type-table path='./props/types.ts' name='Artifact' />
 
-<auto-type-table path='./props/types.ts' name='HashedGeometryResult' />
+<auto-type-table path='./props/types.ts' name='EvaluateResult' />
+
+<auto-type-table path='./props/types.ts' name='RenderResult' />
+
+<auto-type-table path='./props/types.ts' name='WriteResult' />
+
+### Current client bridge
+
+The current client still presents geometry-oriented envelopes until W3's document-view client migration. Those client result types describe the compatibility boundary; kernel authors implement the v2 `evaluate`/`render`/`write` hooks above.
+
+<auto-type-table path='./props/types.ts' name='CreateGeometryResult' />
 
 <auto-type-table path='./props/types.ts' name='GetParametersResult' />
 
 <auto-type-table path='./props/types.ts' name='ExportGeometryResult' />
 
-Successful exports resolve to an ordered `ExportFile` array (`name` plus owned `bytes`). Kernel handlers receive `GetParametersInput` / `ExportGeometryInput`; `GetParametersResult` carries a `JSONSchema7` parameter schema.
+Successful writes return a nonempty ordered `ExportFile` tuple (`name`, open `mimeType`, and owned `bytes`). The runtime attaches a selected view's declared MIME type to `RenderOutput`; `GetParametersResult` remains the current client bridge's parameter envelope.
 
 ## Content and Capability Types
 

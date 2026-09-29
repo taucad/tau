@@ -1,14 +1,14 @@
-import type { CreateGeometryResult } from '@taucad/runtime';
+import type { EvaluateResult } from '@taucad/runtime/types';
 import { defineMiddleware } from '@taucad/runtime/middleware';
 import { z } from 'zod';
 
-const cache = new Map<string, CreateGeometryResult>();
+const cache = new Map<string, EvaluateResult>();
 
 export const myCache = defineMiddleware({
   id: 'my-cache',
   name: 'MyCache',
   stateSchema: z.object({ cacheKey: z.string().optional() }),
-  async wrapCreateGeometry(input, handler, { state, dependencyHash }) {
+  async wrapEvaluate(input, handler, { state, dependencyHash }) {
     const cached = cache.get(dependencyHash);
     if (cached) {
       state.update({ cacheKey: dependencyHash });

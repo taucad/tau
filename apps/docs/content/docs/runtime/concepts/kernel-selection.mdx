@@ -53,7 +53,7 @@ When the extension has a registered bundler (for example `.ts` with esbuild):
 
 1. Call `bundler.detectImports({ entryPath })` -- a lightweight pass that discovers transitive imports without a full bundle.
 2. Compare the detected bare specifiers against each kernel's `builtinModuleNames`; `replicad` and `replicad/utils` both match a `replicad` builtin.
-3. The first matching kernel becomes primary. Dependencies found during detection are cached for the subsequent `getDependencies` call, so the bundler does not run twice.
+3. The first matching kernel becomes primary. Dependencies found during detection are cached for the subsequent `resolve` call, so the bundler does not run twice.
 
 This pass catches what the pass-1 regex cannot: an entry that imports a local module which in turn imports the kernel library.
 
@@ -78,7 +78,7 @@ In autonomous rendering mode (the default), the worker's filesystem watch subscr
 
 - **Selection and plugins** -- kernel plugins declare `extensions`, `detectImport`, and `builtinModuleNames`; those three fields drive all three passes.
 - **Selection and bundler** -- pass 2 exists only where a bundler implements `detectImports`.
-- **Selection and worker** -- selection runs worker-side, before `getParameters` or `createGeometry`.
+- **Selection and worker** -- selection runs worker-side, before `describe` or `evaluate`.
 
 ## Implications
 

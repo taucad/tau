@@ -34,8 +34,8 @@ flowchart TD
     Immediate --> Render3["render"]
     Render3 --> Push3["push geometry event"]
 
-    Export["export(format)"] --> ExportGeom["exportGeometry(format, nativeHandle)"]
-    ExportGeom --> Resolve["resolve export call"]
+    Export["export(format)"] --> Write["write(selected export, retained handle)"]
+    Write --> Resolve["resolve export call"]
 ```
 
 **render(source, parameters):** normalize the entry to a [runtime path](./path-namespaces), store it with the parameters, and render immediately, aborting any in-progress render. Afterwards, discover the entry's dependencies and subscribe to filesystem watches scoped to that set. Push the `geometry` event.
@@ -44,7 +44,7 @@ flowchart TD
 
 **updateParameters(params):** store the new parameters and schedule a re-render with no added delay. Parameter changes are user-driven and latency-sensitive; there is nothing to batch.
 
-**export(format):** export from the last native handle produced by `createGeometry` and resolve the export call with the artifact files.
+**export(format):** the current client bridges a file extension to an offered v2 export, calls `write` with the retained evaluation handle, and resolves with nonempty artifact files. W3 will expose the export ID directly.
 
 ### Why File Changes Debounce and Parameter Changes Do Not
 
@@ -160,7 +160,7 @@ Invalidation (`Map.delete()`) is synchronous and monotonically correct:
 
 - **Render loop and worker:** the loop is worker-internal; the main thread never orchestrates scheduling.
 - **Abort and transport:** the abort channel crosses the thread boundary outside MessagePort. SAB-capable transports let the worker observe it mid-WASM; SAB-less transports serialise it as a wire `abort` notification. Either way, the client only calls `reservePreview()` before posting the superseding command.
-- **Dependencies and watch:** `getDependencies` returns runtime paths; the worker subscribes to them over the filesystem bridge, and watch events use the same namespace.
+- **Dependencies and watch:** kernel `resolve` returns runtime paths; the worker subscribes to them over the filesystem bridge, and watch events use the same namespace.
 - **Debounce and parameters:** the 200ms file debounce is independent of immediate parameter scheduling; the earlier schedule wins when both change.
 
 ## Implications

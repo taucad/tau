@@ -60,8 +60,8 @@ Kernel and bundler methods receive the canonical `entryPath` that names the mode
 ```typescript
 import type { KernelDefinition } from '@taucad/runtime/kernel';
 
-const kernelMethods: Pick<KernelDefinition, 'getDependencies'> = {
-  async getDependencies({ entryPath }, { filesystem }) {
+const kernelMethods: Pick<KernelDefinition, 'resolve'> = {
+  async resolve({ entryPath }, { filesystem }) {
     // entryPath === 'models/main.ts'
     const source = await filesystem.readFile(entryPath, 'utf8');
     return { resolved: [entryPath, 'lib/part.ts'], unresolved: source ? [] : [entryPath] };

@@ -3069,6 +3069,24 @@ describe('BrowserPlacementChatTransport', () => {
     unregister();
   });
 
+  it('should group each durable event once while preserving four-run SDK replay', async () => {
+    const source = hexagonalNutFourRunEvents();
+    let runIdReads = 0;
+    const events = source.map((event) =>
+      new Proxy(event, {
+        get: (target, key, receiver) => {
+          if (key === 'runId') {
+            runIdReads += 1;
+          }
+          return Reflect.get(target, key, receiver) as unknown;
+        },
+      }),
+    );
+    const messages = await deriveChatTranscript(events);
+    expect(assistantTexts(messages)).toEqual(durableTexts(source));
+    expect(runIdReads).toBeLessThan(source.length * 4);
+  });
+
   it('should keep another device’s turns that follow this host’s runs when it reattaches (V15)', async () => {
     /*
      * Two devices wrote one chat. This host's own log holds the first two runs;
@@ -3119,6 +3137,18 @@ describe('BrowserPlacementChatTransport', () => {
 
     expect(chat.messages.map((message) => message.id)).toEqual(merged.map((message) => message.id));
     expect(chat.messages).toEqual(merged);
+
+    // A partial local transcript still places this host's missing second run
+    // before the foreign turn, without moving or rewriting that turn.
+    const partial = new Chat<MyUIMessage>({
+      id: chatId,
+      transport: new BrowserPlacementChatTransport(),
+      messages: structuredClone([merged[0]!, merged[1]!, merged[4]!, merged[5]!, merged[6]!, merged[7]!]),
+    });
+    const unregisterPartialReset = applyRunResets(partial, chatId);
+    await partial.resumeStream();
+    expect(partial.messages).toEqual(merged);
+    unregisterPartialReset();
     unregister();
   });
 

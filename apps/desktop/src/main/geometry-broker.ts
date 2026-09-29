@@ -185,8 +185,14 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
   let cancelWatchdog: ReturnType<typeof setTimeout> | undefined;
   let idleWatchdog: ReturnType<typeof setTimeout> | undefined;
   let residentWatchdog: ReturnType<typeof setInterval> | undefined;
+  // A completed suite can leave admitted native subjects in this utility.
+  // Keep its original grant predicate until the process actually exits.
+  let residentSuiteGrant: (() => boolean) | undefined;
   const log = options.log ?? ((): void => undefined);
   const isIdle = (): boolean => active === undefined && queue.length === 0 && !stopping;
+  const grantAllows = (grant: (() => boolean) | undefined): boolean => {
+    try { return grant?.() === true; } catch { return false; }
+  };
 
   const answer = (job: Job, value: unknown): void => {
     if (job.finished) {
@@ -252,7 +258,7 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
     }
     const job = queue.shift()!;
     if (job.canceled || job.finished) { pump(); return; }
-    if (job.kind === 'suite' && job.stillAuthorized?.() !== true) {
+    if (job.kind === 'suite' && !grantAllows(job.stillAuthorized)) {
       unavailable(job, 'The GeoSpec runner root grant expired before execution.');
       pump();
       return;
@@ -350,6 +356,7 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
           clearInterval(residentWatchdog);
           residentWatchdog = undefined;
           utility = undefined;
+          residentSuiteGrant = undefined;
           stopping = false;
           unhealthy = false;
           if (active) {
@@ -367,6 +374,7 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
       clearTimeout(idleWatchdog);
       if (job.kind === 'suite') {
         job.lease = options.connectRuntime(job.context!);
+        residentSuiteGrant = job.stillAuthorized;
         utility.postMessage({ type: 'geometry-run', generation, requestId: job.id, kind: job.kind, root: job.root, engine: job.engine, input: job.input, runtimeConfig: options.runtimeConfig }, [job.lease.port]);
       } else {
         utility.postMessage({ type: 'geometry-run', generation, requestId: job.id, kind: job.kind, input: job.input });
@@ -458,12 +466,19 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
     connectSuite: (input) => connect('suite', input),
     revokeUnauthorized() {
       for (const job of queue.toReversed()) {
-        if (job.kind === 'suite' && job.stillAuthorized?.() !== true) {
+        if (job.kind === 'suite' && !grantAllows(job.stillAuthorized)) {
           cancel(job, 'The GeoSpec runner root grant was revoked.');
         }
       }
-      if (active?.kind === 'suite' && active.stillAuthorized?.() !== true) {
+      if (active?.kind === 'suite' && !grantAllows(active.stillAuthorized)) {
         cancel(active, 'The GeoSpec runner root grant was revoked.');
+      }
+      if (residentSuiteGrant && !grantAllows(residentSuiteGrant) && utility) {
+        if (active && !active.canceled) {
+          active.canceled = true;
+          unavailable(active, 'The geometry process retained a revoked GeoSpec root.');
+        }
+        killActiveSlot('retained GeoSpec root grant revoked');
       }
     },
     async dispose() {

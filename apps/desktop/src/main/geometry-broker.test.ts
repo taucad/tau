@@ -220,6 +220,54 @@ describe('geometry broker', () => {
     await broker.dispose();
   });
 
+  it('retires an idle slot retaining a revoked suite root before regranting the same path', async () => {
+    const { broker, channels, utilities, fork } = harness();
+    let firstGenerationAuthorized = true;
+    broker.connectSuite({
+      root: '/project/checkout', context: { projectRoot: '/project/checkout' }, engine: 'native',
+      stillAuthorized: () => firstGenerationAuthorized,
+    });
+    channels[0]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
+    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 1, value: { type: 'result', result: { success: true } } });
+    expect(channels[0]!.broker.posted).toMatchObject([{ type: 'result' }]);
+    expect(utilities[0]!.kill).not.toHaveBeenCalled();
+
+    firstGenerationAuthorized = false;
+    broker.revokeUnauthorized();
+    expect(utilities[0]!.kill).toHaveBeenCalledOnce();
+    broker.connectSuite({
+      root: '/project/checkout', context: { projectRoot: '/project/checkout', attachmentGeneration: '2' }, engine: 'native',
+      stillAuthorized: () => true,
+    });
+    channels[1]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
+    expect(fork).toHaveBeenCalledOnce();
+    utilities[0]!.exit();
+    expect(fork).toHaveBeenCalledTimes(2);
+    expect(utilities[1]!.posted[0]).toMatchObject({ generation: 2, kind: 'suite', root: '/project/checkout' });
+    const disposed = broker.dispose();
+    utilities[1]!.exit();
+    await disposed;
+  });
+
+  it('fails closed when a retained root grant predicate throws', async () => {
+    const { broker, channels, utilities } = harness();
+    let predicateThrows = false;
+    broker.connectSuite({
+      root: '/project', context: { projectRoot: '/project' }, engine: 'native',
+      stillAuthorized: () => {
+        if (predicateThrows) { throw new Error('root generation unavailable'); }
+        return true;
+      },
+    });
+    channels[0]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
+    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 1, value: { type: 'result', result: { success: true } } });
+    predicateThrows = true;
+    expect(() => broker.revokeUnauthorized()).not.toThrow();
+    expect(utilities[0]!.kill).toHaveBeenCalledOnce();
+    utilities[0]!.exit();
+    await broker.dispose();
+  });
+
   it('cancels an active suite when a cyclic event cannot be bounded', async () => {
     vi.useFakeTimers();
     const { broker, channels, utilities } = harness();

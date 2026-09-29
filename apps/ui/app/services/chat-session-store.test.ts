@@ -1980,6 +1980,130 @@ describe('ChatSessionStore', () => {
     vi.unstubAllGlobals();
   });
 
+  it('keeps structural and command selections stable across a long text-only stream', () => {
+    const store = createStore();
+    const session = store.acquire('chat_presented', 'project_1');
+    let indexedReads = 0;
+    const messages = new Proxy(
+      Array.from(
+        { length: 1000 },
+        (_, index): MyUIMessage => ({
+          id: `message-${String(index)}`,
+          role: index % 2 === 0 ? 'user' : 'assistant',
+          parts: [{ type: 'text', text: 'first' }],
+        }),
+      ),
+      {
+        get(target, key, receiver) {
+          if (typeof key === 'string' && /^\d+$/.test(key)) {
+            indexedReads++;
+          }
+          // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- Proxy's Reflect.get is dynamically typed.
+          return Reflect.get(target, key, receiver) as unknown;
+        },
+      },
+    );
+    session.chat.messages = messages;
+    const before = store.getMessagePresentation('chat_presented');
+    const replaceTail = (parts: MyUIMessage['parts']): void => {
+      const tail = messages.at(-1);
+      if (tail === undefined) {
+        throw new Error('Missing transcript tail');
+      }
+      messages[messages.length - 1] = { ...tail, parts };
+    };
+    indexedReads = 0;
+    replaceTail([{ type: 'text', text: 'next token' }]);
+    indexedReads = 0;
+    const after = store.getMessagePresentation('chat_presented');
+    expect(after.order).toBe(before.order);
+    expect(after.groups).toBe(before.groups);
+    expect(after.agentInvocations).toBe(before.agentInvocations);
+    expect(indexedReads).toBeLessThan(10);
+
+    const acp = (name: string): MyUIMessage['parts'][number] => ({
+      type: 'data-acp-session',
+      data: {
+        type: 'acp-session',
+        id: 'session-1',
+        agentId: 'codex',
+        commands: [{ name, description: '' }],
+        configOptions: [],
+      },
+    });
+    replaceTail([acp('help')]);
+    expect(store.getMessagePresentation('chat_presented').agentInvocations).toBe('/help');
+    replaceTail([acp('next')]);
+    expect(store.getMessagePresentation('chat_presented').agentInvocations).toBe('/next');
+
+    messages.push({ id: 'new-user', role: 'user', parts: [{ type: 'text', text: 'next turn' }] });
+    const appended = store.getMessagePresentation('chat_presented');
+    expect(appended.order.at(-1)).toBe('new-user');
+    expect(appended.groups.at(-1)?.messageIds).toEqual(['new-user']);
+    store.release('chat_presented');
+  });
+
+  it('derives funded operation IDs and tokens from a foreign accepted host log', async () => {
+    const client = createMemoryClient();
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(createStubDeps(client));
+    const unobserve = store.observe('chat_usage', 'project_1');
+    const rows = [
+      ...runningRows(),
+      logRow(2, {
+        type: 'message.appended',
+        message: {
+          id: 'assistant-usage',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Done' }],
+          metadata: {
+            model: 'test-model',
+            usage: {
+              input: 12,
+              output: 7,
+              cacheRead: 3,
+              cacheWrite: 2,
+              totalTokens: 24,
+              cost: { input: 0.12, output: 0.07, cacheRead: 0.03, cacheWrite: 0.02, total: 0.24 },
+            },
+            tauInternal: {
+              kind: 'billing-invocation',
+              operationId: 'operation-1',
+              attemptId: 'attempt-1',
+              status: 'terminal',
+            },
+          },
+        },
+      }),
+      lifecycleRow(3, 'completed'),
+    ];
+    client.files.set(
+      '/projects/project_1/.tau/chats/chat_usage/events/foreign.jsonl',
+      new TextEncoder().encode(`${rows.map((row) => JSON.stringify(row)).join('\n')}\n`),
+    );
+    expect(store.historicalUsageReady('chat_usage', 'project_1')).toBe(false);
+    publishLogRows(store, 'chat_usage', []);
+    await store.refreshRemoteSegments('chat_usage', 'project_1');
+    expect(store.historicalUsageReady('chat_usage', 'project_1')).toBe(true);
+    expect(store.getProjection('chat_usage')?.remote?.views['run_1']?.chunks.map((chunk) => chunk.type)).toContain(
+      'data-usage',
+    );
+    const first = await store.getHistoricalUsage('chat_usage');
+    expect(first).toMatchObject({
+      operationIds: ['operation-1'],
+      inputTokens: 12,
+      outputTokens: 7,
+      cacheReadTokens: 3,
+      cacheWriteTokens: 2,
+      parts: 1,
+    });
+    const priorProjection = store.getProjection('chat_usage');
+    publishLogRows(store, 'chat_usage', [logRow(0, { type: 'unrecognized.future-event' })]);
+    expect(store.getProjection('chat_usage')).not.toBe(priorProjection);
+    expect(await store.getHistoricalUsage('chat_usage')).toBe(first);
+    unobserve();
+  });
+
   it('routes accepted user activity through the current dependency set', async () => {
     const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps();

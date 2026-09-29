@@ -99,6 +99,8 @@ import type { RowKey } from '@taucad/agent-host';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
 import type { SdkWatchInput } from '#chat-clients/_internal/sdk-watch.js';
+import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
+import { commandInvocation } from '#utils/at-reference.utils.js';
 
 /** Framing can exist even when no assistant content reached the person. */
 const nonOutputChunkTypes: ReadonlySet<string> = new Set([
@@ -172,6 +174,102 @@ export type ChatSession = {
   /* A root the store creates at acquire and stops at dispose (PV-S5, L3 D10): never swapped, so a view that
    * subscribed once stays subscribed to the chat's machine. */
   readonly stateActorRef: ChatSessionActorRef;
+};
+
+type MessagePresentation = {
+  readonly messagesById: ReadonlyMap<string, MyUIMessage>;
+  readonly order: readonly string[];
+  readonly groups: ReturnType<typeof buildTurnGroups>;
+  readonly agentInvocations: string;
+};
+
+type CachedMessagePresentation = MessagePresentation & {
+  readonly messagesById: Map<string, MyUIMessage>;
+  readonly length: number;
+  readonly lastId: string | undefined;
+  readonly lastRole: MyUIMessage['role'] | undefined;
+  readonly prefixInvocations: ReadonlySet<string>;
+  readonly lastParts: MyUIMessage['parts'] | undefined;
+  readonly lastMessage: MyUIMessage | undefined;
+  readonly firstMessage: MyUIMessage | undefined;
+};
+
+export type ChatHistoricalUsage = Readonly<{
+  operationIds: readonly string[];
+  lastActivityAt: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  parts: number;
+}>;
+
+const emptyHistoricalUsage: ChatHistoricalUsage = {
+  operationIds: [],
+  lastActivityAt: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  parts: 0,
+};
+
+const usageOf = (messages: readonly MyUIMessage[]): ChatHistoricalUsage => {
+  if (messages.length === 0) {
+    return emptyHistoricalUsage;
+  }
+  const ids = new Set<string>();
+  let lastActivityAt = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
+  let parts = 0;
+  for (const message of messages) {
+    lastActivityAt = Math.max(lastActivityAt, message.metadata?.createdAt ?? 0);
+    for (const part of message.parts) {
+      if (part.type === 'data-usage') {
+        parts++;
+        inputTokens += part.data.inputTokens;
+        outputTokens += part.data.outputTokens;
+        cacheReadTokens += part.data.cacheReadTokens;
+        cacheWriteTokens += part.data.cacheWriteTokens;
+        if (part.data.operationId !== undefined) {
+          ids.add(part.data.operationId);
+        }
+      }
+    }
+  }
+  return {
+    operationIds: [...ids].sort(),
+    lastActivityAt,
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    parts,
+  };
+};
+
+const emptyMessagePresentation: MessagePresentation = {
+  messagesById: new Map(),
+  order: Object.freeze([]),
+  groups: buildTurnGroups([]),
+  agentInvocations: '',
+};
+
+const invocationsOf = (messages: readonly MyUIMessage[]): Set<string> => {
+  const invocations = new Set<string>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type === 'data-acp-session') {
+        for (const command of part.data.commands) {
+          invocations.add(commandInvocation(command.name));
+        }
+      }
+    }
+  }
+  return invocations;
 };
 
 // ---------------------------------------------------------------------------
@@ -343,6 +441,7 @@ export class ChatSessionStore {
   readonly #observed = new Map<string, ObservedChat>();
   readonly #projectHostConnectors = new Map<string, ProjectHostConnector>();
   readonly #remoteReadVersions = new Map<string, number>();
+  readonly #remoteReadCompletedVersions = new Map<string, number>();
   readonly #projectRunKeys = new Map<string, string>();
   readonly #projectRunVersions = new Map<string, number>();
   readonly #chatSessionLogic: typeof chatSessionMachine;
@@ -379,6 +478,17 @@ export class ChatSessionStore {
   /** Any chat's unread answer may have moved (PV-S8). */
   readonly #unreadTopic = new Topic<void>({ name: 'ChatSessionStore.unread' });
   readonly #chatTopics = new Map<string, Topic<void>>();
+  readonly #messagePresentations = new Map<string, CachedMessagePresentation>();
+  readonly #historicalUsage = new Map<
+    string,
+    {
+      projection: ChatProjection;
+      pending?: Promise<ChatHistoricalUsage>;
+      result?: ChatHistoricalUsage;
+    }
+  >();
+  #foreignReadsActive = 0;
+  readonly #foreignReadWaiters: Array<() => void> = [];
   /** Readers of one chat's projection (PV-S9). */
   readonly #projectionTopics = new Map<string, Topic<void>>();
   #snapshot: readonly string[] = [];
@@ -494,6 +604,9 @@ export class ChatSessionStore {
       }
       this.#stopObservedAttachment(chatId, observed);
       this.#observed.delete(chatId);
+      if (!this.#sessions.has(chatId)) {
+        this.#historicalUsage.delete(chatId);
+      }
       this.#notifyMembership();
       this.#refreshProjectRuns(projectId);
     };
@@ -524,13 +637,15 @@ export class ChatSessionStore {
     const segments = await Promise.all(
       entries
         .filter((name) => /^[^/]+\.jsonl$/.test(name))
-        .map(async (name) => ({ deviceId: name, bytes: await this.#deps.client.readFile(`${directory}/${name}`) })),
+        .map(async (name) => ({ deviceId: name, bytes: await this.#readForeignSegment(`${directory}/${name}`) })),
     );
     if (
       this.#remoteReadVersions.get(chatId) === version &&
       (this.#observed.get(chatId)?.projectId === projectId || this.#sessions.get(chatId)?.projectId === projectId)
     ) {
       this.#projectionOf(chatId).send({ type: 'remote', segments });
+      this.#remoteReadCompletedVersions.set(chatId, version);
+      this.#projectionTopics.get(chatId)?.emit();
       const session = this.#sessions.get(chatId);
       if (session?.pendingSeedGesture !== undefined) {
         session.seedRemoteReadVersion = version;
@@ -795,6 +910,66 @@ export class ChatSessionStore {
     return this.#sessions.get(chatId);
   }
 
+  /** Replace the SDK transcript after invalidating indexes that may include a changed middle message. */
+  public replaceMessages(chatId: string, messages: MyUIMessage[]): void {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      return;
+    }
+    this.#messagePresentations.delete(chatId);
+    session.chat.messages = messages;
+  }
+
+  /** Stable structural and command selections; streaming text only inspects the current tail. */
+  public getMessagePresentation(chatId: string): MessagePresentation {
+    const messages = this.#sessions.get(chatId)?.chat.messages;
+    if (messages === undefined) {
+      return emptyMessagePresentation;
+    }
+    const last = messages.at(-1);
+    const cached = this.#messagePresentations.get(chatId);
+    if (
+      cached?.length === messages.length &&
+      cached.lastId === last?.id &&
+      cached.lastRole === last?.role &&
+      cached.firstMessage === messages[0]
+    ) {
+      if (cached.lastMessage === last) {
+        return cached;
+      }
+      if (last !== undefined) {
+        // The map is an index over the authoritative SDK array, not another transcript.
+        cached.messagesById.set(last.id, last);
+      }
+      const agentInvocations =
+        cached.lastParts === last?.parts
+          ? cached.agentInvocations
+          : [...new Set([...cached.prefixInvocations, ...invocationsOf(last === undefined ? [] : [last])])].join('\n');
+      const next = { ...cached, agentInvocations, lastParts: last?.parts, lastMessage: last };
+      this.#messagePresentations.set(chatId, next);
+      return next;
+    }
+    const prefixInvocations = invocationsOf(messages.slice(0, -1));
+    const agentInvocations = [
+      ...new Set([...prefixInvocations, ...invocationsOf(last === undefined ? [] : [last])]),
+    ].join('\n');
+    const next: CachedMessagePresentation = {
+      messagesById: new Map(messages.map((message) => [message.id, message])),
+      order: messages.map((message) => message.id),
+      groups: buildTurnGroups(messages),
+      agentInvocations,
+      length: messages.length,
+      lastId: last?.id,
+      lastRole: last?.role,
+      prefixInvocations,
+      lastParts: last?.parts,
+      lastMessage: last,
+      firstMessage: messages[0],
+    };
+    this.#messagePresentations.set(chatId, next);
+    return next;
+  }
+
   public list(): readonly string[] {
     return this.#snapshot;
   }
@@ -816,6 +991,57 @@ export class ChatSessionStore {
    */
   public getProjection(chatId: string): ChatProjection | undefined {
     return this.#projectionContext(chatId);
+  }
+
+  /** Derive exact usage from the merged host log, cached per projected snapshot. */
+  public async getHistoricalUsage(chatId: string): Promise<ChatHistoricalUsage> {
+    const projection = this.#projectionContext(chatId);
+    if (projection === undefined || !selectCaughtUp(projection)) {
+      return usageOf(this.#sessions.get(chatId)?.chat.messages ?? []);
+    }
+    const cached = this.#historicalUsage.get(chatId);
+    const sameSource = (left: ChatProjection, right: ChatProjection): boolean =>
+      left.views === right.views && left.remote?.digest === right.remote?.digest;
+    if (cached !== undefined) {
+      const unchanged = sameSource(cached.projection, projection);
+      if (!unchanged) {
+        cached.projection = projection;
+        cached.result = undefined;
+      }
+      if (cached.pending !== undefined) {
+        return cached.pending;
+      }
+      if (unchanged && cached.result !== undefined) {
+        return cached.result;
+      }
+    }
+    const entry = cached ?? { projection };
+    const pending = (async (): Promise<ChatHistoricalUsage> => {
+      for (;;) {
+        const target = entry.projection;
+        // oxlint-disable-next-line eslint/no-await-in-loop -- One chat's projections serialize; a later snapshot replaces the target after this read.
+        const result = usageOf(await materializeTranscript(target));
+        const latest = this.#projectionContext(chatId);
+        if (latest !== undefined && selectCaughtUp(latest) && !sameSource(target, latest)) {
+          entry.projection = latest;
+        }
+        if (entry.projection === target) {
+          entry.result = result;
+          entry.pending = undefined;
+          return result;
+        }
+      }
+    })();
+    entry.pending = pending;
+    this.#historicalUsage.set(chatId, entry);
+    try {
+      return await pending;
+    } catch (error) {
+      if (this.#historicalUsage.get(chatId) === entry) {
+        this.#historicalUsage.delete(chatId);
+      }
+      throw error;
+    }
   }
 
   /** Fold one host read answer; the attachment and deterministic test readers share this projection ingress. @internal */
@@ -851,6 +1077,18 @@ export class ChatSessionStore {
   /** The current read-only host attachment's verified state, never a run lifecycle. @public */
   public getAttachmentStatus(chatId: string): ObservedChat['status'] {
     return this.#observed.get(chatId)?.status ?? 'unknown';
+  }
+
+  /** Exact usage can be read only after both the host log and foreign segments reached this projection. */
+  public historicalUsageReady(chatId: string, projectId: string): boolean {
+    const projection = this.#projectionContext(chatId);
+    return (
+      this.#observed.get(chatId)?.projectId === projectId &&
+      this.#answeredLogReads.has(chatId) &&
+      this.#remoteReadCompletedVersions.get(chatId) === this.#remoteReadVersions.get(chatId) &&
+      projection !== undefined &&
+      selectCaughtUp(projection)
+    );
   }
 
   /**
@@ -914,6 +1152,7 @@ export class ChatSessionStore {
       session.pendingSeedGesture = undefined;
       session.seedRequestId = undefined;
       session.seedMessage = undefined;
+      this.#messagePresentations.delete(session.chatId);
       session.chat.messages = session.chat.messages.filter((message) => message.id !== seedMessageId);
       if (seedRequestId !== undefined) {
         void this.#clearAcceptedSeed(chatId, seedRequestId);
@@ -1264,6 +1503,26 @@ export class ChatSessionStore {
     }
     const binding = await session.composer;
     await binding.record.attachments.retainOnly(referencedAttachments(session.draftActorRef.getSnapshot().context));
+  }
+
+  async #readForeignSegment(path: string): Promise<Uint8Array<ArrayBuffer>> {
+    if (this.#foreignReadsActive < 4) {
+      this.#foreignReadsActive++;
+    } else {
+      await new Promise<void>((resolve) => {
+        this.#foreignReadWaiters.push(resolve);
+      });
+    }
+    try {
+      return await this.#deps.client.readFile(path);
+    } finally {
+      const next = this.#foreignReadWaiters.shift();
+      if (next === undefined) {
+        this.#foreignReadsActive--;
+      } else {
+        next();
+      }
+    }
   }
 
   async #refreshRemoteSegmentsSafely(chatId: string, projectId: string): Promise<void> {
@@ -1687,6 +1946,7 @@ export class ChatSessionStore {
         if (session.seedMessage?.id !== command.payload.message.id) {
           const seedMessageId = session.seedMessage?.id;
           session.seedMessage = undefined;
+          this.#messagePresentations.delete(session.chatId);
           session.chat.messages = session.chat.messages.filter((message) => message.id !== seedMessageId);
         }
         void this.#clearAcceptedSeed(session.chatId, seedRequestId);
@@ -1717,6 +1977,7 @@ export class ChatSessionStore {
         if (index === -1) {
           throw new Error('That message is no longer in this chat, so it cannot be edited.');
         }
+        this.#messagePresentations.delete(session.chatId);
         session.chat.messages = [
           ...session.chat.messages.slice(0, index),
           editedMessage(session.chat.messages[index]!, request),
@@ -1907,6 +2168,7 @@ export class ChatSessionStore {
         }
         return;
       }
+      this.#messagePresentations.delete(session.chatId);
       session.chat.messages = this.#retainSeedUntilLogged(session, messages);
       const watch = createActor(sdkWatch, {
         input: {
@@ -1965,6 +2227,7 @@ export class ChatSessionStore {
         session.watchedRunId === undefined &&
         session.materializeVersion === version
       ) {
+        this.#messagePresentations.delete(session.chatId);
         session.chat.messages = this.#retainSeedUntilLogged(session, messages);
       }
     } catch (error) {
@@ -2238,6 +2501,7 @@ export class ChatSessionStore {
 
               if (!loadedChat) {
                 if (session.chat.messages.length === 0) {
+                  this.#messagePresentations.delete(session.chatId);
                   session.chat.messages = [];
                 }
                 session.draftActorRef.send({ type: 'initializeFromChat' });
@@ -2260,6 +2524,7 @@ export class ChatSessionStore {
                * history, never a second copy of it. */
               const inFlight = session.chat.messages;
               const inFlightIds = new Set(inFlight.map((message) => message.id));
+              this.#messagePresentations.delete(session.chatId);
               session.chat.messages = [
                 ...loadedChat.messages.filter((message) => !inFlightIds.has(message.id)),
                 ...inFlight,
@@ -2511,6 +2776,10 @@ export class ChatSessionStore {
     void this.#drainComposer(session, drained);
     session.chatRoot.stop();
     this.#sessions.delete(session.chatId);
+    this.#messagePresentations.delete(session.chatId);
+    if (!this.#observed.has(session.chatId)) {
+      this.#historicalUsage.delete(session.chatId);
+    }
     clearChatTurnServices(session.chatId);
     clearLedger(session.chatId);
     this.#disposeChatTopics(session.chatId);

@@ -5,12 +5,15 @@ import type { MyUIMessage, SkillMetadata } from '@taucad/chat';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
 
-const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog } = vi.hoisted(() => ({
-  mockMessagesById: new Map<string, MyUIMessage>(),
-  mockMessageOrder: [] as string[],
-  mockStatus: { value: 'ready' as 'ready' | 'streaming' | 'submitted' | 'error' },
-  mockSkillsCatalog: [] as SkillMetadata[],
-}));
+const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog, mockStartEditingMessage } = vi.hoisted(
+  () => ({
+    mockMessagesById: new Map<string, MyUIMessage>(),
+    mockMessageOrder: [] as string[],
+    mockStatus: { value: 'ready' as 'ready' | 'streaming' | 'submitted' | 'error' },
+    mockSkillsCatalog: [] as SkillMetadata[],
+    mockStartEditingMessage: vi.fn(),
+  }),
+);
 
 const getMockChatSelectorState = (): {
   messages: MyUIMessage[];
@@ -43,7 +46,7 @@ vi.mock('#hooks/use-chat.js', () => ({
   useChatActions() {
     return {
       editMessage: vi.fn(),
-      startEditingMessage: vi.fn(),
+      startEditingMessage: mockStartEditingMessage,
       exitEditMode: vi.fn(),
       stop: vi.fn(),
     };
@@ -361,6 +364,25 @@ describe('ChatMessage column wrapper layout', () => {
     const rowsWrap = innerBubble.querySelector('.flex.flex-col.gap-1');
     expect(rowsWrap).not.toBeNull();
     expect(rowsWrap!.querySelectorAll('p').length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ['one long line', 'x'.repeat(100_000)],
+    ['many lines', 'x\n'.repeat(50_000)],
+  ])('bounds the collapsed preview for %s while retaining the full edit text', (_label, fullText) => {
+    setMessages([userMessage('msg-1', fullText)]);
+    render(<ChatMessage messageId='msg-1' />);
+
+    const bubble = getColumnWrapper().firstElementChild?.firstElementChild;
+    if (!(bubble instanceof HTMLElement)) {
+      throw new Error('User bubble missing');
+    }
+    expect(bubble.querySelectorAll('p').length).toBeLessThanOrEqual(9);
+    expect(bubble.textContent.length).toBeLessThan(2100);
+    fireEvent.click(bubble);
+    expect(mockStartEditingMessage).toHaveBeenCalledWith('msg-1');
+    expect(screen.getByTestId('chat-textarea')).toBeInTheDocument();
+    expect(mockMessagesById.get('msg-1')?.parts[0]).toMatchObject({ text: fullText });
   });
 });
 

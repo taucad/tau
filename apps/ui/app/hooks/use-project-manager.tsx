@@ -729,8 +729,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           scheduleProjectsListInvalidation();
           return;
         }
-        const [resourceId, chatId] = projected;
-        invalidateChatQueries(resourceId, chatId);
+        const [, chatId] = projected;
+        // The log projection owns accepted messages. A log write cannot change chat.json metadata.
+        void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
       },
     };
     const subscription = { interestedIn: isManifestPath, handler: scheduleProjectsListInvalidation };
@@ -748,7 +749,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         unsubscribe();
       }
     };
-  }, [chatStore, fileManager.workerChangeChannel, invalidateChatQueries, scheduleProjectsListInvalidation]);
+  }, [chatStore, fileManager.workerChangeChannel, queryClient, scheduleProjectsListInvalidation]);
 
   // Select state from the machine
   const error = useSelector(actorRef, (state) => state.context.error);

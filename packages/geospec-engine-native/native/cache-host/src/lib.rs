@@ -19,6 +19,7 @@ const ENVELOPE_SCHEMA: &str = "geospec-authenticated-evidence-v1";
 const SECRET_BYTES: usize = 32;
 const MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
 const MAX_ACTION_BYTES: usize = 64 * 1024;
+const OVERLAP_FAMILY: &str = "native-b48-overlap-evidence-v1";
 type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -109,16 +110,70 @@ impl AuthenticatedOverlapCache {
         bytes
     }
 
-    /// Removes this family's evidence while preserving the installation key.
+    /// Removes authenticated B48 action records. Content and poison markers
+    /// remain until a pin-aware collector can prove they are disposable.
     pub fn clear(&self) -> bool {
         if self.sealed.get() {
             return false;
         }
         let result = (|| {
-            remove_if_present(&self.root.join("content"))?;
-            remove_if_present(&self.root.join("actions"))?;
-            fs::create_dir_all(self.root.join("content"))?;
-            fs::create_dir_all(self.root.join("actions"))
+            let actions = self.root.join("actions");
+            let mut overlap_actions = Vec::new();
+            for entry in fs::read_dir(&actions)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.extension().is_none_or(|extension| extension != "json") {
+                    continue;
+                }
+                let bytes = read_bounded(&path, MAX_ACTION_BYTES)?;
+                if canonicalize(&bytes).map_err(io::Error::other)? != bytes {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "noncanonical cache action",
+                    ));
+                }
+                let record: ActionRecord =
+                    serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+                let name = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or_default();
+                if !valid_digest(name)
+                    || record.envelope.action_sha256 != name
+                    || record.envelope.schema != ENVELOPE_SCHEMA
+                    || record.envelope.authority_id != self.authority_id
+                    || record.envelope.key_id != self.key_id
+                    || !valid_digest(&record.envelope.content_sha256)
+                    || record.envelope.content_byte_length > MAX_PAYLOAD_BYTES as u64
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "invalid cache action name",
+                    ));
+                }
+                let envelope_bytes =
+                    canonicalize(&serde_json::to_vec(&record.envelope).map_err(io::Error::other)?)
+                        .map_err(io::Error::other)?;
+                let mut mac = HmacSha256::new_from_slice(&self.secret)
+                    .map_err(|_| io::Error::other("invalid HMAC key"))?;
+                mac.update(&envelope_bytes);
+                let supplied = decode_hex_32(&record.hmac_sha256).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "invalid cache action HMAC")
+                })?;
+                mac.verify_slice(&supplied).map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "cache action authentication failed",
+                    )
+                })?;
+                if record.envelope.family == OVERLAP_FAMILY {
+                    overlap_actions.push(path);
+                }
+            }
+            for path in overlap_actions {
+                fs::remove_file(path)?;
+            }
+            File::open(actions)?.sync_all()
         })();
         if result.is_err() {
             self.diagnostics.borrow_mut().io_failures += 1;
@@ -392,14 +447,6 @@ fn read_bounded(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn remove_if_present(path: &Path) -> io::Result<()> {
-    match fs::remove_dir_all(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
 fn domain_id(domain: &[u8], secret: &[u8]) -> String {
     let mut hash = Sha256::new();
     hash.update(domain);
@@ -507,6 +554,61 @@ mod tests {
             .join("actions")
             .join(format!("{}.json", address.action_sha256))
             .exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn clearing_overlap_preserves_exact_fact_and_poison() {
+        let (root, project) = roots("family-clear");
+        let cache = AuthenticatedOverlapCache::open(&root, &project).unwrap();
+        let overlap = address();
+        let mut exact = address();
+        exact.action_sha256 = "44".repeat(32);
+        exact.family = "native-exact-step-clusters-v1";
+        exact.codec = "geospec-exact-clusters-json-v1";
+        cache.publish(&overlap, b"shared-content");
+        cache.publish(&exact, b"shared-content");
+        let mut poisoned = address();
+        poisoned.action_sha256 = "55".repeat(32);
+        cache.publish(&poisoned, b"first");
+        cache.publish(&poisoned, b"second");
+        let poison = root
+            .join("actions")
+            .join(format!("{}.poison", poisoned.action_sha256));
+        assert!(poison.exists());
+
+        assert!(cache.clear());
+        assert_eq!(cache.load(&overlap), None);
+        drop(cache);
+        let reopened = AuthenticatedOverlapCache::open(&root, &project).unwrap();
+        assert_eq!(
+            reopened.load(&exact).as_deref(),
+            Some(b"shared-content".as_slice())
+        );
+        assert!(poison.exists(), "a conflict must stay poisoned after clear");
+        assert!(root.join("authority").join("install-secret-v1").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn clear_refuses_ambiguous_action_before_removing_any_family() {
+        let (root, project) = roots("ambiguous-clear");
+        let cache = AuthenticatedOverlapCache::open(&root, &project).unwrap();
+        let overlap = address();
+        let mut exact = address();
+        exact.action_sha256 = "44".repeat(32);
+        exact.family = "native-exact-step-clusters-v1";
+        exact.codec = "geospec-exact-clusters-json-v1";
+        cache.publish(&overlap, b"overlap");
+        cache.publish(&exact, b"exact");
+        fs::write(
+            root.join("actions")
+                .join(format!("{}.json", exact.action_sha256)),
+            b"invalid",
+        )
+        .unwrap();
+        assert!(!cache.clear());
+        assert_eq!(cache.load(&overlap).as_deref(), Some(b"overlap".as_slice()));
         fs::remove_dir_all(root).unwrap();
     }
 

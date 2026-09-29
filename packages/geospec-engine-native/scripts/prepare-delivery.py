@@ -513,12 +513,49 @@ def verify_prefix(prefix, contract, recipe_path=None, support_inputs=None):
     require(prefix_sources(recorded_recipe, contract['kind']) == prefix_sources(RECIPE, contract['kind']),
             f'Prefix source selection changed: {prefix}')
     migration = None
+    relocated = None
     for name, expected in contract.items():
         if name == 'recipeSha256':
             # Historical provenance is checked above. Compatibility uses every
             # effective field, including source selections absent from old receipts.
             continue
         actual = receipt.get(name)
+        if name == 'command' and actual != expected:
+            # The receipt keeps its original builder path. A checkout move may
+            # change only that path, never the executed options or selected tools.
+            require(isinstance(actual, list) and isinstance(expected, list) and
+                    len(actual) == len(expected) and len(actual) >= 2 and
+                    actual[0] == expected[0] and actual[2:] == expected[2:] and
+                    Path(actual[1]).is_absolute() and Path(expected[1]).is_absolute() and
+                    Path(actual[1]).resolve() == producer_builder(),
+                    f'Prefix receipt command changed: {prefix}')
+            original_builder = Path(actual[1])
+            current_builder = Path(expected[1])
+            require(original_builder.is_file() and current_builder.is_file() and
+                    digest(original_builder) == digest(current_builder) == receipt.get('builderSha256'),
+                    f'Prefix producer builder bytes changed: {prefix}')
+            # build-occt.sh reads sibling patches; source-manifest selects the
+            # archive before this prefix. Bridge/Rust/test files are downstream
+            # consumers, not OCCT static-library build inputs.
+            def builder_sources(builder):
+                directory = builder.parent
+                selected = [builder, *directory.glob('*.patch')]
+                manifest = directory / 'source-manifest.json'
+                if manifest.is_file():
+                    selected.append(manifest)
+                return {path.name: digest(path) for path in selected}
+
+            original_sources = builder_sources(original_builder)
+            current_sources = builder_sources(current_builder)
+            require(original_sources == current_sources, f'Prefix OCCT source closure changed: {prefix}')
+            relocated = {
+                'schema': 'geospec-prefix-relocation-v1',
+                'originalReceiptSha256': digest(receipt_path),
+                'originalBuilder': str(original_builder),
+                'currentBuilder': str(current_builder),
+                'sourceFiles': len(current_sources),
+            }
+            actual = expected
         if (name == 'supportPayload' and contract['kind'] == 'mixed' and
                 receipt.get('schema') == PREFIX_RECEIPT_SCHEMA and
                 isinstance(actual, dict) and 'schema' not in actual and
@@ -564,7 +601,8 @@ def verify_prefix(prefix, contract, recipe_path=None, support_inputs=None):
         recorded[relative] = item['sha256']
     actual = {path.relative_to(install): digest(path) for path in files(install)}
     require(actual == recorded, f'Installed prefix outputs changed: {prefix}')
-    return {**receipt, 'supportMigration': migration} if migration else receipt
+    return {**receipt, **({'supportMigration': migration} if migration else {}),
+            **({'recovery': relocated} if relocated else {})}
 
 
 def prepare_prefix(kind, paths, env, context):

@@ -6,7 +6,29 @@ import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import process from 'node:process';
 // oxlint-disable-next-line no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export.
-import { ensureDelivery, prepareArtifacts, verifyArtifacts, verifyDelivery } from './ci-artifacts.mjs';
+import { darwinGroupAlive, ensureDelivery, prepareArtifacts, recoverExitedProducer, snapshotDelivery, verifyArtifacts, verifyDelivery, withProducerMarker } from './ci-artifacts.mjs';
+
+void test('malformed process listings cannot prove a producer group exited', (context) => {
+  const listing = context.mock.method(childProcess, 'spawnSync', () => ({ status: 0, stdout: '123 S\nmalformed row\n' }));
+  assert.throws(() => darwinGroupAlive(123), /Malformed process listing/);
+  listing.mock.mockImplementation(() => ({ status: 0, stdout: undefined }));
+  assert.throws(() => darwinGroupAlive(123), /Could not prove GeoSpec producer group exit/);
+});
+
+/** @type {(condition: () => boolean, label: string) => Promise<void>} */
+const waitForCondition = async (condition, label) => new Promise((resolve, reject) => {
+  const poll = setInterval(() => {
+    if (condition()) {
+      clearInterval(poll);
+      clearTimeout(deadline);
+      resolve();
+    }
+  }, 20);
+  const deadline = setTimeout(() => {
+    clearInterval(poll);
+    reject(new Error(`Timed out waiting for ${label}`));
+  }, 2000);
+});
 
 /** @type {(context: import('node:test').TestContext, reusePrefixes: boolean) => void} */
 const checkTransport = (context, reusePrefixes) => {
@@ -25,6 +47,8 @@ const checkTransport = (context, reusePrefixes) => {
   const transportPath = 'out/artifacts/geospec-native-engine/ci';
   const snapshotPath = `${packagePath}/bindings/node/types/generated/index.d.ts`;
   const bindingPath = `${packagePath}/bindings/emscripten/src/lib.rs`;
+  const patchPath = `${packagePath}/native/occt/patches/fixture.patch`;
+  const toolchainPath = 'rust-toolchain.toml';
   const generatedPath = `${packagePath}/bindings/node/generated`;
   const mixedPath = `${packagePath}/bindings/emscripten/generated`;
   const productPath = process.env.PATH;
@@ -55,6 +79,8 @@ const checkTransport = (context, reusePrefixes) => {
   };
   put(join(producer, snapshotPath), 'fixture declaration\n');
   put(join(producer, bindingPath), 'fixture source\n');
+  put(join(producer, patchPath), 'fixture native patch\n');
+  put(join(producer, toolchainPath), 'fixture toolchain\n');
   put(join(producer, packagePath, 'scripts/ci-artifacts.mjs'), 'fixture inventory script');
   put(join(producer, packagePath, 'scripts/collect-native-proof.py'), 'inert collector source');
   put(join(producer, packagePath, 'scripts/test_native_proof.py'), 'inert positive fixture source');
@@ -70,8 +96,8 @@ const checkTransport = (context, reusePrefixes) => {
         return `${revision}\n`;
       }
       assert.ok(args.includes('--cached'));
-      assert.ok(!args.includes('--others'));
-      return `${snapshotPath}\0${bindingPath}\0`;
+      assert.ok(args.includes('--others'));
+      return `${snapshotPath}\0${bindingPath}\0${patchPath}\0${toolchainPath}\0`;
     },
   );
   /** @type {string[]} */
@@ -331,6 +357,17 @@ const checkTransport = (context, reusePrefixes) => {
   const builtTargets = [...targets];
   assert.deepEqual(ensureDelivery(producer), inventory);
   assert.deepEqual(targets, builtTargets, 'an unchanged delivery must not invoke a producer');
+  const snapshot = snapshotDelivery(producer);
+  assert.deepEqual(targets, builtTargets, 'a verified snapshot must not invoke a producer');
+  for (const name of ['root.tgz', 'darwin-arm64.tgz', 'geospec-engine-native-source-relink.tar.gz']) {
+    const canonical = join(producer, transportPath, 'assembly/tarballs', name);
+    const selected = join(snapshot, 'tarballs', name);
+    const bytes = readFileSync(canonical);
+    assert.deepEqual(readFileSync(selected), bytes);
+    put(canonical, 'next producer');
+    assert.deepEqual(readFileSync(selected), bytes, 'a package snapshot cannot change with canonical output');
+    put(canonical, bytes);
+  }
   for (const [name, original] of [
     ['mixed-inputs.json', join(mixedCache, 'mixed-inputs-simd128.json')],
     ['mixed-commands.json', join(buildCache, 'attempt-1/commands.json')],
@@ -375,10 +412,17 @@ const checkTransport = (context, reusePrefixes) => {
   assert.throws(() => verifyArtifacts(consumer), /membership\/bytes\/hashes differ/);
   cpSync(join(producer, mixedPath), join(consumer, mixedPath), { recursive: true });
   put(join(consumer, bindingPath), 'changed input');
-  assert.throws(() => verifyArtifacts(consumer), /source revision\/inputs differ/);
+  assert.throws(() => verifyArtifacts(consumer), /source inputs differ/);
   put(join(consumer, bindingPath), 'fixture source\n');
+  put(join(consumer, patchPath), 'changed native patch');
+  assert.throws(() => verifyArtifacts(consumer), /source inputs differ/);
+  put(join(consumer, patchPath), 'fixture native patch\n');
+  put(join(consumer, toolchainPath), 'changed toolchain');
+  assert.throws(() => verifyArtifacts(consumer), /source inputs differ/);
+  put(join(consumer, toolchainPath), 'fixture toolchain\n');
   revision = 'b'.repeat(40);
-  assert.throws(() => verifyArtifacts(consumer), /source revision\/inputs differ/);
+  assert.deepEqual(verifyArtifacts(consumer), inventory, 'an unrelated HEAD change preserves the source-compatible product');
+  assert.deepEqual(verifyDelivery(consumer), inventory, 'the delivery keeps its original producer revision');
   revision = 'a'.repeat(40);
   const inventoryFile = join(consumer, transportPath, 'inventory.json');
   for (const name of ['mixed-inputs.json', 'mixed-commands.json']) {
@@ -541,4 +585,178 @@ await test('default cold preparation transports complete artifacts without loadi
 
 await test('independent retained prefixes transport complete artifacts without loading a product', (context) => {
   checkTransport(context, true);
+});
+
+await test('a producer marker blocks a second waiter and clears only its unchanged successful owner', (context) => {
+  const root = mkdtempSync(join(resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts'), 'marker-'));
+  context.after(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  assert.equal(
+    withProducerMarker(root, () => {
+      assert.throws(() => withProducerMarker(root, () => 'second'), /producer interrupted/);
+      return 'first';
+    }),
+    'first',
+  );
+  assert.equal(withProducerMarker(root, () => 'second'), 'second');
+  const marker = join(root, 'node_modules/.cache/geospec-engine-native/ci-artifacts.active.json');
+  assert.throws(
+    () => {
+      withProducerMarker(root, () => {
+        writeFileSync(marker, JSON.stringify({ owner: 'other' }));
+      });
+    },
+    /marker changed/,
+  );
+  assert.ok(existsSync(marker), 'a conflicting marker must remain for inspection');
+  writeFileSync(marker, JSON.stringify({ owner: 'other', started: new Date(Date.now() - 61_000).toISOString() }));
+  assert.throws(() => withProducerMarker(root, () => 'age steal'), /producer interrupted/);
+});
+
+await test('a killed coordinator leaves a refusal while a nested Python writer survives', async (context) => {
+  const root = mkdtempSync(join(resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts'), 'nested-'));
+  context.after(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  const ready = join(root, 'ready');
+  const done = join(root, 'done');
+  const moduleUrl = new URL('ci-artifacts.mjs', import.meta.url).href;
+  const program = `
+    import { spawn } from 'node:child_process';
+    import { writeFileSync } from 'node:fs';
+    import { withProducerMarker } from ${JSON.stringify(moduleUrl)};
+    withProducerMarker(${JSON.stringify(root)}, () => {
+      spawn('python3', ['-c', ${JSON.stringify(`import time; time.sleep(0.6); open(${JSON.stringify(done)}, 'w').write('done')`)}], { stdio: 'ignore' });
+      writeFileSync(${JSON.stringify(ready)}, 'ready');
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);
+    });
+  `;
+  const coordinator = childProcess.spawn(process.execPath, ['--input-type=module', '-e', program], { stdio: 'ignore' });
+  /** @type {(path: string) => Promise<void>} */
+  const waitFor = async (path) => {
+    await new Promise((resolve, reject) => {
+    const pollTimer = setInterval(() => {
+      if (existsSync(path)) {
+        clearInterval(pollTimer);
+        clearTimeout(deadlineTimer);
+        resolve();
+      }
+    }, 20);
+    const deadlineTimer = setTimeout(() => {
+      clearInterval(pollTimer);
+      reject(new Error(`Timed out waiting for ${path}`));
+    }, 2000);
+    });
+  };
+  try {
+    await waitFor(ready);
+    coordinator.kill('SIGKILL');
+    await new Promise((resolve) => {
+      coordinator.once('exit', resolve);
+    });
+    assert.throws(() => withProducerMarker(root, () => 'unsafe second writer'), /producer interrupted/);
+    await waitFor(done);
+    assert.throws(() => withProducerMarker(root, () => 'late writer'), /producer interrupted/);
+  } finally {
+    coordinator.kill('SIGKILL');
+  }
+});
+
+await test('an interrupted closed producer retries only after its process group exits', (context) => {
+  const root = mkdtempSync(join(resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts'), 'recovery-'));
+  context.after(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  const inventory = join(root, 'out/artifacts/geospec-native-engine/ci/inventory.json');
+  mkdirSync(dirname(inventory), { recursive: true });
+  writeFileSync(inventory, 'stale complete publication');
+  assert.throws(() => withProducerMarker(root, () => { throw new Error('interrupted'); }, { pgid: process.pid }), /interrupted/);
+  assert.throws(() => recoverExitedProducer(root, () => false, 'changed recipe'), /not a recognized closed recipe/);
+  assert.throws(() => recoverExitedProducer(root, () => true), /possible writer/);
+  assert.ok(existsSync(inventory), 'a live group keeps its original evidence');
+  assert.equal(recoverExitedProducer(root, () => false), true);
+  assert.ok(!existsSync(inventory), 'recovery invalidates the old publication before retry');
+  assert.equal(withProducerMarker(root, () => 'retry', { pgid: process.pid }), 'retry');
+  assert.equal(recoverExitedProducer(root, () => false), false);
+});
+
+await test('Darwin producer lock serializes two independent waiters', { skip: process.platform !== 'darwin' }, async (context) => {
+  const root = mkdtempSync(join(resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts'), 'waiters-'));
+  context.after(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  const moduleUrl = new URL('ci-artifacts.mjs', import.meta.url).href;
+  const program = `
+    import { spawnSync } from 'node:child_process';
+    import { closeSync, mkdirSync, openSync, writeFileSync } from 'node:fs';
+    import { join } from 'node:path';
+    import { withProducerMarker } from ${JSON.stringify(moduleUrl)};
+    const root = ${JSON.stringify(root)};
+    const name = process.argv[1];
+    mkdirSync(join(root, 'node_modules/.cache/geospec-engine-native'), { recursive: true });
+    const fd = openSync(join(root, 'node_modules/.cache/geospec-engine-native/ci-artifacts.lock'), 'a+');
+    const lock = spawnSync('lockf', ['3'], { stdio: ['ignore', 'ignore', 'inherit', fd] });
+    if (lock.status !== 0) process.exit(2);
+    withProducerMarker(root, () => {
+      writeFileSync(join(root, name + '.started'), 'started');
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, name === 'first' ? 250 : 1);
+      writeFileSync(join(root, name + '.done'), 'done');
+    });
+    closeSync(fd);
+  `;
+  const first = childProcess.spawn(process.execPath, ['--input-type=module', '-e', program, 'first'], { stdio: 'ignore' });
+  try {
+    await waitForCondition(() => existsSync(join(root, 'first.started')), 'first waiter');
+    const second = childProcess.spawn(process.execPath, ['--input-type=module', '-e', program, 'second'], { stdio: 'ignore' });
+    try {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 60);
+      });
+      assert.ok(!existsSync(join(root, 'second.started')), 'second waiter cannot enter during first writer');
+      await waitForCondition(() => existsSync(join(root, 'first.done')), 'first completion');
+      await waitForCondition(() => existsSync(join(root, 'second.done')), 'second completion');
+    } finally {
+      second.kill('SIGKILL');
+    }
+  } finally {
+    first.kill('SIGKILL');
+  }
+});
+
+await test('Darwin recovery waits for a nested writer in its owned group', { skip: process.platform !== 'darwin' }, async (context) => {
+  const root = mkdtempSync(join(resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts'), 'owned-group-'));
+  context.after(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  const ready = join(root, 'ready');
+  const done = join(root, 'done');
+  const moduleUrl = new URL('ci-artifacts.mjs', import.meta.url).href;
+  const program = `
+    import { spawn } from 'node:child_process';
+    import { writeFileSync } from 'node:fs';
+    import { withProducerMarker } from ${JSON.stringify(moduleUrl)};
+    withProducerMarker(${JSON.stringify(root)}, () => {
+      spawn('python3', ['-c', ${JSON.stringify(`import time; time.sleep(0.5); open(${JSON.stringify(done)}, 'w').write('done')`)}], { stdio: 'ignore' });
+      writeFileSync(${JSON.stringify(ready)}, 'ready');
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);
+    }, { pgid: process.pid });
+  `;
+  const coordinator = childProcess.spawn(process.execPath, ['--input-type=module', '-e', program], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  try {
+    await waitForCondition(() => existsSync(ready), 'owned group readiness');
+    coordinator.kill('SIGKILL');
+    await new Promise((resolve) => {
+      coordinator.once('exit', resolve);
+    });
+    assert.throws(() => recoverExitedProducer(root, darwinGroupAlive), /possible writer/);
+    await waitForCondition(() => existsSync(done), 'nested writer completion');
+    await waitForCondition(() => !darwinGroupAlive(coordinator.pid), 'owned group exit');
+    assert.equal(recoverExitedProducer(root, darwinGroupAlive), true, 'retry follows actual process-group exit');
+  } finally {
+    coordinator.kill('SIGKILL');
+  }
 });

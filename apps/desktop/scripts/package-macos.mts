@@ -31,13 +31,7 @@ import { packager } from '@electron/packager';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { parseMacosPackageMode } from './macos-package-mode.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import {
-  copyGeoSpecNative,
-  copyGeoSpecNativeAssembly,
-  copyGeoSpecSourceRelink,
-  copyRuntimeClosure,
-  copyTree,
-} from './runtime-closure.mjs';
+import { copyGeoSpecNative, copyGeoSpecNativeAssembly, copyGeoSpecSourceRelink, copyRuntimeClosure, copyTree } from './runtime-closure.mjs';
 
 type PackageMetadata = {
   readonly name: string;
@@ -121,14 +115,30 @@ const selectedGeoSpecAssembly = process.env['TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT'];
 if (selectedGeoSpecAssembly === '') {
   throw new Error('TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT must name a qualified native assembly.');
 }
-const geospecAssemblyInput = selectedGeoSpecAssembly ?? 'out/artifacts/geospec-native-engine/ci/assembly';
+let geospecAssemblyInput = selectedGeoSpecAssembly ?? 'out/artifacts/geospec-native-engine/ci/assembly';
 if (selectedGeoSpecAssembly === undefined) {
-  execFileSync(
+  const output = execFileSync(
     process.execPath,
-    [resolve(workspaceRoot, 'packages/geospec-engine-native/scripts/ci-artifacts.mjs'), 'ensure-delivery'],
-    { cwd: workspaceRoot, stdio: 'inherit' },
+    [resolve(workspaceRoot, 'packages/geospec-engine-native/scripts/ci-artifacts.mjs'), 'snapshot-delivery'],
+    { cwd: workspaceRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
   );
+  process.stdout.write(output);
+  const selections = [...output.matchAll(/^ASSEMBLY_ROOT=(.+)$/gmu)].map((match) => match[1]?.trim());
+  if (selections.length !== 1 || !selections[0]) {
+    throw new Error('GeoSpec delivery did not select one immutable assembly snapshot.');
+  }
+  geospecAssemblyInput = selections[0];
 }
+const ownedGeoSpecSnapshot =
+  selectedGeoSpecAssembly === undefined ? resolve(workspaceRoot, geospecAssemblyInput) : undefined;
+if (
+  ownedGeoSpecSnapshot !== undefined &&
+  (dirname(ownedGeoSpecSnapshot) !== resolve(workspaceRoot, 'node_modules/.cache/geospec-engine-native') ||
+    !basename(ownedGeoSpecSnapshot).startsWith('assembly-snapshot-'))
+) {
+  throw new Error('GeoSpec delivery selected an assembly snapshot outside its owned cache.');
+}
+try {
 const geospecAssemblyRoot = await realpath(resolve(workspaceRoot, geospecAssemblyInput));
 if (geospecAssemblyRoot === outputRoot || geospecAssemblyRoot.startsWith(`${outputRoot}/`)) {
   throw new Error('GeoSpec native assembly must be outside the disposable package output root.');
@@ -570,3 +580,8 @@ if (zip) {
 await rm(stageRoot, { recursive: true, force: true });
 console.log(`${release ? 'Signed and notarized' : unsigned ? 'Unsigned' : 'Ad-hoc signed'} Tau: ${appPath}`);
 console.log(zip ? `Distribution archive: ${zipPath}` : 'No distribution archive; pass --zip to write one.');
+} finally {
+  if (ownedGeoSpecSnapshot !== undefined) {
+    await rm(ownedGeoSpecSnapshot, { recursive: true, force: true });
+  }
+}

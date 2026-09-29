@@ -1,4 +1,4 @@
-import { Star, GitFork, Eye, Scale, Lock, Globe, Clock } from 'lucide-react';
+import { Star, GitFork } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { ExternalLink } from '#components/external-link.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
@@ -60,104 +60,58 @@ function formatRelativeTime(dateString: string | undefined): string {
   return `${years} ${years === 1 ? 'year' : 'years'} ago`;
 }
 
-// oxlint-disable-next-line complexity -- acceptable for containment.
 export function RepositoryCard(properties: RepositoryCardProperties): React.JSX.Element {
   const { metadata, owner, repo, isLoading, className } = properties;
 
   if (isLoading) {
     return (
-      <div className={cn('space-y-4 rounded-lg border bg-muted/50 p-4', className)}>
-        <div className='flex items-start gap-3'>
-          <Skeleton className='size-16 rounded-full' />
-          <div className='flex-1 space-y-2'>
-            <Skeleton className='h-5 w-48' />
-            <Skeleton className='h-4 w-full' />
-          </div>
+      <div
+        role='status'
+        aria-label='Loading repository'
+        aria-busy='true'
+        className={cn('flex min-w-0 gap-3', className)}
+      >
+        <Skeleton className='size-8 shrink-0 rounded-full' />
+        <div className='min-w-0 flex-1 space-y-2'>
+          <Skeleton className='h-5 w-48 max-w-full' />
+          <Skeleton className='h-4 w-full' />
         </div>
-        <Skeleton className='h-10 w-full' />
       </div>
     );
   }
 
   return (
-    <div className={cn('space-y-4 rounded-lg border bg-muted/50 p-4', className)}>
-      {/* Header with avatar and name */}
-      <div className='flex items-start gap-3'>
-        {metadata?.avatarUrl ? (
-          <img src={metadata.avatarUrl} alt={`${owner} avatar`} className='size-16 rounded-full' />
-        ) : (
-          <div className='flex size-16 items-center justify-center rounded-full bg-muted'>
-            <span className='text-2xl font-semibold'>{owner[0]?.toUpperCase()}</span>
-          </div>
-        )}
-        <div className='flex-1 space-y-1'>
-          <ExternalLink href={`https://github.com/${owner}/${repo}`} className='font-mono text-lg font-semibold'>
-            {owner}/{repo}
-          </ExternalLink>
-          {metadata?.description ? (
-            <p className='line-clamp-2 text-sm text-muted-foreground'>{metadata.description}</p>
-          ) : undefined}
+    <div className={cn('flex min-w-0 items-start gap-3', className)}>
+      <span
+        aria-hidden
+        className='flex size-8 shrink-0 items-center justify-center rounded-full border bg-muted text-sm font-medium'
+      >
+        {owner[0]?.toUpperCase()}
+      </span>
+      <div className='min-w-0 flex-1 space-y-1'>
+        <ExternalLink href={`https://github.com/${owner}/${repo}`} className='font-mono text-sm font-medium break-all'>
+          {owner}/{repo}
+        </ExternalLink>
+        {metadata?.description ? <p className='text-sm text-muted-foreground'>{metadata.description}</p> : undefined}
+        <div className='flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground tabular-nums'>
+          {metadata?.stars === undefined ? undefined : (
+            <span className='flex items-center gap-1'>
+              <Star aria-hidden className='size-3.5' />
+              {metadata.stars.toLocaleString()} stars
+            </span>
+          )}
+          {metadata?.forks === undefined ? undefined : (
+            <span className='flex items-center gap-1'>
+              <GitFork aria-hidden className='size-3.5' />
+              {metadata.forks.toLocaleString()} forks
+            </span>
+          )}
+          {metadata?.isPrivate === undefined ? undefined : (
+            <Badge variant='outline'>{metadata.isPrivate ? 'Private' : 'Public'}</Badge>
+          )}
+          {metadata?.license ? <span>{metadata.license}</span> : undefined}
+          {metadata?.lastUpdated ? <span>Updated {formatRelativeTime(metadata.lastUpdated)}</span> : undefined}
         </div>
-      </div>
-
-      {/* Stats row */}
-      {metadata?.stars !== undefined || metadata?.forks !== undefined || metadata?.watchers !== undefined ? (
-        <div className='flex items-center gap-4 text-sm text-muted-foreground'>
-          {metadata.stars === undefined ? undefined : (
-            <div className='flex items-center gap-1'>
-              <Star className='size-4' />
-              <span>{metadata.stars.toLocaleString()}</span>
-            </div>
-          )}
-          {metadata.forks === undefined ? undefined : (
-            <div className='flex items-center gap-1'>
-              <GitFork className='size-4' />
-              <span>{metadata.forks.toLocaleString()}</span>
-            </div>
-          )}
-          {metadata.watchers === undefined ? undefined : (
-            <div className='flex items-center gap-1'>
-              <Eye className='size-4' />
-              <span>{metadata.watchers.toLocaleString()}</span>
-            </div>
-          )}
-        </div>
-      ) : undefined}
-
-      {/* Bottom row with badges and info */}
-      <div className='flex flex-wrap items-center gap-2 text-sm'>
-        {/* Visibility badge */}
-        {metadata?.isPrivate === undefined ? undefined : (
-          <Badge variant='secondary' className='gap-1'>
-            {metadata.isPrivate ? (
-              <>
-                <Lock className='size-3' />
-                Private
-              </>
-            ) : (
-              <>
-                <Globe className='size-3' />
-                Public
-              </>
-            )}
-          </Badge>
-        )}
-
-        {/* License badge */}
-        {metadata?.license ? (
-          <Badge variant='secondary' className='gap-1'>
-            <Scale className='size-3' />
-            {metadata.license}
-          </Badge>
-        ) : undefined}
-
-        {/* Last updated */}
-        {metadata?.lastUpdated ? (
-          <Badge variant='secondary' className='gap-1'>
-            <Clock className='size-3' />
-            {formatRelativeTime(metadata.lastUpdated)}
-          </Badge>
-        ) : undefined}
       </div>
     </div>
   );

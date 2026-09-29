@@ -255,7 +255,7 @@ export const cancelRun = async (page: Page, settled?: () => boolean): Promise<vo
  * The engine version never crosses the runtime wire — and since one engine
  * release ships both payloads under one version, it would not distinguish them
  * anyway. The witness is the `kernel.engine` line the utility appends to the
- * shell's rotating log at startup (main names the directory through
+ * shell's rotating log when OpenRSCAD initializes (main names the directory through
  * `TAU_DESKTOP_LOG_DIR`), produced inside the process that loaded the engine,
  * with `native` derived from the engine's own `backend` export. A packaged app
  * whose platform package went missing renders through WebAssembly and fails

@@ -601,6 +601,13 @@ describe('tau tui', () => {
 
   it('keeps the current external run selected when an older turn settles late', async () => {
     const client = mock<AgentChannelClient>();
+    client.execute.mockImplementation(async (command) => ({
+      commandId: command.commandId,
+      generation: 1,
+      status: 'applied',
+      effect: 'durable',
+      cursor: 0,
+    }));
     const chatId = 'chat-tui-late-settlement';
     const base = { version: 1, leaderEpoch: 'epoch-1', recordedAt: new Date(0).toISOString() } as const;
     const events = [
@@ -657,12 +664,18 @@ describe('tau tui', () => {
       client,
       url: new URL('http://127.0.0.1:1'),
     });
-    const replay = vi.spyOn(agentClient, 'readPage').mockImplementation(async ({ cursor }) => ({
-      cursor,
-      nextCursor: events.length,
-      endCursor: events.length,
-      events: cursor === 0 ? events : [],
-    }));
+    const replay = vi.spyOn(agentClient, 'readNext').mockImplementation(async ({ ledger, signal }) => {
+      if (ledger.position.cursor === 0) {
+        return {
+          ledger: { ...ledger, position: { cursor: events.length } },
+          events,
+          endCursor: events.length,
+          reset: false,
+        };
+      }
+      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }));
+      return { ledger, events: [], endCursor: events.length, reset: false };
+    });
     try {
       const terminal = createTerminal();
       const finished = runTui({
@@ -682,7 +695,7 @@ describe('tau tui', () => {
       expect(terminal.output()).toContain('4  turn.finalized');
       expect(terminal.output()).toContain('5  message.envelope-replaced');
       expect(terminal.output()).not.toContain('steer failed');
-      expect(client.execute).not.toHaveBeenCalled();
+      expect(client.execute.mock.calls.some(([command]) => command.type === 'steer')).toBe(false);
       terminal.stdin.write('\u001B');
       await settle();
       terminal.stdin.write('q');
@@ -715,25 +728,26 @@ describe('tau tui', () => {
     ] satisfies AgentLogEvent[];
     let startedRunId: string | undefined;
     client.execute.mockImplementation(async (command) => {
+      if (command.type === 'attach') {
+        return { commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 0 };
+      }
       if (command.type === 'start') {
-        startedRunId = command.runId;
+        startedRunId = command.payload.runId;
         return {
-          type: 'result',
-          operation: 'start',
-          snapshot: {
-            chatId,
-            runId: command.runId,
-            turnId: command.message.id,
-            state: 'running',
-            messages: [],
-          },
+          commandId: command.commandId,
+          generation: 1,
+          status: 'applied',
+          effect: 'durable',
+          cursor: events.length,
         };
       }
       if (command.type === 'steer') {
         return {
-          type: 'result',
-          operation: 'steer',
-          snapshot: { chatId, runId: command.runId, turnId: 'local-user', state: 'running', messages: [] },
+          commandId: command.commandId,
+          generation: 1,
+          status: 'applied',
+          effect: 'durable',
+          cursor: events.length,
         };
       }
       throw new Error(`unexpected ${command.type} command`);
@@ -742,12 +756,18 @@ describe('tau tui', () => {
       client,
       url: new URL('http://127.0.0.1:1'),
     });
-    const replay = vi.spyOn(agentClient, 'readPage').mockImplementation(async ({ cursor }) => ({
-      cursor,
-      nextCursor: events.length,
-      endCursor: events.length,
-      events: cursor === 0 ? events : [],
-    }));
+    const replay = vi.spyOn(agentClient, 'readNext').mockImplementation(async ({ ledger, signal }) => {
+      if (ledger.position.cursor === 0) {
+        return {
+          ledger: { ...ledger, position: { cursor: events.length } },
+          events,
+          endCursor: events.length,
+          reset: false,
+        };
+      }
+      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }));
+      return { ledger, events: [], endCursor: events.length, reset: false };
+    });
     try {
       const terminal = createTerminal();
       const finished = runTui({
@@ -766,7 +786,7 @@ describe('tau tui', () => {
       await submit(terminal, 'nudge local');
       await until(() => (client.execute.mock.calls.some(([command]) => command.type === 'steer') ? true : undefined));
       expect(client.execute.mock.calls).toContainEqual([
-        { type: 'steer', chatId, runId: startedRunId, message: 'nudge local' },
+        expect.objectContaining({ type: 'steer', payload: { chatId, runId: startedRunId, message: 'nudge local' } }),
       ]);
       expect(terminal.output()).not.toContain('EXTERNAL_AGENT_UNSUPPORTED');
       terminal.stdin.write('q');

@@ -413,7 +413,16 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
        * the view already read for this run are newer than that. */
       if (running === undefined) {
         setSession((current) =>
-          current.runId === started ? current : { ...current, runId: started, state: 'admitted' },
+          current.runId === started
+            ? current
+            : {
+                ...current,
+                runId: started,
+                state: 'admitted',
+                agent: undefined,
+                approval: undefined,
+                refusal: undefined,
+              },
         );
       }
       return `${label}: ${answerLine(answer)}`;

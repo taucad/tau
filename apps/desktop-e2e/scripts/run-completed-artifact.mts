@@ -213,6 +213,9 @@ const main = async (): Promise<void> => {
     if (![databaseAddress, redisAddress, storageAddress].every((address) => /^127\.0\.0\.1:\d+$/u.test(address))) {
       throw new Error('Disposable services did not bind exclusively to loopback.');
     }
+    if (databaseAddress.endsWith(':5432')) {
+      throw new Error('Disposable Postgres must not use the shared development database port.');
+    }
     const databaseIdentity = run(composeCommand, [
       ...composeArguments,
       'exec',
@@ -247,8 +250,6 @@ const main = async (): Promise<void> => {
       NX_LOAD_DOT_ENV_FILES: 'false',
       DOTENV_CONFIG_PATH: '/dev/null',
       DATABASE_URL: databaseUrl,
-      BILLING_DATABASE_URL: databaseUrl,
-      BILLING_ENVIRONMENT: 'development',
       REDIS_URL: `redis://${redisAddress}`,
       AUTH_SECRET: randomUUID(),
       TAU_VIEW_COOKIE_SECRET: randomUUID(),
@@ -280,6 +281,8 @@ const main = async (): Promise<void> => {
         ? {
             TAU_E2E_COMPLETED_CLOUD_GATEWAY: 'true',
             TAU_CLOUD_ENABLED: 'true',
+            BILLING_DATABASE_URL: databaseUrl,
+            BILLING_ENVIRONMENT: 'development',
             TAU_E2E_PROVIDER_STUB_URL: `http://127.0.0.1:${String(providerPort)}`,
             BILLING_PROVIDER_ACCOUNTS: JSON.stringify({
               anthropic: 'desktop-e2e-anthropic',
@@ -302,7 +305,11 @@ const main = async (): Promise<void> => {
       TAU_S3_REGION: 'us-east-1',
       TAU_S3_SECRET_ACCESS_KEY: storagePassword,
     };
-    run('pnpm', ['--config.verify-deps-before-run=warn', 'nx', 'run', 'api:db-migrate'], environment);
+    run('pnpm', ['--config.verify-deps-before-run=warn', 'nx', 'run', 'api:db-migrate'], {
+      ...environment,
+      BILLING_DATABASE_URL: environment.DATABASE_URL,
+      BILLING_ENVIRONMENT: 'development',
+    });
     const vitest = spawn(
       resolve(workspaceRoot, 'node_modules/.bin/vitest'),
       [
@@ -316,6 +323,7 @@ const main = async (): Promise<void> => {
         'src/desktop-ephemeral-isolation.spec.ts',
         'src/desktop-image-geospec.spec.ts',
         'src/desktop-geometry-host.spec.ts',
+        'src/desktop-measurement-exact.spec.ts',
         'src/desktop-thumbnail-lifecycle.spec.ts',
         'src/desktop-native-payload.spec.ts',
         'src/desktop-community-preview.spec.ts',

@@ -187,6 +187,10 @@ export const deriveProjectRouteState = (input: ProjectRouteStateInput): ProjectR
 // eslint-disable-next-line @typescript-eslint/naming-convention -- React context objects are PascalCase; this module is `.ts` because the state is not JSX.
 export const ProjectRouteStateContext = createContext<ProjectRouteState | undefined>(undefined);
 
+/** Route-owned retry callback shared with the on-demand notice view. */
+// eslint-disable-next-line @typescript-eslint/naming-convention -- React context objects are PascalCase.
+export const ProjectRouteRetryContext = createContext<() => void>(() => undefined);
+
 /**
  * Read what the project route is showing.
  *

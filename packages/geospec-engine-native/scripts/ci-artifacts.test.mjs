@@ -307,6 +307,8 @@ const checkTransport = (context, reusePrefixes) => {
         return { status: 0, stdout: `ASSEMBLY_ROOT=${assembly}\n` };
       }
       if (target === 'build') {
+        assert.ok(targets.includes('build-wasm'), 'dist build must follow the mixed WASM producer');
+        verifyArtifacts(producer);
         assert.equal(observations, 1, 'native proof must precede facade build');
         assert.equal(pythonFetches, 1, 'locked Python material must precede facade build');
         for (const name of ['index.mjs', 'node.mjs', 'wasm.mjs']) {

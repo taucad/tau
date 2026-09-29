@@ -135,6 +135,34 @@ const captureCacheKey = (job: HeadlessImageJob): string | undefined =>
     : undefined;
 
 const failedAutomaticIdentityLimit = 100;
+const maxQueuedExplicitJobs = 16;
+const maxQueuedExplicitBytes = 64 * 1024 * 1024;
+
+const hasExplicitQueueCapacity = (
+  queue: readonly QueuedJob[],
+  incoming: HeadlessImageJob,
+  active: QueuedJob | undefined,
+): boolean => {
+  const buffers = new Set<ArrayBuffer>();
+  if (active?.job.sourceFormat === 'glb') {
+    buffers.add(active.job.content.buffer);
+  }
+  let jobs = 0;
+  let bytes = 0;
+  for (const job of [...queue.map((entry) => entry.job), incoming]) {
+    if (job.kind === 'automatic-thumbnail') {
+      continue;
+    }
+    jobs += 1;
+    if (job.sourceFormat === 'svg') {
+      bytes += job.content.length * 2;
+    } else if (!buffers.has(job.content.buffer)) {
+      buffers.add(job.content.buffer);
+      bytes += job.content.buffer.byteLength;
+    }
+  }
+  return jobs <= maxQueuedExplicitJobs && bytes <= maxQueuedExplicitBytes;
+};
 
 /**
  * App-owned, lazy image export client shared by thumbnails and agent captures.
@@ -185,6 +213,13 @@ export class HeadlessImageService {
         outputBytes: files.reduce((total, file) => total + file.bytes.byteLength, 0),
       });
       return files;
+    }
+    if (
+      job.kind !== 'automatic-thumbnail' &&
+      (this.running || this.queue.length > 0) &&
+      !hasExplicitQueueCapacity(this.queue, job, this.activeJob)
+    ) {
+      throw new RangeError('Headless image queue is full (16 explicit jobs or 64 MiB of queued source data)');
     }
     return new Promise((resolve, reject) => {
       const settleResolve = (queued: QueuedJob, files: ExportFile[] | undefined): void => {

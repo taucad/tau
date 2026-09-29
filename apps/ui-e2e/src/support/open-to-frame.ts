@@ -29,8 +29,8 @@
  *
  * Usage:
  *   TAU_DESKTOP_CLIENT_ROOT=<private copy of apps/ui/desktop/build/client> \
- *   node apps/ui-e2e/src/support/open-to-frame.ts desktop jscad 3 [base-url] [cold|home|restart-warm]
- *   node apps/ui-e2e/src/support/open-to-frame.ts browser jscad 3 http://127.0.0.1:3110
+ *   node apps/ui-e2e/src/support/open-to-frame.ts desktop jscad 3 [base-url] [cold|home|restart-warm|link-intent]
+ *   node apps/ui-e2e/src/support/open-to-frame.ts browser jscad 3 http://127.0.0.1:3110 [cold|home]
  *
  * Environment:
  *   TAU_DESKTOP_CLIENT_ROOT      Required for unpackaged desktop runs; packaged runs hash their bundled client.
@@ -39,6 +39,8 @@
  *                                statement instead of the load-average derivation.
  *   TAU_MEASUREMENT_BUILD        `production` (default) or `development`.
  *   TAU_OPEN_TO_FRAME_OUT        Output directory (default `out/test-results/open-to-frame`).
+ *   TAU_MEASUREMENT_OBSERVE_SPANS `1` includes selected-producer action-window diagnostics;
+ *                                these do not qualify critical-path attribution.
  */
 /* eslint-disable @nx/enforce-module-boundaries -- executable driver imports source projects before package install. */
 import { createHash, randomInt } from 'node:crypto';
@@ -60,10 +62,10 @@ import type { RuntimeTraceSummary } from '../../../runtime-e2e/src/benchmarks/ru
 // oxlint-disable-next-line no-restricted-imports -- executable driver: no package alias before install.
 import { classifyWebGpuAdapter } from './webgpu-profile.ts';
 // oxlint-disable-next-line no-restricted-imports -- executable driver runs directly in Node without the test aliases.
-import { epochForRelativeMarks, observedKernelSelection } from './open-to-frame-observation.ts';
+import { epochForRelativeMarks, observedKernelSelection, observedRuntimeWindow } from './open-to-frame-observation.ts';
 
 type Host = 'browser' | 'desktop';
-type Scenario = 'cold' | 'home' | 'restart-warm';
+type Scenario = 'cold' | 'home' | 'restart-warm' | 'link-intent';
 
 /** Steps of one open-to-frame sample, in the order they are stamped. */
 type Timeline = Readonly<Record<string, number>>;
@@ -100,12 +102,20 @@ if (!Number.isSafeInteger(repeats) || repeats < 2) {
 }
 const baseUrl = process.argv[5] ?? 'http://127.0.0.1:3110';
 const scenarioArgument = process.argv[6] ?? 'cold';
-if (scenarioArgument !== 'cold' && scenarioArgument !== 'home' && scenarioArgument !== 'restart-warm') {
-  throw new Error(`Scenario must be cold, home or restart-warm; received '${scenarioArgument}'.`);
+if (
+  scenarioArgument !== 'cold' &&
+  scenarioArgument !== 'home' &&
+  scenarioArgument !== 'restart-warm' &&
+  scenarioArgument !== 'link-intent'
+) {
+  throw new Error(`Scenario must be cold, home, restart-warm or link-intent; received '${scenarioArgument}'.`);
 }
 const scenario: Scenario = scenarioArgument;
 if (scenario === 'restart-warm' && host !== 'desktop') {
   throw new Error('restart-warm requires the desktop host with a persistent user-data profile.');
+}
+if (scenario === 'link-intent' && host !== 'desktop') {
+  throw new Error('link-intent requires the desktop host: only it seeds a project visible from Home.');
 }
 const scenarioSuffix = scenario === 'cold' ? '' : `-${scenario}`;
 const origin = host === 'desktop' ? 'app://tau' : baseUrl;
@@ -402,6 +412,10 @@ const observedEngine = async (
   if (kernel === undefined) {
     return undefined;
   }
+  /* JSCAD's selected kernel executes @jscad/modeling as JavaScript and has no WASM variant. */
+  if (kernel === 'jscad') {
+    return 'jscad:none';
+  }
   /* The host log names whichever engine the fork loaded — a desktop fork loads its resident native
    * engine whatever the render then selects — so it may only qualify the kernel the trace names. */
   const engineLine = mainProcessLog?.findLast((entry) => entry.includes(`"kernelId":"${kernel}"`));
@@ -433,7 +447,7 @@ const tagsFor = (
     }),
   },
   ...(observed.trace === undefined ? {} : { runtimeTraceJsonl: observed.trace.file }),
-  /* The utility records its own PID in kernel.engine; the desktop main PID is not a substitute. */
+  /* The selected utility's trace origin supplies its PID; the desktop main PID is not a substitute. */
   kernelProcess:
     host === 'desktop'
       ? { kind: 'utility', role: 'electron kernel fork', pid: kernelPid }
@@ -659,12 +673,28 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
         .click({ timeout: 5000 })
         .catch(() => undefined);
 
+      /* A link-intent sample needs a real Home link before its measured clock starts. */
+      const link = scenario === 'link-intent' ? page.locator(`a[href="/w/home/${slug}"]`).first() : undefined;
+      if (link) {
+        await link.waitFor({ state: 'visible' });
+        at('homeLinkReady');
+      }
       /* The user-perceived clock starts here; Home's own viewer is discarded with it. */
       await page
         .evaluate(() => (globalThis as { __TAU_OPEN_TO_FRAME__?: { reset(): void } }).__TAU_OPEN_TO_FRAME__?.reset())
         .catch(() => undefined);
       at('openIntent');
-      await page.goto(`${origin}/w/home/${slug}`, { waitUntil: 'commit' });
+      if (link) {
+        await link.hover();
+        at('intentHover');
+        await link.focus();
+        at('intentFocus');
+        at('navigationClick');
+        await link.click();
+        await page.waitForURL(`${origin}/w/home/${slug}`);
+      } else {
+        await page.goto(`${origin}/w/home/${slug}`, { waitUntil: 'commit' });
+      }
       at('projectRouteEntered');
       projectUrl = page.url();
       await page.evaluate(instrument, kernelId).catch(() => undefined);
@@ -834,11 +864,16 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
     ),
   }).catch(() => undefined);
   const engine = await observedEngine(trace?.file, mainProcessLog);
-  const kernelRecord = mainProcessLog?.findLast(
-    (line) => line.includes('kernel.engine') && line.includes(`"kernelId":"${kernelId}"`),
-  );
-  const observedPid = /"pid":(?<pid>\d+)/u.exec(kernelRecord ?? '')?.groups?.['pid'];
-  const kernelPid = observedPid === undefined ? undefined : Number(observedPid);
+  const spanObservation =
+    scenario === 'home'
+      ? undefined
+      : await observedRuntimeWindow({
+          traceFile: trace?.file,
+          kernelId,
+          fromEpoch: marksEpochMilliseconds + (marks['openIntent'] ?? Number.NaN),
+          toEpoch: marksEpochMilliseconds + (marks['pixelCaptureUpperBound'] ?? Number.NaN),
+        });
+  const kernelPid = host === 'desktop' ? spanObservation?.pid : undefined;
   const invalidReason = sampleVerdict({
     marks,
     projectUrl,
@@ -881,7 +916,14 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
     scenario === 'home'
       ? [['launchIntent', 'homePixelCaptureUpperBound', 'desktop/browser launch and Home presentation']]
       : [
-          ['openIntent', 'projectRouteEntered', 'route admission'],
+          ...(scenario === 'link-intent'
+            ? ([
+                ['openIntent', 'intentHover', 'pointer intent and warmup dispatch'],
+                ['intentHover', 'intentFocus', 'focus dispatch'],
+                ['intentFocus', 'navigationClick', 'automation handoff'],
+                ['navigationClick', 'projectRouteEntered', 'click and route admission'],
+              ] as const)
+            : ([['openIntent', 'projectRouteEntered', 'route admission']] as const)),
           ['projectRouteEntered', 'geometryInScene', 'filesystem/runtime/geometry and scene admission'],
           ['geometryInScene', 'pixelCaptureUpperBound', 'renderer/GPU presentation and screenshot latency'],
         ];
@@ -932,6 +974,9 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
     homeWitness,
     /** Total milliseconds per span name for this sample's ten heaviest spans. */
     runtimeSpans: trace?.totals,
+    ...(process.env['TAU_MEASUREMENT_OBSERVE_SPANS'] !== '1' || spanObservation === undefined
+      ? {}
+      : { spanObservation }),
     measurement:
       scenario === 'home'
         ? {

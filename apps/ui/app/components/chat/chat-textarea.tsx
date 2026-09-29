@@ -21,7 +21,6 @@ import type { ChatContextReference } from '#components/chat/chat-context-inserti
 import { ChatApprovalBanner } from '#components/chat/chat-approval-banner.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
-import { captureCadImages, captureFilesToDataUrls, omittedSectionCutsNotice } from '#services/headless-capture.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { latestAcpSessionData } from '#services/agent-host-event-projection.js';
 import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
@@ -251,6 +250,8 @@ export const ChatTextarea = memo(function ({
         if (!cadRef) {
           throw new Error('No CAD view available for image capture');
         }
+        const { captureCadImages, captureFilesToDataUrls, omittedSectionCutsNotice } =
+          await import('#services/headless-capture.js');
         const graphicsRef = resolveGraphicsRefForEntry(entryPath);
         const { files, omittedSectionCutIds } = await captureCadImages({
           cadRef,

@@ -5,7 +5,6 @@ import { useLocation } from 'react-router';
 import { XIcon } from 'lucide-react';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
 import { ChatRevisionMarker } from '#routes/w.$workspace.$project/chat-revision-marker.js';
-import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import type { TurnGroup as TurnGroupData } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { ScrollDownButton } from '#routes/w.$workspace.$project/scroll-down-button.js';
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
@@ -33,23 +32,6 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useProject } from '#hooks/use-project.js';
 import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
-import { commandInvocation } from '#utils/at-reference.utils.js';
-import type { MyUIMessage } from '@taucad/chat';
-
-/** Every command any ACP agent advertised in this chat, one invocation per line (a stable selector value). */
-function agentInvocationsKey(messages: readonly MyUIMessage[]): string {
-  const invocations = new Set<string>();
-  for (const message of messages) {
-    for (const part of message.parts) {
-      if (part.type === 'data-acp-session') {
-        for (const command of part.data.commands) {
-          invocations.add(commandInvocation(command.name));
-        }
-      }
-    }
-  }
-  return [...invocations].join('\n');
-}
 
 // Component-local CSS variable. Declared here (rather than in global.css)
 // to keep the chat-history pinning system self-contained — the only
@@ -176,7 +158,7 @@ const ExpandedChatHistory = memo(function ({
   const { chats } = useChatRecords(projectId);
   const { activeChatId, persistenceActorRef } = useChatContext();
   const skillsCatalog = useSkillsCatalog();
-  const agentInvocations = useChatSelector((state) => agentInvocationsKey(state.messages));
+  const agentInvocations = useChatSelector((state) => state.agentInvocations);
   const skillInvocations = skillsCatalog.map((skill) => `/${skill.name}`).join('\n');
   const knownTokens = useMemo(
     () => new Set(`${skillInvocations}\n${agentInvocations}`.split('\n').filter(Boolean)),
@@ -233,12 +215,7 @@ const ExpandedChatHistory = memo(function ({
     [submitChat],
   );
 
-  // Build the rendered turn groups. A new group starts at index 0 and at
-  // every user message; all other messages join the preceding group. The
-  // result is memoised on the `state.messages` reference inside
-  // `buildTurnGroups`, so streaming tokens (which mutate message *parts*
-  // without adding new ids) reuse the same group array reference.
-  const groups = useChatSelector((state) => buildTurnGroups(state.messages));
+  const groups = useChatSelector((state) => state.turnGroups);
 
   const renderItem = useCallback(
     (index: number, group: TurnGroupData) => {

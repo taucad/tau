@@ -57,7 +57,17 @@ function producerLabel(): string {
  * @returns A label plus a nonce that no other producer shares.
  */
 export function createTelemetryOrigin(): TelemetryOrigin {
-  return { label: producerLabel(), instance: randomUuid() };
+  const label = producerLabel();
+  const { process: hostProcess } = globalThis as { process?: { pid?: number } };
+  const hostPid = hostProcess?.pid;
+  const instance = randomUuid();
+  return {
+    label,
+    instance:
+      label === 'utility' && typeof hostPid === 'number' && Number.isSafeInteger(hostPid) && hostPid > 0
+        ? `pid-${String(hostPid)}-${instance}`
+        : instance,
+  };
 }
 
 /**

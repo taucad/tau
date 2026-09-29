@@ -294,8 +294,8 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
  * whether the app shell survived it.
  */
 vi.mock('#routes/w.$workspace.$project/project-route-notices.js', async () => {
-  const { createContext, useContext } = await import('react');
-  const ProjectRouteRetryContext = createContext<() => void>(() => undefined);
+  const { useContext } = await import('react');
+  const { ProjectRouteRetryContext } = await import('#routes/w.$workspace.$project/project-route-state.js');
   return {
     ProjectRouteRetryContext,
     ProjectRouteNotice: ({ state }: { readonly state: { kind: string; error?: Error } }) => {

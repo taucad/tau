@@ -54,6 +54,8 @@ export type HeadlessImageJob = HeadlessGlbImageJob | HeadlessSvgImageJob;
 export type HeadlessImageBackend = {
   readonly createImageClient: () => Promise<AppRuntimeClient>;
   readonly isGpuAvailable?: () => boolean | Promise<boolean>;
+  /** Automatic previews may be deferred on a software adapter that stalls the viewport. */
+  readonly isAutomaticGpuAvailable?: () => boolean | Promise<boolean>;
   readonly renderSvg?: (
     content: string,
     format: 'png' | 'webp',
@@ -211,6 +213,10 @@ export class HeadlessImageService {
       createImageClient: dependencies.createImageClient ?? headlessImageBackend.createImageClient,
       isGpuAvailable:
         'isGpuAvailable' in dependencies ? dependencies.isGpuAvailable : headlessImageBackend.isGpuAvailable,
+      isAutomaticGpuAvailable:
+        'isAutomaticGpuAvailable' in dependencies
+          ? dependencies.isAutomaticGpuAvailable
+          : headlessImageBackend.isAutomaticGpuAvailable,
       renderSvg: 'renderSvg' in dependencies ? dependencies.renderSvg : headlessImageBackend.renderSvg,
     };
   }
@@ -220,6 +226,20 @@ export class HeadlessImageService {
     job.signal?.throwIfAborted();
     if (this.disposed) {
       throw new Error('HeadlessImageService is disposed');
+    }
+    const automaticGpuAvailable =
+      job.kind === 'automatic-thumbnail' && job.sourceFormat === 'glb' && this.backend.isAutomaticGpuAvailable
+        ? await this.backend.isAutomaticGpuAvailable()
+        : true;
+    job.signal?.throwIfAborted();
+    if (this.disposed) {
+      throw new Error('HeadlessImageService is disposed');
+    }
+    if (!automaticGpuAvailable) {
+      throw new HeadlessImageError(
+        'driver-unsupported',
+        'Automatic part previews are deferred on this software WebGPU adapter.',
+      );
     }
     if (job.kind === 'automatic-thumbnail' && this.failedAutomaticIdentities.has(job.identity)) {
       return undefined;

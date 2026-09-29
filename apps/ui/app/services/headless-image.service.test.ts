@@ -40,6 +40,7 @@ const createFixture = (dependencies: HeadlessImageServiceDependencies = {}) => {
   const service = new HeadlessImageService({
     createImageClient: vi.fn().mockResolvedValue(imageClient),
     isGpuAvailable: () => true,
+    isAutomaticGpuAvailable: () => true,
     ...dependencies,
   });
   activeServices.add(service);
@@ -520,7 +521,8 @@ describe('HeadlessImageService', () => {
   it('selects direct SVG WebP rendering with the exact thumbnail options', async () => {
     const webp: ExportFile = { name: 'render.webp', mimeType: 'image/webp', bytes: new Uint8Array([1, 2, 3]) };
     const renderSvg = vi.fn(async () => webp);
-    const { imageClient, service } = createFixture({ renderSvg });
+    const automaticGpuProbe = vi.fn(() => false);
+    const { imageClient, service } = createFixture({ renderSvg, isAutomaticGpuAvailable: automaticGpuProbe });
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"/>';
     const exportOptions = { width: 768, height: 576, quality: 0.9 };
 
@@ -537,6 +539,7 @@ describe('HeadlessImageService', () => {
       }),
     ).resolves.toEqual([webp]);
     expect(renderSvg).toHaveBeenCalledWith(svg, 'webp', exportOptions);
+    expect(automaticGpuProbe).not.toHaveBeenCalled();
     expect(imageClient.transcode).not.toHaveBeenCalled();
   });
 
@@ -588,6 +591,29 @@ describe('HeadlessImageService', () => {
     const result = service.export(captureJob('missing-gpu'));
     await expect(result).rejects.toBeInstanceOf(HeadlessImageError);
     await expect(result).rejects.toMatchObject({ code: 'adapter-unavailable' });
+  });
+
+  it('defers automatic previews on a software adapter without starting native rendering, while manual retry remains available', async () => {
+    const { imageClient, service } = createFixture({ isAutomaticGpuAvailable: () => false });
+    await expect(service.export(captureJob('software-preview', { kind: 'automatic-thumbnail' }))).rejects.toMatchObject(
+      {
+        code: 'driver-unsupported',
+      },
+    );
+    expect(imageClient.transcode).not.toHaveBeenCalled();
+    await expect(service.export(captureJob('software-retry', { kind: 'manual-thumbnail' }))).resolves.toEqual(files());
+    expect(imageClient.transcode).toHaveBeenCalledOnce();
+  });
+
+  it('does not enqueue an automatic preview when disposal wins during adapter admission', async () => {
+    const probe = Promise.withResolvers<boolean>();
+    const createImageClient = vi.fn();
+    const service = new HeadlessImageService({ createImageClient, isAutomaticGpuAvailable: () => probe.promise });
+    const pending = service.export(captureJob('late-adapter', { kind: 'automatic-thumbnail' }));
+    service.dispose();
+    probe.resolve(true);
+    await expect(pending).rejects.toThrow('disposed');
+    expect(createImageClient).not.toHaveBeenCalled();
   });
 
   it.each([

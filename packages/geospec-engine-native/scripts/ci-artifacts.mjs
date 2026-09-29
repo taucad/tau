@@ -511,7 +511,13 @@ export const prepareArtifacts = (root) => {
   mkdirSync(resolve(root, transportPath), { recursive: true });
   /** @type {(target: string, preparationEnvironment?: Record<string, string | undefined>) => string} */
   const run = (target, preparationEnvironment = {}) => {
-    const argv = ['pnpm', 'nx', 'run', `geospec-engine-native:${target}`];
+    const argv = [
+      'pnpm',
+      'nx',
+      'run',
+      `geospec-engine-native:${target}`,
+      ...(['build', 'assemble-package'].includes(target) ? ['--excludeTaskDependencies'] : []),
+    ];
     const capture = target === 'build-node' || target === 'assemble-package';
     const overrides =
       target === 'build-node'
@@ -624,6 +630,8 @@ export const prepareArtifacts = (root) => {
   checkReceipt(root, inventory);
   publishInventory(root, inventory);
   verifyArtifacts(root);
+  // The producer owns the inventory lock; these internal tasks must not recurse into its verify dependency.
+  run('build');
   // The collector is a source-owned adaptation of the accepted ordinary identity observation.
   // It runs only on the real producer; pure tests replace this subprocess with inert metadata.
   const proofDirectory = resolve(root, transportPath, 'native-proof');

@@ -46,12 +46,6 @@ test('keeps fresh and returning desktop profiles free of web consent and analyti
   const { page } = session;
   await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
   await expectDesktopSurfaceBoundary(session);
-  await session.application.evaluate(({ shell }) => {
-    const state = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
-    shell.openExternal = async (url): Promise<void> => {
-      state.__TAU_E2E_EXTERNAL_URL__ = url;
-    };
-  });
   await page.getByRole('button', { name: 'Help' }).click();
   await page.getByRole('menuitem', { name: 'Privacy' }).click();
   await expect

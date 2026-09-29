@@ -750,10 +750,16 @@
     },
     "prepare-geospec-ci-artifacts": {
       "executor": "nx:run-commands",
-      "cache": false,
+      "cache": true,
+      "inputs": [
+        {
+          "runtime": "node packages/geospec-engine-native/scripts/ci-artifacts.mjs cache-key"
+        }
+      ],
       "outputs": [
         "{projectRoot}/bindings/node/generated",
         "{projectRoot}/bindings/emscripten/generated",
+        "{projectRoot}/dist",
         "{workspaceRoot}/out/artifacts/geospec-native-engine/ci"
       ],
       "options": {

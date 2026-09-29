@@ -122,19 +122,20 @@ const selectedGeoSpecAssembly = process.env['TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT'];
 if (selectedGeoSpecAssembly === '') {
   throw new Error('TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT must name a qualified native assembly.');
 }
-let geospecAssemblyInput = selectedGeoSpecAssembly ?? 'out/artifacts/geospec-native-engine/ci/assembly';
+let geospecAssemblyInput: string;
 if (selectedGeoSpecAssembly === undefined) {
   const output = execFileSync(
     process.execPath,
     [resolve(workspaceRoot, 'packages/geospec-engine-native/scripts/ci-artifacts.mjs'), 'snapshot-delivery'],
-    { cwd: workspaceRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: 64 * 1024 ** 2 },
+    { cwd: workspaceRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
   );
-  process.stdout.write(output);
   const selections = [...output.matchAll(/^ASSEMBLY_ROOT=(.+)$/gmu)].map((match) => match[1]?.trim());
   if (selections.length !== 1 || !selections[0]) {
     throw new Error('GeoSpec delivery did not select one verified immutable assembly snapshot.');
   }
   geospecAssemblyInput = selections[0];
+} else {
+  geospecAssemblyInput = selectedGeoSpecAssembly;
 }
 const ownedGeoSpecSnapshot =
   selectedGeoSpecAssembly === undefined ? resolve(workspaceRoot, geospecAssemblyInput) : undefined;

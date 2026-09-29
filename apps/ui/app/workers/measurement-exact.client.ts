@@ -2,6 +2,7 @@ import type { ActorRefFrom } from 'xstate';
 import type { GeometryComponentManifest } from '@taucad/types';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { bestRouteForActiveKernel, exportWithRuntimeValidatedInput } from '#utils/export-formats.utils.js';
+import { runExactRequest } from '#workers/measurement-exact.transport.js';
 import type { ExactRequest, ExactResponse } from './measurement-exact.worker.js';
 
 export type ExactOccurrenceDistanceResult =
@@ -101,52 +102,13 @@ export async function measureExactOccurrenceDistance(
     if (!exported.success || exported.data.length !== 1) {
       return unavailable('AP242 export failed.');
     }
-    const stepText = new TextDecoder().decode(exported.data[0]!.bytes);
     const id = ++nextRequestId;
-    const request: ExactRequest = { id, stepText, nameA, nameB };
-    const worker = new Worker(new URL('measurement-exact.worker.ts', import.meta.url), { type: 'module' });
-    const result = await new Promise<ExactResponse>((resolve) => {
-      let finished = false;
-      const finish = (response: ExactResponse): void => {
-        if (finished) {
-          return;
-        }
-        finished = true;
-        input.signal?.removeEventListener('abort', onAbort);
-        clearTimeout(queryTimeout);
-        worker.terminate();
-        resolve(response);
-      };
-      const onAbort = (): void => {
-        finish({ id, status: 'unavailable', reason: 'The exact query was cancelled.' });
-      };
-      const queryTimeout = setTimeout(() => {
-        finish({ id, status: 'unavailable', reason: 'The AP242 query timed out.' });
-      }, 120_000);
-      if (isCancelled(input.signal)) {
-        onAbort();
-        return;
-      }
-      input.signal?.addEventListener('abort', onAbort, { once: true });
-      worker.addEventListener('error', () => {
-        finish({ id, status: 'unavailable', reason: 'The AP242 worker failed.' });
-      });
-      worker.addEventListener('message', (event: MessageEvent<ExactResponse>) => {
-        finish(
-          event.data.id === id
-            ? event.data
-            : { id, status: 'unavailable', reason: 'The AP242 response identity changed.' },
-        );
-      });
-      worker.addEventListener('messageerror', () => {
-        finish({ id, status: 'unavailable', reason: 'The AP242 response could not be decoded.' });
-      });
-      try {
-        worker.postMessage(request);
-      } catch {
-        finish({ id, status: 'unavailable', reason: 'The AP242 request could not be sent.' });
-      }
-    });
+    const request: ExactRequest = {
+      id,
+      source: { format: 'ap242', bytes: exported.data[0]!.bytes, coordinateSystem: 'y-up' },
+      occurrences: [{ name: nameA }, { name: nameB }],
+    };
+    const result: ExactResponse = await runExactRequest(request, input.signal);
     if (isCancelled(input.signal) || !presentedRevisionMatches(input, baseline)) {
       return unavailable('The displayed model changed during the exact query.');
     }

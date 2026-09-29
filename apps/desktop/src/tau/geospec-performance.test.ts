@@ -15,6 +15,8 @@ const lab = vi.hoisted(() => {
         public constructor(...args: unknown[]) {
           construct(...args);
         }
+
+        public close(): void { /* The mock exposes the native engine lifecycle. */ }
       },
       canonicalize: vi.fn(),
     },
@@ -48,7 +50,8 @@ describe('desktop GeoSpec performance concern', () => {
         expect(actual).toEqual({ ...input, cache: 'host-module-cache' });
         const native = await modules.native();
         expect(native.canonicalize).toBe(lab.native.canonicalize);
-        new native.Engine({ variant: 'st' });
+        const engine = new native.Engine({ variant: 'st' });
+        expect(engine).toBeDefined();
         expect(lab.construct).toHaveBeenCalledExactlyOnceWith();
         started.resolve();
         await finish.promise;

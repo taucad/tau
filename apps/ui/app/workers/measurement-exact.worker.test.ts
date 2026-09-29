@@ -9,6 +9,7 @@ import {
   buildGltfMeasurementFeatures,
 } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import { evaluateExactOccurrenceDistance } from './measurement-exact.worker.js';
+import type { ExactRequest } from './measurement-exact.worker.js';
 
 vi.setConfig({ testTimeout: 120_000 });
 
@@ -51,8 +52,13 @@ describe('displayed Replicad to retained AP242 correspondence', () => {
       expect([...features.values()].some((item) => item.faces?.length)).toBe(true);
       const exported = await client.export('step', { exportOptions: { coordinateSystem: 'y-up' } });
       assertSuccess(exported);
-      const stepText = new TextDecoder().decode(exported.data[0]!.bytes);
-      const result = await evaluateExactOccurrenceDistance({ id: 1, stepText, nameA: 'left', nameB: 'right' });
+      const stepBytes = exported.data[0]!.bytes;
+      const query = (id: number, bytes: Uint8Array<ArrayBuffer>, names: readonly [string, string]): ExactRequest => ({
+        id,
+        source: { format: 'ap242', bytes, coordinateSystem: 'y-up' },
+        occurrences: [{ name: names[0] }, { name: names[1] }],
+      });
+      const result = await evaluateExactOccurrenceDistance(query(1, stepBytes, ['left', 'right']));
       if (result.status === 'unavailable') {
         throw new Error(result.reason);
       }
@@ -73,20 +79,19 @@ describe('displayed Replicad to retained AP242 correspondence', () => {
         result.distanceMeters,
         8,
       );
-      const ambiguous = await evaluateExactOccurrenceDistance({ id: 2, stepText, nameA: 'left', nameB: 'left' });
+      const ambiguous = await evaluateExactOccurrenceDistance(query(2, stepBytes, ['left', 'left']));
       expect(ambiguous.status).toBe('unavailable');
       if (ambiguous.status === 'unavailable') {
-        expect(ambiguous.reason).toContain('unique AP242 occurrences');
+        expect(ambiguous.reason).toContain('distinct displayed AP242 occurrence names');
       }
-      const mixedUnits = await evaluateExactOccurrenceDistance({
-        id: 3,
-        stepText: stepText.replace('SI_UNIT(.MILLI.,.METRE.)', 'SI_UNIT($,.METRE.)'),
-        nameA: 'left',
-        nameB: 'right',
-      });
+      const mixedUnits = await evaluateExactOccurrenceDistance(query(
+        3,
+        new TextEncoder().encode(new TextDecoder().decode(stepBytes).replace('SI_UNIT(.MILLI.,.METRE.)', 'SI_UNIT($,.METRE.)')),
+        ['left', 'right'],
+      ));
       expect(mixedUnits.status).toBe('unavailable');
       if (mixedUnits.status === 'unavailable') {
-        expect(mixedUnits.reason).toContain('millimetre length context');
+        expect(mixedUnits.reason).toContain('units or frame');
       }
     } finally {
       await client.shutdown();

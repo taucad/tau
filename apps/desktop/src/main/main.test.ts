@@ -44,6 +44,10 @@ const state = vi.hoisted(() => ({
   /* The quit hold's two halves, in the order main runs them (R9, D31). */
   shutdownOrder: [] as string[],
   servicesConnect: vi.fn(() => ({ id: 'services-port' })),
+  geometryMeasurementConnect: vi.fn(() => ({ id: 'geometry-measurement-port' })),
+  geometryPerformanceConnect: vi.fn(() => ({ id: 'geometry-performance-port' })),
+  geometryDispose: vi.fn(async () => undefined),
+  geometrySampleResidentBytes: undefined as undefined | ((utility: { pid: number | undefined }) => number | undefined),
   servicesCompleteBinding: vi.fn(async (_input: Readonly<Record<string, string>>, _boundMilliseconds: number) => ({
     status: 'bound',
     machineId: 'workshop-x1c',
@@ -91,6 +95,7 @@ const app = {
   }),
   getPath: vi.fn((name: string) => (name === 'userData' ? state.userData : join(state.userData, name))),
   getVersion: vi.fn(() => 'test'),
+  getAppMetrics: vi.fn((): Array<{ pid: number; memory: { workingSetSize: number } }> => []),
   on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
     const listeners = state.appListeners.get(event) ?? [];
     listeners.push(listener);
@@ -247,7 +252,7 @@ vi.mock('#main/navigation-policy.js', () => ({
   rendererOrigins: vi.fn(() => []),
 }));
 vi.mock('#main/services-broker.js', () => ({
-  rendererServicesConcerns: ['nodeFs', 'agentHost', 'geospecPerformance', 'machines'],
+  rendererServicesConcerns: ['nodeFs', 'agentHost', 'geospecPerformance', 'exactMeasurement', 'machines'],
   ServicesQuiescingError: class ServicesQuiescingError extends Error {},
   createServicesBroker: vi.fn((options: { utilityEntry: string }) => {
     state.servicesUtilityEntry = options.utilityEntry;
@@ -259,6 +264,18 @@ vi.mock('#main/services-broker.js', () => ({
       dispose: state.servicesDispose,
       computeProjectRoot: (root: string) =>
         root.includes('/.tau/checkouts/') ? root.slice(0, root.indexOf('/.tau/checkouts/')) : undefined,
+    };
+  }),
+}));
+vi.mock('#main/geometry-broker.js', () => ({
+  createGeometryBroker: vi.fn((options: { sampleResidentBytes: typeof state.geometrySampleResidentBytes }) => {
+    state.geometrySampleResidentBytes = options.sampleResidentBytes;
+    return {
+    connectMeasurement: state.geometryMeasurementConnect,
+    connectPerformance: state.geometryPerformanceConnect,
+    connectSuite: vi.fn(),
+    revokeUnauthorized: vi.fn(),
+    dispose: state.geometryDispose,
     };
   }),
 }));
@@ -313,6 +330,11 @@ afterEach(async () => {
   state.authHandleCallback.mockClear();
   state.resolveFork = undefined;
   state.servicesConnect.mockClear();
+  state.geometryMeasurementConnect.mockClear();
+  state.geometryPerformanceConnect.mockClear();
+  state.geometrySampleResidentBytes = undefined;
+  app.getAppMetrics.mockReset();
+  app.getAppMetrics.mockReturnValue([]);
   state.runtimePrewarm.mockClear();
   state.utilityEnvironmentAdditions.length = 0;
   // Each case bootstraps main afresh; the cached module would otherwise register nothing.
@@ -853,6 +875,52 @@ describe('desktop main machine store', () => {
       listener({ senderFrame }, { requestId, concern: 'machines' });
     }
   };
+
+  it('routes exact measurement and debug performance to geometry, never the services singleton', async () => {
+    const { desktopEnvironment } = await import('#main/environment.js');
+    vi.mocked(desktopEnvironment).mockReturnValueOnce({
+      TAU_API_URL: 'http://127.0.0.1:1',
+      TAU_WEBSOCKET_URL: 'ws://127.0.0.1:1',
+      TAU_FRONTEND_URL: 'http://127.0.0.1:1',
+      TAU_DEBUG: 'true',
+    } as ReturnType<typeof desktopEnvironment>);
+    await boot();
+    const postMessage = vi.fn();
+    for (const [requestId, concern] of [['measure', 'exactMeasurement'], ['diagnostic', 'geospecPerformance']] as const) {
+      for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+        listener({ senderFrame: { url: 'app://tau/index.html', postMessage } }, { requestId, concern });
+      }
+    }
+    expect(state.geometryMeasurementConnect).toHaveBeenCalledOnce();
+    expect(state.geometryPerformanceConnect).toHaveBeenCalledOnce();
+    expect(state.servicesConnect).not.toHaveBeenCalled();
+    expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, { requestId: 'measure' }, [{ id: 'geometry-measurement-port' }]);
+    expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, { requestId: 'diagnostic' }, [{ id: 'geometry-performance-port' }]);
+  }, bootMilliseconds);
+
+  it('refuses the diagnostic geometry port when TAU_DEBUG is absent', async () => {
+    await boot();
+    const postMessage = vi.fn();
+    for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+      listener({ senderFrame: { url: 'app://tau/index.html', postMessage } }, { requestId: 'diagnostic', concern: 'geospecPerformance' });
+    }
+    expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, {
+      requestId: 'diagnostic', error: 'GeoSpec performance tools require TAU_DEBUG.',
+    });
+    expect(state.geometryPerformanceConnect).not.toHaveBeenCalled();
+    expect(state.servicesConnect).not.toHaveBeenCalled();
+  }, bootMilliseconds);
+
+  it('samples only the exact geometry utility pid and converts Electron KiB to bytes', async () => {
+    await boot();
+    app.getAppMetrics.mockReturnValue([
+      { pid: 41, memory: { workingSetSize: 999 } },
+      { pid: 42, memory: { workingSetSize: 512 } },
+    ]);
+    expect(state.geometrySampleResidentBytes?.({ pid: 42 })).toBe(512 * 1024);
+    expect(state.geometrySampleResidentBytes?.({ pid: 43 })).toBeUndefined();
+    expect(state.geometrySampleResidentBytes?.({ pid: undefined })).toBeUndefined();
+  }, bootMilliseconds);
 
   it(
     'should keep the machine store under the config directory and connect a machines port that names no root, for a trusted frame only',

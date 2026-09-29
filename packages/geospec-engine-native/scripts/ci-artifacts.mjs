@@ -2,7 +2,7 @@
 /**
  * Prepare or verify the complete Node/mixed package payload for CI transport.
  * Uses existing Nx producers; hashes establish transport identity, not qualification.
- * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery|snapshot-delivery
+ * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery|snapshot-delivery|cache-key
  * Optional env: GEOSPEC_DELIVERY_CACHE and existing delivery tool selectors.
  * GEOSPEC_NATIVE_DELIVERY_CACHE selects independent retained native-prefix reuse;
  * GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER/RECIPE and GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES
@@ -20,7 +20,6 @@ import {
   closeSync,
   constants,
   existsSync,
-  fstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -31,7 +30,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { delimiter, join, posix, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, posix, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import process from 'node:process';
 import { isDeepStrictEqual } from 'node:util';
@@ -46,6 +45,19 @@ const mixedCommandsPath = `${transportPath}/mixed-commands.json`;
 const proofPath = `${transportPath}/native-proof/identity-source-proof.json`;
 const archiveNames = ['root.tgz', 'darwin-arm64.tgz', 'geospec-engine-native-source-relink.tar.gz'];
 const archivePaths = archiveNames.map((name) => `${transportPath}/assembly/tarballs/${name}`);
+const sourceKitOnly = new Set([
+  `${packagePath}/scripts/ci-artifacts.test.mjs`,
+  `${packagePath}/bindings/browser-conformance/run-browser-conformance.ts`,
+  `${packagePath}/bindings/browser-conformance/app/run.ts`,
+  `${packagePath}/bench/performance-lab-cli.ts`,
+  `${packagePath}/bench/performance-lab-cli.test.ts`,
+  `${packagePath}/bench/performance-lab-focus.ts`,
+  `${packagePath}/bench/performance-lab-focus.test.ts`,
+  `${packagePath}/bench/performance-lab-runner.ts`,
+  `${packagePath}/bench/performance-lab-runner.test.ts`,
+  `${packagePath}/bench/performance-lab.test.ts`,
+  `${packagePath}/vitest.config.ts`,
+]);
 const lockPath = 'node_modules/.cache/geospec-engine-native/ci-artifacts.lock';
 const activePath = 'node_modules/.cache/geospec-engine-native/ci-artifacts.active.json';
 /** @type {number | undefined} */
@@ -61,6 +73,21 @@ const producerStdio = (capture = false) =>
       : ['inherit', 'inherit', 'inherit', heldLockFile];
 /** @type {() => {id: string | null, attempt: string | null}} */
 const workflowRun = () => ({ id: process.env.GITHUB_RUN_ID ?? null, attempt: process.env.GITHUB_RUN_ATTEMPT ?? null });
+/** The recorded workflow belongs to the original producer, not the verifying host. */
+/** @type {(value: unknown) => {id: string | null, attempt: string | null}} */
+const recordedWorkflowRun = (value) => {
+  const run = /** @type {{id?: unknown, attempt?: unknown}} */ (value);
+  assert.ok(
+    value !== null &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      isDeepStrictEqual(Object.keys(value).sort(), ['attempt', 'id']) &&
+      (typeof run.id === 'string' || run.id === null) &&
+      (typeof run.attempt === 'string' || run.attempt === null),
+    'Delivery lacks producer workflow provenance.',
+  );
+  return { id: run.id, attempt: run.attempt };
+};
 const outputs = [
   `${packagePath}/bindings/node/generated/index.d.ts`,
   `${packagePath}/bindings/node/generated/index.js`,
@@ -234,6 +261,137 @@ const sourceIdentity = (root) => {
  * @type {(root: string) => string}
  */
 const closedRecipe = (root) => digest(JSON.stringify(sourceIdentity(root).files));
+/** @type {(source: ReturnType<typeof sourceIdentity>) => ReturnType<typeof sourceIdentity>} */
+const producerIdentity = (source) => ({
+  ...source,
+  files: source.files.filter((file) => !sourceKitOnly.has(file.path)),
+});
+/** Nx's runtime input uses the same source closure as transport verification.
+ * The delivery generation covers the selected host tools, compilers, SDK and
+ * pinned OCCT recipe without requiring downloads or generated outputs.
+ * @type {(root: string) => string}
+ * @internal
+ */
+export const deliveryCacheKey = (root) => {
+  const generation = childProcess.spawnSync(
+    'python3',
+    ['-B', resolve(root, packagePath, 'scripts/prepare-delivery.py'), 'generation'],
+    { cwd: root, encoding: 'utf8', env: process.env },
+  );
+  assert.ok(generation.status === 0, `GeoSpec delivery generation failed: ${generation.stderr || generation.error}`);
+  const selectedGeneration = generation.stdout.trim();
+  assert.match(selectedGeneration, /^[0-9a-f]{64}$/u, 'Invalid GeoSpec delivery generation.');
+  const selectedEnvironment = Object.fromEntries(
+    [
+      'CC',
+      'CXX',
+      'CFLAGS',
+      'CXXFLAGS',
+      'LDFLAGS',
+      'RUSTFLAGS',
+      'CARGO_ENCODED_RUSTFLAGS',
+      'MACOSX_DEPLOYMENT_TARGET',
+      'SDKROOT',
+      'CARGO_HOME',
+      'GEOSPEC_DELIVERY_CACHE',
+      'GEOSPEC_NATIVE_DELIVERY_CACHE',
+      'GEOSPEC_NATIVE_PREFIX_PATH',
+      'GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER',
+      'GEOSPEC_NATIVE_OCCT_PRODUCER_RECIPE',
+      'GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES',
+      'GEOSPEC_OCCT_PRODUCER_BUILDER',
+      'GEOSPEC_OCCT_PRODUCER_RECIPE',
+      'GEOSPEC_OCCT_SUPPORT_INPUTS',
+      'GIT_CEILING_DIRECTORIES',
+    ].map((name) => [name, process.env[name] ?? null]),
+  );
+  const cargoEnvironment = Object.fromEntries(
+    Object.entries(process.env)
+      .filter(
+        ([name]) =>
+          (name.startsWith('CARGO_') &&
+            name !== 'CARGO_BUILD_JOBS' &&
+            name !== 'CARGO_TARGET_DIR' &&
+            !/(?:TOKEN|PASSWORD|CREDENTIAL|AUTH)/u.test(name)) ||
+          /^(?:RUSTC(?:_WRAPPER|_WORKSPACE_WRAPPER)?|CC(?:_.+)?|CXX(?:_.+)?|AR(?:_.+)?|CFLAGS(?:_.+)?|CXXFLAGS(?:_.+)?|CXXSTDLIB|CRATE_CC_NO_DEFAULTS|CC_SHELL_ESCAPED_FLAGS)$/u.test(
+            name,
+          ),
+      )
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
+  const cargoHome = resolve(root, process.env['CARGO_HOME'] ?? join(homedir(), '.cargo'));
+  const cargoConfigPaths = [join(cargoHome, 'config'), join(cargoHome, 'config.toml')];
+  for (let directory = resolve(root, packagePath); ; directory = dirname(directory)) {
+    cargoConfigPaths.push(join(directory, '.cargo/config'), join(directory, '.cargo/config.toml'));
+    if (dirname(directory) === directory) {
+      break;
+    }
+  }
+  const cargoConfigs = [...new Set(cargoConfigPaths)]
+    .filter((path) => existsSync(path))
+    .map((path) => {
+      const local = relative(root, path);
+      return fileRecord(root, local.startsWith('..') || isAbsolute(local) ? path : local);
+    })
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const executableOverrides = Object.fromEntries(
+    Object.entries(cargoEnvironment)
+      .filter(([name]) =>
+        /^(?:RUSTC(?:_WRAPPER|_WORKSPACE_WRAPPER)?|CARGO_TARGET_.+_LINKER|CARGO_BUILD_RUSTC(?:_WRAPPER|_WORKSPACE_WRAPPER)?)$/u.test(
+          name,
+        ),
+      )
+      .map(([name, value]) => {
+        assert.ok(typeof value === 'string', `Missing Cargo executable override: ${name}`);
+        if (value === '') {
+          return [name, null];
+        }
+        const executable = executableOnPath(value, process.env['PATH']) ?? resolve(root, value);
+        return [name, fileRecord(root, executable)];
+      }),
+  );
+  const externalInputs = Object.fromEntries(
+    [
+      'GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER',
+      'GEOSPEC_NATIVE_OCCT_PRODUCER_RECIPE',
+      'GEOSPEC_OCCT_PRODUCER_BUILDER',
+      'GEOSPEC_OCCT_PRODUCER_RECIPE',
+      'GEOSPEC_OCCT_SUPPORT_INPUTS',
+    ].map((name) => {
+      const selected = process.env[name];
+      if (selected === undefined) {
+        return [name, null];
+      }
+      const path = resolve(root, selected);
+      const files = name.endsWith('_BUILDER')
+        ? [
+            path,
+            ...readdirSync(dirname(path))
+              .filter((entry) => entry.endsWith('.patch') || entry === 'source-manifest.json')
+              .map((entry) => join(dirname(path), entry)),
+          ]
+        : [path];
+      return [name, [...new Set(files)].sort().map((file) => fileRecord(root, file))];
+    }),
+  );
+  const pnpmRunner = executableOnPath('pnpm', process.env['PATH']);
+  assert.ok(pnpmRunner, 'pnpm is not executable on the caller PATH.');
+  return digest(
+    JSON.stringify({
+      sources: sourceIdentity(root).files,
+      generation: selectedGeneration,
+      environment: selectedEnvironment,
+      cargoEnvironment,
+      cargoConfigs,
+      executableOverrides,
+      externalInputs,
+      platform: process.platform,
+      arch: process.arch,
+      node: { version: process.version, sha256: digest(readFileSync(process.execPath)) },
+      pnpm: digest(readFileSync(pnpmRunner)),
+    }),
+  );
+};
 /** @type {(root: string) => ReturnType<typeof fileRecord>[]} */
 const payload = (root) => {
   const files = outputs.map((path) => fileRecord(root, path));
@@ -414,12 +572,17 @@ export const verifyArtifacts = (root) => {
     'Missing GeoSpec artifact inventory; run geospec-engine-native:prepare-geospec-ci-artifacts on Darwin ARM64 or restore its complete same-source transport.',
   );
   const inventory = readJson(resolve(root, inventoryPath));
-  const { schema, source: recordedSource, artifacts: recordedArtifacts } = inventory;
+  const { schema, source: recordedSource, producerSource, artifacts: recordedArtifacts } = inventory;
   const source = sourceIdentity(root);
   const artifacts = payload(root);
-  assert.ok(schema === 'geospec-ci-artifacts-v2', 'Unsupported GeoSpec artifact inventory.');
   assert.ok(
-    isDeepStrictEqual(recordedSource.files, source.files),
+    schema === 'geospec-ci-artifacts-v2' || schema === 'geospec-ci-artifacts-v3',
+    'Unsupported GeoSpec artifact inventory.',
+  );
+  assert.ok(
+    schema === 'geospec-ci-artifacts-v3'
+      ? isDeepStrictEqual(producerSource?.files, producerIdentity(source).files)
+      : isDeepStrictEqual(recordedSource.files, source.files),
     'GeoSpec artifact source inputs differ from this checkout.',
   );
   assert.ok(
@@ -433,8 +596,92 @@ export const verifyArtifacts = (root) => {
   ]) {
     assert.ok(isDeepStrictEqual(inventory[key], fileRecord(root, path)), `${key} changed during transport.`);
   }
-  checkReceipt(root, { source: recordedSource, artifacts });
+  checkReceipt(root, { source: schema === 'geospec-ci-artifacts-v3' ? producerSource : recordedSource, artifacts });
   return { ...inventory, source: recordedSource, artifacts };
+};
+
+/** @type {(root: string, archive: string, member: string) => Buffer} */
+const archiveMember = (root, archive, member) => {
+  const result = childProcess.spawnSync('tar', ['-xOzf', resolve(root, archive), member], {
+    cwd: root,
+    maxBuffer: 8 * 1024 ** 2,
+  });
+  assert.ok(result.status === 0 && Buffer.isBuffer(result.stdout), `Cannot read ${member} from ${archive}.`);
+  return result.stdout;
+};
+const checkSourceTree = `
+import hashlib, json, pathlib, sys, tarfile
+archive, checkout, expected_json = sys.argv[1:]
+prefix = 'geospec-engine-native-source-relink/'
+with tarfile.open(archive, 'r:gz') as bundle:
+    members = {member.name: member for member in bundle.getmembers()}
+    assert len(members) == len(bundle.getmembers())
+    for name, member in members.items():
+        path = pathlib.PurePosixPath(name)
+        assert name.startswith(prefix) and not path.is_absolute() and '..' not in path.parts and path.as_posix() == name
+        assert member.isfile(), f'Unexpected non-file archive member: {name}'
+    assert members[prefix + 'manifest.json'].isfile()
+    manifest = json.load(bundle.extractfile(members[prefix + 'manifest.json']))
+    entries = manifest['sourceTree']['entries']
+    assert manifest['schema'] == 'geospec-native-source-relink-v2'
+    assert len(entries) == manifest['sourceTree']['files']
+    encoded = json.dumps(entries, sort_keys=True, separators=(',', ':')).encode()
+    assert hashlib.sha256(encoded).hexdigest() == manifest['sourceTree']['sha256']
+    paths = [entry['path'] for entry in entries]
+    assert len(paths) == len(set(paths)) and set(json.loads(expected_json)) <= set(paths)
+    expected_members = {prefix + 'source/' + path for path in paths}
+    actual_members = {name for name in members if name.startswith(prefix + 'source/')}
+    assert expected_members == actual_members, (sorted(expected_members - actual_members), sorted(actual_members - expected_members))
+    for entry in entries:
+        path = pathlib.PurePosixPath(entry['path'])
+        assert not path.is_absolute() and '..' not in path.parts
+        source = (pathlib.Path(checkout) / entry['path']).read_bytes()
+        archived = bundle.extractfile(members[prefix + 'source/' + entry['path']]).read()
+        assert len(source) == entry['bytes'] == len(archived)
+        assert hashlib.sha256(source).hexdigest() == entry['sha256'] == hashlib.sha256(archived).hexdigest()
+`;
+/** @type {(selection: {checkout: string, archiveRoot: string, archives: ReturnType<typeof fileRecord>[], source: ReturnType<typeof sourceIdentity>}) => void} */
+const checkCurrentSourceKit = ({ checkout, archiveRoot, archives, source }) => {
+  const relink = archives[2];
+  assert.ok(relink, 'Missing source-relink archive.');
+  const kitRoots = ['rust', 'native', 'bindings/node', 'bindings/python', 'bindings/emscripten', 'scripts'];
+  const kitFiles = new Set(['LICENSE', 'NOTICE', 'README.md', 'package.json', 'project.json']);
+  const expected = [];
+  for (const file of source.files) {
+    if (!file.path.startsWith(`${packagePath}/`)) {
+      continue;
+    }
+    const relative = file.path.slice(packagePath.length + 1);
+    if (
+      (kitFiles.has(relative) || kitRoots.some((part) => relative.startsWith(`${part}/`))) &&
+      !relative.split('/').some((part) => ['dist', 'generated', 'licenses', 'target'].includes(part)) &&
+      !['.node', '.pyc', '.pyo', '.so', '.whl'].some((suffix) => relative.endsWith(suffix))
+    ) {
+      expected.push(file.path);
+    }
+  }
+  const checked = childProcess.spawnSync(
+    'python3',
+    ['-I', '-c', checkSourceTree, resolve(archiveRoot, relink.path), checkout, JSON.stringify(expected)],
+    { cwd: checkout, encoding: 'utf8' },
+  );
+  assert.ok(
+    checked.status === 0,
+    `Source-relink archive does not contain current source: ${checked.stderr || checked.error}`,
+  );
+  for (const archive of archives.slice(0, 2)) {
+    /** @type {unknown} */
+    const receipt = JSON.parse(
+      archiveMember(archiveRoot, archive.path, 'package/licenses/SOURCE-RELINK.json').toString(),
+    );
+    assert.ok(receipt !== null && typeof receipt === 'object' && 'artifact' in receipt);
+    const { artifact: recordedArtifact } = receipt;
+    const artifact = /** @type {{sha256?: unknown, bytes?: unknown}} */ (recordedArtifact);
+    assert.ok(
+      artifact.sha256 === relink.sha256 && artifact.bytes === relink.bytes,
+      `Package source-relink receipt differs from ${relink.path}.`,
+    );
+  }
 };
 
 /** Verify the final assembly as well as the build inputs; portable across checkout paths.
@@ -443,7 +690,21 @@ export const verifyArtifacts = (root) => {
  */
 export const verifyDelivery = (root) => {
   const inventory = verifyArtifacts(root);
-  const archives = archivePaths.map((path) => fileRecord(root, path));
+  const { delivery: recordedDelivery } = inventory;
+  const delivery = /** @type {{archives: ReturnType<typeof fileRecord>[]} | undefined} */ (recordedDelivery);
+  const archives =
+    inventory.schema === 'geospec-ci-artifacts-v3'
+      ? delivery?.archives.map((archive) => fileRecord(root, archive.path))
+      : archivePaths.map((path) => fileRecord(root, path));
+  assert.ok(Array.isArray(archives) && archives.length === archiveNames.length, 'Missing delivery archive set.');
+  assert.deepEqual(
+    archives.map((archive) => posix.basename(archive.path)),
+    archiveNames,
+    'Wrong delivery archive names.',
+  );
+  const run = recordedWorkflowRun(inventory.delivery?.run);
+  const assemblyRun =
+    inventory.schema === 'geospec-ci-artifacts-v3' ? recordedWorkflowRun(inventory.delivery?.assemblyRun) : undefined;
   assert.ok(
     archives.every((file) => file.bytes > 0),
     'Empty delivery archive.',
@@ -451,12 +712,20 @@ export const verifyDelivery = (root) => {
   assert.ok(
     isDeepStrictEqual(inventory.delivery, {
       platform: 'darwin-arm64',
-      run: workflowRun(),
+      run,
+      ...(inventory.schema === 'geospec-ci-artifacts-v3' ? { assemblyRun } : {}),
       archives,
       nativeProof: fileRecord(root, proofPath),
     }),
-    'Delivery archive/proof hashes or workflow run differ.',
+    'Delivery archive/proof hashes or producer provenance differ.',
   );
+  assert.ok(
+    isDeepStrictEqual(inventory.source.files, sourceIdentity(root).files),
+    'GeoSpec source kit differs from this checkout.',
+  );
+  if (inventory.schema === 'geospec-ci-artifacts-v3') {
+    checkCurrentSourceKit({ checkout: root, archiveRoot: root, archives, source: inventory.source });
+  }
   return inventory;
 };
 
@@ -467,6 +736,7 @@ export const verifyDelivery = (root) => {
  */
 export const prepareArtifacts = (root) => {
   rmSync(resolve(root, inventoryPath), { force: true });
+  const cacheKey = deliveryCacheKey(root);
   const source = sourceIdentity(root);
   const pnpmRunner = executableOnPath('pnpm', process.env.PATH);
   assert.ok(pnpmRunner, 'pnpm is not executable on the caller PATH.');
@@ -512,6 +782,7 @@ export const prepareArtifacts = (root) => {
   mkdirSync(resolve(root, transportPath), { recursive: true });
   /** @type {(target: string, preparationEnvironment?: Record<string, string | undefined>) => string} */
   const run = (target, preparationEnvironment = {}) => {
+    console.log(`GeoSpec producer: ${target}`);
     const argv = [
       'pnpm',
       'nx',
@@ -540,6 +811,12 @@ export const prepareArtifacts = (root) => {
     if (capture) {
       writeFileSync(resolve(root, transportPath, `${target}.stdout`), result.stdout || '');
       writeFileSync(resolve(root, transportPath, `${target}.stderr`), result.stderr || String(result.error ?? ''));
+      if (result.stdout) {
+        process.stdout.write(result.stdout);
+      }
+      if (result.stderr) {
+        process.stderr.write(result.stderr);
+      }
     }
     assert.ok(result.status === 0, `GeoSpec producer ${target} failed: ${result.error?.message ?? result.status}`);
     if (target === 'build-node') {
@@ -621,14 +898,15 @@ export const prepareArtifacts = (root) => {
   writeFileSync(resolve(root, mixedInputsPath), inputsBytes);
   writeFileSync(resolve(root, mixedCommandsPath), readFileSync(join(mixedCache, newAttempt, 'commands.json')));
   const inventory = {
-    schema: 'geospec-ci-artifacts-v2',
+    schema: 'geospec-ci-artifacts-v3',
     source,
+    producerSource: producerIdentity(source),
     artifacts,
     mixedReceipt: fileRecord(root, receiptPath),
     mixedInputs: fileRecord(root, mixedInputsPath),
     mixedCommands: fileRecord(root, mixedCommandsPath),
   };
-  checkReceipt(root, inventory);
+  checkReceipt(root, { source: inventory.producerSource, artifacts });
   publishInventory(root, inventory);
   verifyArtifacts(root);
   // The collector is a source-owned adaptation of the accepted ordinary identity observation.
@@ -687,10 +965,113 @@ export const prepareArtifacts = (root) => {
     delivery: {
       platform: 'darwin-arm64',
       run: workflowRun(),
+      assemblyRun: workflowRun(),
       archives: archivePaths.map((path) => fileRecord(root, path)),
       nativeProof: fileRecord(root, proofPath),
     },
   };
+  assert.equal(
+    cacheKey,
+    deliveryCacheKey(root),
+    'GeoSpec source, toolchain or selected environment changed during production.',
+  );
+  publishInventory(root, complete);
+  return verifyDelivery(root);
+};
+
+/** Repackage unchanged verified products with a source kit made from this checkout.
+ * @type {(root: string, inventory: ReturnType<typeof verifyArtifacts>) => ReturnType<typeof verifyDelivery>}
+ */
+const reassembleDelivery = (root, inventory) => {
+  const source = sourceIdentity(root);
+  const inputs = readJson(resolve(root, mixedInputsPath));
+  const proof = readJson(resolve(root, proofPath));
+  const nativePrefix =
+    proof.actualPrefix !== null && typeof proof.actualPrefix === 'object'
+      ? /** @type {{path?: unknown}} */ (proof.actualPrefix).path
+      : undefined;
+  const nativeCargoHome = /** @type {{invocation?: {environment?: {CARGO_HOME?: unknown}}} | undefined} */ (
+    proof.actualBuild
+  )?.invocation?.environment?.CARGO_HOME;
+  const nativeToolPath = /** @type {{invocation?: {environment?: {PATH?: unknown}}} | undefined} */ (proof.actualBuild)
+    ?.invocation?.environment?.PATH;
+  assert.ok(
+    typeof inputs.preparationCache === 'string' &&
+      posix.isAbsolute(inputs.preparationCache) &&
+      typeof nativePrefix === 'string' &&
+      posix.isAbsolute(nativePrefix) &&
+      typeof nativeCargoHome === 'string' &&
+      posix.isAbsolute(nativeCargoHome) &&
+      typeof nativeToolPath === 'string',
+    'Verified delivery lacks source-kit assembly inputs.',
+  );
+  const pnpmRunner = executableOnPath('pnpm', nativeToolPath);
+  assert.ok(pnpmRunner, 'Recorded GeoSpec pnpm runner is unavailable.');
+  const result = childProcess.spawnSync(
+    pnpmRunner,
+    ['nx', 'run', 'geospec-engine-native:assemble-package', '--excludeTaskDependencies'],
+    {
+      cwd: root,
+      stdio: producerStdio(true),
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 ** 2,
+      env: {
+        ...process.env,
+        NX_DAEMON: 'false',
+        pnpm_config_verify_deps_before_run: 'warn',
+        PATH: nativeToolPath,
+        CARGO_HOME: nativeCargoHome,
+        GEOSPEC_DELIVERY_CACHE: inputs.preparationCache,
+        GEOSPEC_OCCT_PREFIX: nativePrefix,
+        GEOSPEC_PRODUCER_RECEIPT: resolve(root, proofPath),
+        GEOSPEC_MIXED_INPUTS: resolve(root, mixedInputsPath),
+        GEOSPEC_MIXED_COMMANDS: resolve(root, mixedCommandsPath),
+        GEOSPEC_MIXED_RECEIPT: resolve(root, receiptPath),
+      },
+    },
+  );
+  assert.ok(result.status === 0, `GeoSpec source-kit assembly failed: ${result.stderr || result.error}`);
+  const selections = [...result.stdout.matchAll(/^ASSEMBLY_ROOT=(.+)$/gm)].map((match) => match[1]?.trim());
+  assert.ok(
+    selections.length === 1 && selections[0] && posix.isAbsolute(selections[0]),
+    'Missing unique successful source-kit assembly root.',
+  );
+  const assemblyRoot = selections[0];
+  const selected = archiveNames.map((name) => fileRecord(assemblyRoot, `tarballs/${name}`));
+  const selectedArchives = selected.map((record) => ({
+    ...record,
+    path: `${transportPath}/assembly/${posix.basename(assemblyRoot)}/tarballs/${posix.basename(record.path)}`,
+  }));
+  checkCurrentSourceKit({ checkout: root, archiveRoot: assemblyRoot, archives: selected, source });
+  assert.ok(
+    isDeepStrictEqual(source.files, sourceIdentity(root).files),
+    'GeoSpec sources changed during source-kit assembly.',
+  );
+  const directory = resolve(root, transportPath, 'assembly', posix.basename(assemblyRoot), 'tarballs');
+  mkdirSync(directory, { recursive: true });
+  for (const name of archiveNames) {
+    copyFileSync(join(assemblyRoot, 'tarballs', name), join(directory, name));
+  }
+  const complete = {
+    ...inventory,
+    schema: 'geospec-ci-artifacts-v3',
+    source,
+    producerSource:
+      inventory.schema === 'geospec-ci-artifacts-v3'
+        ? /** @type {ReturnType<typeof sourceIdentity>} */ (inventory.producerSource)
+        : producerIdentity(inventory.source),
+    delivery: {
+      platform: 'darwin-arm64',
+      run: recordedWorkflowRun(inventory.delivery?.run),
+      assemblyRun: workflowRun(),
+      archives: selectedArchives,
+      nativeProof: fileRecord(root, proofPath),
+    },
+  };
+  assert.ok(
+    isDeepStrictEqual(complete.artifacts, payload(root)),
+    'GeoSpec products changed during source-kit assembly.',
+  );
   publishInventory(root, complete);
   return verifyDelivery(root);
 };
@@ -703,17 +1084,47 @@ export const ensureDelivery = (root) => {
   try {
     return verifyDelivery(root);
   } catch (error) {
-    console.log(`Preparing GeoSpec delivery: ${error instanceof Error ? error.message : String(error)}`);
+    let compatible;
+    try {
+      compatible = verifyArtifacts(root);
+      const { archives, nativeProof, platform, run, assemblyRun } =
+        /** @type {{archives: ReturnType<typeof fileRecord>[], nativeProof: ReturnType<typeof fileRecord>, platform: string, run: ReturnType<typeof workflowRun>, assemblyRun?: ReturnType<typeof workflowRun>}} */ (
+          compatible.delivery
+        );
+      assert.ok(
+        platform === 'darwin-arm64' &&
+          isDeepStrictEqual(run, recordedWorkflowRun(run)) &&
+          (compatible.schema === 'geospec-ci-artifacts-v2' ||
+            isDeepStrictEqual(assemblyRun, recordedWorkflowRun(assemblyRun))) &&
+          isDeepStrictEqual(nativeProof, fileRecord(root, proofPath)) &&
+          isDeepStrictEqual(
+            archives,
+            archives.map((archive) => fileRecord(root, archive.path)),
+          ),
+        'Previous delivery is not intact for source-kit assembly.',
+      );
+    } catch {
+      console.log(`Preparing GeoSpec delivery: ${error instanceof Error ? error.message : String(error)}`);
+      return prepareArtifacts(root);
+    }
+    return reassembleDelivery(root, compatible);
   }
-  return prepareArtifacts(root);
 };
 
-/** Select immutable archives while holding the same producer lock as ensure/verify.
+/** Select immutable archives while holding the same producer lock as prepare/verify.
  * @type {(root: string) => string}
  * @internal
  */
 export const snapshotDelivery = (root) => {
-  const inventory = ensureDelivery(root);
+  let inventory;
+  try {
+    inventory = verifyDelivery(root);
+  } catch (error) {
+    throw new Error(
+      `GeoSpec delivery is missing or stale; run pnpm nx run geospec-engine-native:prepare-geospec-ci-artifacts: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
   const cache = resolve(root, 'node_modules/.cache/geospec-engine-native');
   mkdirSync(cache, { recursive: true });
   const snapshot = mkdtempSync(join(cache, 'assembly-snapshot-'));
@@ -744,6 +1155,10 @@ const invokedScript = process.argv.at(1);
 if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(import.meta.url)) {
   try {
     const root = resolve(import.meta.dirname, '../../..');
+    if (process.argv.length === 3 && process.argv[2] === 'cache-key') {
+      console.log(deliveryCacheKey(root));
+      process.exit(0);
+    }
     const worker = process.argv[2] === '--producer';
     assert.ok(
       process.argv.length === (worker ? 4 : 3),
@@ -758,9 +1173,9 @@ if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(impo
         mode === 'snapshot-delivery',
       'Usage: ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery|snapshot-delivery',
     );
-    const produces = mode === 'prepare' || mode === 'ensure-delivery' || mode === 'snapshot-delivery';
+    const produces = mode === 'prepare' || mode === 'ensure-delivery';
     assert.ok(
-      process.platform === 'darwin' || !produces,
+      process.platform === 'darwin' || (!produces && mode !== 'snapshot-delivery'),
       'GeoSpec production and snapshot selection require Darwin; non-Darwin supports verified transport reads only.',
     );
     if (worker) {
@@ -790,9 +1205,7 @@ if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(impo
         });
         assert.ok(child.status === 0, `GeoSpec producer failed: ${child.error?.message ?? child.status}`);
       } else if (mode === 'snapshot-delivery') {
-        console.log(
-          `ASSEMBLY_ROOT=${withProducerMarker(root, () => snapshotDelivery(root), { pgid: process.pid, recipeSha256: closedRecipe(root) })}`,
-        );
+        console.log(`ASSEMBLY_ROOT=${snapshotDelivery(root)}`);
       } else {
         const inventory =
           mode === 'ensure-delivery'

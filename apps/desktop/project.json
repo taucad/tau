@@ -111,6 +111,7 @@
       "dependsOn": [
         "build",
         "check-renderer-payload",
+        { "projects": ["geospec-engine-native"], "target": "prepare-geospec-ci-artifacts" },
         { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
         "prepare-picogk-dotnet-macos",
@@ -127,6 +128,7 @@
       "dependsOn": [
         "build",
         "check-renderer-payload",
+        { "projects": ["geospec-engine-native"], "target": "prepare-geospec-ci-artifacts" },
         { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
         "prepare-picogk-dotnet-macos",
@@ -143,6 +145,7 @@
       "dependsOn": [
         "build",
         "check-renderer-payload",
+        { "projects": ["geospec-engine-native"], "target": "prepare-geospec-ci-artifacts" },
         { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
         "prepare-picogk-dotnet-macos",

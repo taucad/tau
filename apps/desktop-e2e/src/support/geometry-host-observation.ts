@@ -17,7 +17,7 @@ export type GeometryHostEvent = Readonly<{
   toleranceMm?: number;
 }>;
 
-/* Executed only through the geometry utility's test-only --require, before its real bundle. */
+/* Test-only geometry utility entry installs the native hook before importing the real bundle. */
 const nativeEntryPreload = String.raw`const Module = require('node:module');
 const load = Module._load;
 let minimumDistanceCalls = 0;
@@ -63,6 +63,11 @@ Module._load = function(request, parent, isMain) {
   binding.Engine.prototype.evaluateClaim = observedEvaluateClaim;
   return binding;
 };
+if (process.env.TAU_E2E_GEOMETRY_ENTRY) {
+  // Electron does not honor Node's --require in a packaged utility process.
+  // This test-only entry installs the hook, then runs the unchanged product entry.
+  void import(require('node:url').pathToFileURL(process.env.TAU_E2E_GEOMETRY_ENTRY).href);
+}
 `;
 
 const preloadRoot = resolve(
@@ -111,13 +116,14 @@ export const observeGeometryHost = async (
         const geometry = options?.serviceName === 'tau-geometry-host';
         if (geometry) {
           const environment: Record<string, string | undefined> = { ...options.env };
+          environment['TAU_E2E_GEOMETRY_ENTRY'] = args[0];
           if (holdSecondMinimumDistance) {
             environment['TAU_E2E_HOLD_SECOND_MINIMUM_DISTANCE'] = '1';
           }
+          args[0] = entryPreload;
           args[2] = {
             ...options,
-            execArgv: [...(options.execArgv ?? []), '--require', entryPreload],
-            ...(holdSecondMinimumDistance ? { env: environment } : {}),
+            env: environment,
           };
         }
         const child = originalFork(...args);

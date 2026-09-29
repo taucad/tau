@@ -131,13 +131,13 @@ export const ChatTextarea = memo(function ({
 
   const geometryUnits = projectContext?.geometryUnits;
   const mainEntryPath = projectContext?.mainEntryPath;
-  const viewSettings = useSelector(projectContext?.editorRef, (state) => state?.context.viewSettings);
+  const viewRecords = projectContext?.viewRecords;
   const mainGeometryFormat = useSelector(
     mainEntryPath ? geometryUnits?.get(mainEntryPath) : undefined,
     (state) => state?.context.geometry?.format,
   );
   const screenshotActionItems = useMemo((): ContextSuggestionItem[] => {
-    if (!geometryUnits || !viewSettings || !logic.imageInputSupported) {
+    if (!geometryUnits || !viewRecords || !logic.imageInputSupported) {
       return [];
     }
 
@@ -162,7 +162,7 @@ export const ChatTextarea = memo(function ({
       });
     }
 
-    for (const entryPath of listGeometryEntryPaths(geometryUnits, viewSettings, mainEntryPath ?? '')) {
+    for (const entryPath of listGeometryEntryPaths(geometryUnits, viewRecords, mainEntryPath ?? '')) {
       if (entryPath === mainEntryPath) {
         continue;
       }
@@ -178,7 +178,7 @@ export const ChatTextarea = memo(function ({
     }
 
     return items;
-  }, [geometryUnits, viewSettings, mainEntryPath, mainGeometryFormat, logic.imageInputSupported]);
+  }, [geometryUnits, viewRecords, mainEntryPath, mainGeometryFormat, logic.imageInputSupported]);
 
   const mounted = useRef(true);
   useEffect(() => {

@@ -1655,9 +1655,10 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     vi.resetModules();
     const freshSessions = await import('#hooks/use-sessions.js');
     const freshStore = await import('#services/sessions-store.js');
+    const freshActor = freshStore.createSessionsActor().start();
     const view = render(
       <QueryClientProvider client={queryClient}>
-        <freshSessions.SessionsProvider>
+        <freshSessions.SessionsProvider actor={freshActor}>
           <span>app</span>
         </freshSessions.SessionsProvider>
       </QueryClientProvider>,
@@ -1669,7 +1670,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     });
     await settle();
     expect(view.getByRole('status').textContent).toContain('checked workbench write unavailable');
-    expect(freshStore.sessionsActor.getSnapshot().matches('ready')).toBe(true);
+    expect(freshActor.getSnapshot().matches('ready')).toBe(true);
     expect(answers).toEqual([]);
     await act(async () => {
       view.getByRole('button', { name: 'Try again' }).click();
@@ -1677,7 +1678,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     });
     await settle();
     expect(flushProducers).toHaveBeenCalledTimes(2);
-    expect(freshStore.sessionsActor.getSnapshot().matches('quiesced')).toBe(true);
+    expect(freshActor.getSnapshot().matches('quiesced')).toBe(true);
     expect(answers).toEqual(['quiesced']);
     view.unmount();
   });

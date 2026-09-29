@@ -95,7 +95,6 @@ export type AgentHostProjectProvide = {
   readonly hostId: string;
   readonly fileSystemPort: MessagePort;
   readonly projectRootPort: MessagePort;
-  readonly workbenchRootPort: MessagePort;
   readonly computeMode?: 'off' | 'memory' | 'durable' | undefined;
   readonly computeStorePort?: MessagePort | undefined;
   /** A port into the file-manager worker's revision root for this project; the `revisions` tool is offered with it. */
@@ -361,7 +360,6 @@ const provideSchema = z.strictObject({
   hostId: nonEmptyString,
   fileSystemPort: messagePortSchema,
   projectRootPort: messagePortSchema,
-  workbenchRootPort: messagePortSchema,
   computeMode: z.enum(['off', 'memory', 'durable']).optional(),
   computeStorePort: messagePortSchema.optional(),
   revisionsPort: messagePortSchema.optional(),

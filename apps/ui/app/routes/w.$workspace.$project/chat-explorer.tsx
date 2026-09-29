@@ -241,10 +241,10 @@ function ChatGeometryExplorerContent({
   );
   const entries = useMemo(
     () =>
-      listGeometryEntryPaths(project.geometryUnits, viewSettings, project.mainEntryPath).map(
+      listGeometryEntryPaths(project.geometryUnits, project.viewRecords, project.mainEntryPath).map(
         (entryPath): [string, GraphicsActorRef | undefined] => [entryPath, resolveGraphicsForFile(entryPath)],
       ),
-    [project.geometryUnits, project.mainEntryPath, resolveGraphicsForFile, viewSettings],
+    [project.geometryUnits, project.mainEntryPath, resolveGraphicsForFile, project.viewRecords],
   );
 
   if (entries.length === 0) {

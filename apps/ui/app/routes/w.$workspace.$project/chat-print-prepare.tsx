@@ -413,17 +413,16 @@ export const usePrintPrepare = ({
   readonly manifest: MachineManifest | undefined;
   readonly isShown?: boolean;
 }): PrintPrepare => {
-  const { projectId, projectRef, geometryUnits, mainEntryPath, editorRef } = useProject();
+  const { projectId, projectRef, geometryUnits, mainEntryPath, editorRef, viewRecords, entriesRecord } = useProject();
   const fileManager = useFileManager();
   const [chosenEntryPath, setEntryPath] = useState<string>();
-  const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
   const entryPaths = useMemo(
-    () => listGeometryEntryPaths(geometryUnits, viewSettings, mainEntryPath),
-    [geometryUnits, viewSettings, mainEntryPath],
+    () => listGeometryEntryPaths(geometryUnits, viewRecords, mainEntryPath),
+    [geometryUnits, viewRecords, mainEntryPath],
   );
   const entryPath =
     chosenEntryPath !== undefined && entryPaths.includes(chosenEntryPath) ? chosenEntryPath : mainEntryPath;
-  const renderTimeout = useSelector(editorRef, (state) => state.context.unitSettings[entryPath]?.renderTimeout);
+  const renderTimeout = entriesRecord?.entries[entryPath]?.renderTimeout;
   useEffect(() => {
     if (!isShown || !entryPath) {
       return;

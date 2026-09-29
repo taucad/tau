@@ -16,14 +16,16 @@ export const sortGeometryUnitEntries = <T>(entries: Array<[string, T]>, mainEntr
 /** Restored viewer paths remain discoverable before their CAD units are admitted. */
 export const listGeometryEntryPaths = (
   units: ReadonlyMap<string, unknown>,
-  views: Readonly<Record<string, { readonly entryPath?: string }>>,
+  views:
+    | ReadonlyMap<string, { readonly entryPath?: string | null }>
+    | Readonly<Record<string, { readonly entryPath?: string | null }>>,
   mainEntryPath: string,
 ): string[] => {
   const paths = new Set(units.keys());
   if (mainEntryPath) {
     paths.add(mainEntryPath);
   }
-  for (const view of Object.values(views)) {
+  for (const view of views instanceof Map ? views.values() : Object.values(views)) {
     if (view.entryPath) {
       paths.add(view.entryPath);
     }

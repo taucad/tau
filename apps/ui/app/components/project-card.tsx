@@ -1,8 +1,9 @@
+import { lazy, Suspense } from 'react';
 import { Eye } from 'lucide-react';
 import type { To } from 'react-router';
 import { Link } from 'react-router';
-import { CadPreviewViewer } from '#components/cad-preview.js';
 import type { CadPreviewGraphicsOptions } from '#components/cad-preview.js';
+import { warmProjectWorkspace } from '#lib/project-workspace-warmup.js';
 import { Button } from '@taucad/ui/components/button';
 import { Card } from '@taucad/ui/components/card';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -33,6 +34,11 @@ const projectCardGraphicsOptions = {
   viewerClassName: 'bg-muted',
 } satisfies CadPreviewGraphicsOptions;
 
+const CadPreviewViewer = lazy(async () => {
+  const module = await import('#components/cad-preview.js');
+  return { default: module.CadPreviewViewer };
+});
+
 export function ProjectCard({
   to,
   linkLabel,
@@ -40,12 +46,21 @@ export function ProjectCard({
   children,
   ...properties
 }: ProjectCardProps): React.JSX.Element {
+  const warmWorkspace = (typeof to === 'string' ? to : to.pathname)?.startsWith('/w/')
+    ? warmProjectWorkspace
+    : undefined;
   return (
     <Card
       className={cn('isolate relative h-full overflow-hidden pt-0 hover:border-foreground/30', className)}
       {...properties}
     >
-      <Link to={to} className='absolute inset-0 z-10 rounded-xl focus-visible:focus-outline'>
+      <Link
+        to={to}
+        className='absolute inset-0 z-10 rounded-xl focus-visible:focus-outline'
+        onPointerEnter={warmWorkspace}
+        onPointerDown={warmWorkspace}
+        onFocus={warmWorkspace}
+      >
         <span className='sr-only'>{linkLabel}</span>
       </Link>
       {children}
@@ -95,11 +110,13 @@ export function ProjectCardMedia({
 
 export function ProjectCardCadPreview(): React.JSX.Element {
   return (
-    <CadPreviewViewer
-      className='size-full'
-      enablePan={false}
-      initialVerticalFieldOfView={45}
-      graphicsOptions={projectCardGraphicsOptions}
-    />
+    <Suspense fallback={<div role='status' aria-label='Loading preview' className='size-full bg-muted' />}>
+      <CadPreviewViewer
+        className='size-full'
+        enablePan={false}
+        initialVerticalFieldOfView={45}
+        graphicsOptions={projectCardGraphicsOptions}
+      />
+    </Suspense>
   );
 }

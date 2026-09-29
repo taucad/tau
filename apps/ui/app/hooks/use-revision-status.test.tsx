@@ -462,6 +462,43 @@ describe('the page client of the worker revision root', () => {
     expect(channel.close).toHaveBeenCalledOnce();
   });
 
+  it('reports a save failure while the host channel remains open', async () => {
+    const pendingSave = Promise.withResolvers<RevisionAnswer>();
+    const revision = vi.fn(async (request: JsonValue): Promise<RevisionAnswer> => {
+      if (
+        typeof request === 'object' &&
+        request !== null &&
+        'command' in request &&
+        request['command'] === 'saveRevision'
+      ) {
+        return pendingSave.promise;
+      }
+      return { result: null, status: { projectId, branch: 'main' } };
+    });
+    const channel = revisionChannel({
+      revision,
+      async *revisionEvents() {
+        yield* [];
+      },
+      close: vi.fn(),
+    });
+    const client = createHostRevisionClient({ projectId, connect: async () => channel });
+    const toasts: RevisionToast[] = [];
+    client.subscribeToasts((toast) => toasts.push(toast));
+
+    client.open();
+    await waitFor(() => {
+      expect(client.status()).toBeDefined();
+    });
+    client.send({ command: 'saveRevision' });
+    await expect.poll(() => revision.mock.calls.length).toBe(3);
+    pendingSave.reject(new Error('disk full'));
+    await expect.poll(() => toasts.length).toBe(1);
+
+    expect(toasts).toEqual([{ type: 'error', subject: 'save', message: 'disk full' }]);
+    client.close();
+  });
+
   it('replays a native chat projection to a later route subscriber', async () => {
     const channel = revisionChannel({
       revision: vi.fn(async (): Promise<RevisionAnswer> => ({ result: null, status: { projectId, branch: 'main' } })),

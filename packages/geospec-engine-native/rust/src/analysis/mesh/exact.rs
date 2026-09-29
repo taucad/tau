@@ -28,6 +28,109 @@ use crate::{
 /// Face-box tests per work unit.
 pub(crate) const BOX_TESTS_PER_UNIT: u64 = 4096;
 
+/// Rust-visible component work kinds; OCCT's inner vertex/edge/face split
+/// requires bridge instrumentation and is deliberately not inferred here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChargeStage {
+    BodySetup,
+    Sweep,
+    FaceBoxes,
+    FaceDistance,
+    NestedClassify,
+    WholeBodyDistance,
+}
+
+impl ChargeStage {
+    fn index(self) -> usize {
+        match self {
+            Self::BodySetup => 0,
+            Self::Sweep => 1,
+            Self::FaceBoxes => 2,
+            Self::FaceDistance => 3,
+            Self::NestedClassify => 4,
+            Self::WholeBodyDistance => 5,
+        }
+    }
+}
+
+/// One accepted cold charge, in execution order. Pair indexes use the
+/// retained body labels so warm refusals name the same pair.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChargeStep {
+    pub(crate) units: u64,
+    pub(crate) pair: Option<(usize, usize)>,
+    pub(crate) stage: ChargeStage,
+}
+
+/// Bound the side-channel independently of work units: a native callback may
+/// make arbitrarily many accepted zero-unit charges.
+const MAX_TRACE_BYTES: usize = 4 * 1024 * 1024;
+
+pub(crate) struct ChargeTrace {
+    pub(crate) steps: Vec<ChargeStep>,
+    pub(crate) complete: bool,
+    pub(crate) stage_calls: [u64; 6],
+    pub(crate) stage_units: [u64; 6],
+    limit: usize,
+}
+
+impl Default for ChargeTrace {
+    fn default() -> Self {
+        Self {
+            steps: Vec::new(),
+            complete: true,
+            stage_calls: [0; 6],
+            stage_units: [0; 6],
+            limit: MAX_TRACE_BYTES / std::mem::size_of::<ChargeStep>(),
+        }
+    }
+}
+
+impl ChargeTrace {
+    pub(crate) fn disabled() -> Self {
+        Self {
+            steps: Vec::new(),
+            complete: false,
+            stage_calls: [0; 6],
+            stage_units: [0; 6],
+            limit: 0,
+        }
+    }
+
+    pub(crate) fn record(&mut self, step: ChargeStep) {
+        if !self.complete {
+            return;
+        }
+        let stage = step.stage.index();
+        let Some(stage_units) = self.stage_units[stage].checked_add(step.units) else {
+            self.discard();
+            return;
+        };
+        if self.steps.len() == self.limit {
+            self.discard();
+            return;
+        }
+        self.stage_calls[stage] += 1;
+        self.stage_units[stage] = stage_units;
+        self.steps.push(step);
+    }
+
+    fn discard(&mut self) {
+        self.complete = false;
+        self.steps.clear();
+        self.stage_calls = [0; 6];
+        self.stage_units = [0; 6];
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_limit(limit: usize) -> Self {
+        Self {
+            limit,
+            ..Self::default()
+        }
+    }
+}
+
 /// Why exact components stopped: a charge that would pass the budget, with
 /// the body pair it was for (none while measuring the bodies), or a kernel
 /// failure.
@@ -71,17 +174,61 @@ pub(crate) fn ask<T>(
     }
 }
 
+pub(crate) fn ask_traced<T>(
+    budget: &Budget,
+    pair: Option<(usize, usize)>,
+    stage: ChargeStage,
+    trace: &mut ChargeTrace,
+    step: impl FnOnce(&mut Charge<'_>) -> Result<Option<T>, BackendError>,
+) -> Result<T, ExactError> {
+    let mut refused = None;
+    let answer = step(
+        &mut |units| match charge_traced(budget, units, pair, stage, trace) {
+            Ok(()) => true,
+            Err(exceeded) => {
+                refused = Some(exceeded);
+                false
+            }
+        },
+    )?;
+    match (answer, refused) {
+        (_, Some(exceeded)) => Err(ExactError::Budget { exceeded, pair }),
+        (Some(answer), None) => Ok(answer),
+        (None, None) => Err(ExactError::Backend(BackendError {
+            kind: BackendErrorKind::ComputationFailed,
+            message: "A native step stopped without a refused charge.".into(),
+        })),
+    }
+}
+
 /// The clusters of bodies within `tolerance` of each other, in the mesh
 /// clusters' order; `labels[i]` names body `i`.
+#[cfg(test)]
 pub(crate) fn exact_clusters(
     bodies: &dyn ComponentBodies,
     labels: &[String],
     tolerance: f64,
     budget: &Budget,
 ) -> Result<Vec<ClusterReport>, ExactError> {
+    exact_clusters_traced(
+        bodies,
+        labels,
+        tolerance,
+        budget,
+        &mut ChargeTrace::default(),
+    )
+}
+
+pub(crate) fn exact_clusters_traced(
+    bodies: &dyn ComponentBodies,
+    labels: &[String],
+    tolerance: f64,
+    budget: &Budget,
+    trace: &mut ChargeTrace,
+) -> Result<Vec<ClusterReport>, ExactError> {
     let list = bodies.bodies();
     let mut parent: Vec<usize> = (0..list.len()).collect();
-    let mut pairs = candidate_pairs(list, tolerance, budget)?;
+    let mut pairs = candidate_pairs(list, tolerance, budget, trace)?;
     pairs.sort_unstable_by_key(|pair| (pair.count, pair.left, pair.right));
     let mut nested = Vec::new();
     for pair in pairs {
@@ -90,16 +237,22 @@ pub(crate) fn exact_clusters(
             continue;
         }
         let touching = pair.count > 0
-            && ask(budget, Some((left, right)), |charge| {
-                bodies.faces_within(
-                    left,
-                    &pair.left_faces,
-                    right,
-                    &pair.right_faces,
-                    tolerance,
-                    charge,
-                )
-            })?;
+            && ask_traced(
+                budget,
+                Some((left, right)),
+                ChargeStage::FaceDistance,
+                trace,
+                |charge| {
+                    bodies.faces_within(
+                        left,
+                        &pair.left_faces,
+                        right,
+                        &pair.right_faces,
+                        tolerance,
+                        charge,
+                    )
+                },
+            )?;
         if touching {
             union(&mut parent, left, right);
         } else if holds(&list[left], &list[right], tolerance)
@@ -115,7 +268,7 @@ pub(crate) fn exact_clusters(
         if find(&mut parent, left) == find(&mut parent, right) {
             continue;
         }
-        if nested_within(bodies, left, right, tolerance, units, budget)? {
+        if nested_within(bodies, left, right, tolerance, units, budget, trace)? {
             union(&mut parent, left, right);
         }
     }
@@ -135,6 +288,7 @@ fn nested_within(
     tolerance: f64,
     units: u64,
     budget: &Budget,
+    trace: &mut ChargeTrace,
 ) -> Result<bool, ExactError> {
     let list = bodies.bodies();
     let mut unsure = false;
@@ -142,9 +296,13 @@ fn nested_within(
         if !list[outer].solid {
             continue;
         }
-        match ask(budget, Some((left, right)), |charge| {
-            bodies.body_inside(outer, inner, charge)
-        })? {
+        match ask_traced(
+            budget,
+            Some((left, right)),
+            ChargeStage::NestedClassify,
+            trace,
+            |charge| bodies.body_inside(outer, inner, charge),
+        )? {
             PointState::In => return Ok(true),
             PointState::On => unsure = true,
             PointState::Out => {}
@@ -153,7 +311,14 @@ fn nested_within(
     if !unsure {
         return Ok(false);
     }
-    charge(budget, units).map_err(|exceeded| ExactError::Budget {
+    charge_traced(
+        budget,
+        units,
+        Some((left, right)),
+        ChargeStage::WholeBodyDistance,
+        trace,
+    )
+    .map_err(|exceeded| ExactError::Budget {
         exceeded,
         pair: Some((left, right)),
     })?;
@@ -168,7 +333,7 @@ fn union(parent: &mut [usize], left: usize, right: usize) {
 
 /// Checked before charging, so a refused step never leaves the budget spent
 /// past its limit, where the plan would refuse without the pair.
-fn charge(budget: &Budget, units: u64) -> Result<(), BudgetExceeded> {
+pub(crate) fn charge(budget: &Budget, units: u64) -> Result<(), BudgetExceeded> {
     let used = budget.used().saturating_add(units);
     if used > budget.limit() {
         return Err(BudgetExceeded {
@@ -177,6 +342,18 @@ fn charge(budget: &Budget, units: u64) -> Result<(), BudgetExceeded> {
         });
     }
     budget.charge(units)
+}
+
+fn charge_traced(
+    budget: &Budget,
+    units: u64,
+    pair: Option<(usize, usize)>,
+    stage: ChargeStage,
+    trace: &mut ChargeTrace,
+) -> Result<(), BudgetExceeded> {
+    charge(budget, units)?;
+    trace.record(ChargeStep { units, pair, stage });
+    Ok(())
 }
 
 fn aabb(bounds: Bounds) -> Aabb {
@@ -206,6 +383,7 @@ fn candidate_pairs(
     list: &[ComponentBody],
     tolerance: f64,
     budget: &Budget,
+    trace: &mut ChargeTrace,
 ) -> Result<Vec<Candidate>, ExactError> {
     let reaches: Vec<Aabb> = list.iter().map(|body| aabb(reach(body))).collect();
     let axis = sweep_axis(reaches.iter().copied());
@@ -220,9 +398,11 @@ fn candidate_pairs(
         let bounds = reaches[current];
         for &candidate in &order[position + 1..] {
             if comparisons % BOX_TESTS_PER_UNIT == 0 {
-                charge(budget, 1).map_err(|exceeded| ExactError::Budget {
-                    exceeded,
-                    pair: None,
+                charge_traced(budget, 1, None, ChargeStage::Sweep, trace).map_err(|exceeded| {
+                    ExactError::Budget {
+                        exceeded,
+                        pair: None,
+                    }
                 })?;
             }
             comparisons += 1;
@@ -234,11 +414,16 @@ fn candidate_pairs(
                 let (left, right) = (current.min(candidate), current.max(candidate));
                 let tests =
                     (list[left].faces.len() as u64).saturating_mul(list[right].faces.len() as u64);
-                charge(budget, 1 + tests / BOX_TESTS_PER_UNIT).map_err(|exceeded| {
-                    ExactError::Budget {
-                        exceeded,
-                        pair: Some((left, right)),
-                    }
+                charge_traced(
+                    budget,
+                    1 + tests / BOX_TESTS_PER_UNIT,
+                    Some((left, right)),
+                    ChargeStage::FaceBoxes,
+                    trace,
+                )
+                .map_err(|exceeded| ExactError::Budget {
+                    exceeded,
+                    pair: Some((left, right)),
                 })?;
                 pairs.push(face_pairs(
                     &list[left],
@@ -725,7 +910,7 @@ mod tests {
             },
         ];
         let budget = Budget::new(2);
-        let pairs = candidate_pairs(&bodies, 0.001, &budget).unwrap();
+        let pairs = candidate_pairs(&bodies, 0.001, &budget, &mut ChargeTrace::default()).unwrap();
         assert_eq!(pairs.len(), 1);
         assert_eq!((pairs[0].left, pairs[0].right), (0, 1));
         // The sweep's batch, then the pair's face-box tests.

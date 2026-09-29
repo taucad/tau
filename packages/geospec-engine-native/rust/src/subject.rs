@@ -12,8 +12,8 @@ use crate::{
         batch::{BatchAnalysis, ExactClusters},
         continuous::{self, GridPlan, Topology},
         mesh::{
-            analyze, analyze_indexed, ClusterReport, ConnectedComponents, MeshAnalysis,
-            MeshAnalysisRecord, Primitive,
+            analyze, analyze_indexed, exact::ChargeTrace, ClusterReport, ConnectedComponents,
+            MeshAnalysis, MeshAnalysisRecord, Primitive,
         },
         selection::{build_report_index, SelectorIndex},
     },
@@ -1616,7 +1616,12 @@ impl<'a> EvaluationContext<'a> {
     pub(crate) fn exact_clusters(
         &self,
         tolerance_mm: f64,
-        build: impl FnOnce() -> Result<Vec<ClusterReport>, Evaluation>,
+        build: impl FnOnce(&mut ChargeTrace) -> Result<(Vec<ClusterReport>, Vec<String>), Evaluation>,
+        on_exceeded: impl Fn(
+            crate::budget::BudgetExceeded,
+            Option<(usize, usize)>,
+            &[String],
+        ) -> Evaluation,
     ) -> Result<Rc<ExactClusters>, Evaluation> {
         match self.batch {
             Some(batch) => batch.exact_clusters(
@@ -1624,8 +1629,22 @@ impl<'a> EvaluationContext<'a> {
                 tolerance_mm,
                 self.budget,
                 build,
+                on_exceeded,
             ),
-            None => build().map(|clusters| Rc::new(ExactClusters { clusters, units: 0 })),
+            None => {
+                let mut trace = ChargeTrace::disabled();
+                build(&mut trace).map(|(clusters, labels)| {
+                    Rc::new(ExactClusters {
+                        clusters,
+                        units: 0,
+                        labels,
+                        trace: trace.steps,
+                        trace_complete: trace.complete,
+                        stage_calls: trace.stage_calls,
+                        stage_units: trace.stage_units,
+                    })
+                })
+            }
         }
     }
 

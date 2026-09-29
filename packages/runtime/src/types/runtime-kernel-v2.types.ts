@@ -30,12 +30,13 @@ export type Artifact = Readonly<{
 export type ExportFile = Omit<ExistingExportFile, 'mimeType'> & { readonly mimeType: MediaType };
 /** One named instance of a declared view. @public */
 export type ViewInstance = Readonly<{ id: string; title: string }>;
+type ObjectOptionsSchema = z.ZodType<Readonly<Record<string, unknown>>, Readonly<Record<string, unknown>>>;
 
 /** Static declaration and validation metadata for a view. @public */
 export type ViewDeclaration = Readonly<{
   title: string;
   mimeType: MediaType;
-  optionsSchema?: z.ZodType;
+  optionsSchema?: ObjectOptionsSchema;
   content?: RuntimeContentDeclaration;
   instances?: true;
 }>;
@@ -44,7 +45,7 @@ export type ExportDeclaration = Readonly<{
   title: string;
   mimeType: MediaType;
   extension: string;
-  optionsSchema?: z.ZodType;
+  optionsSchema?: ObjectOptionsSchema;
   content?: RuntimeContentDeclaration;
 }>;
 /** Views offered by a kernel, keyed by stable view identifier. @public */
@@ -313,6 +314,39 @@ const schemaMetadata = (schema: z.ZodType | undefined, label: string): JSONSchem
     throw new Error(`Failed to derive JSON Schema for ${label}.`, { cause: error });
   }
 };
+// Undefined means the input can accept arbitrary keys, so overlap cannot be ruled out.
+const inputOptionKeys = (schema: z.core.$ZodType): string[] | undefined => {
+  if (schema instanceof z.ZodPipe) {
+    return inputOptionKeys(schema.in);
+  }
+  if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable || schema instanceof z.ZodDefault) {
+    return inputOptionKeys(schema.unwrap());
+  }
+  if (schema instanceof z.ZodUnion) {
+    const branches = schema.options.map(inputOptionKeys);
+    return branches.some((keys) => keys === undefined) ? undefined : branches.flatMap((keys) => keys ?? []);
+  }
+  if (schema instanceof z.ZodIntersection) {
+    const left = inputOptionKeys(schema._zod.def.left);
+    const right = inputOptionKeys(schema._zod.def.right);
+    return left && right ? [...left, ...right] : undefined;
+  }
+  if (schema instanceof z.ZodRecord) {
+    const { keyType } = schema;
+    if (keyType instanceof z.ZodEnum) {
+      return keyType.options.map(String);
+    }
+    if (keyType instanceof z.ZodLiteral) {
+      return [...keyType.values].map(String);
+    }
+    return undefined;
+  }
+  if (schema instanceof z.ZodObject) {
+    const { catchall } = schema._zod.def;
+    return catchall && !(catchall instanceof z.ZodNever) ? undefined : Object.keys(schema.shape);
+  }
+  return undefined;
+};
 const declarationMetadata = <Declaration extends ViewDeclaration>(
   declaration: Declaration,
   label: string,
@@ -397,6 +431,15 @@ export function defineKernelV2<
     definition;
   for (const [viewId, view] of Object.entries(views)) {
     assertDeclaration(id, { kind: 'view', id: viewId }, view);
+    const viewOptionsSchema = view.optionsSchema;
+    if (definition.evaluateOptionsSchema && viewOptionsSchema) {
+      const inputKeys = inputOptionKeys(viewOptionsSchema);
+      const evaluateKeys = inputOptionKeys(definition.evaluateOptionsSchema);
+      const overlap = evaluateKeys?.find((key) => inputKeys?.includes(key));
+      if (overlap) {
+        throw new TypeError(`Kernel "${id}" evaluate and view "${viewId}" both declare option "${overlap}".`);
+      }
+    }
     validateRuntimeContentDeclarations(id, [[`views.${viewId}.content`, view.content]]);
   }
   for (const [exportId, output] of Object.entries(exports)) {

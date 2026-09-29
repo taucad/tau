@@ -48,6 +48,7 @@ import { isRenderAbortedError } from '#framework/runtime-worker-client.js';
 import { preserveMethodNames } from '#framework/named.js';
 import { isWebAssemblyException } from '#framework/wasm-exception.js';
 import { createKernelError } from '#kernels/kernel-helpers.js';
+import { admitKernelOptions } from '#framework/kernel-option-admission.js';
 import type { KernelPlugin } from '#plugins/plugin-types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RenderRequest } from '#types/runtime-middleware-v2.types.js';
@@ -113,8 +114,10 @@ const isViewInstance = (value: unknown): value is ViewInstance =>
   value !== null &&
   'id' in value &&
   typeof value.id === 'string' &&
+  value.id.length > 0 &&
   'title' in value &&
-  typeof value.title === 'string';
+  typeof value.title === 'string' &&
+  value.title.length > 0;
 
 /**
  * Describe why an entry matched no kernel: its extension and the ones the runtime does handle.
@@ -135,6 +138,9 @@ const describeUnhandledExtension = (entryPath: string, kernels: readonly KernelP
 /** Multi-kernel runtime worker that dynamically selects and delegates to loaded kernel definitions. */
 class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   protected override readonly name = 'KernelRuntimeWorker';
+  protected override get deferRenderOptionAdmission(): boolean {
+    return true;
+  }
 
   private readonly runtime: AnyRuntimeDefinition;
   private readonly loadedKernels = new Map<string, LoadedKernel>();
@@ -167,6 +173,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       this.kernelPlugins = resolvedRuntime.kernels;
       this.loadedKernels.clear();
       this.kernelExportZodSchemasMap.clear();
+      this.kernelAmbiguousExportFormatsMap.clear();
       this.kernelRenderZodSchemaMap.clear();
       this.kernelCreateOptionsZodSchemaMap.clear();
       this.kernelExportContentMap.clear();
@@ -347,13 +354,56 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         kernelRuntime,
         kernel.ctx,
       );
-
+      // Own the produced handle before validating offers so a rejected evaluation can release it.
       this.captureNativeHandle(output.handle, owner, slot);
+      if (
+        output.views !== undefined &&
+        (!Array.isArray(output.views) || !output.views.every((id) => typeof id === 'string'))
+      ) {
+        throw new TypeError(`Kernel ${kernel.entry.id} offered invalid views; expected an array of view IDs.`);
+      }
+      if (
+        output.exports !== undefined &&
+        (!Array.isArray(output.exports) || !output.exports.every((id) => typeof id === 'string'))
+      ) {
+        throw new TypeError(`Kernel ${kernel.entry.id} offered invalid exports; expected an array of export IDs.`);
+      }
+      const offeredInstances: unknown = output.instances;
+      if (
+        offeredInstances !== undefined &&
+        (typeof offeredInstances !== 'object' || offeredInstances === null || Array.isArray(offeredInstances))
+      ) {
+        throw new TypeError(`Kernel ${kernel.entry.id} offered invalid instances; expected a view-keyed object.`);
+      }
+      const viewIds = output.views ?? Object.keys(kernel.definition.views);
+      const exportIds = output.exports ?? Object.keys(kernel.definition.exports);
+      for (const [kind, ids, declarations] of [
+        ['view', viewIds, kernel.definition.views],
+        ['export', exportIds, kernel.definition.exports],
+      ] as const) {
+        const seen = new Set<string>();
+        for (const id of ids) {
+          if (!Object.hasOwn(declarations, id) || seen.has(id)) {
+            throw new TypeError(
+              `Kernel ${kernel.entry.id} offered ${seen.has(id) ? 'duplicate' : 'unknown'} ${kind} ${id}.`,
+            );
+          }
+          seen.add(id);
+        }
+      }
       const instances: Record<string, readonly ViewInstance[]> = {};
       for (const [id, value] of Object.entries(output.instances ?? {})) {
         const candidate: unknown = value;
+        if (!viewIds.includes(id) || kernel.definition.views[id]?.instances !== true) {
+          throw new TypeError(
+            `Kernel ${kernel.entry.id} offered instances for unavailable or undeclared-instance view ${id}.`,
+          );
+        }
         if (!Array.isArray(candidate) || !candidate.every((item: unknown) => isViewInstance(item))) {
           throw new TypeError(`Kernel ${kernel.entry.id} offered invalid instances for view ${id}.`);
+        }
+        if (new Set(candidate.map((item: ViewInstance) => item.id)).size !== candidate.length) {
+          throw new TypeError(`Kernel ${kernel.entry.id} offered duplicate instance IDs for view ${id}.`);
         }
         instances[id] = candidate.filter((item: unknown) => isViewInstance(item));
       }
@@ -364,7 +414,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       };
       slot.offers = offers;
       slot.nativeBuildInput = input;
-      const defaultViewId = output.views === undefined ? Object.keys(kernel.definition.views)[0] : output.views[0];
+      const defaultViewId = viewIds[0];
       const defaultView = defaultViewId ? kernel.definition.views[defaultViewId] : undefined;
       if (defaultView) {
         this.kernelRenderMimeTypeMap.set(kernel.entry.id, defaultView.mimeType);
@@ -472,7 +522,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       return createKernelError([
         {
           message: `No matching render view ${input.view} with media type ${input.mimeType}.`,
-          code: 'KERNEL_CAPABILITY_MISSING',
+          code: 'VIEW_UNKNOWN',
           type: 'kernel',
           severity: 'error',
         },
@@ -483,34 +533,22 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       return createKernelError([
         {
           message: `Kernel ${kernel.entry.id} did not offer view ${input.view} for this evaluation.`,
-          code: 'KERNEL_CAPABILITY_MISSING',
+          code: 'VIEW_UNAVAILABLE',
           type: 'kernel',
           severity: 'error',
         },
       ]);
     }
-    const parsed = declaration.optionsSchema?.safeParse(input.options);
-    if (parsed && !parsed.success) {
-      return createKernelError(
-        parsed.error.issues.map((issue) => ({
-          message: `Kernel ${kernel.entry.id} view ${input.view} option ${issue.path.join('.')}: ${issue.message}`,
-          code: 'RUNTIME',
-          type: 'kernel',
-          severity: 'error',
-        })),
-      );
+    const admitted = admitKernelOptions(
+      declaration.optionsSchema,
+      input.options,
+      `Kernel ${kernel.entry.id} view ${input.view}`,
+      'VIEW_OPTIONS_INVALID',
+    );
+    if (!admitted.success) {
+      return createKernelError(admitted.issues);
     }
-    if (!declaration.optionsSchema && Object.keys(input.options).length > 0) {
-      return createKernelError([
-        {
-          message: `Kernel ${kernel.entry.id} view ${input.view} declares no options.`,
-          code: 'RUNTIME',
-          type: 'kernel',
-          severity: 'error',
-        },
-      ]);
-    }
-    const resolvedOptions: unknown = parsed?.data ?? {};
+    const resolvedOptions: unknown = admitted.options;
     if (typeof resolvedOptions !== 'object' || resolvedOptions === null || Array.isArray(resolvedOptions)) {
       return createKernelError([
         {
@@ -742,53 +780,36 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     runtime: KernelRuntime,
     slot?: EvaluationSlot,
   ): Promise<ExportGeometryResult> {
-    const selected = Object.entries(kernel.definition.exports).find(
+    const declared = Object.entries(kernel.definition.exports).filter(
       ([, declaration]) => declaration.extension === input.format,
     );
+    const matching = declared.filter(([id]) => slot?.offers?.exports === undefined || slot.offers.exports.includes(id));
+    const selected = matching[0];
+    if (matching.length > 1) {
+      return createKernelError([
+        {
+          message: `Kernel ${kernel.entry.id} has multiple exports for ${input.format}: ${matching.map(([id]) => id).join(', ')}.`,
+          code: 'EXPORT_AMBIGUOUS',
+          type: 'kernel',
+          severity: 'error',
+        },
+      ]);
+    }
     if (!selected || !kernel.definition.write) {
       return createKernelError([
         {
-          message: `Kernel ${kernel.entry.id} does not offer export format ${input.format}.`,
-          code: 'KERNEL_CAPABILITY_MISSING',
+          message:
+            declared.length > 0
+              ? `Kernel ${kernel.entry.id} did not offer export format ${input.format} for this evaluation.`
+              : `Kernel ${kernel.entry.id} does not declare export format ${input.format}.`,
+          code: 'EXPORT_UNKNOWN',
           type: 'kernel',
           severity: 'error',
         },
       ]);
     }
-    const [exportId, declaration] = selected;
-    const offeredExports = slot?.offers?.exports;
-    if (offeredExports !== undefined && !offeredExports.includes(exportId)) {
-      return createKernelError([
-        {
-          message: `Kernel ${kernel.entry.id} did not offer export ${exportId} for this evaluation.`,
-          code: 'KERNEL_CAPABILITY_MISSING',
-          type: 'kernel',
-          severity: 'error',
-        },
-      ]);
-    }
-    const parsed = declaration.optionsSchema?.safeParse(input.options);
-    if (parsed && !parsed.success) {
-      return createKernelError(
-        parsed.error.issues.map((issue) => ({
-          message: `Kernel ${kernel.entry.id} export ${exportId} option ${issue.path.join('.')}: ${issue.message}`,
-          code: 'RUNTIME',
-          type: 'kernel',
-          severity: 'error',
-        })),
-      );
-    }
-    if (!declaration.optionsSchema && Object.keys(input.options).length > 0) {
-      return createKernelError([
-        {
-          message: `Kernel ${kernel.entry.id} export ${exportId} declares no options.`,
-          code: 'RUNTIME',
-          type: 'kernel',
-          severity: 'error',
-        },
-      ]);
-    }
-    const resolvedOptions: unknown = parsed?.data ?? {};
+    const [exportId] = selected;
+    const resolvedOptions: unknown = input.options;
     if (typeof resolvedOptions !== 'object' || resolvedOptions === null || Array.isArray(resolvedOptions)) {
       return createKernelError([
         {
@@ -921,6 +942,15 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
     this.loadedKernels.set(config.id, loaded);
     const exportFormats = definition.exports;
+    const seenExtensions = new Set<string>();
+    const ambiguousExtensions = new Set<string>();
+    for (const declaration of Object.values(exportFormats)) {
+      if (seenExtensions.has(declaration.extension)) {
+        ambiguousExtensions.add(declaration.extension);
+      }
+      seenExtensions.add(declaration.extension);
+    }
+    this.kernelAmbiguousExportFormatsMap.set(config.id, ambiguousExtensions);
 
     this.kernelExportZodSchemasMap.set(
       config.id,

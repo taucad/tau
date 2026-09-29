@@ -5,6 +5,7 @@ import { logLevels, lookupExportFidelity, mimeTypes } from '@taucad/types/consta
 import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
+import { admitKernelOptions } from '#framework/kernel-option-admission.js';
 import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
 import type { FileExtension, FileStat, GeometryResponse, MediaType, OnWorkerLog } from '@taucad/types';
 import type { JSONSchema7, JSONSchema7Definition } from '@taucad/json-schema';
@@ -524,9 +525,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** Raw Zod schemas for runtime validation, keyed by kernel ID → format. Populated from kernel definitions. */
   protected readonly kernelExportZodSchemasMap = new Map<string, Partial<Record<FileExtension, z.ZodType>>>();
+  protected readonly kernelAmbiguousExportFormatsMap = new Map<string, Set<string>>();
 
   /** Raw Zod schema for render option validation, keyed by kernel ID. Populated from kernel definitions. */
   protected readonly kernelRenderZodSchemaMap = new Map<string, z.ZodType>();
+  protected get deferRenderOptionAdmission(): boolean {
+    return false;
+  }
 
   /** Exact construction-option schemas keyed by kernel ID. */
   protected readonly kernelCreateOptionsZodSchemaMap = new Map<string, z.ZodObject<z.ZodRawShape>>();
@@ -4334,10 +4339,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
       }
 
-      // Today's client supplies one global renderOptions bag. Once evaluate selects
-      // the offered default view, omit that bag for a schema-less view.
-      const selectedOptions =
-        owner.binding?.kernelId && !this.kernelRenderZodSchemaMap.has(owner.binding.kernelId) ? {} : renderOptions;
+      // The current client supplies one bag for evaluate and its default view.
+      const evaluateKeys = owner.binding?.kernelId
+        ? Object.keys(this.kernelCreateOptionsZodSchemaMap.get(owner.binding.kernelId)?.shape ?? {})
+        : [];
+      const selectedOptions = Object.fromEntries(
+        Object.entries(renderOptions).filter(([key]) => !evaluateKeys.includes(key)),
+      );
       const meshResult = await chain({ ...selection, options: selectedOptions });
       if (!meshResult.success) {
         return meshResult;
@@ -4446,48 +4454,35 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const ownerKernelId = owner.binding?.kernelId;
     const zodSchemas = ownerKernelId ? this.kernelExportZodSchemasMap.get(ownerKernelId) : undefined;
     const formatZodSchema = zodSchemas?.[format];
+    if (ownerKernelId && this.kernelAmbiguousExportFormatsMap.get(ownerKernelId)?.has(format)) {
+      return {
+        success: false,
+        result: createKernelError([
+          {
+            message: `Kernel ${ownerKernelId} has multiple exports for ${format}; select an export ID.`,
+            code: 'EXPORT_AMBIGUOUS',
+            type: 'kernel',
+            severity: 'error',
+          },
+        ]),
+      };
+    }
 
     if (zodSchemas && Object.hasOwn(zodSchemas, format)) {
-      const directRoute = this._capabilitiesManifest.routes.find(
-        (route) => route.kernelId === ownerKernelId && route.targetFormat === format && !route.transcoderId,
+      const admitted = admitKernelOptions(
+        formatZodSchema,
+        rawOptions,
+        `Kernel ${ownerKernelId} export ${format}`,
+        'EXPORT_OPTIONS_INVALID',
       );
-      const allowedOptionKeys = new Set(
-        Object.keys(collectJsonSchemaProperties(directRoute?.exportOptions.schema ?? {})),
-      );
-      const unsupportedOptionKey = Object.keys(rawOptions).find((key) => !allowedOptionKeys.has(key));
-      if (unsupportedOptionKey) {
-        return {
-          success: false,
-          result: createKernelError([
-            {
-              message: `Export option "${unsupportedOptionKey}" is not supported by direct kernel route ${ownerKernelId} → ${format}.`,
-              code: 'RUNTIME',
-              type: 'runtime',
-              severity: 'error',
-            },
-          ]),
-        };
+      if (!admitted.success) {
+        return { success: false, result: createKernelError(admitted.issues) };
       }
       const contentResult = this.validateRuntimeContent('export', this.getExportContentKeys(owner, format), content);
       if (!contentResult.success) {
         return { success: false, result: createKernelError(contentResult.issues) };
       }
-      const parseResult = formatZodSchema?.safeParse(rawOptions);
-      if (parseResult && !parseResult.success) {
-        return {
-          success: false,
-          result: {
-            success: false,
-            issues: parseResult.error.issues.map((issue) => ({
-              message: `Export option validation failed: ${issue.path.join('.')} — ${issue.message}`,
-              code: 'RUNTIME',
-              type: 'runtime',
-              severity: 'error',
-            })),
-          },
-        };
-      }
-      const parsedOptions: unknown = parseResult?.data ?? rawOptions;
+      const parsedOptions: unknown = admitted.options;
       if (typeof parsedOptions !== 'object' || parsedOptions === null || Array.isArray(parsedOptions)) {
         return {
           success: false,
@@ -4620,25 +4615,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     );
     const edgeOptionKeys = [...allowedOptionKeys].filter((key) => !sourceOptionKeys.includes(key));
     if (sourceZodSchema) {
-      const parseResult = sourceZodSchema.safeParse({
-        ...pickRecordProperties(rawOptions, sourceOptionKeys),
-        ...matchingEdge?.sourceOptions,
-      });
-      if (parseResult.success) {
-        sourceOptions = parseResult.data as Record<string, unknown>;
-      } else {
-        return {
-          success: false,
-          result: createKernelError(
-            parseResult.error.issues.map((issue) => ({
-              message: `Source export option validation failed (${transcoderRoute.sourceFormat}): ${issue.path.join('.')} — ${issue.message}`,
-              code: 'RUNTIME',
-              type: 'runtime',
-              severity: 'error',
-            })),
-          ),
-        };
+      const admittedSource = admitKernelOptions(
+        sourceZodSchema,
+        {
+          ...pickRecordProperties(rawOptions, sourceOptionKeys),
+          ...matchingEdge?.sourceOptions,
+        },
+        `Kernel ${ownerKernelId} source export ${transcoderRoute.sourceFormat}`,
+        'EXPORT_OPTIONS_INVALID',
+      );
+      if (!admittedSource.success) {
+        return { success: false, result: createKernelError(admittedSource.issues) };
       }
+      sourceOptions = admittedSource.options;
     }
 
     const sourceContentKeys = this.getExportContentKeys(owner, transcoderRoute.sourceFormat);
@@ -4748,7 +4737,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       result: createKernelError([
         {
           message: 'Export could not materialize the kernel-native geometry handle for the requested render identity.',
-          code: 'RUNTIME_EXPORT_NATIVE_HANDLE_MISSING',
+          code: 'HANDLE_MISSING',
           type: 'runtime',
           severity: 'error',
         },
@@ -5155,7 +5144,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       {
         message:
           'Export cache lookup requires a settled render identity. Render the model first or use request-scoped export with file and parameters.',
-        code: 'RUNTIME_EXPORT_RENDER_IDENTITY_MISSING',
+        code: 'HANDLE_MISSING',
         type: 'runtime',
         severity: 'error',
       },
@@ -5913,10 +5902,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       throw new Error(`Failed to derive JSON Schema for ${label}.`, { cause: error });
     }
 
-    const defaults = zodSchema.safeParse({});
+    const defaults = inputDefaults(schema);
     return {
       schema,
-      defaults: defaults.success ? (defaults.data as Record<string, unknown>) : {},
+      defaults: zodSchema.safeParse(defaults).success ? defaults : {},
     };
   }
 
@@ -7129,25 +7118,28 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     const createKeys = Object.keys(createSchema.shape);
+    const renderDefaults = kernelId ? this.kernelRenderZodSchemaMap.get(kernelId)?.safeParse({}) : undefined;
     const candidate = deepmerge(
-      pickRecordProperties(renderOptions, createKeys),
+      {
+        ...(renderDefaults?.success
+          ? pickRecordProperties(renderDefaults.data as Record<string, unknown>, createKeys)
+          : {}),
+        ...pickRecordProperties(renderOptions, createKeys),
+      },
       pickRecordProperties(exportOptions ?? {}, createKeys),
       {
         arrayMerge: (_target: unknown[], source: unknown[]) => source,
       },
     );
-    const parseResult = createSchema.safeParse(candidate);
-    if (parseResult.success) {
-      return { success: true, input: { options: parseResult.data } };
-    }
-    return {
-      success: false,
-      issues: parseResult.error.issues.map((issue) => ({
-        message: `Create option validation failed: ${issue.path.join('.')} — ${issue.message}`,
-        code: 'RUNTIME',
-        severity: 'error',
-      })),
-    };
+    const admitted = admitKernelOptions(
+      createSchema,
+      candidate,
+      `Kernel ${kernelId} evaluate`,
+      'EVALUATE_OPTIONS_INVALID',
+    );
+    return admitted.success
+      ? { success: true, input: { options: admitted.options } }
+      : { success: false, issues: admitted.issues };
   }
 
   private async computeNativeHandleKey(input: {
@@ -7185,32 +7177,25 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     );
   }
 
-  /**
-   * Validate render options against the active kernel's render Zod schema.
-   * Always returns a populated object — when a schema exists, applies defaults
-   * via `safeParse(renderOptions ?? {})`. When no schema exists, returns `renderOptions ?? {}`.
-   */
+  /** Preserve the current client's combined bag until evaluation chooses its offered view. */
   private validateRenderOptions(
     renderOptions: Record<string, unknown> | undefined,
     owner: OperationOwner,
   ): { success: true; options: Record<string, unknown> } | { success: false; issues: KernelIssue[] } {
-    const activeKernelId = owner.binding?.kernelId;
-    const zodSchema = activeKernelId ? this.kernelRenderZodSchemaMap.get(activeKernelId) : undefined;
-    if (!zodSchema) {
-      return { success: true, options: renderOptions ?? {} };
+    if (!this.deferRenderOptionAdmission) {
+      const kernelId = owner.binding?.kernelId;
+      const schema = kernelId ? this.kernelRenderZodSchemaMap.get(kernelId) : undefined;
+      if (!schema) {
+        return { success: true, options: renderOptions ?? {} };
+      }
+      return admitKernelOptions(
+        schema,
+        renderOptions ?? {},
+        `Kernel ${kernelId ?? '<unknown>'} view`,
+        'VIEW_OPTIONS_INVALID',
+      );
     }
-    const parseResult = zodSchema.safeParse(renderOptions ?? {});
-    if (parseResult.success) {
-      return { success: true, options: parseResult.data as Record<string, unknown> };
-    }
-    return {
-      success: false,
-      issues: parseResult.error.issues.map((issue) => ({
-        message: `Render option validation failed: ${issue.path.join('.')} — ${issue.message}`,
-        code: 'RUNTIME',
-        severity: 'error',
-      })),
-    };
+    return { success: true, options: renderOptions ?? {} };
   }
 
   private getNativeRenderContentKeys(owner: OperationOwner): readonly RuntimeContentKey[] {
@@ -7486,6 +7471,19 @@ function collectJsonSchemaProperties(schema: JSONSchema7): Record<string, unknow
     }
   }
   return properties;
+}
+
+function inputDefaults(schema: JSONSchema7): Record<string, unknown> {
+  const firstBranch = (schema.anyOf ?? schema.oneOf)?.[0];
+  const branchDefaults = typeof firstBranch === 'object' ? inputDefaults(firstBranch) : {};
+  return {
+    ...branchDefaults,
+    ...Object.fromEntries(
+      Object.entries(schema.properties ?? {}).flatMap(([key, property]) =>
+        typeof property === 'object' && 'default' in property ? [[key, property.default]] : [],
+      ),
+    ),
+  };
 }
 
 function omitJsonSchemaProperties(

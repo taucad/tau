@@ -49,6 +49,73 @@ const makeKernel = () =>
   });
 
 describe('v2 kernel definition boundary', () => {
+  it('should reject overlapping evaluate and view options at authoring', () => {
+    for (const optionsSchema of [
+      z.object({ quality: z.number() }),
+      z.object({ quality: z.number() }).transform((value) => value),
+      z.union([z.object({ quality: z.number() }), z.object({ other: z.string() })]),
+      z.intersection(z.object({ quality: z.number() }), z.object({ other: z.string() })),
+    ]) {
+      expect(() =>
+        defineKernelV2({
+          id: 'overlap',
+          extensions: ['txt'],
+          name: 'Overlap',
+          version: '1',
+          evaluateOptionsSchema: z.object({ quality: z.number() }),
+          views: { text: { title: 'Text', mimeType: 'text/plain', optionsSchema } },
+          exports: {},
+          async initialize() {
+            return {};
+          },
+          async resolve() {
+            return { resolved: [], unresolved: [] };
+          },
+          async describe() {
+            return { success: false, issues: [] };
+          },
+          async evaluate() {
+            return { handle: {} };
+          },
+          async render() {
+            return { content: '' };
+          },
+        }),
+      ).toThrow('both declare option "quality"');
+    }
+  });
+
+  it('should allow loose view keys and reject bounded record overlap', () => {
+    const define = (optionsSchema: NonNullable<ViewDeclaration['optionsSchema']>) =>
+      defineKernelV2({
+        id: 'record',
+        extensions: ['txt'],
+        name: 'Record',
+        version: '1',
+        evaluateOptionsSchema: z.object({ quality: z.number() }),
+        views: { text: { title: 'Text', mimeType: 'text/plain', optionsSchema } },
+        exports: {},
+        async initialize() {
+          return {};
+        },
+        async resolve() {
+          return { resolved: [], unresolved: [] };
+        },
+        async describe() {
+          return { success: false, issues: [] };
+        },
+        async evaluate() {
+          return { handle: {} };
+        },
+        async render() {
+          return { content: '' };
+        },
+      });
+    expect(() => define(z.looseObject({}))).not.toThrow();
+    expect(() => define(z.record(z.enum(['scale']), z.number()))).not.toThrow();
+    expect(() => define(z.record(z.enum(['quality']), z.number()))).toThrow('both declare option "quality"');
+  });
+
   it('should publish only plain metadata while retaining private executable hooks and factory branding', async () => {
     const factory = makeKernel();
     expect(runtimePluginFactoryAcceptsOptions(factory)).toBe(false);

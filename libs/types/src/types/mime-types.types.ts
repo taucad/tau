@@ -11,3 +11,6 @@ export type FileExtension = keyof typeof mimeTypes;
  * @public
  */
 export type MimeType = (typeof mimeTypes)[FileExtension];
+
+/** Known MIME types complete in editors; runtime artifacts may use other media types. @public */
+export type MediaType = MimeType | (string & Record<never, never>);

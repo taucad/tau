@@ -2341,6 +2341,61 @@ describe('independent sync record failures', () => {
     expect(requested).toEqual([['refs/heads/main']]);
   }, 30_000);
 
+  it.each([
+    { name: 'default preference', localManifest: '{}\n', remotePreference: false },
+    { name: 'local export sync', localManifest: '{"syncLargeExports":true}\n', remotePreference: false },
+    { name: 'fetched export sync preference', localManifest: undefined, remotePreference: true },
+  ])(
+    'should exclude candidate refs from ordinary fetch with $name',
+    async ({ localManifest, remotePreference }) => {
+      const context = await fixture(localManifest === undefined ? {} : { 'tau.json': localManifest });
+      await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      const receipt = await context.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree(remotePreference ? [['tau.json', '{"syncLargeExports":true}\n']] : []),
+        provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+        summary: { generated: 'Main' },
+      });
+      const head = revisionId(receipt.commitId);
+      const candidate = 'refs/tau/artifacts/geospec-candidates';
+      const evidence = 'refs/tau/evidence/exports';
+      const unrelated = 'refs/tau/artifacts/other';
+      const requested: Array<readonly string[] | undefined> = [];
+      const actors = createRevisionActors({
+        port: {
+          ...context.port,
+          listRemoteRefs: async () => [
+            { name: 'refs/heads/main', head },
+            { name: candidate, head },
+            { name: `${candidate}/device-a`, head },
+            { name: 'refs/remotes/tau/tau/artifacts/geospec-candidates', head },
+            { name: `refs/remotes/tau/tau/artifacts/geospec-candidates/device-b`, head },
+            { name: unrelated, head },
+            { name: evidence, head },
+          ],
+          fetch: async (input) => {
+            requested.push(input.refs);
+            if (input.refs?.includes('refs/heads/main')) {
+              await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head });
+            }
+            return { refs: [] };
+          },
+        },
+        projectId: 'project-1',
+        filesystem: () => context.filesystem,
+      });
+
+      await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+
+      expect(requested).toEqual(
+        remotePreference
+          ? [['refs/heads/main', unrelated], [evidence]]
+          : [['refs/heads/main', unrelated, ...(localManifest === '{"syncLargeExports":true}\n' ? [evidence] : [])]],
+      );
+    },
+    30_000,
+  );
+
   /* W13d: this device's own push, echoed back by the stream, brings nothing new. */
   it('fetches nothing when every advertised tip is the one already tracked, as after its own push', async () => {
     const context = await fixture({ 'main.ts': 'base\n' });

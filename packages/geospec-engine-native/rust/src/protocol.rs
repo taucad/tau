@@ -290,7 +290,10 @@ impl Engine {
         }
         let subject = self
             .subjects
-            .get(&control.subject_hash)
+            .get(&crate::subject::subject_cache_key(
+                "geospec-subject-v1",
+                &control.subject_hash,
+            ))
             .filter(|subject| subject.format == SubjectFormat::Step);
         let response = match control.operation.as_str() {
             "export" if control.candidate.is_none() => {

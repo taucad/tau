@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_kmiHxq6yyIxvw6MoU0CsW",
+  "name": "Open-end compression spring",
+  "description": "A true helical round-wire spring with individually adjustable outer diameter, wire diameter, pitch and integral coil count.",
+  "tags": [
+    "Springs",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

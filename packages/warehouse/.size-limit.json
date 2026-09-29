@@ -1,0 +1,12 @@
+[
+  {
+    "name": "Catalog metadata — measured 8.43 kB Brotli on 2026-09-30",
+    "path": "dist/builtin.mjs",
+    "limit": "11 kB"
+  },
+  {
+    "name": "Complete lazy source and thumbnail corpus — measured 2.19 MB Brotli on 2026-09-30",
+    "path": "dist/**/*.mjs",
+    "limit": "2.75 MB"
+  }
+]

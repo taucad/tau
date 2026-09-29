@@ -1,0 +1,74 @@
+{
+  "name": "@taucad/warehouse",
+  "version": "0.0.1",
+  "description": "Editable parametric mechanical parts with portable geometry specifications",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/warehouse"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/warehouse#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "parts"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json",
+    "./builtin": "./src/builtin.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json",
+      "./builtin": {
+        "types": "./dist/builtin.d.mts",
+        "import": "./dist/builtin.mjs",
+        "default": "./dist/builtin.mjs"
+      }
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "devDependencies": {
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/geospec-engine": "workspace:*",
+    "@taucad/image": "workspace:*",
+    "@taucad/middleware": "workspace:*",
+    "@taucad/replicad": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "geospec": "workspace:*",
+    "replicad": "catalog:"
+  },
+  "dependencies": {
+    "@taucad/project-core": "workspace:*"
+  }
+}

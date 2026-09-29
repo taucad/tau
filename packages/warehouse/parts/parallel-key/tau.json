@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_dtFGLIzHDtbgBCepzzJSd",
+  "name": "Parallel key",
+  "description": "Round-ended parallel shaft key with editable length, width and height.",
+  "tags": [
+    "Pins and retainers",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

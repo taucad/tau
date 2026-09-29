@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_yFNc4uXTVfZBU0F1fU1gl",
+  "name": "O-ring",
+  "description": "Circular-section toroidal O-ring in its undeformed free state.",
+  "tags": [
+    "Seals",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

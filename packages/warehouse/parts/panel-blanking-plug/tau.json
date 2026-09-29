@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_TOCgnKQy5aayUHAFrDrV-",
+  "name": "Panel blanking plug",
+  "description": "Solid blanking plug with two retention lips and a panel groove.",
+  "tags": [
+    "Enclosures",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_xFHEoXnJFKI1bmLL7XI9P",
+  "name": "Flat washer",
+  "description": "Flat washer; one M3/M4/M5/M6/M8/M10 diameter selects all admitted head, socket or washer dimensions.",
+  "tags": [
+    "Washers and spacers",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

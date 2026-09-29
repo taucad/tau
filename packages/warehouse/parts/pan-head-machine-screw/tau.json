@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_OOSnnjNun00O_CyFb-4mg",
+  "name": "Pan-head machine screw",
+  "description": "Pan-head machine screw with editable millimetre dimensions and a deliberately symbolic thread.",
+  "tags": [
+    "Fasteners",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

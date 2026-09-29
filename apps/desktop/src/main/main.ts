@@ -1048,6 +1048,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       title: 'Tau',
       titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
       webPreferences: {
+        focusOnNavigation: !hideTestWindow,
         contextIsolation: true,
         nodeIntegration: false,
         /* `sandbox: false` because the preload is ESM; the CJS-preload fix is

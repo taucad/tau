@@ -49,18 +49,31 @@ const writeConsentStatus = (status: Exclude<ConsentStatus, 'unknown'>): void => 
 };
 
 /*
- * The cookie is the source of truth; these signals only prompt a re-read. Focus
- * and visibility also cover expiry and changes made while the tab was hidden.
+ * The cookie is the source of truth; these signals only prompt a re-read.
+ * Cookie Store reports foreground expiry where supported; focus and visibility
+ * cover browsers without it after the next activation.
  */
 const subscribe = (listener: () => void): (() => void) => {
   const unsubscribe = consentTopic.subscribe(listener);
   const channel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel(consentChannelName);
+  const cookieStore = Reflect.get(globalThis, 'cookieStore') as EventTarget | undefined;
+  const onCookieChange = (event: Event): void => {
+    const change = event as Event & {
+      readonly changed?: ReadonlyArray<{ readonly name: string }>;
+      readonly deleted?: ReadonlyArray<{ readonly name: string }>;
+    };
+    if ([...(change.changed ?? []), ...(change.deleted ?? [])].some(({ name }) => name === consentCookieName)) {
+      listener();
+    }
+  };
   channel?.addEventListener('message', listener);
+  cookieStore?.addEventListener('change', onCookieChange);
   globalThis.addEventListener('focus', listener);
   document.addEventListener('visibilitychange', listener);
   return () => {
     unsubscribe();
     channel?.close();
+    cookieStore?.removeEventListener('change', onCookieChange);
     globalThis.removeEventListener('focus', listener);
     document.removeEventListener('visibilitychange', listener);
   };

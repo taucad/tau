@@ -141,3 +141,40 @@ describe('desktop module graph', () => {
     expect(serverFiles.some((file) => file.startsWith('tau-module-graph-'))).toBe(false);
   });
 });
+
+describe('web module graph', () => {
+  it.each([
+    ['static import', "import { value } from 'virtual:desktop'; document.body.dataset.value = value;"],
+    ['dynamic import', "void import('virtual:desktop').then(({ value }) => { document.body.dataset.value = value; });"],
+    ['re-export', "import { value } from './bridge.js'; document.body.dataset.value = value;"],
+  ])('rejects a desktop implementation reached by %s', async (_kind, source) => {
+    const cacheRoot = path.resolve('node_modules/.cache/tau-ui-module-graph');
+    await mkdir(cacheRoot, { recursive: true });
+    const root = await mkdtemp(path.join(cacheRoot, 'fixture-'));
+    roots.push(root);
+    await writeFile(path.join(root, 'entry.js'), source);
+    await writeFile(path.join(root, 'bridge.js'), "export { value } from 'virtual:desktop';");
+    await writeFile(path.join(root, 'index.html'), '<script type="module" src="/entry.js"></script>');
+    await expect(
+      build({
+        configFile: false,
+        root,
+        logLevel: 'silent',
+        plugins: [
+          {
+            name: 'desktop-import-fixture',
+            resolveId(id) {
+              return id === 'virtual:desktop' ? '\0apps/ui/app/services/browser-agent-worker.desktop.ts' : null;
+            },
+            load(id) {
+              return id === '\0apps/ui/app/services/browser-agent-worker.desktop.ts'
+                ? "export const value = 'desktop';"
+                : null;
+            },
+          },
+          createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'web' }),
+        ],
+      }),
+    ).rejects.toThrow(/Desktop-only implementation in web bundle/u);
+  });
+});

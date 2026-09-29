@@ -1,6 +1,6 @@
 ---
 name: cad-picogk
-description: Guides trusted, upstream-compatible PicoGK C# voxel authoring in main.cs. Use when creating or editing PicoGK projects in Tau Desktop.
+description: Guides PicoGK C# geometry, named parts and animated mechanisms. Use for PicoGK models, part identification or moving-part requests in Tau Desktop.
 ---
 
 # PicoGK C# authoring
@@ -19,7 +19,7 @@ using PicoGK;
 
 Library.Go(1.0f, () =>
 {
-    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 20.0f));
+    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 20.0f), "Hub");
 });
 ```
 
@@ -27,9 +27,11 @@ Tau captures the final scene as mesh topology, not precise BRep. Smaller voxels 
 
 ## Part names and mechanisms
 
-Use `Viewer.Add(Voxels|Mesh|PolyLine geometry, string name, int nGroupID = 0)` to name each part uniquely; include indexes in loops. A slash is label text, not an assembly. Groups control appearance/transforms. Unnamed parts get `Shape N` labels.
+Name each part with `Viewer.Add(geometry, name, nGroupID)`; use unique full labels and indexes in loops. Groups control appearance/transforms; slash labels do not create assemblies. Unnamed parts get `Shape N`.
 
-For motion, call `Viewer.SetMechanism(object source)` inside `Library.Go`. Supply JSON-equivalent `@taucad/kinematics` source with exact lowercase `schemaVersion`, `units` (`length: "mm"`, `angle: "deg"` or `"rad"`), `root`, `links.*.shapes`, and `joints`. Reference authored names, never `Shape N`. Anonymous objects, plain public properties, dictionaries, arrays, primitives, and `JsonElement` work; custom converters and `JsonPropertyName` do not. Tau resolves build-local IDs and converts millimetre/Z-up metadata with the GLB vertices. Invalid metadata warns while geometry renders. PicoGK `Animation` does not create Tau mechanism metadata.
+For naming or moving parts, read `kinematics-reference.md`. Keep moving parts separate; call `Viewer.SetMechanism(source)` inside `Library.Go` with lowercase JSON-equivalent data referencing exact authored names. Author a clip for every intended independent motion. Use the as-built millimetre/Z-up frame; Tau converts metadata with the GLB. PicoGK `Animation` does not declare Tau motion.
+
+Inspect `get_kernel_result` and fix mechanism warnings even when geometry renders. Verify named hover, each clip's direction/travel, coupled followers and Reset in the Kinematics pane; check a changed parameter or filtered view. Validate geometry with GeoSpec separately; playback does not prove clearance.
 
 ## Interactive parameters
 
@@ -40,7 +42,7 @@ using System.ComponentModel.DataAnnotations;
 using PicoGK;
 
 Library.Go(Params.VoxelSizeMm, () =>
-    Library.oViewer().Add(Voxels.voxSphere(System.Numerics.Vector3.Zero, 20f)));
+    Library.oViewer().Add(Voxels.voxSphere(System.Numerics.Vector3.Zero, 20f), "Hub"));
 
 public static class Params
 {

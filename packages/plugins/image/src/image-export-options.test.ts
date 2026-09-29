@@ -321,6 +321,68 @@ describe('imageEdgeSchemas', () => {
       ).toBe(true);
     });
 
+    it('should select exact primitive instances independently in batch views', () => {
+      const options = imageEdgeSchemas.webp.parse({
+        mode: 'batch',
+        views: [
+          { id: 'first', visiblePrimitives: [{ nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 }] },
+          { id: 'second', visiblePrimitives: [{ nodeIndex: 3, meshIndex: 1, primitiveIndex: 0 }] },
+          { id: 'whole' },
+        ],
+      });
+      expect(options.mode).toBe('batch');
+      if (options.mode !== 'batch') {
+        throw new Error('Expected batch image options');
+      }
+      expect(options.views.map((view) => view.visiblePrimitives)).toEqual([
+        [{ nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 }],
+        [{ nodeIndex: 3, meshIndex: 1, primitiveIndex: 0 }],
+        undefined,
+      ]);
+      const schema = toJSONSchema(imageEdgeSchemas.webp, { target: 'draft-7', io: 'input' }) as JSONSchema7;
+      const batch = (schema.anyOf ?? [])
+        .map((branch) => requireSchema(branch, 'Expected an object branch'))
+        .find((branch) => branch.title === 'Batch');
+      const views = requireSchema(batch?.properties?.['views'], 'Expected the batch views schema');
+      if (Array.isArray(views.items)) {
+        throw new TypeError('Expected one view item schema');
+      }
+      expect(requireSchema(views.items, 'Expected a view item schema').properties).toHaveProperty('visiblePrimitives');
+      expect(
+        imageEdgeSchemas.webp.safeParse({
+          mode: 'batch',
+          views: [{ id: 'duplicate', visiblePrimitives: [{ nodeIndex: 2 }, { nodeIndex: 2 }] }],
+        }).success,
+      ).toBe(false);
+    });
+
+    it('should reject selected sections and an empty fitted selection', () => {
+      const selected = [{ nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 }];
+      const sectioned = imageEdgeSchemas.png.safeParse({
+        mode: 'batch',
+        sections: { planes: [{}] },
+        views: [{ id: 'part', visiblePrimitives: selected }],
+      });
+      expect(sectioned.success).toBe(false);
+      if (!sectioned.success) {
+        expect(sectioned.error.issues[0]).toMatchObject({ path: ['views', 0, 'visiblePrimitives'] });
+      }
+      const emptyFit = imageEdgeSchemas.png.safeParse({
+        mode: 'batch',
+        views: [{ id: 'empty', visiblePrimitives: [] }],
+      });
+      expect(emptyFit.success).toBe(false);
+      if (!emptyFit.success) {
+        expect(emptyFit.error.issues[0]).toMatchObject({ path: ['views', 0, 'visiblePrimitives'] });
+      }
+      expect(
+        imageEdgeSchemas.png.safeParse({
+          mode: 'batch',
+          views: [{ id: 'empty', visiblePrimitives: [], camera: { framing: 'fixed' } }],
+        }).success,
+      ).toBe(true);
+    });
+
     it('should validate format-aware per-view output overrides', () => {
       const webp = imageEdgeSchemas.webp.parse({
         mode: 'batch',

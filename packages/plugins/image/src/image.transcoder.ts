@@ -190,8 +190,11 @@ export const imageTranscoder = defineTranscoder({
           : {}),
       });
       runtime.logger.log(`Rendering GLB → ${input.to}`);
-      const cameras = options.mode === 'batch' ? options.views.map((view) => view.camera) : [options.camera];
-      const boundsFitStartedAt = cameras.some((camera) => isBoundsCamera(camera)) ? performance.now() : undefined;
+      const needsSceneBounds =
+        options.mode === 'batch'
+          ? options.views.some((view) => isBoundsCamera(view.camera) && view.visiblePrimitives === undefined)
+          : isBoundsCamera(options.camera);
+      const boundsFitStartedAt = needsSceneBounds ? performance.now() : undefined;
       const boundsParseStartedAt = boundsFitStartedAt === undefined ? undefined : performance.now();
       const cameraBounds =
         boundsFitStartedAt === undefined
@@ -200,13 +203,22 @@ export const imageTranscoder = defineTranscoder({
       const boundsParseDuration =
         boundsParseStartedAt === undefined ? undefined : performance.now() - boundsParseStartedAt;
       const cameraSolveStartedAt = cameraBounds ? performance.now() : undefined;
-      const resolveImageCamera = (
-        camera: { readonly framing: string },
-        width: number,
-        height: number,
-      ): Nanoraster.RenderCamera => {
+      const resolveImageCamera = ({
+        camera,
+        width,
+        height,
+        selected = false,
+      }: {
+        readonly camera: { readonly framing: string };
+        readonly width: number;
+        readonly height: number;
+        readonly selected?: boolean;
+      }): Nanoraster.RenderCamera => {
         if (!isBoundsCamera(camera)) {
           return camera as Nanoraster.RenderCamera;
+        }
+        if (selected) {
+          return { ...camera, framing: 'fit' };
         }
         if (!cameraBounds) {
           throw new Error('Bounds camera resolution requires finite scene bounds.');
@@ -222,7 +234,12 @@ export const imageTranscoder = defineTranscoder({
         const { mode: _, views, sections, ...renderOptions } = options;
         const resolvedViews = views.map((view) => ({
           ...view,
-          camera: resolveImageCamera(view.camera, view.width ?? options.width, view.height ?? options.height),
+          camera: resolveImageCamera({
+            camera: view.camera,
+            width: view.width ?? options.width,
+            height: view.height ?? options.height,
+            selected: view.visiblePrimitives !== undefined,
+          }),
         }));
         cameraSolveDuration = cameraSolveStartedAt === undefined ? undefined : performance.now() - cameraSolveStartedAt;
         boundsFitDuration = boundsFitStartedAt === undefined ? undefined : performance.now() - boundsFitStartedAt;
@@ -235,7 +252,7 @@ export const imageTranscoder = defineTranscoder({
         });
       } else {
         const { mode: _, camera, label, sections, ...renderOptions } = options;
-        const resolvedCamera = resolveImageCamera(camera, options.width, options.height);
+        const resolvedCamera = resolveImageCamera({ camera, width: options.width, height: options.height });
         cameraSolveDuration = cameraSolveStartedAt === undefined ? undefined : performance.now() - cameraSolveStartedAt;
         boundsFitDuration = boundsFitStartedAt === undefined ? undefined : performance.now() - boundsFitStartedAt;
         images = await renderImages(glb, {

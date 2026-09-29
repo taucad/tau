@@ -146,6 +146,7 @@ import type {
 import { validateJsonSchemaValue } from '@taucad/parameters/schema';
 import type {
   DependencyResolutionContext,
+  EvaluationSlot,
   CommonDependencySet,
   MiddlewareDependencySet,
   KernelBinding,
@@ -556,13 +557,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   protected pendingNativeHandle: unknown;
 
+  /** The evaluation currently entering its terminal kernel hook. */
+  private activeEvaluationSlot: EvaluationSlot | undefined;
+  private nextEvaluationId = 0;
+  /** Latest admitted evaluation, whether or not its display projection succeeded. */
+  private retainedEvaluation: EvaluationSlot | undefined;
+
   /**
    * Live native handles this worker owns, mapped to the owner that can release
    * them. A handle enters on creation (`createGeometry`, snapshot restore) and
    * leaves when no worker field references it any more — see
    * {@link disposeUnreachableNativeHandles}.
    */
-  private readonly ownedNativeHandles = new Map<unknown, OperationOwner>();
+  private readonly ownedNativeHandles = new Map<number, { slot: EvaluationSlot; handle: unknown }>();
 
   /** Fully initialized bundlers keyed by file extension. Shared context across extensions of the same bundler. */
   protected loadedBundlers = new Map<string, { definition: BundlerDefinition; ctx: unknown }>();
@@ -797,6 +804,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** Exact artifact identity for the currently published preview render. */
   private currentPublishedRender: MaterializedRender | undefined;
+  /** Newest evaluated build, even when its display projection failed or was request-scoped. */
+  private latestEvaluationArtifact: MaterializedRender | undefined;
+  private latestEvaluationSettled = false;
 
   /** Current render options for autonomous render loop. */
   private currentRenderOptions: Record<string, unknown> | undefined;
@@ -1603,6 +1613,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   private invalidatePublishedArtifactState(): void {
     this.currentPublishedRender = undefined;
+    this.latestEvaluationArtifact = undefined;
+    this.latestEvaluationSettled = false;
     this.pendingNativeHandle = undefined;
     this.onPublishedArtifactInvalidated();
   }
@@ -1643,6 +1655,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.watchedPaths.clear();
     this.pendingNativeHandle = undefined;
     this.currentPublishedRender = undefined;
+    this.latestEvaluationArtifact = undefined;
+    this.latestEvaluationSettled = false;
+    this.retainedEvaluation = undefined;
     this.currentFile = undefined;
     // Nothing references the handles now — release them before onCleanup tears
     // down the kernel that owns their memory.
@@ -2137,7 +2152,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       format,
     });
 
-    const currentRender = this.currentPublishedRender;
+    const currentRender = this.latestEvaluationSettled ? this.latestEvaluationArtifact : this.currentPublishedRender;
     if (!currentRender) {
       exportSpan.end();
       return this.createExportRenderIdentityMissingResult();
@@ -2968,6 +2983,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const renderOptionsResult = this.validateRenderOptions(entry.options, owner);
     if (!renderOptionsResult.success) {
+      if (options.publish) {
+        this.latestEvaluationSettled = true;
+        this.latestEvaluationArtifact = undefined;
+        this.currentPublishedRender = undefined;
+        this.retainedEvaluation = undefined;
+      }
       return {
         artifact: {
           identity: this.createRenderIdentity({
@@ -2987,6 +3008,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const createOptionsResult = this.resolveCreateOptions(renderOptionsResult.options, entry.export?.options, owner);
     if (!createOptionsResult.success) {
+      if (options.publish) {
+        this.latestEvaluationSettled = true;
+        this.latestEvaluationArtifact = undefined;
+        this.currentPublishedRender = undefined;
+        this.retainedEvaluation = undefined;
+      }
       return {
         artifact: {
           identity: this.createRenderIdentity({
@@ -3010,6 +3037,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       ? { success: true, content: entry.content ?? {} }
       : this.validateRuntimeContent('render', this.getRenderContentKeys(owner), entry.content);
     if (!renderContentResult.success) {
+      if (options.publish) {
+        this.latestEvaluationSettled = true;
+        this.latestEvaluationArtifact = undefined;
+        this.currentPublishedRender = undefined;
+        this.retainedEvaluation = undefined;
+      }
       return {
         artifact: {
           identity: this.createRenderIdentity({
@@ -3074,6 +3107,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
     const nativeHandleKey = await this.computeDependencyHash(nativeHandleDependencies);
     geoDepsSpan.end();
+    const evaluationIdentityKey = createNativeHandleIdentityKey({
+      file: entry.file,
+      selectedKernelId: owner.binding?.kernelId,
+      selectedKernelVersion: owner.binding?.kernelVersion,
+      nativeHandleKey,
+    });
+    let evaluationSlot = this.createEvaluationSlot(owner, evaluationIdentityKey);
 
     const runtimes = new Map<string, KernelMiddlewareRuntime>();
     for (const { middleware, options: middlewareOptions, enabled, id } of createMiddleware) {
@@ -3165,7 +3205,37 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               }
             : {}),
         };
-        const result = await this.onEvaluateForOwner(owner, kernelInput, this.createRuntime());
+        const retained = this.retainedEvaluation;
+        const sameBuild =
+          retained?.identityKey === evaluationIdentityKey &&
+          retained.nativeBuildInput !== undefined &&
+          canonicalJson(retained.nativeBuildInput) === canonicalJson(kernelInput);
+        if (sameBuild && retained.hasHandle) {
+          try {
+            if ((await this.isNativeHandleValidForOwner(owner, retained.handle, this.createRuntime())) === false) {
+              this.dropEvaluationHandle(retained);
+            }
+          } catch {
+            this.dropEvaluationHandle(retained);
+          }
+        }
+        if (sameBuild && (retained.hasHandle || retained.serializedNativeHandleSlot)) {
+          evaluationSlot = retained;
+          this.activeEvaluationSlot = retained;
+          computeSpan.end();
+          return {
+            success: true,
+            data: retained.offers ?? {},
+            issues: retained.issues ?? [],
+            [nativeBuildInputSymbol]: retained.nativeBuildInput,
+          };
+        }
+        evaluationSlot.nativeBuildInput = kernelInput;
+        const result = await this.onEvaluateForOwner(owner, kernelInput, this.createRuntime(), evaluationSlot);
+        if (result.success) {
+          evaluationSlot.offers = result.data;
+          evaluationSlot.issues = result.issues;
+        }
         computeSpan.end();
         return { ...result, [nativeBuildInputSymbol]: kernelInput };
       },
@@ -3207,7 +3277,28 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     this.pendingNativeHandle = undefined;
-    const evaluated = await chain(input);
+    this.activeEvaluationSlot = evaluationSlot;
+    let evaluated: EvaluateResult;
+    try {
+      evaluated = await chain(input);
+    } finally {
+      this.activeEvaluationSlot = undefined;
+    }
+    if (evaluated.success && evaluationSlot.hasHandle && evaluationSlot.nativeBuildInput) {
+      // A finished evaluation remains reusable even if its preview was superseded before projection.
+      this.retainedEvaluation = evaluationSlot;
+    }
+    this.operationSignal?.throwIfAborted();
+    if (options.publish) {
+      this.latestEvaluationSettled = true;
+      if (!evaluated.success) {
+        this.latestEvaluationArtifact = undefined;
+        this.retainedEvaluation = undefined;
+      }
+    }
+    if (evaluated.success && evaluationSlot.hasHandle) {
+      evaluationSlot.nativeBuildInput ??= evaluated[nativeBuildInputSymbol];
+    }
     const internalResult: CreateGeometryResult & NativeBuildInputCarrier = evaluated.success
       ? {
           success: true,
@@ -3253,6 +3344,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const serializedNativeHandle = internalResult.success ? internalResult.serializedNativeHandle : undefined;
     const { liveNativeHandleSlot, serializedNativeHandleSlot } = this.bindNativeHandleSlots({
       identity,
+      slot: evaluationSlot,
       success: internalResult.success,
       serializedNativeHandle,
       serializeNativeHandleSnapshot: internalResult.success ? internalResult.serializeNativeHandleSnapshot : undefined,
@@ -3274,6 +3366,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         renderArtifact: {
           identity,
           owner,
+          evaluationSlot,
           result: {
             success: true,
             data: undefined,
@@ -3319,11 +3412,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       identity,
       owner,
       result,
+      evaluationSlot,
       liveNativeHandleSlot,
       serializedNativeHandleSlot,
     };
+    if (options.publish && evaluated.success) {
+      this.latestEvaluationArtifact = artifact;
+    }
     if (options.publish && result.success) {
       this.publishCurrentRender(artifact);
+    } else if (options.publish) {
+      this.currentPublishedRender = undefined;
     }
 
     this.logger.debug('createGeometry completed', {
@@ -3349,9 +3448,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @param nativeHandle - Opaque handle returned by the kernel.
    * @param owner - Owner whose kernel binding can release the handle.
    */
-  protected captureNativeHandle(nativeHandle: unknown, owner?: OperationOwner): void {
+  protected captureNativeHandle(nativeHandle: unknown, owner?: OperationOwner, evaluationSlot?: EvaluationSlot): void {
     this.pendingNativeHandle = nativeHandle;
-    this.ownNativeHandle(nativeHandle, owner);
+    const slot = evaluationSlot ?? this.activeEvaluationSlot;
+    if (slot) {
+      slot.hasHandle = true;
+      slot.handle = nativeHandle;
+      this.ownNativeHandle(slot, owner);
+    }
   }
 
   /**
@@ -3364,15 +3468,53 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @returns True while the worker still owns it.
    */
   protected isNativeHandleLive(nativeHandle: unknown): boolean {
-    return this.ownedNativeHandles.has(nativeHandle);
+    return [...this.ownedNativeHandles.values()].some((owned) => owned.handle === nativeHandle);
   }
 
-  private ownNativeHandle(nativeHandle: unknown, owner: OperationOwner | undefined): void {
-    if (owner === undefined || nativeHandle === undefined || nativeHandle === null) {
+  private ownNativeHandle(slot: EvaluationSlot, owner: OperationOwner | undefined): void {
+    if (owner === undefined || !slot.hasHandle) {
       return;
     }
+    const previous = this.ownedNativeHandles.get(slot.id);
+    if (previous && previous.handle !== slot.handle) {
+      this.releaseOwnedNativeHandle(previous);
+    }
+    this.ownedNativeHandles.set(slot.id, { slot, handle: slot.handle });
+  }
 
-    this.ownedNativeHandles.set(nativeHandle, owner);
+  private releaseOwnedNativeHandle(owned: { slot: EvaluationSlot; handle: unknown }): void {
+    const sharedObject =
+      (typeof owned.handle === 'object' && owned.handle !== null) || typeof owned.handle === 'function';
+    if (
+      sharedObject &&
+      [...this.ownedNativeHandles.values()].some((other) => other !== owned && other.handle === owned.handle)
+    ) {
+      return;
+    }
+    try {
+      this.disposeNativeHandleForOwner(owned.slot.owner, owned.handle, this.createRuntime(), owned.slot);
+    } catch (error) {
+      this.logger.warn('Native-handle disposal failed', {
+        data: { error: error instanceof Error ? error.message : String(error) },
+      });
+    }
+  }
+
+  private dropEvaluationHandle(slot: EvaluationSlot): void {
+    const live = slot.liveNativeHandleSlot;
+    slot.liveNativeHandleSlot = undefined;
+    slot.hasHandle = false;
+    slot.handle = undefined;
+    for (const artifact of [this.currentPublishedRender, this.latestEvaluationArtifact]) {
+      if (artifact && artifact.liveNativeHandleSlot === live) {
+        artifact.liveNativeHandleSlot = undefined;
+      }
+    }
+    const owned = this.ownedNativeHandles.get(slot.id);
+    if (owned) {
+      this.ownedNativeHandles.delete(slot.id);
+      this.releaseOwnedNativeHandle(owned);
+    }
   }
 
   /**
@@ -3389,27 +3531,23 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return;
     }
 
-    const retained = new Set<unknown>([
-      this.pendingNativeHandle,
-      this.currentPublishedRender?.liveNativeHandleSlot?.handle,
-    ]);
+    const retained = new Set<number>(
+      [
+        this.activeEvaluationSlot?.id,
+        this.retainedEvaluation?.id,
+        this.latestEvaluationArtifact?.evaluationSlot?.id,
+        this.currentPublishedRender?.evaluationSlot?.id,
+      ].filter((id): id is number => id !== undefined),
+    );
 
     // Built on first release only: most operation boundaries drop nothing.
-    let runtime: KernelRuntime | undefined;
-    for (const [handle, owner] of this.ownedNativeHandles) {
-      if (retained.has(handle)) {
+    for (const [id, owned] of this.ownedNativeHandles) {
+      if (retained.has(id)) {
         continue;
       }
 
-      this.ownedNativeHandles.delete(handle);
-      try {
-        runtime ??= this.createRuntime();
-        this.disposeNativeHandleForOwner(owner, handle, runtime);
-      } catch (error) {
-        this.logger.warn('Native-handle disposal failed', {
-          data: { error: error instanceof Error ? error.message : String(error) },
-        });
-      }
+      this.ownedNativeHandles.delete(id);
+      this.releaseOwnedNativeHandle(owned);
     }
   }
 
@@ -3440,6 +3578,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   protected bindNativeHandleSlots(input: {
     readonly identity: RenderIdentity;
+    readonly slot: EvaluationSlot;
     readonly success: boolean;
     /** A snapshot already in hand — a cache hit decodes one. */
     readonly serializedNativeHandle: unknown;
@@ -3449,33 +3588,36 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     liveNativeHandleSlot?: NativeHandleSlot;
     serializedNativeHandleSlot?: SerializedNativeHandleSlot;
   } {
-    const { identity, success, serializedNativeHandle, serializeNativeHandleSnapshot } = input;
+    const { identity, slot, success, serializedNativeHandle, serializeNativeHandleSnapshot } = input;
     const identityKey = createNativeHandleIdentityKey(identity);
-    const { pendingNativeHandle } = this;
     this.pendingNativeHandle = undefined;
 
     const liveNativeHandleSlot =
-      success && pendingNativeHandle !== undefined && pendingNativeHandle !== null
+      success && slot.hasHandle
         ? {
+            evaluationId: slot.id,
             identityKey,
             kernelId: identity.selectedKernelId,
             kernelVersion: identity.selectedKernelVersion,
-            handle: pendingNativeHandle,
+            handle: slot.handle,
           }
         : undefined;
+    slot.liveNativeHandleSlot = liveNativeHandleSlot;
 
     const hasSnapshot = serializedNativeHandle !== undefined && serializedNativeHandle !== null;
     if (!success || (!hasSnapshot && serializeNativeHandleSnapshot === undefined)) {
-      return { liveNativeHandleSlot, serializedNativeHandleSlot: undefined };
+      return { liveNativeHandleSlot, serializedNativeHandleSlot: slot.serializedNativeHandleSlot };
     }
 
     const serializedNativeHandleSlot: SerializedNativeHandleSlot = {
+      evaluationId: slot.id,
       identityKey,
       kernelId: identity.selectedKernelId,
       kernelVersion: identity.selectedKernelVersion,
       serializedNativeHandle,
     };
     if (hasSnapshot) {
+      slot.serializedNativeHandleSlot = serializedNativeHandleSlot;
       return { liveNativeHandleSlot, serializedNativeHandleSlot };
     }
     /* Resolved on the first read and remembered, so an export and the reheat that follows it do not
@@ -3485,7 +3627,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       configurable: true,
       enumerable: true,
       get: () => {
-        resolved ??= { value: serializeNativeHandleSnapshot!() };
+        resolved ??= { value: this.isEvaluationSlotLive(slot) ? serializeNativeHandleSnapshot!() : undefined };
         return resolved.value;
       },
       set: (value: unknown) => {
@@ -3493,6 +3635,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       },
     });
 
+    slot.serializedNativeHandleSlot = serializedNativeHandleSlot;
     return { liveNativeHandleSlot, serializedNativeHandleSlot };
   }
 
@@ -3550,11 +3693,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (artifact.liveNativeHandleSlot === slot) {
       artifact.liveNativeHandleSlot = undefined;
     }
+    const evaluation = artifact.evaluationSlot;
+    if (evaluation?.liveNativeHandleSlot === slot) {
+      this.dropEvaluationHandle(evaluation);
+    }
   }
 
   protected clearSerializedNativeHandleSlot(artifact: MaterializedRender, slot: SerializedNativeHandleSlot): void {
     if (artifact.serializedNativeHandleSlot === slot) {
       artifact.serializedNativeHandleSlot = undefined;
+    }
+    if (artifact.evaluationSlot?.serializedNativeHandleSlot === slot) {
+      artifact.evaluationSlot.serializedNativeHandleSlot = undefined;
     }
   }
 
@@ -3789,20 +3939,40 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return this.onGetDependencies(input, runtime);
   }
 
+  // oxlint-disable-next-line max-params -- Owner-bound hook also carries the evaluation slot.
   protected async onCreateGeometryForOwner(
     _owner: OperationOwner,
     input: NativeBuildInput,
     runtime: KernelRuntime,
+    _slot: EvaluationSlot,
   ): Promise<CreateGeometryResult> {
     return this.onCreateGeometry(input, runtime);
   }
 
   /** Evaluate the selected kernel before the current-client display bridge. */
+  // oxlint-disable-next-line max-params -- Owner-bound hook also carries the evaluation slot.
   protected abstract onEvaluateForOwner(
     owner: OperationOwner,
     input: NativeBuildInput,
     runtime: KernelRuntime,
+    slot: EvaluationSlot,
   ): Promise<EvaluateResult>;
+
+  /** Allocate an identity before entering the terminal evaluate hook. */
+  protected createEvaluationSlot(owner: OperationOwner, identityKey: string): EvaluationSlot {
+    return {
+      id: ++this.nextEvaluationId,
+      identityKey,
+      owner,
+      hasHandle: false,
+      handle: undefined,
+    };
+  }
+
+  /** A deferred snapshot may read the payload only while its evaluation is retained. */
+  protected isEvaluationSlotLive(slot: EvaluationSlot): boolean {
+    return this.ownedNativeHandles.get(slot.id)?.slot === slot;
+  }
 
   /**
    * Whether the owner's kernel implements the optional `meshGeometry` display phase.
@@ -3820,16 +3990,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   ): { view: string; mimeType: MediaType; instance?: string } | undefined;
 
   /** Render a selected view before current-client artifact conversion. */
+  // oxlint-disable-next-line max-params -- Owner-bound hook also carries the evaluation slot.
   protected abstract onRenderForOwner(
     owner: OperationOwner,
     input: RenderRequest & { nativeHandle: unknown },
     runtime: KernelRuntime,
+    slot: EvaluationSlot,
   ): Promise<RenderResult>;
 
+  // oxlint-disable-next-line max-params -- Owner-bound hook also carries the evaluation slot.
   protected async onExportGeometryForOwner(
     _owner: OperationOwner,
     input: ExportGeometryInput,
     runtime: KernelRuntime,
+    _slot?: EvaluationSlot,
   ): Promise<ExportGeometryResult> {
     return this.onExportGeometry(input, runtime);
   }
@@ -3853,16 +4027,24 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return undefined;
   }
 
+  // oxlint-disable-next-line max-params -- Owner-bound hook also carries the evaluation slot.
   protected async deserializeNativeHandleForOwner(
     _owner: OperationOwner,
     _serializedNativeHandle: unknown,
     _runtime: KernelRuntime,
+    _slot: EvaluationSlot,
   ): Promise<unknown | undefined> {
     return undefined;
   }
 
   /** Release a dropped native handle through the kernel that created it. */
-  protected disposeNativeHandleForOwner(_owner: OperationOwner, _nativeHandle: unknown, _runtime: KernelRuntime): void {
+  // oxlint-disable-next-line max-params -- Owner-bound hook also carries the evaluation slot.
+  protected disposeNativeHandleForOwner(
+    _owner: OperationOwner,
+    _nativeHandle: unknown,
+    _runtime: KernelRuntime,
+    _slot?: EvaluationSlot,
+  ): void {
     // Workers without kernel-managed native memory have nothing to release.
   }
 
@@ -4066,6 +4248,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             this.getNativeRenderContentKeys(owner),
           ),
           runtime,
+          renderArtifact.evaluationSlot ??
+            this.createEvaluationSlot(owner, createNativeHandleIdentityKey(renderArtifact.identity)),
         );
       };
 
@@ -4620,19 +4804,32 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }): Promise<{ success: true; handle: unknown } | { success: false }> {
     const { owner, identity, renderArtifact, slot, runtime } = options;
     try {
-      const handle = await this.deserializeNativeHandleForOwner(owner, slot.serializedNativeHandle, runtime);
+      const { evaluationSlot } = renderArtifact;
+      if (!evaluationSlot) {
+        return { success: false };
+      }
+      const handle = await this.deserializeNativeHandleForOwner(
+        owner,
+        slot.serializedNativeHandle,
+        runtime,
+        evaluationSlot,
+      );
       if (handle === undefined || handle === null) {
         this.clearSerializedNativeHandleSlot(renderArtifact, slot);
         return { success: false };
       }
       this.logger.debug('Restoring nativeHandle via owner-bound deserializeNativeHandle');
-      this.ownNativeHandle(handle, owner);
+      evaluationSlot.hasHandle = true;
+      evaluationSlot.handle = handle;
+      this.ownNativeHandle(evaluationSlot, owner);
       renderArtifact.liveNativeHandleSlot = {
+        evaluationId: evaluationSlot.id,
         identityKey: createNativeHandleIdentityKey(identity),
         kernelId: identity.selectedKernelId,
         kernelVersion: identity.selectedKernelVersion,
         handle,
       };
+      evaluationSlot.liveNativeHandleSlot = renderArtifact.liveNativeHandleSlot;
       return { success: true, handle };
     } catch (error) {
       this.clearSerializedNativeHandleSlot(renderArtifact, slot);
@@ -4662,9 +4859,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const reheatSpan = this.tracer.startSpan('kernel.export-reheat');
     try {
       this.pendingNativeHandle = undefined;
-      const reheatResult = await this.onCreateGeometryForOwner(owner, reheatInput, runtime);
+      const evaluationSlot =
+        renderArtifact.evaluationSlot ?? this.createEvaluationSlot(owner, createNativeHandleIdentityKey(identity));
+      renderArtifact.evaluationSlot = evaluationSlot;
+      evaluationSlot.nativeBuildInput = reheatInput;
+      this.activeEvaluationSlot = evaluationSlot;
+      let reheatResult: CreateGeometryResult;
+      try {
+        reheatResult = await this.onCreateGeometryForOwner(owner, reheatInput, runtime, evaluationSlot);
+      } finally {
+        this.activeEvaluationSlot = undefined;
+      }
       const slots = this.bindNativeHandleSlots({
         identity,
+        slot: evaluationSlot,
         success: reheatResult.success,
         serializedNativeHandle: reheatResult.success ? reheatResult.serializedNativeHandle : undefined,
         serializeNativeHandleSnapshot: reheatResult.success ? reheatResult.serializeNativeHandleSnapshot : undefined,
@@ -4912,6 +5120,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       input: nativeInput.input,
       runtime,
       renderIdentity: renderArtifact.identity,
+      evaluationSlot: renderArtifact.evaluationSlot,
     });
     computeSpan.end();
     return result;
@@ -5471,6 +5680,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     record?: RenderCancellationRecord,
     revisions?: ReadonlyMap<string, ObservedFileRevision | undefined>,
   ): Promise<void> {
+    if (revisions && [...revisions.values()].some((revision) => revision === undefined)) {
+      // A failed observer read cannot prove the prior evaluation still matches.
+      this.retainedEvaluation = undefined;
+    }
     if (revisions) {
       this._applyObservedRevisions(paths, revisions);
     } else {
@@ -5901,9 +6114,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       readonly input: KernelExportGeometryInput;
       readonly runtime: KernelRuntime;
       readonly renderIdentity: RenderIdentity;
+      readonly evaluationSlot?: EvaluationSlot;
     },
   ): Promise<ExportGeometryResult> {
-    const { input, runtime, renderIdentity } = execution;
+    const { input, runtime, renderIdentity, evaluationSlot } = execution;
     if (plan.route.kind === 'direct') {
       return this.onExportGeometryForOwner(
         plan.owner,
@@ -5913,6 +6127,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           this.getNativeExportContentKeys(plan.owner, plan.route.targetFormat),
         ),
         runtime,
+        evaluationSlot,
       );
     }
 
@@ -5971,6 +6186,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           this.getNativeExportContentKeys(plan.owner, route.sourceFormat),
         ),
         runtime,
+        evaluationSlot,
       );
       if (!result.success) {
         return result;

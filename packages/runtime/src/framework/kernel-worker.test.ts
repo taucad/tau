@@ -444,11 +444,7 @@ describe('KernelWorker lifecycle', () => {
     await openAndWaitForRender(worker, file, parameters);
     await worker.exportModel({ file, parameters, format: 'gltf' });
 
-    expect(capturedParameters).toEqual(
-      Array.from({ length: 3 }, () => ({
-        sections: { planes: [{ point: [1, 2, 3] }], clipLines: true },
-      })),
-    );
+    expect(capturedParameters).toEqual([{ sections: { planes: [{ point: [1, 2, 3] }], clipLines: true } }]);
   });
 
   // The producer projection drops an empty `properties` map, as PicoGK emits for a source without `Params`.
@@ -502,7 +498,7 @@ describe('KernelWorker lifecycle', () => {
       await openAndWaitForRender(worker, file, parameters);
       await worker.exportModel({ file, parameters, format: 'gltf' });
 
-      expect(capturedParameters).toEqual([{}, {}, {}]);
+      expect(capturedParameters).toEqual([{}]);
     },
   );
 
@@ -984,6 +980,137 @@ describe('KernelWorker lifecycle', () => {
       await worker.cleanup();
 
       expect(worker.disposedHandles).toEqual([sharedHandle]);
+    });
+
+    it('releases equal primitive handle IDs once per evaluation generation', async () => {
+      const worker = createDisposingWorker();
+      worker.stableHandle = 0;
+
+      await worker.runCreateGeometry('test.kcl', { size: 1 });
+      await worker.runCreateGeometry('test.kcl', { size: 2 });
+      expect(worker.disposedHandles).toEqual([0]);
+
+      await worker.cleanup();
+      expect(worker.disposedHandles).toEqual([0, 0]);
+    });
+
+    it('keeps the published slot pinned across private requests and releases each dropped request slot once', async () => {
+      const worker = createDisposingWorker();
+      await worker.runCreateGeometry('test.kcl', { size: 1 });
+      const file = createGeometryFile('test.kcl');
+      await worker.evaluateModel({ file, parameters: { size: 2 } });
+      expect(worker.disposedHandles).toEqual([]);
+      await worker.evaluateModel({ file, parameters: { size: 3 } });
+      expect(worker.disposedHandles).toEqual([{ build: 2 }]);
+      await worker.cleanup();
+      expect(worker.disposedHandles).toEqual([{ build: 2 }, { build: 1 }, { build: 3 }]);
+    });
+
+    it('releases a replaced request slot once and leaves its lazy snapshot unread', async () => {
+      let snapshotReads = 0;
+      class SnapshotWorker extends DisposingKernelWorker {
+        protected override async onEvaluateForOwner(
+          owner: OperationOwner,
+          input: NativeBuildInput,
+          runtime: KernelRuntime,
+        ): Promise<EvaluateResult> {
+          const result = await super.onEvaluateForOwner(owner, input, runtime);
+          return result.success ? { ...result, serializeHandleSnapshot: () => ({ read: ++snapshotReads }) } : result;
+        }
+      }
+      const worker = new SnapshotWorker({ middleware: [], onLog: noopLog, filesystem: createMockFileSystem() });
+      const file = createGeometryFile('test.kcl');
+      await worker.evaluateModel({ file, parameters: { size: 1 } });
+      const oldSlot = (
+        worker as unknown as {
+          retainedEvaluation?: { serializedNativeHandleSlot?: { serializedNativeHandle: unknown } };
+        }
+      ).retainedEvaluation;
+      expect(snapshotReads).toBe(0);
+      await worker.evaluateModel({ file, parameters: { size: 2 } });
+      expect(worker.disposedHandles).toEqual([{ build: 1 }]);
+      expect(oldSlot?.serializedNativeHandleSlot?.serializedNativeHandle).toBeUndefined();
+      expect(snapshotReads).toBe(0);
+      await worker.cleanup();
+      expect(worker.disposedHandles).toEqual([{ build: 1 }, { build: 2 }]);
+    });
+
+    it('releases a restored handle once after its published slot is replaced', async () => {
+      class RestoringWorker extends DisposingKernelWorker {
+        protected override async onEvaluateForOwner(
+          owner: OperationOwner,
+          input: NativeBuildInput,
+          runtime: KernelRuntime,
+        ): Promise<EvaluateResult> {
+          const result = await super.onEvaluateForOwner(owner, input, runtime);
+          return result.success ? { ...result, serializedHandle: { snapshot: true } } : result;
+        }
+
+        protected override async deserializeNativeHandleForOwner(): Promise<unknown> {
+          return { restored: true };
+        }
+      }
+      const worker = new RestoringWorker({ middleware: [], onLog: noopLog, filesystem: createMockFileSystem() });
+      await worker.runCreateGeometry('test.kcl', { size: 1 });
+      const artifact = (worker as unknown as { currentPublishedRender?: MaterializedRender }).currentPublishedRender;
+      artifact!.liveNativeHandleSlot = undefined;
+      const exported = await worker.exportGeometry('gltf');
+      expect(exported.success).toBe(true);
+      expect(worker.disposedHandles).toEqual([{ build: 1 }]);
+      await worker.runCreateGeometry('test.kcl', { size: 2 });
+      expect(worker.disposedHandles).toEqual([{ build: 1 }, { restored: true }]);
+      await worker.cleanup();
+      expect(worker.disposedHandles).toEqual([{ build: 1 }, { restored: true }, { build: 2 }]);
+    });
+
+    it('does not pin or export an older handle after the newest evaluation fails', async () => {
+      class FailingWorker extends DisposingKernelWorker {
+        protected override async onEvaluateForOwner(
+          owner: OperationOwner,
+          input: NativeBuildInput,
+          runtime: KernelRuntime,
+        ): Promise<EvaluateResult> {
+          if (input.parameters['size'] === 2) {
+            return {
+              success: false,
+              issues: [{ code: 'RUNTIME', type: 'kernel', severity: 'error', message: 'build failed' }],
+            };
+          }
+          return super.onEvaluateForOwner(owner, input, runtime);
+        }
+      }
+      const worker = new FailingWorker({ middleware: [], onLog: noopLog, filesystem: createMockFileSystem() });
+      const first = await worker.runCreateGeometry('test.kcl', { size: 1 });
+      const second = await worker.runCreateGeometry('test.kcl', { size: 2 });
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(false);
+      expect(worker.disposedHandles).toEqual([{ build: 1 }]);
+      const exported = await worker.exportGeometry('gltf');
+      expect(exported.success).toBe(false);
+      await worker.cleanup();
+      expect(worker.disposedHandles).toEqual([{ build: 1 }]);
+    });
+
+    it('reuses a completed evaluation after its request is superseded before projection', async () => {
+      const controller = new AbortController();
+      class SupersededWorker extends MockKernelWorker {
+        protected override async onEvaluateForOwner(
+          owner: OperationOwner,
+          input: NativeBuildInput,
+          runtime: KernelRuntime,
+        ): Promise<EvaluateResult> {
+          const result = await super.onEvaluateForOwner(owner, input, runtime);
+          controller.abort();
+          return result;
+        }
+      }
+      const worker = new SupersededWorker({ middleware: [], onLog: noopLog, filesystem: createMockFileSystem() });
+      const request = { file: createGeometryFile('test.kcl'), parameters: {} };
+      await expect(worker.evaluateModel(request, controller.signal)).rejects.toBeDefined();
+      const result = await worker.evaluateModel(request);
+      expect(result.success).toBe(true);
+      expect(worker.createGeometryCalls).toBe(1);
+      await worker.cleanup();
     });
 
     it('disposes a superseded materialization handle after unwind without publishing it', async () => {
@@ -2311,7 +2438,7 @@ describe('KernelWorker lifecycle', () => {
         expect(filesystem.mocks.mkdir).not.toHaveBeenCalled();
         // @ts-expect-error - white-box: the staged bytes are the path's observed revision.
         expect(worker.fileContentCache.get('sub/main.ts')).toBe(staged);
-        expect(worker.createGeometryCalls).toBe(2);
+        expect(worker.createGeometryCalls).toBe(1);
 
         const states: string[] = [];
         worker.onStateChanged = ({ state }) => states.push(state);
@@ -2323,7 +2450,7 @@ describe('KernelWorker lifecycle', () => {
         await flushMicrotasks();
 
         expect(states).toEqual([]);
-        expect(worker.createGeometryCalls).toBe(2);
+        expect(worker.createGeometryCalls).toBe(1);
       } finally {
         await worker.cleanup();
       }
@@ -3909,6 +4036,7 @@ describe('abort reason propagation', () => {
     const kernelSignals: AbortSignal[] = [];
     const middlewareSignals: AbortSignal[] = [];
     const bundlerSignals: AbortSignal[] = [];
+    let kernelVersion = '1.0.0';
     let releaseFirst!: () => void;
     const firstGate = new Promise<void>((resolve) => {
       releaseFirst = resolve;
@@ -3928,6 +4056,10 @@ describe('abort reason propagation', () => {
     });
 
     class SignalIdentityWorker extends MockKernelWorker {
+      protected override getActiveKernelVersion(): string {
+        return kernelVersion;
+      }
+
       protected override async onEvaluateForOwner(
         _owner: OperationOwner,
         _input: NativeBuildInput,
@@ -3982,6 +4114,7 @@ describe('abort reason propagation', () => {
     expect(middlewareSignals[0]).toBe(kernelSignals[0]);
     expect(bundlerSignals[0]).toBe(kernelSignals[0]);
 
+    kernelVersion = '2.0.0';
     worker.handleOpenFile({ renderId: secondRenderId, file: createGeometryFile('main.ts'), parameters: {} });
     const retainedFirstSignal = kernelSignals[0]!;
     expect(retainedFirstSignal.aborted).toBe(true);
@@ -4675,10 +4808,8 @@ describe('transcoder loading', () => {
     expect(stlRoute).toBeDefined();
     const stlProps = Object.keys((stlRoute.exportOptions.schema as { properties: Record<string, unknown> }).properties);
     expect(stlProps).toEqual(expect.arrayContaining(['binary', 'tessellation', 'coordinateSystem']));
-    expect(stlRoute.exportOptions.defaults).toEqual(
-      // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers are untyped
-      expect.objectContaining({ binary: true, tessellation: expect.any(Object), coordinateSystem: 'z-up' }),
-    );
+    expect(stlRoute.exportOptions.defaults).toMatchObject({ binary: true, coordinateSystem: 'z-up' });
+    expect(stlRoute.exportOptions.defaults).toHaveProperty('tessellation');
 
     const stepRoute = manifest.routes.find((r) => r.targetFormat === 'step')!;
     expect(stepRoute).toBeDefined();
@@ -5336,8 +5467,44 @@ describe('native-handle materialization', () => {
     const customParams = { radius: 42, height: 10 };
     await openAndWaitForRender(worker, createGeometryFile('test.ts'), customParams);
 
+    const artifact = (worker as unknown as { currentPublishedRender?: MaterializedRender }).currentPublishedRender;
+    expect(artifact?.identity.nativeBuildInput?.parameters).toEqual(customParams);
+    artifact!.serializedNativeHandleSlot = undefined;
+    vi.spyOn(
+      worker as unknown as { isNativeHandleValidForOwner: (...args: unknown[]) => Promise<boolean> },
+      'isNativeHandleValidForOwner',
+    ).mockResolvedValue(false);
+    const replay = vi.spyOn(
+      worker as unknown as { onCreateGeometryForOwner: (...args: unknown[]) => Promise<unknown> },
+      'onCreateGeometryForOwner',
+    );
+
     const result = await worker.runExportGeometry('gltf');
     expect(result.success).toBe(true);
+    expect(replay).toHaveBeenCalledOnce();
+    expect(replay.mock.calls[0]?.[1]).toEqual(artifact?.identity.nativeBuildInput);
+  });
+
+  it('fails export when a stale handle cannot be reheated from its captured input', async () => {
+    const worker = createConfiguredWorker();
+    await openAndWaitForRender(worker, createGeometryFile('test.ts'), { radius: 42 });
+    const artifact = (worker as unknown as { currentPublishedRender?: MaterializedRender }).currentPublishedRender;
+    artifact!.serializedNativeHandleSlot = undefined;
+    vi.spyOn(
+      worker as unknown as { isNativeHandleValidForOwner: (...args: unknown[]) => Promise<boolean> },
+      'isNativeHandleValidForOwner',
+    ).mockResolvedValue(false);
+    const replay = vi
+      .spyOn(
+        worker as unknown as { onCreateGeometryForOwner: (...args: unknown[]) => Promise<unknown> },
+        'onCreateGeometryForOwner',
+      )
+      .mockRejectedValue(new Error('generation unavailable'));
+
+    const result = await worker.runExportGeometry('gltf');
+    expect(result.success).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toContain('RUNTIME_EXPORT_NATIVE_HANDLE_MISSING');
+    expect(replay.mock.calls[0]?.[1]).toEqual(artifact?.identity.nativeBuildInput);
   });
 });
 
@@ -5570,20 +5737,10 @@ describe('CapabilitiesManifest target shape', () => {
     });
 
     const manifest = worker.capabilitiesManifest;
-    /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- expect.objectContaining/expect.any matchers return any */
-    expect(manifest.renderCapabilities['mock-kernel']).toEqual(
-      expect.objectContaining({
-        renderOptions: expect.objectContaining({
-          schema: expect.any(Object),
-          defaults: expect.objectContaining({
-            tessellation: expect.objectContaining({
-              linearTolerance: 0.1,
-              angularTolerance: 15,
-            }),
-          }),
-        }),
-      }),
-    );
-    /* oxlint-enable @typescript-eslint/no-unsafe-assignment */
+    const renderOptions = manifest.renderCapabilities['mock-kernel']?.renderOptions;
+    expect(renderOptions?.schema).toBeDefined();
+    expect(renderOptions?.defaults).toMatchObject({
+      tessellation: { linearTolerance: 0.1, angularTolerance: 15 },
+    });
   });
 });

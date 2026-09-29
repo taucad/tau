@@ -127,6 +127,21 @@ const evaluationHash = async (worker: SourceLabelWorker, filename: string): Prom
 };
 
 describe('request-scoped freshness on a watchable filesystem', () => {
+  it('reuses an unchanged watcherless evaluation and rebuilds after bytes change', async () => {
+    const { worker, files } = createHarness({ 'main.ts': 'v1' }, { watchable: false });
+
+    const first = await evaluationHash(worker, 'main.ts');
+    const second = await evaluationHash(worker, 'main.ts');
+    expect(second).toBe(first);
+    expect(worker.createGeometryCalls).toBe(1);
+
+    files.set('main.ts', 'v2');
+    const changed = await evaluationHash(worker, 'main.ts');
+    expect(changed).not.toBe(first);
+    expect(worker.createGeometryCalls).toBe(2);
+    await worker.cleanup();
+  });
+
   it('(a) evaluateModel answers for the bytes written after the previous evaluation', async () => {
     const { worker, files } = createHarness({ 'main.ts': 'v1' });
 

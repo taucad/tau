@@ -158,7 +158,7 @@ describe('v2 kernel boundary with the current client', () => {
         return createKernelSuccess({ parameters });
       },
       async evaluate({ entryPath }) {
-        return { handle: entryPath, views: entryPath === 'empty.circuit' ? [] : ['b', 'a'] };
+        return { handle: 'same-primitive-handle', views: entryPath === 'empty.circuit' ? [] : ['b', 'a'] };
       },
       render,
     })();
@@ -181,6 +181,115 @@ describe('v2 kernel boundary with the current client', () => {
       const empty = await worker.createGeometry({ file: createGeometryFile('empty.circuit'), parameters: {} });
       expect(empty.success).toBe(false);
       expect(render).toHaveBeenCalledTimes(1);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('keeps view and export offers on separate evaluations with the same undefined handle', async () => {
+    const render = vi.fn(async ({ view }: { view: 'a' | 'b' }) => ({
+      content: `<svg xmlns="http://www.w3.org/2000/svg"><text>${view}</text></svg>`,
+    }));
+    const write = vi.fn(async ({ exportId }: { exportId: 'first' | 'second' }) => ({
+      files: [{ name: `${exportId}.txt`, mimeType: 'text/plain', bytes: new TextEncoder().encode(exportId) }] as const,
+    }));
+    const kernel = defineKernelV2({
+      id: 'v2-undefined-offers',
+      extensions: ['circuit'] as const,
+      name: 'V2 undefined offers',
+      version: '1.0.0',
+      views: {
+        a: { title: 'A', mimeType: 'image/svg+xml' },
+        b: { title: 'B', mimeType: 'image/svg+xml' },
+      },
+      exports: {
+        first: { title: 'First', mimeType: 'text/plain', extension: 'txt' },
+        second: { title: 'Second', mimeType: 'text/csv', extension: 'csv' },
+      },
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate({ entryPath }) {
+        return entryPath === 'first.circuit'
+          ? { handle: undefined, views: ['a'] as const, exports: ['first'] as const }
+          : { handle: undefined, views: ['b'] as const, exports: ['second'] as const };
+      },
+      render,
+      write,
+    })();
+    await seedTestFileSystem({ 'first.circuit': 'first', 'second.circuit': 'second' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    try {
+      const first = await worker.createGeometry({ file: createGeometryFile('first.circuit'), parameters: {} });
+      expect(first.success).toBe(true);
+      if (first.success && first.data.format === 'svg') {
+        expect(first.data.content).toContain('a');
+      }
+      const second = await worker.createGeometry({ file: createGeometryFile('second.circuit'), parameters: {} });
+      expect(second.success).toBe(true);
+      if (second.success && second.data.format === 'svg') {
+        expect(second.data.content).toContain('b');
+      }
+      const unavailable = await worker.exportGeometry('txt');
+      expect(unavailable.success).toBe(false);
+      expect(unavailable.issues[0]?.code).toBe('KERNEL_CAPABILITY_MISSING');
+      const available = await worker.exportGeometry('csv');
+      expect(available.success, JSON.stringify(available.issues)).toBe(true);
+      expect(write).toHaveBeenCalledOnce();
+      expect(write).toHaveBeenCalledWith(
+        expect.objectContaining({ exportId: 'second', handle: undefined }),
+        expect.any(Object),
+        expect.any(Object),
+      );
+      expect(render).toHaveBeenCalledTimes(2);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('exports from a zero-view evaluation without inventing a display offer', async () => {
+    const write = vi.fn(async () => ({
+      files: [{ name: 'bom.csv', mimeType: 'text/csv', bytes: new TextEncoder().encode('part,count\nR1,1') }] as const,
+    }));
+    const kernel = defineKernelV2({
+      id: 'v2-export-only',
+      extensions: ['circuit'] as const,
+      name: 'V2 export only',
+      version: '1.0.0',
+      views: {},
+      exports: { bom: { title: 'BOM', mimeType: 'text/csv', extension: 'csv' } },
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        return { handle: undefined, views: [] as const, exports: ['bom'] as const };
+      },
+      write,
+    })();
+    await seedTestFileSystem({ 'export.circuit': 'export only' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    try {
+      const result = await worker.exportModel({
+        file: createGeometryFile('export.circuit'),
+        parameters: {},
+        format: 'csv',
+      });
+      expect(result.success, JSON.stringify(result.issues)).toBe(true);
+      expect(write).toHaveBeenCalledOnce();
     } finally {
       await worker.cleanup();
     }

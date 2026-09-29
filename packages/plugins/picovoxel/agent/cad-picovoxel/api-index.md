@@ -1,6 +1,6 @@
 # picovoxel API index
 
-picovoxel 0.1.0-beta.0 · 715 symbols · extracted by TypeScript 5.9.3.
+picovoxel 0.1.0-beta.0 · 725 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature.
 
@@ -12,20 +12,20 @@ AddBeamOptions (interface) [6 members]
   AddBeamOptions.radius (property) — Uniform radius
   AddBeamOptions.startRadius (property)
   AddBeamOptions.endRadius (property)
-  AddBeamOptions.roundCap (property) — Hemispherical end caps (SG12 default)
+  AddBeamOptions.roundCap (property) — Hemispherical end caps (default true, as upstream)
 Bounds (interface) [2 members] — An axis-aligned box in millimetres
   Bounds.min (property)
   Bounds.max (property)
 CreatePicoOptions (interface) — `createPico` options
 CreatePicoRuntimeOptions (interface) [2 members] — Options that shape a runtime
-  CreatePicoRuntimeOptions.wasm (property) — Emscripten Module overrides (e.g
+  CreatePicoRuntimeOptions.wasm (property) — Emscripten Module overrides forwarded to instantiation
   CreatePicoRuntimeOptions.wasmModule (property) — A compiled `WebAssembly.Module` of this entry's wasm (`pico.wasm` for the…
 CreatePicoSessionOptions (interface) [7 members] — Options that shape a session
   CreatePicoSessionOptions.voxelSize (property) — Voxel edge length in millimetres
   CreatePicoSessionOptions.memoryWarningBytes (property) — Native-memory warning threshold in bytes (default 1 GiB)
-  CreatePicoSessionOptions.lane (property) — SKv2-0 V0.5 (§14.1) — the named lane bundle
-  CreatePicoSessionOptions.fastRenorm (property) — Session-wide default for the offset family's `fastRenorm` (SK-0.8 first-order renormalization…
-  CreatePicoSessionOptions.serialLattice (property) — SKv2-0 V0.6 — routes lattice rendering down the serial C#-identical…
+  CreatePicoSessionOptions.lane (property) — The session's lane, a policy claim about every value it…
+  CreatePicoSessionOptions.fastRenorm (property) — Session-wide default for the offset family's `fastRenorm` (first-order renormalization —…
+  CreatePicoSessionOptions.serialLattice (property) — Routes lattice rendering down the serial C#-identical `Voxels::RenderLattice` loop instead…
   CreatePicoSessionOptions.registry (property)
   CreatePicoSessionOptions.now (property)
 FromStlOptions (interface) [3 members]
@@ -37,7 +37,7 @@ Lattice (interface) [7 members]
   Lattice.addBeam (method)
   Lattice.toVoxels (method) — Renders the lattice into a fresh voxel field
   Lattice.memUsage (property)
-  Lattice.handle (property) — Raw ABI handle — escape hatch (§10)
+  Lattice.handle (property) — Raw ABI handle — escape hatch
   Lattice.dispose (method) — Optional
   Lattice.[Symbol.dispose] (method)
 MemoryUsage (interface) [9 members]
@@ -50,21 +50,22 @@ MemoryUsage (interface) [9 members]
   MemoryUsage.vectorFields (property)
   MemoryUsage.vdbFiles (property)
   MemoryUsage.metadata (property)
-Mesh (interface) [16 members]
+Mesh (interface) [17 members]
   Mesh.vertices (property) — Vertex positions, xyz triples in mm
   Mesh.triangles (property) — Triangle corner indices, triples
   Mesh.vertexCount (property)
   Mesh.triangleCount (property)
   Mesh.bounds (method) — Bounding box
+  Mesh.measure (method) — Enclosed volume (mm³) and surface area (mm²) from the triangles
   Mesh.transform (method) — Pure transformed copy
   Mesh.mirror (method) — Pure mirrored copy across the plane through `point` with `normal`
   Mesh.merged (method) — Pure concatenation — no dedup, no boolean (as upstream Append…
   Mesh.toVoxels (method) — Voxelizes the (closed) mesh
-  Mesh.shellVoxels (method) — SG13 — offset in ALL directions from a not-necessarily-closed mesh
-  Mesh.toStl (method) — SG7 — binary STL bytes with the UNITS= header convention
+  Mesh.shellVoxels (method) — Offset in ALL directions from a not-necessarily-closed mesh
+  Mesh.toStl (method) — Binary STL bytes with the UNITS= header convention
   Mesh.toGlb (method) — GLB container (positions + indices)
-  Mesh.lane (property) — §14.1 value-class provenance, inherited from the producing voxels/mesh chain
-  Mesh.handle (property) — Raw ABI handle — escape hatch (§10)
+  Mesh.lane (property) — Value provenance, inherited from the producing voxels/mesh chain
+  Mesh.handle (property) — Raw ABI handle — escape hatch
   Mesh.dispose (method) — Optional
   Mesh.[Symbol.dispose] (method)
 Metadata (interface) [9 members]
@@ -72,19 +73,19 @@ Metadata (interface) [9 members]
   Metadata.names (method) — Every entry name, index order
   Metadata.typeOf (method)
   Metadata.get (method) — Typed read
-  Metadata.set (method) — SG3 — reserved names (`PicoGK.*`, `class`, `name`, `file_*`) throw
-  Metadata.remove (method) — SG3 guard applies here too
-  Metadata.handle (property) — Raw ABI handle — escape hatch (§10)
+  Metadata.set (method) — Reserved names (`PicoGK.*`, `PicoVoxel.*`, `class`, `name`, `file_*`) throw
+  Metadata.remove (method) — The reserved-name guard applies here too
+  Metadata.handle (property) — Raw ABI handle — escape hatch
   Metadata.dispose (method) — Optional
   Metadata.[Symbol.dispose] (method)
 Pico (interface) [24 members]
   Pico.voxelSize (property)
-  Pico.lane (property) — SKv2-0 V0.5 — the RESOLVED session lane (never `'auto'`
+  Pico.lane (property) — The RESOLVED session lane (never `'auto'`
   Pico.name (property)
   Pico.version (property)
   Pico.buildInfo (property)
   Pico.voxelToMm (method) — Convert voxel-index coordinates to world millimetres
-  Pico.mmToVoxel (method) — Convert world millimetres to integer voxel indices (fixes upstream B2)
+  Pico.mmToVoxel (method) — Convert world millimetres to integer voxel indices (upstream `MmToVoxels` converts…
   Pico.createVoxels (method)
   Pico.createMesh (method) — Builds a mesh from vertex/triangle data via the bulk imports…
   Pico.createLattice (method)
@@ -93,19 +94,24 @@ Pico (interface) [24 members]
   Pico.createVectorField (method)
   Pico.createVdb (method) — An empty writable .vdb container
   Pico.openVdb (method) — Opens .vdb bytes as a container for field-level access
-  Pico.vdbVoxelSize (method) — SG5 handshake — the voxel size recorded in .vdb bytes…
-  Pico.voxelsFromVdb (method) — SG5 — first GRID_LEVEL_SET field wins
-  Pico.meshFromStl (method) — SG7 — binary STL bytes to a mesh (UNITS= header…
+  Pico.vdbVoxelSize (method) — The voxel-size handshake — the voxel size recorded in .vdb…
+  Pico.voxelsFromVdb (method) — The first GRID_LEVEL_SET field wins
+  Pico.meshFromStl (method) — Binary STL bytes to a mesh (UNITS= header honoured on…
   Pico.memory (property) — PicoGK-side memory usage in bytes, per object type
   Pico.allocated (property) — PicoGK's own per-type allocation counters — the leak oracle
-  Pico.module (property) — §10 escape hatch
-  Pico.handle (property) — §10 escape hatch
+  Pico.module (property) — Escape hatch
+  Pico.handle (property) — Escape hatch
   Pico.dispose (method) — Deterministic teardown
   Pico.[Symbol.dispose] (method)
 PicoRuntime (interface) [3 members] — One instantiated wasm module — plus, on `picovoxel/multi`, its warm…
   PicoRuntime.createPico (method) — Opens a session on this runtime
   PicoRuntime.dispose (method) — Disposes every open session, then terminates the pthread pool
   PicoRuntime.[Symbol.dispose] (method)
+PicoWasmOverrides (interface) [4 members] — The Emscripten Module overrides picovoxel forwards to its glue
+  PicoWasmOverrides.locateFile (property) — Returns the URL of the wasm file (a filesystem path…
+  PicoWasmOverrides.mainScriptUrlOrBlob (property) — The pthread worker script (`picovoxel/multi/worker`), loaded by every worker as…
+  PicoWasmOverrides.instantiateWasm (property) — Instantiates the module yourself
+  PicoWasmOverrides.wasmBinary (property) — The wasm file's bytes, compiled in place of fetching the…
 PolyLine (interface) [10 members]
   PolyLine.addVertex (method) — Appends one vertex
   PolyLine.addVertices (method) — Appends many vertices
@@ -114,7 +120,7 @@ PolyLine (interface) [10 members]
   PolyLine.color (property) — RGBA, each 0..1, as the line was created
   PolyLine.bounds (method)
   PolyLine.memUsage (property)
-  PolyLine.handle (property) — Raw ABI handle — escape hatch (§10)
+  PolyLine.handle (property) — Raw ABI handle — escape hatch
   PolyLine.dispose (method) — Optional
   PolyLine.[Symbol.dispose] (method)
 ScalarField (interface) [9 members]
@@ -125,7 +131,7 @@ ScalarField (interface) [9 members]
   ScalarField.dimensions (method) — Field extent in discrete voxel units
   ScalarField.getSlice (method) — One Z slice of raw field values
   ScalarField.bounds (method) — Bounding box of active voxels in mm (dims × voxel…
-  ScalarField.signedDistanceAt (method) — SG6 — stored values are voxel-unit signed distance
+  ScalarField.signedDistanceAt (method) — Stored values are voxel-unit signed distance
   ScalarField.clone (method)
 ScalarFieldSlice (interface) [3 members]
   ScalarFieldSlice.width (property)
@@ -136,7 +142,7 @@ ShellOptions (interface) [5 members]
   ShellOptions.inner (property)
   ShellOptions.outer (property)
   ShellOptions.smoothInner (property)
-  ShellOptions.fastRenorm (property) — SK-0.8 — see `offset({ fastRenorm })`
+  ShellOptions.fastRenorm (property) — See `offset({ fastRenorm })`
 SurfaceNormalFieldOptions (interface) [4 members]
   SurfaceNormalFieldOptions.surfaceThresholdVx (property) — Active values with |sd| above this (voxel units) are skipped…
   SurfaceNormalFieldOptions.directionFilter (property) — Keep only normals within the tolerance of this direction (C#…
@@ -146,7 +152,7 @@ ToStlOptions (interface) [4 members]
   ToStlOptions.unit (property)
   ToStlOptions.scale (property) — Scale applied while still in mm, after offset
   ToStlOptions.offset (property) — Offset in mm, applied first
-  ToStlOptions.acceptLane (property) — §14.1 — acknowledges, for this one export, that the geometry…
+  ToStlOptions.acceptLane (property) — Acknowledges, for this one export, that the geometry has non-exact…
 VdbFile (interface) [10 members]
   VdbFile.fieldCount (property)
   VdbFile.fields (method) — Name + type of every field, index order
@@ -155,7 +161,7 @@ VdbFile (interface) [10 members]
   VdbFile.getScalarField (method)
   VdbFile.getVectorField (method)
   VdbFile.toBytes (method) — Serialises the container to .vdb bytes
-  VdbFile.handle (property) — Raw ABI handle — escape hatch (§10)
+  VdbFile.handle (property) — Raw ABI handle — escape hatch
   VdbFile.dispose (method) — Optional
   VdbFile.[Symbol.dispose] (method)
 VectorField (interface) [5 members]
@@ -174,12 +180,12 @@ Voxels (interface) [40 members]
   Voxels.union (method) — Pure union
   Voxels.subtract (method) — Pure subtraction of every operand
   Voxels.intersect (method) — Pure intersection
-  Voxels.equals (method) — Content equality (SG10-guarded)
-  Voxels.isEmpty (property) — SG2 — THE emptiness oracle
+  Voxels.equals (method) — Content equality
+  Voxels.isEmpty (property) — THE emptiness oracle
   Voxels.offset (method) — Pure surface offset
   Voxels.doubleOffset (method) — Two offsets in sequence (closing/opening when signs differ)
-  Voxels.smoothen (method) — SG9 — in, 2× out, in again
-  Voxels.fillet (method) — SG9 — over-offset composition
+  Voxels.smoothen (method) — In, 2× out, in again
+  Voxels.fillet (method) — Over-offset composition
   Voxels.shell (method) — Shell
   Voxels.trim (method) — Everything outside the box is trimmed away (cube-mesh intersect, as…
   Voxels.projectZSlice (method) — Projects the slice at startZ through endZ (mm)
@@ -188,16 +194,16 @@ Voxels (interface) [40 members]
   Voxels.withImplicit (method) — Pure
   Voxels.maskedByImplicit (method) — The gyroid-in-sphere idiom
   Voxels.volume (property) — Volume in mm³ from the raw grid — fast but…
-  Voxels.properties (method) — SG1 — the correct volume (mm³), surface area (mm²) and…
-  Voxels.gridHash (method) — SKv2-0 V0.1 — the G0 canonical grid hash (NON-DETERMINISM.md §14.5)
+  Voxels.properties (method) — Volume (mm³), surface area (mm²) and bounds free of boolean…
+  Voxels.gridHash (method) — The canonical grid hash
   Voxels.densifyInterior (method) — Oracle test tooling
-  Voxels.bounds (method) — SG1 — bounding box via the intermediate mesh (the only…
+  Voxels.bounds (method) — Bounding box via the intermediate mesh (the only accurate way)
   Voxels.isInside (method) — True if the point is at or below the surface
   Voxels.surfaceNormal (method) — Surface normal at a point on the surface (use after…
   Voxels.closestPointOnSurface (method) — Closest surface point, or null when the field is empty
   Voxels.raycastToSurface (method) — Ray-surface intersection, or null on a miss
-  Voxels.raycastBatch (method) — SKv2-0 V0.11 (P8) — N rays over ONE cached intersector…
-  Voxels.closestPointsOnSurface (method) — SKv2-0 V0.11 (P8) — N closest-surface-point queries over one index…
+  Voxels.raycastBatch (method) — N rays over ONE cached intersector and one ABI crossing
+  Voxels.closestPointsOnSurface (method) — N closest-surface-point queries over one index build (openvdb ClosestSurfacePoint)
   Voxels.dimensions (method) — Field extent in discrete voxel units
   Voxels.sliceCount (property) — Number of Z slices
   Voxels.sliceOrigin (method) — Real-world origin of slice `index` in mm
@@ -206,8 +212,8 @@ Voxels (interface) [40 members]
   Voxels.toScalarField (method)
   Voxels.metadata (property)
   Voxels.memUsage (property)
-  Voxels.lane (property) — §14.1 value-class provenance
-  Voxels.handle (property) — Raw ABI handle — escape hatch (§10)
+  Voxels.lane (property) — Value provenance
+  Voxels.handle (property) — Raw ABI handle — escape hatch
   Voxels.dispose (method) — Optional
   Voxels.[Symbol.dispose] (method)
 BeamThickness (interface) [3 members] — Beam thickness for a given point in space (C# `IBeamThickness`)
@@ -287,14 +293,14 @@ SdfImage (interface) [3 members]
 Slice (interface) [3 members]
   Slice.z (property) — Layer height position in mm (first layer at one layerHeight,…
   Slice.contours (property)
-  Slice.lane (property) — §14.1 value-class provenance of the sliced voxels (`'exact'` or absent…
+  Slice.lane (property) — Value provenance of the sliced voxels (`'exact'` or absent =…
 SliceContour (interface) [2 members]
   SliceContour.points (property) — Flat [x0, y0, x1, y1, …] loop in mm
   SliceContour.winding (property) — Solid boundaries are CCW, holes CW (upstream contract)
 SliceStack (interface) [3 members]
   SliceStack.slices (property)
   SliceStack.bounds (property) — XY bounds over every contour + Z from first/last layer
-  SliceStack.lane (property) — §14.1 value-class provenance (`'exact'` or absent = exact)
+  SliceStack.lane (property) — Value provenance (`'exact'` or absent = exact)
 SliceVoxelsOptions (interface) [3 members]
   SliceVoxelsOptions.layerHeight (property) — Layer height in mm
   SliceVoxelsOptions.useAbsoluteXY (property) — Keep absolute XY coordinates instead of the bbox-relative default
@@ -325,7 +331,7 @@ SdfExpression (type) — A serializable SDF
 SdfFunction (type) — Signed distance in millimetres at (x, y, z) — scalars,…
 SdfOperator (type)
 SliceAxis (type)
-SliceMode (type) — SG8 — modes are pure post-processing over the native narrow-band…
+SliceMode (type) — Slice modes are pure post-processing over the native narrow-band floats
 StlUnit (type)
 TransformOptions (type)
 VdbFieldType (type)
@@ -453,7 +459,7 @@ RawTransitionTpmsPattern (class) [1 members] — Schwarz diamond blending into S
 RegularCellArray (class) [2 members] — Regular grid cell array housing the bounding box of the…
   RegularCellArray.constructor (constructor)
   RegularCellArray.unitCells (method)
-RegularUnitCell (class) [2 members] — A grid of just one unit cell, centred in XY…
+RegularUnitCell (class) [2 members] — A grid of exactly one unit cell, centred in XY…
   RegularUnitCell.constructor (constructor)
   RegularUnitCell.unitCells (method)
 ScaleTrafo (class) [2 members] — Per-axis division by the unit sizes (C# `ScaleTrafo`)
@@ -524,7 +530,7 @@ BaseLens (class) [19 members] — Lens/washer
   BaseLens.phiRatioFromStep (method)
   BaseLens.heightRatioFromStep (method)
   BaseLens.surfacePoint (method) — Surface point (C# `vecGetSurfacePoint`
-BasePipe (class) [21 members] — Pipe (annular cylinder) along a straight frame or spine (C#…
+BasePipe (class) [22 members] — Pipe (annular cylinder) along a straight frame or spine (C#…
   BasePipe.lengthSteps (property)
   BasePipe.polarSteps (property)
   BasePipe.radialSteps (property)
@@ -545,6 +551,7 @@ BasePipe (class) [21 members] — Pipe (annular cylinder) along a straight frame
   BasePipe.radiusRatioFromStep (method)
   BasePipe.phiRatioFromStep (method)
   BasePipe.lengthRatioFromStep (method)
+  BasePipe.axesAt (method) — Spine point and local axes at a length ratio
   BasePipe.surfacePoint (method) — Surface point
 BasePipeSegment (class) [5 members] — Angular pipe segment
   BasePipeSegment.rangeModulation (property)
@@ -677,7 +684,10 @@ LineModulation (class) [7 members] — 1D modulation
   LineModulation.add (method) — Sum of two modulations (C# `operator +`)
   LineModulation.sub (method) — Difference of two modulations (C# `operator -`)
   LineModulation.scale (method) — Scaled modulation (C# `operator *`)
-MeshBuilder (class) [3 members] — Accumulates upstream-style per-triangle geometry, built through ONE bulk `createMesh` call
+MeshBuilder (class) [6 members] — Accumulates upstream-style per-triangle geometry, built through ONE bulk `createMesh` call
+  MeshBuilder.vertexCount (property) — Number of vertices added so far
+  MeshBuilder.addVertex (method) — Adds one vertex and returns its index, for {@link MeshBuilder.addIndexedTriangle}…
+  MeshBuilder.addIndexedTriangle (method) — One triangle over vertices already added, by index (C# `Mesh.nAddTriangle(Triangle)`)
   MeshBuilder.addTriangle (method) — Three fresh vertices + one triangle, exactly like C# `Mesh.nAddTriangle(v0,…
   MeshBuilder.addQuad (method) — The two-triangle quad both upstream mesh helpers and shape mantles…
   MeshBuilder.build (method)
@@ -688,6 +698,9 @@ SurfaceModulation (class) [6 members] — 2D modulation over (phi, lengthRatio) 
   SurfaceModulation.add (method) — Sum of two modulations (C# `operator +`)
   SurfaceModulation.sub (method) — Difference of two modulations (C# `operator -`)
   SurfaceModulation.scale (method) — Scaled modulation (C# `operator *`)
+
+## Classs (2) — `api-classs-2.md`
+
 TangentialControlSpline (class) [3 members] — Cubic-feel connector between two points/frames with tangent control (C# `TangentialControlSpline`)
   TangentialControlSpline.constructor (constructor)
   TangentialControlSpline.betweenFrames (method) — The frame-to-frame form
@@ -697,8 +710,8 @@ TangentialControlSpline (class) [3 members] — Cubic-feel connector between two
 
 createPico (function) — Creates a single-threaded PicoGK session
 createPicoRuntime (function) — Creates a single-threaded runtime
-emptyBounds (function) — SG15 — the empty-bounds sentinel the ABI structs use (`BBox3()`…
-isEmptyBounds (function) — True for the SG15 sentinel (an empty mesh/field produced it)
+emptyBounds (function) — The empty-bounds sentinel the ABI structs use (`BBox3()` default
+isEmptyBounds (function) — True for the empty-bounds sentinel (an empty mesh/field produced it)
 meshToStlBytes (function) — Serialises indexed geometry to binary STL bytes (deindexed, as the…
 surfaceNormalFieldExtractor (function) — Builds a VectorField of surface normals from a voxel field's…
 vectorFieldMerge (function) — Writes every active value of `source` into `target` (C# `VectorFieldMerge.Merge`)

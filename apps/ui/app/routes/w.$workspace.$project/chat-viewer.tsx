@@ -1,5 +1,4 @@
 import { memo, useEffect, useCallback, useMemo, useRef, useState } from 'react';
-import { useSelector } from '@xstate/react';
 import type { SnapshotFrom } from 'xstate';
 import type { FileEntry } from '@taucad/types';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
@@ -17,7 +16,8 @@ import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useFileContent } from '#hooks/use-file-content.js';
 import { useRevisionStatus } from '#hooks/use-revision-status.js';
 import { Loader } from '#components/ui/loader.js';
-import { defaultGraphicsSettings } from '#constants/editor.constants.js';
+import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
+import { newViewRecord, viewTabTitle } from '#workbench-records/projection.js';
 import { CadProvider, useCad, useCadSelector } from '#hooks/use-cad.js';
 import {
   GraphicsProvider,
@@ -143,7 +143,9 @@ export const ChatViewer = memo(function ({
   panelApi,
   profile = 'editor',
 }: ChatViewerProps): React.JSX.Element {
-  const { projectRef, editorRef, viewGraphics, geometryUnits, mainEntryPath } = useProject();
+  const { projectRef, viewGraphics, viewRecords, entriesRecord, geometryUnits, mainEntryPath, setViewEntryPath } =
+    useProject();
+  const viewCommands = useWorkbenchViewCommands();
   // Get the per-view graphics machine
   const graphicsActor = viewGraphics.get(viewId);
 
@@ -184,16 +186,15 @@ export const ChatViewer = memo(function ({
   const fileContent = useFileContent(entryPath);
   const isMissing = fileContent.kind === 'orphaned' && !isDirectory;
 
-  // Get the current view settings from editor state for this panel
-  const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
-  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
+  // The project view record is the camera seed for this pane.
+  const viewRecord = viewRecords.get(viewId);
   /* Create-only seed for this view's camera session, built when the viewer mounts its canvas. The
    * canvas-less branches mount no provider, so a directory or a missing file builds no camera (R8). */
   const cameraSeed: ViewCameraSeed = {
     identity: entryPath,
     camera: {
-      cameraFovAngle: viewSettings[viewId]?.graphicsSettings.cameraFovAngle,
-      cameraView: viewSettings[viewId]?.graphicsSettings.cameraView,
+      cameraFovAngle: viewRecord?.fieldOfView,
+      cameraView: viewRecord?.camera.kind === 'pose' ? viewRecord.camera : undefined,
     },
   };
 
@@ -205,7 +206,7 @@ export const ChatViewer = memo(function ({
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath: path,
-          renderTimeout: unitSettings[path]?.renderTimeout,
+          renderTimeout: entriesRecord?.entries[path]?.renderTimeout,
         });
       }
 
@@ -222,33 +223,32 @@ export const ChatViewer = memo(function ({
       }
       graphicsActor?.send({ type: 'cancelCurrentMeasurement' });
 
-      // Preserve existing view settings (FOV, visibility, environment preset, etc.)
-      // But clear geometry-dependent state (camera pose, measurements) on file switch
-      const existingGraphics = viewSettings[viewId]?.graphicsSettings;
-
-      editorRef.send({
-        type: 'setViewSettings',
-        viewId,
-        viewState: {
-          entryPath: path,
-          graphicsSettings: {
-            ...(existingGraphics ?? defaultGraphicsSettings),
-            // Clear geometry-dependent state on file switch
-            cameraView: undefined,
-            sectionView: undefined,
-            pinnedMeasurements: undefined,
-          },
-        },
-      });
+      void viewCommands.edit(viewId, (current) => ({
+        ...(current ?? newViewRecord(path)),
+        entryPath: path,
+        camera: { kind: 'preset', preset: 'isometric' },
+        section: { active: false, cuts: [] },
+        measurements: [],
+      }));
+      setViewEntryPath(viewId, path);
 
       // Update Dockview panel params so the component re-renders with new entryPath
       panelApi.updateParameters({ entryPath: path });
 
       // Update the Dockview panel title
-      const fileName = path.split('/').pop() ?? path;
-      panelApi.setTitle(fileName);
+      panelApi.setTitle(viewTabTitle({ ...(viewRecord ?? newViewRecord(path)), entryPath: path }));
     },
-    [projectRef, editorRef, geometryUnits, graphicsActor, viewId, panelApi, viewSettings, unitSettings],
+    [
+      entriesRecord,
+      projectRef,
+      geometryUnits,
+      graphicsActor,
+      viewId,
+      panelApi,
+      setViewEntryPath,
+      viewCommands,
+      viewRecord,
+    ],
   );
 
   // A cloud project opens with a placeholder main file. Follow the real main
@@ -353,7 +353,7 @@ const ViewerContent = memo(function ({
   readonly entryPath: string;
   readonly profile: 'editor' | 'shared';
 }): React.JSX.Element {
-  const { editorRef, projectRef } = useProject();
+  const { projectRef, entriesRecord } = useProject();
   const cadRef = useCad();
   const geometry = useCadSelector(selectCadGeometry, undefined);
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
@@ -367,14 +367,13 @@ const ViewerContent = memo(function ({
   // stays open. Surface a "Reopen renderer" overlay so the user can re-spawn
   // the cad actor without having to re-add the panel.
   const isGeometryUnitClosed = !cadRef;
-  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
   const handleReopenRenderer = useCallback(() => {
     projectRef.send({
       type: 'createGeometryUnit',
       entryPath,
-      renderTimeout: unitSettings[entryPath]?.renderTimeout,
+      renderTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
     });
-  }, [projectRef, entryPath, unitSettings]);
+  }, [entriesRecord, projectRef, entryPath]);
 
   // Bridge geometry from the headless CadMachine to the per-view GraphicsMachine in
   // the same tick the cad machine publishes it. The canvas then renders a new

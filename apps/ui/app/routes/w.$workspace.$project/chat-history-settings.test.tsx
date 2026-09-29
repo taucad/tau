@@ -8,6 +8,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 type ChatState = { chat: { messages: unknown[] } | undefined; activeChatId: string };
 const chatState = vi.hoisted((): ChatState => ({ chat: { messages: [] }, activeChatId: 'chat_active' }));
 const downloadBlob = vi.fn();
+const chats = [{ id: 'chat_active', name: 'Bracket design' }];
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatContext: () => ({ chat: chatState.chat, activeChatId: chatState.activeChatId }),
@@ -16,7 +17,10 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: 'proj_one' }),
 }));
 vi.mock('#hooks/use-chats.js', () => ({
-  useChats: () => ({ chats: [{ id: 'chat_active', name: 'Bracket design' }] }),
+  useChats: () => ({ chats }),
+}));
+vi.mock('#hooks/use-chat-records.js', () => ({
+  useChatRecords: () => ({ chats, isLoading: false, error: undefined }),
 }));
 vi.mock('@taucad/utils/file', () => ({ downloadBlob }));
 vi.mock('#utils/chat.utils.js', () => ({ serializeTranscript: () => '# transcript' }));

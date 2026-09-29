@@ -207,6 +207,8 @@ const nodeFileSystem = async (sandbox: string, workspaceRoot: string): Promise<P
 
 /** A runtime whose parameter resolution names the source as undeclared. */
 const unresolvedRuntime = (): ProjectHostRuntimeClient => ({
+  capabilities: undefined,
+  connect: async () => undefined,
   evaluate: async () => {
     throw new Error('Not rendered in this test.');
   },

@@ -256,6 +256,10 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     output: (output) =>
       `${output.path}: ${String(output.counts.done)} done, ${String(output.counts.in_progress)} in progress, ${String(output.counts.pending)} pending`,
   },
+  [toolName.arrangeWorkbench]: {
+    input: (input) => `arrange_workbench(${Object.keys(input).join(', ')})`,
+    output: (output) => `-> ${output.revisions.map((revision) => revision.path).join(', ')}`,
+  },
   [toolName.getMachine]: {
     input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
     output: (output) => JSON.stringify(output, null, 2),

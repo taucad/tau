@@ -1,5 +1,4 @@
 import { configDefaults, defineConfig } from 'vitest/config';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
 /** Broad by construction: only type-only and test-support source is excluded. */
 export const substrateCoverageSourcePolicy = {
@@ -15,7 +14,6 @@ export const substrateCoverageSourcePolicy = {
 };
 
 export default defineConfig({
-  plugins: [nxViteTsPaths()],
   test: {
     environment: 'node',
     // Source checks and externally installed campaigns remain required test dependencies.

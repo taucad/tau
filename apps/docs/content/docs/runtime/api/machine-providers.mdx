@@ -1,0 +1,32 @@
+---
+title: Machine Provider API
+description: Declare physical machine capabilities and implement bounded discovery, connection, observation, and effects.
+docType: reference
+wordBudgetOverride: 1200
+---
+
+# Machine Provider API
+
+Import from `@taucad/runtime/machine`. `defineMachine` attaches a trusted `MachineProviderDefinition` to a callable `MachineProviderFactory`. The serializable `MachineProvider` advertises provider identity, configuration, queries, and capabilities; `parseMachineProvider` admits only the bounded descriptor. The `/plugin` type `ExpandPluginMachines` lets a composed runtime infer the provider tuple.
+
+## Provider declaration
+
+`MachineManifest` is the versioned descriptor checked by `parseMachineManifest` and `machineManifestSchema`; `MachineActionDescriptor` advertises supported actions. `defineMachineQuery` preserves the input/result schema correlation of a `MachineDeclaredQuery`, while `MachineQueryManifest` is its serializable form. Queries disclose catalog facts; they are not a hidden path to physical effects.
+
+The provider receives a `MachineDiscoveryRuntime` for discovery and a `MachineConnectionRuntime` only while establishing a trusted connection. `MachineDiscoveryInput` carries configuration and cancellation; its stream yields `MachineDiscoveryEvent`. `MachineConnectInput` includes `MachineConnectionContext`, which carries a host-local credential reference and `MachineTransportTrust` (`system` or pinned digest). `MachineClock` is the host's time source; `MachineLogEntry` is redacted provider telemetry.
+
+`MachineAcceptedContainer` records the semantic container a provider accepts for print preparation; it is distinct from a raw filename extension.
+
+Host-owned network access is bounded by `MachineNetworkRequest` and `MachineNetworkStream`. `MachineNetworkStillInput` requests one bounded authenticated JPEG. `MachineDatagramListenInput` admits a user-initiated listener and yields `MachineDatagram` with peer evidence. `MachineFileUploadInput` uses the host-owned transfer service and returns `MachineFileUploadReceipt`; the provider does not receive a general filesystem or socket grant.
+
+## Connected session
+
+`MachineSession` owns explicit cleanup plus read and effect methods. `MachineGetDescriptorInput`, `MachineGetSnapshotInput`, and `MachineObserveInput` supply cancellation to descriptor, snapshot, and observation calls. `MachineSubmitInput` starts one exact transferred artifact; `MachineReconcileInput` looks up a late semantic reply. `MachineControlInput` checks the expected run before a command. Their outcomes are `MachineSubmissionReceipt` and `MachineCommandReceipt` and may be unknown after a transport loss.
+
+`MachineProviderPreparePrintInput` asks for non-mutating preflight; `MachinePreparationReceipt` proves what is ready. `MachineProviderUploadInput` then requests one exact transfer and receives `MachineTransferReceipt`. `MachineArtifactReadInput` lets the host stream the immutable `MachineArtifactReference` in bounded chunks. `MachineCaptureStillInput` may return a `MachineStill`; `MachineStillCaptureCapability` explicitly says whether capture is supported. Never infer still capture from a network endpoint.
+
+## Related
+
+- [Machines API](./machines)
+- [Host authority API](./host)
+- [Transport API](./transport)

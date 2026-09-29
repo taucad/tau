@@ -122,6 +122,17 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     `${packagePath}/bindings/browser-conformance/run-browser-conformance.ts`,
     `${packagePath}/bindings/browser-conformance/app/run.ts`,
   ];
+  const sourceOnlyOutsideArchive = [
+    `${packagePath}/bench/performance-lab-cli.ts`,
+    `${packagePath}/bench/performance-lab-cli.test.ts`,
+    `${packagePath}/bench/performance-lab-focus.ts`,
+    `${packagePath}/bench/performance-lab-focus.test.ts`,
+    `${packagePath}/bench/performance-lab-runner.ts`,
+    `${packagePath}/bench/performance-lab-runner.test.ts`,
+    `${packagePath}/bench/performance-lab.test.ts`,
+    `${packagePath}/vitest.config.ts`,
+  ];
+  const sourceOnlyPaths = [...sourceKitPaths, ...sourceOnlyOutsideArchive];
   const toolchainPath = 'rust-toolchain.toml';
   const cargoLockPath = 'Cargo.lock';
   const generatedPath = `${packagePath}/bindings/node/generated`;
@@ -224,6 +235,9 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
   for (const path of sourceKitPaths) {
     put(join(producer, path), `old source-kit input ${path}`);
   }
+  for (const path of sourceOnlyOutsideArchive) {
+    put(join(producer, path), `old non-product input ${path}`);
+  }
   put(join(producer, packagePath, 'project.json'), JSON.stringify({ targets: { 'build-node': { fixture: true } } }));
   put(join(producer, packagePath, 'rust/target/untracked-output'), 'not source');
   let revision = 'f6ee22ab908e59d4335889cbc88e5907decd7198';
@@ -237,7 +251,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       }
       assert.ok(args.includes('--cached'));
       assert.ok(args.includes('--others'));
-      return `${snapshotPath}\0${bindingPath}\0${patchPath}\0${toolchainPath}\0${cargoLockPath}\0${sourceKitPaths.join('\0')}\0`;
+      return `${snapshotPath}\0${bindingPath}\0${patchPath}\0${toolchainPath}\0${cargoLockPath}\0${sourceOnlyPaths.join('\0')}\0`;
     },
   );
   /** @type {string[]} */
@@ -550,6 +564,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     'assemble-package',
   ]);
   assert.equal(inventory.artifacts.length, 5);
+  assert.deepEqual(verifyArtifacts(producer), inventory);
   const builtTargets = [...targets];
   if (sourceOnly) {
     const inventoryFile = join(producer, transportPath, 'inventory.json');
@@ -569,7 +584,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     const originalDelivery = /** @type {{archives: {path: string}[]}} */ (inventory.delivery);
     const oldArchives = originalDelivery.archives.map((archive) => fileRecordForTest(join(producer, archive.path)));
     revision = 'b'.repeat(40);
-    for (const path of sourceKitPaths) {
+    for (const path of sourceOnlyPaths) {
       put(join(producer, path), `current source-kit input ${path}`);
     }
     assert.deepEqual(verifyArtifacts(producer).artifacts, inventory.artifacts);
@@ -604,7 +619,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     for (const [index, archive] of originalDelivery.archives.entries()) {
       assert.deepEqual(fileRecordForTest(join(producer, archive.path)), oldArchives[index], 'old trio is immutable');
     }
-    for (const [index, path] of sourceKitPaths.entries()) {
+    for (const [index, path] of sourceOnlyPaths.entries()) {
       put(join(producer, path), `second source-only edit ${path}`);
       assert.deepEqual(verifyArtifacts(producer).artifacts, inventory.artifacts);
       assert.throws(() => verifyDelivery(producer), /source kit differs/);

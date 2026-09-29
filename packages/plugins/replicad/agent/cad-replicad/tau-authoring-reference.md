@@ -43,32 +43,32 @@ The legacy appearance path uses CSS `color` (sRGB, converted to linear glTF), `o
 
 Set metallic and roughness factors deliberately: glTF defaults both to `1`, so an omitted metallic factor does not mean plastic. Use `metallicFactor: 0` for a dielectric and `1` for a fully metallic finish.
 
-| Field | Purpose |
-| --- | --- |
-| `name`, `extras` | Human material name and JSON metadata. |
-| `pbrMetallicRoughness.baseColorFactor` | `[r, g, b, alpha]` linear color. |
-| `pbrMetallicRoughness.metallicFactor`, `.roughnessFactor` | Metallic/roughness factors in `[0, 1]`; defaults are glTF's values when omitted. |
-| `pbrMetallicRoughness.baseColorTexture`, `.metallicRoughnessTexture` | Indexed texture maps. The latter uses green for roughness and blue for metallic. |
-| `normalTexture` (`index`, optional `scale`) | Tangent-space normal map. |
-| `occlusionTexture` (`index`, optional `strength`) | Occlusion map. |
-| `emissiveFactor`, `emissiveTexture` | Linear RGB emission and optional map. |
-| `alphaMode`, `alphaCutoff`, `doubleSided` | `OPAQUE`, `MASK`, or `BLEND`; cutoff applies to `MASK`; double-sided surface rendering. |
+| Field                                                                | Purpose                                                                                 |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `name`, `extras`                                                     | Human material name and JSON metadata.                                                  |
+| `pbrMetallicRoughness.baseColorFactor`                               | `[r, g, b, alpha]` linear color.                                                        |
+| `pbrMetallicRoughness.metallicFactor`, `.roughnessFactor`            | Metallic/roughness factors in `[0, 1]`; defaults are glTF's values when omitted.        |
+| `pbrMetallicRoughness.baseColorTexture`, `.metallicRoughnessTexture` | Indexed texture maps. The latter uses green for roughness and blue for metallic.        |
+| `normalTexture` (`index`, optional `scale`)                          | Tangent-space normal map.                                                               |
+| `occlusionTexture` (`index`, optional `strength`)                    | Occlusion map.                                                                          |
+| `emissiveFactor`, `emissiveTexture`                                  | Linear RGB emission and optional map.                                                   |
+| `alphaMode`, `alphaCutoff`, `doubleSided`                            | `OPAQUE`, `MASK`, or `BLEND`; cutoff applies to `MASK`; double-sided surface rendering. |
 
 For `Material.extensions`, the following **eleven** ratified effects have typed fields and are admitted by the material pipeline. Use them where they convey an intended physical finish, rather than adding every effect to every part.
 
-| Extension | Typed fields | Typical use |
-| --- | --- | --- |
-| `KHR_materials_anisotropy` | `anisotropyStrength`, `anisotropyRotation` (radians), `anisotropyTexture` | Brushed or spun metal. |
-| `KHR_materials_clearcoat` | `clearcoatFactor`, `clearcoatRoughnessFactor`, `clearcoatTexture`, `clearcoatRoughnessTexture`, `clearcoatNormalTexture` | Varnish, lacquer, glazing. |
-| `KHR_materials_dispersion` | `dispersion` | Chromatic separation in transmissive glass. |
-| `KHR_materials_emissive_strength` | `emissiveStrength` | Bright emitting surfaces; pair with `emissiveFactor`. |
-| `KHR_materials_ior` | `ior` | Dielectric index of refraction. |
-| `KHR_materials_iridescence` | `iridescenceFactor`, `iridescenceIor`, `iridescenceThicknessMinimum`, `iridescenceThicknessMaximum`, `iridescenceTexture`, `iridescenceThicknessTexture` | Thin-film color shifts. Thickness values are nanometres. |
-| `KHR_materials_sheen` | `sheenColorFactor`, `sheenRoughnessFactor`, `sheenColorTexture`, `sheenRoughnessTexture` | Cloth and velvet. |
-| `KHR_materials_specular` | `specularFactor`, `specularColorFactor`, `specularTexture`, `specularColorTexture` | Dielectric highlight control. |
-| `KHR_materials_transmission` | `transmissionFactor`, `transmissionTexture` | Glass and other light-transmitting solids. |
-| `KHR_materials_unlit` | `{}` | Flat, unshaded graphics or indicator surfaces. |
-| `KHR_materials_volume` | `thicknessFactor`, `thicknessTexture`, `attenuationDistance`, `attenuationColor` | Absorbing/tinted volume; combine with transmission. |
+| Extension                         | Typed fields                                                                                                                                             | Typical use                                              |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `KHR_materials_anisotropy`        | `anisotropyStrength`, `anisotropyRotation` (radians), `anisotropyTexture`                                                                                | Brushed or spun metal.                                   |
+| `KHR_materials_clearcoat`         | `clearcoatFactor`, `clearcoatRoughnessFactor`, `clearcoatTexture`, `clearcoatRoughnessTexture`, `clearcoatNormalTexture`                                 | Varnish, lacquer, glazing.                               |
+| `KHR_materials_dispersion`        | `dispersion`                                                                                                                                             | Chromatic separation in transmissive glass.              |
+| `KHR_materials_emissive_strength` | `emissiveStrength`                                                                                                                                       | Bright emitting surfaces; pair with `emissiveFactor`.    |
+| `KHR_materials_ior`               | `ior`                                                                                                                                                    | Dielectric index of refraction.                          |
+| `KHR_materials_iridescence`       | `iridescenceFactor`, `iridescenceIor`, `iridescenceThicknessMinimum`, `iridescenceThicknessMaximum`, `iridescenceTexture`, `iridescenceThicknessTexture` | Thin-film color shifts. Thickness values are nanometres. |
+| `KHR_materials_sheen`             | `sheenColorFactor`, `sheenRoughnessFactor`, `sheenColorTexture`, `sheenRoughnessTexture`                                                                 | Cloth and velvet.                                        |
+| `KHR_materials_specular`          | `specularFactor`, `specularColorFactor`, `specularTexture`, `specularColorTexture`                                                                       | Dielectric highlight control.                            |
+| `KHR_materials_transmission`      | `transmissionFactor`, `transmissionTexture`                                                                                                              | Glass and other light-transmitting solids.               |
+| `KHR_materials_unlit`             | `{}`                                                                                                                                                     | Flat, unshaded graphics or indicator surfaces.           |
+| `KHR_materials_volume`            | `thicknessFactor`, `thicknessTexture`, `attenuationDistance`, `attenuationColor`                                                                         | Absorbing/tinted volume; combine with transmission.      |
 
 For glass, build actual separate closed or hollow BRep geometry where thickness matters. `KHR_materials_transmission` with `KHR_materials_ior` and `KHR_materials_volume` can express refractive, tinted glass; `alphaMode: 'BLEND'` is ordinary alpha compositing and does not substitute for transmission. `KHR_materials_unlit` conflicts with anisotropy. `KHR_materials_volume.thicknessFactor` and `.attenuationDistance` are authored in **metres**, even when BRep dimensions are in millimetres; the Replicad glTF export converts them to the selected output length unit.
 
@@ -82,10 +82,15 @@ const textured: Model = {
   images: [{ name: 'Albedo', mimeType: 'image/png', data: pngBytes }],
   textures: [{ source: 0, sampler: 0 }],
   samplers: [{ magFilter: 9729, minFilter: 9987, wrapS: 10497, wrapT: 10497 }],
-  shapes: [{
-    name: 'Textured panel', shape: panel,
-    material: { pbrMetallicRoughness: { baseColorTexture: { index: 0, texCoord: 0 }, metallicFactor: 0, roughnessFactor: 0.7 } },
-  }],
+  shapes: [
+    {
+      name: 'Textured panel',
+      shape: panel,
+      material: {
+        pbrMetallicRoughness: { baseColorTexture: { index: 0, texCoord: 0 }, metallicFactor: 0, roughnessFactor: 0.7 },
+      },
+    },
+  ],
 };
 ```
 

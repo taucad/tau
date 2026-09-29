@@ -23,6 +23,7 @@ describe('desktop route manifest', () => {
 
     expect(manifest).not.toContain('legal');
     expect(manifest).not.toContain('cookie');
+    expect(manifest).not.toContain('../../app/routes/vision/');
     expect(manifest).toContain('auth.$');
     expect(manifest).toContain('home-surface.desktop.tsx');
     expect(manifest).not.toContain('"file":"../../app/routes/_index/route.tsx"');

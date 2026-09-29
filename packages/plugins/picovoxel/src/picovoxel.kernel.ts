@@ -495,10 +495,14 @@ const isVoxels = (value: unknown): value is Voxels =>
   isRecordObject(value) && isCallable(value['toMesh']) && typeof value['isEmpty'] === 'boolean';
 
 const ownedFloat32 = (values: Float32Array): Float32Array<ArrayBuffer> =>
-  values.buffer instanceof ArrayBuffer ? (values as Float32Array<ArrayBuffer>) : new Float32Array(values);
+  values.buffer instanceof ArrayBuffer
+    ? new Float32Array(values.buffer, values.byteOffset, values.length)
+    : new Float32Array(values);
 
 const ownedUint32 = (values: Uint32Array): Uint32Array<ArrayBuffer> =>
-  values.buffer instanceof ArrayBuffer ? (values as Uint32Array<ArrayBuffer>) : new Uint32Array(values);
+  values.buffer instanceof ArrayBuffer
+    ? new Uint32Array(values.buffer, values.byteOffset, values.length)
+    : new Uint32Array(values);
 
 /**
  * Validate one returned mesh and keep PicoVoxel's own JavaScript copy.

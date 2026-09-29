@@ -1,3 +1,5 @@
+import { bundlePattern, workspace } from '@taucad/nx';
+import { assembleBundledDeclarations } from '@taucad/nx/bundled-declarations';
 import { defineConfig } from 'tsdown';
 import type { UserConfig } from 'tsdown';
 
@@ -5,8 +7,12 @@ const baseConfig: UserConfig = {
   entry: ['src/index.ts'],
   sourcemap: false,
   clean: true,
-  dts: true,
+  dts: { eager: true },
   minify: true,
+  hooks: {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- tsdown's hook API uses colon-delimited names.
+    'build:done': async ({ options }) => assembleBundledDeclarations(process.cwd(), options.outDir, 'mcp'),
+  },
   tsconfig: 'tsconfig.build.json',
   unbundle: false,
   platform: 'node',
@@ -14,12 +20,16 @@ const baseConfig: UserConfig = {
   deps: { neverBundle: [/^@modelcontextprotocol\/sdk(?:\/|$)/u, 'zod'] },
 };
 
-const packageConfig: UserConfig = {
-  ...baseConfig,
-  format: 'esm',
-  outDir: 'dist',
-  // @taucad/chat is private. Its four canonical schema/RPC subpaths are
-  // intentionally bundled; only the public MCP SDK and Zod remain external.
-};
-
-export default defineConfig(packageConfig);
+export default defineConfig(async () => {
+  const pattern = bundlePattern(await workspace(), 'mcp');
+  return {
+    ...baseConfig,
+    format: 'esm',
+    outDir: 'dist',
+    deps: {
+      ...baseConfig.deps,
+      alwaysBundle: [pattern],
+      dts: { neverBundle: [pattern] },
+    },
+  } satisfies UserConfig;
+});

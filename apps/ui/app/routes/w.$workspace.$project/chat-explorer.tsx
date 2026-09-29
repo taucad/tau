@@ -228,24 +228,23 @@ function ChatGeometryExplorerContent({
   readonly query: string;
   readonly revealTarget: ModelComponentRevealTarget | undefined;
 }): React.JSX.Element {
-  const viewSettings = useSelector(project.editorRef, (state) => state.context.viewSettings);
   const resolveGraphicsForFile = useCallback(
     (entryPath: string): GraphicsActorRef | undefined => {
       for (const [viewId, graphicsRef] of project.viewGraphics) {
-        if (viewSettings[viewId]?.entryPath === entryPath) {
+        if (project.viewRecords.get(viewId)?.entryPath === entryPath) {
           return graphicsRef;
         }
       }
       return undefined;
     },
-    [project.viewGraphics, viewSettings],
+    [project.viewGraphics, project.viewRecords],
   );
   const entries = useMemo(
     () =>
-      listGeometryEntryPaths(project.geometryUnits, viewSettings, project.mainEntryPath).map(
+      listGeometryEntryPaths(project.geometryUnits, project.viewRecords, project.mainEntryPath).map(
         (entryPath): [string, GraphicsActorRef | undefined] => [entryPath, resolveGraphicsForFile(entryPath)],
       ),
-    [project.geometryUnits, project.mainEntryPath, resolveGraphicsForFile, viewSettings],
+    [project.geometryUnits, project.mainEntryPath, resolveGraphicsForFile, project.viewRecords],
   );
 
   if (entries.length === 0) {

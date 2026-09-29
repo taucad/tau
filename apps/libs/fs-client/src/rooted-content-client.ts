@@ -38,6 +38,7 @@ export type RootedFiles = Pick<
   | 'readFile'
   | 'writeFile'
   | 'writeFileChecked'
+  | 'deleteFileChecked'
   | 'writeFiles'
   | 'mkdir'
   | 'readdir'
@@ -222,6 +223,16 @@ export const createRootedContentClient = <Consumer extends string>(input: {
           ...write,
           path: relative(write.path),
           preconditions: write.preconditions.map((precondition) => ({
+            ...precondition,
+            path: relative(precondition.path),
+          })),
+        });
+      },
+      deleteFileChecked: async (input) => {
+        const { files, relative } = await rooted([input.path, ...input.preconditions.map(({ path }) => path)]);
+        return files.deleteFileChecked({
+          path: relative(input.path),
+          preconditions: input.preconditions.map((precondition) => ({
             ...precondition,
             path: relative(precondition.path),
           })),

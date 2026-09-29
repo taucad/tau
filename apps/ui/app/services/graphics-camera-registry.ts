@@ -21,6 +21,10 @@ export type ViewCameraFraming = {
   identity: string | undefined;
   /** Persisted pose to apply once the first geometry has been framed. */
   pendingView: PersistedCameraView | undefined;
+  /** A record orientation already applied to the rig before first geometry; fit without configured angles. */
+  preserveOrientationOnFirstFrame: boolean;
+  /** The automatic first-frame result, so its fitted span/zoom are not mistaken for a person orbit. */
+  firstFrameView: PersistedCameraView | undefined;
   /** Whether the first real geometry has already been framed for this identity. */
   initialized: boolean;
 };
@@ -153,6 +157,8 @@ export const acquireViewCameraSession = (
     if (seed.identity !== undefined && existing.framing.identity !== seed.identity) {
       existing.framing.identity = seed.identity;
       existing.framing.pendingView = seed.camera?.cameraView;
+      existing.framing.preserveOrientationOnFirstFrame = false;
+      existing.framing.firstFrameView = undefined;
       existing.framing.initialized = false;
     }
     return existing;
@@ -169,7 +175,13 @@ export const acquireViewCameraSession = (
     connectorRef,
     consumersRef: { current: new Set<CameraUpdateHandler>() },
     renderFrame,
-    framing: { identity: seed.identity, pendingView: seed.camera?.cameraView, initialized: false },
+    framing: {
+      identity: seed.identity,
+      pendingView: seed.camera?.cameraView,
+      preserveOrientationOnFirstFrame: false,
+      firstFrameView: undefined,
+      initialized: false,
+    },
   };
   sessions.set(graphicsRef, session);
   session.rig.actorRef.start();

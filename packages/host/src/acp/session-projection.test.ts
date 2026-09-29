@@ -399,6 +399,17 @@ describe('the ACP turn projection', () => {
   });
 
   it.each([
+    [
+      'arrange_workbench',
+      { views: [{ id: 'front', name: 'Front', entryPath: 'main.scad' }] },
+      {
+        status: 'written',
+        revisions: [
+          { path: '.tau/workbench/layout.json', digest: `sha256:${'a'.repeat(64)}`, previousDigest: 'missing' },
+        ],
+        visible: [{ kind: 'view', view: 'front' }],
+      },
+    ],
     ['get_kernel_result', { targetFile: 'main.ts' }, { status: 'ready' }],
     ['test_model', {}, { failures: [], passes: [], passed: 0, total: 0 }],
     [
@@ -459,6 +470,7 @@ describe('the ACP turn projection', () => {
       role: 'tool-input',
       toolName: tool,
       content: args,
+      call: { nativeName: tool },
       metadata: { tauInternal: { origin: 'external', agentId: 'codex', presentation: 'tau-mcp' } },
     });
     expect(messages[1]).toMatchObject({ role: 'tool-output', toolName: tool, content: output, isError: false });
@@ -482,6 +494,51 @@ describe('the ACP turn projection', () => {
     expect(unattested[0]).toMatchObject({ content: { server: 'tau', tool: 'screenshot' } });
     expect(foreign[0]?.metadata?.tauInternal).not.toHaveProperty('presentation');
     expect(unattested[0]?.metadata?.tauInternal).not.toHaveProperty('presentation');
+  });
+
+  it('does not promote malformed arrange input or invalid structured output', async () => {
+    const input = {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'arrange-bad',
+      title: 'mcp.tau.arrange_workbench',
+      kind: 'execute',
+      status: 'pending',
+      rawInput: { server: 'tau', tool: 'arrange_workbench', arguments: { views: [{ id: 'Front' }] } },
+      _meta: { is_mcp_tool_call: true },
+    } as const;
+    const malformed = await project([input], 'codex', undefined, 'tau');
+    expect(malformed[0]?.metadata?.tauInternal).not.toHaveProperty('presentation');
+
+    const valid = {
+      ...input,
+      rawInput: {
+        server: 'tau',
+        tool: 'arrange_workbench',
+        arguments: {
+          open: [{ kind: 'pane', pane: 'model' }],
+        },
+      },
+    };
+    const invalidOutput = await project(
+      [
+        valid,
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'arrange-bad',
+          status: 'completed',
+          rawOutput: { result: { structuredContent: { status: 'written', visible: [] }, content: [] }, error: null },
+        },
+      ],
+      'codex',
+      undefined,
+      'tau',
+    );
+    expect(invalidOutput[1]).toMatchObject({
+      role: 'tool-output',
+      toolName: 'arrange_workbench',
+      isError: true,
+      content: { errorCode: 'MCP_RESULT_INVALID' },
+    });
   });
 
   it('turns a nested MCP tool error into a truthful canonical failure', async () => {

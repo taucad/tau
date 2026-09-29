@@ -49,9 +49,17 @@ const sourceKitOnly = new Set([
   `${packagePath}/scripts/ci-artifacts.test.mjs`,
   `${packagePath}/bindings/browser-conformance/run-browser-conformance.ts`,
   `${packagePath}/bindings/browser-conformance/app/run.ts`,
+  `${packagePath}/bench/performance-lab-cli.ts`,
+  `${packagePath}/bench/performance-lab-cli.test.ts`,
+  `${packagePath}/bench/performance-lab-focus.ts`,
+  `${packagePath}/bench/performance-lab-focus.test.ts`,
+  `${packagePath}/bench/performance-lab-runner.ts`,
+  `${packagePath}/bench/performance-lab-runner.test.ts`,
+  `${packagePath}/bench/performance-lab.test.ts`,
+  `${packagePath}/vitest.config.ts`,
 ]);
 const previousCoordinatorSha256 = '0b54e638a6ebc108d3f36382de1ab24796211a6bde148e00b454c8e8b2aca87e';
-const migrationCoordinatorSha256 = '2c5595b58f6a457223d5b81a0e38122c825fd8bafb49acc6df36fb526ff923eb';
+const migrationCoordinatorSha256 = 'ecdc16bcb8f83426c8ada94f2d1ee2aaa64adffb28141d1942ccc7ecadcf30f2';
 const lockPath = 'node_modules/.cache/geospec-engine-native/ci-artifacts.lock';
 const activePath = 'node_modules/.cache/geospec-engine-native/ci-artifacts.active.json';
 /** @type {number | undefined} */

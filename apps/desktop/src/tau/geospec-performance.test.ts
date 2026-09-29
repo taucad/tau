@@ -16,13 +16,15 @@ const lab = vi.hoisted(() => {
           construct(...args);
         }
 
-        public close(): void { /* The mock exposes the native engine lifecycle. */ }
+        public close(): void {
+          /* The mock exposes the native engine lifecycle. */
+        }
       },
       canonicalize: vi.fn(),
     },
   };
 });
-vi.mock('../../../../packages/geospec-engine-native/bench/performance-lab-runner.js', () => ({
+vi.mock('../../../../packages/geospec-engine/experiments/performance-lab/performance-lab-runner.js', () => ({
   parsePerformanceLabRunInput: lab.parse,
   runPerformanceLabCell: lab.run,
 }));

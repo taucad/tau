@@ -18,10 +18,10 @@ test('project card thumbnail and preview parity', async () => {
     .poll(async () =>
       target.evaluateLocator(thumbnail, (element) => {
         const image = element as HTMLImageElement;
-        return image.complete && image.naturalWidth;
+        return image.complete ? { width: image.naturalWidth, height: image.naturalHeight } : undefined;
       }),
     )
-    .toBe(768);
+    .toEqual({ width: 1536, height: 1152 });
 
   const toggle = `${card} button[aria-label="Preview model"]`;
   const media = `${card} div:has(> button[aria-label="Preview model"])`;

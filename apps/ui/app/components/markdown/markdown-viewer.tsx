@@ -9,6 +9,7 @@ import { memo, useMemo } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
 import { MarkdownHyperlink } from '#components/markdown/markdown-hyperlink.js';
 import { MarkdownCode } from '#components/markdown/markdown-code.js';
+import { publicationRehypeSanitize } from '#components/markdown/markdown-sanitize.js';
 import { useTheme } from '#hooks/use-theme.js';
 
 type MarkdownViewerProps = {
@@ -91,6 +92,7 @@ export const MarkdownViewer = memo(function ({
       ...(rehypePluginsBeforeHarden ?? []),
       ...(hardenPlugin === undefined ? [] : [hardenPlugin]),
       ...(additionalRehypePlugins ?? []),
+      ...publicationRehypeSanitize,
     ],
     [additionalRehypePlugins, rehypePluginsBeforeHarden],
   );

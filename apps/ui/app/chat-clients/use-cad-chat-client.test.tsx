@@ -39,7 +39,11 @@ const browserHostHarness = vi.hoisted(() => ({
   }),
   resolveInterrupt: vi.fn().mockResolvedValue(undefined),
   syncProjectRoots: vi.fn().mockResolvedValue(undefined),
-  openProjectRootBridge: vi.fn(() => ({ port: new MessageChannel().port1, dispose: vi.fn() })),
+  selectedRoot: '/projects/proj_test',
+  openProjectRootBridge: vi.fn((_root: string, _plane: string) => ({
+    port: new MessageChannel().port1,
+    dispose: vi.fn(),
+  })),
   // The daemon leg: `openAgentHostChannel` → `createDaemonAgentHostTransport`
   // → `createAgentHostClient`, with no worker, bridge or workspace claim.
   openAgentHostChannel: vi.fn(async (hostId: string) => ({ hostId })),
@@ -159,7 +163,7 @@ vi.mock('#hooks/use-file-manager.js', () => {
     fileManagerRef: {
       getSnapshot: () => ({
         context: {
-          rootDirectory: '/projects/proj_test',
+          rootDirectory: browserHostHarness.selectedRoot,
           openFileSystemBridge: browserHostHarness.openProjectRootBridge,
         },
       }),

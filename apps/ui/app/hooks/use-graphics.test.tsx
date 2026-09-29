@@ -376,7 +376,13 @@ describe('GraphicsProvider camera rig ownership', () => {
     const firstRig = rig;
 
     expect(rig!.actorRef.getSnapshot().context.view).toMatchObject(cameraView);
-    expect(framing).toEqual({ identity: 'file-a', pendingView: cameraView, initialized: false });
+    expect(framing).toEqual({
+      identity: 'file-a',
+      pendingView: cameraView,
+      preserveOrientationOnFirstFrame: false,
+      firstFrameView: undefined,
+      initialized: false,
+    });
 
     // The canvas frames the first geometry and consumes the pose.
     framing!.initialized = true;
@@ -395,7 +401,13 @@ describe('GraphicsProvider camera rig ownership', () => {
       </GraphicsProvider>,
     );
     expect(rig).toBe(firstRig);
-    expect(framing).toEqual({ identity: 'file-a', pendingView: cameraView, initialized: true });
+    expect(framing).toEqual({
+      identity: 'file-a',
+      pendingView: cameraView,
+      preserveOrientationOnFirstFrame: false,
+      firstFrameView: undefined,
+      initialized: true,
+    });
 
     mounted.rerender(
       <GraphicsProvider graphicsRef={graphicsActor} seed={{ identity: 'file-b' }}>
@@ -408,7 +420,13 @@ describe('GraphicsProvider camera rig ownership', () => {
       </GraphicsProvider>,
     );
     expect(rig).toBe(firstRig);
-    expect(framing).toEqual({ identity: 'file-b', pendingView: undefined, initialized: false });
+    expect(framing).toEqual({
+      identity: 'file-b',
+      pendingView: undefined,
+      preserveOrientationOnFirstFrame: false,
+      firstFrameView: undefined,
+      initialized: false,
+    });
   });
 
   it('keeps sibling viewer camera views isolated', () => {

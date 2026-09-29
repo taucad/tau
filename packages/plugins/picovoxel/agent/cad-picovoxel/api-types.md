@@ -33,7 +33,7 @@ CreateVoxelsOptions: {
   startRadius?: number;
   endRadius?: number;
 } |
-/** Alias of 'beam' kept for continuity with the R12 surface. */
+/** Alias of 'beam', kept for source compatibility. */
 {
   shape: 'capsule';
   start: Vec3;
@@ -84,7 +84,7 @@ SdfOperator: '+' | '-' | '*' | '/' | 'abs' | 'sqrt' | 'sin' | 'cos' | 'floor' | 
 
 SliceAxis: 'x' | 'y' | 'z'
 
-// SG8 — modes are pure post-processing over the native narrow-band floats
+// Slice modes are pure post-processing over the native narrow-band floats
 SliceMode: 'sdf' | 'bw' | 'antialiased'
 
 StlUnit: 'auto' | 'mm' | 'cm' | 'm' | 'ft' | 'in'

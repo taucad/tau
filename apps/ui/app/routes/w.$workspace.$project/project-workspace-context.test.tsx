@@ -1,6 +1,8 @@
 import { act, fireEvent, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WorkbenchLaneNode, WorkbenchLayout } from '@taucad/workbench';
 import type * as KeyboardModule from '#hooks/use-keyboard.js';
+import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 
 const state = vi.hoisted(() => ({ isMobile: false, isEditorReady: true }));
 const route = vi.hoisted<{
@@ -70,7 +72,7 @@ describe('ProjectWorkspaceProvider', () => {
     keyboard.useKeybinding.mockImplementation(stubKeybinding);
   });
 
-  it('routes Files through the connected Workbench opener', () => {
+  it('reveals the Workbench lane for Files before its launcher mounts', () => {
     render(
       <ProjectWorkspaceProvider>
         <Probe />
@@ -93,6 +95,20 @@ describe('ProjectWorkspaceProvider', () => {
     const opener = vi.fn();
     act(() => {
       workspace.connectWorkbench(opener);
+    });
+    expect(opener).not.toHaveBeenCalled();
+  });
+
+  it('opens Files immediately when the Workbench opener is connected', () => {
+    render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    const opener = vi.fn();
+    act(() => {
+      workspace.connectWorkbench(opener);
+      workspace.openPanel('files');
     });
     expect(opener).toHaveBeenCalledExactlyOnceWith('files');
   });
@@ -160,15 +176,41 @@ describe('ProjectWorkspaceProvider', () => {
     expect(opener).toHaveBeenCalledExactlyOnceWith('share');
   });
 
-  it('keeps only the latest queued utility request before the Workbench connects', () => {
+  it('records utility intent in the layout owner before the Dockview connects', () => {
     render(
       <ProjectWorkspaceProvider>
         <Probe />
       </ProjectWorkspaceProvider>,
     );
 
+    const layout: WorkbenchLayout = {
+      version: 1,
+      lanes: { chat: true, workbench: true },
+      viewer: { kind: 'group', tabs: [] },
+      workbench: { kind: 'group', tabs: [] },
+    };
+    let workbench: WorkbenchLaneNode = layout.workbench;
+    const controller: WorkbenchLayoutController = {
+      snapshot: () => ({ layout: { ...layout, workbench }, layoutDigest: 'missing', refused: [] }),
+      subscribe: () => () => undefined,
+      restorePreviousArrangement: async () => true,
+      registerViewer: () => () => undefined,
+      registerWorkbench: (apply) => {
+        apply(workbench, () => undefined);
+        return () => undefined;
+      },
+      personViewerChanged: () => undefined,
+      personWorkbenchChanged: (next) => {
+        workbench = typeof next === 'function' ? next(workbench) : next;
+      },
+    };
+    act(() => {
+      workspace.registerLayoutController(controller);
+    });
+
     act(() => {
       workspace.openPanel('files');
+      workspace.openPanel('parameters');
       workspace.openPanel('revisions');
     });
 
@@ -176,7 +218,20 @@ describe('ProjectWorkspaceProvider', () => {
     act(() => {
       workspace.connectWorkbench(opener);
     });
-    expect(opener).toHaveBeenCalledExactlyOnceWith('revisions');
+    expect(opener).not.toHaveBeenCalled();
+    expect(workbench).toEqual({
+      kind: 'group',
+      tabs: [
+        { kind: 'pane', pane: 'parameters' },
+        { kind: 'pane', pane: 'revisions' },
+      ],
+      active: 1,
+    });
+    const adopt = vi.fn();
+    act(() => {
+      workspace.layoutController.registerWorkbench(adopt);
+    });
+    expect(adopt).toHaveBeenCalledExactlyOnceWith(workbench, expect.any(Function));
   });
 
   it('maps supported Workbench actions to the existing mobile drawer tabs', () => {

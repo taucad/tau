@@ -158,6 +158,50 @@ node_modules/
 });
 
 describe('isomorphic-git remote refusals (N1)', () => {
+  it('refuses an invalid fetch budget before transport and an oversized advertisement before storing refs', async () => {
+    const { http, requested } = refusingClient(200, 'oversized advertisement', { 'content-length': '23' });
+    const port = await storeWithRemote(http, 'tau');
+    await expect(
+      port.fetch({ remote: 'tau', refs: ['refs/heads/main'], maximumTransferBytes: 0 }),
+    ).rejects.toBeInstanceOf(RangeError);
+    expect(requested).toHaveLength(0);
+    await expect(
+      port.fetch({ remote: 'tau', refs: ['refs/heads/main'], maximumTransferBytes: 2 }),
+    ).rejects.toMatchObject({
+      code: 'FETCH_LIMIT_EXCEEDED',
+    });
+    expect(requested).toHaveLength(1);
+    expect(await port.readRef('refs/remotes/tau/main')).toBeUndefined();
+  });
+
+  it('counts actual response chunks when Content-Length understates the body and cancels the iterator', async () => {
+    let cancelled = false;
+    const body = async function* (): AsyncIterableIterator<Uint8Array<ArrayBuffer>> {
+      try {
+        yield encoder.encode('001');
+        yield encoder.encode('002');
+      } finally {
+        cancelled = true;
+      }
+    };
+    const http: RevisionHttpClient = {
+      request: async (request) => ({
+        url: request.url,
+        method: request.method ?? 'GET',
+        headers: { 'content-length': '1' },
+        body: body(),
+        statusCode: 200,
+        statusMessage: 'OK',
+      }),
+    };
+    const port = await storeWithRemote(http, 'tau');
+    await expect(
+      port.fetch({ remote: 'tau', refs: ['refs/heads/main'], maximumTransferBytes: 5 }),
+    ).rejects.toMatchObject({ code: 'FETCH_LIMIT_EXCEEDED' });
+    expect(cancelled).toBe(true);
+    expect(await port.readRef('refs/remotes/tau/main')).toBeUndefined();
+  });
+
   const push = async (port: ReturnType<typeof createIsomorphicGitRevisionPort>, remote: string): Promise<unknown> =>
     port.push({ remote, refs: [{ name: 'refs/heads/main' }] });
 

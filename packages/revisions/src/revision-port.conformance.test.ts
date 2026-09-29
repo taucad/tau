@@ -1425,6 +1425,35 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
         }
       }, 180_000);
 
+      it('enforces a browser fetch ceiling and refuses native budgets before remote contact', async () => {
+        const second = await adapter.create();
+        try {
+          const reader = second.withTransport();
+          await reader.init({ author });
+          await reader.setRemote({ name: 'tau', url: fixture.url });
+          const before = fixture.trail().length;
+          await expect(
+            reader.fetch({ remote: 'tau', refs: ['refs/heads/main'], maximumTransferBytes: 1 }),
+          ).rejects.toMatchObject({
+            code: adapter.name === 'isomorphic-git' ? 'FETCH_LIMIT_EXCEEDED' : 'UNSUPPORTED_OPERATION',
+          });
+          expect(await reader.readRef('refs/remotes/tau/main')).toBeUndefined();
+          if (adapter.name === 'native-git') {
+            expect(fixture.trail()).toHaveLength(before);
+          } else {
+            expect(fixture.trail().length).toBeGreaterThan(before);
+            const fetched = await reader.fetch({
+              remote: 'tau',
+              refs: ['refs/heads/main'],
+              maximumTransferBytes: 1_000_000,
+            });
+            expect(fetched.refs[0]?.head).toBe(head);
+          }
+        } finally {
+          await second.dispose();
+        }
+      }, 180_000);
+
       /* The browser leg's request count (W13d): every wanted ref — branch,
        * chat and tag — in one advertisement and one `upload-pack`, and nothing
        * new costs no pack request. The native leg is `git fetch`'s own. */

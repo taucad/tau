@@ -134,8 +134,7 @@ export const exactClusterSelector = (request: Uint8Array<ArrayBuffer>): ExactClu
     if (typeof subject !== 'object' || subject === null) {
       return undefined;
     }
-    const hash =
-      'subjectHash' in subject ? subject.subjectHash : 'contentHash' in subject ? subject.contentHash : undefined;
+    const hash = 'subjectHash' in subject ? subject.subjectHash : undefined;
     if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/u.test(hash)) {
       return undefined;
     }

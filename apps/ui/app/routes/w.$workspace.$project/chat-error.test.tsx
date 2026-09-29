@@ -23,7 +23,10 @@ import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-l
 const continueChat = vi.fn();
 const regenerate = vi.fn();
 const resumableFailureOverrides = vi.hoisted(() => new Set<string>());
-const retainedRun = vi.hoisted((): { runId: string | undefined } => ({ runId: undefined }));
+const retainedRun = vi.hoisted((): { runId: string | undefined; stoppedRunId: string | undefined } => ({
+  runId: undefined,
+  stoppedRunId: undefined,
+}));
 const debug = vi.hoisted(() => ({ enabled: false }));
 
 vi.mock('#flags/use-feature.js', () => ({
@@ -55,6 +58,7 @@ vi.mock('#hooks/use-chat.js', () => ({
 
 vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   resumableBrowserAgentHostRunId: () => retainedRun.runId,
+  stoppedBrowserAgentHostRunId: () => retainedRun.stoppedRunId,
 }));
 
 vi.mock('@taucad/agent-host', async (importOriginal) => {
@@ -94,7 +98,10 @@ vi.mock('#components/code/code-viewer.js', () => ({
  * owners; this suite renders the banner alone. */
 const openNewChat = vi.fn(async () => undefined);
 vi.mock('#hooks/active-chat-provider.js', () => ({
-  useChatComposer: () => ({ execution: { execution: { kind: 'tau', model: 'openai-gpt-6-astra' } } }),
+  useChatComposer: () => ({
+    execution: { execution: { kind: 'tau', model: 'openai-gpt-6-astra' } },
+    resume: retainedRun.stoppedRunId === undefined ? undefined : continueChat,
+  }),
 }));
 vi.mock('#routes/w.$workspace.$project/use-open-new-chat.js', () => ({
   useOpenNewChat: () => ({ openNewChat, isReady: true }),
@@ -110,9 +117,22 @@ describe('ChatError', () => {
   beforeEach(() => {
     mockRetryAttempt = 0;
     retainedRun.runId = undefined;
+    retainedRun.stoppedRunId = undefined;
     debug.enabled = false;
     resumableFailureOverrides.clear();
     vi.clearAllMocks();
+  });
+
+  it('should show a neutral Resume row for a stopped retained run with no error', async () => {
+    retainedRun.stoppedRunId = 'run-stopped';
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({ error: undefined, persistedError: undefined } as unknown as CombinedChatState),
+    );
+    render(<ChatErrorBanner />);
+    expect(screen.getByText('Stopped')).toBeInTheDocument();
+    expect(screen.queryByText('Everything up to here is saved.')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(continueChat).toHaveBeenCalledOnce();
   });
 
   /* F5: the rate-limit and service cards are routed by CATEGORY, so each also

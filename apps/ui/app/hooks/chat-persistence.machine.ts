@@ -167,6 +167,8 @@ type ChatPersistenceMachineEvents =
        * to gate transparent auto-retry on truly transient breaks.
        */
       isDisconnect: boolean;
+      /** The host durably retained this stopped turn's user message for continuation. */
+      retainStoppedTurn?: boolean;
     }
   // Active selection (chat-scoped execution / kernel)
   | { type: 'setActiveExecution'; execution: CadAgentExecution | undefined }
@@ -573,7 +575,7 @@ export const chatPersistenceMachine = setup({
               // streamed in. Emit the restore variant so the store listener
               // lifts the user message back into the composer draft and
               // truncates `chat.messages` — see `restoreCancelledDraft`.
-              if (hasNoAssistantContent(event.messages)) {
+              if (hasNoAssistantContent(event.messages) && !event.retainStoppedTurn) {
                 enq.emit(buildRestoreCancelledDraftEmit(event.messages));
                 return { target: 'idle' };
               }

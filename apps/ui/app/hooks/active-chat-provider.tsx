@@ -73,7 +73,10 @@ import { attachmentUrl } from '#utils/attachment.utils.js';
 import type { ChatMode, ReasoningLevel } from '@taucad/chat/constants';
 import { effectiveEffort } from '#utils/model-reasoning.js';
 import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
-import { resumableBrowserAgentHostRunId } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import {
+  resumableBrowserAgentHostRunId,
+  stoppedBrowserAgentHostRunId,
+} from '#chat-clients/_internal/browser-agent-host-transport.js';
 
 type ChatInstance = Chat<MyUIMessage>;
 
@@ -712,19 +715,22 @@ function canResumeSession({
   persistence,
   runtimeError,
   resumableRunId,
+  stoppedRunId,
 }: {
   chat: ChatInstance;
   run: SnapshotFrom<typeof chatSessionMachine> | undefined;
   persistence: SnapshotFrom<typeof chatPersistenceMachine>;
   runtimeError: Error | undefined;
   resumableRunId: string | undefined;
+  stoppedRunId: string | undefined;
 }): boolean {
   const failure =
     runtimeError === undefined ? persistence.context.persistedError : parseErrorForPersistence(runtimeError);
   return (
-    (failure?.code === 'RUN_ABANDONED' || failure?.code === 'NETWORK_ERROR') &&
-    isResumableRunFailure(failure) &&
-    run?.matches({ run: 'failed' }) === true &&
+    ((run?.matches({ run: 'failed' }) === true &&
+      (failure?.code === 'RUN_ABANDONED' || failure?.code === 'NETWORK_ERROR') &&
+      isResumableRunFailure(failure)) ||
+      (run?.matches({ run: 'stopped' }) === true && stoppedRunId === resumableRunId)) &&
     resumableRunId !== undefined &&
     // A hydrated failure can precede host discovery; the host supplies the identity until the actor knows it.
     (run.context.activeRunId === undefined || resumableRunId === run.context.activeRunId) &&
@@ -743,9 +749,14 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
   const store = useChatSessionStore();
   const run = useSelector(session.stateActorRef, (snapshot) => snapshot);
   const persistence = useSelector(session.persistenceActorRef, (snapshot) => snapshot);
-  const { error: runtimeError, resumableRunId } = useChatSessionSnapshot(chatId, (snapshot) => ({
+  const {
+    error: runtimeError,
+    resumableRunId,
+    stoppedRunId,
+  } = useChatSessionSnapshot(chatId, (snapshot) => ({
     error: snapshot?.chat.error,
     resumableRunId: snapshot === undefined ? undefined : resumableBrowserAgentHostRunId(chatId),
+    stoppedRunId: snapshot === undefined ? undefined : stoppedBrowserAgentHostRunId(chatId),
   }));
   const resume = useCallback(() => {
     // Admission begins synchronously. Re-read here so a stale or duplicate click cannot queue another attempt.
@@ -756,6 +767,7 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
         persistence: session.persistenceActorRef.getSnapshot(),
         runtimeError: session.chat.error,
         resumableRunId: resumableBrowserAgentHostRunId(chatId),
+        stoppedRunId: stoppedBrowserAgentHostRunId(chatId),
       })
     ) {
       return;
@@ -763,7 +775,9 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
     void store.touchChatRecency(chatId, Date.now());
     void store.requestTurn(chatId, { kind: 'continue' });
   }, [chatId, session, store]);
-  return canResumeSession({ chat: session.chat, run, persistence, runtimeError, resumableRunId }) ? resume : undefined;
+  return canResumeSession({ chat: session.chat, run, persistence, runtimeError, resumableRunId, stoppedRunId })
+    ? resume
+    : undefined;
 }
 
 /**

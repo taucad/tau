@@ -20,6 +20,7 @@ import {
   registerAgentHostRunReset,
   requestBrowserAgentHostResume,
   resumableBrowserAgentHostRunId,
+  stoppedBrowserAgentHostRunId,
   resolveBrowserAgentHostInterrupt,
   subscribeHostTurnSettlements,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
@@ -1915,12 +1916,14 @@ describe('BrowserPlacementChatTransport', () => {
     { state: 'paused', code: 'RUN_ABANDONED', resumable: false },
     { state: 'completed', code: 'NETWORK_ERROR', resumable: false },
     { state: 'cancelled', code: 'RUN_ABANDONED', resumable: false },
+    { state: 'cancelled', code: 'USER_STOPPED', resumable: true },
+    { state: 'failed', code: 'USER_STOPPED', resumable: false },
     { state: 'failed', code: 'RUN_ABANDONED', resumable: true },
     { state: 'failed', code: 'NETWORK_ERROR', resumable: true },
     { state: 'failed', code: 'INSUFFICIENT_CREDIT', resumable: true },
     { state: 'failed', code: 'MODEL_NOT_IN_CATALOG', resumable: false },
   ] as const)(
-    'admits Resume for $state/$code only when the host failed resumably',
+    'admits Resume for $state/$code only when the host retained a continuable run',
     async ({ state, code, resumable }) => {
       installBrowserGlobals();
       const chatId = `chat-resume-${state}-${code}`;
@@ -1953,6 +1956,128 @@ describe('BrowserPlacementChatTransport', () => {
       try {
         const stream = await new BrowserPlacementChatTransport().reconnectToStream({ chatId, metadata: undefined });
         expect(resumableBrowserAgentHostRunId(chatId)).toBe(resumable ? runId : undefined);
+        expect(stoppedBrowserAgentHostRunId(chatId)).toBe(
+          state === 'cancelled' && code === 'USER_STOPPED' ? runId : undefined,
+        );
+        await stream?.cancel();
+      } finally {
+        unregister();
+      }
+    },
+  );
+
+  it.each([
+    { code: 'USER_STOPPED', resumable: true },
+    { code: undefined, resumable: false },
+  ])('should read a cancelled $code marker from the durable log after reload', async ({ code, resumable }) => {
+    installBrowserGlobals();
+    const chatId = `chat-stopped-log-${code ?? 'generic'}`;
+    const runId = `run-stopped-log-${code ?? 'generic'}`;
+    const cancelled = {
+      version: 1,
+      leaderEpoch: 'leader-stopped-log',
+      sequence: 1,
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+      type: 'run.lifecycle',
+      state: 'cancelled',
+      ...(code === undefined ? {} : { detail: { code, message: 'Stopped.' } }),
+    } satisfies AgentLogEvent;
+    const client = clientFor(chatId, runId, {
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 1,
+        endCursor: 1,
+        events: [cancelled],
+        snapshot: snapshot(chatId, runId, 'cancelled'),
+      })),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({ projectId: chatId, backend: 'opfs', providerBasePath: chatId }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    try {
+      await drain(
+        (await new BrowserPlacementChatTransport().reconnectToStream({ chatId, metadata: undefined }))!.getReader(),
+      );
+      expect(stoppedBrowserAgentHostRunId(chatId)).toBe(resumable ? runId : undefined);
+      retireBrowserAgentHostRun(chatId, runId);
+      expect(stoppedBrowserAgentHostRunId(chatId)).toBe(resumable ? runId : undefined);
+    } finally {
+      unregister();
+    }
+  });
+
+  it.each([
+    { outcome: 'stopped', retireFirst: true, retained: true },
+    { outcome: 'stopped', retireFirst: false, retained: true },
+    { outcome: 'generic-cancel', retireFirst: true, retained: false },
+    { outcome: 'completed', retireFirst: true, retained: false },
+  ] as const)(
+    'retires $outcome correctly when settlement precedes marker: $retireFirst',
+    async ({ outcome, retireFirst, retained }) => {
+      installBrowserGlobals();
+      const chatId = `chat-retire-${outcome}-${retireFirst}`;
+      const runId = `run-retire-${outcome}-${retireFirst}`;
+      const turnId = `turn-retire-${outcome}-${retireFirst}`;
+      let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+      const client = clientFor(chatId, runId, {
+        attach: vi.fn(
+          async () =>
+            ({
+              cursor: 0,
+              nextCursor: 0,
+              endCursor: 0,
+              events: [],
+              snapshot: {
+                chatId,
+                runId,
+                turnId,
+                state: 'running',
+                messages: [{ id: turnId, role: 'user', content: 'Continue this.' }],
+              },
+            }) satisfies Awaited<ReturnType<AgentHostClient['attach']>>,
+        ),
+        subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+          listener = next;
+          return () => {
+            listener = undefined;
+          };
+        }),
+      });
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => ({ projectId: chatId, backend: 'opfs', providerBasePath: chatId }),
+        createClient: async () => client,
+        markRunId: async () => undefined,
+      });
+      try {
+        const stream = await new BrowserPlacementChatTransport().reconnectToStream({ chatId, metadata: undefined });
+        await vi.waitFor(() => {
+          expect(getBrowserAgentHostRun(chatId)).toMatchObject({ runId, state: 'running', committedUserTurn: true });
+        });
+        if (retireFirst) {
+          retireBrowserAgentHostRun(chatId, runId);
+        }
+        listener?.(chatId, {
+          version: 1,
+          leaderEpoch: 'leader-retire-order',
+          sequence: 1,
+          recordedAt: '2026-09-01T00:00:01.000Z',
+          runId,
+          type: 'run.lifecycle',
+          state: outcome === 'completed' ? 'completed' : 'cancelled',
+          ...(outcome === 'stopped' ? { detail: { code: 'USER_STOPPED', message: 'Stopped.' } } : {}),
+        } satisfies AgentLogEvent);
+        await vi.waitFor(() => {
+          expect(getBrowserAgentHostRun(chatId)?.state).toBe(
+            retained ? 'cancelled' : retireFirst ? undefined : 'cancelled',
+          );
+        });
+        if (!retireFirst) {
+          retireBrowserAgentHostRun(chatId, runId);
+        }
+        expect(stoppedBrowserAgentHostRunId(chatId)).toBe(retained ? runId : undefined);
         await stream?.cancel();
       } finally {
         unregister();
@@ -2456,6 +2581,7 @@ describe('BrowserPlacementChatTransport', () => {
       state: 'completed',
       eventCount: 0,
       turnId,
+      committedUserTurn: true,
       userMessage: {
         id: turnId,
         role: 'user',
@@ -2628,6 +2754,58 @@ describe('BrowserPlacementChatTransport', () => {
     await expect(stream.getReader().read()).resolves.toEqual({ done: true, value: undefined });
     expect(client.cancel).toHaveBeenCalledWith(runId);
     unregister();
+  });
+
+  it('does not turn SDK reader cleanup into an intentional host Stop', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-reader-cleanup';
+    const runId = 'run-reader-cleanup';
+    const completion = Promise.withResolvers<Awaited<ReturnType<AgentHostClient['start']>>>();
+    const client = clientFor(chatId, runId, {
+      start: vi.fn(async () => completion.promise),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-reader-cleanup',
+        backend: 'opfs',
+        providerBasePath: 'project-reader-cleanup',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const operation = new AbortController();
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: 'message-reader-cleanup',
+        messages: [{ id: 'message-reader-cleanup', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+        abortSignal: operation.signal,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      await vi.waitFor(() => {
+        expect(client.start).toHaveBeenCalledOnce();
+      });
+      await stream.getReader().cancel(new Error('SDK discarded the readable side'));
+      expect(operation.signal.aborted).toBe(false);
+      expect(client.cancel).not.toHaveBeenCalled();
+      completion.resolve(snapshot(chatId, runId));
+      recordHostTurnSettlement({
+        type: 'turn.failed',
+        turnId: 'message-reader-cleanup',
+        runId,
+        chatId,
+        checkoutId: undefined,
+        reason: 'Reader cleanup',
+      });
+      await vi.waitFor(() => {
+        expect(client.close).toHaveBeenCalledOnce();
+      });
+      expect(client.cancel).not.toHaveBeenCalled();
+    } finally {
+      unregister();
+    }
   });
 
   /**

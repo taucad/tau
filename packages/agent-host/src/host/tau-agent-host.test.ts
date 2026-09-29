@@ -1210,8 +1210,116 @@ the cancelled tools left the system unchanged.
     await cancellation;
     release.resolve();
     await first;
-    await expect(host.snapshot('chat-reserved')).resolves.toMatchObject({ state: 'cancelled' });
+    const reserved = await host.snapshot('chat-reserved');
+    expect(reserved.state).toBe('cancelled');
+    const reservedEvents = await readLog(file);
+    const committed = reservedEvents.some((event) => event.type === 'turn.history-projection-committed');
+    expect(reserved.failure?.code === 'USER_STOPPED').toBe(committed);
     expect(calls).toBeLessThanOrEqual(1);
+    await host.close();
+  });
+
+  it('continues the same committed turn across two intentional stops', async () => {
+    const file = createMemoryLogFile();
+    let calls = 0;
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(request): AsyncGenerator<ModelStreamEvent> {
+            calls++;
+            yield { type: 'text-delta', text: `Saved part ${calls}.` };
+            if (calls < 3) {
+              if (!request.signal.aborted) {
+                await new Promise<void>((resolve) => {
+                  request.signal.addEventListener(
+                    'abort',
+                    () => {
+                      resolve();
+                    },
+                    { once: true },
+                  );
+                });
+              }
+              yield { type: 'completed', stopReason: 'aborted' };
+              return;
+            }
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'user-stop',
+      }),
+    );
+    const admission = host.admit({
+      chatId: 'chat-user-stop',
+      runId: 'run-user-stop',
+      trigger: 'submit',
+      message: { id: 'turn-user-stop', role: 'user', content: 'Answer in parts.' },
+    });
+    await vi.waitFor(() => {
+      expect(calls).toBe(1);
+    });
+    await host.cancel({ runId: 'run-user-stop' });
+    await admission;
+    expect(await host.snapshot('chat-user-stop')).toMatchObject({
+      runId: 'run-user-stop',
+      state: 'cancelled',
+      failure: { code: 'USER_STOPPED' },
+    });
+
+    const second = host.resume('chat-user-stop');
+    await vi.waitFor(() => {
+      expect(calls).toBe(2);
+    });
+    await host.cancel({ runId: 'run-user-stop' });
+    await second;
+    expect(await host.snapshot('chat-user-stop')).toMatchObject({
+      state: 'cancelled',
+      failure: { code: 'USER_STOPPED' },
+    });
+
+    await host.resume('chat-user-stop');
+    const final = await host.snapshot('chat-user-stop');
+    expect(final).toMatchObject({ runId: 'run-user-stop', state: 'completed' });
+    expect(final.messages.filter((message) => message.id === 'turn-user-stop')).toHaveLength(1);
+    expect(final.messages.filter((message) => message.role === 'assistant')).toHaveLength(3);
+    expect(calls).toBe(3);
+    await host.close();
+  });
+
+  it.each([
+    { state: 'failed', code: 'USER_STOPPED' },
+    { state: 'cancelled', code: 'NETWORK_ERROR' },
+  ] as const)('does not resume a mismatched $state/$code terminal record', async ({ state, code }) => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [
+      {
+        type: 'message.appended',
+        runId: 'run-mismatch',
+        message: { id: 'user-mismatch', role: 'user', content: 'Wait.' },
+      },
+      { type: 'run.lifecycle', runId: 'run-mismatch', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-mismatch', state: 'running' },
+      { type: 'run.lifecycle', runId: 'run-mismatch', state, detail: { code, message: 'Mismatched stop.' } },
+    ]);
+    const stream = vi.fn(async function* (): AsyncGenerator<ModelStreamEvent> {
+      yield { type: 'completed', stopReason: 'stop' };
+    });
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: { stream },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+      }),
+    );
+    await host.resume('chat-mismatch');
+    expect(stream).not.toHaveBeenCalled();
+    const mismatchEvents = await readLog(file);
+    expect(mismatchEvents.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
+      state,
+      detail: { code },
+    });
     await host.close();
   });
 
@@ -1351,6 +1459,10 @@ the cancelled tools left the system unchanged.
     await started.promise;
     await host.relinquish('chat-generation');
     await firstFailure;
+    const fencedEvents = await readLog(file);
+    expect(fencedEvents.some((event) => event.type === 'run.lifecycle' && event.detail?.code === 'USER_STOPPED')).toBe(
+      false,
+    );
 
     host.assumeLeadership('chat-generation', 'generation-two');
     await host.resume('chat-generation');

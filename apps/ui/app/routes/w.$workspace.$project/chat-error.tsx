@@ -1,11 +1,15 @@
 import { memo } from 'react';
 import type React from 'react';
-import { Bot, CircleAlert, RefreshCcw, WifiOff } from 'lucide-react';
+import { Bot, CircleAlert, Play, RefreshCcw, WifiOff } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { useChatActions, useChatContext, useChatRetrySnapshot, useChatSelector } from '#hooks/use-chat.js';
-import { resumableBrowserAgentHostRunId } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import {
+  resumableBrowserAgentHostRunId,
+  stoppedBrowserAgentHostRunId,
+} from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { chatHistoryTidyFailureMessage, chatTurnNotStartedCode, parseErrorForPersistence } from '#utils/error.utils.js';
@@ -216,6 +220,8 @@ function codedErrorCard({
 export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
   const { activeChatId } = useChatContext();
   const resumableRunId = useChatSelector(() => resumableBrowserAgentHostRunId(activeChatId));
+  const stoppedRunId = useChatSelector(() => stoppedBrowserAgentHostRunId(activeChatId));
+  const { resume } = useChatComposer();
   const { retryAttempt } = useChatRetrySnapshot();
   // Derive parsed error inside selector - prefer runtime error, fallback to persisted
   const parsedError = useChatSelector((state): NormalizedChatError | undefined => {
@@ -238,7 +244,20 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
   }
 
   if (!parsedError) {
-    return null;
+    return stoppedRunId !== undefined && resume !== undefined ? (
+      <ChatErrorCard
+        className={cn('min-w-0', className)}
+        tone='neutral'
+        title='Stopped'
+        description='Continue this turn when you are ready.'
+        actions={
+          <Button variant='outline' size='xs' onClick={resume}>
+            <Play className='size-3.5' />
+            Resume
+          </Button>
+        }
+      />
+    ) : null;
   }
 
   // Generic failures use the same compact recovery surface as coded failures.

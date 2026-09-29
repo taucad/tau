@@ -186,7 +186,13 @@ export type AcpTurnOutcome = {
 };
 
 /** The durable seams one turn needs; the session itself owns no chat state. @public */
-export type AcpPromptTurn = Pick<ExternalAgentTurn, 'append' | 'appendSession' | 'approve' | 'publishLive' | 'signal'>;
+export type AcpPromptTurn = Pick<
+  ExternalAgentTurn,
+  'append' | 'appendSession' | 'approve' | 'publishLive' | 'signal'
+> & {
+  /** Record that the vendor received this turn's prompt request before a Stop can become resumable. */
+  readonly onPromptDispatched?: (() => Promise<void>) | undefined;
+};
 
 /**
  * Whether the agent advertised one capability.
@@ -860,14 +866,14 @@ export type AcpSession = {
   readonly agent: AcpAgentFacts;
   /** Config options as the session last reported them, `config_option_update` included. */
   readonly configOptions: readonly SessionConfigOption[] | undefined;
-  /** Select a model on a throwaway discovery session to read that model's own configuration options. */
-  probeModel(model: string): Promise<readonly SessionConfigOption[] | undefined>;
   /** The mode the agent last reported, when it pushed one. */
   readonly modeId: string | undefined;
   /** `true` when a requested session could be neither resumed nor loaded. */
   readonly contextLost: boolean;
   /** Resolves when the connection is gone, however it went. */
   readonly closed: Promise<void>;
+  /** Select a model on a throwaway discovery session to read that model's own configuration options. */
+  probeModel(model: string): Promise<readonly SessionConfigOption[] | undefined>;
   /**
    * Run one turn against this session.
    *
@@ -2444,12 +2450,11 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
             presentation = { ...presentation, configOptions: configOptions.map((entry) => asJson(entry)) };
             projection.sessionState(presentation);
           }
-          const answered = await requestDuringTurn(
-            connection.agent.request('session/prompt', {
-              sessionId: acpSessionId,
-              prompt: sendable(typeof prompt === 'string' ? [{ type: 'text', text: prompt }] : prompt),
-            }),
-          );
+          const promptRequest = connection.agent.request('session/prompt', {
+            sessionId: acpSessionId,
+            prompt: sendable(typeof prompt === 'string' ? [{ type: 'text', text: prompt }] : prompt),
+          });
+          const [answered] = await Promise.all([requestDuringTurn(promptRequest), turn.onPromptDispatched?.()]);
           /* Read back, not echoed: `configOptions` has absorbed every
            * `config_option_update` the turn pushed, so this is the model the
            * agent actually finished on (V6). */

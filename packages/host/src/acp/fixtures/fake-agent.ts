@@ -676,6 +676,8 @@ const runPrompt = async (sessionId: string, blocks: readonly unknown[]): Promise
   if (!session) {
     return 'refusal';
   }
+  /* ACP cancellation belongs to one prompt; a later prompt on this session starts fresh. */
+  cancelled.delete(sessionId);
   const text = promptText(blocks);
   session.prompts.push(text);
   saveSessions();
@@ -921,6 +923,10 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
       return;
     }
     case 'session/resume': {
+      if (mode === 'restore-lost') {
+        fail(-32_602, 'Unknown session');
+        return;
+      }
       if (mode === 'restore-auth') {
         fail(-32_000, 'Authentication required');
         return;
@@ -931,6 +937,10 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
       return;
     }
     case 'session/load': {
+      if (mode === 'restore-lost') {
+        fail(-32_602, 'Unknown session');
+        return;
+      }
       if (mode === 'restore-auth') {
         fail(-32_000, 'Authentication required');
         return;

@@ -1516,6 +1516,31 @@ describe('ChatSessionStore', () => {
       expect(session.chat.messages.map(({ id }) => id)).toEqual(['message_durable_user', 'run_durable_user']);
     });
 
+    it('should restore a settled stopped run after its host marker arrives on reload', () => {
+      const chatId = 'chat_stopped_reload';
+      const runId = 'run_stopped_reload';
+      const store = createStore();
+      recordHostTurnSettlement({
+        type: 'turn.failed',
+        chatId,
+        runId,
+        turnId: 'msg_stopped_reload',
+        checkoutId: 'live',
+        reason: 'Stopped by the user.',
+      });
+      startTurnOwner(store, 'project_test');
+      const session = store.acquire(chatId);
+      const stopped = vi.spyOn(transportModule, 'stoppedBrowserAgentHostRunId').mockReturnValue(runId);
+      try {
+        harness.created.find((entry) => entry.id === chatId)!.emitMessagesChange();
+        expect(session.stateActorRef?.getSnapshot().matches({ run: 'stopped' })).toBe(true);
+        expect(session.stateActorRef?.getSnapshot().context.activeRunId).toBe(runId);
+      } finally {
+        stopped.mockRestore();
+        store.release(chatId);
+      }
+    });
+
     it('resumes a durable run discovered after the mounted chat finished loading', async () => {
       const store = new ChatSessionStore();
       const deps = createStubDeps();
@@ -2742,6 +2767,44 @@ describe('ChatSessionStore', () => {
   });
 
   describe('empty-cancel draft restore', () => {
+    it('should keep the user turn in history when the host committed it before Stop', async () => {
+      const chatId = 'chat_stopped_retained';
+      const store = createStore();
+      const session = store.acquire(chatId);
+      const fake = harness.created.find((entry) => entry.id === chatId)!;
+      const userMessage: MyUIMessage = {
+        id: 'msg_stopped_retained',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Continue this work.' }],
+        metadata: { createdAt: 0, status: 'pending' },
+      };
+      const hostRun = vi.spyOn(transportModule, 'getBrowserAgentHostRun').mockReturnValue({
+        runId: 'run_stopped_retained',
+        state: 'running',
+        eventCount: 2,
+        userMessage,
+        committedUserTurn: true,
+      });
+      try {
+        bindDurableChatRun(chatId, 'run_stopped_retained');
+        fake.messages = [userMessage];
+        session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'send', message: userMessage } });
+        session.persistenceActorRef.send({ type: 'stopRequest' });
+        fake.finish({ isAbort: true });
+
+        expect(fake.messages).toEqual([
+          {
+            ...userMessage,
+            metadata: { ...userMessage.metadata, status: 'cancelled' },
+          },
+        ]);
+        expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+      } finally {
+        hostRun.mockRestore();
+        store.release(chatId);
+      }
+    });
+
     it('lifts the cancelled user message back into the draft, truncates chat.messages, and atomically persists transcript plus draft', async () => {
       vi.useFakeTimers();
       try {

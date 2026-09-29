@@ -445,9 +445,9 @@ function ParameterGroupSelector({
               <Pencil className='size-3' />
             </Button>
             <Button
-              variant='ghost'
-              size='icon'
-              className='size-6 hover:bg-destructive/20!'
+              variant='destructive'
+              size='icon-xs'
+              aria-label={`Delete ${item.name}`}
               disabled={item.isActive}
               onClick={(event) => {
                 event.stopPropagation();

@@ -1,5 +1,12 @@
 /* eslint-disable @typescript-eslint/naming-convention -- tool identifiers are an external wire contract */
-import type { HostToolInvocation, InterruptResolution, JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
+import type {
+  HostToolApprovalAnswer,
+  HostToolInvocation,
+  InterruptResolution,
+  JsonObject,
+  JsonValue,
+  ToolRegistry,
+} from '@taucad/agent-host';
 import type { KernelIssue } from '@taucad/runtime';
 import type {
   MachineArtifactReference,
@@ -409,6 +416,30 @@ const requesterOf = (invocation: HostToolInvocation): PrintRequester =>
     : { kind: 'agent', id: 'tau', label: 'Tau agent' };
 
 /**
+ * Settle a print request by the person's answer in chat.
+ *
+ * @param client - The negotiated machines facet.
+ * @param answered - The request the person answered, their answer, and the call's cancellation (only an approval
+ *   takes it).
+ * @returns The settled request.
+ */
+const settleApproval = async (
+  client: MachineClient,
+  answered: Readonly<{ requestId: string; resolution: InterruptResolution; signal: AbortSignal }>,
+): Promise<PrintRequest> => {
+  const { requestId, resolution, signal } = answered;
+  const resolvedBy: PrintRequester = { kind: 'user', id: 'chat', label: resolutionLabels[resolution.outcome] };
+  /* A denial is the person's decision and ends the request `denied`; only a run
+   * that was aborted or closed withdraws it. Both are safety answers that must
+   * land even while the run is being cancelled, so neither takes the signal. */
+  return resolution.outcome === 'approved'
+    ? client.resolvePrintRequest({ requestId, decision: 'approve', resolvedBy, signal })
+    : resolution.outcome === 'denied'
+      ? client.resolvePrintRequest({ requestId, decision: 'deny', resolvedBy })
+      : client.withdrawPrintRequest({ requestId, resolvedBy });
+};
+
+/**
  * `request_print`: resolve the machine, plan with the project's print intent,
  * open the request, and gate it.
  *
@@ -432,6 +463,22 @@ const requestPrint = async (
   const { signal } = invocation;
   const machine = await resolveMachine(client, parsed.machineId, signal);
   const machineName = machine.descriptor.name;
+  /* D5 under a Tau host: asking paused the run, and this is its next attempt. The person answered the request they
+   * saw, so that request is settled, not a new plan. */
+  const approvalKey = `print:${machine.machineId}:${parsed.targetFile}`;
+  const prior = await invocation.approve?.recall?.(approvalKey);
+  const priorRequestId = prior?.payload['requestId'];
+  if (prior !== undefined && typeof priorRequestId === 'string') {
+    const request = await findRequest(client, priorRequestId, signal);
+    if (request.state !== 'awaiting-approval') {
+      /* Settled already, by the hand-over or by the Print pane: the ledger's answer is the effective one. */
+      const approval =
+        request.state === 'denied' ? 'denied' : request.state === 'withdrawn' ? 'cancelled' : prior.resolution.outcome;
+      return asJson({ request, machineName, approval, ...nextStepOf(request) });
+    }
+    const settled = await settleApproval(client, { requestId: priorRequestId, resolution: prior.resolution, signal });
+    return asJson({ request: settled, machineName, approval: prior.resolution.outcome, ...nextStepOf(settled) });
+  }
   const plan = await planPrint({
     toolCallId: invocation.toolCallId,
     targetFile: parsed.targetFile,
@@ -468,6 +515,7 @@ const requestPrint = async (
     return asJson({ request, machineName, ...nextStepOf(request), ...reported });
   }
   const resolution = await invocation.approve({
+    key: approvalKey,
     prompt: approvalPrompt(request, machine),
     payload: {
       kind: 'print-request',
@@ -477,16 +525,7 @@ const requestPrint = async (
       artifactDigest: plan.artifact.digest,
     },
   });
-  const resolvedBy: PrintRequester = { kind: 'user', id: 'chat', label: resolutionLabels[resolution.outcome] };
-  /* A denial is the person's decision and ends the request `denied`; only a run
-   * that was aborted or closed withdraws it. Both are safety answers that must
-   * land even while the run is being cancelled, so neither takes the signal. */
-  const settled =
-    resolution.outcome === 'approved'
-      ? await client.resolvePrintRequest({ requestId, decision: 'approve', resolvedBy, signal })
-      : resolution.outcome === 'denied'
-        ? await client.resolvePrintRequest({ requestId, decision: 'deny', resolvedBy })
-        : await client.withdrawPrintRequest({ requestId, resolvedBy });
+  const settled = await settleApproval(client, { requestId, resolution, signal });
   return asJson({ request: settled, machineName, approval: resolution.outcome, ...nextStepOf(settled), ...reported });
 };
 
@@ -712,6 +751,7 @@ export const createMachineToolRegistry = (
           (name !== 'prepare_machine_print' || options.projectId !== undefined),
       )
       .map((name) => definitionFor(name)),
+  answerApproval: async (answer) => answerPrintApproval(client, answer),
   async invoke(invocation) {
     if (!toolNames.has(invocation.toolName)) {
       return {
@@ -752,6 +792,30 @@ export const createMachineToolRegistry = (
     }
   },
 });
+
+/**
+ * Settle the print request a person answered in chat (D5, GM.r1 H2): the host hands every answer to the approval
+ * `request_print` asked for here, whether or not the run continues.
+ *
+ * A request no longer awaiting approval was already settled (by the call's own recall, the Print pane, or a replayed
+ * answer) and is left alone, so a second hand-over settles nothing twice.
+ *
+ * @param client - The negotiated machines facet.
+ * @param answer - The tool, its request's payload and the person's answer.
+ */
+const answerPrintApproval = async (client: MachineClient, answer: HostToolApprovalAnswer): Promise<void> => {
+  const { toolName, payload, resolution } = answer;
+  const { requestId } = payload;
+  if (toolName !== 'request_print' || payload['kind'] !== 'print-request' || typeof requestId !== 'string') {
+    return;
+  }
+  /* Nobody waits on the hand-over, and an approval's upload answers to the host rather than to a caller. */
+  const { signal } = new AbortController();
+  const request = await findRequest(client, requestId, signal);
+  if (request.state === 'awaiting-approval') {
+    await settleApproval(client, { requestId, resolution, signal });
+  }
+};
 
 /** Whether a name belongs to the bounded machine registry. @internal */
 export const isMachineToolName = (name: string): name is MachineToolName => toolNames.has(name);

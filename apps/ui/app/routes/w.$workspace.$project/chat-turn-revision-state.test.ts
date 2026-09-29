@@ -1,3 +1,8 @@
+/**
+ * The revision card's state from its turn's log (W9 PV-S9, blueprint §5.8): the settlement row decides, the terminal
+ * row says the save is on its way, and nothing waits on a run state.
+ */
+
 import { describe, expect, it } from 'vitest';
 import {
   deriveTurnRevisionState,
@@ -5,6 +10,7 @@ import {
   turnRevisionLabel,
 } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
 import type { TurnRevisionFacts } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
+import type { TurnRevisionLog } from '#machines/chat-projection.logic.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 
 const revision: RevisionCard = {
@@ -18,127 +24,132 @@ const revision: RevisionCard = {
   trigger: 'turn',
 };
 
+const placement = { checkoutId: 'live', baseRevisionId: 'rev-4', mode: 'direct' } as const;
+
+const log = (over: Partial<TurnRevisionLog> = {}): TurnRevisionLog => ({
+  attempt: 1,
+  isWaiting: false,
+  placement,
+  ...over,
+});
+
 const facts = (over: Partial<TurnRevisionFacts> = {}): TurnRevisionFacts => ({
-  revision: undefined,
-  outcome: undefined,
-  isSettledWithoutChange: false,
-  isLatestTurn: true,
-  turnStatus: undefined,
-  runState: undefined,
-  isRequestActive: false,
-  isRetrying: false,
-  hasError: false,
-  base: undefined,
+  log: log(),
+  settled: undefined,
+  recorded: undefined,
+  base: { kind: 'revision', n: 4 },
+  isUnreachable: false,
+  isReconnecting: false,
   previous: undefined,
   ...over,
 });
 
+const finalized = { type: 'turn.finalized', revisionId: 'rev-5' } as const;
+
 describe('deriveTurnRevisionState', () => {
-  it('should show a working state from the placed base revision', () => {
-    const state = deriveTurnRevisionState(
-      facts({ runState: 'working', base: { kind: 'revision', n: 4 }, isRequestActive: true }),
-    );
+  it('should show a working state from attempt 1’s placement', () => {
+    const state = deriveTurnRevisionState(facts());
     expect(state).toStrictEqual({ kind: 'working', base: { kind: 'revision', n: 4 }, isWaiting: false });
     expect(turnRevisionLabel(state, 0)).toBe('Starting from Rev 4');
   });
 
   it('should never invent a number for an unborn branch', () => {
-    const state = deriveTurnRevisionState(facts({ runState: 'working', base: { kind: 'first' } }));
+    const state = deriveTurnRevisionState(facts({ base: { kind: 'first' } }));
     expect(turnRevisionLabel(state, 0)).toBe('Starting first revision');
   });
 
-  it('should name an unknown starting point as a new revision', () => {
-    const state = deriveTurnRevisionState(facts({ runState: 'working', isRequestActive: true }));
-    expect(turnRevisionLabel(state, 0)).toBe('New revision');
+  it('should name no base for a later attempt, or before the placement', () => {
+    expect(turnRevisionLabel(deriveTurnRevisionState(facts({ log: log({ attempt: 2 }) })), 0)).toBe('New revision');
+    expect(turnRevisionLabel(deriveTurnRevisionState(facts({ base: undefined })), 0)).toBe('New revision');
   });
 
-  it('should say Waiting for you during an approval pause', () => {
-    const state = deriveTurnRevisionState(facts({ runState: 'approval', base: { kind: 'revision', n: 4 } }));
+  it('should say Waiting for you while the attempt waits on the person', () => {
+    const state = deriveTurnRevisionState(facts({ log: log({ isWaiting: true }) }));
     expect(turnRevisionLabel(state, 0)).toBe('Starting from Rev 4 · Waiting for you');
   });
 
-  it('should show Saving while the run finishes without an attested revision', () => {
-    expect(deriveTurnRevisionState(facts({ runState: 'finishing' })).kind).toBe('saving');
+  /* PV-A7: the run reads Done at its terminal row; the card alone waits on the settlement row. */
+  it('should show saving until the settlement row', () => {
+    const ended = facts({ log: log({ terminal: 'completed' }) });
+    expect(turnRevisionLabel(deriveTurnRevisionState(ended), 0)).toBe('Saving revision');
+    const settled = deriveTurnRevisionState({ ...ended, log: log({ terminal: 'completed', settlement: finalized }) });
+    /* Named, with its card still on its way: still saving, never hidden. */
+    expect(settled.kind).toBe('saving');
+    const shown = deriveTurnRevisionState({
+      ...ended,
+      log: log({ terminal: 'completed', settlement: finalized }),
+      settled: revision,
+    });
+    expect(turnRevisionLabel(shown, 2)).toBe('Rev 5 saved · 2 files');
   });
 
-  it('should show the attested revision with its file count', () => {
-    const state = deriveTurnRevisionState(facts({ revision, runState: 'done' }));
-    expect(turnRevisionLabel(state, 2)).toBe('Rev 5 saved · 2 files');
-  });
-
-  it('should keep a saved revision inspectable when the run failed or stopped', () => {
-    for (const runState of ['failed', 'stopped'] as const) {
-      const state = deriveTurnRevisionState(facts({ revision, runState }));
+  /* PV-A20, TS-R11: a Stop after the agent changed files settles with its revision. */
+  it('shows an interrupted save for a stopped attempt', () => {
+    for (const terminal of ['cancelled', 'failed'] as const) {
+      const state = deriveTurnRevisionState(
+        facts({ log: log({ terminal, settlement: finalized }), settled: revision }),
+      );
+      expect(state).toStrictEqual({ kind: 'saved', revision, isInterrupted: true });
       expect(turnRevisionLabel(state, 2)).toBe('Rev 5 saved · Work interrupted');
     }
   });
 
-  it('should hide the summary when the host confirms no change', () => {
-    expect(deriveTurnRevisionState(facts({ isSettledWithoutChange: true, runState: 'done' }))).toStrictEqual({
-      kind: 'hidden',
-    });
+  it('should hide the summary when the settlement names no revision', () => {
+    for (const type of ['turn.finalized', 'turn.failed'] as const) {
+      expect(
+        deriveTurnRevisionState(facts({ log: log({ terminal: 'cancelled', settlement: { type } }) })),
+      ).toStrictEqual({ kind: 'hidden' });
+    }
   });
 
-  /*
-   * A refused turn settles as `turn.finalized` with no changed paths, which is
-   * abandonment, not confirmation: the run failed before it could write. Hiding
-   * the marker there unmounted the card and left the person reading the
-   * *previous* turn's "Rev 1 saved".
-   */
-  it('should say Save not confirmed when a failed turn settles without a change', () => {
+  /* V5 A8, Q14: an attempt that never ran still saved the person's edits as its base. */
+  it('should show the base a failed attempt minted as saved, saying whose edits it holds', () => {
     const state = deriveTurnRevisionState(
-      facts({ isSettledWithoutChange: true, hasError: true, runState: 'failed', base: { kind: 'revision', n: 1 } }),
+      facts({
+        log: log({ terminal: 'failed', settlement: { type: 'turn.failed', revisionId: 'rev-5' } }),
+        settled: revision,
+      }),
     );
-    expect(turnRevisionLabel(state, 0)).toBe('Save not confirmed');
+    expect(state).toStrictEqual({ kind: 'saved', revision, isInterrupted: false, isBase: true });
+    expect(turnRevisionLabel(state, 2)).toBe('Rev 5 saved · 2 files');
+    expect(turnRevisionDetail(state)).toBe('Your unsaved edits, saved before this request.');
+    expect(turnRevisionDetail({ kind: 'saved', revision, isInterrupted: false })).toBe('');
   });
 
-  it('should hold the last known state while reconnecting or retrying', () => {
-    const previous = { kind: 'saving' } as const;
-    expect(deriveTurnRevisionState(facts({ runState: 'reconnecting', previous }))).toBe(previous);
-    expect(deriveTurnRevisionState(facts({ isRetrying: true, hasError: true, previous }))).toBe(previous);
+  it('should route a conflicted settlement to its own label', () => {
+    const state = deriveTurnRevisionState(facts({ log: log({ settlement: { type: 'turn.conflicted' } }) }));
+    expect(turnRevisionLabel(state, 0)).toBe('Needs your decision');
   });
 
-  it('should report Save not confirmed only for an error with no settlement after work began', () => {
-    const state = deriveTurnRevisionState(facts({ hasError: true, base: { kind: 'revision', n: 4 } }));
-    expect(turnRevisionLabel(state, 0)).toBe('Save not confirmed');
-    expect(turnRevisionDetail(state)).toContain('Rev 4 is the last confirmed revision.');
-    expect(deriveTurnRevisionState(facts({ hasError: true })).kind).toBe('hidden');
+  it('should hold the last known state while reconnecting', () => {
+    const previous = { kind: 'working', base: { kind: 'revision', n: 4 }, isWaiting: true } as const;
+    expect(deriveTurnRevisionState(facts({ isReconnecting: true, previous }))).toBe(previous);
+    expect(deriveTurnRevisionState(facts({ isReconnecting: true })).kind).toBe('working');
   });
 
-  it('should let a settlement replace an unconfirmed state', () => {
-    const previous = deriveTurnRevisionState(facts({ hasError: true, base: { kind: 'first' } }));
-    expect(deriveTurnRevisionState(facts({ hasError: true, revision, previous })).kind).toBe('saved');
-  });
-
-  it('should route conflicted and failed outcomes to their own labels', () => {
-    expect(turnRevisionLabel(deriveTurnRevisionState(facts({ outcome: 'conflicted' })), 0)).toBe('Needs your decision');
-    expect(turnRevisionLabel(deriveTurnRevisionState(facts({ outcome: 'failed' })), 0)).toBe('Revision not saved');
-  });
-
-  it('should hide unsaved state on earlier turns and keep their saved revisions', () => {
-    expect(deriveTurnRevisionState(facts({ isLatestTurn: false, hasError: true, base: { kind: 'first' } })).kind).toBe(
-      'hidden',
+  it('should say Save not confirmed while the host cannot be reached and nothing settled', () => {
+    for (const terminal of [undefined, 'completed'] as const) {
+      const state = deriveTurnRevisionState(facts({ log: log({ terminal }), isUnreachable: true }));
+      expect(turnRevisionLabel(state, 0)).toBe('Save not confirmed');
+      expect(turnRevisionDetail(state)).toContain('Rev 4 is the last confirmed revision.');
+    }
+    /* The settlement row answers whatever the connection does. */
+    const settled = deriveTurnRevisionState(
+      facts({ log: log({ terminal: 'completed', settlement: finalized }), settled: revision, isUnreachable: true }),
     );
-    const state = deriveTurnRevisionState(facts({ isLatestTurn: false, revision, runState: 'failed' }));
-    expect(state).toStrictEqual({ kind: 'saved', revision, isInterrupted: false });
+    expect(settled.kind).toBe('saved');
   });
 
-  /*
-   * C38: the turn keeps its own outcome.
-   *
-   * `runState` belongs to the chat's *current* run, so the same turn used to
-   * lose "Work interrupted" the moment another message was sent and never read
-   * interrupted again after a reload. The user message's persisted status is
-   * per turn and travels with the transcript.
-   */
-  it('should keep Work interrupted on an earlier turn from its durable status', () => {
-    const state = deriveTurnRevisionState(facts({ isLatestTurn: false, revision, turnStatus: 'cancelled' }));
-    expect(state).toStrictEqual({ kind: 'saved', revision, isInterrupted: true });
-    expect(turnRevisionLabel(state, 2)).toBe('Rev 5 saved · Work interrupted');
-  });
-
-  it('should hold Saving across the gap between done and the revision card', () => {
-    expect(deriveTurnRevisionState(facts({ runState: 'done', previous: { kind: 'saving' } })).kind).toBe('saving');
-    expect(deriveTurnRevisionState(facts({ runState: 'done' })).kind).toBe('hidden');
+  it('should answer from the revision client for a turn its log will never settle', () => {
+    /* A legacy run with no placement, and a turn the log does not name. */
+    const legacy = log({ terminal: 'cancelled', placement: undefined });
+    expect(deriveTurnRevisionState(facts({ log: legacy, recorded: revision }))).toStrictEqual({
+      kind: 'saved',
+      revision,
+      isInterrupted: true,
+    });
+    expect(deriveTurnRevisionState(facts({ log: undefined, recorded: revision })).kind).toBe('saved');
+    expect(deriveTurnRevisionState(facts({ log: legacy })).kind).toBe('hidden');
+    expect(deriveTurnRevisionState(facts({ log: undefined, isUnreachable: true })).kind).toBe('hidden');
   });
 });

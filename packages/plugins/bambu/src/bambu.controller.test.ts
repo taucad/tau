@@ -15,7 +15,9 @@ const report =
 const published = vi.hoisted((): string[] => []);
 const versionReply = vi.hoisted(() => ({ serial: '00M00A391800004' }));
 // The model the mocked printer's status reports; `BL-P001` is the X1C.
-const statusReply = vi.hoisted(() => ({ printerType: 'BL-P001' }));
+const statusReply = vi.hoisted(() => ({ printerType: 'BL-P001', externalSpool: false }));
+const externalSpoolReport =
+  '"vt_tray":{"id":"254","tray_type":"PETG","tray_color":"FFFFFFFF","tray_info_idx":"GFG99","remain":0},"ams":{';
 // How the mocked printer answers a start: an exact echo, or only its status naming the run by the id or name Tau sent.
 const startReply = vi.hoisted((): { mode: 'echo' | 'status-id' | 'status-name' } => ({ mode: 'echo' }));
 
@@ -111,7 +113,11 @@ vi.mock('mqtt', async () => {
         this.#emit(
           'message',
           topic.replace('/request', '/report'),
-          Buffer.from(report.replace('BL-P001', statusReply.printerType)),
+          Buffer.from(
+            report
+              .replace('BL-P001', statusReply.printerType)
+              .replace('"ams":{', statusReply.externalSpool ? externalSpoolReport : '"ams":{'),
+          ),
         );
       }
       await Promise.resolve();
@@ -486,6 +492,120 @@ describe('Bambu read-only controller', () => {
       startReply.mode = 'echo';
     }
     await session.close();
+  });
+
+  it('should offer the external spool as slot 254 and start from it with the AMS off', async () => {
+    published.length = 0;
+    versionReply.serial = '00M00A391800004';
+    statusReply.externalSpool = true;
+    const artifact = artifactOf(studioArchive);
+    const configuration = {
+      amsMapping: [254],
+      bedLeveling: true,
+      expectedBedType: 'textured-pei',
+      expectedFilamentDiameter: 1.75,
+      expectedMaterials: [{ slot: 254, materialId: 'PETG' }],
+      expectedModel: 'X1C',
+      expectedNozzleDiameter: 0.4,
+      operatorConfirmedBedType: 'textured-pei',
+      flowCalibration: true,
+      timelapse: false,
+    } as const;
+    const runtime: MachineConnectionRuntime = {
+      clock: { now: () => '2026-09-14T00:00:01.000Z' },
+      log: vi.fn(async () => undefined),
+      connectStream: vi.fn(async () => ({
+        readable: (async function* () {
+          yield* [];
+        })(),
+        write: vi.fn(async () => undefined),
+        close: vi.fn(async () => undefined),
+      })),
+      async *readArtifact() {
+        yield studioArchive;
+      },
+      resolveSecret: vi.fn(async () => 'access-code'),
+      uploadFile: vi.fn(async () => ({ bytesWritten: studioArchive.byteLength })),
+    };
+    const session = await connectBambuMachine(
+      {
+        candidate,
+        configuration: { logicalId: 'workshop' },
+        connection: { secretRef: 'vault:bambu-x1c', serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } } },
+        signal: new AbortController().signal,
+      },
+      runtime,
+    );
+    const { signal } = new AbortController();
+    try {
+      const snapshot = await session.getSnapshot({ signal });
+      expect(snapshot.setup.materials.at(-1)).toEqual({
+        slot: 254,
+        state: 'loaded',
+        materialId: 'PETG',
+        profileId: 'GFG99',
+        color: '#FFFFFF',
+      });
+      const prepare = async (
+        overrides: Readonly<{
+          amsMapping?: readonly number[];
+          expectedMaterials?: ReadonlyArray<Readonly<{ slot: number; materialId: string }>>;
+        }>,
+      ) =>
+        session.preparePrint({
+          operationId: 'prepared-external',
+          expectedMachineId: '00M00A391800004',
+          artifact,
+          configuration: { ...configuration, ...overrides },
+          signal,
+        });
+      await expect(
+        prepare({
+          amsMapping: [0, 254],
+          expectedMaterials: [
+            { slot: 0, materialId: 'PLA' },
+            { slot: 254, materialId: 'PETG' },
+          ],
+        }),
+      ).resolves.toMatchObject({
+        status: 'rejected',
+        code: 'SETUP_UNQUALIFIED',
+        message: 'The external spool can only feed a one-filament print. Map every filament to an AMS tray.',
+      });
+      await expect(prepare({ expectedMaterials: [{ slot: 254, materialId: 'PLA' }] })).resolves.toMatchObject({
+        status: 'rejected',
+        code: 'SETUP_UNQUALIFIED',
+      });
+      const prepared = await prepare({});
+      if (prepared.status !== 'ready') {
+        throw new Error('Expected ready preparation');
+      }
+      await expect(
+        session.submit({
+          operationId: 'start-external',
+          expectedMachineId: '00M00A391800004',
+          artifact,
+          remoteName: prepared.remoteName,
+          transferId: prepared.remoteName,
+          providerData: prepared.providerData,
+          configuration,
+          signal,
+        }),
+      ).resolves.toMatchObject({ status: 'accepted' });
+      const project = published
+        .map((payload) => JSON.parse(payload) as { print?: Record<string, unknown> })
+        .findLast((payload) => payload.print?.['command'] === 'project_file')?.print;
+      /* eslint-disable @typescript-eslint/naming-convention -- Bambu wire field names are fixed. */
+      expect(project).toMatchObject({
+        use_ams: false,
+        ams_mapping: [-1],
+        ams_mapping2: [{ ams_id: 255, slot_id: 0 }],
+      });
+      /* eslint-enable @typescript-eslint/naming-convention -- Bambu wire field section ends. */
+    } finally {
+      statusReply.externalSpool = false;
+      await session.close();
+    }
   });
 
   it('should emit a bounded manual candidate without opening a datagram listener', async () => {

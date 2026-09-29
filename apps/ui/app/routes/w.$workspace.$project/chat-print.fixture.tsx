@@ -375,7 +375,7 @@ export const manifest = parseMachineManifest({
     ],
   },
   chamber: { enclosed: true, heated: false, light: true, fans: [{ id: 'part', label: 'Part cooling fan' }] },
-  materialSystem: { units: 1, slotsPerUnit: 4, externalSpool: true, drying: true },
+  materialSystem: { units: 1, slotsPerUnit: 4, externalSpool: true, externalSpoolSlot: 254, drying: true },
   camera: { stills: true },
   storage: { removable: true },
   network: { lanMode: true, cloud: false },

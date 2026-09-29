@@ -17,7 +17,7 @@ import {
   probeAcpAgents,
   resolveAcpAdapters,
 } from '#acp/registry.js';
-import { externalAgentDescriptorSchema } from '@taucad/agent-host';
+import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
 
 const fakeAgentPath = new URL('fixtures/fake-agent.ts', import.meta.url).pathname;
 

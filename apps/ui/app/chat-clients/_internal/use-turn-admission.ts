@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback } from 'react';
 import type { CadAgentExecution } from '@taucad/chat';
 import type { ChatExecutionTarget } from '@taucad/chat/schemas';
 import { awaitAgentHostAvailability } from '#hooks/use-cad-agent-config.js';
@@ -7,37 +7,29 @@ import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { parseAdmissionFailureForPersistence } from '#utils/error.utils.js';
 import { useProject } from '#hooks/use-project.js';
-import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
 import { isBrowserAgentHostProviderKind } from '#services/agent-host-client.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { useModels } from '#hooks/use-models.js';
-import type { ResolvedModel } from '#hooks/use-models.js';
+import { randomUuid } from '@taucad/utils/id';
 
-/** Upper bound on waiting for a conflicting admitted claim to clear. Milliseconds. */
-const admissionWaitTimeout = 15_000;
-/** Upper bound on waiting for `GET /v1/models` to answer before a turn composes. Milliseconds. */
-const modelCatalogWaitTimeout = 20_000;
+/**
+ * This document's resident agent host, as a CAD turn's execution target names it. The host places the turn itself,
+ * so the target names no checkout and no base (W8 TS-S5; `chatExecutionTargetSchema`).
+ */
+export const browserHostId = `host_${randomUuid()}`;
 
 /** The single admission path every verb of one chat goes through. @public */
 export type TurnAdmission = Readonly<{
   /**
-   * Prepare (or reuse) this chat's workspace and mark it admitted.
+   * Check that this turn can run where it is placed: the host is available, the model resolves and the account can
+   * fund it. The host places the attempt itself when it runs it (W8 TS-S5).
    *
-   * @param turnId - The user message this turn leases.
    * @param turnExecution - The execution this dispatch runs, when not the live one.
-   * @param runId - The run the lease belongs to, when the host already holds
-   *   it; a continuation's attempt is fenced under the run it continues (I1).
-   * @returns The turn's execution target and the run id its claim carries.
+   * @returns The daemon a daemon-placed turn runs on; nothing for a browser-hosted one.
    */
-  admitWorkspace: (
-    turnId: string | undefined,
-    turnExecution?: CadAgentExecution,
-    runId?: string,
-  ) => Promise<readonly [ChatExecutionTarget, string | undefined]>;
+  admitExecution: (turnExecution?: CadAgentExecution) => Promise<ChatExecutionTarget>;
   /** Surface a dropped dispatch on the same banner the transport errors use. */
   surfaceDispatchFailure: (error: unknown) => void;
-  /** The catalog row for one model, waiting out a cold `GET /v1/models`. */
-  awaitResolvedModel: (modelId: string) => Promise<ResolvedModel>;
 }>;
 
 /**
@@ -56,34 +48,8 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
   const { projectId } = useProject();
   const { resolveModel } = useModels();
   const creditPreflight = useCreditPreflight();
-  const workspaceAuthority = useOptionalChatWorkspaceAuthority();
-  // Always the current resolver: a dispatch composed before `GET /v1/models`
-  // answers must read the catalog row that arrives *while* it waits, not the
-  // unresolved one its render closed over.
-  const resolveModelRef = useRef(resolveModel);
-  useEffect(() => {
-    resolveModelRef.current = resolveModel;
-  }, [resolveModel]);
-
-  const awaitResolvedModel = useCallback(async (modelId: string): Promise<ResolvedModel> => {
-    const deadline = Date.now() + modelCatalogWaitTimeout;
-    let resolved = resolveModelRef.current(modelId);
-    while (!resolved.isResolved && Date.now() < deadline) {
-      // oxlint-disable-next-line no-await-in-loop -- polling the catalog is inherently serial
-      await new Promise<void>((resolve) => {
-        globalThis.setTimeout(resolve, 100);
-      });
-      resolved = resolveModelRef.current(modelId);
-    }
-    return resolved;
-  }, []);
-
-  const admitWorkspace = useCallback(
-    async (
-      turnId: string | undefined,
-      turnExecution: CadAgentExecution = liveExecution,
-      runId?: string,
-    ): Promise<readonly [ChatExecutionTarget, string | undefined]> => {
+  const admitExecution = useCallback(
+    async (turnExecution: CadAgentExecution = liveExecution): Promise<ChatExecutionTarget> => {
       const daemonHostId = daemonPlacementOf(turnExecution);
       // Every host placement waits out its own probe: a turn dispatched before
       // one answers must WAIT for it (the seeded first turn fires at chat load,
@@ -109,11 +75,9 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
        * subscription, so there is no row to resolve and no gateway wire to
        * refuse. */
       if (turnExecution.kind === 'tau') {
-        // The host config is built from the model's catalog row (provider wire,
-        // context window, rates). The seeded first turn composes before
-        // `GET /v1/models` answers, and reading an unresolved row threw the
-        // turn away instead of waiting the moment out.
-        const resolved = await awaitResolvedModel(turnExecution.model);
+        // Catalog lookup is advisory here: M1 refuses an unknown model, while
+        // the picker refreshes from its own subscription. Admission never polls.
+        const resolved = resolveModel(turnExecution.model);
         // The availability above is per project; the model's wire is per
         // turn. A resolved catalog row the browser host cannot speak (the
         // `tau` replay row, for one) must refuse here, before a body is
@@ -129,68 +93,22 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
           );
         }
         /* R9: a turn the account cannot fund is refused here, before any
-         * workspace is prepared or admitted, with the same credits payload the
+         * turn is dispatched, with the same credits payload the
          * gateway's own 402 would have carried. An unavailable balance or a
          * route with no published estimate returns silently — the server's
          * admission stays the authority, and a failed read never blocks a turn. */
         creditPreflight(turnExecution.model, resolved.name);
       }
-      if (daemonHostId !== undefined) {
-        /* No browser turn: the daemon owns the files, mints its own base and
-         * records its own revision, so placing one here would lease a checkout
-         * nothing writes to. */
-        return [{ hostId: daemonHostId }, undefined];
-      }
-      if (!workspaceAuthority) {
-        throw new Error('The durable workspace authority is unavailable for this chat.');
-      }
-      const current = workspaceAuthority.get(activeChatId);
-      if (current?.admitted) {
-        await new Promise<void>((resolve, reject) => {
-          let unsubscribe = (): void => undefined;
-          // A claim whose run died leaves `admitted` set forever; an
-          // unbounded wait here silently swallowed the submit. Bound it and
-          // let the rejection reach the chat error banner — the stale claim
-          // itself is retired by `ProjectChatRunSettlement` on the next mount.
-          const admissionExpiry = globalThis.setTimeout(() => {
-            unsubscribe();
-            reject(
-              new Error('This chat is still holding a workspace from an earlier run. Reload the page to release it.'),
-            );
-          }, admissionWaitTimeout);
-          const settle = (): void => {
-            if (workspaceAuthority.get(activeChatId)?.admitted) {
-              return;
-            }
-            globalThis.clearTimeout(admissionExpiry);
-            unsubscribe();
-            resolve();
-          };
-          unsubscribe = workspaceAuthority.subscribe(settle);
-          settle();
-        });
-      }
-      /* A claim this chat still holds is reused — except by a continuation,
-       * which has to be fenced under the run the host is carrying: reusing a
-       * claim minted for a different run would leave `drop` unable to name
-       * either of them. The wait above has already established that no claim is
-       * admitted, so a claim here belongs to a turn that took no run. */
-      const retained = workspaceAuthority.get(activeChatId);
-      const prepared =
-        (runId === undefined || retained?.runId === runId ? retained : undefined) ??
-        (await workspaceAuthority.prepare(activeChatId, {
-          ...(turnId === undefined ? {} : { turnId }),
-          ...(runId === undefined ? {} : { runId }),
-        }));
-      await workspaceAuthority.markAdmitted(activeChatId, turnId);
-      return [prepared.execution, prepared.runId];
+      /* Every host places its own turn: the daemon on its tree, the resident agent host through the file-manager
+       * worker's revision root (W8 TS-S5). */
+      return { hostId: daemonHostId ?? browserHostId };
     },
-    [activeChatId, awaitResolvedModel, creditPreflight, liveExecution, projectId, workspaceAuthority],
+    [creditPreflight, liveExecution, projectId, resolveModel],
   );
 
   const surfaceDispatchFailure = useCallback(
     (error: unknown): void => {
-      console.error('[useTurnAdmission] durable workspace admission failed', error);
+      console.error('[useTurnAdmission] turn admission failed', error);
       store.get(activeChatId)?.persistenceActorRef.send({
         type: 'setPersistedError',
         /* Admission is the one failure with no run behind it, so the card it
@@ -205,5 +123,5 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
     [activeChatId, store],
   );
 
-  return { admitWorkspace, surfaceDispatchFailure, awaitResolvedModel };
+  return { admitExecution, surfaceDispatchFailure };
 };

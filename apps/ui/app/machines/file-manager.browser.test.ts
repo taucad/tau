@@ -19,9 +19,10 @@ const verifyPublicReuse = async (
   options: {
     existingStore?: ReturnType<typeof connectComputeStoreChannel>['store'];
     expectedSolves?: number;
+    expectRevoked?: boolean;
   } = {},
 ): Promise<void> => {
-  const { existingStore, expectedSolves = 1 } = options;
+  const { existingStore, expectedSolves = 1, expectRevoked = false } = options;
   let solves = 0;
   let publication: unknown;
   const kernel = defineKernel({
@@ -37,7 +38,20 @@ const verifyPublicReuse = async (
       return { resolved: [input.entryPath], unresolved: [] };
     },
     async getParameters() {
-      return { success: true, data: { defaults: {}, schema: {} }, issues: [] };
+      return {
+        success: true,
+        data: {
+          defaults: {},
+          schema: {
+            $schema: 'https://json-structure.org/meta/extended/v0/#',
+            $id: 'urn:taucad:test:file-manager-compute-parameters',
+            $uses: ['JSONSchemaUnits'],
+            name: 'FileManagerComputeParameters',
+            type: 'object',
+          },
+        },
+        issues: [],
+      };
     },
     async exportGeometry() {
       return { success: false, issues: [] };
@@ -97,7 +111,10 @@ const verifyPublicReuse = async (
   const rendered = await producer.client.render({
     source: { files: { 'main.compute': 'producer' } },
   });
-  if (existingStore) {
+  if (!expectRevoked) {
+    expect(rendered).toMatchObject({ superseded: false, geometry: { success: true, issues: [] } });
+  }
+  if (expectRevoked) {
     expect(rendered.superseded || !rendered.geometry.success).toBe(true);
     expect(publication).toBeUndefined();
   } else if (expectedSolves === 1) {
@@ -111,9 +128,10 @@ const verifyPublicReuse = async (
     return;
   }
   const consumer = createClient();
-  await consumer.client.render({
+  const consumed = await consumer.client.render({
     source: { files: { 'main.compute': 'consumer' } },
   });
+  expect(consumed).toMatchObject({ superseded: false, geometry: { success: true, issues: [] } });
   expect(solves).toBe(expectedSolves);
   await consumer.client.shutdown();
   consumer.connection?.dispose();
@@ -322,7 +340,7 @@ it('owns durable compute by admitted project and preserves generation across aut
         projectId: 'candidate-workspace',
       }),
     ).resolves.toEqual({
-      error: 'Compute store project authority does not match the active project.',
+      error: 'Compute store project authority does not match a live project.',
     });
     await Promise.all(
       (['computeStoreConnect', 'computeStoreControl'] as const).map(async (type) => {
@@ -364,7 +382,7 @@ it('owns durable compute by admitted project and preserves generation across aut
         action: 'inspect',
       }),
     ).resolves.toEqual({
-      error: 'Compute control project authority does not match the active project.',
+      error: 'Compute control project authority does not match a live project.',
     });
     await expect(
       rawComputeRequest(first.ready.context.worker!, {
@@ -405,15 +423,33 @@ it('owns durable compute by admitted project and preserves generation across aut
 
     const projectB = `proj_${crypto.randomUUID().replaceAll('-', '').slice(0, 21)}`;
     const oldA = connectComputeStoreChannel(first.ready.context.openComputeStorePort!(projectId));
+    await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectId), 'project-a-before-b', {
+      existingStore: oldA.store,
+    });
     first.ready.context.worker!.postMessage({
       type: 'computeStoreAdmission',
       projectId: projectB,
     });
-    await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectId), 'revoked-a', {
+    await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectB), 'project-b');
+    const stillLiveA = await first.ready.context.computeControl!(projectId, 'inspect', {});
+    expect(Number(stillLiveA.generation)).toBe(clearedGeneration);
+    await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectId), 'project-a-after-b', {
       existingStore: oldA.store,
     });
+    first.ready.context.worker!.postMessage({ type: 'computeStoreRelease', projectId });
+    await expect(
+      rawComputeRequest(first.ready.context.worker!, {
+        type: 'computeStoreControl',
+        projectId,
+        action: 'inspect',
+      }),
+    ).resolves.toEqual({ error: 'Compute control project authority does not match a live project.' });
+    await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectId), 'revoked-a', {
+      existingStore: oldA.store,
+      expectRevoked: true,
+    });
     oldA.dispose();
-    await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectB), 'project-b');
+    await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectB), 'project-b-after-a-release');
 
     const rejectedProject = `proj_${crypto.randomUUID().replaceAll('-', '').slice(0, 21)}`;
     const rejectedDatabase = await computeDatabaseName(rejectedProject);

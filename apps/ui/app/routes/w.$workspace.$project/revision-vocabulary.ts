@@ -503,7 +503,7 @@ export const selectStripVerbs = ({
 
 /**
  * The chat marker's glyph for its turn's state, from the trigger's family (HQ5):
- * a failed or unconfirmed save is the trigger's red, a conflict its amber, and
+ * an unconfirmed save is the trigger's red, a conflict its amber, and
  * only an interrupted turn — the chat's own soft error — is purple.
  *
  * @param state - A visible turn revision state.
@@ -524,7 +524,6 @@ export const turnRevisionGlyph = (state: TurnRevisionState): Readonly<{ icon: Lu
     case 'conflicted': {
       return { icon: GitMerge, tone: 'text-warning' };
     }
-    case 'notSaved':
     case 'unconfirmed': {
       return { icon: CircleAlert, tone: 'text-destructive' };
     }

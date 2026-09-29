@@ -1,20 +1,32 @@
 import { EventLogError } from '#log/event-log-error.js';
-import { parseLogEvent } from '#log/event-schema.js';
+import { classifyLogRow, historyRowTypes } from '#log/event-schema.js';
 import { createEventSequence } from '#log/event-sequence.js';
+import type { SequenceAnomaly } from '#log/event-sequence.js';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
 
-// Log events are immutable after append; cached ProviderMessage objects are intentionally shared across reductions.
-const parsedEvents = new WeakMap<AgentLogEvent, AgentLogEvent>();
+type ReducerRow = { readonly event: AgentLogEvent; readonly opaque: boolean };
 
-const reducerEvent = (candidate: AgentLogEvent): AgentLogEvent => {
+// Log events are immutable after append; cached ProviderMessage objects are intentionally shared across reductions.
+const parsedEvents = new WeakMap<AgentLogEvent, ReducerRow>();
+
+/*
+ * A row this build cannot interpret is opaque (CL-R1): it keeps its place in the term's sequence and applies
+ * nothing. A value without a row envelope is not a row at all and fails closed here; the tolerant reader quarantines
+ * such a line before it reaches the reducer.
+ */
+const reducerEvent = (candidate: AgentLogEvent): ReducerRow => {
   const cached = parsedEvents.get(candidate);
   if (cached) {
     return cached;
   }
-  const parsed = parseLogEvent(candidate);
-  parsedEvents.set(candidate, parsed);
-  parsedEvents.set(parsed, parsed);
-  return parsed;
+  const classified = classifyLogRow(candidate);
+  if (classified.class === 'quarantined') {
+    throw new EventLogError('EVENT_INVALID', 'Invalid agent event-log record: it has no row envelope.');
+  }
+  const row = { event: classified.event, opaque: classified.class === 'opaque' };
+  parsedEvents.set(candidate, row);
+  parsedEvents.set(classified.event, row);
+  return row;
 };
 
 const failHistory = (message: string): never => {
@@ -56,24 +68,32 @@ type EventLogTransition =
   | { readonly duplicate: true }
   | { readonly duplicate: false; readonly event: AgentLogEvent; commit(): void };
 
+/** What replaying one row of history found; the row is kept either way (CL-R6). @internal */
+export type ReplayAnomaly = SequenceAnomaly | { readonly kind: 'history'; readonly message: string };
+
 /** Incremental reducer used to validate a transition before it reaches storage. @internal */
 export const createEventLogReducer = (): {
   prepare(candidate: AgentLogEvent): EventLogTransition;
+  /**
+   * Fold one row of history as an opening reader does: never throws. A broken term rule or a history the message
+   * rules reject is reported, and after the first rejected history row the messages stop changing, so the chat stays
+   * readable while the host refuses to run it (`HISTORY_INVALID`, CL-R2).
+   */
+  replay(candidate: AgentLogEvent): { readonly duplicate: boolean; readonly anomaly?: ReplayAnomaly };
   messages(): readonly ProviderMessage[];
+  /** `false` once a history row was rejected at replay. */
+  historyIntact(): boolean;
 } => {
   const sequence = createEventSequence();
   const knownMessageIds = new Set<string>();
   const preparedInvocations = new Set<string>();
   const invocationBindings = new Map<string, string>();
+  const settledInvocations = new Set<string>();
   let messages: ProviderMessage[] = [];
+  let intact = true;
 
-  const prepare = (candidate: AgentLogEvent): EventLogTransition => {
-    const event = reducerEvent(candidate);
-    const sequenceCheck = sequence.check(event);
-    if (sequenceCheck.duplicate) {
-      return { duplicate: true };
-    }
-
+  /** The history rules for one known row: returns its effect, or throws `HISTORY_INVALID`. */
+  const transitionOf = (event: AgentLogEvent): (() => void) => {
     let apply: () => void;
     switch (event.type) {
       case 'message.appended': {
@@ -186,6 +206,22 @@ export const createEventLogReducer = (): {
         apply = () => invocationBindings.set(event.attemptId, event.operationId);
         break;
       }
+      /* CL-R17 (W11, readers first): the gateway's answer for a prepared attempt, at most once, naming the operation
+       * the attempt was bound to. It renders nothing. */
+      case 'model.invocation-settled': {
+        if (!preparedInvocations.has(event.attemptId)) {
+          failHistory(`Model invocation attempt "${event.attemptId}" must be prepared before it settles.`);
+        }
+        if (settledInvocations.has(event.attemptId)) {
+          failHistory(`Model invocation attempt "${event.attemptId}" cannot settle twice.`);
+        }
+        const bound = invocationBindings.get(event.attemptId);
+        if (event.outcome !== 'voided' && bound !== undefined && bound !== event.operationId) {
+          failHistory(`Model invocation attempt "${event.attemptId}" settled a different operation than it bound.`);
+        }
+        apply = () => settledInvocations.add(event.attemptId);
+        break;
+      }
       /* A record a newer writer emitted and this reader's vocabulary has no
        * case for (D14). It is ordered, cursored and replayed like any other,
        * and applies nothing: preserved without being executed. */
@@ -195,6 +231,16 @@ export const createEventLogReducer = (): {
       }
     }
 
+    return apply;
+  };
+
+  const prepare = (candidate: AgentLogEvent): EventLogTransition => {
+    const { event, opaque } = reducerEvent(candidate);
+    const sequenceCheck = sequence.check(event);
+    if (sequenceCheck.duplicate) {
+      return { duplicate: true };
+    }
+    const apply = opaque ? () => undefined : transitionOf(event);
     return {
       duplicate: false,
       event,
@@ -205,7 +251,28 @@ export const createEventLogReducer = (): {
     };
   };
 
-  return { prepare, messages: () => [...messages] };
+  const replay = (candidate: AgentLogEvent): { readonly duplicate: boolean; readonly anomaly?: ReplayAnomaly } => {
+    const { event, opaque } = reducerEvent(candidate);
+    const replayed = sequence.replay(event);
+    if (!replayed.duplicate && opaque && historyRowTypes.has(event.type)) {
+      intact = false;
+    }
+    if (replayed.duplicate || replayed.anomaly?.kind === 'conflict' || opaque || !intact) {
+      return replayed;
+    }
+    try {
+      transitionOf(event)();
+    } catch (error) {
+      if (!(error instanceof EventLogError) || error.code !== 'HISTORY_INVALID') {
+        throw error;
+      }
+      intact = false;
+      return { duplicate: false, anomaly: { kind: 'history', message: error.message } };
+    }
+    return replayed;
+  };
+
+  return { prepare, replay, messages: () => [...messages], historyIntact: () => intact };
 };
 
 /**

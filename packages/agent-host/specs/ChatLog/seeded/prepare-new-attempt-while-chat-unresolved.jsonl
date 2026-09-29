@@ -1,0 +1,8 @@
+{"version":1,"leaderEpoch":"epoch-a","sequence":0,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"run.lifecycle","state":"admitted","attempt":1}
+{"version":1,"leaderEpoch":"epoch-a","sequence":1,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"run.lifecycle","state":"running","attempt":1}
+{"version":1,"leaderEpoch":"epoch-a","sequence":2,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"model.invocation-prepared","attemptId":"r1:1:1","purpose":"generation","modelId":"m"}
+{"version":1,"leaderEpoch":"epoch-a","sequence":3,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"run.lifecycle","state":"failed","attempt":1,"detail":{"message":"network down","code":"NETWORK_ERROR"}}
+{"version":1,"leaderEpoch":"epoch-a","sequence":4,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"turn.failed","turnId":"t1","chatId":"c","reason":"network down","attempt":1}
+{"version":1,"leaderEpoch":"epoch-a","sequence":5,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r2","type":"run.lifecycle","state":"admitted","attempt":1}
+{"version":1,"leaderEpoch":"epoch-a","sequence":6,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r2","type":"run.lifecycle","state":"running","attempt":1}
+{"version":1,"leaderEpoch":"epoch-a","sequence":7,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r2","type":"model.invocation-prepared","attemptId":"r2:1:1","purpose":"generation","modelId":"m"}

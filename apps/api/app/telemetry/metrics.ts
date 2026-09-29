@@ -255,6 +255,16 @@ export class MetricsService {
 
   // --- Billing / credit ledger (C11/C12) ---
 
+  public readonly billingAttemptResolutions = this.apiMeter.createCounter(TauMetrics.billingAttemptResolutions.name, {
+    description: TauMetrics.billingAttemptResolutions.description,
+    unit: TauMetrics.billingAttemptResolutions.unit,
+  });
+
+  public readonly billingVoidedAdmissions = this.apiMeter.createCounter(TauMetrics.billingVoidedAdmissions.name, {
+    description: TauMetrics.billingVoidedAdmissions.description,
+    unit: TauMetrics.billingVoidedAdmissions.unit,
+  });
+
   public readonly billingReservationFailures = this.apiMeter.createCounter(TauMetrics.billingReservationFailures.name, {
     description: TauMetrics.billingReservationFailures.description,
     unit: TauMetrics.billingReservationFailures.unit,

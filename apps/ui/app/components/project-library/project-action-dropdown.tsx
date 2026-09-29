@@ -13,7 +13,10 @@ import type { ProjectActions } from '#components/project-library/project-library
 import { Popover, PopoverContent } from '@taucad/ui/components/popover';
 import { Input } from '@taucad/ui/components/input';
 import { CloseProjectDialog } from '#components/nav/project-close-dialogs.js';
-import { useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
+import { useProjectSidebarRow, useSidebarCommands } from '#hooks/use-sidebar-status.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import type { ProjectClosePlan } from '#services/chat-session-store.js';
+import { toast } from '#components/ui/sonner.js';
 
 type ProjectActionDropdownProps = {
   readonly project: ProjectListItem;
@@ -24,8 +27,29 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
   const isDeleted = Boolean(project.deletedAt);
   const [isRenaming, setIsRenaming] = useState(false);
   const [isConfirmingClose, setIsConfirmingClose] = useState(false);
+  const [closePlan, setClosePlan] = useState<ProjectClosePlan | undefined>();
   const [newName, setNewName] = useState(project.name);
   const row = useProjectSidebarRow(project.id);
+  const { closeProject } = useSidebarCommands();
+  const chatSessions = useChatSessionStore();
+
+  const requestTrash = async (): Promise<void> => {
+    try {
+      const plan = await chatSessions.getProjectClosePlan(project.id);
+      if (plan.continuingRuns.length > 0) {
+        toast.error(`Can’t move ${project.name} to Trash while work continues in another window or build.`);
+        return;
+      }
+      if (plan.liveChatIds.length > 0) {
+        setClosePlan(plan);
+        setIsConfirmingClose(true);
+        return;
+      }
+      await actions.handleDelete(project);
+    } catch {
+      toast.error(`Couldn’t check running work in ${project.name}. Try again.`);
+    }
+  };
 
   const handleRename = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -105,11 +129,7 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
                 data-id={project.id}
                 data-name={project.name}
                 onClick={() => {
-                  if (row.runs > 0) {
-                    setIsConfirmingClose(true);
-                  } else {
-                    void actions.handleDelete(project);
-                  }
+                  void requestTrash();
                 }}
               >
                 <Trash />
@@ -145,10 +165,12 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
         <CloseProjectDialog
           row={row}
           name={project.name}
+          closePlan={closePlan}
+          beforeDelete
           isOpen
           onOpenChange={setIsConfirmingClose}
           onConfirm={() => {
-            void actions.handleDelete(project);
+            closeProject(project.id);
           }}
         />
       ) : null}

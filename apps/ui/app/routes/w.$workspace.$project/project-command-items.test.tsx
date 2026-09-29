@@ -141,11 +141,8 @@ vi.mock('#flags/use-feature.js', () => ({
   useFeature: () => isTauDebugEnabled,
 }));
 
-/* One stable array: `useSyncExternalStore` re-renders forever on a new reference per read. */
-const settlements: readonly never[] = [];
-vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
-  getHostFinalizedTurns: () => settlements,
-  subscribeHostFinalizedTurns: () => () => undefined,
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({ observedChatIdsOf: () => [], subscribeMembership: () => () => undefined }),
 }));
 
 vi.mock('#components/layout/command-palette.js', () => ({

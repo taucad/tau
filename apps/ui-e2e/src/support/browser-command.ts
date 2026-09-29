@@ -8,6 +8,8 @@ import { release } from 'node:os';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { BrowserCommand, BrowserCommandContext } from 'vitest/node';
+import { captureChatLogs, chatLogDestination, writeChatLogs } from '@taucad/formal/capture';
+import type { CapturedChatLog } from '@taucad/formal/capture';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
 import type {
   AgentHostGatewayFixtureOptions,
@@ -43,7 +45,7 @@ type AgentHostGatewayFailure = {
   /**
    * The wire error type, which is what decides the run's coded failure.
    *
-   * Tau's own gateway refuses with one of `gatewayModelErrorCodes` here, and
+   * Tau's own gateway refuses with one of `gatewayErrorCodes` here, and
    * `gatewayErrorCode` maps anything else — an upstream provider's own
    * `api_error`, for one — to `UNKNOWN_GATEWAY_ERROR`, which
    * `isResumableRunFailure` rejects. So the default refusal is one the turn
@@ -360,16 +362,61 @@ export const uiOpenTarget: BrowserCommand = async (commandContext) => {
   sessions.set(commandContext.sessionId, session);
 };
 
+/**
+ * Every `.tau/chats/<chatId>/events.jsonl` in the page's OPFS, the same walk
+ * `readHomeGlobText` does. A closed or navigated-away page yields nothing: capture
+ * is evidence for `formal:logs`, never a reason to fail teardown.
+ */
+const readOpfsChatLogs = async (page: TargetPage): Promise<CapturedChatLog[]> => {
+  try {
+    return await page.evaluate(async () => {
+      const found: Array<{ chatId: string; text: string }> = [];
+      const walk = async (directory: FileSystemDirectoryHandle, depth: number): Promise<void> => {
+        for await (const handle of directory.values()) {
+          if (handle.kind !== 'directory') {
+            continue;
+          }
+          if (handle.name === '.tau') {
+            const chats = await handle.getDirectoryHandle('chats').catch(() => undefined);
+            for await (const chat of chats?.values() ?? []) {
+              const file =
+                chat.kind === 'directory' ? await chat.getFileHandle('events.jsonl').catch(() => undefined) : undefined;
+              if (file) {
+                const blob = await file.getFile();
+                found.push({ chatId: chat.name, text: await blob.text() });
+              }
+            }
+          } else if (depth > 0) {
+            await walk(handle, depth - 1);
+          }
+        }
+      };
+      await walk(await navigator.storage.getDirectory(), 3);
+      return found;
+    });
+  } catch {
+    return [];
+  }
+};
+
 export const uiCloseTarget: BrowserCommand = async (commandContext) => {
   const session = sessions.get(commandContext.sessionId);
   if (!session) {
     return;
   }
   sessions.delete(commandContext.sessionId);
+  /* Field trace validation (formal-verification policy): keep every chat log this
+   * session wrote, from OPFS and from the daemon's workspace, before disposal
+   * removes them. `formal:logs` validates the copies against ChatLog.tla. */
+  const logs = chatLogDestination('ui-e2e', commandContext.testPath);
+  await writeChatLogs(logs, await readOpfsChatLogs(session.primary));
+  const daemon = tauServeFixtures.get(commandContext.sessionId);
+  if (daemon) {
+    await captureChatLogs(daemon.workspace, logs);
+  }
   await disposeSession(session);
   /* A spec that fails mid-vertical must not leak a daemon, its two stub
    * servers and a temp workspace onto the machine. */
-  const daemon = tauServeFixtures.get(commandContext.sessionId);
   if (daemon) {
     tauServeFixtures.delete(commandContext.sessionId);
     await daemon.dispose();
@@ -934,6 +981,10 @@ export const uiStartTauServeFixture: BrowserCommand<[options?: TauServeFixtureOp
 export const uiReleaseTauServeGateway: BrowserCommand = (commandContext) => {
   tauServeFor(commandContext).release();
 };
+
+/** Whether the daemon's second provider request is parked before its final answer. */
+export const uiIsTauServeGatewayHeld: BrowserCommand<[], boolean> = (commandContext) =>
+  tauServeFor(commandContext).secondRequestHeld();
 
 export const uiReadTauServeFile: BrowserCommand<[relativePath: string], string | undefined> = async (
   commandContext,
@@ -1790,6 +1841,7 @@ export const uiBrowserCommands = {
   uiTargetWorkers,
   uiStopTauServeFixture,
   uiReleaseTauServeGateway,
+  uiIsTauServeGatewayHeld,
   uiReadTauServeFile,
   uiListTauServeChats,
   uiTypeTarget,

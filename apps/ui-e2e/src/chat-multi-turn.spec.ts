@@ -26,7 +26,7 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { composerSelector, pdfModelName, selectModel, sendDraft } from '#support/chat-attachments.js';
+import { composerSelector, pdfModelName, readHomeGlobText, selectModel, sendDraft } from '#support/chat-attachments.js';
 import {
   chatLog,
   completeFirstTurn,
@@ -130,6 +130,31 @@ test('sends a new message after stopping a gated turn', async () => {
    * records `turn.failed` (`describeTurnRelease`) — the count alone passed a
    * cancelled run that claimed to have recorded work. */
   await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.failed', 'turn.finalized'] });
+});
+
+test('shows the revision of a turn stopped after it changed files', async () => {
+  const [chatId] = await openChat([
+    reply('The proof file is written.', {
+      toolCalls: [
+        { name: 'create_file', args: { targetFile: 'interrupted-proof.txt', content: 'saved before stop\n' } },
+      ],
+    }),
+    reply('Checking the saved file.', { gated: true }),
+  ]);
+  await sendDraft('First plain message.');
+  await target.waitForAgentHostGatewayGate({ kind: 'stream', turn: 'First plain message.' }, 120_000);
+  await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
+
+  await target.click(selectors.getByCss('button:has(svg.lucide-square)').last());
+  await target.expectVisible(selectors.getByText(/Rev \d+ saved · Work interrupted/u).first(), 120_000);
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'] });
+  expect(await readHomeGlobText('/*/interrupted-proof.txt')).toBe('saved before stop\n');
+  const records = await chatLog(chatId!);
+  const finalized = records.find((record) => record.type === 'turn.finalized');
+  expect(finalized?.revisionId).toBeDefined();
+  expect(finalized?.changedPaths).toContain('interrupted-proof.txt');
+  await target.releaseAgentHostGatewayFixture('First plain message.');
+  await expectAsksByTurn([['First plain message.', 1]]);
 });
 
 test('sends a second message after reloading a completed chat', async () => {
@@ -485,9 +510,8 @@ test('sends again after reloading while a turn is queued', async () => {
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
   await target.releaseAgentHostGatewayRequest('First plain message.');
 
-  /* I4: the document that placed the run is gone, so the new document's attach
-   * *records* it — one `turn.failed` carrying `RUN_ABANDONED` — and never
-   * drives it. The turn keeps its single ask; the reload spends nothing. */
+  /* Reload killed the browser Worker. Discovery records the orphan, but the
+   * page neither re-asks the provider nor finishes the run on its own. */
   await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.failed'], timeoutMilliseconds: 120_000 });
   await expectAsksByTurn([['First plain message.', 1]]);
 
@@ -500,8 +524,6 @@ test('sends again after reloading while a turn is queued', async () => {
     ['Second plain message.', 1],
   ]);
   await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.failed', 'turn.finalized'] });
-  /* `RUN_ABANDONED` is the record the takeover just wrote, so the page reports
-   * it; every other refusal in the union is still a failure here. */
   await expectNoAdmissionRefusal(['RUN_ABANDONED']);
 });
 
@@ -515,25 +537,22 @@ test('resumes the turn a navigation abandoned, then sends another', async () => 
   await target.expectUrl(/\/$|\/\?/u, 60_000);
   await target.navigate(`${projectUrl.pathname}${projectUrl.search}`);
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
-  await target.releaseAgentHostGatewayFixture();
-
-  /* Ruling E1: the run the departed document left behind is recorded, not
-   * resumed. The takeover used to resume it on the next gesture's attach — a
-   * full-price re-ask of a turn the person had already paid for, with the reply
-   * they watched erased and no settlement written at all (Finding 1). */
   await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.failed'], timeoutMilliseconds: 120_000 });
   await expectAsksByTurn([['First plain message.', 1]]);
 
-  /* The person's own gesture is what spends: the saved turn's card continues
-   * the same run rather than rewinding it. A partial stream is never durable,
-   * so the continuation asks for that turn a second time and the script replays
-   * its own entry. */
   await target.expectVisible(continueAction, 60_000);
   await target.click(continueAction);
-  await target.waitForAgentHostGatewayGate({ kind: 'stream', turn: 'First plain message.' });
+  await expect.poll(gatewayRequestCount, { timeout: 120_000 }).toBe(2);
+  await expect.poll(gatewayPendingCount, { timeout: 120_000 }).toBe(2);
   await target.releaseAgentHostGatewayFixture('First plain message.');
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
   await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
+  await expectLogInvariant(chatId!, {
+    runs: 1,
+    attempts: [2],
+    settlements: ['turn.failed', 'turn.finalized'],
+    timeoutMilliseconds: 120_000,
+  });
 
   await selectModel(pdfModelName);
   await sendDraft('Second plain message.');
@@ -549,4 +568,53 @@ test('resumes the turn a navigation abandoned, then sends another', async () => 
     settlements: ['turn.failed', 'turn.finalized', 'turn.finalized'],
   });
   await expectNoAdmissionRefusal(['RUN_ABANDONED']);
+});
+
+/*
+ * W9 PV-S9 (V5 B1, B2). A turn's first model call writes a file, so its attempt
+ * has something to save; the second is its reply.
+ */
+const writingTurn = (reply2: ReturnType<typeof reply>): Array<ReturnType<typeof reply>> => [
+  reply('Writing the proof.', {
+    toolCalls: [{ name: 'create_file', args: { targetFile: 'turn-proof.txt', content: 'written by the turn\n' } }],
+  }),
+  reply2,
+];
+
+/* PV-A7: the run reads Done at its terminal row; only the revision card waits on the settlement row. */
+test('reads Done, never Finishing, while a finished turn saves its revision', async () => {
+  const [chatId] = await openChat(writingTurn(reply('Reply one.')));
+  await target.evaluate(() => {
+    const seen = { finishing: false };
+    Object.assign(globalThis, { pvS9: seen });
+    new MutationObserver(() => {
+      seen.finishing ||= /Finishing/u.test(document.body.textContent);
+    }).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+
+  await sendDraft('First plain message.');
+
+  await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'] });
+  await target.expectText(selectors.getByRole('status', { name: 'Turn revision status' }), /^Rev \d+ saved$/u, 60_000);
+  expect(await target.evaluate(() => (globalThis as unknown as { pvS9: { finishing: boolean } }).pvS9.finishing)).toBe(
+    false,
+  );
+});
+
+/* PV-A20, TS-R11: W8 cuts every attempt that executed, so a Stop after a change settles with a revision. */
+test('shows the revision of a turn stopped after it changed files', async () => {
+  const [chatId] = await openChat(writingTurn(reply('Reply one.', { gated: true })));
+  await sendDraft('First plain message.');
+  await target.expectVisible(selectors.getByText('Writing the proof.', { exact: true }).last(), 120_000);
+
+  await target.click(selectors.getByRole('button', { name: 'Stop' }).last());
+  await target.releaseAgentHostGatewayFixture();
+
+  await target.expectText(
+    selectors.getByRole('status', { name: 'Turn revision status' }),
+    /^Rev \d+ saved · Work interrupted$/u,
+    60_000,
+  );
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'] });
 });

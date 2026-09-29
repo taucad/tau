@@ -12,6 +12,7 @@ const fixture = gunzipSync(
 ).toString();
 
 class ReplayTransport implements ModelTransport {
+  public readonly funding = { type: 'unfunded' } as const;
   public readonly requests: ModelStreamRequest[] = [];
 
   public async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
@@ -74,14 +75,13 @@ describe('production compaction replay', () => {
       }
       return event.details === undefined ? [] : [event];
     });
-    const terminal = events.findLast((event) => event.runId === 'replay-run' && event.type === 'run.lifecycle');
 
     expect(compactions).toHaveLength(1);
     expect(compactions[0]).toMatchObject({
       type: 'history.compacted',
       details: { tier: 'summarization', cleared: 0 },
     });
-    expect(terminal?.type === 'run.lifecycle' && terminal.state).toBe('completed');
+    expect(snapshot.state).toBe('completed');
     expect(snapshot.failure).toBeUndefined();
     expect(JSON.stringify(events)).not.toContain('SESSION_LOG_INTEGRITY');
     expect(replayed).toEqual(snapshot.messages);

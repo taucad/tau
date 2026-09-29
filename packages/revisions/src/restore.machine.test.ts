@@ -1,10 +1,16 @@
 import { createActor } from 'xstate';
+import type { AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#restore.machine.js';
 import { restoreCutMilliseconds, restoreMachine } from '#restore.machine.js';
-import { createFakeParent, createFakePromiseActors, createManualClock, recordEmitted } from '#test/fake-actors.js';
-import type { FakePromiseActors, ManualClock } from '#test/fake-actors.js';
+import type { RestoreMachineEvent } from '#restore.machine.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { createFakeParent, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
+import type { FakePromiseActors } from '@taucad/xstate-testing/fakes';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 /*
  * Path table — `restore.machine` (catalogue: 12).
@@ -38,6 +44,43 @@ import type { FakePromiseActors, ManualClock } from '#test/fake-actors.js';
  * --  start and stop, serializable snapshot, one exported machine value
  */
 
+/**
+ * Known defects (MC-S5): public events a reachable state neither takes nor
+ * declares ignored. W5 answers each one or moves it to an exported
+ * `restoreIgnoredEvents` (D13, MC-R17), and deletes the row as it lands.
+ */
+const knownDefects: IgnoredEvents = {
+  restore: [
+    /* W5: a verb or a confirmation that reaches a state not waiting for it is
+     * dropped without an answer. (Cut answers are taken at the root.) */
+    ['idle', 'cancel'],
+    ['idle', 'confirm'],
+    ['recording', 'cancel'],
+    ['recording', 'confirm'],
+    ['recording', 'restore'],
+    ['recording', 'undo'],
+    ['recording', 'undoOperation'],
+    ['planning', 'cancel'],
+    ['planning', 'confirm'],
+    ['planning', 'restore'],
+    ['planning', 'undo'],
+    ['planning', 'undoOperation'],
+    ['confirming', 'restore'],
+    ['confirming', 'undo'],
+    ['confirming', 'undoOperation'],
+    ['applying', 'cancel'],
+    ['applying', 'confirm'],
+    ['applying', 'restore'],
+    ['applying', 'undo'],
+    ['applying', 'undoOperation'],
+    ['minting', 'cancel'],
+    ['minting', 'confirm'],
+    ['minting', 'restore'],
+    ['minting', 'undo'],
+    ['minting', 'undoOperation'],
+  ],
+};
+
 /** Let every queued microtask and the actor's promise handlers run. */
 const flush = async (): Promise<void> => {
   await new Promise<void>((resolve) => {
@@ -50,13 +93,14 @@ type Harness = Readonly<{
   promises: FakePromiseActors;
   parent: ReturnType<typeof createFakeParent>;
   emitted: ReturnType<typeof recordEmitted>;
-  clock: ManualClock;
+  clock: StepClock;
 }>;
 
 const start = (): Harness => {
+  const guard = guardActors({ ignore: knownDefects });
   const promises = createFakePromiseActors();
   const parent = createFakeParent();
-  const clock = createManualClock();
+  const clock = new StepClock();
   const actor = createActor(
     restoreMachine.provide({
       actors: {
@@ -67,6 +111,7 @@ const start = (): Harness => {
     {
       clock,
       input: { projectId: 'project-1', checkoutId: 'checkout-1', parentRef: parent.ref },
+      inspect: guard.inspect,
     },
   );
   const emitted = recordEmitted(actor);
@@ -399,7 +444,7 @@ describe('restoreMachine', () => {
     actor.send({ type: 'restore', revisionId: 'rev-3' });
     actor.send({ type: 'nothingToSave', checkoutId: 'checkout-1', trigger: 'save' });
     actor.send({ type: 'nothingToSave', checkoutId: 'checkout-2', trigger: 'restore' });
-    actor.send({ type: 'nothingToSave', checkoutId: 'checkout-1', trigger: 'restore', turnId: 'turn-1' });
+    actor.send({ type: 'nothingToSave', checkoutId: 'checkout-1', trigger: 'restore', requestId: 'restore-9' });
 
     expect(actor.getSnapshot().matches('recording')).toBe(true);
 
@@ -496,6 +541,42 @@ describe('restoreMachine', () => {
 
     expect(Object.values(machineModule).filter((value) => isMachine(value))).toEqual([restoreMachine]);
   });
+
+  it('should answer every public event in every reachable state', () => {
+    const planInvoke = restoreMachine.getStateNodeById('restore.planning').invoke[0]?.id ?? '';
+    const applyInvoke = restoreMachine.getStateNodeById('restore.applying').invoke[0]?.id ?? '';
+    const publicEvents: readonly RestoreMachineEvent[] = [
+      { type: 'restore', revisionId: 'rev-3' },
+      { type: 'undo' },
+      { type: 'undoOperation' },
+      { type: 'lineMinted' },
+      { type: 'confirm' },
+      { type: 'cancel' },
+      { type: 'selectCheckout', checkoutId: 'checkout-b', branch: 'main' },
+      /* The root's answers to this machine's own cuts (`restore-<n>`, RM-R1). */
+      ...['restore-1', 'restore-2'].flatMap((requestId): RestoreMachineEvent[] => [
+        { type: 'revisionMinted', checkoutId: 'checkout-1', trigger: 'restore', requestId, revisionId: 'rev-6' },
+        { type: 'nothingToSave', checkoutId: 'checkout-1', trigger: 'restore', requestId },
+        { type: 'cutFailed', checkoutId: 'checkout-1', trigger: 'restore', requestId, reason: 'disk full' },
+        { type: 'casLost', checkoutId: 'checkout-1', trigger: 'restore', requestId },
+      ]),
+    ];
+    const options = {
+      input: { projectId: 'project-1', checkoutId: 'checkout-1', parentRef: undefined },
+      /* Effect outcomes reach the states behind each invoke; they are not public. */
+      events: [
+        ...publicEvents,
+        { type: `xstate.done.actor.${planInvoke}`, output: { ...plan, removedPathCount: 1 } },
+        { type: `xstate.error.actor.${planInvoke}`, error: new Error('unknown revision') },
+        { type: `xstate.done.actor.${applyInvoke}`, output: { revisionId: 'rev-3', treeId: 'tree-3', branch: 'main' } },
+      ],
+      limit: 5000,
+      serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
+    };
+
+    expect(unansweredEvents(restoreMachine, { ...options, ignore: knownDefects['restore'] })).toEqual([]);
+    expect(unreachedStates(restoreMachine, options)).toEqual([]);
+  });
 });
 
 describe('restoreMachine — Undo (D15)', () => {
@@ -503,7 +584,7 @@ describe('restoreMachine — Undo (D15)', () => {
     const promises = createFakePromiseActors();
     promises.script('readUndoable', ...answers.map((output) => ({ output })));
     const parent = createFakeParent();
-    const clock = createManualClock();
+    const clock = new StepClock();
     const actor = createActor(
       restoreMachine.provide({
         actors: {

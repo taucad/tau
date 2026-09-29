@@ -1,63 +1,44 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { ChatStatus } from 'ai';
-import { isAnyToolPart } from '@taucad/chat';
 import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
 import { toast } from 'sonner';
-import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
-import { chatHostServices } from '#chat-clients/_internal/chat-host-binding.js';
+import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
+import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { attachmentSendBlockReason, buildUserMessage } from '#utils/chat.utils.js';
-import type { AttachmentReference } from '#utils/attachment.utils.js';
-import { useProject } from '#hooks/use-project.js';
-import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
-import {
-  getBrowserAgentHostRun,
-  resolveBrowserAgentHostInterrupt,
-} from '#chat-clients/_internal/browser-agent-host-transport.js';
-import { daemonPlacementOf } from '#lib/agent-host-placement.js';
+import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import { useModels } from '#hooks/use-models.js';
-import { createRunBody } from '#chat-clients/_internal/turn-body.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 
 /**
  * Input payload for {@link CadChatClient.submit}. Mirrors the surface the
  * `ChatTextarea`'s `onSubmit` hands the client — a string `text` plus the
- * draft's stored attachments. All other request configuration
- * (model, kernel, mode, toolChoice, testingEnabled, snapshot, contextPayload)
- * is assembled by the chat's turn host from `useCadAgentConfig`.
+ * draft's stored attachments. `ChatTurnHost` composes the durable host command
+ * from the selected agent and its current project context.
  *
  * @public
  */
 export type CadChatSubmitInput = {
   readonly text: string;
   /** The draft's attachments, stored beside its record; the client promotes them before sending (D18). */
-  readonly attachments?: readonly AttachmentReference[];
+  readonly attachments?: readonly StoredAttachmentRef[];
 };
 
 /**
- * Public surface of the CAD chat client. Every UI assembly site reaches the
- * `/v1/chat` wire through one of these verbs — never through the raw
- * `Chat.sendMessage` / `Chat.regenerate` API or a hand-built `body: { ... }`
- * literal. This is the indirection that stops the previously-broken
- * kernel / testingEnabled / model fields from sprawling across N call sites
- * (the original symptom behind the chat-metadata-first-class-architecture
- * refactor).
+ * Public surface of the CAD chat client. UI assembly sites express gestures
+ * through these verbs, never a raw SDK request or hand-built host command.
  *
- * The verbs route their requests through the **persistence machine** (via
- * `useChatActions().sendMessage`) so the entire request lifecycle —
- * milestone persists, tool-state cleanup on abort / disconnect, auto-retry
- * on transport disconnects, status emit on `streaming` — remains owned by
- * the existing `chatPersistenceMachine`. The chat client's only addition
- * is the per-request `body: { agent }` payload it threads onto each
- * dispatch (see `dispatchRequest` in `chat-session-store.ts`).
+ * `ChatSessionStore` turns each gesture into one command id and a projection
+ * watch. The persistence machine retains only chat record/error/composer state;
+ * the host log owns run lifecycle, transcript and settlement.
  *
  * @public
  */
 export type CadChatClient = {
   /**
-   * Send a fresh user message. Builds `{ body: { agent } }` from the live agent config.
+   * Send a fresh user message through the chat's admission and command path.
    *
    * Settles once the message is handed to the chat or the dispatch failed, so
    * the composer can stay busy through attachment copy and workspace admission
@@ -67,9 +48,8 @@ export type CadChatClient = {
   submit: (input: CadChatSubmitInput) => Promise<void>;
   /**
    * Replace the targeted user message's text/image parts and regenerate the
-   * assistant turn from there. The wire body's `agent` block is composed
-   * from the live `useCadAgentConfig` snapshot — never from the historical
-   * user-message metadata (which is preserved verbatim for display badges).
+   * assistant turn from there. Admission uses the live agent config, never
+   * historical user-message metadata (which is retained for display).
    */
   edit: (messageId: string, input: CadChatSubmitInput) => void;
   /** Abort the in-flight request, if any. */
@@ -93,9 +73,7 @@ export type CadChatClient = {
   /** Live error from the bound `Chat` instance. */
   error: Error | undefined;
   /**
-   * Live agent config the turn host will use on its next call.
-   * Exposed for test/regression scope and the chat-session-store dispatch
-   * adapter (R10/t17) — production UI sites should not read this directly.
+   * Snapshot of the agent config the next turn's admission will use.
    */
   agent: CadAgentConfigInput;
 };
@@ -107,48 +85,36 @@ const promotionToastId = 'chat-attachment-promotion';
  * Profile-scoped chat client for the CAD agent.
  *
  * Composes:
- * - `ChatTurnHost` — the single assembler of the per-turn `agent` payload.
+ * - {@link useCadAgentConfig} — the assembler hook that builds the per-turn
+ *   `agent` payload from the current UI producer hooks.
  * - {@link useActiveChatInstance} — the module-private accessor for the live
  *   AI SDK `Chat` instance owned by the chat-session store. Exposed via the
  *   client's `messages`/`status`/`error` reads.
- * - {@link useChatActions} — the persistence-machine entry point. Verbs go
- *   through here so the machine still owns lifecycle / cleanup / retry.
+ * - {@link useChatActions} — the gesture entry point into the session store.
  *
- * Exposes profile-aware verbs (`submit`, `edit`, `stop`) that thread
- * `body: { agent }` onto every wire call. Verb identities are
- * stable across renders as long as the underlying actions don't change.
+ * Exposes profile-aware verbs (`submit`, `edit`, `stop`). Verb identities are
+ * stable across renders as long as the underlying actions and agent identity
+ * don't change.
  *
  * @public
  */
 export const useCadChatClient = (): CadChatClient => {
   const chat = useActiveChatInstance();
   const actions = useChatActions();
-  const {
-    execution: { execution },
-  } = useChatComposer();
+  const agent = useCadAgentConfig();
   const status = useChatSelector((state) => state.status);
-  const requestInFlight = status === 'submitted' || status === 'streaming';
   // The CAD chat client is session-required by construction (it composes
   // `useActiveChatInstance` / `useChatActions`), so `activeChatId` is a
   // guaranteed `string` from the strict session context — no optional
   // branching needed.
   const { activeChatId } = useActiveChatSession();
-  const currentAgent = useCallback((): CadAgentConfigInput => {
-    const agent = chatHostServices(activeChatId)?.currentAgent();
-    if (!agent) {
-      throw new Error('The chat turn host is unavailable.');
-    }
-    return agent;
-  }, [activeChatId]);
   const store = useChatSessionStore();
-  const { projectId } = useProject();
   const { resolveModel } = useModels();
-  const workspaceAuthority = useOptionalChatWorkspaceAuthority();
   /* This hook is a *view*: it composes gestures and reads the live chat. The
    * chat's agent-host binding and its admission belong to `ChatTurnHost`, which
    * is mounted once — owning either here made every transcript message a writer
    * of a fact the chat can only have one of. */
-  const { surfaceDispatchFailure } = useTurnAdmission(execution);
+  const { surfaceDispatchFailure } = useTurnAdmission(agent.execution);
   // Always the current resolver: a dispatch composed before `GET /v1/models`
   // answers must read the catalog row that arrives *while* it waits, not the
   // unresolved one its render closed over.
@@ -165,8 +131,7 @@ export const useCadChatClient = (): CadChatClient => {
    * leaves the draft as it is and sends nothing.
    */
   const withAttachments = useCallback(
-    async (attachments: readonly AttachmentReference[], send: () => void | Promise<void>): Promise<void> => {
-      const agent = currentAgent();
+    async (attachments: readonly StoredAttachmentRef[], send: () => void | Promise<void>): Promise<void> => {
       if (agent.execution.kind === 'tau' && attachments.length > 0) {
         const resolved = resolveModelRef.current(agent.execution.model);
         const blocked = attachmentSendBlockReason(attachments, {
@@ -191,7 +156,7 @@ export const useCadChatClient = (): CadChatClient => {
       }
       await send();
     },
-    [activeChatId, currentAgent, store, surfaceDispatchFailure],
+    [activeChatId, agent.execution, store, surfaceDispatchFailure],
   );
 
   const submit = useCallback(
@@ -219,19 +184,8 @@ export const useCadChatClient = (): CadChatClient => {
   );
 
   const stop = useCallback(() => {
-    if (workspaceAuthority) {
-      const markCancelled = async (): Promise<void> => {
-        try {
-          await workspaceAuthority.markCancelled(activeChatId);
-        } catch (error) {
-          console.error('[useCadChatClient] durable workspace cancellation mark failed', error);
-        }
-      };
-      // async-iife: bootstrap
-      void markCancelled();
-    }
     actions.stop();
-  }, [actions, activeChatId, workspaceAuthority]);
+  }, [actions]);
 
   const respondToToolApproval = useCallback(
     async (
@@ -239,68 +193,10 @@ export const useCadChatClient = (): CadChatClient => {
       approved: boolean,
       decision?: { readonly reason?: string | undefined; readonly optionId?: string | undefined },
     ): Promise<void> => {
-      const agent = currentAgent();
       const { reason, optionId } = decision ?? {};
-      const browserRun = getBrowserAgentHostRun(activeChatId);
-      if (browserRun) {
-        await resolveBrowserAgentHostInterrupt({
-          chatId: activeChatId,
-          runId: browserRun.runId,
-          interruptId: approvalId,
-          approved,
-          reason,
-          optionId,
-        });
-        actions.setMessages(
-          messages.map((message) => ({
-            ...message,
-            parts: message.parts.map((part) =>
-              isAnyToolPart(part) && part.state === 'approval-requested' && part.approval.id === approvalId
-                ? {
-                    ...part,
-                    state: 'approval-responded',
-                    approval: { ...part.approval, approved, ...(reason ? { reason } : {}) },
-                  }
-                : part,
-            ),
-          })),
-        );
-        return;
-      }
-      /* The branch below is the browser placement's: it claims this chat's
-         workspace and re-admits the run over the API transport. A daemon-placed
-         chat has neither — the daemon owns the files and records the turn — so
-         reaching it for one would admit a claim nothing writes to, and a claim
-         admitted here is exactly what lets this tab finalize a revision for a
-         turn the host already finalized (5-review N5). With no live host run to
-         answer, the stale affordance is dropped instead. */
-      if (requestInFlight || !workspaceAuthority || daemonPlacementOf(agent.execution) !== undefined) {
-        return;
-      }
-      // Re-admits this chat's own in-flight run rather than starting a new
-      // turn, so it never waits on the admission its own claim already holds.
-      const approvalTurnId = messages.findLast((message) => message.role === 'user')?.id;
-      const prepared = await workspaceAuthority.prepare(
-        activeChatId,
-        approvalTurnId === undefined ? undefined : { turnId: approvalTurnId },
-      );
-      await workspaceAuthority.markAdmitted(activeChatId, approvalTurnId);
-      const runBody = store.startRun(
-        activeChatId,
-        createRunBody({ agent, projectId, execution: prepared.execution, runId: prepared.runId }),
-      );
-      try {
-        await chat.addToolApprovalResponse({
-          id: approvalId,
-          approved,
-          ...(reason ? { reason } : {}),
-          options: { body: runBody },
-        });
-      } catch {
-        store.endRun(activeChatId);
-      }
+      await store.respondToProjectedApproval(activeChatId, approvalId, { approved, reason, optionId });
     },
-    [actions, activeChatId, chat, currentAgent, messages, projectId, requestInFlight, store, workspaceAuthority],
+    [activeChatId, store],
   );
 
   return {
@@ -311,8 +207,6 @@ export const useCadChatClient = (): CadChatClient => {
     messages,
     status,
     error: chat.error,
-    get agent() {
-      return currentAgent();
-    },
+    agent,
   };
 };

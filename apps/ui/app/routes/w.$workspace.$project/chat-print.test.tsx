@@ -6,7 +6,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MachineClient } from '@taucad/runtime/machine';
+import type { MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
 import { printIntentPath } from '@taucad/slicer/print-intent';
 import { writeBambuContainer } from '@taucad/slicer/container';
 import { ToolpathParseError, parseGcode } from '@taucad/slicer/toolpath';
@@ -726,6 +726,96 @@ describe('Print pane prepare and send', () => {
   });
 });
 
+describe('Print pane external spool', () => {
+  /** The fixture printer with its external spool holding white PETG beside the AMS trays. */
+  const withExternalSpool = (external: MachineDirectoryEntry['snapshot']['setup']['materials'][number]) => {
+    const base = entry();
+    return entry({
+      snapshot: {
+        ...base.snapshot,
+        setup: { ...base.snapshot.setup, materials: [...base.snapshot.setup.materials, external] },
+      },
+    });
+  };
+  // oxlint-disable-next-line tau-lint/no-hardcoded-color -- the colour the printer reports for a white spool
+  const whitePetg = {
+    slot: 254,
+    state: 'loaded',
+    materialId: 'petg-white',
+    profileId: 'GFG99',
+    color: '#FFFFFF',
+  } as const;
+
+  it('offers the external spool as Ext and sends from it with the external-spool checks', async () => {
+    const fixture = createFixture({ entries: [withExternalSpool(whitePetg)] });
+    const user = userEvent.setup();
+    renderPane(fixture.client);
+
+    const material = await screen.findByRole('group', { name: 'Material' });
+    expect(
+      within(material)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['A1pla-black', 'A2Empty', 'Extpetg-white']);
+    // The AMS stays the default; the external spool is chosen on purpose.
+    expect(within(material).getByRole('button', { name: /A1/u })).toHaveAttribute('aria-pressed', 'true');
+    const externalSpool = within(material).getByRole('button', { name: /Ext/u });
+    externalSpool.focus();
+    await user.keyboard('{Enter}');
+    expect(externalSpool).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
+    await user.click(send);
+    const confirmation = screen.getByRole('group', { name: 'Confirm before starting' });
+    expect(within(confirmation).getByText('petg-white is loaded on the external spool')).toBeInTheDocument();
+    confirmAll(confirmation);
+    await user.click(within(confirmation).getByRole('button', { name: 'Start print on Workshop X1C' }));
+    await waitFor(() => {
+      expect(fixture.requestPrint).toHaveBeenCalledOnce();
+    });
+    expect(fixture.requestPrint.mock.calls.at(0)?.[0].configuration).toMatchObject({
+      amsMapping: [254],
+      expectedMaterials: [{ slot: 254, materialId: 'petg-white' }],
+    });
+  });
+
+  it('cannot choose an empty or unset external holder', async () => {
+    renderPane(createFixture({ entries: [withExternalSpool({ slot: 254, state: 'empty' })] }).client);
+    const material = await screen.findByRole('group', { name: 'Material' });
+    const externalSpool = within(material).getByRole('button', { name: /^Ext/u });
+    expect(externalSpool).toHaveTextContent('ExtEmpty');
+    expect(externalSpool).toBeDisabled();
+  });
+
+  it('names the external spool when the material there no longer matches, and in the checks', () => {
+    const configuration = { expectedMaterials: [{ slot: 254, materialId: 'petg-white' }] };
+    expect(startBlocker(configuration, withExternalSpool({ ...whitePetg, materialId: 'pla-white' }), manifest)).toBe(
+      'petg-white is not loaded on the external spool (pla-white is).',
+    );
+    expect(startBlocker(configuration, withExternalSpool(whitePetg), manifest)).toBeUndefined();
+    expect(describeStartConfirmations(configuration, withExternalSpool(whitePetg), manifest)).toContainEqual({
+      id: 'material',
+      label: 'petg-white is loaded on the external spool',
+    });
+  });
+
+  it('shows Ext in the monitor, in use while the printer feeds from it', async () => {
+    const run = printing();
+    const machine = entry({
+      snapshot: {
+        ...run.snapshot,
+        setup: { ...run.snapshot.setup, materials: [...run.snapshot.setup.materials, whitePetg] },
+        materialSystem: { currentSlot: 254, units: [] },
+      },
+    });
+    renderPane(createFixture({ entries: [machine] }).client);
+    const slots = await screen.findByRole('list', { name: 'Material slots' });
+    const external = within(slots).getByText('Ext').closest('li');
+    expect(external).toHaveTextContent('Extpetg-white, in use');
+  });
+});
+
 describe('Print pane slice summary', () => {
   it('should measure the part apart from the purge line and end lift and check the plate fit on the part', async () => {
     const summary = await vi.importActual<typeof PrintSummary>('#routes/w.$workspace.$project/chat-print-summary.js');
@@ -1366,6 +1456,30 @@ describe('Print pane Bambu Studio mode', () => {
       await screen.findByRole('group', { name: 'Filaments' });
       return fixture;
     };
+
+    it('never maps a filament to the external spool, and says why it is not offered', async () => {
+      const user = userEvent.setup();
+      // oxlint-disable-next-line tau-lint/no-hardcoded-color -- the RGBA a machine reports for a blue spool
+      const externalBlue = {
+        slot: 254,
+        state: 'loaded',
+        materialId: 'PLA',
+        profileId: 'GFA01',
+        color: blueTray,
+      } as const;
+      await sliceTwoColours(user, colourful([externalBlue, ...colourful().snapshot.setup.materials]));
+      // Blue PLA on the external spool, listed first, still loses to the AMS tray that can change filament.
+      expect(slot(1)).toHaveValue('1');
+      expect(slot(2)).toHaveValue('0');
+      expect(
+        within(slot(1))
+          .getAllByRole('option')
+          .map(({ textContent }) => textContent),
+      ).toEqual([`A1 · PLA · ${redTray}`, `A2 · PLA · ${blueTray}`, `A3 · PETG · ${blueTray}`]);
+      expect(
+        within(prepareRegion()).getByText('The external spool feeds one-filament prints only.'),
+      ).toBeInTheDocument();
+    });
 
     it('maps each filament to a tray of its colour and sends without slicing again when the presets agree', async () => {
       const user = userEvent.setup();

@@ -33,7 +33,7 @@ Nx Release with version plans provides native monorepo integration and decouples
 | `packages/plugins/*`      | Publishable runtime capability toolkits                   |
 | `packages/core/*`         | Publishable shared implementation packages                |
 
-The following internal libraries remain in the fixed Nx version group but are not published independently: `@taucad/events`, `@taucad/filesystem`, `@taucad/fs-bridge`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/rpc`, `@taucad/types`, and `@taucad/utils`. Runtime bundles all eight. The former `@taucad/vm` library is no longer one of them: its sources live inside `@taucad/esbuild`, which owns and publishes them directly. Public `@taucad/units`, plugin, and core packages remain external dependencies and publish in the same fixed train.
+The following internal libraries remain in the fixed Nx version group but are not published independently: `@taucad/events`, `@taucad/filesystem`, `@taucad/fs-bridge`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/types`, and `@taucad/utils`. Runtime bundles all seven. `@taucad/rpc` is published as its own leaf package (host-agnostic R3, W4 SC-S4), a dependency of `@taucad/runtime` and `@taucad/agent-host`. The former `@taucad/vm` library is no longer one of them: its sources live inside `@taucad/esbuild`, which owns and publishes them directly. Public `@taucad/units`, plugin, and core packages remain external dependencies and publish in the same fixed train.
 
 `@taucad/runtime/types` is the public owner for runtime contract types. JSON Schema inference remains an implementation library with no public runtime veneer or subpath. `@taucad/units` owns the portable public units API.
 
@@ -243,7 +243,6 @@ npm deprecate '@taucad/converter@0.1.0-beta.0' 'Use @taucad/assimp, @taucad/brep
 npm deprecate '@taucad/events@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
 npm deprecate '@taucad/filesystem@0.1.0-beta.0' 'Use @taucad/runtime/filesystem.'
 npm deprecate '@taucad/memory@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
-npm deprecate '@taucad/rpc@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
 npm deprecate '@taucad/types@0.1.0-beta.0' 'Use @taucad/runtime/types.'
 npm deprecate '@taucad/json-schema@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
 npm deprecate '@taucad/utils@0.1.0-beta.0' 'Bundled into @taucad/runtime.'

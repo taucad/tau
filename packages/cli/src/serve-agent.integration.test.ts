@@ -28,11 +28,10 @@ import { runCommand } from 'citty';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { RawData } from 'ws';
 
-import { agentChannelProtocolSchemas } from '@taucad/agent-host';
-import type { AgentChannelCommand, AgentChannelProtocol, AgentChannelResponse } from '@taucad/agent-host';
-import { createChannelClient, wrapWebSocket } from '@taucad/rpc';
-import type { Channel, WireProtocolSchemas } from '@taucad/rpc';
-import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
+import type { HostRunSnapshot } from '@taucad/agent-host';
+import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
+import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
+import { agentWireLimits } from '@taucad/agent-host/wire';
 import type * as TauHost from '@taucad/host';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -262,32 +261,56 @@ const startServe = async (options: {
 };
 
 type AgentClient = {
-  readonly channel: Channel<AgentChannelProtocol>;
-  readonly socket: WebSocket;
+  readonly client: AgentChannelClient;
+  /** Every socket this client dialled; the test kills one to drop the client mid-run. */
+  readonly sockets: readonly WebSocket[];
 };
 
-const connectAgent = async (origin: URL): Promise<AgentClient> => {
-  const socket = new WebSocket(new URL('/agent', origin).href.replace('http:', 'ws:'), {
-    headers: { authorization: `Bearer ${agentToken}` },
+const connectAgent = (origin: URL): AgentClient => {
+  const sockets: WebSocket[] = [];
+  const client = createAgentChannelClient({
+    connect: () => {
+      const socket = new WebSocket(new URL('/agent', origin).href.replace('http:', 'ws:'), {
+        headers: { authorization: `Bearer ${agentToken}` },
+      });
+      sockets.push(socket);
+      return socket;
+    },
+    livenessTimeout: 10_000,
   });
-  /* Wrapped before `open`: the daemon posts its channel hello the instant the
-   * upgrade completes, and `ws` drops a message that lands with no listener
-   * attached. `wrapWebSocket` buffers from the moment it is called. */
-  const port = wrapWebSocket<unknown>(socket, msgpackCodec);
-  await new Promise<void>((resolve, reject) => {
-    socket.once('open', resolve);
-    socket.once('error', reject);
-  });
-  const channel = createChannelClient<AgentChannelProtocol>({
-    port,
-    sessionKey: 'tau-agent',
-    protocolSchemas: agentChannelProtocolSchemas as WireProtocolSchemas<AgentChannelProtocol>,
-  });
-  return { channel, socket };
+  return { client, sockets };
 };
 
-const send = async (client: AgentClient, command: AgentChannelCommand): Promise<AgentChannelResponse> =>
-  client.channel.call('request', command);
+let attaches = 0;
+
+/** The run projection `attach` names for chat-1; rows come only from `read`. */
+const attachedSnapshot = async (agent: AgentClient): Promise<HostRunSnapshot | undefined> => {
+  attaches += 1;
+  const answer = await agent.client.execute({
+    type: 'attach',
+    commandId: `attach-${String(attaches)}`,
+    payload: { chatId: 'chat-1' },
+  });
+  if (answer.status !== 'applied' || answer.effect !== 'not-applied') {
+    throw new Error(`attach must answer with its details, not ${JSON.stringify(answer)}`);
+  }
+  return answer.details['snapshot'] as HostRunSnapshot | undefined;
+};
+
+/** Poll `attach` until chat-1's run settles; a projection read, not a durable row. */
+const settledSnapshot = async (agent: AgentClient): Promise<HostRunSnapshot | undefined> => {
+  const settled = new Set(['completed', 'failed', 'cancelled']);
+  let snapshot = await attachedSnapshot(agent);
+  for (let attempt = 0; attempt < 600 && !settled.has(snapshot?.state ?? ''); attempt++) {
+    // oxlint-disable-next-line no-await-in-loop -- polling a durable projection is sequential by nature.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    // oxlint-disable-next-line no-await-in-loop -- each poll depends on the previous projection.
+    snapshot = await attachedSnapshot(agent);
+  }
+  return snapshot;
+};
 
 describe('tau serve --agent-port (always-on agent channel)', () => {
   it('keeps a run alive across a client disconnect and replays the transcript from a tail cursor', async () => {
@@ -327,58 +350,43 @@ describe('tau serve --agent-port (always-on agent channel)', () => {
     expect(descriptor.headers.get('cache-control')).toBe('no-store');
     await expect(descriptor.json()).resolves.toMatchObject({ v: 1, agent: true, workspaceRoot: workspace });
 
-    const first = await connectAgent(origin);
-    const started = await send(first, {
+    const first = connectAgent(origin);
+    const started = await first.client.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId: 'chat-1',
-      runId: 'run-1',
-      message: { id: 'user-1', role: 'user', content: 'hello daemon' },
+      commandId: 'start-1',
+      payload: {
+        chatId: 'chat-1',
+        runId: 'run-1',
+        trigger: 'submit',
+        message: { id: 'user-1', role: 'user', content: 'hello daemon' },
+      },
     });
-    if (started.type !== 'result') {
-      throw new Error('start must answer with a result frame');
-    }
-    expect(started.snapshot.runId).toBe('run-1');
-    expect(['admitted', 'running']).toContain(started.snapshot.state);
+    expect(started).toMatchObject({ status: 'applied', effect: 'durable' });
 
     // Kill the client while the gateway response is still pending.
-    first.socket.terminate();
+    first.sockets[0]?.terminate();
     await new Promise((resolve) => {
       setTimeout(resolve, 50);
     });
     gateway.release();
 
-    const second = await connectAgent(origin);
-    const settled = new Set(['completed', 'failed', 'cancelled']);
-    let attached = await send(second, { type: 'attach', chatId: 'chat-1', cursor: 0, limit: 16 });
-    for (
-      let attempt = 0;
-      attempt < 600 && attached.type === 'attach' && !settled.has(attached.snapshot?.state ?? '');
-      attempt++
-    ) {
-      // oxlint-disable-next-line no-await-in-loop -- polling a durable projection is sequential by nature.
-      await new Promise((resolve) => {
-        setTimeout(resolve, 50);
-      });
-      // oxlint-disable-next-line no-await-in-loop -- each poll depends on the previous projection.
-      attached = await send(second, { type: 'attach', chatId: 'chat-1', cursor: 0, limit: 16 });
-    }
-    if (attached.type !== 'attach') {
-      throw new Error('attach must answer with an attach frame');
-    }
-    expect(attached.snapshot?.state).toBe('completed');
-    expect(attached.snapshot?.messages.at(-1)).toMatchObject({ role: 'assistant' });
+    const second = connectAgent(origin);
+    const snapshot = await settledSnapshot(second);
+    expect(snapshot?.state).toBe('completed');
+    expect(snapshot?.messages.at(-1)).toMatchObject({ role: 'assistant' });
 
     // The transcript is a file in the workspace, not a row in a database.
     const log = await readFile(join(workspace, '.tau', 'chats', 'chat-1', 'events.jsonl'), 'utf8');
     expect(log).toContain('"state":"completed"');
 
     // And the same transcript replays from a cursor on the reconnected client.
-    const replayed = await send(second, { type: 'tail', chatId: 'chat-1', cursor: 0, limit: 16 });
-    if (replayed.type !== 'tail') {
-      throw new Error('tail must answer with a tail frame');
-    }
-    expect(replayed.batch.events.length).toBeGreaterThan(0);
+    const replayed = await second.client.read({
+      chatId: 'chat-1',
+      cursor: 0,
+      limit: agentWireLimits.batchRows,
+      maxBytes: agentWireLimits.batchBytes,
+    });
+    expect(replayed.status === 'batch' && replayed.events.length > 0).toBe(true);
 
     /* The run directory (PH19 ruling 2): the daemon reported this run's
      * identity and state to the relay while the client was gone, and reported
@@ -411,8 +419,7 @@ describe('tau serve --agent-port (always-on agent channel)', () => {
     ]);
     expect(JSON.stringify(runFrames)).not.toContain('Daemon ready.');
 
-    second.channel.close();
-    second.socket.close();
+    second.client.close();
   }, 180_000);
 });
 
@@ -644,51 +651,35 @@ describe.skipIf(!containerImage)('tau serve in the launcher-3 container image', 
     }
     await expect(descriptor?.json()).resolves.toMatchObject({ v: 1, agent: true, workspaceRoot: '/workspace' });
 
-    const first = await connectAgent(origin);
-    const started = await send(first, {
+    const first = connectAgent(origin);
+    const started = await first.client.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId: 'chat-1',
-      runId: 'run-1',
-      message: { id: 'user-1', role: 'user', content: 'hello cloud host' },
+      commandId: 'start-1',
+      payload: {
+        chatId: 'chat-1',
+        runId: 'run-1',
+        trigger: 'submit',
+        message: { id: 'user-1', role: 'user', content: 'hello cloud host' },
+      },
     });
-    if (started.type !== 'result') {
-      throw new Error('start must answer with a result frame');
-    }
+    expect(started).toMatchObject({ status: 'applied', effect: 'durable' });
 
     // Drop the client mid-run: nothing about the run may depend on it.
-    first.socket.terminate();
+    first.sockets[0]?.terminate();
     await new Promise((resolve) => {
       setTimeout(resolve, 50);
     });
     api.release();
 
-    const second = await connectAgent(origin);
-    const settled = new Set(['completed', 'failed', 'cancelled']);
-    let attached = await send(second, { type: 'attach', chatId: 'chat-1', cursor: 0, limit: 16 });
-    for (
-      let attempt = 0;
-      attempt < 600 && attached.type === 'attach' && !settled.has(attached.snapshot?.state ?? '');
-      attempt++
-    ) {
-      // oxlint-disable-next-line no-await-in-loop -- polling a durable projection is sequential by nature.
-      await new Promise((resolve) => {
-        setTimeout(resolve, 50);
-      });
-      // oxlint-disable-next-line no-await-in-loop -- each poll depends on the previous projection.
-      attached = await send(second, { type: 'attach', chatId: 'chat-1', cursor: 0, limit: 16 });
-    }
-    if (attached.type !== 'attach') {
-      throw new Error('attach must answer with an attach frame');
-    }
-    expect(attached.snapshot?.state).toBe('completed');
-    expect(attached.snapshot?.messages.at(-1)).toMatchObject({ role: 'assistant' });
+    const second = connectAgent(origin);
+    const snapshot = await settledSnapshot(second);
+    expect(snapshot?.state).toBe('completed');
+    expect(snapshot?.messages.at(-1)).toMatchObject({ role: 'assistant' });
 
     // The log is a file on the container's own disk, under its workspace.
     const log = await docker('exec', containerName, 'cat', '/workspace/.tau/chats/chat-1/events.jsonl');
     expect(log).toContain('"state":"completed"');
 
-    second.channel.close();
-    second.socket.close();
+    second.client.close();
   }, 600_000);
 });

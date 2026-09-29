@@ -31,7 +31,11 @@ import { projects, workspace } from '@taucad/nx';
 import type { Workspace } from '@taucad/nx';
 
 /** The workflows that drive the package surface. */
-export const workflowPaths = ['.github/workflows/ci.yml', '.github/workflows/publish.yml'] as const;
+export const workflowPaths = [
+  '.github/workflows/ci.yml',
+  '.github/workflows/publish.yml',
+  '.github/workflows/formal-nightly.yml',
+] as const;
 
 export type WorkflowFile = { readonly path: string; readonly text: string };
 

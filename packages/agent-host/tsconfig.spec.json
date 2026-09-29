@@ -19,6 +19,7 @@
     "src/**/*.test-d.ts",
     "src/**/*.d.ts",
     "src/**/*.ts",
+    "src/**/*.json",
     "src/**/*.tsx",
     "src/**/*.js",
     "src/**/*.jsx",

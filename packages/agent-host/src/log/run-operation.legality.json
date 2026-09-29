@@ -1,0 +1,14 @@
+{
+  "domain": {
+    "state": ["none", "reserved", "admitted", "running", "paused", "terminal"],
+    "op": ["admit", "resume"]
+  },
+  "table": {
+    "none": { "admit": "ok", "resume": "NO_RUN_ADMITTED" },
+    "reserved": { "admit": "CHAT_RUN_LIVE", "resume": "CHAT_RUN_LIVE" },
+    "admitted": { "admit": "CHAT_RUN_LIVE", "resume": "ok" },
+    "running": { "admit": "CHAT_RUN_LIVE", "resume": "ok" },
+    "paused": { "admit": "CHAT_RUN_LIVE", "resume": "ok" },
+    "terminal": { "admit": "ok", "resume": "ok" }
+  }
+}

@@ -76,6 +76,8 @@ export type SessionsMachineContext = Readonly<{
    * the ninth open is remembered here and resumed on `sessionClosed`.
    */
   pendingOpen: string | undefined;
+  /** An effect or child failure no transition modelled; the registry keeps answering (MC-R12). */
+  fault: string | undefined;
 }>;
 
 /** Events accepted by sessionsMachine. @public */
@@ -173,6 +175,19 @@ const withoutKey = <T>(record: Readonly<Record<string, T>>, key: string): Record
   Object.fromEntries(Object.entries(record).filter(([id]) => id !== key));
 
 /**
+ * The (state, event) pairs this machine ignores (MC-R17).
+ *
+ * - While quitting, navigation and policy verbs: every session is already closing for quit.
+ * - `quitAnyway` while ready: there is no quit to cut short.
+ *
+ * @public
+ */
+export const sessionsIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  ...['open', 'touch', 'close', 'idleExpired', 'quit'].map((type) => ['quitting', type] as const),
+  ['ready', 'quitAnyway'],
+];
+
+/**
  * The client's live project set: who is open, what closed them, and quit.
  *
  * @public
@@ -196,6 +211,11 @@ export const sessionsMachine = setup({
   },
 }).createMachine({
   id: 'sessions',
+  version: '1',
+  /* A fault no transition modelled is recorded and the registry keeps answering (MC-R12). */
+  onError: ({ event }) => ({
+    context: { fault: event.error instanceof Error ? event.error.message : 'sessions fault' },
+  }),
   context: ({ input }) => ({
     budget: input.budget ?? browserLiveProjectBudget,
     idleWindowMilliseconds: input.idleWindowMilliseconds ?? 30 * 60 * 1000,
@@ -208,6 +228,7 @@ export const sessionsMachine = setup({
     closed: {},
     refusals: {},
     pendingOpen: undefined,
+    fault: undefined,
   }),
   initial: 'ready',
   on: {
@@ -262,14 +283,14 @@ export const sessionsMachine = setup({
   states: {
     ready: {
       on: {
-        open: ({ context, event, guards, self }, enq) => {
+        open: ({ context, event, guards, self, actors }, enq) => {
           /* Already live: opening is a touch. Navigation never restarts a
            * project, which is why returning is instant (I22). */
           if (guards.isLive(context, event.projectId)) {
             return { context: touchProject(context, event.projectId) };
           }
           if (guards.hasRoom(context)) {
-            const ref = enq.spawn('projectSession', {
+            const ref = enq.spawn(actors.projectSession, {
               id: `session:${event.projectId}`,
               input: {
                 projectId: event.projectId,
@@ -311,11 +332,12 @@ export const sessionsMachine = setup({
           enq.emit({ type: 'budgetRefused', projectId: event.projectId, suggestions: Object.keys(context.refs) });
           return { context: { pendingOpen: event.projectId } };
         },
+        /* A touch or close for a project that is not live is stale (MC-R18). */
         touch: ({ context, event, guards }) =>
-          guards.isLive(context, event.projectId) ? { context: touchProject(context, event.projectId) } : undefined,
+          guards.isLive(context, event.projectId) ? { context: touchProject(context, event.projectId) } : {},
         close: ({ context, event, guards }, enq) => {
           if (!guards.isLive(context, event.projectId)) {
-            return undefined;
+            return {};
           }
           const ref = context.refs[event.projectId];
           if (ref !== undefined) {

@@ -100,7 +100,7 @@ describe('live prompt vocabulary', () => {
       systemPrompt: 'Hermetic live prompt vocabulary check.',
       model: liveSessionModel('xai-grok-4.7'),
       toolRegistry: createLiveToolRegistry({}),
-      eventLog: await createNodeEventLog({ filePath: join(root, chatId, 'events.jsonl') }),
+      eventLog: await createNodeEventLog({ filePath: join(root, chatId, 'events.jsonl'), access: 'write' }),
     });
 
   it('should refuse a prompt that asks for a token before it reaches the gateway', async () => {

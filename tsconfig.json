@@ -86,7 +86,7 @@
       "path": "./packages/cli"
     },
     {
-      "path": "./libs/rpc"
+      "path": "./packages/rpc"
     },
     {
       "path": "./libs/fs-bridge"

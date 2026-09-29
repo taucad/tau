@@ -1,9 +1,14 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Bambu Studio setting keys are its own wire vocabulary */
 import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import { createTauAgentHost } from '@taucad/agent-host';
 import type { HostToolInvocation, InterruptResolution, JsonObject, JsonValue } from '@taucad/agent-host';
+import { createNodeEventLog } from '@taucad/agent-host/node';
 import { ResourceQueue } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -33,6 +38,8 @@ import { createChatToolRegistry } from '#registry/tool-registry.js';
 import { createMachineToolRegistry } from '#registry/machine-tool-registry.js';
 import type { MachinePrintPlanner } from '#registry/machine-tool-registry.js';
 import type { BambuStudioEngine } from '#registry/print-profiles.js';
+import { placementOver, scriptedTransport } from '#registry/tau-host.fixture.js';
+import type { ScriptedResponse } from '#registry/tau-host.fixture.js';
 import { createRuntimeAgentClients } from '#runtime/runtime-agent-clients.js';
 import type { RuntimeAgentClient } from '#runtime/runtime-agent-clients.js';
 
@@ -434,6 +441,7 @@ describe('machine tool registry', () => {
       });
       expect(approve).toHaveBeenCalledTimes(1);
       expect(approve).toHaveBeenCalledWith({
+        key: 'print:machine-1:main.ts',
         prompt: 'Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min.',
         payload: {
           kind: 'print-request',
@@ -459,6 +467,45 @@ describe('machine tool registry', () => {
           machineName: 'Workshop X1C',
           request: { requestId: 'call-1', state: 'approved' },
         },
+      });
+    });
+
+    /* D5 under a Tau host: asking paused the run; its next attempt settles the request the person approved. A denial
+     * ends the run, so no attempt recalls one: the host hands it to `answerApproval` instead (below). */
+    it('should settle the request asked in an earlier attempt when the person approved it', async () => {
+      const fixture = clientFixture();
+      await run(fixture.client, { toolName: 'request_print', input: { targetFile: 'main.ts' } });
+      planPrint.mockClear();
+      fixture.requestPrint.mockClear();
+      const approve = Object.assign(
+        vi.fn<NonNullable<HostToolInvocation['approve']>>(async () => {
+          throw new Error('not asked again');
+        }),
+        {
+          recall: vi.fn(async (key: string) =>
+            key === 'print:machine-1:main.ts'
+              ? {
+                  payload: { kind: 'print-request', requestId: 'call-1' },
+                  resolution: { interruptId: 'i-1', outcome: 'approved' },
+                }
+              : undefined,
+          ),
+        },
+      );
+
+      const result = await run(fixture.client, {
+        toolName: 'request_print',
+        input: { targetFile: 'main.ts' },
+        approve,
+      });
+
+      expect(approve).not.toHaveBeenCalled();
+      expect(planPrint).not.toHaveBeenCalled();
+      expect(fixture.requestPrint).not.toHaveBeenCalled();
+      expect(fixture.resolvePrintRequest.mock.calls[0]![0]).toMatchObject({ requestId: 'call-1', decision: 'approve' });
+      expect(result).toMatchObject({
+        isError: false,
+        content: { approval: 'approved', request: { requestId: 'call-1' } },
       });
     });
 
@@ -565,50 +612,6 @@ describe('machine tool registry', () => {
       );
     });
 
-    it('should deny the request, not withdraw it, when the person declines', async () => {
-      const fixture = clientFixture();
-      const result = await run(fixture.client, {
-        toolName: 'request_print',
-        input: { targetFile: 'main.ts' },
-        approve: approveWith('denied'),
-      });
-      expect(fixture.withdrawPrintRequest).not.toHaveBeenCalled();
-      /* No signal: a denial must land even while the run is being cancelled. */
-      expect(fixture.resolvePrintRequest.mock.calls).toEqual([
-        [
-          {
-            requestId: 'call-1',
-            decision: 'deny',
-            resolvedBy: { kind: 'user', id: 'chat', label: 'Declined in chat' },
-          },
-        ],
-      ]);
-      expect(fixture.startPrint).not.toHaveBeenCalled();
-      expect(fixture.uploadPrint).not.toHaveBeenCalled();
-      expect(result).toMatchObject({
-        isError: false,
-        content: { approval: 'denied', request: { requestId: 'call-1', state: 'denied' } },
-      });
-    });
-
-    it('should withdraw the request when the run is cancelled before anyone answers', async () => {
-      const fixture = clientFixture();
-      const result = await run(fixture.client, {
-        toolName: 'request_print',
-        input: { targetFile: 'main.ts' },
-        approve: approveWith('cancelled'),
-      });
-      expect(fixture.resolvePrintRequest).not.toHaveBeenCalled();
-      expect(fixture.withdrawPrintRequest.mock.calls).toEqual([
-        [{ requestId: 'call-1', resolvedBy: { kind: 'user', id: 'chat', label: 'Stopped with the chat turn' } }],
-      ]);
-      expect(fixture.startPrint).not.toHaveBeenCalled();
-      expect(result).toMatchObject({
-        isError: false,
-        content: { approval: 'cancelled', request: { requestId: 'call-1', state: 'withdrawn' } },
-      });
-    });
-
     it('returns the request awaiting approval with a next step under a host without interrupts', async () => {
       const fixture = clientFixture();
       const result = await invoke(fixture.client, 'request_print', { targetFile: 'main.ts' });
@@ -659,6 +662,150 @@ describe('machine tool registry', () => {
   });
 
   /* The start outcome in words: the agent reports what nextStep says, never an unconfirmed start as "submitted". */
+  /* D5 through the host (GM.r1 H2): the chat's answer settles the ledger's request whether or not the run continues,
+   * so the Print pane never offers a request the person already answered. */
+  describe('request_print under a Tau agent host', () => {
+    let directory: string | undefined;
+    afterEach(async () => {
+      if (directory !== undefined) {
+        await rm(directory, { recursive: true, force: true });
+        directory = undefined;
+      }
+    });
+
+    const printCall = { id: 'call-print', name: 'request_print', input: { targetFile: 'main.ts' } };
+    const pausedOnPrint = async (continued: readonly ScriptedResponse[] = [{ text: 'The print is on its way.' }]) => {
+      directory = await mkdtemp(join(tmpdir(), 'tau-request-print-'));
+      const logPath = join(directory, 'events.jsonl');
+      const fixture = clientFixture();
+      const registry = createMachineToolRegistry(fixture.client, { planPrint, projectId });
+      const transport = scriptedTransport([{ toolCalls: [printCall] }, ...continued]);
+      let tick = 0;
+      let id = 0;
+      const host = createTauAgentHost({
+        systemPrompt: 'You are the print fixture.',
+        model: { id: 'scripted-print-model', contextWindow: 200_000 },
+        modelTransport: transport,
+        toolRegistry: registry,
+        placement: placementOver(registry),
+        openEventLog: async () => createNodeEventLog({ filePath: logPath, access: 'write' }),
+        createId: () => `print-${String(id++)}`,
+        createLeaderEpoch: () => `epoch-${String(id++)}`,
+        now: () => new Date(Date.UTC(2026, 8, 28, 0, 0, tick++)),
+      });
+      await host.admit({
+        chatId: 'chat-print',
+        runId: 'run-print',
+        trigger: 'submit',
+        message: { id: 'turn-print', role: 'user', content: 'Print the pyramid.' },
+      });
+      const [pending] = await host.pendingInterrupts('run-print');
+      expect(fixture.requests.get('call-print')?.state).toBe('awaiting-approval');
+      return { fixture, host, transport, interruptId: pending!.interruptId };
+    };
+
+    it('should deny the request in the ledger, not withdraw it, when the person declines in chat', async () => {
+      const { fixture, host, interruptId } = await pausedOnPrint();
+
+      await host.resolveInterrupt({ runId: 'run-print', interruptId, outcome: 'denied' });
+
+      await vi.waitFor(() => {
+        expect(fixture.requests.get('call-print')?.state).toBe('denied');
+      });
+      /* No signal: a denial must land even while the run is being cancelled. */
+      expect(fixture.resolvePrintRequest.mock.calls).toEqual([
+        [
+          {
+            requestId: 'call-print',
+            decision: 'deny',
+            resolvedBy: { kind: 'user', id: 'chat', label: 'Declined in chat' },
+          },
+        ],
+      ]);
+      expect(fixture.withdrawPrintRequest).not.toHaveBeenCalled();
+      expect(fixture.uploadPrint).not.toHaveBeenCalled();
+      await host.close();
+    });
+
+    it('should withdraw the request when its paused run is cancelled before anyone answers', async () => {
+      const { fixture, host } = await pausedOnPrint();
+
+      await host.cancel({ runId: 'run-print' });
+
+      await vi.waitFor(() => {
+        expect(fixture.requests.get('call-print')?.state).toBe('withdrawn');
+      });
+      expect(fixture.withdrawPrintRequest.mock.calls).toEqual([
+        [{ requestId: 'call-print', resolvedBy: { kind: 'user', id: 'chat', label: 'Stopped with the chat turn' } }],
+      ]);
+      expect(fixture.resolvePrintRequest).not.toHaveBeenCalled();
+      await host.close();
+    });
+
+    it('should approve the request once when the person approves in chat, and tell the continued attempt', async () => {
+      const { fixture, host, transport, interruptId } = await pausedOnPrint();
+
+      await host.resolveInterrupt({ runId: 'run-print', interruptId, outcome: 'approved' });
+      await vi.waitFor(() => {
+        expect(fixture.requests.get('call-print')?.state).toBe('approved');
+      });
+      await host.resume('chat-print');
+
+      expect(fixture.resolvePrintRequest.mock.calls.map(([call]) => call.decision)).toEqual(['approve']);
+      expect(fixture.requestPrint).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(transport.requests.at(-1)?.messages)).toContain(
+        String.raw`approved: \"Print pyramid.gcode.3mf`,
+      );
+      await expect(host.snapshot('chat-print')).resolves.toMatchObject({ state: 'completed' });
+      await host.close();
+    });
+
+    it('should report the answer to a re-call that recalls a request the hand-over already settled (GM.r2 H1)', async () => {
+      const { fixture, host, transport, interruptId } = await pausedOnPrint([
+        { toolCalls: [{ ...printCall, id: 'call-print-again' }] },
+        { text: 'The print is on its way.' },
+      ]);
+
+      await host.resolveInterrupt({ runId: 'run-print', interruptId, outcome: 'approved' });
+      await vi.waitFor(() => {
+        expect(fixture.requests.get('call-print')?.state).toBe('approved');
+      });
+      await host.resume('chat-print');
+
+      expect(fixture.requestPrint).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(transport.requests.at(-1)?.messages)).toContain(
+        '"machineName":"Workshop X1C","approval":"approved"',
+      );
+      await host.close();
+    });
+    it.each([
+      ['denied', 'denied'],
+      ['withdrawn', 'cancelled'],
+    ] as const)(
+      "should report the ledger's answer, not the recalled approval, when the Print pane settled it first (%s, GM.r3)",
+      async (state, approval) => {
+        const { fixture, host, transport, interruptId } = await pausedOnPrint([
+          { toolCalls: [{ ...printCall, id: 'call-print-again' }] },
+          { text: 'The print is on its way.' },
+        ]);
+        /* The Print pane answers the ledger directly, before the chat's approval reaches it. */
+        const resolvedBy = { kind: 'user', id: 'pane', label: 'You' } as const;
+        await (state === 'denied'
+          ? fixture.client.resolvePrintRequest({ requestId: 'call-print', decision: 'deny', resolvedBy })
+          : fixture.client.withdrawPrintRequest({ requestId: 'call-print', resolvedBy }));
+
+        await host.resolveInterrupt({ runId: 'run-print', interruptId, outcome: 'approved' });
+        await host.resume('chat-print');
+
+        expect(fixture.requests.get('call-print')?.state).toBe(state);
+        expect(JSON.stringify(transport.requests.at(-1)?.messages)).toContain(
+          `"machineName":"Workshop X1C","approval":"${approval}"`,
+        );
+        await host.close();
+      },
+    );
+  });
+
   describe('nextStep', () => {
     const recorded = (state: PrintRequest['state'], overrides: Partial<PrintRequest> = {}): PrintRequest => ({
       requestId: 'call-1',
@@ -1316,8 +1463,28 @@ describe('request_print slicer options through the chat registry', () => {
     });
     const requestPrint = async (toolCallId: string, input: JsonValue) =>
       registry.invoke({ toolCallId, toolName: 'request_print', input, signal: new AbortController().signal });
-    return { exportModel, ledger, requestPrint };
+    return { exportModel, ledger, registry, requestPrint };
   };
+
+  it("should hand the chat's answer to request_print through the composed registry (D5)", async () => {
+    const host = await printHost();
+    await host.requestPrint('call-answered', { targetFile: 'main.ts' });
+
+    await host.registry.answerApproval?.({
+      toolName: 'request_print',
+      payload: { kind: 'print-request', requestId: 'call-answered' },
+      resolution: { interruptId: 'interrupt-1', outcome: 'denied' },
+    });
+    await host.registry.answerApproval?.({
+      toolName: 'request_print',
+      payload: { kind: 'print-request', requestId: 'call-answered' },
+      resolution: { interruptId: 'interrupt-1', outcome: 'denied' },
+    });
+
+    expect(host.ledger.requests.get('call-answered')?.state).toBe('denied');
+    /* Handed over twice, settled once. */
+    expect(host.ledger.resolvePrintRequest).toHaveBeenCalledTimes(1);
+  });
 
   it('should hand runtime.export exactly the preset and options the agent chose', async () => {
     const host = await printHost();

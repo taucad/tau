@@ -16,6 +16,17 @@ const chromiumDisabledArguments = webGpuLaunchArguments('disabled');
 /** The opt-in specs that spend real provider credit; excluded from every default run. */
 const liveProviderSpecs = ['src/gemini-browser-agent-host.live.spec.ts', 'src/provider-switch.live.spec.ts'];
 const liveProvidersEnabled = process.env['TAU_E2E_LIVE_GEMINI'] === 'true';
+/**
+ * The agent-host specs run only in `test:e2e:browser-host` and `test:e2e:daemon-host`, which set
+ * `TAU_E2E_HOST_TIER`, so each spec runs in exactly one CI target (north star P7).
+ */
+const hostSpecs = [
+  'src/browser-agent-host.spec.ts',
+  'src/chat-isolated-workspace.spec.ts',
+  'src/chat-todo-list.spec.ts',
+  'src/daemon-agent-host.spec.ts',
+];
+const hostExcluded = process.env['TAU_E2E_HOST_TIER'] === 'true' ? [] : hostSpecs;
 const playwrightProvider = (options?: Parameters<typeof playwright>[0]): BrowserProviderOption =>
   playwright(options) as unknown as BrowserProviderOption;
 /* Only the snapshot production server honours TAU_E2E_DISABLE_COI (`production-server.ts`): the
@@ -82,6 +93,7 @@ export default defineConfig({
           exclude: [
             'src/headless-chat-image-capture.no-webgpu.spec.ts',
             ...(liveProvidersEnabled ? [] : liveProviderSpecs),
+            ...hostExcluded,
           ],
           provider: playwrightProvider({
             actionTimeout: 10_000,
@@ -131,6 +143,7 @@ export default defineConfig({
             'src/picovoxel-multi.spec.ts',
             'src/remote-host.spec.ts',
           ],
+          exclude: hostExcluded,
         },
         {
           browser: 'webkit',
@@ -144,6 +157,7 @@ export default defineConfig({
             'src/picovoxel-multi.spec.ts',
             'src/remote-host.spec.ts',
           ],
+          exclude: hostExcluded,
         },
       ],
     },

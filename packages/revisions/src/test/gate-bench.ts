@@ -197,7 +197,6 @@ const measureSave = async (variant: string): Promise<Record<string, number>> => 
   const { actor } = createProjectRevisionsActor({
     port,
     projectId: 'gate-bench',
-    authorityEpoch: 'gate-bench',
     // oxlint-disable-next-line typescript/consistent-type-assertions -- the in-memory provider is the checkout the worker's rooted view wraps.
     filesystem: async () => filesystem as unknown as RevisionFileSystem,
     completeChanges: variant === 'save',
@@ -213,6 +212,7 @@ const measureSave = async (variant: string): Promise<Record<string, number>> => 
   });
   actor.start();
   let generation = 0;
+  let saves = 0;
   const save = async (edited: string | undefined, index: number): Promise<number> => {
     if (edited !== undefined) {
       await filesystem.writeFile(edited, body(index, generation + 1));
@@ -221,7 +221,8 @@ const measureSave = async (variant: string): Promise<Record<string, number>> => 
     }
     answered = Promise.withResolvers<void>();
     const start = performance.now();
-    actor.send({ type: 'cut', trigger: 'save', checkoutId: 'live', leaseIds: [] });
+    saves += 1;
+    actor.send({ type: 'cut', requestId: `save-${String(saves)}`, trigger: 'save', checkoutId: 'live', leaseIds: [] });
     await answered.promise;
     return performance.now() - start;
   };
@@ -276,7 +277,6 @@ const measureNativeParts = async (): Promise<Record<string, number>> => {
   const actors = createRevisionActors({
     port,
     projectId: 'gate-bench',
-    authorityEpoch: 'gate-bench',
     // oxlint-disable-next-line typescript/consistent-type-assertions -- the provider is the live checkout.
     filesystem: async () => filesystem as unknown as RevisionFileSystem,
   });
@@ -330,7 +330,6 @@ const measurePlan = async (): Promise<Record<string, number>> => {
   const actors = createRevisionActors({
     port,
     projectId: 'gate-bench',
-    authorityEpoch: 'gate-bench',
     // oxlint-disable-next-line typescript/consistent-type-assertions -- the provider is the live checkout.
     filesystem: async () => filesystem as unknown as RevisionFileSystem,
     completeChanges: true,

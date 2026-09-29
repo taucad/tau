@@ -1,13 +1,13 @@
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
-import type { Chat, MyUIMessage } from '@taucad/chat';
+import { safeValidateUiMessages } from '@taucad/chat';
+import type { Chat } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { parseChatRecord, serializeChatRecord } from '@taucad/chat/schemas';
-import { mergeLogSegments } from '@taucad/agent-host';
 import { chatLogFileName, chatRecordFileName, chatRecordsPath } from '@taucad/revisions';
-import { deriveChatTranscript } from '#chat-clients/_internal/browser-agent-host-transport.js';
-import { idPrefix } from '@taucad/types/constants';
+import { errorCategory, idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
+import { isRecord } from '@taucad/utils/schema';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
@@ -38,11 +38,10 @@ import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
  *   order the upgrade is a Web Lock keyed on the chat id, as the revision port
  *   already does for refs.
  *
- * `messages` never reaches `chat.json` (P26): it is *derived*. The session log
- * beside the record is the chat's history, so the transcript is rebuilt from its
- * segments on open — through `deriveChatTranscript`, the same derivation the
- * reattach path runs, never a second reducer. A copy in the record would be a
- * second history over the one path two devices both claim.
+ * `messages` never reaches `chat.json` (P26). The session log's projection owns
+ * the transcript; this store reads only metadata. Before the host acknowledges
+ * the first Start, `startupRequest.message` is a durable command intent that
+ * can be displayed as one pending message after a reload.
  *
  * The composer — draft, message edits, unread — is not the chat's at all: it is
  * this device's composer records (blueprint D3, W8), and this module only
@@ -50,6 +49,13 @@ import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
  */
 
 const defaultNavigationChatName = 'New chat';
+
+const invalidStartupError: NonNullable<Chat['error']> = {
+  category: errorCategory.generic,
+  code: 'HISTORY_INVALID',
+  title: 'Could not restore the starting message',
+  message: 'The saved starting message is invalid. This chat cannot start until its history is repaired.',
+};
 
 const chatDirectory = (projectId: string, chatId: string): string =>
   `/projects/${projectId}/${chatRecordsPath(chatId)}`;
@@ -88,11 +94,6 @@ export type ChatStoreClient = {
   rmdir: (path: string, options?: { recursive?: boolean }) => Promise<void>;
 };
 
-/** The {@link Chat} field this client holds rather than the file. */
-type ClientChatState = {
-  messages: readonly MyUIMessage[];
-};
-
 /** How the chat store finds the projects a chat could be in. @internal */
 export type ChatFileStoreOptions = {
   readonly client: ChatStoreClient;
@@ -120,16 +121,10 @@ const valuesEqual = (left: unknown, right: unknown): boolean => {
  * @internal
  */
 // oxlint-disable-next-line tau-lint/require-public-export-jsdoc -- @internal, app-scoped.
-export function createChatFileStore(
-  options: ChatFileStoreOptions,
-): ChatStorage & { invalidateLog(chatId: string): void } {
+export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage {
   const mutex = new KeyedMutex<string>();
   /** `chatId -> projectId`, filled by every read and every create. */
   const located = new Map<string, string>();
-  /** The transcript the record does not carry, per chat (P26). */
-  const client = new Map<string, ClientChatState>();
-  const staleLogs = new Set<string>();
-  const encoder = new TextEncoder();
 
   const readText = async (path: string): Promise<string | undefined> => {
     try {
@@ -139,64 +134,39 @@ export function createChatFileStore(
     }
   };
 
-  /**
-   * The transcript one chat's log implies, across every device that wrote it.
-   *
-   * This device's own segment is `events.jsonl`; every other device's arrived
-   * as `events/<deviceId>.jsonl` through the fetch path's projection, and the
-   * two are disjoint paths by construction, so reading is a merge and never a
-   * line-level reconciliation (A39/S39).
-   */
-  const deriveMessages = async (projectId: string, chatId: string): Promise<readonly MyUIMessage[]> => {
-    const directory = chatDirectory(projectId, chatId);
-    let entries: string[] = [];
-    try {
-      entries = await options.client.readdir(`${directory}/events`);
-    } catch {
-      entries = [];
+  const hydrate = async (record: ChatRecord): Promise<Chat> => {
+    const request: unknown = record.startupRequest;
+    if (request === undefined) {
+      return { ...record, messages: [] };
     }
-    const foreign = entries.filter((name) => name.endsWith('.jsonl'));
-    const read = await Promise.all([
-      readText(`${directory}/${chatLogFileName}`).then((text) => [chatLogFileName, text] as const),
-      ...foreign.map(async (name) => readText(`${directory}/events/${name}`).then((text) => [name, text] as const)),
-    ]);
-    const segments = read
-      .filter((entry): entry is readonly [string, string] => entry[1] !== undefined)
-      /* The file name stands in for the device id, which only breaks a tie
-       * between two terms that start at the same instant; this host's own
-       * device id is W13's to mint and the reader never needs it. */
-      .map(([name, text]) => ({ deviceId: name, bytes: encoder.encode(text) }));
-    return segments.length === 0 ? [] : deriveChatTranscript(mergeLogSegments(segments));
-  };
-
-  /**
-   * This client's view of one chat, derived once and then held.
-   *
-   * A full transcript reader pays one log derivation per chat per session.
-   * Metadata navigation uses the record path below and leaves modern logs
-   * untouched until a transcript consumer opens them.
-   */
-  const clientState = async (projectId: string, chatId: string): Promise<ClientChatState> => {
-    const held = client.get(chatId);
-    if (held !== undefined && !staleLogs.delete(chatId)) {
-      return held;
+    const envelope = isRecord(request) ? request : undefined;
+    const validEnvelope =
+      envelope !== undefined &&
+      typeof envelope['id'] === 'string' &&
+      envelope['id'].startsWith(`${idPrefix.request}_`) &&
+      envelope['id'].length > idPrefix.request.length + 1 &&
+      envelope['kind'] === 'regenerate-tail' &&
+      typeof envelope['messageId'] === 'string' &&
+      envelope['messageId'].length > 0 &&
+      (envelope['source'] === 'homepage-initial-message' ||
+        envelope['source'] === 'fix-with-ai-new-chat' ||
+        envelope['source'] === 'resolve-conflict-new-chat') &&
+      Number.isSafeInteger(envelope['createdAt']) &&
+      typeof envelope['createdAt'] === 'number' &&
+      envelope['createdAt'] >= 0;
+    const result = validEnvelope ? await safeValidateUiMessages([envelope['message']]) : undefined;
+    const message = result?.success ? result.data[0] : undefined;
+    if (message?.role === 'user' && message.id === envelope?.['messageId'] && message.metadata?.status === 'pending') {
+      return { ...record, messages: [message] };
     }
-    const derived: ClientChatState = { messages: await deriveMessages(projectId, chatId) };
-    client.set(chatId, derived);
-    return derived;
+    return {
+      ...record,
+      messages: [],
+      error: invalidStartupError,
+    };
   };
 
-  const hydrate = async (projectId: string, record: ChatRecord): Promise<Chat> => {
-    const state = await clientState(projectId, record.id);
-    return { ...record, messages: [...state.messages] };
-  };
-
-  /** Keep the transcript the file will not carry, so this session goes on seeing it. */
-  const holdTranscript = (chat: Chat): void => {
-    client.set(chat.id, { messages: chat.messages });
-  };
-
-  const readStoredRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
+  const readRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
     const text = await readText(recordPath(projectId, chatId));
     const record = text === undefined ? undefined : parseChatRecord(text);
     if (record === undefined) {
@@ -206,54 +176,46 @@ export function createChatFileStore(
     return record;
   };
 
-  const readRecord = async (projectId: string, chatId: string): Promise<Chat | undefined> => {
-    const record = await readStoredRecord(projectId, chatId);
-    return record === undefined ? undefined : hydrate(projectId, record);
-  };
-
   const writeRecord = async (projectId: string, chat: Chat): Promise<void> => {
     await options.client.writeFile(recordPath(projectId, chat.id), serializeChatRecord(chat));
     located.set(chat.id, projectId);
-    holdTranscript(chat);
   };
 
   /**
    * One chat directory, record or no record.
    *
-   * A directory holding only a log is a real runtime state, not a compatibility
-   * shim: the fetch path projects segments and `chat.json` as separate writes,
-   * and a chat whose record has not landed yet still has a transcript to show.
-   * Reading it as a placeholder is what keeps that chat out of the void; the
-   * record replaces it the moment it arrives or the chat is next written.
+   * Fetch projects segments and `chat.json` as separate writes. A log-only
+   * directory stays discoverable, but its transcript belongs to the projection
+   * subscriber, not this metadata store.
    */
   const readChatDirectory = async (projectId: string, chatId: string): Promise<Chat | undefined> => {
     const record = await readRecord(projectId, chatId);
     if (record !== undefined) {
-      return record;
+      return hydrate(record);
     }
-    /* Derived without caching first: `locate` asks every known project about a
-     * chat, and caching the empty answer from the wrong one would hide the
-     * chat's real transcript for the rest of the session. */
-    const state = (located.get(chatId) === projectId ? client.get(chatId) : undefined) ?? {
-      messages: await deriveMessages(projectId, chatId),
-    };
-    if (state.messages.length === 0) {
+    const directory = chatDirectory(projectId, chatId);
+    const ownLog = await options.client.exists(`${directory}/${chatLogFileName}`);
+    let foreignLog = false;
+    if (!ownLog) {
+      try {
+        const entries = await options.client.readdir(`${directory}/events`);
+        foreignLog = entries.some((name) => name.endsWith('.jsonl'));
+      } catch {
+        // This chat has no projected foreign segment yet.
+      }
+    }
+    if (!ownLog && !foreignLog) {
       return undefined;
     }
-    client.set(chatId, state);
     located.set(chatId, projectId);
-    return hydrate(projectId, placeholderRecord(projectId, chatId));
+    return placeholderRecord(projectId, chatId);
   };
 
-  /** Read the durable row alone; only legacy ordering and log-only placeholders need the transcript. */
+  /** Read navigation metadata without deriving a host-log transcript. */
   const readChatRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
-    const record = await readStoredRecord(projectId, chatId);
-    if (record?.recencyAt !== undefined) {
-      return record;
-    }
-    const legacyRecency: unknown = record === undefined ? undefined : Reflect.get(record, 'lastUserActivityAt');
-    if (record !== undefined && typeof legacyRecency === 'number') {
-      return { ...record, recencyAt: legacyRecency };
+    const record = await readRecord(projectId, chatId);
+    if (record !== undefined) {
+      return record.recencyAt === undefined ? { ...record, recencyAt: getChatRecencyAt(record) } : record;
     }
     const chat = await readChatDirectory(projectId, chatId);
     if (chat === undefined) {
@@ -318,7 +280,8 @@ export function createChatFileStore(
       if (projectId === undefined) {
         return undefined;
       }
-      const existing = await readChatDirectory(projectId, chatId);
+      const record = await readRecord(projectId, chatId);
+      const existing = record === undefined ? await readChatDirectory(projectId, chatId) : { ...record, messages: [] };
       if (existing === undefined) {
         return undefined;
       }
@@ -330,7 +293,7 @@ export function createChatFileStore(
         return undefined;
       }
       await writeRecord(projectId, updated);
-      return updated;
+      return hydrate(updated);
     });
 
   /** As {@link write}, but `false` from the mutator means "nothing changed". */
@@ -361,7 +324,7 @@ export function createChatFileStore(
       recencyAt: timestamp,
     };
     await writeRecord(resourceId, created);
-    return created;
+    return hydrate(created);
   };
 
   /**
@@ -397,9 +360,6 @@ export function createChatFileStore(
   };
 
   return {
-    invalidateLog: (chatId) => {
-      staleLogs.add(chatId);
-    },
     createChat: async (resourceId, chat) => create(resourceId, chat),
 
     createNavigationRepairChat: async (resourceId) =>
@@ -409,7 +369,13 @@ export function createChatFileStore(
       write(chatId, (chat) => {
         const isFullChat = 'id' in update && update.id === chatId;
         // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- the caller's own contract: a full row replaces, a partial merges.
-        const candidate = isFullChat ? (update as Chat) : (deepmerge(chat, update) as Chat);
+        const candidate = {
+          ...(isFullChat ? (update as Chat) : (deepmerge(chat, update) as Chat)),
+          messages: chat.messages,
+        };
+        if (isFullChat && chat.error === undefined && valuesEqual(candidate.error, invalidStartupError)) {
+          delete candidate.error;
+        }
         if (valuesEqual(candidate, chat)) {
           return undefined;
         }
@@ -430,6 +396,9 @@ export function createChatFileStore(
 
     patchChat: async (chatId, key, value) =>
       patch(chatId, (chat) => {
+        if (key === 'messages') {
+          throw new Error('Chat transcript messages are host-log-owned and cannot be patched in chat.json.');
+        }
         if (valuesEqual(chat[key], value)) {
           return false;
         }
@@ -454,16 +423,11 @@ export function createChatFileStore(
 
     commitCancelledDraftRestore: async (chatId, input: CommitCancelledDraftRestoreInput) =>
       patch(chatId, (chat) => {
-        let changed = false;
-        if (!valuesEqual(chat.messages, input.messages)) {
-          chat.messages = input.messages;
-          changed = true;
-        }
         if (input.clearStartupRequestId !== undefined && chat.startupRequest?.id === input.clearStartupRequestId) {
           delete chat.startupRequest;
-          changed = true;
+          return true;
         }
-        return changed;
+        return false;
       }),
 
     softDeleteChat: async (chatId) => tombstone(chatId),
@@ -476,14 +440,8 @@ export function createChatFileStore(
       await tombstone(chatId);
     },
 
-    getChat: async (chatId, projectHint) => {
-      if (projectHint !== undefined) {
-        const hintedChat = await readChatDirectory(projectHint, chatId);
-        if (hintedChat !== undefined) {
-          return hintedChat;
-        }
-      }
-      const projectId = await locate(chatId);
+    getChat: async (chatId, knownProjectId) => {
+      const projectId = knownProjectId ?? (await locate(chatId));
       return projectId === undefined ? undefined : readChatDirectory(projectId, chatId);
     },
 

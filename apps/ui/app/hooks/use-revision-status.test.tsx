@@ -33,7 +33,26 @@ import {
   useRevisionCommands,
 } from '#hooks/use-revision-status.js';
 import type { GitRemoteCredential } from '@taucad/revisions';
-import type { AgentChannelClient, AgentChannelRequest, AgentChannelResponse, JsonValue } from '@taucad/agent-host';
+import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
+
+type RevisionAnswer = Awaited<ReturnType<AgentChannelClient['revision']>>;
+
+/** A daemon channel that only speaks revisions; the agent verbs are not this hook's. */
+const revisionChannel = (
+  fields: Pick<AgentChannelClient, 'revision' | 'revisionEvents' | 'close'>,
+): AgentChannelClient & typeof fields => ({
+  execute: async () => {
+    throw new Error('The revision hook sends no agent commands.');
+  },
+  read: async () => {
+    throw new Error('The revision hook reads no chat log.');
+  },
+  async *liveEvents() {
+    yield* [];
+  },
+  onClose: () => () => undefined,
+  ...fields,
+});
 
 const projectId = 'alpha';
 
@@ -216,7 +235,6 @@ const harness = (
         },
         filesystem: (root) => service.createRootedFileSystem(root),
         observe: () => () => undefined,
-        authorityEpoch: 'epoch-w3d-a2',
       });
       const worker = {
         postMessage: (message: { type: string; projectId: string; port: MessagePort }) => {
@@ -293,7 +311,9 @@ describe('the page client of the worker revision root', () => {
    *
    * @returns The client and the pump that puts one toast on its stream.
    */
-  const hostBranchClient = (): Readonly<{
+  const hostBranchClient = (
+    createAnswer: JsonValue = null,
+  ): Readonly<{
     client: ReturnType<typeof createHostRevisionClient>;
     toast: (value: RevisionToast) => void;
   }> => {
@@ -310,27 +330,26 @@ describe('the page client of the worker revision root', () => {
       });
       return nextToast();
     };
-    const channel = {
-      execute: async (): Promise<AgentChannelResponse> => ({
-        type: 'revision',
-        result: null,
+    const channel = revisionChannel({
+      revision: async (request: JsonValue) => ({
+        /* The host answers `createBranch` with the checkout it made (B7). */
+        result:
+          typeof request === 'object' &&
+          request !== null &&
+          'command' in request &&
+          request['command'] === 'createBranch'
+            ? createAnswer
+            : null,
         status: { projectId, branch: 'main', headRevisionId: 'revision-1' },
       }),
-      async *events() {
-        yield* [];
-      },
-      async *liveEvents() {
-        yield* [];
-      },
       async *revisionEvents() {
         for (;;) {
           // oxlint-disable-next-line no-await-in-loop -- a stream is sequential by definition.
           yield { kind: 'toast', value: (await nextToast()) as unknown as JsonValue };
         }
       },
-      onClose: () => () => undefined,
       close: () => undefined,
-    } satisfies AgentChannelClient;
+    });
     return {
       client: createHostRevisionClient({ projectId, connect: async () => channel }),
       toast: (value) => {
@@ -341,38 +360,24 @@ describe('the page client of the worker revision root', () => {
   };
 
   it('projects and drives a host-owned revision root without opening a worker store', async () => {
-    const seen: AgentChannelRequest[] = [];
-    const execute = vi.fn(async (request: AgentChannelRequest): Promise<AgentChannelResponse> => {
+    const seen: JsonValue[] = [];
+    const revision = vi.fn(async (request: JsonValue): Promise<RevisionAnswer> => {
       seen.push(request);
-      if (request.type !== 'revision') {
-        throw new Error('Expected a revision request.');
-      }
       return {
-        type: 'revision',
         result:
-          typeof request.request === 'object' &&
-          request.request !== null &&
-          'command' in request.request &&
-          request.request['command'] === 'log'
+          typeof request === 'object' && request !== null && 'command' in request && request['command'] === 'log'
             ? [{ id: 'revision-1', revisionNumber: 1 }]
             : null,
         status: { projectId, branch: 'main', headRevisionId: 'revision-1' },
       };
     });
-    const channel = {
-      execute,
-      async *events() {
-        yield* [];
-      },
-      async *liveEvents() {
-        yield* [];
-      },
+    const channel = revisionChannel({
+      revision,
       async *revisionEvents() {
         yield* [];
       },
-      onClose: () => () => undefined,
       close: vi.fn(),
-    } satisfies AgentChannelClient;
+    });
     const client = createHostRevisionClient({
       projectId,
       connect: async () => channel,
@@ -387,18 +392,14 @@ describe('the page client of the worker revision root', () => {
       });
     });
     client.send({ command: 'createBranch', name: 'isolated-run' });
-    await expect.poll(() => execute.mock.calls.length).toBe(3);
+    await expect.poll(() => revision.mock.calls.length).toBe(3);
     await expect(client.log({ limit: 8 })).resolves.toEqual([{ id: 'revision-1', revisionNumber: 1 }]);
-    client.send({ command: 'adoptHostFinalized', checkoutId: 'live', revisionId: 'revision-1', treeId: 'tree-1' });
     await settle();
     expect(seen).toEqual([
-      { type: 'revision', request: { command: 'status' } },
-      { type: 'revision', request: { command: 'open' } },
-      {
-        type: 'revision',
-        request: { command: 'createBranch', name: 'isolated-run' },
-      },
-      { type: 'revision', request: { command: 'log', limit: 8 } },
+      { command: 'status' },
+      { command: 'open' },
+      { command: 'createBranch', name: 'isolated-run' },
+      { command: 'log', limit: 8 },
     ]);
     client.close();
     expect(channel.close).toHaveBeenCalledOnce();
@@ -406,20 +407,13 @@ describe('the page client of the worker revision root', () => {
 
   it('closes a host channel that finishes opening after the project closed', async () => {
     const connected = Promise.withResolvers<AgentChannelClient>();
-    const channel = {
-      execute: vi.fn(),
-      async *events() {
-        yield* [];
-      },
-      async *liveEvents() {
-        yield* [];
-      },
+    const channel = revisionChannel({
+      revision: vi.fn(),
       async *revisionEvents() {
         yield* [];
       },
-      onClose: () => () => undefined,
       close: vi.fn(),
-    } satisfies AgentChannelClient;
+    });
     const client = createHostRevisionClient({
       projectId,
       connect: async () => connected.promise,
@@ -431,34 +425,21 @@ describe('the page client of the worker revision root', () => {
     await settle();
 
     expect(channel.close).toHaveBeenCalledOnce();
-    expect(channel.execute).not.toHaveBeenCalled();
+    expect(channel.revision).not.toHaveBeenCalled();
     expect(client.status()).toBeUndefined();
   });
 
   it('replays a native chat projection to a later route subscriber', async () => {
-    const channel = {
-      execute: vi.fn(
-        async (): Promise<AgentChannelResponse> => ({
-          type: 'revision',
-          result: null,
-          status: { projectId, branch: 'main' },
-        }),
-      ),
-      async *events() {
-        yield* [];
-      },
-      async *liveEvents() {
-        yield* [];
-      },
+    const channel = revisionChannel({
+      revision: vi.fn(async (): Promise<RevisionAnswer> => ({ result: null, status: { projectId, branch: 'main' } })),
       async *revisionEvents() {
         yield {
           kind: 'event',
           value: { type: 'chats.projected', projectId, chatIds: ['remote-chat'] },
         };
       },
-      onClose: () => () => undefined,
       close: vi.fn(),
-    } satisfies AgentChannelClient;
+    });
     const client = createHostRevisionClient({ projectId, connect: async () => channel });
     client.open();
     await settle();
@@ -757,122 +738,34 @@ describe('the page client of the worker revision root', () => {
     expect(settled).toBe(true);
   });
 
-  it('should refuse a turn the worker answered with something other than a placement', async () => {
-    const { worker, ports, messages } = controlledWorker();
-    const revisionClient = getRevisionClient({ projectId, worker });
-    revisionClient.open();
-    messages.length = 0;
-
-    const admitted = revisionClient.admitTurn({ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    await settle();
-    const frame = messages.at(-1) as { command: string; id: number };
-    ports[0]?.postMessage({ type: 'result', id: frame.id, result: { kind: 'saved' } } satisfies WorkerRevisionResponse);
-
-    /* A placement rooted at `''` is not a placement: it used to build a bridge
-     * at the workspace root and run the turn on the wrong files (P2). The
-     * diagnostic used to reach the card verbatim (review finding 8). */
-    await expect(admitted).rejects.toMatchObject({
-      code: 'PLACEMENT_UNROOTED',
-      message: describeRevisionFailure('turn', 'PLACEMENT_UNROOTED').description,
+  /* B7: the host answers the verb itself, so the page waits on that answer and never on a bound or a toast. */
+  it('should resolve a host createBranch with the checkout the host answered', async () => {
+    const { client } = hostBranchClient({
+      branch: 'isolated-run',
+      checkoutId: 'checkout-isolated',
+      checkoutRoot: '/checkouts/checkout-isolated',
     });
-  });
+    client.open();
+    await waitFor(() => {
+      expect(client.status()).toBeDefined();
+    });
 
-  /*
-   * The host leg's correlated *New branch* (review findings 1 and 5): it waits
-   * on a toast stream nothing guarantees will carry its settlement, so without
-   * a bound a dropped `create` wedges the chat's send path for the session, and
-   * an unrelated branch verb's refusal used to settle it with the wrong words.
-   */
-  it('should refuse a host createBranch the tree never answers, on the bound', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const { client } = hostBranchClient();
-      client.open();
-      await vi.waitFor(() => {
-        expect(client.status()).toBeDefined();
-      });
-
-      /* Asserted before the clock moves: the rejection lands inside the tick,
-         and a handler attached after it is an unhandled rejection first. */
-      const refused = expect(client.createBranch('isolated-run')).rejects.toMatchObject({
-        code: 'BRANCH_UNANSWERED',
-      });
-      await vi.advanceTimersByTimeAsync(60_000);
-
-      await refused;
-      client.close();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('should not attribute another host verb’s refusal to a pending createBranch', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const { client, toast } = hostBranchClient();
-      client.open();
-      await vi.waitFor(() => {
-        expect(client.status()).toBeDefined();
-      });
-
-      const refused = expect(client.createBranch('isolated-run')).rejects.toMatchObject({
-        code: 'BRANCH_UNANSWERED',
-      });
-      toast({
-        type: 'error',
-        subject: 'branch',
-        operation: 'discard',
-        branch: 'spike',
-        message: 'An agent is working in spike.',
-      });
-      await vi.advanceTimersByTimeAsync(60_000);
-
-      await refused;
-      client.close();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  /* A refusal that names neither verb nor branch is uncorrelated: it may be a
-     discard's, a rename's, or another *New branch*'s. Reading the absent fields
-     as "mine" let it settle this create with the wrong words (finding 2). */
-  it('should not settle a pending createBranch with a refusal that names no verb', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const { client, toast } = hostBranchClient();
-      client.open();
-      await vi.waitFor(() => {
-        expect(client.status()).toBeDefined();
-      });
-
-      const refused = expect(client.createBranch('isolated-run')).rejects.toMatchObject({
-        code: 'BRANCH_UNANSWERED',
-      });
-      toast({
-        type: 'error',
-        subject: 'branch',
-        message: 'That branch already has a checkout.',
-        code: 'CHECKOUT_CONFLICT',
-      });
-      await vi.advanceTimersByTimeAsync(60_000);
-
-      await refused;
-      client.close();
-    } finally {
-      vi.useRealTimers();
-    }
+    await expect(client.createBranch('isolated-run')).resolves.toEqual({
+      branch: 'isolated-run',
+      checkoutId: 'checkout-isolated',
+      checkoutRoot: '/checkouts/checkout-isolated',
+    });
+    client.close();
   });
 
   it('should refuse a host createBranch the registry made no checkout for', async () => {
-    const { client, toast } = hostBranchClient();
+    const { client } = hostBranchClient({ branch: 'isolated-run' });
     client.open();
     await waitFor(() => {
       expect(client.status()).toBeDefined();
     });
 
     const created = client.createBranch('isolated-run');
-    toast({ type: 'branch', operation: 'create', branch: 'isolated-run' });
 
     /* `checkoutId: ''` used to reach `Chat.checkoutId`, and the chat then had
      * no root to run on for the rest of the session (review finding 5). */

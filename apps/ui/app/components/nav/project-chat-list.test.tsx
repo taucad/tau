@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
-import type { Chat } from '@taucad/chat';
+import type { ChatRecord } from '@taucad/chat/schemas';
 import { projectToManifest } from '@taucad/types';
 import type { useChats } from '#hooks/use-chats.js';
 import type { useChatRecords } from '#hooks/use-chat-records.js';
@@ -9,19 +9,25 @@ import type { ProjectListItem } from '#types/project-library.types.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 
 const mockUseChats = vi.fn();
+const mockUseChatRecords = vi.fn();
 const mockWarmMonaco = vi.hoisted(() => vi.fn());
 vi.mock('#lib/monaco-warmup.js', () => ({ warmMonaco: mockWarmMonaco }));
-const mockUseChatSession = vi.fn();
+const mockObserve = vi.hoisted(() => vi.fn(() => () => undefined));
 const mockNavigate = vi.fn();
 const mockLinkState = vi.fn();
 let search = '?chat=chat_12';
 let pendingLocation: { readonly pathname: string; readonly search: string } | undefined;
 
-vi.mock('#hooks/use-chats.js', () => ({ useChats: () => mockUseChats() as ReturnType<typeof useChats> }));
-vi.mock('#hooks/use-chat-records.js', () => ({
-  useChatRecords: () => mockUseChats() as ReturnType<typeof useChatRecords>,
+vi.mock('#hooks/use-chats.js', () => ({
+  useChats: (...args: Parameters<typeof useChats>) => mockUseChats(...args) as ReturnType<typeof useChats>,
 }));
-vi.mock('#hooks/use-chat-session.js', () => ({ useChatSession: mockUseChatSession }));
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({ observe: mockObserve }),
+}));
+vi.mock('#hooks/use-chat-records.js', () => ({
+  useChatRecords: (...args: Parameters<typeof useChatRecords>) =>
+    mockUseChatRecords(...args) as ReturnType<typeof useChatRecords>,
+}));
 vi.mock('react-router', () => ({
   Link: ({
     children,
@@ -127,11 +133,10 @@ const status = (over: Record<string, unknown> = {}): Record<string, unknown> => 
   ...over,
 });
 
-const chat = (index: number, updatedAt = index): Chat => ({
+const chat = (index: number, updatedAt = index): ChatRecord => ({
   id: `chat_${index}`,
   resourceId: 'proj_one',
   name: `Chat ${index}`,
-  messages: [],
   createdAt: index,
   updatedAt,
 });
@@ -166,6 +171,7 @@ describe('ProjectChatList', () => {
     search = '?chat=chat_12';
     pendingLocation = undefined;
     mockUseChats.mockReturnValue(defaultChatsResult);
+    mockUseChatRecords.mockReturnValue(defaultChatsResult);
     mockNavigate.mockResolvedValue(undefined);
     mockChatStatus.mockReturnValue(undefined);
   });
@@ -190,6 +196,21 @@ describe('ProjectChatList', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show more chats' }));
     expect(screen.getAllByRole('link')).toHaveLength(12);
     expect(screen.queryByRole('button', { name: 'Show more chats' })).not.toBeInTheDocument();
+  });
+
+  it('observes all listed chats while collapsed without rendering chat rows', () => {
+    render(<ProjectChatList project={project} isProjectActive={false} isExpanded={false} />);
+    expect(mockObserve).toHaveBeenCalledTimes(12);
+    expect(mockUseChatRecords).toHaveBeenCalledWith('proj_one', { includeDeleted: true });
+    expect(mockUseChats).toHaveBeenCalledWith('proj_one', { enabled: false });
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('reads navigation rows from metadata even when the mutation hook has no chats', () => {
+    mockUseChats.mockReturnValue({ ...defaultChatsResult, chats: [] });
+    render(<ProjectChatList project={project} isProjectActive />);
+    expect(screen.getAllByRole('link')).toHaveLength(5);
+    expect(mockObserve).toHaveBeenCalledTimes(12);
   });
 
   it('marks only the query-selected chat active', () => {
@@ -229,14 +250,14 @@ describe('ProjectChatList', () => {
 
   it('replaces a deleted focused-chat URL with the deterministic next chat', async () => {
     const deleteChat = vi.fn().mockResolvedValue(undefined);
-    mockUseChats.mockReturnValue({
+    mockUseChatRecords.mockReturnValue({
       ...defaultChatsResult,
       chats: [
         { ...chat(1, 20), recencyAt: 20 },
         { ...chat(2, 10), recencyAt: 10 },
       ],
-      deleteChat,
     });
+    mockUseChats.mockReturnValue({ ...defaultChatsResult, deleteChat });
     search = '?chat=chat_1';
     render(<ProjectChatList project={project} isProjectActive />);
 
@@ -249,9 +270,12 @@ describe('ProjectChatList', () => {
 
   it('reveals trashed chats and restores one through the existing record', async () => {
     const restoreChat = vi.fn().mockResolvedValue(chat(2));
-    mockUseChats.mockReturnValue({
+    mockUseChatRecords.mockReturnValue({
       ...defaultChatsResult,
       chats: [chat(1), { ...chat(2), deletedAt: Date.now() }],
+    });
+    mockUseChats.mockReturnValue({
+      ...defaultChatsResult,
       restoreChat,
     });
     render(<ProjectChatList project={project} isProjectActive />);
@@ -304,7 +328,7 @@ describe('ProjectChatList', () => {
 
   it('keeps an empty status column and no sentence for a chat with no state at all', () => {
     render(<ProjectChatList project={project} isProjectActive />);
-    expect(mockUseChatSession).toHaveBeenCalledWith('chat_12', 'proj_one');
+    expect(mockObserve).toHaveBeenCalledWith('chat_12', 'proj_one');
     expect(screen.getByRole('link', { name: 'Chat 12' })).not.toHaveAttribute('aria-describedby');
     const slots = document.querySelectorAll<HTMLElement>('[data-slot=chat-status]');
     expect(slots).toHaveLength(5);
@@ -361,7 +385,7 @@ describe('ProjectChatList', () => {
   });
 
   it('shows a failure row with no control when the chats could not load', () => {
-    mockUseChats.mockReturnValue({ ...defaultChatsResult, chats: [], error: new Error('offline') });
+    mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], error: 'offline' });
     render(<ProjectChatList project={project} isProjectActive />);
     const failure = document.querySelector('[data-slot=failure-row]');
     expect(failure).toHaveTextContent("Couldn't load chats");
@@ -387,7 +411,7 @@ describe('ProjectChatList', () => {
 
   it('groups chats by day only when both days are on screen', () => {
     const now = Date.now();
-    mockUseChats.mockReturnValue({
+    mockUseChatRecords.mockReturnValue({
       ...defaultChatsResult,
       chats: [
         { ...chat(1), recencyAt: now },
@@ -398,7 +422,7 @@ describe('ProjectChatList', () => {
     expect(screen.getByText('Today')).toBeInTheDocument();
     expect(screen.getByText('Earlier')).toBeInTheDocument();
 
-    mockUseChats.mockReturnValue({ ...defaultChatsResult, chats: [{ ...chat(1), recencyAt: now }] });
+    mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [{ ...chat(1), recencyAt: now }] });
     render(<ProjectChatList project={project} isProjectActive />);
     expect(screen.queryAllByText('Earlier')).toHaveLength(1);
   });

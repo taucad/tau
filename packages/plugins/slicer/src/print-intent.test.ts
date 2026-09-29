@@ -14,7 +14,7 @@ const fullIntent: PrintIntent = {
   preset: 'fine',
   printer: 'Bambu Lab X1 Carbon 0.4 nozzle',
   process: '0.12mm Fine @BBL X1C',
-  filaments: { '0': 'Bambu PLA Basic @BBL X1C', '15': 'Bambu PETG HF @BBL X1C' },
+  filaments: { '0': 'Bambu PLA Basic @BBL X1C', '15': 'Bambu PETG HF @BBL X1C', '254': 'Generic PETG @BBL X1C' },
   plate: 'engineering',
   settings: {
     wall_loops: 3,
@@ -87,6 +87,7 @@ describe('print intent', () => {
       ['an empty model', '{"model":""}'],
       ['a model over 64 characters', JSON.stringify({ model: 'X'.repeat(65) })],
       ['filament slot 16', '{"model":"X1C","filaments":{"16":"Bambu PLA Basic @BBL X1C"}}'],
+      ['filament slot 255, no tray', '{"model":"X1C","filaments":{"255":"Bambu PLA Basic @BBL X1C"}}'],
       ['a zero-padded filament slot', '{"model":"X1C","filaments":{"01":"Bambu PLA Basic @BBL X1C"}}'],
       ['a negative filament slot', '{"model":"X1C","filaments":{"-1":"Bambu PLA Basic @BBL X1C"}}'],
       ['filaments as a list', '{"model":"X1C","filaments":["Bambu PLA Basic @BBL X1C"]}'],

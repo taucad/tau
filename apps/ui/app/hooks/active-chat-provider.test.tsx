@@ -10,7 +10,7 @@ import type { Chat, MyUIMessage } from '@taucad/chat';
 import { resolveKernel } from '@taucad/types/constants';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
-import { spyOnSend } from '#lib/xstate-test.utils.js';
+import { lifecycleRow, logRow, publishLogRows, runningRows } from '#machines/chat-projection.fixture.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted harness — mocks the project-manager surface (chat row persistence),
@@ -258,7 +258,7 @@ const {
   useActiveChatSession,
   useChatComposer,
 } = await import('#hooks/active-chat-provider.js');
-const { ChatSessionStoreProvider } = await import('#hooks/chat-session-store-provider.js');
+const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
 const { UnloadProvider, useFlushOnClose } = await import('#hooks/use-flush-on-close.js');
 
 const testModel: DraftAttachmentModel = {
@@ -278,11 +278,13 @@ function makeChat(overrides: Partial<Chat> = {}): Chat {
   };
 }
 
-function createSessionWrapper(chatId: string) {
+function createSessionWrapper(chatId: string, projectId = 'home') {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return (
       <ChatSessionStoreProvider>
-        <ActiveChatProvider chatId={chatId}>{children}</ActiveChatProvider>
+        <ActiveChatProvider chatId={chatId} projectId={projectId}>
+          {children}
+        </ActiveChatProvider>
       </ChatSessionStoreProvider>
     );
   };
@@ -642,7 +644,7 @@ describe('HomeNewProjectComposerProvider', () => {
       </StrictMode>,
     );
 
-    expect(view.getByTestId('home-composer')).toBeInTheDocument();
+    expect(view.getByTestId('home-composer')).toBeTruthy();
     expect(view.container.textContent).toBe('ready');
     await act(async () => {
       release();
@@ -957,58 +959,61 @@ describe('ActiveChatProvider', () => {
     });
 
     expect(result.current.status).toBe('streaming');
-    expect(result.current.agentActivity).toBe('working');
+  });
+
+  it('names the agent working from its log’s run, not the SDK request (PV-S7, D12)', () => {
+    const { result } = renderHook(() => ({ composer: useChatComposer(), store: useChatSessionStore() }), {
+      wrapper: createSessionWrapper('chat_working'),
+    });
+
+    act(() => {
+      publishLogRows(result.current.store, 'chat_working', runningRows());
+    });
+    expect(result.current.composer.status).toBe('streaming');
+    expect(result.current.composer.agentActivity).toBe('working');
+
+    act(() => {
+      publishLogRows(result.current.store, 'chat_working', [lifecycleRow(2, 'completed')], 2);
+    });
+    expect(result.current.composer.agentActivity).toBe('ready');
+    expect(result.current.composer.status).toBe('ready');
   });
 
   it('should surface approval and cancellation activity independently from the execution provider', () => {
-    const { result } = renderHook(() => ({ composer: useChatComposer(), session: useActiveChatSession() }), {
+    const { result } = renderHook(() => ({ composer: useChatComposer(), store: useChatSessionStore() }), {
       wrapper: createSessionWrapper('chat_activity'),
     });
 
     act(() => {
-      const live = harness.created[0]!;
-      live.messages = [
-        {
-          id: 'approval-message',
-          role: 'assistant',
-          metadata: { createdAt: 1, status: 'pending' },
-          parts: [
-            {
-              type: 'tool-delete_file',
-              toolCallId: 'tool-1',
-              state: 'approval-requested',
-              input: { targetFile: 'main.ts' },
-              approval: { id: 'approval-1' },
-            } as unknown as MyUIMessage['parts'][number],
-          ],
-        },
-      ];
-      live.emitMessagesChange();
+      publishLogRows(result.current.store, 'chat_activity', [
+        ...runningRows(),
+        logRow(2, { type: 'interrupt.recorded', interruptId: 'i1', phase: 'requested', reason: 'approval' }),
+      ]);
     });
     expect(result.current.composer.agentActivity).toBe('approval-required');
 
     act(() => {
-      const live = harness.created[0]!;
-      live.messages = [];
-      live.emitMessagesChange();
-      result.current.session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
+      publishLogRows(
+        result.current.store,
+        'chat_activity',
+        [logRow(3, { type: 'interrupt.recorded', interruptId: 'i1', phase: 'resolved', reason: 'approval' })],
+        3,
+      );
       result.current.composer.stop();
     });
     expect(result.current.composer.agentActivity).toBe('stopping');
   });
 
-  it('should dispatch stopRequest on the persistence machine when stop() is called', () => {
-    const { result } = renderHook(() => ({ composer: useChatComposer(), session: useActiveChatSession() }), {
+  it('marks a projected run stopping locally when stop() is called', () => {
+    const { result } = renderHook(() => ({ composer: useChatComposer(), store: useChatSessionStore() }), {
       wrapper: createSessionWrapper('chat_stop'),
     });
-
-    const sendSpy = spyOnSend(result.current.session.persistenceActorRef);
-
     act(() => {
+      publishLogRows(result.current.store, 'chat_stop', runningRows());
       result.current.composer.stop();
     });
-
-    expect(sendSpy).toHaveBeenCalledWith({ type: 'stopRequest' });
+    expect(result.current.store.isStopping('chat_stop')).toBe(true);
+    expect(result.current.composer.agentActivity).toBe('stopping');
   });
 
   it('should scan messages for the latest data-context-usage part', () => {
@@ -1249,7 +1254,7 @@ describe('ActiveChatProvider', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
 
     const { result } = renderHook(() => useActiveChatSession(), {
-      wrapper: createSessionWrapper('chat_persist'),
+      wrapper: createSessionWrapper('chat_persist', 'proj_persist'),
     });
 
     act(() => {
@@ -1274,7 +1279,7 @@ describe('ActiveChatProvider', () => {
 
     const { rerender } = render(
       <ChatSessionStoreProvider>
-        <ActiveChatProvider chatId='chat_first'>
+        <ActiveChatProvider chatId='chat_first' projectId='home'>
           <Probe />
         </ActiveChatProvider>
       </ChatSessionStoreProvider>,
@@ -1284,7 +1289,7 @@ describe('ActiveChatProvider', () => {
 
     rerender(
       <ChatSessionStoreProvider>
-        <ActiveChatProvider chatId='chat_second'>
+        <ActiveChatProvider chatId='chat_second' projectId='home'>
           <Probe />
         </ActiveChatProvider>
       </ChatSessionStoreProvider>,
@@ -1304,7 +1309,7 @@ describe('ActiveChatProvider', () => {
     harness.getChat.mockResolvedValue(makeChat({ id: 'chat_with_draft', resourceId: 'proj_load' }));
 
     const { result } = renderHook(() => useActiveChatSession(), {
-      wrapper: createSessionWrapper('chat_with_draft'),
+      wrapper: createSessionWrapper('chat_with_draft', 'proj_load'),
     });
 
     await waitFor(() => {
@@ -1340,7 +1345,7 @@ describe('ActiveChatProvider', () => {
       harness.getChat.mockResolvedValue(makeChat({ id: 'chat_no_toast', resourceId: 'proj_toast' }));
 
       const { result } = renderHook(() => useActiveChatSession(), {
-        wrapper: createSessionWrapper('chat_no_toast'),
+        wrapper: createSessionWrapper('chat_no_toast', 'proj_toast'),
       });
 
       act(() => {

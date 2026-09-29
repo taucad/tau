@@ -1058,6 +1058,32 @@ describe('BillableModelInvocationService', () => {
     expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
   });
 
+  it('should answer a voided attempt key with 409 ATTEMPT_VOIDED and never dispatch it', async () => {
+    const qualified = qualification();
+    const metrics = { billingVoidedAdmissions: { add: vi.fn() } };
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => ({ status: 'denied', reason: 'attempt_voided' })),
+      recoverDueLlmOperationsForOwner: vi.fn(),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+      metrics as unknown as MetricsService,
+    );
+
+    await expect(service.invoke(intent())).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof LlmGatewayError && error.getStatus() === 409 && gatewayErrorType(error) === 'ATTEMPT_VOIDED',
+    );
+    expect(ledger.recoverDueLlmOperationsForOwner).not.toHaveBeenCalled();
+    expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
+    expect(metrics.billingVoidedAdmissions.add).toHaveBeenCalledWith(1, { 'deployment.environment': 'development' });
+  });
+
   it('returns recovery-unavailable while another claimant owns an expired operation', async () => {
     const qualified = qualification();
     const metrics = {

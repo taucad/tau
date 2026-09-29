@@ -359,6 +359,32 @@ describe('createServicesBroker', () => {
     });
   });
 
+  /* L6 N3 / W0.11: a release that outlives its deadline may still be closing
+   * in the utility. Had main restarted the root's generation, the next
+   * adoption would reuse that release's number and the stale release would
+   * pass the utility's checks and delete the new session's launcher. */
+  it('never reuses a timed-out release generation for the next adoption', async () => {
+    const { broker, spawns } = brokerHarness();
+    const posted = (): Array<Record<string, unknown>> =>
+      (spawns[0]?.posted ?? []).filter(
+        (message): message is Record<string, unknown> => typeof message === 'object' && message !== null,
+      );
+    broker.retainAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' });
+    broker.connect('agentHost', { workspaceRoot: '/home/a', projectId: 'a' });
+    await expect(
+      broker.releaseAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' }, 0),
+    ).rejects.toThrow('timed out');
+    const staleGeneration = posted().find((message) => message['type'] === 'agent-host-release')?.[
+      'attachmentGeneration'
+    ];
+
+    broker.retainAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' });
+    broker.connect('agentHost', { workspaceRoot: '/home/a', projectId: 'a' });
+
+    const remount = posted().at(-1) as { context?: Record<string, string> };
+    expect(Number(remount.context?.['attachmentGeneration'])).toBeGreaterThan(Number(staleGeneration));
+  });
+
   it('mints runtime ports only from a main-admitted agent context', () => {
     const { broker, connectRuntime, spawns } = brokerHarness();
     broker.connect('agentHost', {

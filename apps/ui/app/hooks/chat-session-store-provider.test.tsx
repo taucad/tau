@@ -145,7 +145,7 @@ describe('ChatSessionStoreProvider', () => {
 
     // Acquire a session so a hydration call materialises and we can assert
     // the store invokes the latest mocked closures.
-    store.acquire('chat_a');
+    store.acquire('chat_a', 'proj_a');
 
     await Promise.resolve();
     await Promise.resolve();

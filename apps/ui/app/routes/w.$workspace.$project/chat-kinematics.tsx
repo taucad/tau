@@ -17,6 +17,7 @@ import { PaneviewReact } from 'dockview-react';
 import { convert, createQuantity, quantityKinds } from '@taucad/units/quantity';
 import type { DegreeOfFreedom, Mechanism } from '@taucad/kinematics';
 import type { KernelIssue } from '@taucad/runtime';
+import { randomUuid } from '@taucad/utils/id';
 import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
@@ -60,7 +61,7 @@ import {
   getKinematicsStructure,
 } from '#utils/kinematics-structure.utils.js';
 import type { KinematicsStructure } from '#utils/kinematics-structure.utils.js';
-import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import { WorkspaceLanesContext } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 type GraphicsRef = ActorRefFrom<typeof graphicsMachine>;
@@ -1350,18 +1351,35 @@ function KinematicsContent({
   readonly isShown: boolean;
   readonly reveal: KinematicsReveal | undefined;
 }): React.JSX.Element {
-  const { geometryUnits, mainEntryPath, viewGraphics, editorRef } = useProject();
+  const { geometryUnits, mainEntryPath, viewGraphics, editorRef, projectRef } = useProject();
   const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
+  const entryPaths = useMemo(
+    () => listGeometryEntryPaths(geometryUnits, viewSettings, mainEntryPath),
+    [geometryUnits, mainEntryPath, viewSettings],
+  );
+  useEffect(() => {
+    if (!isShown) {
+      return;
+    }
+    const claims = entryPaths.map((entryPath) => {
+      const claimId = randomUuid();
+      projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath });
+      return claimId;
+    });
+    return () => {
+      for (const claimId of claims) {
+        projectRef.send({ type: 'releaseGeometryUnit', claimId });
+      }
+    };
+  }, [entryPaths, isShown, projectRef]);
   // The unit posed here is the one a viewer shows: its graphics actor owns the kinematics actor.
   const entries = useMemo(
     () =>
-      sortGeometryUnitEntries([...geometryUnits.entries()], mainEntryPath).map(
-        ([entryPath, cadRef]): KinematicsEntry => {
-          const graphicsRef = [...viewGraphics].find(([viewId]) => viewSettings[viewId]?.entryPath === entryPath)?.[1];
-          return [entryPath, cadRef, graphicsRef];
-        },
-      ),
-    [geometryUnits, mainEntryPath, viewGraphics, viewSettings],
+      entryPaths.map((entryPath): KinematicsEntry => {
+        const graphicsRef = [...viewGraphics].find(([viewId]) => viewSettings[viewId]?.entryPath === entryPath)?.[1];
+        return [entryPath, geometryUnits.get(entryPath), graphicsRef];
+      }),
+    [entryPaths, geometryUnits, viewGraphics, viewSettings],
   );
 
   if (entries.length === 0) {

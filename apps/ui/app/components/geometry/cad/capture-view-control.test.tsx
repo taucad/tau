@@ -15,7 +15,12 @@ let mockSelectedModel: { name: string; model?: typeof selectedModel.model } = se
 let mockExecution: CadAgentExecution = { kind: 'tau', model: 'vision' };
 const mockTrigger = vi.fn();
 const mockGraphicsRef = { send: vi.fn(), id: 'graphics-actor' };
-const mockCadRef = { send: vi.fn(), id: 'cad-actor' };
+const mockCadRef = {
+  send: vi.fn(),
+  id: 'cad-actor',
+  getSnapshot: () => ({ context: { entryPath: 'main.ts' } }),
+};
+const mockProjectSend = vi.fn();
 const mockImageService = { export: vi.fn() };
 const mockCaptureCadImages = vi.fn<typeof captureCadImagesType>();
 
@@ -26,6 +31,7 @@ vi.mock('#services/headless-capture.js', () => ({
 }));
 vi.mock('#hooks/use-graphics.js', () => ({ useGraphics: () => mockGraphicsRef }));
 vi.mock('#hooks/use-cad.js', () => ({ useCad: () => mockCadRef }));
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectRef: { send: mockProjectSend } }) }));
 vi.mock('#hooks/use-chat.js', () => ({ useChatActions: () => ({ addDraftAttachment: mockAddDraftAttachment }) }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({ model: { model: mockSelectedModel }, execution: { execution: mockExecution } }),

@@ -2,10 +2,12 @@ import { CheckCircle, ChevronDown, Download, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSelector } from '@xstate/react';
+import { waitFor } from 'xstate';
 import { toast } from 'sonner';
 import type { ToolInvocation } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import type { FileExtension } from '@taucad/types';
+import { randomUuid } from '@taucad/utils/id';
 
 import {
   ChatToolCard,
@@ -30,6 +32,7 @@ import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { awaitFreshRender } from '#machines/await-fresh-render.js';
 
 /** Matches {@link chat-tool-file-operation.tsx} action buttons — label hidden until `@xs/code`. */
 const exportActionLabelClassName = '**:data-[slot=label]:hidden @xs/code:**:data-[slot=label]:flex';
@@ -79,7 +82,7 @@ function ExportGeometryDownloadSplitButton({
   readonly exportedFormat: FileExtension;
 }): React.JSX.Element {
   const fileManager = useFileManager();
-  const { geometryUnits } = useProject();
+  const { geometryUnits, projectRef } = useProject();
   const { openPanel } = useProjectWorkspace();
   const filenameBase = useMemo(() => filenameBaseFromTargetFile(targetFile), [targetFile]);
   const { exportToDisk, isExporting } = useExportToDisk(filenameBase);
@@ -113,12 +116,28 @@ function ExportGeometryDownloadSplitButton({
 
   const onDownload = useCallback(async () => {
     if (selectedFormat !== exportedFormat) {
-      if (!cadActor) {
+      const claimId = randomUuid();
+      projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath: targetFile });
+      try {
+        let claimedActor = projectRef.getSnapshot().context.geometryUnits.get(targetFile);
+        if (!claimedActor) {
+          const projectState = await waitFor(
+            projectRef,
+            (state) => state.context.geometryUnits.has(targetFile) || state.matches('error'),
+          );
+          claimedActor = projectState.context.geometryUnits.get(targetFile);
+        }
+        if (!claimedActor) {
+          toast.error('Export failed');
+          return;
+        }
+        await awaitFreshRender(claimedActor);
+        await exportToDisk(claimedActor, selectedFormat);
+      } catch {
         toast.error('Export failed');
-        return;
+      } finally {
+        projectRef.send({ type: 'releaseGeometryUnit', claimId });
       }
-
-      await exportToDisk(cadActor, selectedFormat);
       return;
     }
 
@@ -137,7 +156,7 @@ function ExportGeometryDownloadSplitButton({
     } finally {
       setIsArtifactDownloadBusy(false);
     }
-  }, [cadActor, exportToDisk, exportedFormat, fileManager, filenameBase, files, selectedFormat]);
+  }, [exportToDisk, exportedFormat, fileManager, filenameBase, files, projectRef, selectedFormat, targetFile]);
 
   const handleFormatSelect = useCallback((formatValue: string) => {
     setSelectedFormat(formatValue as FileExtension);

@@ -561,8 +561,8 @@ describe('projectMachine', () => {
       actor.stop();
     });
 
-    /* R3: the live session decides that nobody is looking; this owns the kernels. */
-    it('parks and resumes every geometry unit it owns', async () => {
+    /* R3: a returning project wakes only its demanded units. */
+    it('parks every unit and resumes only demanded geometry', async () => {
       const actor = await startAndLoad();
       actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       actor.send({ type: 'createGeometryUnit', entryPath: 'lib/cube.ts' });
@@ -575,7 +575,64 @@ describe('projectMachine', () => {
       expect(units().map((unit) => unit.getSnapshot().value)).toEqual(['parked', 'parked']);
 
       actor.send({ type: 'resumeRuntime' });
-      expect(units().map((unit) => unit.getSnapshot().value)).toEqual(['connecting', 'connecting']);
+      expect(units().map((unit) => unit.getSnapshot().value)).toEqual(['connecting', 'parked']);
+      actor.stop();
+    });
+
+    it('parks a revealed secondary after its last visible view hides and wakes it on reveal', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+      actor.send({ type: 'setViewerGeometryDemand', viewId: 'secondary', entryPath: 'lib/cube.ts' });
+      const main = actor.getSnapshot().context.geometryUnits.get('main.ts')!;
+      const secondary = actor.getSnapshot().context.geometryUnits.get('lib/cube.ts')!;
+      await vi.waitFor(() => {
+        expect(secondary.getSnapshot().value).toBe('error');
+      });
+
+      actor.send({ type: 'setViewerGeometryDemand', viewId: 'secondary' });
+      expect(secondary.getSnapshot().value).toBe('parked');
+      expect(main.getSnapshot().value).not.toBe('parked');
+      expect(actor.getSnapshot().context.geometryUnits.get('lib/cube.ts')).toBe(secondary);
+
+      actor.send({ type: 'setViewerGeometryDemand', viewId: 'secondary', entryPath: 'lib/cube.ts' });
+      expect(secondary.getSnapshot().value).toBe('connecting');
+      actor.stop();
+    });
+
+    it('holds a hidden secondary runtime for an explicit claim until release', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+      actor.send({ type: 'setViewerGeometryDemand', viewId: 'secondary', entryPath: 'lib/cube.ts' });
+      const secondary = actor.getSnapshot().context.geometryUnits.get('lib/cube.ts')!;
+      await vi.waitFor(() => {
+        expect(secondary.getSnapshot().value).toBe('error');
+      });
+
+      actor.send({ type: 'claimGeometryUnit', claimId: 'capture', entryPath: 'lib/cube.ts' });
+      actor.send({ type: 'setViewerGeometryDemand', viewId: 'secondary' });
+      expect(secondary.getSnapshot().value).not.toBe('parked');
+
+      actor.send({ type: 'releaseGeometryUnit', claimId: 'capture' });
+      await vi.waitFor(() => {
+        expect(secondary.getSnapshot().value).toBe('parked');
+      });
+      actor.stop();
+    });
+
+    it('keeps a shared secondary unit live until both viewer demands leave', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+      actor.send({ type: 'setViewerGeometryDemand', viewId: 'left', entryPath: 'lib/cube.ts' });
+      actor.send({ type: 'setViewerGeometryDemand', viewId: 'right', entryPath: 'lib/cube.ts' });
+      const secondary = actor.getSnapshot().context.geometryUnits.get('lib/cube.ts')!;
+      await vi.waitFor(() => {
+        expect(secondary.getSnapshot().value).toBe('error');
+      });
+
+      actor.send({ type: 'setViewerGeometryDemand', viewId: 'left' });
+      expect(secondary.getSnapshot().value).not.toBe('parked');
+      actor.send({ type: 'setViewerGeometryDemand', viewId: 'right' });
+      expect(secondary.getSnapshot().value).toBe('parked');
       actor.stop();
     });
 
@@ -616,6 +673,19 @@ describe('projectMachine', () => {
       actor.stop();
     });
 
+    it('shares one actor when viewer admission and explicit creation arrive in either order', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+      actor.send({ type: 'setViewerGeometryDemand', viewId: 'first', entryPath: 'other.ts' });
+      const secondary = actor.getSnapshot().context.geometryUnits.get('other.ts');
+      actor.send({ type: 'createGeometryUnit', entryPath: 'other.ts' });
+      actor.send({ type: 'claimGeometryUnit', claimId: 'capture', entryPath: 'other.ts' });
+      expect(actor.getSnapshot().context.geometryUnits.get('other.ts')).toBe(secondary);
+      expect(actor.getSnapshot().context.geometryUnits.size).toBe(2);
+      actor.send({ type: 'releaseGeometryUnit', claimId: 'capture' });
+      actor.stop();
+    });
+
     it('should destroy a geometry unit', async () => {
       const actor = await startAndLoad();
       actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
@@ -644,6 +714,21 @@ describe('projectMachine', () => {
       actor.stop();
     });
 
+    it('keeps visible viewer demand across an explicit close so Reopen renderer can recreate the unit', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+      actor.send({ type: 'setViewerGeometryDemand', viewId: 'secondary', entryPath: 'other.ts' });
+      const previous = actor.getSnapshot().context.geometryUnits.get('other.ts');
+
+      actor.send({ type: 'destroyGeometryUnit', entryPath: 'other.ts' });
+      expect(actor.getSnapshot().context.geometryUnits.has('other.ts')).toBe(false);
+      expect(actor.getSnapshot().context.viewerGeometryDemand.get('secondary')).toBe('other.ts');
+
+      actor.send({ type: 'createGeometryUnit', entryPath: 'other.ts' });
+      expect(actor.getSnapshot().context.geometryUnits.get('other.ts')).not.toBe(previous);
+      actor.stop();
+    });
+
     it('should no-op when destroying a non-existent geometry unit', async () => {
       const actor = await startAndLoad();
       actor.send({ type: 'destroyGeometryUnit', entryPath: 'nonexistent.ts' });
@@ -666,11 +751,15 @@ describe('projectMachine', () => {
     it('should point a moved geometry unit at its new file', async () => {
       const actor = await startAndLoad();
       actor.send({ type: 'createGeometryUnit', entryPath: 'parts/main.ts' });
+      actor.send({ type: 'setViewerGeometryDemand', viewId: 'parts-view', entryPath: 'parts/main.ts' });
+      actor.send({ type: 'claimGeometryUnit', claimId: 'export', entryPath: 'parts/main.ts' });
       const unit = actor.getSnapshot().context.geometryUnits.get('parts/main.ts');
 
       actor.send({ type: 'fileMoved', oldPath: 'parts', newPath: 'models' });
 
       expect(actor.getSnapshot().context.geometryUnits.get('models/main.ts')).toBe(unit);
+      expect(actor.getSnapshot().context.viewerGeometryDemand.get('parts-view')).toBe('models/main.ts');
+      expect(actor.getSnapshot().context.operationGeometryDemand.get('export')).toBe('models/main.ts');
       expect(unit!.getSnapshot().context.entryPath).toBe('models/main.ts');
       actor.stop();
     });
@@ -679,11 +768,15 @@ describe('projectMachine', () => {
       const actor = await startAndLoad();
       actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       actor.send({ type: 'createGeometryUnit', entryPath: 'parts/helper.ts' });
+      actor.send({ type: 'setViewerGeometryDemand', viewId: 'parts-view', entryPath: 'parts/helper.ts' });
+      actor.send({ type: 'claimGeometryUnit', claimId: 'export', entryPath: 'parts/helper.ts' });
 
       actor.send({ type: 'fileDeleted', path: 'main.ts' });
       actor.send({ type: 'directoryDeleted', path: 'parts' });
 
       expect(actor.getSnapshot().context.geometryUnits.size).toBe(0);
+      expect(actor.getSnapshot().context.viewerGeometryDemand.size).toBe(0);
+      expect(actor.getSnapshot().context.operationGeometryDemand.size).toBe(0);
       actor.stop();
     });
   });

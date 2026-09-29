@@ -1305,7 +1305,7 @@ describe('picovoxel kernel', () => {
 
       expect(glb.files).toHaveLength(1);
       await expect(stl).rejects.toMatchObject({
-        issues: [{ code: 'NO_RENDER_GEOMETRY', message: expect.stringContaining('no shapes to export') }],
+        issues: [{ code: 'RENDER_ARTIFACT_MISSING', message: expect.stringContaining('no shapes to export') }],
       });
     });
 

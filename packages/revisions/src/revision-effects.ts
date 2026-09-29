@@ -1471,6 +1471,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 
   const evidenceRefName = 'refs/tau/evidence/exports';
+  const candidateRefName = 'refs/tau/artifacts/geospec-candidates';
   const isSyncedEvidencePath = (path: string): boolean =>
     path === '.tau' ||
     path === '.tau/artifacts' ||
@@ -4289,10 +4290,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         /* Operation logs are pushed, never pulled: *Undo* reads only this host's
          * own, and fetching every device's on every pull is two requests each,
          * forever (RV-W7 #1). */
+        const candidateTrackingRef = remoteTrackingRef(input.remote, candidateRefName);
         const wanted = advertised
           .map((entry) => entry.name)
           .filter(
             (name) =>
+              name !== candidateRefName &&
+              !name.startsWith(`${candidateRefName}/`) &&
+              name !== candidateTrackingRef &&
+              !name.startsWith(`${candidateTrackingRef}/`) &&
               !name.startsWith(`${opsRefPrefix}/`) &&
               (!name.startsWith(`${chatRefPrefix}/`) || syncChats) &&
               (!name.startsWith('refs/tau/evidence/') || syncLargeExports),

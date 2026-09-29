@@ -233,7 +233,7 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       return [];
     }
     const chats = await Promise.all(ids.map(async (chatId) => readChatDirectory(projectId, chatId)));
-    return chats.filter((chat) => chat !== undefined);
+    return chats.filter((chat): chat is Chat => chat !== undefined && chat.purgedAt === undefined);
   };
 
   const listProjectChatRecords = async (projectId: string): Promise<ChatRecord[]> => {
@@ -244,7 +244,7 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       return [];
     }
     const records = await Promise.all(ids.map(async (chatId) => readChatRecord(projectId, chatId)));
-    return records.filter((record) => record !== undefined);
+    return records.filter((record): record is ChatRecord => record !== undefined && record.purgedAt === undefined);
   };
 
   /**
@@ -282,7 +282,7 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       }
       const record = await readRecord(projectId, chatId);
       const existing = record === undefined ? await readChatDirectory(projectId, chatId) : { ...record, messages: [] };
-      if (existing === undefined) {
+      if (existing === undefined || existing.purgedAt !== undefined) {
         return undefined;
       }
       const updated = mutate(existing);
@@ -323,7 +323,13 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       updatedAt: timestamp,
       recencyAt: timestamp,
     };
-    await writeRecord(resourceId, created);
+    await mutex.run(id, async () => {
+      const existing = await readRecord(resourceId, id);
+      if (existing?.purgedAt !== undefined) {
+        throw new Error('A permanently deleted chat cannot be recreated.');
+      }
+      await writeRecord(resourceId, created);
+    });
     return hydrate(created);
   };
 
@@ -440,9 +446,24 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       await tombstone(chatId);
     },
 
+    purgeChat: async (chatId) => {
+      const purged = await patch(chatId, (chat) => {
+        if (chat.deletedAt === undefined) {
+          throw new Error('Only archived chats can be deleted permanently.');
+        }
+        chat.purgedAt = Date.now();
+        return true;
+      });
+      const projectId = purged?.resourceId ?? (await locate(chatId));
+      if (projectId !== undefined) {
+        await removeComposerRecord(projectId, chatId);
+      }
+    },
+
     getChat: async (chatId, knownProjectId) => {
       const projectId = knownProjectId ?? (await locate(chatId));
-      return projectId === undefined ? undefined : readChatDirectory(projectId, chatId);
+      const chat = projectId === undefined ? undefined : await readChatDirectory(projectId, chatId);
+      return chat?.purgedAt === undefined ? chat : undefined;
     },
 
     getChatsForResource: async (resourceId, listOptions) => {
@@ -470,7 +491,12 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
     },
 
     putChatRecord: async (chat) => {
-      await writeRecord(chat.resourceId, chat);
+      await mutex.run(chat.id, async () => {
+        const existing = await readRecord(chat.resourceId, chat.id);
+        if (existing?.purgedAt === undefined) {
+          await writeRecord(chat.resourceId, chat);
+        }
+      });
     },
   };
 }

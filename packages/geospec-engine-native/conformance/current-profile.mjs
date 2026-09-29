@@ -125,12 +125,22 @@ export const joinCurrentCorpus = async (originalBytes, profileBytes, bindingProf
       let { expectedUtf8 } = bound;
       if (bindingProfile === 'full-backend' && record.id === 'a1/raw/initialize') {
         // Full bindings unconditionally compose OCCT and Manifold via runtime create_engine.
-        // Replace only these two declared booleans; retain all other canonical bytes verbatim.
+        // Replace only these two booleans and append the independently approved
+        // exact AP242 capability; retain all other frozen canonical bytes.
         const coreBackends = '"backends":{"brep":false,"csg":false}';
         if (expectedUtf8?.split(coreBackends).length !== 2) {
           throw new Error('Current conformance binding mismatch: core backend presence');
         }
         expectedUtf8 = expectedUtf8.replace(coreBackends, '"backends":{"brep":true,"csg":true}');
+        const capabilityEnd = '],"configuration":';
+        const minimumCapability = '{"implementation":"implemented","name":"minimumDistance","profile":"geospec-minimum-distance-v1","qualification":"unqualified","registryVersion":5,"scope":"declared-subject-profile"}';
+        const result = /** @type {{result: {capabilities: Array<{name: string}>}}} */ (JSON.parse(expectedUtf8));
+        if (expectedUtf8.split(capabilityEnd).length !== 2 ||
+          result.result.capabilities.at(-1)?.name !== 'queryPmi' ||
+          result.result.capabilities.some(({ name }) => name === 'minimumDistance')) {
+          throw new Error('Current conformance binding mismatch: minimum capability baseline');
+        }
+        expectedUtf8 = expectedUtf8.replace(capabilityEnd, `,${minimumCapability}${capabilityEnd}`);
       }
       return {
         ...record,

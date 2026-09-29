@@ -3,10 +3,10 @@ import type { ChatStatus } from 'ai';
 import { isAnyToolPart } from '@taucad/chat';
 import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
 import { toast } from 'sonner';
-import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
+import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
+import { chatHostServices } from '#chat-clients/_internal/chat-host-binding.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
-import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { attachmentSendBlockReason, buildUserMessage } from '#utils/chat.utils.js';
 import type { AttachmentReference } from '#utils/attachment.utils.js';
@@ -26,7 +26,7 @@ import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js'
  * `ChatTextarea`'s `onSubmit` hands the client — a string `text` plus the
  * draft's stored attachments. All other request configuration
  * (model, kernel, mode, toolChoice, testingEnabled, snapshot, contextPayload)
- * is composed *inside* the client from `useCadAgentConfig`.
+ * is assembled by the chat's turn host from `useCadAgentConfig`.
  *
  * @public
  */
@@ -93,7 +93,7 @@ export type CadChatClient = {
   /** Live error from the bound `Chat` instance. */
   error: Error | undefined;
   /**
-   * Snapshot of the agent config the client will send on its next call.
+   * Live agent config the turn host will use on its next call.
    * Exposed for test/regression scope and the chat-session-store dispatch
    * adapter (R10/t17) — production UI sites should not read this directly.
    */
@@ -107,8 +107,7 @@ const promotionToastId = 'chat-attachment-promotion';
  * Profile-scoped chat client for the CAD agent.
  *
  * Composes:
- * - {@link useCadAgentConfig} — the assembler hook that builds the per-turn
- *   `agent` payload from the current UI producer hooks.
+ * - `ChatTurnHost` — the single assembler of the per-turn `agent` payload.
  * - {@link useActiveChatInstance} — the module-private accessor for the live
  *   AI SDK `Chat` instance owned by the chat-session store. Exposed via the
  *   client's `messages`/`status`/`error` reads.
@@ -117,15 +116,16 @@ const promotionToastId = 'chat-attachment-promotion';
  *
  * Exposes profile-aware verbs (`submit`, `edit`, `stop`) that thread
  * `body: { agent }` onto every wire call. Verb identities are
- * stable across renders as long as the underlying actions and agent identity
- * don't change.
+ * stable across renders as long as the underlying actions don't change.
  *
  * @public
  */
 export const useCadChatClient = (): CadChatClient => {
   const chat = useActiveChatInstance();
   const actions = useChatActions();
-  const agent = useCadAgentConfig();
+  const {
+    execution: { execution },
+  } = useChatComposer();
   const status = useChatSelector((state) => state.status);
   const requestInFlight = status === 'submitted' || status === 'streaming';
   // The CAD chat client is session-required by construction (it composes
@@ -133,6 +133,13 @@ export const useCadChatClient = (): CadChatClient => {
   // guaranteed `string` from the strict session context — no optional
   // branching needed.
   const { activeChatId } = useActiveChatSession();
+  const currentAgent = useCallback((): CadAgentConfigInput => {
+    const agent = chatHostServices(activeChatId)?.currentAgent();
+    if (!agent) {
+      throw new Error('The chat turn host is unavailable.');
+    }
+    return agent;
+  }, [activeChatId]);
   const store = useChatSessionStore();
   const { projectId } = useProject();
   const { resolveModel } = useModels();
@@ -141,7 +148,7 @@ export const useCadChatClient = (): CadChatClient => {
    * chat's agent-host binding and its admission belong to `ChatTurnHost`, which
    * is mounted once — owning either here made every transcript message a writer
    * of a fact the chat can only have one of. */
-  const { surfaceDispatchFailure } = useTurnAdmission(agent.execution);
+  const { surfaceDispatchFailure } = useTurnAdmission(execution);
   // Always the current resolver: a dispatch composed before `GET /v1/models`
   // answers must read the catalog row that arrives *while* it waits, not the
   // unresolved one its render closed over.
@@ -159,6 +166,7 @@ export const useCadChatClient = (): CadChatClient => {
    */
   const withAttachments = useCallback(
     async (attachments: readonly AttachmentReference[], send: () => void | Promise<void>): Promise<void> => {
+      const agent = currentAgent();
       if (agent.execution.kind === 'tau' && attachments.length > 0) {
         const resolved = resolveModelRef.current(agent.execution.model);
         const blocked = attachmentSendBlockReason(attachments, {
@@ -183,7 +191,7 @@ export const useCadChatClient = (): CadChatClient => {
       }
       await send();
     },
-    [activeChatId, agent.execution, store, surfaceDispatchFailure],
+    [activeChatId, currentAgent, store, surfaceDispatchFailure],
   );
 
   const submit = useCallback(
@@ -231,6 +239,7 @@ export const useCadChatClient = (): CadChatClient => {
       approved: boolean,
       decision?: { readonly reason?: string | undefined; readonly optionId?: string | undefined },
     ): Promise<void> => {
+      const agent = currentAgent();
       const { reason, optionId } = decision ?? {};
       const browserRun = getBrowserAgentHostRun(activeChatId);
       if (browserRun) {
@@ -291,7 +300,7 @@ export const useCadChatClient = (): CadChatClient => {
         store.endRun(activeChatId);
       }
     },
-    [actions, activeChatId, agent, chat, messages, projectId, requestInFlight, store, workspaceAuthority],
+    [actions, activeChatId, chat, currentAgent, messages, projectId, requestInFlight, store, workspaceAuthority],
   );
 
   return {
@@ -302,6 +311,8 @@ export const useCadChatClient = (): CadChatClient => {
     messages,
     status,
     error: chat.error,
-    agent,
+    get agent() {
+      return currentAgent();
+    },
   };
 };

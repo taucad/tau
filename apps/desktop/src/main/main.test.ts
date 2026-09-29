@@ -6,6 +6,7 @@ import type { Worker as NodeWorker } from 'node:worker_threads';
 import type * as WorkerThreads from 'node:worker_threads';
 
 import type * as Host from '@taucad/host';
+import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -17,6 +18,7 @@ import {
 } from '#shared/desktop-bootstrap.js';
 
 const originalTitle = process.title;
+const originalResourcesPath = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
 const originalUncaught = new Set(process.listeners('uncaughtException'));
 const originalUnhandled = new Set(process.listeners('unhandledRejection'));
 
@@ -25,6 +27,10 @@ const state = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   /* Held open by the deep-link cases so a link can arrive before `ready`. */
   ready: undefined as Promise<void> | undefined,
+  shellApplied: undefined as Promise<void> | undefined,
+  authRestored: undefined as Promise<void> | undefined,
+  authToken: undefined as string | undefined,
+  headerOptions: undefined as TauHeaderInjectionOptions | undefined,
   authHandleCallback: vi.fn(async () => undefined),
   protocolClient: [] as unknown[][],
   resolveFork: undefined as
@@ -218,8 +224,8 @@ vi.mock('#main/app-protocol.js', () => ({
 }));
 vi.mock('#main/auth-service.js', () => ({
   createAuthService: vi.fn(() => ({
-    restore: vi.fn(async () => undefined),
-    token: vi.fn(() => undefined),
+    restore: vi.fn(async () => state.authRestored),
+    token: vi.fn(() => state.authToken),
     onChange: vi.fn(),
     dispose: vi.fn(),
     handleCallback: state.authHandleCallback,
@@ -243,7 +249,12 @@ vi.mock('#main/environment.js', () => ({
     TAU_FRONTEND_URL: 'http://127.0.0.1:1',
   })),
 }));
-vi.mock('#main/header-injection.js', () => ({ installTauHeaderInjection: vi.fn(), originOf: vi.fn(() => undefined) }));
+vi.mock('#main/header-injection.js', () => ({
+  installTauHeaderInjection: vi.fn((_request: unknown, options: TauHeaderInjectionOptions) => {
+    state.headerOptions = options;
+  }),
+  originOf: vi.fn((url: string | undefined) => (url ? new URL(url).origin : undefined)),
+}));
 vi.mock('#main/navigation-policy.js', () => ({
   contentSecurityPolicy: vi.fn(() => ''),
   isPermissionGranted: vi.fn(() => false),
@@ -280,7 +291,7 @@ vi.mock('#main/geometry-broker.js', () => ({
   }),
 }));
 vi.mock('#main/utility-environment.js', () => ({
-  loginShellEnvironment: vi.fn(async () => undefined),
+  loginShellEnvironment: vi.fn(async () => state.shellApplied),
   packagedEsbuildEnvironment: vi.fn(() => ({})),
   bundledGitEnvironment: vi.fn(() => ({})),
   compileCacheEnvironment: vi.fn((userDataPath: string) => ({
@@ -326,6 +337,11 @@ afterEach(async () => {
   state.autoQuiesce = true;
   state.acpDiscovery = undefined;
   state.ready = undefined;
+  state.shellApplied = undefined;
+  state.authRestored = undefined;
+  state.authToken = undefined;
+  state.headerOptions = undefined;
+  app.isPackaged = false;
   state.protocolClient.length = 0;
   state.authHandleCallback.mockClear();
   state.resolveFork = undefined;
@@ -351,6 +367,11 @@ afterEach(async () => {
     }
   }
   process.title = originalTitle;
+  if (originalResourcesPath) {
+    Object.defineProperty(process, 'resourcesPath', originalResourcesPath);
+  } else {
+    Reflect.deleteProperty(process, 'resourcesPath');
+  }
   vi.clearAllMocks();
 });
 
@@ -638,6 +659,113 @@ describe('desktop main compute owner', () => {
       });
       dialog.showMessageBox.mockResolvedValue({ response: 0 });
       state.servicesQuiesce.mockResolvedValue({ status: 'quiesced' });
+    },
+    bootMilliseconds,
+  );
+});
+
+describe('desktop main admission gates', () => {
+  const bootMilliseconds = 30_000;
+
+  const boot = async (): Promise<void> => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-admission-'));
+    if (app.isPackaged) {
+      Object.defineProperty(process, 'resourcesPath', { configurable: true, value: state.userData });
+    }
+    await import('#main/main.js');
+  };
+
+  it(
+    'waits for a packaged login shell before capturing the environment and loading the first page',
+    async () => {
+      const shell = Promise.withResolvers<void>();
+      app.isPackaged = true;
+      state.shellApplied = shell.promise;
+
+      await boot();
+      await vi.waitFor(() => {
+        expect(app.whenReady).toHaveBeenCalled();
+      });
+      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+
+      shell.resolve();
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+      });
+      expect(fakeWindow.show).toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'restores the credential before the first page can request an authenticated origin',
+    async () => {
+      const restore = Promise.withResolvers<void>();
+      state.authRestored = restore.promise;
+      const { injectTauHeaders } = await vi.importActual<{
+        injectTauHeaders: (
+          url: string,
+          headers: Record<string, string>,
+          options: TauHeaderInjectionOptions,
+        ) => Record<string, string>;
+      }>('#main/header-injection.js');
+      let firstRequestHeaders: Record<string, string> | undefined;
+      fakeWindow.loadURL.mockImplementationOnce(async () => {
+        firstRequestHeaders = injectTauHeaders('http://127.0.0.1:1/v1/projects', {}, state.headerOptions!);
+      });
+
+      await boot();
+      await vi.waitFor(() => {
+        expect(state.headerOptions).toBeDefined();
+      });
+      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+      expect(state.headerOptions?.token()).toBeUndefined();
+
+      state.authToken = 'restored-token';
+      restore.resolve();
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+      });
+      expect(firstRequestHeaders).toEqual({ authorization: 'Bearer restored-token', 'tau-client': 'tau-desktop/test' });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'keeps a deep link queued while credential restore is pending',
+    async () => {
+      const restore = Promise.withResolvers<void>();
+      state.authRestored = restore.promise;
+      await boot();
+      const openUrl = state.appListeners.get('open-url')?.at(-1);
+      expect(openUrl).toBeDefined();
+      openUrl?.({ preventDefault: vi.fn() }, 'tau://invitations/queued-token');
+      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+
+      restore.resolve();
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/invitations/queued-token');
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'reports a failed credential restore without loading an unauthenticated page',
+    async () => {
+      const restore = Promise.withResolvers<void>();
+      state.authRestored = restore.promise;
+      await boot();
+      await vi.waitFor(() => {
+        expect(state.headerOptions).toBeDefined();
+      });
+      restore.reject(new Error('credential store failed'));
+
+      await vi.waitFor(() => {
+        expect(app.exit).toHaveBeenCalledWith(1);
+      });
+      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
     },
     bootMilliseconds,
   );

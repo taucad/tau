@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { listGeometryEntryPaths, sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 
 describe('sortGeometryUnitEntries', () => {
   it('should place mainEntryPath first', () => {
@@ -50,5 +50,21 @@ describe('sortGeometryUnitEntries', () => {
   it('should handle empty array', () => {
     const sorted = sortGeometryUnitEntries([], 'main.ts');
     expect(sorted).toEqual([]);
+  });
+});
+
+describe('listGeometryEntryPaths', () => {
+  it('keeps a hidden restored entry discoverable without admitting its CAD unit', () => {
+    expect(
+      listGeometryEntryPaths(
+        new Map([['main.ts', {}]]),
+        {
+          'main-view': { entryPath: 'main.ts' },
+          'hidden-view': { entryPath: 'other.ts' },
+          'same-hidden-view': { entryPath: 'other.ts' },
+        },
+        'main.ts',
+      ),
+    ).toEqual(['main.ts', 'other.ts']);
   });
 });

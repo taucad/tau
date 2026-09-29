@@ -164,6 +164,7 @@ vi.mock('#components/geometry/graphics/three/react/kinematics-viewer.js', () => 
 }));
 
 vi.mock('#components/geometry/graphics/metadata/gltf-component-manifest.js', () => ({
+  buildGltfMeasurementFeatures: () => new Map(),
   buildGltfComponentManifest: () => ({
     capabilities: {
       canAdjustOpacity: false,

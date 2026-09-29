@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Folder, Files, FolderOpen, Upload, Download } from 'lucide-react';
-import { importFileAcceptString } from '#routes/import.$/import.utils.js';
+import { Folder, Files, FolderOpen } from 'lucide-react';
+import { importFileAcceptString, supportedKernelExtensions } from '#routes/import.$/import.utils.js';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { isZipFile } from '#utils/file-reader.utils.js';
@@ -67,6 +67,7 @@ export function UploadCard({
     onDrop: handleDrop,
     disabled: isDisabled,
     noClick: true, // We handle clicks separately for folder/file buttons
+    noKeyboard: true,
     onDragEnter() {
       setIsDraggingOver(true);
     },
@@ -142,16 +143,16 @@ export function UploadCard({
     <div
       {...getRootProps()}
       className={cn(
-        'relative space-y-2 rounded-lg border bg-sidebar p-6 outline-none transition-all duration-200 focus-visible:focus-outline',
-        isDropping ? 'border-dashed border-primary bg-primary/5' : 'border-border',
+        'flex min-w-0 flex-col gap-5 md:border-l md:pl-8',
         isDisabled && 'pointer-events-none opacity-50',
         className,
       )}
     >
-      <input {...getInputProps()} />
+      <input {...getInputProps()} hidden aria-label='Drop project files' />
 
       {/* Hidden file inputs */}
       <input
+        aria-label='Select project folder'
         ref={folderInputRef}
         multiple
         type='file'
@@ -162,6 +163,7 @@ export function UploadCard({
         onChange={handleFolderChange}
       />
       <input
+        aria-label='Select project files'
         ref={fileInputRef}
         multiple
         type='file'
@@ -171,78 +173,42 @@ export function UploadCard({
         onChange={handleFileChange}
       />
 
-      {/* Header - always visible */}
-      <div className='mb-4 flex items-center gap-3'>
-        <div
-          className={cn(
-            'flex size-10 items-center justify-center rounded-full transition-colors duration-200',
-            isDropping ? 'bg-primary/20' : 'bg-linear-to-br from-primary/20 to-primary/10',
-          )}
-        >
-          {isDropping ? (
-            <Download className='size-5 animate-bounce text-primary' />
-          ) : (
-            <Upload className='size-5 text-primary' />
-          )}
-        </div>
-        <div>
-          <h2 className='font-medium'>Upload from Disk</h2>
-          <p
-            className={cn(
-              'text-xs transition-colors duration-200',
-              isDropping ? 'text-primary' : 'text-muted-foreground',
-            )}
-          >
-            {isDropping ? 'Drop files here' : 'Select or drop files'}
-          </p>
-        </div>
+      <div className='space-y-1'>
+        <h2 className='text-base font-medium'>Local files</h2>
+        <p className='text-sm text-muted-foreground'>Open a folder, source files or a ZIP archive.</p>
       </div>
-
-      {/* Buttons - hidden when dropping */}
       <div
         className={cn(
-          'flex gap-2 transition-all duration-200',
-          isDropping ? 'pointer-events-none h-0 opacity-0' : 'opacity-100',
+          'flex min-h-40 flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-dashed px-5 py-6 text-center',
+          isDropping && 'border-foreground bg-muted',
         )}
       >
+        <span className='mb-2 rounded-xl border bg-card p-2'>
+          <FolderOpen aria-hidden className='size-5 text-muted-foreground' />
+        </span>
+        <span className='text-sm font-medium'>
+          {isDropping ? 'Release to import' : 'Drop a folder, files or a ZIP here'}
+        </span>
+        <span className='text-xs text-muted-foreground'>
+          Sources: <span className='font-mono'>{supportedKernelExtensions.join(' ')}</span> · archives:{' '}
+          <span className='font-mono'>.zip</span>
+        </span>
+      </div>
+      <div className='flex flex-wrap gap-2'>
         {webAccessDirectoryPicker() ? (
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            className='flex-1'
-            disabled={isDisabled}
-            onClick={handleDirectoryPick}
-          >
-            <FolderOpen className='mr-1.5 size-4' />
-            <span className='hidden sm:inline'>Open Directory</span>
-            <span className='sm:hidden'>Directory</span>
+          <Button type='button' variant='outline' disabled={isDisabled} onClick={handleDirectoryPick}>
+            <FolderOpen />
+            Open folder
           </Button>
         ) : (
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            className='flex-1'
-            disabled={isDisabled}
-            onClick={handleFolderClick}
-          >
-            <Folder className='mr-1.5 size-4' />
-            <span className='hidden sm:inline'>Select Folder</span>
-            <span className='sm:hidden'>Folder</span>
+          <Button type='button' variant='outline' disabled={isDisabled} onClick={handleFolderClick}>
+            <Folder />
+            Select folder
           </Button>
         )}
-        <Button
-          type='button'
-          variant='outline'
-          size='sm'
-          className='flex-1'
-          disabled={isDisabled}
-          onClick={handleFileClick}
-        >
-          <Files className='mr-1.5 size-4' />
-          <span className='hidden sm:inline'>Select Files</span>
-          <span className='sm:hidden'>Files</span>
+        <Button type='button' variant='outline' disabled={isDisabled} onClick={handleFileClick}>
+          <Files />
+          Select files
         </Button>
       </div>
     </div>

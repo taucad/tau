@@ -296,6 +296,7 @@ export function ChatTurnHost(): ReactNode {
       publishChatHostServices(activeChatId, {
         placement,
         compose: () => (composable ? composeRef.current(boundExecutionRef.current) : undefined),
+        currentAgent: () => agentRef.current,
       }),
     [activeChatId, composable, placement],
   );
@@ -332,6 +333,7 @@ export function ChatTurnHost(): ReactNode {
         publishChatHostServices(activeChatId, {
           placement: placementOf(execution),
           compose: () => composeRef.current(boundExecutionRef.current),
+          currentAgent: () => agentRef.current,
         });
         store.setTurnPlacement(activeChatId, placementOf(execution));
       }

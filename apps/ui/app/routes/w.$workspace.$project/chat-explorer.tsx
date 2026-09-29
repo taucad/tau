@@ -32,7 +32,7 @@ import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#mac
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
-import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import {
   PaneviewHeader,
   PaneviewHeaderAction,
@@ -242,10 +242,10 @@ function ChatGeometryExplorerContent({
   );
   const entries = useMemo(
     () =>
-      sortGeometryUnitEntries([...project.geometryUnits.entries()], project.mainEntryPath).map(
-        ([entryPath]): [string, GraphicsActorRef | undefined] => [entryPath, resolveGraphicsForFile(entryPath)],
+      listGeometryEntryPaths(project.geometryUnits, viewSettings, project.mainEntryPath).map(
+        (entryPath): [string, GraphicsActorRef | undefined] => [entryPath, resolveGraphicsForFile(entryPath)],
       ),
-    [project.geometryUnits, project.mainEntryPath, resolveGraphicsForFile],
+    [project.geometryUnits, project.mainEntryPath, resolveGraphicsForFile, viewSettings],
   );
 
   if (entries.length === 0) {

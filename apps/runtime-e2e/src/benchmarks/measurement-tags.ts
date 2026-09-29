@@ -53,7 +53,7 @@ export type MeasurementTags = Readonly<{
   wasmVariant: string;
   adapter: RendererAdapterTag;
   kernelProcess: KernelProcessTag;
-  crossOriginIsolated: boolean;
+  crossOriginIsolated: boolean | undefined;
   contention: ContentionTag;
   /**
    * Seam for D8/W28a: the runtime JSONL trace file both harnesses will read once
@@ -112,6 +112,7 @@ export type BudgetVerdict = Readonly<{ eligible: boolean; refusals: readonly str
  * Applies I13: budgets bind only to a quiet, production, fully tagged run whose
  * coefficient of variation is at or below ten percent.
  */
+// eslint-disable-next-line complexity -- Every independent provenance field must contribute its own refusal.
 export const budgetVerdict = (input: {
   readonly tags?: MeasurementTags | undefined;
   readonly coefficientOfVariation?: number | undefined;
@@ -125,11 +126,40 @@ export const budgetVerdict = (input: {
     if (tags.build !== 'production') {
       refusals.push(`run measured a ${tags.build} build`);
     }
+    if (tags.wasmVariant.length === 0 || tags.wasmVariant.includes('unobserved')) {
+      refusals.push('kernel variant was not observed');
+    }
+    if (
+      tags.adapter.api !== 'none' &&
+      (tags.adapter.name.length === 0 || tags.adapter.implementation === 'ambiguous')
+    ) {
+      refusals.push('renderer adapter was not observed');
+    }
+    if (
+      tags.kernelProcess.role.length === 0 ||
+      tags.kernelProcess.role.includes('unobserved') ||
+      (tags.kernelProcess.kind === 'utility' &&
+        (!Number.isSafeInteger(tags.kernelProcess.pid) || (tags.kernelProcess.pid ?? 0) <= 0))
+    ) {
+      refusals.push('kernel process was not observed');
+    }
+    if (typeof tags.crossOriginIsolated !== 'boolean') {
+      refusals.push('cross-origin isolation was not observed');
+    }
+    if (
+      !Number.isFinite(tags.contention.loadAverage1m) ||
+      !Number.isFinite(tags.contention.cpuCount) ||
+      tags.contention.cpuCount <= 0
+    ) {
+      refusals.push('machine contention was not measured');
+    }
   } else {
     refusals.push('measurement tags are absent');
   }
   if (coefficientOfVariation === undefined) {
     refusals.push('coefficient of variation is unrecorded');
+  } else if (!Number.isFinite(coefficientOfVariation) || coefficientOfVariation < 0) {
+    refusals.push('coefficient of variation is invalid');
   } else if (coefficientOfVariation > maximumBudgetCoefficientOfVariation) {
     refusals.push(
       `coefficient of variation ${(coefficientOfVariation * 100).toFixed(1)}% exceeds ${maximumBudgetCoefficientOfVariation * 100}%`,

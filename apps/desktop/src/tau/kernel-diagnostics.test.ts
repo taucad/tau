@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { resolve } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+import { join, resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
 import { createDesktopRuntime, desktopAssimpBackend, desktopOpenrscadKernel } from '#tau/desktop-runtime.factory.js';
@@ -21,6 +23,7 @@ describe('kernelEngineRecord', () => {
         versions: { electron: '43.5.0', node: '24.19.0' },
       }),
     ).toEqual({
+      pid: process.pid,
       kernelId: 'openrscad',
       version: '0.11.0-beta.4',
       backend: 'native',
@@ -97,5 +100,40 @@ describe('the identity the record reports', () => {
 
   it('is logged under the event name the e2e greps for', () => {
     expect(kernelEngineEvent).toBe('kernel.engine');
+  });
+
+  it('writes no engine record during recipe resolution and one when OpenRSCAD initializes', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-kernel-identity-'));
+    const previous = process.env['TAU_DESKTOP_LOG_DIR'];
+    process.env['TAU_DESKTOP_LOG_DIR'] = directory;
+    try {
+      await resolveRuntimePluginDefinition('kernel', desktopOpenrscadKernel);
+      expect(existsSync(join(directory, 'desktop.log'))).toBe(false);
+
+      const definition = await resolveRuntimePluginDefinition('kernel', desktopOpenrscadKernel);
+      const logger = {
+        log: vi.fn(),
+        debug: vi.fn(),
+        trace: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        custom: vi.fn(),
+      };
+      const runtime = { logger } as unknown as Parameters<typeof definition.initialize>[1];
+      await definition.initialize({}, runtime);
+      await definition.initialize({}, runtime);
+      const records = readFileSync(join(directory, 'desktop.log'), 'utf8')
+        .split('\n')
+        .filter((line) => line.includes(kernelEngineEvent));
+      expect(records).toHaveLength(1);
+      expect(records[0]).toContain('"kernelId":"openrscad"');
+    } finally {
+      if (previous === undefined) {
+        delete process.env['TAU_DESKTOP_LOG_DIR'];
+      } else {
+        process.env['TAU_DESKTOP_LOG_DIR'] = previous;
+      }
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

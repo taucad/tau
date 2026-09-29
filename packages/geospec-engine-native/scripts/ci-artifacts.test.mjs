@@ -1,12 +1,32 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import fs, {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import process from 'node:process';
-// oxlint-disable-next-line no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export.
-import { darwinGroupAlive, ensureDelivery, prepareArtifacts, recoverExitedProducer, snapshotDelivery, verifyArtifacts, verifyDelivery, withProducerMarker } from './ci-artifacts.mjs';
+/* oxlint-disable no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export. */
+import {
+  darwinGroupAlive,
+  ensureDelivery,
+  prepareArtifacts,
+  recoverExitedProducer,
+  snapshotDelivery,
+  verifyArtifacts,
+  verifyDelivery,
+  withProducerMarker,
+} from './ci-artifacts.mjs';
+/* oxlint-enable no-restricted-imports -- End co-located CLI import exception. */
 
 void test('malformed process listings cannot prove a producer group exited', (context) => {
   const listing = context.mock.method(childProcess, 'spawnSync', () => ({ status: 0, stdout: '123 S\nmalformed row\n' }));
@@ -121,7 +141,7 @@ const checkTransport = (context, reusePrefixes) => {
   context.mock.method(
     childProcess,
     'spawnSync',
-    /** @type {(executable: string, args: string[], options: {cwd: string, env: {PATH?: string, CARGO_HOME: string, GEOSPEC_NODE_MANIFEST: string, GEOSPEC_OCCT_PREFIX: string, GEOSPEC_MIXED_INPUTS: string, GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_OCCT_PRODUCER_BUILDER?: string, GEOSPEC_OCCT_PRODUCER_RECIPE?: string, GIT_CEILING_DIRECTORIES?: string}}) => {status: number}} */ (
+    /** @type {(executable: string, args: string[], options: {cwd: string, stdio: unknown, env: {PATH?: string, CARGO_HOME: string, GEOSPEC_NODE_MANIFEST: string, GEOSPEC_OCCT_PREFIX: string, GEOSPEC_MIXED_INPUTS: string, GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_OCCT_PRODUCER_BUILDER?: string, GEOSPEC_OCCT_PRODUCER_RECIPE?: string, GIT_CEILING_DIRECTORIES?: string}}) => {status: number}} */ (
       executable,
       args,
       options,
@@ -175,6 +195,7 @@ const checkTransport = (context, reusePrefixes) => {
       const command = args[2];
       assert.ok(command);
       const target = command.replace('geospec-engine-native:', '');
+      assert.equal(options.stdio, target === 'build-node' || target === 'assemble-package' ? 'pipe' : 'inherit');
       targets.push(target);
       assert.equal(options.env.GEOSPEC_OCCT_PREFIX, join(nativeCache, 'occt-native/install'));
       if (target === 'prepare-delivery:reuse-native') {
@@ -368,6 +389,34 @@ const checkTransport = (context, reusePrefixes) => {
     assert.deepEqual(readFileSync(selected), bytes, 'a package snapshot cannot change with canonical output');
     put(canonical, bytes);
   }
+  const existingSnapshots = readdirSync(dirname(snapshot));
+  const originalCopy = fs.copyFileSync;
+  fs.copyFileSync = () => {
+    throw new Error('fixture copy failure');
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => snapshotDelivery(producer), /fixture copy failure/);
+  } finally {
+    fs.copyFileSync = originalCopy;
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(readdirSync(dirname(snapshot)), existingSnapshots, 'failed snapshots must be removed');
+  const sourceFile = join(producer, bindingPath);
+  const sourceBytes = readFileSync(sourceFile);
+  fs.copyFileSync = (from, to) => {
+    originalCopy(from, to);
+    writeFileSync(sourceFile, 'changed during snapshot');
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => snapshotDelivery(producer), /sources changed during snapshot/);
+  } finally {
+    writeFileSync(sourceFile, sourceBytes);
+    fs.copyFileSync = originalCopy;
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(readdirSync(dirname(snapshot)), existingSnapshots, 'source-raced snapshots must be removed');
   for (const [name, original] of [
     ['mixed-inputs.json', join(mixedCache, 'mixed-inputs-simd128.json')],
     ['mixed-commands.json', join(buildCache, 'attempt-1/commands.json')],
@@ -423,6 +472,14 @@ const checkTransport = (context, reusePrefixes) => {
   revision = 'b'.repeat(40);
   assert.deepEqual(verifyArtifacts(consumer), inventory, 'an unrelated HEAD change preserves the source-compatible product');
   assert.deepEqual(verifyDelivery(consumer), inventory, 'the delivery keeps its original producer revision');
+  const revisionSnapshot = snapshotDelivery(consumer);
+  for (const name of ['root.tgz', 'darwin-arm64.tgz', 'geospec-engine-native-source-relink.tar.gz']) {
+    assert.deepEqual(
+      readFileSync(join(revisionSnapshot, 'tarballs', name)),
+      readFileSync(join(consumer, transportPath, 'assembly/tarballs', name)),
+    );
+  }
+  assert.deepEqual(targets, builtTargets, 'an unrelated HEAD change must not start a producer');
   revision = 'a'.repeat(40);
   const inventoryFile = join(consumer, transportPath, 'inventory.json');
   for (const name of ['mixed-inputs.json', 'mixed-commands.json']) {
@@ -731,13 +788,14 @@ await test('Darwin recovery waits for a nested writer in its owned group', { ski
   });
   const ready = join(root, 'ready');
   const done = join(root, 'done');
+  const release = join(root, 'release');
   const moduleUrl = new URL('ci-artifacts.mjs', import.meta.url).href;
   const program = `
     import { spawn } from 'node:child_process';
     import { writeFileSync } from 'node:fs';
     import { withProducerMarker } from ${JSON.stringify(moduleUrl)};
     withProducerMarker(${JSON.stringify(root)}, () => {
-      spawn('python3', ['-c', ${JSON.stringify(`import time; time.sleep(0.5); open(${JSON.stringify(done)}, 'w').write('done')`)}], { stdio: 'ignore' });
+      spawn('python3', ['-c', ${JSON.stringify(`import os, time; deadline = time.monotonic() + 10; exec('while not os.path.exists(${JSON.stringify(release)}) and time.monotonic() < deadline: time.sleep(0.02)'); open(${JSON.stringify(done)}, 'w').write('done')`)}], { stdio: 'ignore' });
       writeFileSync(${JSON.stringify(ready)}, 'ready');
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);
     }, { pgid: process.pid });
@@ -753,10 +811,12 @@ await test('Darwin recovery waits for a nested writer in its owned group', { ski
       coordinator.once('exit', resolve);
     });
     assert.throws(() => recoverExitedProducer(root, darwinGroupAlive), /possible writer/);
+    writeFileSync(release, 'release');
     await waitForCondition(() => existsSync(done), 'nested writer completion');
     await waitForCondition(() => !darwinGroupAlive(coordinator.pid), 'owned group exit');
     assert.equal(recoverExitedProducer(root, darwinGroupAlive), true, 'retry follows actual process-group exit');
   } finally {
+    writeFileSync(release, 'release');
     coordinator.kill('SIGKILL');
   }
 });

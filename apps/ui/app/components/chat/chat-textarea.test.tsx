@@ -7,14 +7,30 @@ import { ChatTextarea } from '#components/chat/chat-textarea.js';
 
 const mocks = vi.hoisted(() => {
   const cadRef = { getSnapshot: () => ({ context: { geometry: { format: 'gltf' } } }) };
+  const secondaryCadRef = { getSnapshot: () => ({ context: { geometry: { format: 'gltf' } } }) };
+  const viewSettings: Record<string, { entryPath: string }> = { view: { entryPath: 'main.ts' } };
   return {
     cadRef,
+    secondaryCadRef,
+    geometryUnits: new Map([['main.ts', cadRef]]),
+    viewSettings,
     graphicsRef: { id: 'graphics' },
     handleAddImage: vi.fn(),
     onScreenshotAction: undefined as ((item: ContextSuggestionItem) => void) | undefined,
+    actionItems: [] as ContextSuggestionItem[],
     notice: 'Section cutaways narrower than 180° are not shown in captures.',
   };
 });
+
+const projectRef = {
+  send: vi.fn((event: { type: string; entryPath?: string; claimId?: string }) => {
+    if (event.type === 'claimGeometryUnit' && event.entryPath === 'other.ts') {
+      mocks.geometryUnits.set('other.ts', mocks.secondaryCadRef);
+    }
+  }),
+  getSnapshot: () => ({ context: { geometryUnits: mocks.geometryUnits } }),
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
 
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown } | undefined, selector: (state: unknown) => unknown) =>
@@ -31,10 +47,13 @@ vi.mock('#components/chat/chat-textarea-types.js', () => ({
 vi.mock('#components/chat/chat-textarea-desktop.js', () => ({
   ChatTextareaDesktop: ({
     onScreenshotAction,
+    actionItems,
   }: {
     readonly onScreenshotAction: (item: ContextSuggestionItem) => void;
+    readonly actionItems: ContextSuggestionItem[];
   }) => {
     mocks.onScreenshotAction = onScreenshotAction;
+    mocks.actionItems = actionItems;
     return null;
   },
 }));
@@ -51,9 +70,10 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
     projectId: 'project',
     mainEntryPath: 'main.ts',
-    geometryUnits: new Map([['main.ts', mocks.cadRef]]),
+    geometryUnits: mocks.geometryUnits,
     viewGraphics: new Map([['view', mocks.graphicsRef]]),
-    editorRef: { getSnapshot: () => ({ context: { viewSettings: { view: { entryPath: 'main.ts' } } } }) },
+    editorRef: { getSnapshot: () => ({ context: { viewSettings: mocks.viewSettings } }) },
+    projectRef,
   }),
 }));
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => ({ treeService: undefined }) }));
@@ -101,6 +121,8 @@ const captureCurrentView = async (omittedSectionCutIds: readonly string[]): Prom
 describe('ChatTextarea screenshots', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.geometryUnits.delete('other.ts');
+    delete mocks.viewSettings['parked'];
   });
 
   it('should say when a screenshot it adds leaves a section cut out', async () => {
@@ -116,5 +138,31 @@ describe('ChatTextarea screenshots', () => {
     await captureCurrentView([]);
 
     expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it('discovers a restored parked entry and captures only after claiming its actor', async () => {
+    mocks.viewSettings['parked'] = { entryPath: 'other.ts' };
+    vi.mocked(captureCadImages).mockResolvedValue({ files: [], omittedSectionCutIds: [] });
+    render(<ChatTextarea onSubmit={vi.fn()} />);
+    const item = mocks.actionItems.find((action) => action.id === 'screenshot-view:other.ts');
+    expect(item).toBeDefined();
+    if (!item) {
+      throw new Error('Missing restored entry action');
+    }
+    expect(mocks.geometryUnits.has('other.ts')).toBe(false);
+    act(() => {
+      mocks.onScreenshotAction?.(item);
+    });
+    await vi.waitFor(() => {
+      expect(captureCadImages).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cadRef: mocks.secondaryCadRef,
+          recipe: { purpose: 'chat', mode: 'isometric' },
+        }),
+      );
+    });
+    const claim = projectRef.send.mock.calls.find(([event]) => event.type === 'claimGeometryUnit')?.[0];
+    expect(claim).toMatchObject({ entryPath: 'other.ts' });
+    expect(projectRef.send).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: claim?.claimId });
   });
 });

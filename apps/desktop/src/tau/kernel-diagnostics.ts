@@ -9,12 +9,10 @@
  * public transport surface, which is an E6-shaped change needing its own review.
  *
  * So the observable moves to the one place that already knows: the kernel
- * utility itself, which writes a structured line into the shell's diagnostics
- * log (`userData/logs/desktop.log`) that the e2e reads from disk. That is a
- * strictly *better* witness than a string on the wire, because it is produced
- * inside the process that loaded the engine — and since the colocation closeout
- * it reports the engine's own `backend` export rather than a version suffix,
- * which is the only thing left that differs between the two payloads.
+ * utility itself, when OpenRSCAD initializes. Its structured line in the
+ * shell's diagnostics log (`userData/logs/desktop.log`) reports the engine's
+ * own `backend` export, rather than a version suffix. Other kernels leave no
+ * engine record because they never loaded this engine.
  */
 
 /** Log event name the e2e greps for. */
@@ -22,6 +20,8 @@ export const kernelEngineEvent = 'kernel.engine';
 
 /** The detail object logged under {@link kernelEngineEvent}. */
 export type KernelEngineRecord = {
+  /** PID of the utility process that loaded the engine, never the desktop main PID. */
+  readonly pid: number;
   /** Capability id — `openrscad`, whichever payload bound. */
   readonly kernelId: string;
   /** Resolved kernel version, e.g. `0.11.0-beta.4` — the engine release, which
@@ -64,6 +64,7 @@ export const kernelEngineRecord = (input: {
   readonly backend: string;
   readonly versions: { readonly electron?: string | undefined; readonly node: string };
 }): KernelEngineRecord => ({
+  pid: process.pid,
   kernelId: input.kernelId,
   version: input.version,
   backend: input.backend,

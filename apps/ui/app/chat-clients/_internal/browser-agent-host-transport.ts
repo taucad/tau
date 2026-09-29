@@ -600,10 +600,19 @@ const rebuildTranscript = async (
   events: readonly AgentLogEvent[],
   streamingRunId: string | undefined,
 ): Promise<(current: readonly MyUIMessage[]) => Readonly<{ messages: readonly MyUIMessage[]; streams: boolean }>> => {
-  const runIds = [...new Set(events.map((event) => event.runId))];
+  const grouped = new Map<string, AgentLogEvent[]>();
+  for (const event of events) {
+    const run = grouped.get(event.runId);
+    if (run) {
+      run.push(event);
+    } else {
+      grouped.set(event.runId, [event]);
+    }
+  }
+  const runIds = [...grouped.keys()];
   const runs = await Promise.all(
     runIds.map(async (id) => {
-      const runEvents = events.filter((event) => event.runId === id);
+      const runEvents = grouped.get(id)!;
       const user = runEvents.flatMap((event) => projectAgentHostUserTurn(event) ?? []).at(0);
       const assistant = await readRunMessage(runEvents);
       return [...(user === undefined ? [] : [user]), ...(assistant === undefined ? [] : [assistant])];
@@ -631,18 +640,41 @@ const rebuildTranscript = async (
   ): MyUIMessage[] => {
     const rebuiltById = new Map(rebuilt.map((message) => [message.id, message]));
     const next = current.flatMap((message) => (message.id === dropped ? [] : [rebuiltById.get(message.id) ?? message]));
-    const firstHeld = next.findIndex((message) => rebuiltById.has(message.id));
-    let at = firstHeld === -1 ? next.length : firstHeld;
+    const heldIndex = new Map<string, number>();
+    let firstHeld = next.length;
+    for (let index = 0; index < next.length; index += 1) {
+      if (!heldIndex.has(next[index]!.id)) {
+        heldIndex.set(next[index]!.id, index);
+      }
+      if (firstHeld === next.length && rebuiltById.has(next[index]!.id)) {
+        firstHeld = index;
+      }
+    }
+    let at = firstHeld;
+    const inserted = new Map<number, MyUIMessage[]>();
     for (const message of rebuilt) {
-      const held = next.findIndex((candidate) => candidate.id === message.id);
-      if (held === -1) {
-        next.splice(at, 0, message);
-        at += 1;
+      const held = heldIndex.get(message.id);
+      if (held === undefined) {
+        const slot = inserted.get(at);
+        if (slot) {
+          slot.push(message);
+        } else {
+          inserted.set(at, [message]);
+        }
       } else {
         at = held + 1;
       }
     }
-    return next;
+    const placed: MyUIMessage[] = [];
+    for (let index = 0; index <= next.length; index += 1) {
+      for (const message of inserted.get(index) ?? []) {
+        placed.push(message);
+      }
+      if (index < next.length) {
+        placed.push(next[index]!);
+      }
+    }
+    return placed;
   };
   return (current) => {
     const messages = place(current, streamed, streamingRunId);
@@ -1096,12 +1128,17 @@ const createHostStream = <Message extends UIMessage>(input: {
      * incrementally and keep only the trailing run's events here.
      */
     const collectLog = async (hostClient: AgentHostClient, batch: HostEventBatch): Promise<AgentLogEvent[]> => {
+      const events = [...batch.events];
       cursor = batch.nextCursor;
-      if (cursor >= batch.endCursor) {
-        return [...batch.events];
+      let { endCursor } = batch;
+      while (cursor < endCursor) {
+        // oxlint-disable-next-line no-await-in-loop -- Each page begins at the previous page's cursor.
+        const next = await hostClient.tail({ chatId: input.chatId, cursor, limit: agentHostTailBatchLimit });
+        events.push(...next.events);
+        cursor = next.nextCursor;
+        endCursor = next.endCursor;
       }
-      const next = await hostClient.tail({ chatId: input.chatId, cursor, limit: agentHostTailBatchLimit });
-      return [...batch.events, ...(await collectLog(hostClient, next))];
+      return events;
     };
     const reconcileSnapshot = (snapshot: HostRunSnapshot | undefined, reopens = false): boolean => {
       if (!snapshot || snapshot.runId !== runId) {

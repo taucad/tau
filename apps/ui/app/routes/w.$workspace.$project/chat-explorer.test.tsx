@@ -356,7 +356,9 @@ describe('ChatExplorerTree', () => {
     expect(screen.getByTestId('model-pane-src/main.ts')).toHaveAttribute('data-expanded', 'true');
     expect(screen.getByTestId('model-pane-src/helper.ts')).toHaveAttribute('data-expanded', 'true');
     expect(screen.getByTestId('model-pane-src/main.ts')).toHaveAttribute('data-size', '200');
-    expect(screen.getByTestId('model-pane-src/main.ts')).toHaveAttribute('data-minimum-body-size', '80');
+    expect(screen.getByTestId('model-pane-src/main.ts')).toHaveAttribute('data-minimum-body-size', '144');
+    expect(screen.getByTestId('model-pane-properties')).toHaveAttribute('data-size', '392');
+    expect(screen.getByText('No part selected')).toBeVisible();
     expect(screen.getByText('main_part')).toBeInTheDocument();
     expect(screen.getByText('helper_part')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Show search' })).not.toBeInTheDocument();
@@ -366,6 +368,7 @@ describe('ChatExplorerTree', () => {
 
     expect(screen.queryByText('main_part')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'helper_part' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'helper_part' }).tabIndex).toBe(0);
     expect(screen.getByText('helper')).toHaveAttribute('data-slot', 'highlight');
     expect(screen.getByText('No matching parts').closest('[data-slot="panel-empty-state"]')).toBeTruthy();
 
@@ -434,6 +437,8 @@ describe('ChatExplorerTree', () => {
       const rowButton = screen.getByRole('button', { name: 'helper_part' });
       const row = rowButton.parentElement;
       expect(rowButton).toHaveAttribute('aria-pressed', 'true');
+      expect(rowButton.tabIndex).toBe(0);
+      expect(rowButton).toHaveFocus();
       expect(row).toHaveAttribute('data-model-component-row');
       expect(row).toHaveAttribute('data-model-component-unit-id', helperUnitId);
       expect(row).toHaveAttribute('data-model-component-id', secondComponentId);
@@ -441,6 +446,116 @@ describe('ChatExplorerTree', () => {
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     }
+  });
+
+  it('should keep one visible part Tab stop when filtering out the selected row', async () => {
+    const user = userEvent.setup();
+    const first = createNode(firstComponentId, 'planetary_housing');
+    const second = createNode(secondComponentId, 'sun_gear_assembly');
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([
+        [
+          'mainView',
+          createGraphicsRefForUnit('src/main.ts', [first, second], { selectedComponentIds: [firstComponentId] }),
+        ],
+      ]),
+    });
+
+    renderExplorerTree();
+    expect(screen.getByRole('button', { name: 'planetary_housing' }).tabIndex).toBe(0);
+    await user.type(screen.getByRole('searchbox', { name: 'Filter parts' }), 'sun');
+    const visible = screen.getByRole('button', { name: 'sun_gear_assembly' });
+    expect(visible.tabIndex).toBe(0);
+    act(() => {
+      visible.focus();
+    });
+    expect(visible).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Actions for sun_gear_assembly' }).tabIndex).toBe(-1);
+  });
+
+  it('should move the single part Tab stop with arrows, Home, and End', async () => {
+    const user = userEvent.setup();
+    const first = createNode(firstComponentId, 'planetary_housing');
+    const second = createNode(secondComponentId, 'sun_gear_assembly');
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([['mainView', createGraphicsRefForUnit('src/main.ts', [first, second])]]),
+    });
+
+    renderExplorerTree();
+    const firstButton = screen.getByRole('button', { name: 'planetary_housing' });
+    const secondButton = screen.getByRole('button', { name: 'sun_gear_assembly' });
+    act(() => {
+      firstButton.focus();
+    });
+    expect(firstButton.tabIndex).toBe(0);
+    await user.keyboard('{ArrowDown}');
+    expect(secondButton).toHaveFocus();
+    expect(secondButton.tabIndex).toBe(0);
+    expect(firstButton.tabIndex).toBe(-1);
+    await user.keyboard('{Home}');
+    expect(firstButton).toHaveFocus();
+    await user.keyboard('{End}');
+    expect(secondButton).toHaveFocus();
+    await user.keyboard('{ArrowUp}');
+    expect(firstButton).toHaveFocus();
+  });
+
+  it('should find a part by its indexed source material name', async () => {
+    const user = userEvent.setup();
+    const namedMaterial = createNode(firstComponentId, 'housing', {
+      // oxlint-disable-next-line tau-lint/no-hardcoded-color -- GLB material color is source fixture data.
+      materials: [{ materialIndex: 3, name: 'Brushed steel', color: '#aabbcc' }],
+    });
+    const other = createNode(secondComponentId, 'sun_gear');
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([['mainView', createGraphicsRefForUnit('src/main.ts', [namedMaterial, other])]]),
+    });
+
+    renderExplorerTree();
+    await user.type(screen.getByRole('searchbox', { name: 'Filter parts' }), 'brushed');
+    expect(screen.getByRole('button', { name: 'housing' })).toBeInTheDocument();
+    expect(screen.getByText('· Brushed steel')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'sun_gear' })).not.toBeInTheDocument();
+  });
+
+  it('should clear Properties when its selected model unit closes', async () => {
+    const selected = createNode(firstComponentId, 'housing');
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([
+        ['mainView', createGraphicsRefForUnit('src/main.ts', [selected], { selectedComponentIds: [firstComponentId] })],
+      ]),
+    });
+    const view = renderExplorerTree();
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Physical facts' })).toBeVisible();
+    });
+
+    mockProjectForExplorer({
+      mainEntryPath: 'src/other.ts',
+      geometryUnitFiles: ['src/other.ts'],
+      viewSettings: { otherView: { entryPath: 'src/other.ts' } },
+      viewGraphics: new Map([
+        ['otherView', createGraphicsRefForUnit('src/other.ts', [createNode(secondComponentId, 'gear')])],
+      ]),
+    });
+    view.rerender(
+      <TooltipProvider>
+        <ChatExplorerTree isExpanded />
+      </TooltipProvider>,
+    );
+    expect(screen.getByText('No part selected')).toBeVisible();
   });
 
   it('should open requested unavailable renderer sections', async () => {
@@ -653,7 +768,7 @@ describe('Chat explorer component rows', () => {
 
     expect(screen.getByRole('button', { name: 'planetary_housing' })).toHaveAttribute('aria-pressed', 'true');
     expect(selectedRow).toHaveClass('bg-primary/10');
-    expect(selectedRow).toHaveClass('text-primary');
+    expect(selectedRow).toHaveClass('text-foreground');
     expect(focusedRow).not.toHaveClass('bg-primary/10');
     expect(focusedRow).toHaveClass('bg-sidebar-accent/70');
     expect(isolatedRow).not.toHaveClass('bg-primary/10');
@@ -890,8 +1005,39 @@ describe('Chat explorer component rows', () => {
       </TooltipProvider>,
     );
 
-    expect(screen.getByRole('button', { name: 'Remove isolation for planetary_housing' }).tabIndex).toBe(0);
-    expect(screen.getByRole('button', { name: 'Isolate sun_gear_assembly' }).tabIndex).toBe(0);
+    expect(screen.getByRole('button', { name: 'Remove isolation for planetary_housing' }).tabIndex).toBe(-1);
+    expect(screen.getByRole('button', { name: 'Isolate sun_gear_assembly' }).tabIndex).toBe(-1);
+  });
+
+  it('should place the keyboard context menu beside its focused part', () => {
+    const node = createNode(firstComponentId, 'planetary_housing');
+    const manifest = createManifest([node]);
+    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
+    renderComponentRow({
+      manifest,
+      node,
+      graphicsRef,
+      unitId,
+      rootDepth: 0,
+      hoveredComponentId: undefined,
+      isSelected: false,
+      isHidden: false,
+      isIsolated: false,
+      isFocused: false,
+      opacity: 1,
+    });
+    const button = screen.getByRole('button', { name: 'planetary_housing' });
+    const row = button.closest('[data-model-component-row]');
+    if (!row) {
+      throw new Error('Part row missing');
+    }
+    const contextMenu = vi.fn();
+    row.addEventListener('contextmenu', contextMenu);
+    vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ left: 40, width: 120, bottom: 72 } as DOMRect);
+
+    fireEvent.keyDown(button, { key: 'F10', shiftKey: true });
+    expect(contextMenu).toHaveBeenCalledOnce();
+    expect(contextMenu.mock.calls[0]?.[0]).toMatchObject({ clientX: 100, clientY: 72 });
   });
 
   it('should toggle isolation from the first-class target button', async () => {

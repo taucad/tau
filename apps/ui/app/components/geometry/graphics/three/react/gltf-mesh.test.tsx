@@ -12,7 +12,6 @@ import {
   Vector2,
   Vector3,
   Raycaster,
-  Plane,
 } from 'three';
 import type { Material, Object3D } from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
@@ -30,14 +29,17 @@ import {
   resolveModelPointerClickDispatches,
   resolveModelPointerMissedAction,
   resolveViewerHoverUpdate,
+  restoreOriginalMaterials,
   shouldConsumeGuardedModelPointerClick,
 } from '#components/geometry/graphics/three/react/gltf-mesh.js';
 import { sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import { resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
 import {
   getModelComponentOwner,
   setModelComponentOwner,
 } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import { applyFatLineSegments } from '#components/geometry/graphics/three/materials/gltf-edges.js';
+import { createSectionClip, installSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
 import {
   applyModelMaterialAppearance,
   getOrCaptureModelMaterialAppearance,
@@ -48,6 +50,7 @@ import {
 } from '#components/geometry/graphics/three/overlay-colors.constants.js';
 import type { GeometryComponentManifest } from '@taucad/types';
 import * as componentVisibility from '#components/geometry/graphics/metadata/gltf-component-visibility.js';
+import type { GltfMeasurementFeatures } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 
 const firstComponentId = 'component:first';
 const secondComponentId = 'component:second';
@@ -325,6 +328,10 @@ describe('annotateSceneComponents', () => {
     const parentSurface = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
     const parentEdges = buildLineSegmentsWithPositions([0, 0, 0, 1, 0, 0]);
     const childSurface = buildMeshWithPositions([2, 0, 0, 3, 0, 0, 2, 1, 0]);
+    // GLTFLoader copies authored node extras onto renderables before annotation.
+    parentNode.userData['tauComponentId'] = parentId;
+    parentSurface.userData['tauComponentId'] = parentId;
+    parentEdges.userData['tauComponentId'] = parentId;
     parentNode.add(parentSurface, parentEdges, childSurface);
     scene.add(parentNode);
     const associations = new Map<Object3D, { meshes?: number; nodes?: number; primitives?: number }>([
@@ -334,11 +341,47 @@ describe('annotateSceneComponents', () => {
       [childSurface, { nodes: 1, meshes: 1, primitives: 0 }],
     ]);
 
-    annotateSceneComponents(scene, manifest, { unitId, associations });
+    const measurementFeatures = new Map<string, GltfMeasurementFeatures>([
+      [
+        '0/0/0',
+        {
+          occurrenceId: parentId,
+          componentId: parentId,
+          kind: 'surface',
+          primitive: { nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 },
+          faces: [{ id: 'face:7', start: 0, count: 3 }],
+        },
+      ],
+      [
+        '0/0/1',
+        {
+          occurrenceId: parentId,
+          componentId: parentId,
+          kind: 'line',
+          primitive: { nodeIndex: 0, meshIndex: 0, primitiveIndex: 1 },
+          edges: [{ id: 'edge:9', start: 0, count: 2 }],
+        },
+      ],
+    ]);
+    annotateSceneComponents(scene, manifest, { unitId, associations, measurementFeatures });
 
     expect(getModelComponentOwner(parentSurface)).toEqual({ unitId, componentId: parentId });
     expect(getModelComponentOwner(parentEdges)).toEqual({ unitId, componentId: parentId });
     expect(getModelComponentOwner(childSurface)).toEqual({ unitId, componentId: childId });
+    expect(parentSurface.userData['measurementFeatures']).toMatchObject({
+      occurrenceId: parentId,
+      faces: [{ id: 'face:7' }],
+    });
+    expect(parentEdges.userData['measurementFeatures']).toMatchObject({
+      occurrenceId: parentId,
+      edges: [{ id: 'edge:9' }],
+    });
+
+    annotateSceneComponents(scene, manifest, { unitId: 'next-unit', measurementFeatures });
+    expect(parentSurface.userData['measurementFeatures']).toMatchObject({
+      occurrenceId: parentId,
+      faces: [{ id: 'face:7' }],
+    });
   });
 
   it('should assign sibling edge lines to the owning surface fallback component', () => {
@@ -559,7 +602,7 @@ describe('model component BVH picking', () => {
         meshes: [frontMesh, rearMesh],
         clipping: {
           enabled: true,
-          planes: [new Plane(new Vector3(0, 0, -1), -1.5)],
+          pieces: resolveSectionPieces([{ id: 'cut', kind: 'plane', plane: 'xy', offset: -1.5, isFlipped: false }]),
         },
       }),
     ).toBe(firstComponentId);
@@ -575,7 +618,7 @@ describe('model component BVH picking', () => {
         meshes: [frontMesh, rearMesh],
         clipping: {
           enabled: true,
-          planes: [new Plane(new Vector3(0, 0, 1), 0.5)],
+          pieces: resolveSectionPieces([{ id: 'cut', kind: 'plane', plane: 'xy', offset: -0.5, isFlipped: true }]),
         },
       }),
     ).toBeUndefined();
@@ -670,7 +713,65 @@ describe('resolveComponentVisualState', () => {
   });
 });
 
+describe('restoreOriginalMaterials', () => {
+  it('should carry the section clip from the worn material to every restored one', () => {
+    const scene = new Group();
+    const mesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    scene.add(mesh);
+    const originals = [new MeshBasicMaterial(), new MeshBasicMaterial()];
+    const worn = new MeshBasicMaterial();
+    mesh.material = worn;
+    const clip = createSectionClip('webgpu');
+    installSectionClip(worn, clip);
+
+    restoreOriginalMaterials(scene, new Map([[mesh.id, originals]]));
+
+    const restored = mesh.material as unknown as Material[];
+    expect(restored).toHaveLength(2);
+    for (const [index, material] of restored.entries()) {
+      expect(material).not.toBe(originals[index]);
+      expect((material as Material & { maskNode?: unknown }).maskNode).toBe(clip.mask);
+    }
+  });
+});
+
 describe('applyModelComponentVisualStateToScene', () => {
+  it('should carry the section clip to the emphasis material an edge swaps to, and keep it on the way back', () => {
+    const scene = new Group();
+    scene.add(buildLineSegmentsWithPositions([0, 0, 0, 1, 0, 0]));
+    applyFatLineSegments({ scene } as GLTF, {
+      backend: 'webgpu',
+      resolution: new Vector2(1024, 768),
+      edgeColor: gltfEdgeColorLightMode,
+    });
+    scene.traverse((object) => {
+      if (object.type === 'LineSegments2') {
+        assignComponentOwner(object as unknown as LineSegments, firstComponentId);
+      }
+    });
+    const base = getOnlyFatLineMaterial(scene);
+    const clip = createSectionClip('webgpu');
+    installSectionClip(base, clip);
+    const hover = (hoveredComponentId: string | undefined): void => {
+      applyModelComponentVisualStateToScene({
+        scene,
+        componentManifest: createManifest(),
+        modelVisualState: createModelVisualState({ hoveredComponentId }),
+        enableSurfaces: true,
+        enableLines: true,
+      });
+    };
+
+    hover(firstComponentId);
+    const emphasis = getOnlyFatLineMaterial(scene);
+    expect(emphasis).not.toBe(base);
+    expect((emphasis as Material & { maskNode?: unknown }).maskNode).toBe(clip.mask);
+
+    hover(undefined);
+    expect(getOnlyFatLineMaterial(scene)).toBe(base);
+    expect((base as Material & { maskNode?: unknown }).maskNode).toBe(clip.mask);
+  });
+
   it('should build the selection set once for all component objects', () => {
     const scene = new Group();
     for (const componentId of [firstComponentId, secondComponentId]) {
@@ -692,6 +793,28 @@ describe('applyModelComponentVisualStateToScene', () => {
     expect(iterateSelection).toHaveBeenCalledTimes(1);
     expect(emphasis.selected).toEqual([scene.children[0]]);
     expect(emphasis.hover).toEqual([scene.children[1]]);
+  });
+
+  it('should light the parts the Kinematics pane points at as hovered parts', () => {
+    const scene = new Group();
+    for (const componentId of [firstComponentId, secondComponentId]) {
+      const mesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+      assignComponentOwner(mesh, componentId);
+      scene.add(mesh);
+    }
+
+    const emphasis = applyModelComponentVisualStateToScene({
+      scene,
+      componentManifest: createManifest(),
+      modelVisualState: createModelVisualState({
+        hoveredComponentId: firstComponentId,
+        kinematicsHoveredComponentIds: [secondComponentId],
+      }),
+      enableSurfaces: true,
+      enableLines: true,
+    });
+
+    expect(emphasis.hover).toEqual([scene.children[0], scene.children[1]]);
   });
 
   it('should skip empty emphasis ancestry and descendant queries', () => {

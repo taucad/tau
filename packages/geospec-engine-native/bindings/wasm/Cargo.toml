@@ -1,0 +1,15 @@
+[package]
+name = "geospec-engine-native-wasm"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.88"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+geospec-engine-native-core = { path = "../../rust" }
+wasm-bindgen = "=0.2.127"

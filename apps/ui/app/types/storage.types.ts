@@ -1,7 +1,8 @@
 import type { Chat } from '@taucad/chat';
+import type { ChatRecord } from '@taucad/chat/schemas';
 import type { PartialDeep } from 'type-fest';
 import type { EditorState, EditorStateInput } from '#types/editor.types.js';
-import type { ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryState } from '#types/project-library.types.js';
 
 export type CommitCancelledDraftRestoreInput = {
   messages: Chat['messages'];
@@ -108,7 +109,11 @@ export type ChatStorage = {
    * Atomic soft-delete: sets `deletedAt` and bumps `updatedAt` in one txn.
    */
   softDeleteChat(chatId: string): Promise<Chat | undefined>;
-  getChat(chatId: string): Promise<Chat | undefined>;
+  /** Use the owning project when known so a new chat does not depend on the global project inventory. */
+  getChat(chatId: string, projectId?: string): Promise<Chat | undefined>;
+  /** Navigation metadata without deriving a transcript for every chat. */
+  getAllChatRecords(options?: { includeDeleted?: boolean }): Promise<ChatRecord[]>;
+  getChatRecordsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<ChatRecord[]>;
   getAllChats(options?: { includeDeleted?: boolean }): Promise<Chat[]>;
   getChatsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]>;
   deleteChat(chatId: string): Promise<void>;

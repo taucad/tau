@@ -466,6 +466,58 @@ describe('model component action menu', () => {
     expect(screen.queryByText('Reveal in Explorer')).not.toBeInTheDocument();
   });
 
+  it('should reveal the joint that moves a part in the Kinematics pane only for parts in a mechanism link', async () => {
+    const user = userEvent.setup();
+    const node = createNode();
+    const data = {
+      node,
+      graphicsRef: mock<ActorRefFrom<typeof graphicsMachine>>(),
+      unitId,
+      source: 'viewer',
+      isFocused: false,
+      isIsolated: false,
+      hasHiddenComponents: false,
+      hasOpacityOverrides: false,
+      opacity: 1,
+    } as const;
+    const { rerender } = render(
+      <ViewerModelComponentActionMenu
+        isOpen
+        point={{ clientX: 120, clientY: 160 }}
+        data={{ ...data, manifest: createManifest(node) }}
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('menuitem', { name: 'Show kinematics' })).toBeDisabled();
+
+    const mechanism: GeometryComponentManifest['mechanism'] = {
+      schemaVersion: 1,
+      units: { length: 'm', angle: 'rad' },
+      root: 'base',
+      links: { base: { components: ['root'] }, arm: { components: [componentId] } },
+      joints: { hinge: { type: 'revolute', parent: 'base', child: 'arm', origin: [0, 0, 0], axis: [0, 0, 1] } },
+    };
+    rerender(
+      <ViewerModelComponentActionMenu
+        isOpen
+        point={{ clientX: 120, clientY: 160 }}
+        data={{ ...data, manifest: { ...createManifest(node, 'src/main.ts'), mechanism } }}
+        onOpenChange={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole('menuitem', { name: 'Show kinematics' }));
+
+    expect(mocks.openPanel).toHaveBeenCalledWith('kinematics');
+    expect(mocks.editorSend).toHaveBeenCalledWith({
+      type: 'revealModelComponentInKinematics',
+      entryPath: 'src/main.ts',
+      unitId,
+      componentId,
+    });
+    expect(mocks.openPanel.mock.invocationCallOrder[0]!).toBeLessThan(mocks.editorSend.mock.invocationCallOrder[0]!);
+  });
+
   it('should enable and dispatch unit-wide visibility and opacity recovery actions', async () => {
     const user = userEvent.setup();
     const node = createNode();

@@ -41,28 +41,40 @@ const statement = {
     },
   },
 };
-const audit = {
-  invalid: [],
-  missing: [],
-  verified: [
-    {
-      name: '@@CREATE_REPO_npm-name@@',
-      version: '0.1.0',
-      attestations: { provenance: { predicateType: 'https://slsa.dev/provenance/v1' } },
-      attestationBundles: [
-        {
-          predicateType: 'https://slsa.dev/provenance/v1',
-          bundle: { dsseEnvelope: { payload: Buffer.from(JSON.stringify(statement)).toString('base64') } },
-        },
-      ],
-    },
-  ],
+const auditFor = (attempt) => {
+  const invocationId = `https://github.com/taucad/@@CREATE_REPO_slug@@/actions/runs/123/attempts/${attempt}`;
+  const attested = {
+    ...statement,
+    predicate: { ...statement.predicate, runDetails: { ...statement.predicate.runDetails, metadata: { invocationId } } },
+  };
+  return {
+    invalid: [],
+    missing: [],
+    verified: [
+      {
+        name: '@@CREATE_REPO_npm-name@@',
+        version: '0.1.0',
+        attestations: { provenance: { predicateType: 'https://slsa.dev/provenance/v1' } },
+        attestationBundles: [
+          {
+            predicateType: 'https://slsa.dev/provenance/v1',
+            bundle: { dsseEnvelope: { payload: Buffer.from(JSON.stringify(attested)).toString('base64') } },
+          },
+        ],
+      },
+    ],
+  };
 };
-const options = { audit, manifest: { packages: [candidate] }, commit, runId: '123', runAttempt: '1' };
+const options = { audit: auditFor(1), manifest: { packages: [candidate] }, commit, runId: '123' };
 
 describe('release attestation verification', () => {
   it('binds every candidate to the exact repository, workflow, run, commit, and digest', () => {
     assert.doesNotThrow(() => verifyReleaseAttestations(options));
     assert.throws(() => verifyReleaseAttestations({ ...options, commit: 'b'.repeat(40) }), /wrong source commit/u);
+    assert.throws(() => verifyReleaseAttestations({ ...options, runId: '456' }), /wrong workflow invocation/u);
+  });
+
+  it('accepts any attempt of the publishing run so a partial re-run still verifies', () => {
+    assert.doesNotThrow(() => verifyReleaseAttestations({ ...options, audit: auditFor(3) }));
   });
 });

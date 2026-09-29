@@ -43,7 +43,7 @@
       "executor": "nx:run-commands",
       "outputs": ["{projectRoot}/dist"],
       "inputs": ["production", "^production", { "env": "TAU_CLOUD_ENABLED" }],
-      "dependsOn": [{ "projects": ["ui"], "target": "build:desktop" }],
+      "dependsOn": ["typecheck", { "projects": ["ui"], "target": "build:desktop" }],
       "options": {
         "cwd": "{projectRoot}",
         "command": "electron-vite build"
@@ -83,14 +83,39 @@
         }
       }
     },
+    "prepare-git": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/git"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-git.mts"
+      }
+    },
+    "prepare-git-macos": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/git/darwin-arm64", "{projectRoot}/resources/git/SOURCES"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-git.mts --target darwin-arm64"
+      }
+    },
+    "test-git-payload": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/git-payload.test.mts"
+      }
+    },
     "package-macos": {
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
         "check-renderer-payload",
+        { "projects": ["geospec-engine-native"], "target": "prepare-geospec-ci-artifacts" },
         { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
-        "prepare-picogk-dotnet-macos"
+        "prepare-picogk-dotnet-macos",
+        "prepare-git-macos"
       ],
       "outputs": ["{projectRoot}/package-out"],
       "options": {
@@ -103,9 +128,11 @@
       "dependsOn": [
         "build",
         "check-renderer-payload",
+        { "projects": ["geospec-engine-native"], "target": "prepare-geospec-ci-artifacts" },
         { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
-        "prepare-picogk-dotnet-macos"
+        "prepare-picogk-dotnet-macos",
+        "prepare-git-macos"
       ],
       "outputs": ["{projectRoot}/package-out"],
       "options": {
@@ -118,9 +145,11 @@
       "dependsOn": [
         "build",
         "check-renderer-payload",
+        { "projects": ["geospec-engine-native"], "target": "prepare-geospec-ci-artifacts" },
         { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
-        "prepare-picogk-dotnet-macos"
+        "prepare-picogk-dotnet-macos",
+        "prepare-git-macos"
       ],
       "outputs": ["{projectRoot}/package-out"],
       "options": {

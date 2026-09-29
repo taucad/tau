@@ -13,7 +13,7 @@ export type RepositoryStoreErrorCode =
   | 'tombstoned'
   /** The push landed as loose objects, so committing it would record refs whose objects are nowhere (AR-A E1). */
   | 'loose-objects'
-  /** The manifest names a pack the store does not hold. */
+  /** The manifest names a pack or index the store does not hold; `getObject` raises it for an absent key. */
   | 'missing-pack'
   /** `fsck --connectivity-only` refused the refs and packs about to be named. */
   | 'connectivity'

@@ -1,0 +1,145 @@
+import '#styles/global.css';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { page } from 'vitest/browser';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import {
+  agentRequest,
+  bambuStudioVersion,
+  createBambuStudio,
+  createBridge,
+  createFixture,
+  desktopHost,
+  entry,
+  printing,
+  projectMock,
+  fileManagerMock,
+  converterMock,
+  parametersMock,
+  summarizeGcodeContainerMock,
+  desktopBridgeMock,
+} from '#routes/w.$workspace.$project/chat-print.fixture.js';
+
+/**
+ * Screenshot evidence for the reviewed styling: the Print pane at a workbench
+ * width and at 320 px, light and dark, in three states (a ready machine with a
+ * fresh slice; a ready machine with an agent's request awaiting approval; the
+ * same request while a run is in progress, so the start waits with its reason).
+ * PNGs land under `out/research/.../K/` (Lane D's first pass wrote `.../D/`).
+ */
+
+vi.doMock('#hooks/use-project.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ...projectMock,
+}));
+vi.doMock('#hooks/use-file-manager.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ...fileManagerMock,
+}));
+vi.doMock('#routes/w.$workspace.$project/chat-converter.js', async (importOriginal) =>
+  converterMock(await importOriginal()),
+);
+vi.doMock('#components/geometry/parameters/parameters.js', async (importOriginal) =>
+  parametersMock(await importOriginal()),
+);
+vi.doMock('#routes/w.$workspace.$project/chat-print-summary.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  summarizeGcodeContainer: summarizeGcodeContainerMock,
+}));
+vi.doMock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ...desktopBridgeMock,
+}));
+// The chat stack behind the approval bridge is not under test here; the pane receives a bridge directly.
+vi.doMock('#hooks/use-machines-approvals.js', () => ({
+  usePrintApprovalBridge: () => ({ pendingFor: () => undefined, respond: async () => undefined }),
+}));
+vi.doMock('#machines/await-fresh-render.js', () => ({
+  awaitFreshRender: async (actor: { getSnapshot: () => unknown }) => actor.getSnapshot(),
+}));
+
+const { PrintPanel } = await import('#routes/w.$workspace.$project/chat-print.js');
+
+const outputDirectory = '../../../../../out/research/print-pane-polish/2026-09-29-implementation/browser';
+const widths = { desktop: 480, narrow: 320 } as const;
+const themes = ['light', 'dark'] as const;
+
+type Scenario = 'prepare' | 'approval' | 'busy' | 'studio';
+
+/** The fixture machine observed just now, so the freshness budgets read as current rather than stale. */
+const observedNow = (machine: ReturnType<typeof entry>): ReturnType<typeof entry> => ({
+  ...machine,
+  snapshot: { ...machine.snapshot, observedAt: new Date().toISOString() },
+});
+
+const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> => {
+  desktopHost.bambuStudio = scenario === 'studio' ? createBambuStudio() : undefined;
+  const fixture =
+    scenario === 'prepare' || scenario === 'studio'
+      ? createFixture({ entries: [observedNow(entry(scenario === 'studio' ? { providerId: 'bambu' } : {}))] })
+      : createFixture({
+          entries: [observedNow(scenario === 'busy' ? printing() : entry())],
+          requests: [agentRequest()],
+        });
+  const { bridge } = createBridge();
+  const { container } = render(
+    <TooltipProvider>
+      <div data-testid='frame' style={{ width: `${String(width)}px`, height: '900px' }}>
+        <PrintPanel machines={{ available: true, ...fixture.client }} bridge={bridge} />
+      </div>
+    </TooltipProvider>,
+  );
+  if (scenario === 'studio') {
+    // The real printer with Bambu Studio: presets, then the Quality settings open with one change.
+    await screen.findByText(`Slicing with Bambu Studio ${bambuStudioVersion}`);
+    await screen.findByRole('group', { name: 'Bambu Studio presets' });
+    await page.getByRole('button', { name: 'More settings' }).click();
+    await page.getByRole('button', { name: 'Group: Quality' }).click();
+    await page.getByRole('spinbutton', { name: 'Input for Layer Height' }).fill('0.16');
+    fireEvent.blur(screen.getByRole('spinbutton', { name: 'Input for Layer Height' }));
+    await screen.findByRole('button', { name: 'Reset Layer Height' });
+  } else if (scenario === 'prepare') {
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await page.getByRole('region', { name: 'Prepare' }).getByRole('button', { name: 'Slice and preview' }).click();
+    await screen.findByLabelText('Slice result');
+  } else {
+    const name = 'Print request awaiting you: pyramid.gcode.3mf';
+    const region = await screen.findByRole('region', { name });
+    expect(within(region).getByRole('button', { name: 'Open printer preview' })).toBeEnabled();
+    await page.getByRole('region', { name }).getByRole('button', { name: 'Accept' }).click();
+    const confirmation = await within(region).findByRole('group', { name: 'Confirm before starting' });
+    if (scenario === 'busy') {
+      expect(
+        within(confirmation).getByText('Workshop X1C has a run in progress. Start another print once it ends.'),
+      ).toBeInTheDocument();
+    }
+  }
+  return container;
+};
+
+afterEach(() => {
+  cleanup();
+  document.documentElement.classList.remove('dark');
+});
+
+describe('Print pane screenshots', () => {
+  for (const scenario of ['prepare', 'approval', 'busy', 'studio'] as const) {
+    for (const [size, width] of Object.entries(widths)) {
+      for (const theme of themes) {
+        it(`captures ${scenario} at ${size} in ${theme}`, async () => {
+          document.documentElement.classList.toggle('dark', theme === 'dark');
+          await page.viewport(Math.max(width, 320), 900);
+          const container = await mount(scenario, width);
+          const frame = within(container).getByTestId('frame');
+          // The pane stacks at 320 px: nothing scrolls sideways.
+          expect(frame.scrollWidth).toBeLessThanOrEqual(width);
+          const path = await page.screenshot({
+            element: frame,
+            path: `${outputDirectory}/print-${scenario}-${size}-${theme}.png`,
+          });
+          expect(path).toContain(`print-${scenario}-${size}-${theme}.png`);
+        });
+      }
+    }
+  }
+});

@@ -1,4 +1,8 @@
 import type { z } from 'zod';
+import {
+  arrangeWorkbenchInputSchema,
+  arrangeWorkbenchOutputSchema,
+} from '#schemas/tools/arrange-workbench.tool.schema.js';
 import { editFileInputSchema, editFileOutputSchema } from '#schemas/tools/edit-file.tool.schema.js';
 import { webBrowserInputSchema, webBrowserOutputSchema } from '#schemas/tools/web-browser.tool.schema.js';
 import { webSearchInputSchema, webSearchOutputSchema } from '#schemas/tools/web-search.tool.schema.js';
@@ -17,6 +21,21 @@ import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/sc
 import { exportGeometryInputSchema, exportGeometryOutputSchema } from '#schemas/tools/export-geometry.tool.schema.js';
 import { testModelInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
 import { revisionsInputSchema, revisionsOutputSchema } from '#schemas/tools/revisions.tool.schema.js';
+import { updateTodosInputSchema, updateTodosOutputSchema } from '#schemas/tools/update-todos.tool.schema.js';
+import {
+  cancelPrintInputSchema,
+  cancelPrintOutputSchema,
+  getMachineInputSchema,
+  getMachineOutputSchema,
+  getPrintProfilesInputSchema,
+  getPrintProfilesOutputSchema,
+  getPrintRequestInputSchema,
+  getPrintRequestOutputSchema,
+  listPrintRequestsInputSchema,
+  listPrintRequestsOutputSchema,
+  requestPrintInputSchema,
+  requestPrintOutputSchema,
+} from '#schemas/tools/print.tool.schema.js';
 import {
   applyParameterOperationInputSchema,
   applyParameterOperationOutputSchema,
@@ -76,6 +95,7 @@ export const uiMessageTools = {
     inputSchema: createFileInputSchema,
     outputSchema: createFileOutputSchema,
   },
+  [toolName.arrangeWorkbench]: { inputSchema: arrangeWorkbenchInputSchema, outputSchema: arrangeWorkbenchOutputSchema },
   [toolName.editFile]: {
     inputSchema: editFileInputSchema,
     outputSchema: editFileOutputSchema,
@@ -115,6 +135,34 @@ export const uiMessageTools = {
   [toolName.revisions]: {
     inputSchema: revisionsInputSchema,
     outputSchema: revisionsOutputSchema,
+  },
+  [toolName.updateTodos]: {
+    inputSchema: updateTodosInputSchema,
+    outputSchema: updateTodosOutputSchema,
+  },
+  [toolName.getMachine]: {
+    inputSchema: getMachineInputSchema,
+    outputSchema: getMachineOutputSchema,
+  },
+  [toolName.getPrintProfiles]: {
+    inputSchema: getPrintProfilesInputSchema,
+    outputSchema: getPrintProfilesOutputSchema,
+  },
+  [toolName.requestPrint]: {
+    inputSchema: requestPrintInputSchema,
+    outputSchema: requestPrintOutputSchema,
+  },
+  [toolName.getPrintRequest]: {
+    inputSchema: getPrintRequestInputSchema,
+    outputSchema: getPrintRequestOutputSchema,
+  },
+  [toolName.listPrintRequests]: {
+    inputSchema: listPrintRequestsInputSchema,
+    outputSchema: listPrintRequestsOutputSchema,
+  },
+  [toolName.cancelPrint]: {
+    inputSchema: cancelPrintInputSchema,
+    outputSchema: cancelPrintOutputSchema,
   },
 } as const;
 

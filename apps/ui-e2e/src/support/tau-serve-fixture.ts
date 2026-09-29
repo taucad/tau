@@ -41,6 +41,7 @@ export type TauServeFixture = {
 
 type Running = TauServeFixture & {
   release: () => void;
+  secondRequestHeld: () => boolean;
   dispose: () => Promise<void>;
 };
 
@@ -80,9 +81,11 @@ const startStubGateway = async (): Promise<{
   readonly url: URL;
   readonly server: HttpServer;
   readonly release: () => void;
+  readonly secondRequestHeld: () => boolean;
 }> => {
   let requestIndex = 0;
   let held: (() => void) | undefined;
+  let secondRequestHeld = false;
   /* Latched, not edge-triggered: the test releases as soon as it has dropped
    * the client, which routinely happens *before* the daemon issues its second
    * request. An un-latched gate would then hold a turn nobody will ever open. */
@@ -148,7 +151,9 @@ const startStubGateway = async (): Promise<{
         if (currentRequest === 1 && !released) {
           const gate = Promise.withResolvers<void>();
           held = gate.resolve;
+          secondRequestHeld = true;
           await gate.promise;
+          secondRequestHeld = false;
         }
         writeEvent('content_block_start', {
           type: 'content_block_start',
@@ -176,6 +181,7 @@ const startStubGateway = async (): Promise<{
   return {
     url: new URL(`http://127.0.0.1:${String(port)}`),
     server,
+    secondRequestHeld: () => secondRequestHeld,
     release: () => {
       released = true;
       held?.();
@@ -324,7 +330,13 @@ export const startTauServeFixture = async (options: TauServeFixtureOptions = {})
     timer.unref();
   });
   try {
-    return { origin: await Promise.race([origin.promise, deadline]), workspace, release: gateway.release, dispose };
+    return {
+      origin: await Promise.race([origin.promise, deadline]),
+      workspace,
+      release: gateway.release,
+      secondRequestHeld: gateway.secondRequestHeld,
+      dispose,
+    };
   } catch (error) {
     await dispose();
     throw error;

@@ -15,7 +15,7 @@ const disclosure = (path: string): Locator => selectors.getByRole('button', { na
 
 const openCommand = async (name: string, surface?: target.TargetSurface): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }), undefined, surface);
-  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions...');
+  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
   await target.fill(commandSearch, name, surface);
   await target.click(selectors.getByText(name, { exact: true }), undefined, surface);
 };
@@ -54,7 +54,7 @@ const openSecondGeometryUnit = async (): Promise<void> => {
   }
 
   await target.hover(treeItem(secondaryPath));
-  await target.click(selectors.getByRole('button', { name: 'Actions for box-corner.js' }));
+  await target.click(selectors.getByRole('button', { name: 'More actions for box-corner.js', exact: true }));
   await target.click(selectors.getByRole('menuitem', { name: 'Open in Viewer' }));
   await target.expectVisible(selectors.getByCss(`.dv-tab[aria-label="${secondaryPath}"]`), 60_000);
 };
@@ -394,7 +394,7 @@ test('uses inferred units through checked edits, scrubbing, reopen, reset, and d
   const geometryBeforeDisplayChange = await target.evaluateLocator(canvas, (element) =>
     (element as HTMLCanvasElement).toDataURL(),
   );
-  await target.click(selectors.getByRole('button', { name: /^1 mm$/u }).first());
+  await target.click(selectors.getByRole('button', { name: /^Grid 1 mm, unit settings$/u }).first());
   await target.click(selectors.getByRole('menuitemradio', { name: /Centimeter\s+cm/u }));
   await target.keyboardPress('Escape');
   const widthInCentimeters = selectors.getByLabelText('Input for Width').first();
@@ -539,7 +539,9 @@ test('keeps rounded file disclosures accessible and reorderable through Paneview
   const lastGoodFrame = await target.evaluateLocator(canvas, (element) => (element as HTMLCanvasElement).toDataURL());
   expect(lastGoodFrame.length).toBeGreaterThan('data:image/png;base64,'.length);
 
-  const performanceStart = await target.evaluate(() => {
+  /* Timing and render budgets for this form live in parameters-pane.performance.spec.ts; this
+   * checks only that an edit leaves an unrelated row's DOM untouched. */
+  const untouchedRowCount = await target.evaluate(() => {
     const untouchedLabel = document.querySelector<HTMLElement>('[aria-label="Parameter: Stress Value 95"]');
     const untouchedRow = untouchedLabel?.parentElement?.parentElement;
     if (!untouchedRow) {
@@ -558,21 +560,16 @@ test('keeps rounded file disclosures accessible and reorderable through Paneview
     });
     state.__TAU_PARAMETER_STRESS__ = { mutationCount: 0, observer };
     observer.observe(untouchedRow, { attributes: true, characterData: true, childList: true, subtree: true });
-    const memory = performance as Performance & { readonly memory?: { readonly usedJSHeapSize: number } };
-    return {
-      heapBytes: memory.memory?.usedJSHeapSize,
-      milliseconds: performance.now(),
-      rowCount: document.querySelectorAll('[aria-label^="Parameter:"]').length,
-    };
+    return document.querySelectorAll('[aria-label^="Parameter:"]').length;
   });
-  expect(performanceStart.rowCount).toBeGreaterThanOrEqual(104);
+  expect(untouchedRowCount).toBeGreaterThanOrEqual(104);
   await target.fill(stressInput, '');
   await target.type(stressInput, '123456789');
   await target.keyboardPress('Enter');
   await expect
     .poll(async () => target.evaluateLocator(stressInput, (element) => (element as HTMLInputElement).value))
     .toBe('123,456,789');
-  const performanceResult = await target.evaluate((start) => {
+  const untouchedRowMutations = await target.evaluate(() => {
     const state = globalThis as typeof globalThis & {
       __TAU_PARAMETER_STRESS__?: {
         mutationCount: number;
@@ -580,33 +577,9 @@ test('keeps rounded file disclosures accessible and reorderable through Paneview
       };
     };
     state.__TAU_PARAMETER_STRESS__?.observer.disconnect();
-    const memory = performance as Performance & { readonly memory?: { readonly usedJSHeapSize: number } };
-    return {
-      editMilliseconds: performance.now() - start.milliseconds,
-      heapGrowthBytes:
-        start.heapBytes === undefined || memory.memory === undefined
-          ? undefined
-          : memory.memory.usedJSHeapSize - start.heapBytes,
-      mutationCount: state.__TAU_PARAMETER_STRESS__?.mutationCount ?? Number.POSITIVE_INFINITY,
-    };
-  }, performanceStart);
-  expect(performanceResult.editMilliseconds).toBeLessThan(5000);
-  expect(performanceResult.mutationCount).toBe(0);
-  if (performanceResult.heapGrowthBytes !== undefined) {
-    expect(performanceResult.heapGrowthBytes).toBeLessThan(128 * 1024 * 1024);
-  }
-  await target.writeArtifact(
-    'units-parameter-performance.json',
-    JSON.stringify(
-      {
-        budget: { editMilliseconds: 5000, heapGrowthBytes: 128 * 1024 * 1024 },
-        formRows: performanceStart.rowCount,
-        ...performanceResult,
-      },
-      null,
-      2,
-    ),
-  );
+    return state.__TAU_PARAMETER_STRESS__?.mutationCount ?? Number.POSITIVE_INFINITY;
+  });
+  expect(untouchedRowMutations).toBe(0);
   await target.expectVisible(selectors.getByText(/parameter stress preview failure/iu), 60_000);
   await target.expectVisible(canvas);
   await expect

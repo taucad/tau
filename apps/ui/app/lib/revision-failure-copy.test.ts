@@ -38,8 +38,14 @@ describe('describeRevisionFailure', () => {
     });
   });
 
+  it('says why the name conflicts is refused (D14)', () => {
+    expect(describeRevisionFailure('branch', 'BRANCH_NAME_RESERVED').description).toBe(
+      '“conflicts” is kept for decisions that travel between devices. Choose another name.',
+    );
+  });
+
   it('names the branch a person already has, when the refusal came with one', () => {
-    expect(describeRevisionFailure('branch', 'CHECKOUT_CONFLICT', 'bracket-fillet').description).toBe(
+    expect(describeRevisionFailure('branch', 'CHECKOUT_CONFLICT', { branch: 'bracket-fillet' }).description).toBe(
       'bracket-fillet already exists. Pick another name.',
     );
     expect(describeRevisionFailure('branch', 'CHECKOUT_CONFLICT').description).toBe(
@@ -56,14 +62,6 @@ describe('describeRevisionFailure', () => {
     );
   });
 
-  /* The one sentence two layers refuse an unrooted placement with: the worker
-     client one hop from the seam, and the authority above it (finding 8). */
-  it('phrases a chat placed on files that are not there', () => {
-    expect(describeRevisionFailure('turn', 'PLACEMENT_UNROOTED').description).toBe(
-      'This chat’s files could not be found.',
-    );
-  });
-
   it('says the same thing about the engine whichever verb asked it', () => {
     expect(describeRevisionFailure('restore', 'ENGINE_UNAVAILABLE').description).toBe(
       describeRevisionFailure('save', 'ENGINE_UNAVAILABLE').description,
@@ -73,17 +71,24 @@ describe('describeRevisionFailure', () => {
 
   /* The fourth subject is not a toast channel at all: a turn that recorded
    * nothing is announced by `turn.failed`, whose `reason` the machines author
-   * — "The checkout did not settle the cut in time." (P4, W4 §D). */
+   * — "Something else changed this project first." (P4, W4 §D). */
   it('phrases a turn that recorded nothing, never in the machine’s own words', () => {
-    expect(describeRevisionFailure('turn', 'CUT_TIMED_OUT')).toEqual({
+    expect(describeRevisionFailure('turn', 'BASE_CUT_FAILED')).toEqual({
       title: 'Nothing was saved for that change',
-      description: 'Tau took too long to record that change. Try sending it again.',
+      description: 'Tau could not save this project’s earlier edits first. Try sending that again.',
     });
     expect(describeRevisionFailure('turn', 'LEASE_UNAVAILABLE').description).toContain('Another window');
     expect(describeRevisionFailure('turn', undefined).description).toBe(revisionFailureCopy.turn.fallback);
     /* A release is a category of its own: the turn was let go, not broken. */
     expect(describeRevisionFailure('turn', 'TURN_RELEASED').description).toBe(
       'The turn ended before it recorded a revision.',
+    );
+  });
+
+  /* RM-R11: a verb that arrives while another runs is refused by code, and the page says to wait. */
+  it('phrases a branch verb refused while another is still running', () => {
+    expect(describeRevisionFailure('branch', 'REVISIONS_BUSY').description).toBe(
+      'Another branch change is still in progress. Wait for it to finish, then try again.',
     );
   });
 
@@ -96,5 +101,66 @@ describe('describeRevisionFailure', () => {
       description: 'Tau could not record this change. Reload the page and try again.',
     });
     expect(describeRevisionFailure('branch', 'SOMETHING_NEW').description).toBe(revisionFailureCopy.branch.fallback);
+  });
+});
+
+describe('a restore or save the line refused (D1, D3)', () => {
+  it.each([
+    ['restore', 'LEASE_UNAVAILABLE', 'An agent is working in this project’s files.'],
+    ['restore', 'CAS_LOST', 'Something else changed this project first. Try again.'],
+    ['restore', 'CHECKOUT_CONFLICT', 'These files changed while the restore was being prepared. Try again.'],
+    [
+      'restore',
+      'RESTORE_UNRECORDED',
+      'The earlier files are back, but something else changed this project at the same time, so this restore is not in History as its own revision. Your files are kept.',
+    ],
+    ['restore', 'UNDO_UNAVAILABLE', 'That restore was made on another branch. Open it there to undo it.'],
+    ['restore', 'NOTHING_TO_UNDO', 'Nothing you did on this branch is left to undo.'],
+    ['restore', 'UNDO_PAST_MERGE', 'Your last change on this branch was a merge. Restore an earlier revision instead.'],
+    [
+      'restore',
+      'UNDO_CONFLICT',
+      'A later revision changed the same lines, so that change can’t be undone. Restore an earlier revision instead.',
+    ],
+    ['save', 'CAS_LOST', 'Something else changed this project first. Your changes are still here; save again.'],
+  ] as const)('phrases a %s refused with %s', (subject, code, description) => {
+    expect(describeRevisionFailure(subject, code).description).toBe(description);
+  });
+});
+
+/* I12: each new refusal class has one sentence a person can act on, and never the server's code. */
+describe('a restore whose files are back but not recorded (W0 N1, M1)', () => {
+  it('titles it by what happened, and offers no Try again', () => {
+    const copy = describeRevisionFailure('restore', 'RESTORE_UNRECORDED');
+    expect(copy.title).toBe('Files restored');
+    expect(copy.description).not.toMatch(/try again/iu);
+    expect(describeRevisionFailure('restore', 'UNDO_UNAVAILABLE').title).toBe('Nothing to undo here');
+  });
+
+  it('titles an Undo that refused by what it is, never as a failed restore (D15)', () => {
+    expect(describeRevisionFailure('restore', 'NOTHING_TO_UNDO').title).toBe('Nothing to undo here');
+    expect(describeRevisionFailure('restore', 'UNDO_CONFLICT').title).toBe('That change can’t be undone');
+    expect(describeRevisionFailure('restore', 'UNDO_PAST_MERGE').title).toBe('A merge can’t be undone');
+  });
+
+  it('names the revision an Undo could not undo, when it has a number (RV-W7 #13)', () => {
+    expect(describeRevisionFailure('restore', 'UNDO_CONFLICT', { revisionNumber: 3 }).description).toBe(
+      'A later revision changed the same lines, so Rev 3 can’t be undone. Restore an earlier revision instead.',
+    );
+  });
+});
+
+describe('what the Hosted Remote answers (W2a, W9)', () => {
+  it.each([
+    ['backup', 'REMOTE_DAMAGED', /has to repair this project’s copy on Tau Cloud.*Nothing on this device is lost/u],
+    ['removeName', 'GIT_RATE_LIMITED', /Wait a minute, then try again/u],
+    ['removeName', 'GIT_LEASE_OWNER_BUSY', /Try again in a moment/u],
+    ['removeName', 'GIT_HYDRATE_BUDGET_EXHAUSTED', /Try again tomorrow/u],
+    ['backup', 'GIT_RATE_LIMITED', /Wait a minute, then try again/u],
+    ['removeName', 'GIT_REF_REMOVAL_OWNER_ONLY', /Only the project’s owner/u],
+  ] as const)('phrases %s refused with %s', (subject, code, sentence) => {
+    const { description } = describeRevisionFailure(subject, code);
+    expect(description).toMatch(sentence);
+    expect(description).not.toContain(code);
   });
 });

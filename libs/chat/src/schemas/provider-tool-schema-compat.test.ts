@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { toolMode, toolName } from '#constants/tool.constants.js';
+import { toolDescriptions } from '#constants/tool-description.constants.js';
+import { arrangeWorkbenchDescription } from '#schemas/tools/arrange-workbench.tool.schema.js';
 import {
   filterProviderFacingToolNamesByModelSupport,
   getProviderFacingToolInputSchemas,
   toProviderToolJsonSchema,
 } from '#schemas/provider-tool-schemas.js';
+import { getPrintProfilesInputSchema, requestPrintInputSchema } from '#schemas/tools/print.tool.schema.js';
 
 /**
  * Keywords no provider accepts today: Vertex rejects `const`/`propertyNames`/`prefixItems`, and
@@ -44,6 +48,18 @@ const collectKeywordPaths = (
     collectKeywordPaths(child, `${path}.${key}`, paths);
   }
   return paths;
+};
+
+const arrayItemsPaths = (value: unknown, path = '$'): string[] => {
+  if (value === null || typeof value !== 'object') {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => arrayItemsPaths(entry, `${path}[${index}]`));
+  }
+  return Object.entries(value).flatMap(([key, child]) =>
+    key === 'items' && Array.isArray(child) ? [`${path}.items`] : arrayItemsPaths(child, `${path}.${key}`),
+  );
 };
 
 type ProviderToolSchema = {
@@ -94,6 +110,7 @@ describe('provider-facing tool schema compatibility', () => {
       toolName.applyParameterOperation,
       toolName.screenshot,
       toolName.editFile,
+      toolName.arrangeWorkbench,
       toolName.useSkill,
       toolName.readFile,
       toolName.listDirectory,
@@ -104,7 +121,33 @@ describe('provider-facing tool schema compatibility', () => {
       toolName.webSearch,
       toolName.webBrowser,
       toolName.revisions,
+      toolName.updateTodos,
+      toolName.getMachine,
+      toolName.getPrintProfiles,
+      toolName.requestPrint,
+      toolName.getPrintRequest,
+      toolName.listPrintRequests,
+      toolName.cancelPrint,
     ]);
+    expect(toolDescriptions[toolName.arrangeWorkbench]).toBe(arrangeWorkbenchDescription);
+    expect(toolDescriptions[toolName.arrangeWorkbench].length).toBeGreaterThan(0);
+  });
+
+  it('keeps arrange_workbench provider-safe and within the approved 14 KiB ceiling', () => {
+    const schema = providerSchemaFor(toolName.arrangeWorkbench);
+    expect(Object.keys(schema.properties ?? {})).toEqual([
+      'open',
+      'close',
+      'views',
+      'entries',
+      'viewer',
+      'workbench',
+      'lanes',
+      'basedOn',
+    ]);
+    expect(collectKeywordPaths(schema)).toEqual(emptyKeywordPaths());
+    expect(arrayItemsPaths(schema)).toEqual([]);
+    expect(Buffer.byteLength(JSON.stringify(schema), 'utf8')).toBeLessThanOrEqual(14_336);
   });
 
   it('should omit test_model when testing is disabled', () => {
@@ -175,6 +218,34 @@ describe('provider-facing tool schema compatibility', () => {
     },
   );
 
+  it('should emit no Draft 7 tuple items rejected by Draft 2020-12 providers', () => {
+    const failures = serializeProviderFacingSchemas().flatMap((entry) =>
+      arrayItemsPaths(entry.jsonSchema).map((path) => `${entry.toolName}: ${path}`),
+    );
+    expect(failures).toEqual([]);
+  });
+
+  it('should preserve fixed coordinate length and numeric validation in provider JSON Schema', () => {
+    const coordinates = z.object({ direction: z.tuple([z.number(), z.number(), z.number()]) });
+    const serialized = toProviderToolJsonSchema(coordinates);
+    const providerInput = z.fromJSONSchema(serialized);
+
+    expect(serialized).toMatchObject({
+      properties: { direction: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 } },
+    });
+    for (const direction of [[0, -1, 0], [], [0, 1], [0, 1, 2, 3], [0, 'north', 0]]) {
+      expect(providerInput.safeParse({ direction }).success).toBe(coordinates.safeParse({ direction }).success);
+    }
+  });
+
+  it('should refuse tuples that cannot preserve their constraints as homogeneous fixed arrays', () => {
+    for (const schema of [z.tuple([z.number(), z.string()]), z.tuple([z.number()]).rest(z.number())]) {
+      expect(() => toProviderToolJsonSchema(schema)).toThrow(
+        'Provider tool schema has a tuple that cannot use one items schema',
+      );
+    }
+  });
+
   it('should survive the Anthropic codec projection with its parameters intact', () => {
     // Every CAD tool takes at least one input; an empty projection means Claude was offered a tool it cannot call.
     const failures = serializeProviderFacingSchemas().flatMap((entry) => {
@@ -183,6 +254,47 @@ describe('provider-facing tool schema compatibility', () => {
     });
 
     expect(failures).toEqual([]);
+  });
+
+  it('should offer request_print its slicer options as a plain described object slot', () => {
+    const schema = providerSchemaFor(toolName.requestPrint);
+
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual([
+      'machineId',
+      'options',
+      'plate',
+      'preset',
+      'profiles',
+      'settings',
+      'targetFile',
+    ]);
+    expect(schema.required).toEqual(['targetFile']);
+    expect(schema.properties?.['options']).toEqual({
+      description: 'Slicer options: a JSON object mapping option names to JSON values.',
+    });
+    expect(schema.properties?.['settings']).toEqual({
+      description: 'Bambu Studio settings: a JSON object mapping setting keys from get_print_profiles to values.',
+    });
+  });
+
+  it('should bound request_print Bambu Studio settings at runtime', () => {
+    const schema = requestPrintInputSchema;
+    /* Bambu Studio's own setting keys. */
+    const settings = (key: string, value: unknown) => ({ targetFile: 'main.ts', settings: { [key]: value } });
+
+    expect(schema.safeParse(settings('sparse_infill_density', '20%')).success).toBe(true);
+    expect(schema.safeParse(settings('wall_loops', { nested: 1 })).success).toBe(false);
+    expect(schema.safeParse({ targetFile: 'main.ts', profiles: { filaments: [] } }).success).toBe(false);
+  });
+
+  it('should offer get_print_profiles a machine, profiles and a bounded key filter', () => {
+    const schema = providerSchemaFor(toolName.getPrintProfiles);
+
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['keys', 'machineId', 'profiles']);
+    expect(schema.required ?? []).toEqual([]);
+    expect(getPrintProfilesInputSchema.safeParse({ keys: Array.from({ length: 65 }, (_, i) => `k${i}`) }).success).toBe(
+      false,
+    );
   });
 
   it('should keep screenshot and use_skill provider inputs pruned to implemented fields', () => {

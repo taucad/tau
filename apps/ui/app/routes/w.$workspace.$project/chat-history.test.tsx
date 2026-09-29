@@ -10,6 +10,8 @@ import type {
   ChatTextareaSubmitPayload,
 } from '#components/chat/chat-textarea-types.js';
 import type { CadChatSubmitInput } from '#chat-clients/use-cad-chat-client.js';
+import { storedRef } from '#utils/attachment.test-utils.js';
+import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 
 // `useKernel` must NOT be called from chat-history anymore — guard with a
 // throwing mock so any regression is caught loudly.
@@ -67,6 +69,8 @@ vi.mock('#hooks/use-chat.js', () => ({
     return selector({
       messages,
       messageOrder: messages.map((m) => m.id),
+      turnGroups: buildTurnGroups(messages),
+      agentInvocations: '',
     });
   },
   useChatContext: () => ({ activeChatId: 'chat_test', persistenceActorRef: fakePersistenceActorRef }),
@@ -139,7 +143,7 @@ vi.mock('#routes/w.$workspace.$project/chat-revision-marker.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/scroll-down-button.js', () => ({
-  ScrollDownButton: () => null,
+  ScrollDownButton: () => <button type='button' aria-label='Scroll to bottom' />,
 }));
 
 vi.mock('#routes/w.$workspace.$project/revision-seams.js', () => ({
@@ -199,10 +203,16 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({ chats: [] }),
 }));
+vi.mock('#hooks/use-chat-records.js', () => ({
+  useChatRecords: () => ({ chats: [] }),
+}));
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: 'project_test' }),
 }));
+
+const skillsCatalogReads = vi.hoisted(() => vi.fn(() => []));
+vi.mock('#hooks/use-skills-catalog.js', () => ({ useSkillsCatalog: skillsCatalogReads }));
 
 // Capture the Virtuoso props so tests can both inspect counts and render
 // the produced items by walking `itemContent` over `totalCount`.
@@ -237,7 +247,7 @@ vi.mock('react-virtuoso', () => ({
 
 const { ChatHistory } = await import('#routes/w.$workspace.$project/chat-history.js');
 
-const draftAttachment = { hash: 'f'.repeat(64), mediaType: 'application/pdf', filename: 'spec.pdf' };
+const draftAttachment = storedRef({ hash: 'f'.repeat(64), mediaType: 'application/pdf', filename: 'spec.pdf' });
 
 const submitDraft = async (content = 'hello', attachments: ChatTextareaSubmitPayload['attachments'] = []) => {
   await capturedTextarea.onSubmit?.({ content, attachments });
@@ -257,6 +267,24 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     setMockMessages([]);
   });
 
+  it('skips hidden transcript and skill projections, then reveals current messages', () => {
+    setMockMessages([message('u1', 'user')]);
+    const view = render(<ChatHistory isExpanded={false} setIsExpanded={vi.fn()} />);
+
+    expect(skillsCatalogReads).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('virtuoso')).toBeNull();
+    expect(screen.queryByTestId('chat-textarea')).toBeNull();
+
+    setMockMessages([message('u1', 'user'), message('a1', 'assistant')]);
+    view.rerender(<ChatHistory isExpanded={false} setIsExpanded={vi.fn()} />);
+    expect(skillsCatalogReads).not.toHaveBeenCalled();
+
+    view.rerender(<ChatHistory isExpanded setIsExpanded={vi.fn()} />);
+    expect(skillsCatalogReads).toHaveBeenCalledOnce();
+    expect(screen.getAllByTestId('chat-message')).toHaveLength(2);
+    expect(screen.getByTestId('chat-textarea')).toBeInTheDocument();
+  });
+
   it('opens with one header row that holds the title bar, and no status row under it', () => {
     const { container } = render(<ChatHistory />);
 
@@ -272,6 +300,9 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
 
     expect(capturedTextarea.className).toBeUndefined();
     expect(screen.getByTestId('chat-textarea').parentElement).toHaveClass('max-w-xl');
+    expect(screen.getByRole('button', { name: 'Scroll to bottom' }).parentElement).toBe(
+      screen.getByTestId('chat-textarea').parentElement,
+    );
   });
 
   it('calls cadChat.submit with the text and attachment references from the textarea', async () => {

@@ -15,8 +15,9 @@ type ThumbnailState = {
 
 async function openProjectThumbnail(name = projectName): Promise<Locator> {
   await target.navigate('/projects', 'secondary');
-  await target.fill(selectors.getByPlaceholder('Search projects...'), name, 'secondary');
-  const thumbnail = selectors.getByRole('img', { name, exact: true });
+  await target.fill(selectors.getByPlaceholder('Search projects…'), name, 'secondary');
+  const card = `[data-slot="card"]:has(a:has-text("Open ${name}"))`;
+  const thumbnail = selectors.getByCss(`${card} img`);
   await target.expectVisible(thumbnail, 60_000, 'secondary');
   return thumbnail;
 }
@@ -58,7 +59,7 @@ async function expectProjectCardParity(name: string): Promise<void> {
     )
     .toBeTypeOf('string');
 
-  const card = `[data-slot="card"]:has(img[alt="${name}"])`;
+  const card = `[data-slot="card"]:has(a:has-text("Open ${name}"))`;
   const toggle = `${card} button[aria-label="Preview model"]`;
   const media = `${card} div:has(> button[aria-label="Preview model"])`;
   const thumbnailForeground = await measureProjectCardForeground(media, 'secondary');
@@ -95,7 +96,7 @@ test('user project thumbnails follow settled sources, persist, and match the liv
   await target.navigate('/__e2e/user-project-thumbnail-generation');
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?graphicsBackend=webgpu$/u, 60_000);
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
-  await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions...'), 'Open parameters');
+  await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), 'Open parameters');
   await target.click(selectors.getByText('Open parameters', { exact: true }));
   const widthInput = selectors.getByLabelText('Input for Width');
   await target.expectCount(widthInput, 1, 60_000);
@@ -115,7 +116,7 @@ test('user project thumbnails follow settled sources, persist, and match the liv
       )
       .toBe(true);
 
-    expect(initialThumbnail).toMatchObject({ width: 768, height: 576 });
+    expect(initialThumbnail).toMatchObject({ width: 1536, height: 1152 });
 
     await target.focus(widthInput);
     await target.fill(widthInput, '32');
@@ -136,12 +137,12 @@ test('user project thumbnails follow settled sources, persist, and match the liv
       )
       .toBe(true);
 
-    expect(updatedThumbnail).toMatchObject({ width: 768, height: 576 });
+    expect(updatedThumbnail).toMatchObject({ width: 1536, height: 1152 });
 
     await target.reload('secondary');
-    await target.fill(selectors.getByPlaceholder('Search projects...'), projectName, 'secondary');
+    await target.fill(selectors.getByPlaceholder('Search projects…'), projectName, 'secondary');
     await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
-    await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions...'), 'Update thumbnail');
+    await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), 'Update thumbnail');
     await target.click(selectors.getByText('Update thumbnail', { exact: true }));
     /* The operation's terminal state, not its progress. `toast.promise` shows
      * this only once `regenerateThumbnail()` resolves, and it throws on a

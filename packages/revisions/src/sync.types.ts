@@ -80,6 +80,11 @@ export type SyncFacet = Readonly<{
    * rejection, so a surface never has to read the sentence to choose an action.
    */
   reason: SyncFailureReason | undefined;
+  /**
+   * The remote head this checkout has fetched and not applied, while it waits
+   * for a turn's lease to retire (D12, RA4's *Arrived*). Absent otherwise.
+   */
+  arrived?: string;
 }>;
 
 /** How one correlated push ended, for the sibling that asked (`publish`). @public */
@@ -110,6 +115,10 @@ export type SyncFailureReason =
   /* The repository was renamed or transferred (D11): the surface looks it up by
      its stable id and asks before re-pointing the remote. */
   | 'moved'
+  /* The hosted repository is damaged (`GIT_REPOSITORY_INCOMPLETE`): only an
+     operator restore repairs it, so no action a person has — *Sync now*
+     included — can clear it. */
+  | 'damaged'
   | 'rejected'
   | 'offline'
   | 'unknown';

@@ -1,0 +1,1882 @@
+{
+  "schemaVersion": 1,
+  "id": "MATCHER-ORACLE-METADATA-A2/logical-budget-profile-amendment",
+  "status": "frozen-independent-envelope-amendment",
+  "sourceRevision": "abda45d29347115685b226bffe26bbb3678a27e0",
+  "authority": "W2.C-LOGICAL-BUDGET-02",
+  "profile": {
+    "numericProfile": "geospec-st-logical-requests-v2",
+    "logicalRequestProfile": "geospec-logical-requests-v2",
+    "meaning": "Existing combined experimental execution/numeric profile now explicitly binds geospec-logical-requests-v2 accounting as well as the selected ST semantics. This name is not target/numerical certification.",
+    "qualification": "No target, numerical, runtime, complexity, kernel-iteration or memory certification."
+  },
+  "initialize": {
+    "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"initialize\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"configuration\"}",
+    "predecessorExpectedUtf8": "{\"requestId\":\"configuration\",\"result\":{\"canonicalProfile\":\"geospec-jcs-v1\",\"capabilities\":[{\"implementation\":\"partial\",\"name\":\"toHaveBoundingBox\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveConnectedComponents\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toBeWatertight\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveNoComponentInterference\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveAssemblyOccurrences\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveSpatialRelationships\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveMeshIntegrity\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveNoDiagnostics\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveSurfaceArea\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveVolume\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveMass\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveCenterOfMass\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toBeValidBrep\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveTopologyCounts\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveStepUnits\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveProductStructure\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHavePlanarFace\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveCylindricalFace\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveCircularHole\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveCircularHolePattern\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveChamferFeature\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveFilletFeature\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveMinimumWallThickness\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveVoidContinuity\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"analyzeBrep\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"analyzeMesh\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"inspectGeometry\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"analyzeMeshOverlap\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"}],\"configuration\":{\"analysisRetentionLimits\":{\"maxMeshBytes\":268435456,\"maxMeshEntries\":256,\"maxSolidEntries\":256},\"backends\":{\"brep\":true,\"csg\":true},\"binaryAdmissionLimits\":{\"maxOccurrences\":65536,\"maxResourceBytes\":67108864,\"maxSubjectBytes\":67108864,\"maxTotalBinaryBytes\":134217728,\"maxTriangles\":4000000,\"maxVertices\":2000000,\"profileId\":\"geospec-entry-binary-v1\"},\"configurationProfile\":\"geospec-entry-config-v1\",\"defaultWorkUnitBudget\":8000000,\"maxRetainedSubjects\":32,\"productionCapacityQualified\":false},\"protocolVersion\":3,\"qualification\":\"experimental\",\"registryVersion\":4}}",
+    "successorNativeExpectedUtf8": "{\"requestId\":\"configuration\",\"result\":{\"canonicalProfile\":\"geospec-jcs-v1\",\"capabilities\":[{\"implementation\":\"partial\",\"name\":\"toHaveBoundingBox\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveConnectedComponents\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toBeWatertight\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveNoComponentInterference\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveAssemblyOccurrences\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveSpatialRelationships\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveMeshIntegrity\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveNoDiagnostics\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveSurfaceArea\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveVolume\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveMass\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveCenterOfMass\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toBeValidBrep\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveTopologyCounts\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveStepUnits\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveProductStructure\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHavePlanarFace\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveCylindricalFace\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveCircularHole\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveCircularHolePattern\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveChamferFeature\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveFilletFeature\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveMinimumWallThickness\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveVoidContinuity\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"analyzeBrep\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"analyzeMesh\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"inspectGeometry\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"analyzeMeshOverlap\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"}],\"configuration\":{\"analysisRetentionLimits\":{\"maxMeshBytes\":268435456,\"maxMeshEntries\":256,\"maxSolidEntries\":256},\"backends\":{\"brep\":true,\"csg\":true},\"binaryAdmissionLimits\":{\"maxOccurrences\":65536,\"maxResourceBytes\":67108864,\"maxSubjectBytes\":67108864,\"maxTotalBinaryBytes\":134217728,\"maxTriangles\":4000000,\"maxVertices\":2000000,\"profileId\":\"geospec-entry-binary-v1\"},\"configurationProfile\":\"geospec-entry-config-v1\",\"defaultWorkUnitBudget\":8000000,\"maxRetainedSubjects\":32,\"productionCapacityQualified\":false},\"numericProfile\":\"geospec-st-logical-requests-v2\",\"protocolVersion\":3,\"qualification\":\"experimental\",\"registryVersion\":4}}",
+    "successorPortableExpectedUtf8": "{\"requestId\":\"configuration\",\"result\":{\"canonicalProfile\":\"geospec-jcs-v1\",\"capabilities\":[{\"implementation\":\"partial\",\"name\":\"toHaveBoundingBox\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveConnectedComponents\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toBeWatertight\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveNoComponentInterference\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveAssemblyOccurrences\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveSpatialRelationships\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveMeshIntegrity\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveNoDiagnostics\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveSurfaceArea\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveVolume\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveMass\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveCenterOfMass\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toBeValidBrep\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveTopologyCounts\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveStepUnits\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveProductStructure\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHavePlanarFace\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveCylindricalFace\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveCircularHole\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveCircularHolePattern\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveChamferFeature\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveFilletFeature\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveMinimumWallThickness\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"toHaveVoidContinuity\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"analyzeBrep\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"analyzeMesh\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"inspectGeometry\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"},{\"implementation\":\"partial\",\"name\":\"analyzeMeshOverlap\",\"qualification\":\"unqualified\",\"registryVersion\":4,\"scope\":\"declared-subject-profile\"}],\"configuration\":{\"analysisRetentionLimits\":{\"maxMeshBytes\":268435456,\"maxMeshEntries\":256,\"maxSolidEntries\":256},\"backends\":{\"brep\":false,\"csg\":false},\"binaryAdmissionLimits\":{\"maxOccurrences\":65536,\"maxResourceBytes\":67108864,\"maxSubjectBytes\":67108864,\"maxTotalBinaryBytes\":134217728,\"maxTriangles\":4000000,\"maxVertices\":2000000,\"profileId\":\"geospec-entry-binary-v1\"},\"configurationProfile\":\"geospec-entry-config-v1\",\"defaultWorkUnitBudget\":8000000,\"maxRetainedSubjects\":32,\"productionCapacityQualified\":false},\"numericProfile\":\"geospec-st-logical-requests-v2\",\"protocolVersion\":3,\"qualification\":\"experimental\",\"registryVersion\":4}}",
+    "changedPosition": "result.numericProfile",
+    "unchangedPosition": "result.configuration including defaultWorkUnitBudget and all limits"
+  },
+  "stepRows": {
+    "count": 275,
+    "rowIds": [
+      "family/toHaveBoundingBox/positive",
+      "family/toHaveBoundingBox/negative",
+      "family/toHaveConnectedComponents/positive",
+      "family/toHaveConnectedComponents/negative",
+      "family/toBeWatertight/positive",
+      "family/toBeWatertight/negative",
+      "family/toHaveNoComponentInterference/positive",
+      "family/toHaveNoComponentInterference/negative",
+      "family/toHaveAssemblyOccurrences/positive",
+      "family/toHaveAssemblyOccurrences/negative",
+      "family/toHaveMeshIntegrity/positive",
+      "family/toHaveMeshIntegrity/negative",
+      "family/toHaveNoDiagnostics/positive",
+      "family/toHaveNoDiagnostics/negative",
+      "family/toHaveSurfaceArea/positive",
+      "family/toHaveSurfaceArea/negative",
+      "family/toHaveVolume/positive",
+      "family/toHaveVolume/negative",
+      "family/toHaveMass/positive",
+      "family/toHaveMass/negative",
+      "family/toHaveCenterOfMass/positive",
+      "family/toHaveCenterOfMass/negative",
+      "family/toBeValidBrep/positive",
+      "family/toBeValidBrep/negative",
+      "family/toHaveTopologyCounts/positive",
+      "family/toHaveTopologyCounts/negative",
+      "family/toHaveStepUnits/positive",
+      "family/toHaveStepUnits/negative",
+      "family/toHaveProductStructure/positive",
+      "family/toHaveProductStructure/negative",
+      "family/toHavePlanarFace/positive",
+      "family/toHavePlanarFace/negative",
+      "family/toHaveCylindricalFace/positive",
+      "family/toHaveCylindricalFace/negative",
+      "family/toHaveCircularHole/positive",
+      "family/toHaveCircularHole/negative",
+      "family/toHaveCircularHolePattern/positive",
+      "family/toHaveCircularHolePattern/negative",
+      "family/toHaveChamferFeature/positive",
+      "family/toHaveChamferFeature/negative",
+      "family/toHaveFilletFeature/positive",
+      "family/toHaveFilletFeature/negative",
+      "family/toHaveMinimumWallThickness/positive",
+      "family/toHaveMinimumWallThickness/negative",
+      "family/toHaveVoidContinuity/positive",
+      "family/toHaveVoidContinuity/negative",
+      "selector/packages/geospec-engine/fixtures/clearance/aabb-gap-false-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/aabb-gap-false-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/clearance/piston-bore-skirt-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/piston-bore-skirt-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-radial-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-radial-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-tilted-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-tilted-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-too-loose-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-too-loose-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-too-tight-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-too-tight-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/aabb-overlap-false-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/aabb-overlap-false-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/edge-only-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/edge-only-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/flange-face-gap-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/flange-face-gap-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/flange-face-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/flange-face-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/flange-face-tilted-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/flange-face-tilted-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/gasket-sandwich-gap-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/gasket-sandwich-gap-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#selectors[3]",
+      "selector/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#selectors[3]",
+      "selector/packages/geospec-engine/fixtures/contact/valve-seat-cone-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/valve-seat-cone-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/containment/aabb-inside-false-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#selectors[3]",
+      "selector/packages/geospec-engine/fixtures/containment/sidewall-intersection-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/containment/spark-plug-thread-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/containment/spark-plug-thread-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#selectors[3]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#selectors[4]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#selectors[5]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#selectors[6]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#selectors[3]",
+      "selector/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#selectors[4]",
+      "selector/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#selectors[5]",
+      "selector/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#selectors[3]",
+      "selector/packages/geospec-engine/fixtures/mate/shaft-shoulder-stand-off-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/selector/bolt-circle-drift-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/selector/bolt-circle-drift-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/selector/bolt-circle-drift-negative/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/selector/bolt-circle-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/selector/bolt-circle-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/selector/second-producer-transformed/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/selector/second-producer-transformed/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/selector/second-producer-transformed/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/selector/second-producer-transformed/manifest.json#selectors[3]",
+      "selector/packages/geospec-engine/fixtures/selector/twin-bosses-ambiguous/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/selector/twin-bosses-ambiguous/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/selector/twin-bosses-ambiguous/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/selector/unnamed-import/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/selector/unnamed-import/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/selector/unnamed-import/manifest.json#selectors[2]",
+      "relationship/packages/geospec-engine/fixtures/clearance/aabb-gap-false-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/aabb-gap-false-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/piston-bore-skirt-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/piston-bore-skirt-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/piston-bore-skirt-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/piston-bore-skirt-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-radial-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-radial-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-radial-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-radial-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-tilted-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-tilted-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-tilted-negative/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-tilted-negative/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-too-loose-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-too-loose-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-too-tight-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-too-tight-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/aabb-overlap-false-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/aabb-overlap-false-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/edge-only-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/edge-only-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/flange-face-gap-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/flange-face-gap-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/flange-face-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/flange-face-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/flange-face-tilted-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/flange-face-tilted-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-gap-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-gap-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-gap-negative/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-gap-negative/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/valve-seat-cone-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/valve-seat-cone-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/aabb-inside-false-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/aabb-inside-false-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[3]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[3]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[4]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[4]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/sidewall-intersection-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/sidewall-intersection-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/spark-plug-thread-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/spark-plug-thread-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/spark-plug-thread-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/spark-plug-thread-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[3]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[3]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[4]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[4]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[5]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[5]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[6]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[6]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[3]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[3]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-stand-off-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-stand-off-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-stand-off-negative/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-stand-off-negative/manifest.json#relationships[1]/negative",
+      "ancillary/analyzeMesh/positive",
+      "ancillary/analyzeMesh/negative",
+      "ancillary/analyzeBrep/positive",
+      "ancillary/analyzeBrep/negative",
+      "ancillary/inspectGeometry/positive",
+      "ancillary/inspectGeometry/negative",
+      "ancillary/analyzeMeshOverlap/positive",
+      "ancillary/analyzeMeshOverlap/negative"
+    ],
+    "fullAmendmentPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-oracle-metadata-a2/step-name-report-v2-amendment.json"
+  },
+  "nonStepR2Rows": [
+    {
+      "id": "analytic-relationship/contact/touching-boxes/positive/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/contact/touching-boxes/positive/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/contact/separated-boxes/negative/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/contact/separated-boxes/negative/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/clearance/exact-two-mm/positive/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/clearance/exact-two-mm/positive/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/clearance/exact-four-mm/negative/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/clearance/exact-four-mm/negative/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/coaxial/reversed-collinear-axes/positive/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/coaxial/reversed-collinear-axes/positive/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/coaxial/three-four-offset/negative/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/coaxial/three-four-offset/negative/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/concentric/axially-translated/positive/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/concentric/axially-translated/positive/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/concentric/quarter-mm-offset/negative/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/concentric/quarter-mm-offset/negative/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/coplanar/opposed-normal-same-plane/positive/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/coplanar/opposed-normal-same-plane/positive/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/coplanar/quarter-mm-step/negative/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/coplanar/quarter-mm-step/negative/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/parallel/reversed-directions/positive/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/parallel/reversed-directions/positive/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/parallel/forty-five-degrees/negative/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/parallel/forty-five-degrees/negative/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/perpendicular/orthogonal-directions/positive/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/perpendicular/orthogonal-directions/positive/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/perpendicular/forty-five-degrees/negative/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/perpendicular/forty-five-degrees/negative/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/angle/sixty-degrees/positive/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/angle/sixty-degrees/positive/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/angle/sixty-vs-thirty/negative/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/angle/sixty-vs-thirty/negative/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/containment/coaxial-cylinder-in-bore/positive/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/containment/coaxial-cylinder-in-bore/positive/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/containment/cylinder-overruns-bore/negative/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/containment/cylinder-overruns-bore/negative/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/insertion/half-span-engaged/positive/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/insertion/half-span-engaged/positive/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/insertion/half-span-too-shallow/negative/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/insertion/half-span-too-shallow/negative/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/interference/two-hundred-cubic-mm/positive/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/interference/two-hundred-cubic-mm/positive/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/interference/two-hundred-cubic-mm-disallowed/negative/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "analytic-relationship/interference/two-hundred-cubic-mm-disallowed/negative/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "identity-resource/A-scale1/cold",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [
+        "canonicalPlanUtf8.numericProfile",
+        "evaluatePlanResultUtf8.numericProfile"
+      ],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.A-scale1.cold\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":4},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"5ee8cd9f75f8e15390814eeced8693a27516c2cb7944d3fb8383fe0ef063d9c9\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"identity.A-scale1.cold\",\"diagnostics\":[],\"evidence\":{\"measured\":4,\"normalizedExpected\":{\"tolerance\":0,\"value\":4},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      },
+      "successor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.A-scale1.cold\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":4},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"5ee8cd9f75f8e15390814eeced8693a27516c2cb7944d3fb8383fe0ef063d9c9\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"identity.A-scale1.cold\",\"diagnostics\":[],\"evidence\":{\"measured\":4,\"normalizedExpected\":{\"tolerance\":0,\"value\":4},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      }
+    },
+    {
+      "id": "identity-resource/A-scale1/warm",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [
+        "canonicalPlanUtf8.numericProfile",
+        "evaluatePlanResultUtf8.numericProfile"
+      ],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.A-scale1.warm\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":4},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"5ee8cd9f75f8e15390814eeced8693a27516c2cb7944d3fb8383fe0ef063d9c9\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"identity.A-scale1.warm\",\"diagnostics\":[],\"evidence\":{\"measured\":4,\"normalizedExpected\":{\"tolerance\":0,\"value\":4},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      },
+      "successor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.A-scale1.warm\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":4},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"5ee8cd9f75f8e15390814eeced8693a27516c2cb7944d3fb8383fe0ef063d9c9\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"identity.A-scale1.warm\",\"diagnostics\":[],\"evidence\":{\"measured\":4,\"normalizedExpected\":{\"tolerance\":0,\"value\":4},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      }
+    },
+    {
+      "id": "identity-resource/A-scale10/cold",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [
+        "canonicalPlanUtf8.numericProfile",
+        "evaluatePlanResultUtf8.numericProfile"
+      ],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.A-scale10.cold\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":400},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"a29f8cad3261be82baf6c8cc8d23bd57f762e8936ae1303705a2e6177b70ed3d\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"identity.A-scale10.cold\",\"diagnostics\":[],\"evidence\":{\"measured\":400,\"normalizedExpected\":{\"tolerance\":0,\"value\":400},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      },
+      "successor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.A-scale10.cold\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":400},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"a29f8cad3261be82baf6c8cc8d23bd57f762e8936ae1303705a2e6177b70ed3d\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"identity.A-scale10.cold\",\"diagnostics\":[],\"evidence\":{\"measured\":400,\"normalizedExpected\":{\"tolerance\":0,\"value\":400},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      }
+    },
+    {
+      "id": "identity-resource/A-scale10/warm",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [
+        "canonicalPlanUtf8.numericProfile",
+        "evaluatePlanResultUtf8.numericProfile"
+      ],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.A-scale10.warm\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":400},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"a29f8cad3261be82baf6c8cc8d23bd57f762e8936ae1303705a2e6177b70ed3d\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"identity.A-scale10.warm\",\"diagnostics\":[],\"evidence\":{\"measured\":400,\"normalizedExpected\":{\"tolerance\":0,\"value\":400},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      },
+      "successor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.A-scale10.warm\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":400},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"a29f8cad3261be82baf6c8cc8d23bd57f762e8936ae1303705a2e6177b70ed3d\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"identity.A-scale10.warm\",\"diagnostics\":[],\"evidence\":{\"measured\":400,\"normalizedExpected\":{\"tolerance\":0,\"value\":400},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      }
+    },
+    {
+      "id": "identity-resource/B-scale1/cold",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [
+        "canonicalPlanUtf8.numericProfile",
+        "evaluatePlanResultUtf8.numericProfile"
+      ],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.B-scale1.cold\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":1},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"3a7c0c58ea587360707c36d009809f0d81b74145199f9054594a31c92c169187\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"identity.B-scale1.cold\",\"diagnostics\":[],\"evidence\":{\"measured\":1,\"normalizedExpected\":{\"tolerance\":0,\"value\":1},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      },
+      "successor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.B-scale1.cold\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":1},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"3a7c0c58ea587360707c36d009809f0d81b74145199f9054594a31c92c169187\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"identity.B-scale1.cold\",\"diagnostics\":[],\"evidence\":{\"measured\":1,\"normalizedExpected\":{\"tolerance\":0,\"value\":1},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      }
+    },
+    {
+      "id": "identity-resource/B-scale1/warm",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [
+        "canonicalPlanUtf8.numericProfile",
+        "evaluatePlanResultUtf8.numericProfile"
+      ],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.B-scale1.warm\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":1},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"3a7c0c58ea587360707c36d009809f0d81b74145199f9054594a31c92c169187\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"identity.B-scale1.warm\",\"diagnostics\":[],\"evidence\":{\"measured\":1,\"normalizedExpected\":{\"tolerance\":0,\"value\":1},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      },
+      "successor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.B-scale1.warm\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":1},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"3a7c0c58ea587360707c36d009809f0d81b74145199f9054594a31c92c169187\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"identity.B-scale1.warm\",\"diagnostics\":[],\"evidence\":{\"measured\":1,\"normalizedExpected\":{\"tolerance\":0,\"value\":1},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      }
+    },
+    {
+      "id": "identity-resource/B-scale10/cold",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [
+        "canonicalPlanUtf8.numericProfile",
+        "evaluatePlanResultUtf8.numericProfile"
+      ],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.B-scale10.cold\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":100},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"5f79b0812a6fe9e5bfa976a0e311859c563673b63a3b9db447de6bf7094b3455\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"identity.B-scale10.cold\",\"diagnostics\":[],\"evidence\":{\"measured\":100,\"normalizedExpected\":{\"tolerance\":0,\"value\":100},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      },
+      "successor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.B-scale10.cold\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":100},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"5f79b0812a6fe9e5bfa976a0e311859c563673b63a3b9db447de6bf7094b3455\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"identity.B-scale10.cold\",\"diagnostics\":[],\"evidence\":{\"measured\":100,\"normalizedExpected\":{\"tolerance\":0,\"value\":100},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      }
+    },
+    {
+      "id": "identity-resource/B-scale10/warm",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [
+        "canonicalPlanUtf8.numericProfile",
+        "evaluatePlanResultUtf8.numericProfile"
+      ],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.B-scale10.warm\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":100},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"5f79b0812a6fe9e5bfa976a0e311859c563673b63a3b9db447de6bf7094b3455\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"identity.B-scale10.warm\",\"diagnostics\":[],\"evidence\":{\"measured\":100,\"normalizedExpected\":{\"tolerance\":0,\"value\":100},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      },
+      "successor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSurfaceArea\",\"claimId\":\"identity.B-scale10.warm\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":100},\"kind\":\"surfaceArea\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"5f79b0812a6fe9e5bfa976a0e311859c563673b63a3b9db447de6bf7094b3455\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"identity.B-scale10.warm\",\"diagnostics\":[],\"evidence\":{\"measured\":100,\"normalizedExpected\":{\"tolerance\":0,\"value\":100},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60\",\"witnesses\":{\"source\":\"mesh\",\"tolerance\":0}},\"status\":\"passed\"}]}"
+      }
+    },
+    {
+      "id": "required-pair/matcher/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [
+        "canonicalPlanUtf8.numericProfile",
+        "evaluatePlanResultUtf8.numericProfile"
+      ],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveNoComponentInterference\",\"claimId\":\"required-pair\",\"payload\":{\"expected\":{\"pairs\":[{\"left\":\"A\",\"right\":\"absent\"}],\"tolerance\":0.001},\"kind\":\"componentInterference\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"5ee8cd9f75f8e15390814eeced8693a27516c2cb7944d3fb8383fe0ef063d9c9\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"required-pair\",\"diagnostics\":[{\"code\":\"GEOSPEC_SELECTOR_UNMATCHED\",\"details\":{\"matcher\":\"toHaveNoComponentInterference\",\"pair\":{\"left\":\"A\",\"right\":\"absent\"},\"pairIndex\":0},\"message\":\"Requested component pair at index 0 did not match two distinct components.\",\"severity\":\"error\"}],\"status\":\"refused\"}]}"
+      },
+      "successor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveNoComponentInterference\",\"claimId\":\"required-pair\",\"payload\":{\"expected\":{\"pairs\":[{\"left\":\"A\",\"right\":\"absent\"}],\"tolerance\":0.001},\"kind\":\"componentInterference\"},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"5ee8cd9f75f8e15390814eeced8693a27516c2cb7944d3fb8383fe0ef063d9c9\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"required-pair\",\"diagnostics\":[{\"code\":\"GEOSPEC_SELECTOR_UNMATCHED\",\"details\":{\"matcher\":\"toHaveNoComponentInterference\",\"pair\":{\"left\":\"A\",\"right\":\"absent\"},\"pairIndex\":0},\"message\":\"Requested component pair at index 0 did not match two distinct components.\",\"severity\":\"error\"}],\"status\":\"refused\"}]}"
+      }
+    },
+    {
+      "id": "required-pair/matcher/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [
+        "canonicalPlanUtf8.numericProfile",
+        "evaluatePlanResultUtf8.numericProfile"
+      ],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveNoComponentInterference\",\"claimId\":\"required-pair\",\"payload\":{\"expected\":{\"pairs\":[{\"left\":\"A\",\"right\":\"absent\"}],\"tolerance\":0.001},\"kind\":\"componentInterference\"},\"polarity\":\"negative\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"5ee8cd9f75f8e15390814eeced8693a27516c2cb7944d3fb8383fe0ef063d9c9\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"required-pair\",\"diagnostics\":[{\"code\":\"GEOSPEC_SELECTOR_UNMATCHED\",\"details\":{\"matcher\":\"toHaveNoComponentInterference\",\"pair\":{\"left\":\"A\",\"right\":\"absent\"},\"pairIndex\":0},\"message\":\"Requested component pair at index 0 did not match two distinct components.\",\"severity\":\"error\"}],\"status\":\"refused\"}]}"
+      },
+      "successor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveNoComponentInterference\",\"claimId\":\"required-pair\",\"payload\":{\"expected\":{\"pairs\":[{\"left\":\"A\",\"right\":\"absent\"}],\"tolerance\":0.001},\"kind\":\"componentInterference\"},\"polarity\":\"negative\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"5ee8cd9f75f8e15390814eeced8693a27516c2cb7944d3fb8383fe0ef063d9c9\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"required-pair\",\"diagnostics\":[{\"code\":\"GEOSPEC_SELECTOR_UNMATCHED\",\"details\":{\"matcher\":\"toHaveNoComponentInterference\",\"pair\":{\"left\":\"A\",\"right\":\"absent\"},\"pairIndex\":0},\"message\":\"Requested component pair at index 0 did not match two distinct components.\",\"severity\":\"error\"}],\"status\":\"refused\"}]}"
+      }
+    },
+    {
+      "id": "required-pair/query/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [
+        "canonicalPlanUtf8.numericProfile",
+        "evaluatePlanResultUtf8.numericProfile"
+      ],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"analyzeMeshOverlap\",\"claimId\":\"required-pair\",\"payload\":{\"pairs\":[{\"left\":\"A\",\"right\":\"absent\"}],\"tolerance\":0.001},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"5ee8cd9f75f8e15390814eeced8693a27516c2cb7944d3fb8383fe0ef063d9c9\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"required-pair\",\"diagnostics\":[{\"code\":\"GEOSPEC_SELECTOR_UNMATCHED\",\"details\":{\"matcher\":\"toHaveNoComponentInterference\",\"pair\":{\"left\":\"A\",\"right\":\"absent\"},\"pairIndex\":0},\"message\":\"Requested component pair at index 0 did not match two distinct components.\",\"severity\":\"error\"}],\"status\":\"refused\"}]}"
+      },
+      "successor": {
+        "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"analyzeMeshOverlap\",\"claimId\":\"required-pair\",\"payload\":{\"pairs\":[{\"left\":\"A\",\"right\":\"absent\"}],\"tolerance\":0.001},\"polarity\":\"positive\",\"subjectSlots\":[\"part\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"part\",\"subjectHash\":\"5ee8cd9f75f8e15390814eeced8693a27516c2cb7944d3fb8383fe0ef063d9c9\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+        "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"required-pair\",\"diagnostics\":[{\"code\":\"GEOSPEC_SELECTOR_UNMATCHED\",\"details\":{\"matcher\":\"toHaveNoComponentInterference\",\"pair\":{\"left\":\"A\",\"right\":\"absent\"},\"pairIndex\":0},\"message\":\"Requested component pair at index 0 did not match two distinct components.\",\"severity\":\"error\"}],\"status\":\"refused\"}]}"
+      }
+    },
+    {
+      "id": "diagnostic/positive-satisfied",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "diagnostic/negative-satisfied",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "diagnostic/negative-unsatisfied",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "facet/missing/positive",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    },
+    {
+      "id": "facet/missing/negative",
+      "source": "successor-r2-non-step-row",
+      "changedPositions": [],
+      "unchangedPositions": [
+        "authoredRequestJson",
+        "subject descriptor/hash/transport",
+        "canonicalPlanUtf8.plan",
+        "evaluatePlanResultUtf8.results",
+        "per-family evidence",
+        "refusal body",
+        "geometry and witness fields",
+        "workUnitBudget"
+      ],
+      "predecessor": {},
+      "successor": {}
+    }
+  ],
+  "proofRefusalRows": {
+    "predecessorPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-oracle-proof-refusals-a2/oracle-proof-refusals-a2.json",
+    "predecessorSha256": "125997a238af990bb0cd2d90ec63a254a04f605faddf89e22cace4341a85a80c",
+    "count": 4,
+    "amendments": [
+      {
+        "id": "amendment/W5-VOID-CONTINUOUS-01/minCrossSection/positive",
+        "source": "Mencius frozen proof-refusal row",
+        "changedPositions": [
+          "canonicalPlanUtf8.numericProfile",
+          "evaluatePlanResultUtf8.numericProfile"
+        ],
+        "unchangedPositions": [
+          "authoredRequestJson",
+          "subject descriptor/hash/transport",
+          "canonicalPlanUtf8.plan",
+          "evaluatePlanResultUtf8.results",
+          "per-family evidence",
+          "refusal body",
+          "geometry and witness fields",
+          "workUnitBudget"
+        ],
+        "predecessor": {
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveVoidContinuity\",\"claimId\":\"W5-VOID-CONTINUOUS-01:minCrossSection:positive\",\"payload\":{\"expected\":{\"material\":[\"guide\"],\"minCrossSection\":1,\"path\":[[0,0,3],[0,0,42]]},\"kind\":\"voidContinuity\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"a9bbd5dd23964bdb39791cb841e0bd541290a187c4050e987db5ddd42d424df4\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"W5-VOID-CONTINUOUS-01:minCrossSection:positive\",\"diagnostics\":[{\"code\":\"GEOSPEC_EVIDENCE_UNSUPPORTED\",\"details\":{\"continuousMinimumQualified\":false,\"matcher\":\"toHaveVoidContinuity\",\"profile\":\"geospec-void-sampled-sections-v1\"},\"message\":\"The void profile samples cross-sections; a continuous minimum cross-section is not qualified.\",\"severity\":\"error\",\"suggestion\":\"Use a qualified continuous section proof for the declared geometry representation.\"}],\"status\":\"refused\"}]}"
+        },
+        "successor": {
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveVoidContinuity\",\"claimId\":\"W5-VOID-CONTINUOUS-01:minCrossSection:positive\",\"payload\":{\"expected\":{\"material\":[\"guide\"],\"minCrossSection\":1,\"path\":[[0,0,3],[0,0,42]]},\"kind\":\"voidContinuity\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"a9bbd5dd23964bdb39791cb841e0bd541290a187c4050e987db5ddd42d424df4\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"W5-VOID-CONTINUOUS-01:minCrossSection:positive\",\"diagnostics\":[{\"code\":\"GEOSPEC_EVIDENCE_UNSUPPORTED\",\"details\":{\"continuousMinimumQualified\":false,\"matcher\":\"toHaveVoidContinuity\",\"profile\":\"geospec-void-sampled-sections-v1\"},\"message\":\"The void profile samples cross-sections; a continuous minimum cross-section is not qualified.\",\"severity\":\"error\",\"suggestion\":\"Use a qualified continuous section proof for the declared geometry representation.\"}],\"status\":\"refused\"}]}"
+        }
+      },
+      {
+        "id": "amendment/W5-VOID-CONTINUOUS-01/minCrossSection/negative",
+        "source": "Mencius frozen proof-refusal row",
+        "changedPositions": [
+          "canonicalPlanUtf8.numericProfile",
+          "evaluatePlanResultUtf8.numericProfile"
+        ],
+        "unchangedPositions": [
+          "authoredRequestJson",
+          "subject descriptor/hash/transport",
+          "canonicalPlanUtf8.plan",
+          "evaluatePlanResultUtf8.results",
+          "per-family evidence",
+          "refusal body",
+          "geometry and witness fields",
+          "workUnitBudget"
+        ],
+        "predecessor": {
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveVoidContinuity\",\"claimId\":\"W5-VOID-CONTINUOUS-01:minCrossSection:negative\",\"payload\":{\"expected\":{\"material\":[\"guide\"],\"minCrossSection\":1,\"path\":[[0,0,3],[0,0,42]]},\"kind\":\"voidContinuity\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"a9bbd5dd23964bdb39791cb841e0bd541290a187c4050e987db5ddd42d424df4\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"W5-VOID-CONTINUOUS-01:minCrossSection:negative\",\"diagnostics\":[{\"code\":\"GEOSPEC_EVIDENCE_UNSUPPORTED\",\"details\":{\"continuousMinimumQualified\":false,\"matcher\":\"toHaveVoidContinuity\",\"profile\":\"geospec-void-sampled-sections-v1\"},\"message\":\"The void profile samples cross-sections; a continuous minimum cross-section is not qualified.\",\"severity\":\"error\",\"suggestion\":\"Use a qualified continuous section proof for the declared geometry representation.\"}],\"status\":\"refused\"}]}"
+        },
+        "successor": {
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveVoidContinuity\",\"claimId\":\"W5-VOID-CONTINUOUS-01:minCrossSection:negative\",\"payload\":{\"expected\":{\"material\":[\"guide\"],\"minCrossSection\":1,\"path\":[[0,0,3],[0,0,42]]},\"kind\":\"voidContinuity\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"a9bbd5dd23964bdb39791cb841e0bd541290a187c4050e987db5ddd42d424df4\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"W5-VOID-CONTINUOUS-01:minCrossSection:negative\",\"diagnostics\":[{\"code\":\"GEOSPEC_EVIDENCE_UNSUPPORTED\",\"details\":{\"continuousMinimumQualified\":false,\"matcher\":\"toHaveVoidContinuity\",\"profile\":\"geospec-void-sampled-sections-v1\"},\"message\":\"The void profile samples cross-sections; a continuous minimum cross-section is not qualified.\",\"severity\":\"error\",\"suggestion\":\"Use a qualified continuous section proof for the declared geometry representation.\"}],\"status\":\"refused\"}]}"
+        }
+      },
+      {
+        "id": "amendment/W3-CONTAINMENT-SET-01/ap242-cavity-countermodel/positive",
+        "source": "Mencius frozen proof-refusal row",
+        "changedPositions": [
+          "canonicalPlanUtf8.numericProfile",
+          "evaluatePlanResultUtf8.numericProfile"
+        ],
+        "unchangedPositions": [
+          "authoredRequestJson",
+          "subject descriptor/hash/transport",
+          "canonicalPlanUtf8.plan",
+          "evaluatePlanResultUtf8.results",
+          "per-family evidence",
+          "refusal body",
+          "geometry and witness fields",
+          "workUnitBudget"
+        ],
+        "predecessor": {
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSpatialRelationships\",\"claimId\":\"W3-CONTAINMENT-SET-01:ap242-cavity-countermodel:positive\",\"payload\":{\"expected\":{\"relationships\":[{\"angularToleranceDegrees\":0.5,\"kind\":\"containment\",\"subject\":{\"kind\":\"occurrence\",\"name\":\"subject\"},\"target\":{\"kind\":\"occurrence\",\"name\":\"target\"},\"tolerance\":0.02}]},\"kind\":\"spatialRelationships\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"71112ed75ce355faa9fcf259e04d61d8e65a61b714f74ef3c6e9501b533865c1\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"W3-CONTAINMENT-SET-01:ap242-cavity-countermodel:positive\",\"diagnostics\":[{\"code\":\"GEOSPEC_EVIDENCE_UNSUPPORTED\",\"details\":{\"continuousContainmentQualified\":false,\"kind\":\"containment\",\"matcher\":\"toHaveSpatialRelationships\",\"profile\":\"geospec-containment-sampled-v1\"},\"message\":\"The containment profile has only finite point samples; continuous solid containment is not qualified.\",\"severity\":\"error\",\"suggestion\":\"Use a qualified regular-solid containment query; sampled points do not prove that the complete subject is contained.\"}],\"status\":\"refused\"}]}"
+        },
+        "successor": {
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSpatialRelationships\",\"claimId\":\"W3-CONTAINMENT-SET-01:ap242-cavity-countermodel:positive\",\"payload\":{\"expected\":{\"relationships\":[{\"angularToleranceDegrees\":0.5,\"kind\":\"containment\",\"subject\":{\"kind\":\"occurrence\",\"name\":\"subject\"},\"target\":{\"kind\":\"occurrence\",\"name\":\"target\"},\"tolerance\":0.02}]},\"kind\":\"spatialRelationships\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"71112ed75ce355faa9fcf259e04d61d8e65a61b714f74ef3c6e9501b533865c1\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"W3-CONTAINMENT-SET-01:ap242-cavity-countermodel:positive\",\"diagnostics\":[{\"code\":\"GEOSPEC_EVIDENCE_UNSUPPORTED\",\"details\":{\"continuousContainmentQualified\":false,\"kind\":\"containment\",\"matcher\":\"toHaveSpatialRelationships\",\"profile\":\"geospec-containment-sampled-v1\"},\"message\":\"The containment profile has only finite point samples; continuous solid containment is not qualified.\",\"severity\":\"error\",\"suggestion\":\"Use a qualified regular-solid containment query; sampled points do not prove that the complete subject is contained.\"}],\"status\":\"refused\"}]}"
+        }
+      },
+      {
+        "id": "amendment/W3-CONTAINMENT-SET-01/ap242-cavity-countermodel/negative",
+        "source": "Mencius frozen proof-refusal row",
+        "changedPositions": [
+          "canonicalPlanUtf8.numericProfile",
+          "evaluatePlanResultUtf8.numericProfile"
+        ],
+        "unchangedPositions": [
+          "authoredRequestJson",
+          "subject descriptor/hash/transport",
+          "canonicalPlanUtf8.plan",
+          "evaluatePlanResultUtf8.results",
+          "per-family evidence",
+          "refusal body",
+          "geometry and witness fields",
+          "workUnitBudget"
+        ],
+        "predecessor": {
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSpatialRelationships\",\"claimId\":\"W3-CONTAINMENT-SET-01:ap242-cavity-countermodel:negative\",\"payload\":{\"expected\":{\"relationships\":[{\"angularToleranceDegrees\":0.5,\"kind\":\"containment\",\"subject\":{\"kind\":\"occurrence\",\"name\":\"subject\"},\"target\":{\"kind\":\"occurrence\",\"name\":\"target\"},\"tolerance\":0.02}]},\"kind\":\"spatialRelationships\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"71112ed75ce355faa9fcf259e04d61d8e65a61b714f74ef3c6e9501b533865c1\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"W3-CONTAINMENT-SET-01:ap242-cavity-countermodel:negative\",\"diagnostics\":[{\"code\":\"GEOSPEC_EVIDENCE_UNSUPPORTED\",\"details\":{\"continuousContainmentQualified\":false,\"kind\":\"containment\",\"matcher\":\"toHaveSpatialRelationships\",\"profile\":\"geospec-containment-sampled-v1\"},\"message\":\"The containment profile has only finite point samples; continuous solid containment is not qualified.\",\"severity\":\"error\",\"suggestion\":\"Use a qualified regular-solid containment query; sampled points do not prove that the complete subject is contained.\"}],\"status\":\"refused\"}]}"
+        },
+        "successor": {
+          "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSpatialRelationships\",\"claimId\":\"W3-CONTAINMENT-SET-01:ap242-cavity-countermodel:negative\",\"payload\":{\"expected\":{\"relationships\":[{\"angularToleranceDegrees\":0.5,\"kind\":\"containment\",\"subject\":{\"kind\":\"occurrence\",\"name\":\"subject\"},\"target\":{\"kind\":\"occurrence\",\"name\":\"target\"},\"tolerance\":0.02}]},\"kind\":\"spatialRelationships\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"71112ed75ce355faa9fcf259e04d61d8e65a61b714f74ef3c6e9501b533865c1\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"W3-CONTAINMENT-SET-01:ap242-cavity-countermodel:negative\",\"diagnostics\":[{\"code\":\"GEOSPEC_EVIDENCE_UNSUPPORTED\",\"details\":{\"continuousContainmentQualified\":false,\"kind\":\"containment\",\"matcher\":\"toHaveSpatialRelationships\",\"profile\":\"geospec-containment-sampled-v1\"},\"message\":\"The containment profile has only finite point samples; continuous solid containment is not qualified.\",\"severity\":\"error\",\"suggestion\":\"Use a qualified regular-solid containment query; sampled points do not prove that the complete subject is contained.\"}],\"status\":\"refused\"}]}"
+        }
+      }
+    ],
+    "scope": "pure envelope only; no source row, refusal body, subject identity or geometry rewrite"
+  },
+  "oldProfileRejection": {
+    "inputNumericProfile": "geospec-st-v1",
+    "expectedError": {
+      "code": "unsupported-version",
+      "message": "Unsupported canonical plan numeric profile."
+    },
+    "affectedRowIds": [
+      "family/toHaveBoundingBox/positive",
+      "family/toHaveBoundingBox/negative",
+      "family/toHaveConnectedComponents/positive",
+      "family/toHaveConnectedComponents/negative",
+      "family/toBeWatertight/positive",
+      "family/toBeWatertight/negative",
+      "family/toHaveNoComponentInterference/positive",
+      "family/toHaveNoComponentInterference/negative",
+      "family/toHaveAssemblyOccurrences/positive",
+      "family/toHaveAssemblyOccurrences/negative",
+      "family/toHaveMeshIntegrity/positive",
+      "family/toHaveMeshIntegrity/negative",
+      "family/toHaveNoDiagnostics/positive",
+      "family/toHaveNoDiagnostics/negative",
+      "family/toHaveSurfaceArea/positive",
+      "family/toHaveSurfaceArea/negative",
+      "family/toHaveVolume/positive",
+      "family/toHaveVolume/negative",
+      "family/toHaveMass/positive",
+      "family/toHaveMass/negative",
+      "family/toHaveCenterOfMass/positive",
+      "family/toHaveCenterOfMass/negative",
+      "family/toBeValidBrep/positive",
+      "family/toBeValidBrep/negative",
+      "family/toHaveTopologyCounts/positive",
+      "family/toHaveTopologyCounts/negative",
+      "family/toHaveStepUnits/positive",
+      "family/toHaveStepUnits/negative",
+      "family/toHaveProductStructure/positive",
+      "family/toHaveProductStructure/negative",
+      "family/toHavePlanarFace/positive",
+      "family/toHavePlanarFace/negative",
+      "family/toHaveCylindricalFace/positive",
+      "family/toHaveCylindricalFace/negative",
+      "family/toHaveCircularHole/positive",
+      "family/toHaveCircularHole/negative",
+      "family/toHaveCircularHolePattern/positive",
+      "family/toHaveCircularHolePattern/negative",
+      "family/toHaveChamferFeature/positive",
+      "family/toHaveChamferFeature/negative",
+      "family/toHaveFilletFeature/positive",
+      "family/toHaveFilletFeature/negative",
+      "family/toHaveMinimumWallThickness/positive",
+      "family/toHaveMinimumWallThickness/negative",
+      "family/toHaveVoidContinuity/positive",
+      "family/toHaveVoidContinuity/negative",
+      "selector/packages/geospec-engine/fixtures/clearance/aabb-gap-false-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/aabb-gap-false-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/clearance/piston-bore-skirt-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/piston-bore-skirt-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-radial-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-radial-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-tilted-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-tilted-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-too-loose-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-too-loose-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-too-tight-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/clearance/shaft-bore-too-tight-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/aabb-overlap-false-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/aabb-overlap-false-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/edge-only-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/edge-only-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/flange-face-gap-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/flange-face-gap-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/flange-face-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/flange-face-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/flange-face-tilted-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/flange-face-tilted-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/gasket-sandwich-gap-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/gasket-sandwich-gap-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#selectors[3]",
+      "selector/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#selectors[3]",
+      "selector/packages/geospec-engine/fixtures/contact/valve-seat-cone-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/contact/valve-seat-cone-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/containment/aabb-inside-false-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#selectors[3]",
+      "selector/packages/geospec-engine/fixtures/containment/sidewall-intersection-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/containment/spark-plug-thread-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/containment/spark-plug-thread-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#selectors[3]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#selectors[4]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#selectors[5]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#selectors[6]",
+      "selector/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#selectors[3]",
+      "selector/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#selectors[4]",
+      "selector/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#selectors[5]",
+      "selector/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#selectors[3]",
+      "selector/packages/geospec-engine/fixtures/mate/shaft-shoulder-stand-off-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/selector/bolt-circle-drift-negative/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/selector/bolt-circle-drift-negative/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/selector/bolt-circle-drift-negative/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/selector/bolt-circle-positive/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/selector/bolt-circle-positive/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/selector/second-producer-transformed/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/selector/second-producer-transformed/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/selector/second-producer-transformed/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/selector/second-producer-transformed/manifest.json#selectors[3]",
+      "selector/packages/geospec-engine/fixtures/selector/twin-bosses-ambiguous/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/selector/twin-bosses-ambiguous/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/selector/twin-bosses-ambiguous/manifest.json#selectors[2]",
+      "selector/packages/geospec-engine/fixtures/selector/unnamed-import/manifest.json#selectors[0]",
+      "selector/packages/geospec-engine/fixtures/selector/unnamed-import/manifest.json#selectors[1]",
+      "selector/packages/geospec-engine/fixtures/selector/unnamed-import/manifest.json#selectors[2]",
+      "relationship/packages/geospec-engine/fixtures/clearance/aabb-gap-false-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/aabb-gap-false-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/piston-bore-skirt-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/piston-bore-skirt-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/piston-bore-skirt-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/piston-bore-skirt-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-radial-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-radial-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-radial-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-radial-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-tilted-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-tilted-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-tilted-negative/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-tilted-negative/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-too-loose-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-too-loose-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-too-tight-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-too-tight-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/aabb-overlap-false-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/aabb-overlap-false-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/edge-only-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/edge-only-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/flange-face-gap-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/flange-face-gap-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/flange-face-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/flange-face-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/flange-face-tilted-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/flange-face-tilted-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-gap-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-gap-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-gap-negative/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-gap-negative/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/plug-seat-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/contact/valve-seat-cone-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/contact/valve-seat-cone-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/aabb-inside-false-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/aabb-inside-false-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[3]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[3]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[4]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/pin-through-boss-positive/manifest.json#relationships[4]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/sidewall-intersection-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/sidewall-intersection-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/spark-plug-thread-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/spark-plug-thread-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/spark-plug-thread-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/spark-plug-thread-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[3]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[3]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[4]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[4]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[5]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[5]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[6]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/manifest.json#relationships[6]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[3]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/manifest.json#relationships[3]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#relationships[1]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#relationships[2]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/manifest.json#relationships[2]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-stand-off-negative/manifest.json#relationships[0]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-stand-off-negative/manifest.json#relationships[0]/negative",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-stand-off-negative/manifest.json#relationships[1]/positive",
+      "relationship/packages/geospec-engine/fixtures/mate/shaft-shoulder-stand-off-negative/manifest.json#relationships[1]/negative",
+      "ancillary/analyzeMesh/positive",
+      "ancillary/analyzeMesh/negative",
+      "ancillary/analyzeBrep/positive",
+      "ancillary/analyzeBrep/negative",
+      "ancillary/inspectGeometry/positive",
+      "ancillary/inspectGeometry/negative",
+      "ancillary/analyzeMeshOverlap/positive",
+      "ancillary/analyzeMeshOverlap/negative",
+      "identity-resource/A-scale1/cold",
+      "identity-resource/A-scale1/warm",
+      "identity-resource/A-scale10/cold",
+      "identity-resource/A-scale10/warm",
+      "identity-resource/B-scale1/cold",
+      "identity-resource/B-scale1/warm",
+      "identity-resource/B-scale10/cold",
+      "identity-resource/B-scale10/warm",
+      "required-pair/matcher/positive",
+      "required-pair/matcher/negative",
+      "required-pair/query/positive",
+      "amendment/W5-VOID-CONTINUOUS-01/minCrossSection/positive",
+      "amendment/W5-VOID-CONTINUOUS-01/minCrossSection/negative",
+      "amendment/W3-CONTAINMENT-SET-01/ap242-cavity-countermodel/positive",
+      "amendment/W3-CONTAINMENT-SET-01/ap242-cavity-countermodel/negative",
+      "plan/a1/positive/canonical",
+      "plan/a1/positive/evaluate",
+      "plan/a1/maximum-budget/canonical",
+      "plan/a1/maximum-budget/evaluate",
+      "plan/a1/omitted/canonical",
+      "plan/a1/omitted/evaluate",
+      "plan/a1/null/canonical",
+      "plan/a1/null/evaluate",
+      "plan/a1/order/canonical",
+      "plan/a1/order/evaluate",
+      "plan/unavailable/analyzeBrep/evaluatePlan",
+      "plan/unavailable/toHaveVolume/evaluatePlan"
+    ],
+    "preservation": "Every predecessor canonicalPlanUtf8 remains recorded in its amendment row and is not overwritten."
+  },
+  "schedule": {
+    "reportBundle": 1,
+    "meshAnalysisOrPartition": "V+3T once per claim requested mesh analysis/partition; sameinput demand reused withinclaim is not chargedtwice. Separate actual CSGadmission traversal is distinct.",
+    "csgAdmit": "1+V+3T before both retainedsource operand lookup and coldadmission; merges are ownedinput to same request, no new hidden extraunit. Onecharge perdistinct requested sourceoperand perclaim; localpair reuse is not a newrequest.",
+    "csgBoolean": 1,
+    "csgTransform": 1,
+    "csgDecompose": 1,
+    "csgProperties": 1,
+    "csgExport": 1,
+    "csgSlice": 1,
+    "csgSection": "1+N inputcontourvertices (2D V;T=0) before any resultlookup",
+    "csgSectionBoolean": 1,
+    "derivedTessellation": "1 per entity/exactprofile requested demand before coremeshcache lookup; fixedwhole reportmesh reuse is already charged reportBundle1, no duplicatekernelrequest",
+    "voidShellAnalysis": "V+3T per requested distinct exported shell analysis before windingtree/cache; repeated waypointreading logical1 per requested point against preparedbody",
+    "brepExtrema": 1,
+    "brepCommonVolume": 1,
+    "brepRegularSolidCut": "1 per authored subject-targetpair requested before resultcache",
+    "brepPointClassification": "N requested points, source chargeAndReplay unchanged",
+    "cleanup": "No geometryrequest unit for ordinary scopecleanup/release; no heldlifetime tests"
+  },
+  "phaseOrdering": [
+    "Phase1 validates complete batchsyntax/regex/requiredquerypolarity/subjectbinding without backendcalls; any malformed laterclaim rejects entirebatch before phase2.",
+    "Construct one Budget for each admittedclaim, retained in ResolvedClaim through phase2 and evaluation; never reset used to0 afterselectors.",
+    "Phase2 before first report/index/face/occurrence lookup required by thisclaim, charge reportBundle1. Mark that claim reportDemandPaid; reuse samebundle/index during subsequentselectors and evaluation without a secondcharge for the identicalreportdemand. Differentclaims eachpay1 even if Enginecachewarm.",
+    "Insufficientbudget records that claim noninvertible MATCHER_TIMEOUT and doesnotperform its report/selector/backendcall; continue preparation of remainingvalidclaims so no evaluationboolean begins beforephase2complete.",
+    "Afterphase2/evaluation use exactsame Budget. Meshanalysis V+3T charged once perrequested analysis demand after counts available and before analysis/partitioncache. STEP reportrequest cost1 precedes obtaining meshcounts; no uncharged speculative report.",
+    "Current approved unsupportedproofdomains refuse afterrequiredsyntax/selectors; do not schedule unexecuted expensive CSGwork."
+  ],
+  "invariants": [
+    "One Budget per admitted claim survives phase 2 and evaluation.",
+    "Cache warmth does not change a claim charge, result or refusal.",
+    "CONFIG01 and authored workUnitBudget fields are unchanged.",
+    "Per-family result bodies and evidence are unchanged by this envelope amendment.",
+    "Mencius refusal bodies and geometry remain byte-for-byte unchanged inside the new envelope."
+  ]
+}

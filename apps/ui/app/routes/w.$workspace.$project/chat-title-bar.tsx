@@ -7,6 +7,8 @@ import { ChatHistorySettings } from '#routes/w.$workspace.$project/chat-history-
 import { useActiveChatNaming } from '#routes/w.$workspace.$project/use-active-chat-naming.js';
 import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.js';
 import { useChats } from '#hooks/use-chats.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
+import { useChatSelector } from '#hooks/use-chat.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject } from '#hooks/use-project.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
@@ -40,10 +42,13 @@ export function ChatTitleBar({ closeButton }: { readonly closeButton?: ReactNode
   const { editorRef, projectRef, projectId } = useProject();
   const activeChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const isProjectLoading = useSelector(projectRef, (state) => state.context.isLoading);
-  const { chats, applyGeneratedChatName, updateChatName, isLoading: isChatsLoading } = useChats(projectId);
+  const { chats, isLoading: isChatsLoading } = useChatRecords(projectId);
+  const { applyGeneratedChatName, updateChatName } = useChats(projectId, { enabled: false });
+  const firstMessage = useChatSelector((state) => state.messages[0]);
   const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId), [chats, activeChatId]);
   const isGeneratingName = useActiveChatNaming({
     activeChat,
+    firstMessage,
     isProjectLoading,
     isChatsLoading,
     applyGeneratedChatName,
@@ -69,15 +74,12 @@ export function ChatTitleBar({ closeButton }: { readonly closeButton?: ReactNode
           <SquarePen aria-hidden className='size-3.5 translate-y-[0.5px]' />
         </PaneButton>
       ) : null}
-      {/* oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- the double-click is a
-          pointer shortcut for the menu's Rename item, which stays the keyboard route. */}
       <div
         className={cn(
-          'flex min-w-0 flex-1 items-center self-stretch',
+          'relative flex min-w-0 flex-1 items-center self-stretch',
           // The editor draws no outline of its own (the sidebar's row does the same).
           isRenaming && 'rounded-sm focus-outline',
         )}
-        onDoubleClick={isRenaming ? undefined : startRename}
       >
         {isRenaming && activeChat ? (
           <InlineTextEditor
@@ -100,21 +102,23 @@ export function ChatTitleBar({ closeButton }: { readonly closeButton?: ReactNode
           <span className='fade-label flex-1 text-sm font-medium'>
             {/* The text, not its box, leaves the drag region: a double-click on a macOS drag
                 region zooms the window, and the rest of the row still drags it. */}
+            {/* oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- Rename remains in the keyboard-accessible menu. */}
             <span
               className={cn('text-foreground [app-region:no-drag]', isGeneratingName && 'animate-pulse')}
               aria-busy={isGeneratingName}
+              onDoubleClick={startRename}
             >
               {name}
             </span>
           </span>
         )}
+        <FloatingPanelContentHeaderActions className={cn(!isRenaming && 'md:absolute md:inset-y-0 md:right-0')}>
+          <FloatingPanelButtonGroup>
+            <ChatHistorySettings onRename={startRename} />
+          </FloatingPanelButtonGroup>
+          {isMobile ? closeButton : null}
+        </FloatingPanelContentHeaderActions>
       </div>
-      <FloatingPanelContentHeaderActions>
-        <FloatingPanelButtonGroup>
-          <ChatHistorySettings onRename={startRename} />
-        </FloatingPanelButtonGroup>
-        {isMobile ? closeButton : null}
-      </FloatingPanelContentHeaderActions>
     </>
   );
 }

@@ -1,0 +1,34 @@
+---
+title: Jobs API
+description: Job submission, provider declarations, lifecycle projections, and recovery contracts.
+docType: reference
+wordBudgetOverride: 1100
+---
+
+# Jobs API
+
+Import from `@taucad/runtime/job`. Jobs bind an immutable input revision and admitted provider configuration to a durable `JobReference`; provider execution is separate from submission and query surfaces.
+
+## Submission and projection
+
+`JobSubmitInput` selects `JobProviderIdentity`, a `JobRevision`, literal `JobInput` files, `JobConfigurationInput`, and a caller-retained `submissionKey`. Explicit RFC 6901 presence pointers distinguish an omitted field from a supplied value. `parseJobSubmitInput` checks an untrusted submission before admission. `JobSubmitOutcome` includes the key and host identity needed to reconcile a lost reply; do not resubmit under a new key solely because the first response was lost.
+
+`JobEffectiveConfiguration` is the immutable admitted configuration. `JobSnapshot` projects `JobLifecycleState` from durable facts; it is not an editable record. `JobValidationIssue` identifies invalid submitted fields. `reduceJobSnapshot` folds `JobAcceptedEvent` and subsequent `JobLifecycleEvent` values into a projection; `JobProjectionEvent` names its public event union. The host, not provider progress callbacks, owns lifecycle transitions.
+
+## Provider descriptor and execution
+
+`defineJobProvider` attaches a trusted `JobProviderDefinition` to a callable `JobProviderFactory`. Its serializable `JobProviderDescriptor` (also exposed as `JobProviderRegistration`) declares id, kind/version, configuration manifest, result schema, capability requirements, artifacts, recovery policy, queries, and commands. `JobArtifactDeclaration` bounds each artifact role and media type. `JobRecoveryDescriptor` chooses restart from sealed input, checkpoint, or reconciliation of an external effect.
+
+The `/plugin` type `ExpandPluginJobs` preserves the job provider tuple when a runtime combines plugin factories.
+
+Execution receives `JobProviderExecuteInput` and fenced `JobProviderAttemptServices`: a rooted workspace, abort signal, attempt identity, progress/log methods, artifact publication, and conditional checkpoint publication. `JobProgressUpdate` and `JobLogEntry` are bounded observations, not lifecycle authority. `publishArtifact` returns an immutable `JobPublishedArtifact`; checkpoint-capable providers pass `JobCheckpointPublication` and may resume with `JobProviderResumeContext`.
+
+## Provider extensions
+
+`defineJobQuery` preserves the correlated schemas and handler type of a read-only `JobQueryDefinition`. `defineJobCommand` does the same for a stateful `JobCommandDefinition`. Their serializable `JobExtensionDescriptor` and `JobCommandDescriptor` advertise names and schemas. A command declares `JobCommandReplayPolicy`: `replay-safe`, `reconcile-required`, or `non-replayable`. Choose a policy that matches what the provider can prove after a crash; a retry cannot invent success.
+
+## Related
+
+- [Configuration API](./configuration)
+- [Host admission API](./host)
+- [Runtime architecture](../concepts/architecture)

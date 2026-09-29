@@ -106,6 +106,64 @@ describe('HeadlessImageService', () => {
     expect(completionOrder).toEqual(['capture', 'automatic']);
   });
 
+  it('should bound queued capture bytes while counting shared buffers once and releasing aborted work', async () => {
+    const { imageClient, service } = createFixture();
+    const gate = Promise.withResolvers<void>();
+    vi.mocked(imageClient.transcode).mockImplementationOnce(async () => {
+      await gate.promise;
+      return { success: true, data: files(), issues: [] };
+    });
+    const active = service.export(captureJob('active'));
+    await vi.waitFor(() => {
+      expect(imageClient.transcode).toHaveBeenCalledOnce();
+    });
+
+    const sharedBytes = new Uint8Array(33 * 1024 * 1024);
+    const firstAbort = new AbortController();
+    const sharedAbort = new AbortController();
+    const first = service.export(captureJob('first', { content: sharedBytes, signal: firstAbort.signal }));
+    const shared = service.export(
+      captureJob('shared', { content: sharedBytes.subarray(0), signal: sharedAbort.signal }),
+    );
+    const distinctBytes = new Uint8Array(33 * 1024 * 1024);
+    const overflow = service.export(captureJob('overflow', { content: distinctBytes }));
+    await expect(overflow).rejects.toBeInstanceOf(RangeError);
+    await expect(overflow).rejects.toThrow('Headless image queue is full');
+    expect(imageClient.transcode).toHaveBeenCalledOnce();
+
+    firstAbort.abort();
+    sharedAbort.abort();
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(shared).rejects.toMatchObject({ name: 'AbortError' });
+    const admitted = service.export(captureJob('admitted', { content: distinctBytes }));
+    gate.resolve();
+    await expect(Promise.all([active, admitted])).resolves.toHaveLength(2);
+    expect(imageClient.transcode).toHaveBeenCalledTimes(2);
+  });
+
+  it('should bound the number of queued explicit exports even when they share one payload', async () => {
+    const { imageClient, service } = createFixture();
+    const gate = Promise.withResolvers<void>();
+    vi.mocked(imageClient.transcode).mockImplementationOnce(async () => {
+      await gate.promise;
+      return { success: true, data: files(), issues: [] };
+    });
+    const active = service.export(captureJob('active'));
+    await vi.waitFor(() => {
+      expect(imageClient.transcode).toHaveBeenCalledOnce();
+    });
+    const accepted: Array<Promise<ExportFile[] | undefined>> = [];
+    for (let index = 0; index < 16; index += 1) {
+      accepted.push(service.export(captureJob(`queued-${index}`)));
+    }
+    const overflow = service.export(captureJob('seventeenth'));
+    await expect(overflow).rejects.toBeInstanceOf(RangeError);
+    await expect(overflow).rejects.toThrow('Headless image queue is full');
+    gate.resolve();
+    await expect(Promise.all([active, ...accepted])).resolves.toHaveLength(17);
+    expect(imageClient.transcode).toHaveBeenCalledTimes(17);
+  });
+
   it('rejects pre-aborted and queued work without starting or poisoning sibling jobs', async () => {
     const { imageClient, service } = createFixture();
     const preAborted = new AbortController();

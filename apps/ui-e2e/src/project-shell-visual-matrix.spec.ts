@@ -58,7 +58,7 @@ async function ensureWideLanesOpen(): Promise<void> {
 async function openParameters(): Promise<void> {
   const searchButton = selectors.getByRole('button', { name: /Search projects and chats/u });
   await target.click(searchButton);
-  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions...');
+  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
   await target.fill(commandSearch, 'Open parameters');
   await target.click(selectors.getByText('Open parameters', { exact: true }));
   await target.expectVisible(parametersTab(), 15_000);

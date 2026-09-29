@@ -6,12 +6,15 @@ import type { AcpSessionData } from '@taucad/chat';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
+import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
+import type { AgentConfig } from '#components/chat/use-agent-config.js';
 
 const manifoldKernel = kernelConfigurations.find((k) => k.id === 'manifold')!;
 const execution: { current: ChatComposerContextValue['execution']['execution'] } = {
   current: { kind: 'tau', model: 'm' },
 };
 const setActiveExecution = vi.fn();
+const placements: { current: readonly AgentHostPlacementTarget[] } = { current: [] };
 
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({
@@ -40,8 +43,12 @@ vi.mock('#hooks/use-keyboard.js', () => ({
 /* The sheet has its own suite; here it only has to sit beside Send. */
 vi.mock('#components/chat/chat-agent-sheet.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  ChatAgentSheet: () => (
-    <button type='button' data-slot='agent-trigger'>
+  ChatAgentSheet: ({ agentConfig }: { readonly agentConfig: AgentConfig }) => (
+    <button
+      type='button'
+      data-slot='agent-trigger'
+      data-reasoning={agentConfig.options.find((option) => option.category === 'thought_level')?.currentValue}
+    >
       Agent and model
     </button>
   ),
@@ -59,7 +66,17 @@ vi.mock('#components/icons/svg-icon.js', () => ({
   SvgIcon: ({ id }: { readonly id?: string }) => <span data-testid='svg-icon' data-icon={id} />,
 }));
 
-const { ChatTextareaBar, acpCommandToSlashCommand } = await import('#components/chat/chat-textarea-desktop.js');
+vi.mock('#hooks/use-skills-catalog.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useSkillsCatalog: () => [],
+}));
+
+vi.mock('#hooks/use-cad-agent-config.js', () => ({
+  useAgentHostPlacements: () => ({ targets: placements.current, loading: false }),
+}));
+
+const { ChatTextareaBar, ChatTextareaDesktop, acpCommandToSlashCommand } =
+  await import('#components/chat/chat-textarea-desktop.js');
 
 const noop = (): void => undefined;
 const asyncNoop = async (): Promise<void> => undefined;
@@ -125,6 +142,7 @@ describe('ChatTextareaBar', () => {
     vi.clearAllMocks();
     keybindings.clear();
     execution.current = { kind: 'tau', model: 'm' };
+    placements.current = [];
   });
 
   it('lays out +, the kernel, the agent trigger and Send — no branch, balance or Tau mode (D6, Q11, Q16)', () => {
@@ -201,6 +219,46 @@ describe('ChatTextareaBar', () => {
     });
   });
 
+  it('passes the host-discovered reasoning option to the pre-project agent control', () => {
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex', model: 'gpt-6-astra' };
+    placements.current = [
+      {
+        hostId: 'desktop',
+        rung: 'in-process',
+        label: 'This Mac',
+        workspaceRoot: '',
+        online: true,
+        externalAgents: [
+          {
+            id: 'codex',
+            displayName: 'Codex',
+            defaultModel: 'gpt-6-sol',
+            models: [
+              { id: 'gpt-6-sol', name: 'Sol' },
+              {
+                id: 'gpt-6-astra',
+                name: 'Astra',
+                thoughtLevel: {
+                  type: 'select',
+                  id: 'reasoning_effort',
+                  name: 'Reasoning effort',
+                  category: 'thought_level',
+                  currentValue: 'medium',
+                  options: [
+                    { value: 'medium', name: 'Medium' },
+                    { value: 'high', name: 'High' },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    renderBar();
+    expect(screen.getByRole('button', { name: 'Agent and model' })).toHaveAttribute('data-reasoning', 'medium');
+  });
+
   it('leaves ⌘. and ⌘/ to an edit box that has focus (F6)', () => {
     execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
     renderBar({ acpSessionData: codexSession });
@@ -222,13 +280,102 @@ describe('ACP slash commands', () => {
       id: '$brep-design',
       label: '$brep-design',
       group: 'Commands',
-      commandText: '$brep-design ',
       source: 'codex',
     });
     expect(acpCommandToSlashCommand({ name: 'compact', description: 'Compact' }, 'codex')).toMatchObject({
       id: '/compact',
       label: '/compact',
-      commandText: '/compact ',
     });
+  });
+});
+
+describe('ChatTextareaDesktop draft rehydration', () => {
+  const renderComposer = (inputText: string, acpSessionData: AcpSessionData, canResume = false) => {
+    const element = (session: AcpSessionData): React.JSX.Element => (
+      <TooltipProvider>
+        <ChatTextareaDesktop
+          enableAutoFocus={false}
+          dragKind={undefined}
+          isSubmitting={false}
+          isAttaching={false}
+          canResume={canResume}
+          inputText={inputText}
+          attachments={[]}
+          attachmentDirectory={undefined}
+          sendBlockReason={undefined}
+          attachmentAccept='image/png'
+          attachmentInputSupported
+          status='ready'
+          formattedCancelKeyCombination='⇧⌘⌫'
+          treeService={undefined}
+          chats={[]}
+          setDraftText={noop}
+          acpAgentId='codex'
+          acpSessionData={session}
+          fileInputReference={{ current: null }}
+          containerReference={{ current: null }}
+          focusEditorRef={{ current: undefined }}
+          addContextChipsRef={{ current: undefined }}
+          addContextReferencesRef={{ current: undefined }}
+          handleSubmit={asyncNoop}
+          handleCancelClick={noop}
+          handleDragOver={noop}
+          handleDragLeave={noop}
+          handleDrop={asyncNoop}
+          handlePaste={() => false}
+          handleFileSelect={noop}
+          handleFileChange={noop}
+          handleAddImage={noop}
+          onScreenshotAction={noop}
+          handleTextareaBlur={noop}
+          removeAttachment={noop}
+        />
+      </TooltipProvider>
+    );
+    const view = render(element(acpSessionData));
+    return {
+      ...view,
+      rerenderWith: (session: AcpSessionData): void => {
+        view.rerender(element(session));
+      },
+    };
+  };
+
+  it('should offer Resume through the full composer without the empty-message refusal', () => {
+    renderComposer('', codexSession, true);
+
+    const resume = screen.getByRole('button', { name: 'Resume' });
+    expect(resume).toHaveTextContent('Resume');
+    expect(resume).toHaveAttribute('aria-disabled', 'false');
+  });
+
+  it('keeps one editor scroll region above controls that take layout space', () => {
+    const view = renderComposer('', codexSession);
+    const editorContent = view.container.querySelector('.tiptap')?.parentElement;
+    const editorScroller = editorContent?.parentElement;
+    const bar = view.container.querySelector('[data-slot=composer-bar]');
+
+    expect(editorScroller).toHaveClass('overflow-y-auto', 'max-h-[min(12rem,30cqh)]');
+    expect(editorContent).not.toHaveClass('overflow-y-auto');
+    expect(bar?.parentElement).toBe(editorScroller?.parentElement);
+    expect(bar).not.toHaveClass('absolute');
+  });
+
+  it('chips a restored $skill once the agent advertises it, without changing the draft text', async () => {
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    const view = renderComposer('Make a render of this using $imagegen', codexSession);
+
+    await vi.waitFor(() => {
+      expect(view.container.querySelector('.ProseMirror')).toHaveTextContent('Make a render of this using $imagegen');
+    });
+    /* A chip is the only thing in the editor that draws an icon. */
+    expect(view.container.querySelector('.ProseMirror svg')).toBeNull();
+
+    view.rerenderWith({ ...codexSession, commands: [{ name: '$imagegen', description: 'Generate images' }] });
+
+    await vi.waitFor(() => {
+      expect(view.container.querySelector('.ProseMirror svg')).not.toBeNull();
+    });
+    expect(view.container.querySelector('.ProseMirror')).toHaveTextContent('Make a render of this using $imagegen');
   });
 });

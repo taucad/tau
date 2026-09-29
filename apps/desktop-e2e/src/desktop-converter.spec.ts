@@ -243,7 +243,7 @@ test('[completed-artifact] releases an in-flight conversion utility on unmount a
       mimeType: 'model/obj',
       name: 'slow.obj',
     });
-  await session.page.getByText('Converting file...', { exact: true }).waitFor({ state: 'visible', timeout: 60_000 });
+  await session.page.getByText('Converting file…', { exact: true }).waitFor({ state: 'visible', timeout: 60_000 });
   await openRoute(session.page, '/');
   await expect
     .poll(

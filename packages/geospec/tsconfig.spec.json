@@ -4,15 +4,18 @@
     "outDir": "./out-tsc/spec",
     "composite": false,
     "noEmit": true,
+    "allowJs": true,
     "types": ["node", "vitest/importMeta", "vitest"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
-    "target": "ESNext",
-    "paths": {
-      "#*": ["./src/*"]
-    }
+    "target": "ESNext"
   },
+  "files": [
+    "src/config/__fixtures__/geospec.config.js",
+    "src/config/__fixtures__/geospec.config.mjs",
+    "src/config/__fixtures__/geospec.config.mts"
+  ],
   "include": [
     "vitest.config.ts",
     "vitest.setup.ts",
@@ -24,6 +27,11 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "src/**/*.js",
-    "src/**/*.jsx"
+    "src/**/*.jsx",
+    "host-tests/m3-corpus/*.mjs",
+    "host-tests/fixtures/*.mjs",
+    "host-tests/native-runner/*.test.ts",
+    "host-tests/s7-m3/*.ts",
+    "host-tests/s7-installed-m3/*.mjs"
   ]
 }

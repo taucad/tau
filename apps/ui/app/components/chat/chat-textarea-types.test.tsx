@@ -2,17 +2,20 @@
 import { ChatAttachmentDirectoriesContext, chatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
+import { mock } from 'vitest-mock-extended';
 import {
   resolveKernel,
   tauEditorPanelDragMime,
   tauFileDragMime,
   tauViewerPanelDragMime,
 } from '@taucad/types/constants';
+import type { CadAgentExecution } from '@taucad/chat';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
 import type { DraftAttachment, DraftAttachmentSource } from '#hooks/draft.machine.js';
 import type { ChatTextareaSubmitPayload } from '#components/chat/chat-textarea-types.js';
+import { storedRef } from '#utils/attachment.test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Unified composer-context mock — `useChatTextareaLogic` is a single
@@ -47,6 +50,9 @@ const makeResolvedModel = (
 const stableModel = makeResolvedModel();
 
 let mockActiveModel: ResolvedModel = stableModel;
+let mockExecution: CadAgentExecution | undefined;
+let mockResume: (() => void) | undefined;
+let mockStatus: ChatComposerContextValue['status'] = 'ready';
 
 const chatActionsMock = {
   stop: vi.fn<() => void>(),
@@ -75,7 +81,11 @@ let draftState = defaultDraftState;
 
 const mockUseChatSelector = vi.fn((selector: (state: unknown) => unknown) => selector(draftState));
 
-const storedPdf: DraftAttachment = { hash: 'b'.repeat(64), mediaType: 'application/pdf', filename: 'spec.pdf' };
+const storedPdf: DraftAttachment = storedRef({
+  hash: 'b'.repeat(64),
+  mediaType: 'application/pdf',
+  filename: 'spec.pdf',
+});
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => chatActionsMock,
@@ -95,13 +105,14 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
       draftActorRef: undefined,
       model: { modelId: mockActiveModel.id, model: mockActiveModel, setActiveModel: vi.fn() },
       execution: {
-        execution: { kind: 'tau', model: mockActiveModel.id },
+        execution: mockExecution ?? { kind: 'tau', model: mockActiveModel.id },
         setActiveExecution: vi.fn(),
       },
       kernel: { kernelId: 'openscad', kernel: resolveKernel('openscad'), setActiveKernel: vi.fn() },
-      status: 'ready',
+      status: mockStatus,
       agentActivity: 'ready',
       stop: () => undefined,
+      resume: mockResume,
       contextUsage: undefined,
       session: undefined,
     }) as unknown as ChatComposerContextValue,
@@ -123,7 +134,84 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockActiveModel = stableModel;
+    mockExecution = undefined;
+    mockResume = undefined;
+    mockStatus = 'ready';
     draftState = defaultDraftState;
+  });
+
+  it('should resume an empty main draft through both submit and Enter without sending a new message', async () => {
+    mockResume = vi.fn();
+    draftState = { ...defaultDraftState, draftText: '  ' };
+    const onSubmit = vi.fn(async () => undefined);
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
+
+    expect(result.current.canResume).toBe(true);
+    await act(async () => result.current.handleSubmit());
+    act(() => {
+      result.current.handleTextareaKeyDown(mock<React.KeyboardEvent>({ key: 'Enter', shiftKey: false }));
+    });
+    expect(mockResume).toHaveBeenCalledTimes(2);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(chatActionsMock.setDraftText).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'text', draftText: 'Keep this draft', draftAttachments: [] },
+    {
+      name: 'attachment',
+      draftText: '',
+      draftAttachments: [storedRef({ hash: 'a'.repeat(64), mediaType: 'image/png' })],
+    },
+  ])('should send a new $name draft instead of resuming the interrupted turn', async (draft) => {
+    mockResume = vi.fn();
+    draftState = { ...defaultDraftState, ...draft };
+    const onSubmit = vi.fn(async () => undefined);
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
+
+    expect(result.current.canResume).toBe(false);
+    await act(async () => result.current.handleSubmit());
+    expect(mockResume).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledWith({ content: draft.draftText, attachments: draft.draftAttachments });
+  });
+
+  it.each(['edit', 'attaching', 'unavailable', 'submitted', 'streaming'] as const)(
+    'should not offer or activate Resume while %s',
+    async (state) => {
+      mockResume = vi.fn();
+      mockStatus = state === 'submitted' || state === 'streaming' ? state : 'ready';
+      draftState = { ...defaultDraftState, draftText: '', attachingMain: state === 'attaching' };
+      const onSubmit = vi.fn(async () => undefined);
+      const { result } = renderHook(() =>
+        useChatTextareaLogic({
+          ref: undefined,
+          onSubmit,
+          mode: state === 'edit' ? 'edit' : 'main',
+          isSubmitDisabled: state === 'unavailable',
+        }),
+      );
+
+      expect(result.current.canResume).toBe(false);
+      await act(async () => result.current.handleSubmit());
+      expect(mockResume).not.toHaveBeenCalled();
+      expect(onSubmit).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should stop offering Resume when the session withdraws the action', async () => {
+    const resume = vi.fn();
+    mockResume = resume;
+    draftState = { ...defaultDraftState, draftText: '' };
+    const onSubmit = vi.fn(async () => undefined);
+    const { result, rerender } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
+    expect(result.current.canResume).toBe(true);
+
+    mockResume = undefined;
+    rerender();
+    expect(result.current.canResume).toBe(false);
+    await act(async () => result.current.handleSubmit());
+    expect(resume).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('should expose the chat-scoped model on selectedModel (UI display)', () => {
@@ -135,6 +223,35 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
     );
 
     expect(result.current.selectedModel.id).toBe('chat-scoped-model');
+  });
+
+  it('should admit ACP images and PDFs offline without using the stale Tau model', () => {
+    mockActiveModel = { ...makeResolvedModel('anthropic-claude-haiku-4.5'), isResolved: false, model: undefined };
+    draftState = {
+      ...defaultDraftState,
+      draftAttachments: [storedRef({ hash: 'a'.repeat(64), mediaType: 'image/png' })],
+    };
+
+    const { result, rerender } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+
+    expect(result.current.imageInputSupported).toBe(false);
+    mockExecution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    rerender();
+
+    expect(result.current.imageInputSupported).toBe(true);
+    expect(result.current.attachmentInputSupported).toBe(true);
+    expect(result.current.attachmentAccept).toContain('image/png');
+    expect(result.current.attachmentAccept).toContain('application/pdf');
+    expect(result.current.sendBlockReason).toBeUndefined();
+    act(() => {
+      result.current.handleAddImage('data:image/png;base64,AAA');
+    });
+    expect(chatActionsMock.addDraftAttachment).toHaveBeenCalledWith('data:image/png;base64,AAA', {
+      model: { name: 'codex', support: { modalities: { input: ['text', 'image', 'pdf'], output: ['text'] } } },
+    });
+    expect(toastErrorMock).not.toHaveBeenCalled();
   });
 
   it('should invoke onSubmit with ONLY content and attachments when handleSubmit fires (no model / no metadata)', async () => {

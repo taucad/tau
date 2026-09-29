@@ -1,0 +1,62 @@
+--- a/src/FoundationClasses/TKernel/Resource/Resource_Unicode.cxx
++++ b/src/FoundationClasses/TKernel/Resource/Resource_Unicode.cxx
+@@ -655,17 +655,13 @@
+ {
+   switch (theFormat)
+   {
+-    case Resource_FormatType_SJIS: {
+-      ConvertSJISToUnicode(theFromStr, theToStr);
+-      break;
+-    }
+-    case Resource_FormatType_EUC: {
+-      ConvertEUCToUnicode(theFromStr, theToStr);
+-      break;
+-    }
+-    case Resource_FormatType_GB: {
+-      ConvertGBToUnicode(theFromStr, theToStr);
+-      break;
++    case Resource_FormatType_SJIS:
++    case Resource_FormatType_EUC:
++    case Resource_FormatType_GB:
++    case Resource_FormatType_Big5:
++    case Resource_FormatType_GBK: {
++      // GeoSpec reads STEP as UTF-8 (\X2\/\X4\) and ISO 8859 (\S\) only: the CJK tables stay unlinked.
++      throw Standard_NotImplemented("Resource_Unicode::ConvertFormatToUnicode - CJK code pages are not built");
+     }
+     case Resource_FormatType_ANSI: {
+       theToStr = TCollection_ExtendedString(theFromStr, false);
+@@ -703,16 +699,8 @@
+         }
+         theToStr.AssignCat(aRes);
+       }
+-      break;
+-    }
+-    case Resource_FormatType_Big5: {
+-      ConvertBig5ToUnicode(theFromStr, theToStr);
+       break;
+     }
+-    case Resource_FormatType_GBK: {
+-      ConvertGBKToUnicode(theFromStr, theToStr);
+-      break;
+-    }
+     case Resource_FormatType_UTF8: {
+       theToStr = TCollection_ExtendedString(theFromStr, true);
+       break;
+@@ -733,14 +721,10 @@
+ {
+   switch (theFormat)
+   {
+-    case Resource_FormatType_SJIS: {
+-      return ConvertUnicodeToSJIS(theFromStr, theToStr, theMaxSize);
+-    }
+-    case Resource_FormatType_EUC: {
+-      return ConvertUnicodeToEUC(theFromStr, theToStr, theMaxSize);
+-    }
++    case Resource_FormatType_SJIS:
++    case Resource_FormatType_EUC:
+     case Resource_FormatType_GB: {
+-      return ConvertUnicodeToGB(theFromStr, theToStr, theMaxSize);
++      throw Standard_NotImplemented("Resource_Unicode::ConvertUnicodeToFormat - CJK code pages are not built");
+     }
+     case Resource_FormatType_ANSI: {
+       return ConvertUnicodeToANSI(theFromStr, theToStr, theMaxSize);

@@ -241,10 +241,10 @@ export function buildBundledTypes(): Record<string, string> {
 /** Extract the type-only model surface without pulling the runtime into Monaco. */
 export function buildReplicadModelTypes(): BundledTypesPackageMap {
   const root = join(import.meta.dirname, '../../..');
+  const annotationRoot = join(root, 'packages/plugins/replicad/src');
   const sources = {
     'model.d.ts': 'packages/plugins/replicad/src/model.ts',
     'material.d.ts': 'packages/core/geometry/src/utils/glb-material.ts',
-    'interfaces.d.ts': 'packages/plugins/replicad/src/annotations/interface-declarations.ts',
     'json.d.ts': 'libs/types/src/types/json-value.types.ts',
     'gltf.d.ts': 'node_modules/@gltf-transform/core/src/types/gltf.ts',
   };
@@ -277,6 +277,15 @@ export function buildReplicadModelTypes(): BundledTypesPackageMap {
       ];
     }),
   );
+  const annotationPath = join(annotationRoot, 'annotations/interface-declarations.ts');
+  const annotations = ts.transpileDeclaration(readFileSync(annotationPath, 'utf8'), {
+    fileName: annotationPath,
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ESNext },
+  });
+  if (annotations.diagnostics?.some((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)) {
+    throw new Error('Replicad annotation declaration emit failed');
+  }
+  files['interfaces.d.ts'] = annotations.outputText;
   return {
     '@taucad/replicad': {
       content: "export type * from './model.js';\n",
@@ -285,7 +294,10 @@ export function buildReplicadModelTypes(): BundledTypesPackageMap {
         name: '@taucad/replicad',
         type: 'module',
         types: './index.d.ts',
-        exports: { './model': { types: './model.d.ts' } },
+        exports: {
+          './model': { types: './model.d.ts' },
+          './annotations': { types: './interfaces.d.ts' },
+        },
       },
     },
   };

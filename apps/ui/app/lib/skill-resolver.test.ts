@@ -55,6 +55,21 @@ function createMemoryResolver(files: MemoryTree) {
 }
 
 describe('createSkillResolver', () => {
+  it('resolves the shipped workbench body through the browser system catalog', async () => {
+    const resolver = createMemoryResolver({});
+    expect(await resolver.listSkills()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'workbench', source: 'system' })]),
+    );
+    const resolved = await resolver.resolveSkill('workbench');
+    expect(resolved.success).toBe(true);
+    if (resolved.success) {
+      expect(resolved.content).toContain(
+        '`arrange_workbench({ open?, close?, views?, entries?, viewer?, workbench?, lanes?, basedOn? })`',
+      );
+      expect(resolved.content).toContain('Read before you rearrange');
+    }
+  });
+
   it('should expose the system create-skill as a virtual system resource', async () => {
     const resolver = createMemoryResolver({});
 
@@ -107,7 +122,10 @@ describe('createSkillResolver', () => {
         skillPath: '.agents/skills/create-skill/SKILL.md',
       }),
     );
-    expect(createSkill).not.toHaveProperty('shadowedSources');
+    // The replaced bundle is recorded as shadowed; none of its content or metadata leaks through.
+    expect(createSkill?.shadowedSources).toEqual([
+      expect.objectContaining({ source: 'system', resourceUri: 'system:skills/create-skill/SKILL.md' }),
+    ]);
     expect(createSkill).toHaveProperty('version', undefined);
     expect(createSkill).toHaveProperty('whenToUse', undefined);
 
@@ -123,7 +141,7 @@ describe('createSkillResolver', () => {
     if (resolved.success) {
       expect(resolved.content).toContain('# Workspace replacement');
     }
-    expect(resolved).not.toHaveProperty('shadowedSources');
+    expect(resolved).toHaveProperty('shadowedSources', createSkill?.shadowedSources);
     expect(resolved).not.toHaveProperty('version');
     expect(resolved).not.toHaveProperty('whenToUse');
   });

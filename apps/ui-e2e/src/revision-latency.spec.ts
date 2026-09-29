@@ -17,24 +17,46 @@
  * The chip drops its *Modified* suffix the moment the checkout stops being
  * dirty, which is exactly the transition B1 budgets.
  *
- * The depth B4 reads at is whatever the time budget below buys, and the artifact
- * records it. Reaching 500 revisions in a run needs a bulk-seed verb on the
- * revision port (`packages/revisions`), which this lane does not own.
+ * B4 reads at D11's fixture, 500 revisions and 8 branches, built through the
+ * product's own gestures: 500 saves on `main`, and a *New branch* from the
+ * Revisions pane every 62 of them, so seven more lines fork along it. Saves are
+ * incremental, so no bulk-seed verb is needed; the fixture has a 180 s
+ * allowance (`depthBudgetMilliseconds`). A run that falls short fails on
+ * `depth` or `branches` rather than reading at a smaller fixture.
  *
- * **B7 is deliberately not here.** "Mint → push request issued" needs a
+ * One sample is not a reading (a4 ruling): B1 is the median of `warmSaves` warm
+ * saves and B4 the median of `reopens` reopenings, with every sample and — for
+ * B4 — the session's first open recorded beside it.
+ *
+ * **Both gates read the page's own clock** (a3 ruling). A reading taken as
+ * wall time around `target.click` and `expectVisible` measured the harness:
+ * the click command is one vitest-browser RPC plus Playwright's actionability
+ * checks, and every visibility read is seven sequential CDP calls, so the r11
+ * B4 reading of 120 ms held 37 ms of product (click → heading visible) and
+ * 48 ms to the painted frame. Each gate now runs from the trigger event's
+ * `timeStamp` in the page to the frame after the surface it budgets changed,
+ * and records the harness's wall time beside it as `harnessDuration`.
+ *
+ * **B2 is deliberately not here.** "Mint → push request issued" needs a
  * connected remote, which needs a signed-in account and a live Tau Cloud API;
  * `apps/ui-e2e` boots neither (C60) and this lane may not make it. Its debounce
  * lives in `sync.machine.ts`, so under contract §7 — "benchmarks are owned by
- * the lane that owns the file under test" — B7 belongs beside that machine.
+ * the lane that owns the file under test" — B2 belongs beside that machine.
  */
 
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
+import {
+  awaitSaved,
+  editSource,
+  focusSource,
+  openFixture,
+  openSourceFile,
+  revisionChip,
+  saveShortcut,
+  visibleRevisionsPanel,
+} from '#support/revision-session.js';
 import * as target from '#support/external-target.js';
-
-const visibleRevisionsPanel = '[data-slot="revisions-panel-body"]:visible';
-const revisionChip = (): ReturnType<typeof selectors.getByRole> =>
-  selectors.getByRole('button', { name: /^Open Revisions\./u });
 
 /*
  * The baseline OQ5 asks the first run to record, measured 2026-09-16 on an Apple
@@ -79,108 +101,175 @@ const revisionChip = (): ReturnType<typeof selectors.getByRole> =>
  * 100 ms still needs a capture that does not re-read unchanged files, not a
  * faster digest — `crypto.subtle` (C53) was measured and declined on this evidence.
  */
-/** B1's stated budget, and the regression ceiling actually asserted. */
+/*
+ * The gates (revisions charter EQ12, D11, I13).
+ *
+ * Each gate asserts one ceiling, 1.5× its *loaded* baseline, and names the
+ * fixture that baseline was read at. The budgets stay the stated numbers and
+ * never loosen; a ceiling only ratchets down, and after W4 lands it is
+ * re-measured and tightened. To (re)set a gate, run this spec on the loaded
+ * machine, read the reading from its artifact, and write it into the one
+ * baseline constant below with the run it came from.
+ *
+ * `Number.NaN` is a baseline not yet measured at the gate's current fixture:
+ * the assertion fails until it is filled, loudly, rather than passing on a
+ * number read at another fixture.
+ */
+const ceilingOverLoadedBaseline = 1.5;
+
+/** B1's stated budget (rule 20). */
 const savedBudgetMilliseconds = 100;
-const savedCeilingMilliseconds = 3000;
-/** B4's stated budget, and the regression ceiling actually asserted. */
+/**
+ * B1's fixture (D11): 1 000 source files and one 5 MiB export, warm save.
+ * Loaded baseline: `revision-latency-b1.json` `warmDuration` — the median of
+ * `warmSaves` page-clock samples — read at 8ed6eb2b6 (after W5b and W13) in
+ * the quiet-window run E2E-D u1 at a 1-minute load of 9–12; its repeat u2 read
+ * 57.9 ms. A run under load reads several times higher (r23: 284 ms at ~25),
+ * so this spec is read only below a load of 15.
+ */
+const savedLoadedBaselineMilliseconds = 61.5;
+/** Warm saves B1 reads; `warmDuration` is their median (a4 ruling). */
+const warmSaves = 5;
+const savedFixtureQuery = '?files=1000&binaryMib=5';
+
+/** B4's stated budget (rule 20). */
 const historyBudgetMilliseconds = 50;
-const historyCeilingMilliseconds = 800;
+/**
+ * B4's fixture (D11): 500 revisions on `main` and 8 branches, the other seven
+ * forked along it by *New branch*; read on the page's clock, after a reload so
+ * the open is the session's first.
+ * Loaded baseline: `revision-latency-b4.json` `openDuration` — the median of
+ * `reopens` page-clock samples — read at 8ed6eb2b6 in the quiet-window run
+ * E2E-D u1 (500 revisions, 8 branches, fixture built in 98 s).
+ */
+const historyLoadedBaselineMilliseconds = 31.6;
+/** Times B4 closes and reopens History; `openDuration` is their median (a4 ruling). */
+const reopens = 3;
 
-/** How long B4 may spend building depth before it takes its reading. */
-const depthBudgetMilliseconds = 90_000;
+/**
+ * How long B4 may spend building its fixture before it takes its reading: an
+ * allowance for the fixture, not a latency budget. 90 s reached 413 revisions
+ * and 7 branches at load 11–13.5 (W4c a3); the a4 ruling allows 180 s inside
+ * the 300 s test timeout, and a fixture still short of D11 fails.
+ */
+const depthBudgetMilliseconds = 180_000;
 const depthTarget = 500;
+const branchTarget = 8;
 
-const declineCookies = async (): Promise<void> => {
-  const decline = selectors.getByRole('button', { name: 'Decline' }).last();
-  await target.expectVisible(decline, 15_000);
-  await target.click(decline);
-};
-
-const openFixture = async (query: string): Promise<void> => {
-  await target.setViewport({ width: 1440, height: 900 });
-  await target.navigate(`/__e2e/project-file-tree${query}`);
-  await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 180_000);
-  await declineCookies();
-};
-
-const saveShortcut = async (): Promise<string> =>
-  target.evaluate(() => (/mac/i.test(navigator.userAgent) ? 'Meta+s' : 'Control+s'));
-
-const filesPane = (): ReturnType<typeof selectors.getByRole> =>
-  selectors.getByRole('region', { name: /^Files for /u }).first();
-const treeItem = (path: string): ReturnType<typeof selectors.getByCss> =>
-  filesPane().getByCss(`[data-testid="file-tree-item"][data-file-tree-path="${path}"]`);
+/** Which surface a page-clock reading waits for. */
+type PageClockSurface = 'saved' | 'history';
 
 /**
- * Open the seed's source file the way a person opens it, through the tree.
+ * Start a reading on the page's own clock (a3 ruling).
  *
- * A fresh project opens with no editor tab, and the Files pane is reached from
- * the command palette when the workbench is showing something else.
+ * The next trigger event — the save chord's `keydown`, or a `click` — is time
+ * zero, at its own `timeStamp`; the reading ends at the frame after the surface
+ * changed: the chip saying *Saved*, or History's first row. Capture on
+ * the global, so an editor that stops the chord's propagation cannot hide it.
+ *
+ * @param surface - What the reading waits for.
  */
-const openSourceFile = async (): Promise<void> => {
-  if (!(await target.isVisible(filesPane()))) {
-    await target.click(selectors.getByRole('button', { name: /Search/u }));
-    const search = selectors.getByPlaceholder('Search projects, chats, and actions...');
-    await target.expectVisible(search, 15_000);
-    await target.fill(search, 'Open files');
-    await target.click(selectors.getByText('Open files', { exact: true }));
-  }
-  await target.expectVisible(filesPane(), 60_000);
-  for (const path of ['public', 'public/models']) {
-    const folder = treeItem(path);
-    await target.expectVisible(folder, 30_000);
-    if ((await target.getAttribute(folder, 'aria-expanded')) !== 'true') {
-      await target.click(folder, { position: { x: 8, y: 14 } });
-    }
-  }
-  const entry = treeItem('public/models/honeycomb.js');
-  await target.expectVisible(entry, 30_000);
-  await target.click(entry);
-};
-
-/** Put the caret in the source editor. Once: a save does not move focus. */
-const focusSource = async (): Promise<void> => {
-  const lines = selectors.getByCss('.monaco-editor .view-lines').last();
-  await target.expectVisible(lines, 60_000);
-  await target.click(lines);
+const armPageClock = async (surface: PageClockSurface): Promise<void> => {
+  await target.evaluate((kind: PageClockSurface) => {
+    const clock: { startAt?: number; paintedAt?: number } = {};
+    Object.assign(globalThis, { __tauPageClock: clock });
+    const trigger = kind === 'saved' ? 'keydown' : 'click';
+    const onTrigger = (event: Event): void => {
+      if (kind === 'saved' && !(event instanceof KeyboardEvent && event.key.toLowerCase() === 's')) {
+        return;
+      }
+      clock.startAt ??= event.timeStamp;
+      globalThis.removeEventListener(trigger, onTrigger, { capture: true });
+    };
+    globalThis.addEventListener(trigger, onTrigger, { capture: true });
+    const reached = (): boolean =>
+      kind === 'saved'
+        ? [...document.querySelectorAll('button')].some((button) =>
+            /^Open Revisions\..*\. Saved\b/u.test(button.getAttribute('aria-label') ?? ''),
+          )
+        : document.querySelector(
+            '[data-slot="revisions-panel-body"] ol[aria-label="Revision history"] button[data-revision-row]',
+          ) !== null;
+    const observer = new MutationObserver(() => {
+      if (clock.startAt === undefined || !reached()) {
+        return;
+      }
+      observer.disconnect();
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          clock.paintedAt = performance.now();
+        });
+      });
+    });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['aria-label'],
+    });
+  }, surface);
 };
 
 /**
- * One character into the open file, then wait for the chip to say *Modified*.
+ * The middle sample; the mean of the middle two for an even count.
  *
- * `Escape` closes Monaco's suggest widget, which otherwise covers the editor
- * and swallows the next gesture — the second reading of this file's first
- * chip-based run died on exactly that, a click retried until it timed out.
+ * @param samples - At least one reading.
+ * @returns The median.
  */
-const editSource = async (): Promise<void> => {
-  await target.keyboardPress('a');
-  await target.keyboardPress('Escape');
+const median = (samples: readonly number[]): number => {
+  const sorted = samples.toSorted((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+};
+
+/**
+ * Finish a page-clock reading.
+ *
+ * @returns Milliseconds from the trigger to the frame after the surface changed.
+ */
+const readPageClock = async (): Promise<number> => {
   await target.waitFor(
     () =>
-      [...document.querySelectorAll('button')].some((button) =>
-        /^Open Revisions\..*Modified/u.test(button.getAttribute('aria-label') ?? ''),
-      ),
+      (globalThis as unknown as { __tauPageClock?: { paintedAt?: number } }).__tauPageClock?.paintedAt !== undefined,
     undefined,
-    { timeout: 60_000 },
+    { timeout: 30_000 },
   );
+  return target.evaluate(() => {
+    const { startAt = Number.NaN, paintedAt = Number.NaN } = (
+      globalThis as unknown as { __tauPageClock: { startAt?: number; paintedAt?: number } }
+    ).__tauPageClock;
+    return paintedAt - startAt;
+  });
 };
 
-/** Wait for the checkout to stop being dirty — the chip's own *Saved* signal. */
-const awaitSaved = async (timeout = 60_000): Promise<void> => {
-  await target.waitFor(
-    () =>
-      [...document.querySelectorAll('button')].some((button) => {
-        const label = button.getAttribute('aria-label') ?? '';
-        return label.startsWith('Open Revisions.') && !label.includes('Modified');
-      }),
-    undefined,
-    { timeout },
+/**
+ * Fork one more line off `main` where it is now, from the pane's strip — the
+ * product's only *New branch* (C3) — and hand the slot and the caret back to
+ * the editor.
+ *
+ * @param name - The new branch's name.
+ */
+const forkBranchHere = async (name: string): Promise<void> => {
+  await target.click(revisionChip());
+  const panel = selectors.getByCss(visibleRevisionsPanel);
+  await target.click(panel.getByCss('[aria-label="Where you are"]').getByRole('button', { name: 'New branch' }));
+  await target.fill(selectors.getByRole('textbox', { name: 'Name for the new branch' }), name);
+  await target.click(selectors.getByRole('button', { name: 'Create branch' }));
+  await target.expectVisible(
+    selectors.getByRole('list', { name: 'Branches' }).getByText(name, { exact: true }),
+    60_000,
+  );
+  await target.click(selectors.getByRole('button', { name: 'Close Revisions' }));
+  await target.expectHidden(selectors.getByCss(visibleRevisionsPanel), 15_000);
+  /* Focus, not a click: sixty saves in, the typed line has scrolled the editor
+   * sideways and the lines' centre sits under the gutter. The caret stays put. */
+  await target.focus(
+    selectors.getByCss('.monaco-editor .native-edit-context, .monaco-editor textarea.inputarea').last(),
   );
 };
 
 test('records how long *Saved* takes after Mod+S in a project with bulk in it (B1)', async () => {
-  /* 100 source files and one 5 MiB export: W6's stated condition. */
-  await openFixture('?files=100&binaryMib=5');
+  await openFixture(savedFixtureQuery);
   const shortcut = await saveShortcut();
   await target.expectVisible(revisionChip(), 120_000);
   await openSourceFile();
@@ -192,57 +281,130 @@ test('records how long *Saved* takes after Mod+S in a project with bulk in it (B
    * repeats all day, which is the one B1 is about.
    */
   await editSource();
+  await armPageClock('saved');
   const coldStartedAt = performance.now();
   await target.keyboardPress(shortcut);
   await awaitSaved(180_000);
-  const coldDuration = performance.now() - coldStartedAt;
+  const coldHarnessDuration = performance.now() - coldStartedAt;
+  const coldDuration = await readPageClock();
 
-  await editSource();
-  const warmStartedAt = performance.now();
-  await target.keyboardPress(shortcut);
-  await awaitSaved();
-  const warmDuration = performance.now() - warmStartedAt;
+  const warmSamples: Array<Readonly<{ page: number; harness: number }>> = [];
+  for (let sample = 0; sample < warmSaves; sample += 1) {
+    await editSource();
+    await armPageClock('saved');
+    const warmStartedAt = performance.now();
+    await target.keyboardPress(shortcut);
+    await awaitSaved();
+    const harness = performance.now() - warmStartedAt;
+    warmSamples.push({ page: await readPageClock(), harness });
+  }
+  const warmDuration = median(warmSamples.map((sample) => sample.page));
+  const harnessDuration = median(warmSamples.map((sample) => sample.harness));
 
   await target.writeArtifact(
     'revision-latency-b1.json',
     JSON.stringify(
-      { fileCount: 100, binaryMib: 5, coldDuration, warmDuration, budgetMilliseconds: savedBudgetMilliseconds },
+      {
+        fixture: savedFixtureQuery,
+        clock: 'page: save keydown timeStamp to the frame after the chip says Saved',
+        coldDuration,
+        coldHarnessDuration,
+        warmSamples,
+        warmDuration,
+        harnessDuration,
+        budgetMilliseconds: savedBudgetMilliseconds,
+        loadedBaselineMilliseconds: savedLoadedBaselineMilliseconds,
+      },
       undefined,
       2,
     ),
   );
-  expect(warmDuration).toBeLessThan(savedCeilingMilliseconds);
+  expect(warmDuration).toBeLessThanOrEqual(savedBudgetMilliseconds);
+  expect(warmDuration).toBeLessThan(savedLoadedBaselineMilliseconds * ceilingOverLoadedBaseline);
 });
 
-test('records how long the History region takes to open at depth (B4)', async () => {
+test('records how long the History region takes to open at D11 (B4)', async () => {
   await openFixture('');
   const shortcut = await saveShortcut();
   await target.expectVisible(revisionChip(), 120_000);
   await openSourceFile();
   await focusSource();
 
-  /* Depth is built through the product's own save gesture, in the editor, with
-   * the Revisions pane closed; nothing else here is part of B4's budget. */
+  /* D11 through the product's own gestures: saves in the editor, and every
+   * `branchEvery` of them one more line forked from the pane's strip. */
+  const branchEvery = Math.floor(depthTarget / branchTarget);
   let depth = 0;
+  let branches = 1;
   const startedAt = performance.now();
   while (depth < depthTarget && performance.now() - startedAt < depthBudgetMilliseconds) {
     await editSource();
     await target.keyboardPress(shortcut);
     await awaitSaved();
     depth += 1;
+    if (depth % branchEvery === 0 && branches < branchTarget) {
+      await forkBranchHere(`line-${String(branches)}`);
+      branches += 1;
+    }
   }
+  const fixtureDuration = performance.now() - startedAt;
 
-  /* The pane has never been opened in this session, so this is the region's
-   * first paint from a projection the page already holds. */
-  const openedAt = performance.now();
-  await target.click(revisionChip());
-  await target.expectVisible(selectors.getByCss(`${visibleRevisionsPanel} #revision-history-heading`), 30_000);
-  const openDuration = performance.now() - openedAt;
+  /* A new session, so the open below is the pane's first in it — the fixture
+   * opened it seven times. Wait for the header chip's own history read (its
+   * card lists the newest rows), then let the card close again. */
+  await target.reload();
+  await target.expectVisible(revisionChip(), 120_000);
+  await target.hover(revisionChip());
+  const recent = selectors.getByRole('list', { name: 'Recent revisions' });
+  await target.expectVisible(recent.getByText(`Rev ${String(depth)}`, { exact: true }), 60_000);
+  await target.mouseMove(8, 450);
+  await target.expectHidden(recent, 15_000);
+
+  const openHistory = async (): Promise<Readonly<{ page: number; harness: number }>> => {
+    await armPageClock('history');
+    const openedAt = performance.now();
+    await target.click(revisionChip());
+    await target.expectVisible(selectors.getByCss(`${visibleRevisionsPanel} #revision-history-heading`), 30_000);
+    const harness = performance.now() - openedAt;
+    return { page: await readPageClock(), harness };
+  };
+  const firstOpen = await openHistory();
+  const branchList = await target.read(selectors.getByRole('list', { name: 'Branches' }).getByRole('listitem'));
+  const branchRows = branchList.count;
+  const openSamples: Array<Readonly<{ page: number; harness: number }>> = [];
+  for (let sample = 0; sample < reopens; sample += 1) {
+    await target.click(selectors.getByRole('button', { name: 'Close Revisions' }));
+    /* Closed means unmounted: a pane kept in the DOM would hand the next
+     * reading a row that is already there. */
+    await target.expectCount(selectors.getByCss('[data-slot="revisions-panel-body"]'), 0, 15_000);
+    openSamples.push(await openHistory());
+  }
+  const openDuration = median(openSamples.map((sample) => sample.page));
+  const harnessDuration = median(openSamples.map((sample) => sample.harness));
 
   await target.writeArtifact(
     'revision-latency-b4.json',
-    JSON.stringify({ depth, depthTarget, openDuration, budgetMilliseconds: historyBudgetMilliseconds }, undefined, 2),
+    JSON.stringify(
+      {
+        depth,
+        depthTarget,
+        branches: branchRows,
+        branchTarget,
+        fixtureDuration,
+        clock: 'page: chip click timeStamp to the frame after History shows its first row',
+        firstOpen,
+        openSamples,
+        openDuration,
+        harnessDuration,
+        budgetMilliseconds: historyBudgetMilliseconds,
+        loadedBaselineMilliseconds: historyLoadedBaselineMilliseconds,
+      },
+      undefined,
+      2,
+    ),
   );
-  expect(depth).toBeGreaterThan(0);
-  expect(openDuration).toBeLessThan(historyCeilingMilliseconds);
+  /* Short of D11 is a failed fixture, never a reading at a smaller one. */
+  expect(depth).toBe(depthTarget);
+  expect(branchRows).toBe(branchTarget);
+  expect(openDuration).toBeLessThanOrEqual(historyBudgetMilliseconds);
+  expect(openDuration).toBeLessThan(historyLoadedBaselineMilliseconds * ceilingOverLoadedBaseline);
 });

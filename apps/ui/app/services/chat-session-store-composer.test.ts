@@ -9,10 +9,10 @@ import type { ComposerRecordMachineEmitted } from '#machines/composer-record.mac
 import { composerRecordActors, composerRecordMachine } from '#machines/composer-record.machine.js';
 import { deferredRecordStore } from '#services/chat-session-store-composer.js';
 
-/** A binding nothing will ever settle: the chat row never answers, or a predecessor's drain never lands. */
+/** A predecessor whose final filesystem write never lands. */
 const neverBound = async (): Promise<never> =>
   new Promise<never>(() => {
-    /* The project this chat belongs to is never named. */
+    /* The previous composer actor never finishes its write. */
   });
 
 /** What the bound throws with, whichever call waited it out. */
@@ -27,7 +27,7 @@ describe('deferredRecordStore', () => {
       const reading = deferredRecordStore(neverBound()).read();
       const failed = expect(reading).rejects.toMatchObject({
         ...timedOut,
-        message: 'This chat never found the project its draft is saved in. Reload the page and try again.',
+        message: 'The previous draft save for this chat did not finish. Reload the page and try again.',
       });
 
       await vi.advanceTimersByTimeAsync(29_000);

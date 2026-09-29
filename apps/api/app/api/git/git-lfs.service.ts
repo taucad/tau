@@ -9,6 +9,7 @@ import { projectGitLfsObject } from '#database/schema.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import type { LfsObjectLocation } from '#api/git/lfs-keys.js';
 import { resolveLfsObjectLocation, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
+import { quotaRefusalSentence } from '#api/git/git.constants.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import type { GitAccess } from '#api/git/git.service.js';
 
@@ -18,19 +19,32 @@ const objectContentType = 'application/octet-stream';
 
 type LfsObjectRequest = { readonly oid: string; readonly size: number };
 
-/** D16/AC16: the whole batch is refused with the objects that do not fit. */
-const quotaRefusal = (reservation: {
-  readonly shortfallBytes: number;
-  readonly remainingBytes: number;
-  readonly files: ReadonlyArray<{ readonly oid: string; readonly size: number }>;
-}): LfsBatchOutcome => ({
+/** How many of the refused objects a refusal names, like the `pre-receive` list. */
+const refusedFileLimit = 10;
+
+/**
+ * D16/AC16, D17: the whole batch is refused with the largest objects that do
+ * not fit, and the one sentence addressed to this caller.
+ *
+ * @param reservation - What the reservation refused.
+ * @param access - The caller and the owner's allowance.
+ * @returns The `413`.
+ */
+const quotaRefusal = (
+  reservation: {
+    readonly shortfallBytes: number;
+    readonly remainingBytes: number;
+    readonly files: ReadonlyArray<{ readonly oid: string; readonly size: number }>;
+  },
+  access: GitAccess,
+): LfsBatchOutcome => ({
   status: 413,
   body: {
     code: 'GIT_LFS_QUOTA_EXCEEDED',
-    message: `Storage quota exceeded: this push needs ${String(reservation.shortfallBytes)} bytes more than the plan allows.`,
+    message: quotaRefusalSentence(access.quotaAudience ?? 'ownerAtTopTier', access.storageLimitBytes),
     shortfallBytes: reservation.shortfallBytes,
     remainingBytes: reservation.remainingBytes,
-    files: reservation.files,
+    files: reservation.files.toSorted((left, right) => right.size - left.size).slice(0, refusedFileLimit),
   },
 });
 
@@ -155,7 +169,7 @@ export class GitLfsService {
     const reservation = await this.repositories.reserveLfsObjects({ access: args.access, objects: args.objects });
     if (reservation.status === 'quota') {
       // The client maps the refused objects back to paths.
-      return quotaRefusal(reservation);
+      return quotaRefusal(reservation, args.access);
     }
     const states = new Map(reservation.objects.map((object) => [object.oid, object]));
     const present = await Promise.all(
@@ -187,7 +201,7 @@ export class GitLfsService {
     if (unconfirmed.length > 0) {
       const again = await this.repositories.reserveLfsObjects({ access: args.access, objects: unconfirmed });
       if (again.status === 'quota') {
-        return quotaRefusal(again);
+        return quotaRefusal(again, args.access);
       }
     }
 

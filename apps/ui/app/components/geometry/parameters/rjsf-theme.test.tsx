@@ -470,7 +470,7 @@ describe('composite fields', () => {
     const cameraTrigger = screen.getByRole('button', { name: 'Group: Camera' });
     const cameraContent = cameraTrigger
       .closest('[data-slot="parameter-group"]')
-      ?.querySelector(':scope > [data-slot="parameter-group-content"]');
+      ?.querySelector(':scope > [data-slot="parameter-group-content"] > [data-slot="parameter-group-body"]');
     expect(screen.getAllByRole('button', { name: 'Group: Camera' })).toHaveLength(1);
     expect(cameraContent).toHaveClass('[&>.panel>.form-group]:flex', '[&>.panel>.form-group]:justify-end');
     expect(screen.getByRole('combobox', { name: 'Select for Framing' })).toHaveTextContent('Fit');
@@ -632,6 +632,36 @@ describe('composite fields', () => {
 
     expect(itemTrigger).toHaveAttribute('aria-expanded', 'true');
     expect(onChange.mock.lastCall?.[0].formData).toEqual({ visiblePrimitives: [] });
+  });
+});
+
+describe('field labels', () => {
+  it('should name every widget by the label its row shows', () => {
+    renderSchemaForm({
+      schema: {
+        type: 'object',
+        properties: {
+          speed: { type: 'number', title: 'Demo speed' },
+          host: { type: 'string', title: 'Printer address' },
+          lit: { type: 'boolean', title: 'Chamber light' },
+          quality: { type: 'string', title: 'Print quality', enum: ['draft', 'fine'] },
+          tags: { type: 'array', title: 'Tags', items: { type: 'string' } },
+        },
+      },
+      formData: { speed: 1, host: 'printer.local', lit: false, quality: 'draft', tags: ['one'] },
+    });
+
+    /* WCAG 2.5.3: each control's accessible name contains the label its row shows. */
+    for (const [role, name, label] of [
+      ['spinbutton', 'Input for Demo Speed', 'Demo Speed'],
+      ['textbox', 'Input for Printer Address', 'Printer Address'],
+      ['switch', 'Toggle for Chamber Light', 'Chamber Light'],
+      ['combobox', 'Select for Print Quality', 'Print Quality'],
+      ['textbox', 'Input for Tags 1', 'Tags 1'],
+    ] as const) {
+      expect(screen.getByLabelText(`Parameter: ${label}`)).toHaveTextContent(label);
+      expect(screen.getByRole(role, { name })).toBeInTheDocument();
+    }
   });
 });
 

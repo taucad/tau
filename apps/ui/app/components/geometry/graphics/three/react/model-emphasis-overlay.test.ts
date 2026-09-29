@@ -11,10 +11,9 @@ import {
   MeshStandardMaterial,
   OneFactor,
   PerspectiveCamera,
-  Plane,
   Scene,
 } from 'three';
-import type { Group, WebGLRenderer } from 'three';
+import type { Group, Material, WebGLRenderer } from 'three';
 import {
   createModelEmphasisResources,
   modelEmphasisMaskSamples,
@@ -24,6 +23,7 @@ import {
   syncModelEmphasisFrame,
   syncModelEmphasisProxies,
 } from '#components/geometry/graphics/three/react/model-emphasis-overlay.js';
+import { createSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
 import {
   emptyModelEmphasisSet,
   getModelEmphasisSet,
@@ -51,7 +51,7 @@ const makeRecordingRenderer = (): { gl: WebGLRenderer; calls: string[] } => {
 
 describe('model emphasis overlay resources', () => {
   it('proxies each emphasised mesh into both mask layers and the wash group, sharing six materials', () => {
-    const resources = createModelEmphasisResources('webgl');
+    const resources = createModelEmphasisResources('webgl', createSectionClip('webgl'));
     const hovered = makeSource();
     const selected = makeSource();
 
@@ -77,11 +77,9 @@ describe('model emphasis overlay resources', () => {
     resources.dispose();
   });
 
-  it('follows source world transforms and clipping without traversing the scene', () => {
-    const resources = createModelEmphasisResources('webgpu');
+  it('follows source world transforms without traversing the scene', () => {
+    const resources = createModelEmphasisResources('webgpu', createSectionClip('webgpu'));
     const source = makeSource();
-    const plane = new Plane();
-    (source.material as MeshStandardMaterial).clippingPlanes = [plane];
     source.position.set(1, 2, 3);
     source.updateMatrixWorld(true);
     syncModelEmphasisProxies(resources, { hover: [], selected: [source] });
@@ -91,16 +89,30 @@ describe('model emphasis overlay resources', () => {
     const proxy = resources.maskScene.children[0] as Mesh;
     expect(proxy.matrixWorld.equals(new Matrix4().makeTranslation(1, 2, 3))).toBe(true);
     expect(proxy.matrixWorldAutoUpdate).toBe(false);
-    expect(resources.wash.selected.clippingPlanes).toEqual([plane]);
-    expect(resources.mask.coverage.selected.clippingPlanes).toEqual([plane]);
+    resources.dispose();
+  });
+
+  it("clips coverage and wash with the viewer's section clip, and never the visibility layer", () => {
+    const clip = createSectionClip('webgpu');
+    const resources = createModelEmphasisResources('webgpu', clip);
+    const maskOf = (material: Material): unknown => (material as { maskNode?: unknown }).maskNode;
+
+    for (const material of [
+      resources.wash.hover,
+      resources.wash.selected,
+      resources.mask.coverage.hover,
+      resources.mask.coverage.selected,
+    ]) {
+      expect(maskOf(material)).toBe(clip.mask);
+    }
     // The visibility layer answers for the uncut solid, so a section cap counts as part surface.
-    expect(resources.mask.visibility.selected.clippingPlanes).toBeNull();
-    expect(resources.mask.visibility.hover.clippingPlanes).toBeNull();
+    expect(maskOf(resources.mask.visibility.selected)).toBeUndefined();
+    expect(maskOf(resources.mask.visibility.hover)).toBeUndefined();
     resources.dispose();
   });
 
   it('gives each mask layer and state its own channel, added without touching the others', () => {
-    const resources = createModelEmphasisResources('webgl');
+    const resources = createModelEmphasisResources('webgl', createSectionClip('webgl'));
     const channel = (material: { color: Color; opacity: number }): [number, number, number, number] => [
       material.color.r,
       material.color.g,
@@ -132,7 +144,7 @@ describe('model emphasis overlay resources', () => {
     // Coverage written from one sample per pixel can only be 0 or 1, and the composite's
     // difference is then 0 or 1 too — a hard 2px staircase. Resolving several samples gives the
     // boundary pixels a fraction, which is the outline's antialiasing.
-    const resources = createModelEmphasisResources('webgl');
+    const resources = createModelEmphasisResources('webgl', createSectionClip('webgl'));
     expect(modelEmphasisMaskSamples).toBeGreaterThan(1);
     expect(resources.maskTarget.samples).toBe(modelEmphasisMaskSamples);
     // Nothing ever samples the mask's depth; skipping its resolve keeps that blit off the frame.
@@ -141,7 +153,7 @@ describe('model emphasis overlay resources', () => {
   });
 
   it("resolves visibility with the frame's own depth, restored into the mask target", () => {
-    const resources = createModelEmphasisResources('webgl');
+    const resources = createModelEmphasisResources('webgl', createSectionClip('webgl'));
     syncModelEmphasisProxies(resources, { hover: [], selected: [makeSource()] });
     const { gl, calls } = makeRecordingRenderer();
     const restored: unknown[] = [];
@@ -176,7 +188,7 @@ describe('model emphasis overlay resources', () => {
     // The surface is the only thing pushed back; overlays win by the slope-scaled margin the
     // characteristic edges already rely on. Copying the surface's bias made the pass/fail an
     // exact `LEQUAL` tie, and a derivative-based `gl_FragDepth` is not reproducible across draws.
-    const resources = createModelEmphasisResources('webgl');
+    const resources = createModelEmphasisResources('webgl', createSectionClip('webgl'));
     for (const material of [resources.wash.hover, resources.wash.selected, resources.mask.coverage.hover]) {
       expect(material.polygonOffset).toBe(false);
       expect(material.onBeforeCompile.toString()).not.toContain('logdepthbuf_fragment');
@@ -189,7 +201,7 @@ describe('model emphasis overlay resources', () => {
   it('measures coverage as occupancy, so a section-clipped open shell reports no interior holes', () => {
     // Front-side coverage culls the back faces a section cut exposes, which punches holes into
     // the mask; the composite then draws the component's tessellation across the section cap.
-    const resources = createModelEmphasisResources('webgl');
+    const resources = createModelEmphasisResources('webgl', createSectionClip('webgl'));
     for (const material of [
       resources.mask.coverage.hover,
       resources.mask.coverage.selected,
@@ -210,7 +222,7 @@ describe('model emphasis overlay resources', () => {
   });
 
   it('disposes the mask target, composite and shared materials once', () => {
-    const resources = createModelEmphasisResources('webgl');
+    const resources = createModelEmphasisResources('webgl', createSectionClip('webgl'));
     const disposeTarget = vi.spyOn(resources.maskTarget, 'dispose');
     const disposeComposite = vi.spyOn(resources.composite, 'dispose');
     resources.dispose();

@@ -22,7 +22,7 @@ import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { ENV } from '#environment.config.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { authClient } from '#lib/auth-client.js';
-import { cloudProjectsQueryKey, fetchCloudProjects } from '#hooks/use-cloud-projects.js';
+import { cloudProjectsQueryKeyFor, fetchCloudProjects } from '#hooks/use-cloud-projects.js';
 import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
 
 /** What the route can end in, once the token has been offered. */
@@ -154,7 +154,7 @@ export default function AcceptInvitation(): React.JSX.Element {
         /* N2: the listing this accept has just joined is the one the project
            route reads its role from. Dropping it left the opened project a frame
            with no role at all, which folds every collaborator affordance away. */
-        queryClient.setQueryData(cloudProjectsQueryKey, listing);
+        queryClient.setQueryData(cloudProjectsQueryKeyFor(session.user.id), listing);
         const listed = listing.find((project) => project.id === accepted.projectId);
         if (listed === undefined) {
           /* Accepted, but the listing did not answer: the library is where every

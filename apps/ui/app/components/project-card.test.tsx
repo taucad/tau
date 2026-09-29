@@ -5,12 +5,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
-const { cadPreviewViewerMock } = vi.hoisted(() => ({
+const { cadPreviewViewerMock, warmProjectWorkspaceMock } = vi.hoisted(() => ({
   cadPreviewViewerMock: vi.fn(() => <div data-testid='cad-preview-viewer' />),
+  warmProjectWorkspaceMock: vi.fn(),
 }));
 
 vi.mock('#components/cad-preview.js', () => ({
   CadPreviewViewer: cadPreviewViewerMock,
+}));
+vi.mock('#lib/project-workspace-warmup.js', () => ({
+  warmProjectWorkspace: warmProjectWorkspaceMock,
 }));
 
 function LocationProbe(): React.JSX.Element {
@@ -31,19 +35,38 @@ describe('ProjectCard', () => {
   it('should expose the whole-card destination as a named keyboard-accessible link', async () => {
     render(
       <TestWrapper>
-        <ProjectCard to='/projects/project-1' linkLabel='Open Project One'>
+        <ProjectCard to='/w/home/project-1' linkLabel='Open Project One'>
           <div>Project One</div>
         </ProjectCard>
       </TestWrapper>,
     );
 
     const link = screen.getByRole('link', { name: 'Open Project One' });
-    expect(link).toHaveAttribute('href', '/projects/project-1');
-    expect(link.parentElement).toHaveClass('hover:border-primary/60');
+    expect(link).toHaveAttribute('href', '/w/home/project-1');
+    // Neutral, instant hover edge at the owner; the brand hue and the colour transition are gone.
+    expect(link.parentElement).toHaveClass('hover:border-foreground/30');
+    expect(link.parentElement).not.toHaveClass('hover:border-primary/60', 'transition-colors');
 
     link.focus();
+    expect(warmProjectWorkspaceMock).toHaveBeenCalledOnce();
     await userEvent.keyboard('{Enter}');
-    expect(screen.getByTestId('location')).toHaveTextContent('/projects/project-1');
+    expect(screen.getByTestId('location')).toHaveTextContent('/w/home/project-1');
+  });
+
+  it('should leave the project editor asleep when a community card opens a share route', async () => {
+    warmProjectWorkspaceMock.mockClear();
+    render(
+      <TestWrapper>
+        <ProjectCard to='/s/example' linkLabel='Open shared example'>
+          Example
+        </ProjectCard>
+      </TestWrapper>,
+    );
+
+    const link = screen.getByRole('link', { name: 'Open shared example' });
+    await userEvent.hover(link);
+    link.focus();
+    expect(warmProjectWorkspaceMock).not.toHaveBeenCalled();
   });
 
   it('should leave nested controls independent from card navigation', async () => {
@@ -65,25 +88,23 @@ describe('ProjectCard', () => {
 });
 
 describe('ProjectCardMedia', () => {
-  it('should render a lazy thumbnail and expose preview visibility as native hidden state', async () => {
+  it('should render a lazy thumbnail and mount the preview only while it is visible', async () => {
     const onPreviewVisibilityChange = vi.fn();
     const { rerender } = render(
       <TooltipProvider>
-        <ProjectCardMedia
-          name='Project One'
-          isPreviewVisible={false}
-          onPreviewVisibilityChange={onPreviewVisibilityChange}
-        >
+        <ProjectCardMedia isPreviewVisible={false} onPreviewVisibilityChange={onPreviewVisibilityChange}>
           <div data-testid='preview'>Preview</div>
         </ProjectCardMedia>
       </TooltipProvider>,
     );
 
-    const thumbnail = screen.getByRole('img', { name: 'Project One' });
+    // The card link names the card, so the thumbnail is decorative.
+    const thumbnail = screen.getByRole('presentation');
+    expect(thumbnail).toHaveAttribute('alt', '');
     expect(thumbnail).toHaveAttribute('src', '/placeholder.svg');
     expect(thumbnail).toHaveAttribute('loading', 'lazy');
     expect(thumbnail.parentElement).toHaveClass('aspect-4/3');
-    expect(screen.getByTestId('preview').parentElement).toHaveAttribute('hidden');
+    expect(screen.queryByTestId('preview')).not.toBeInTheDocument();
 
     const toggle = screen.getByRole('button', { name: 'Preview model' });
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
@@ -93,7 +114,6 @@ describe('ProjectCardMedia', () => {
     rerender(
       <TooltipProvider>
         <ProjectCardMedia
-          name='Project One'
           thumbnailSource='/thumbnail.png'
           isPreviewVisible
           onPreviewVisibilityChange={onPreviewVisibilityChange}
@@ -103,15 +123,21 @@ describe('ProjectCardMedia', () => {
       </TooltipProvider>,
     );
 
-    expect(screen.queryByRole('img', { name: 'Project One' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('preview').parentElement).not.toHaveAttribute('hidden');
-    expect(screen.getByRole('button', { name: 'Preview model' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('presentation')).not.toBeInTheDocument();
+    expect(screen.getByTestId('preview')).toBeVisible();
+    const pressed = screen.getByRole('button', { name: 'Preview model' });
+    expect(pressed).toHaveAttribute('aria-pressed', 'true');
+    // Pressed is a neutral fill with a foreground glyph, never hue alone.
+    expect(pressed).toHaveClass('aria-pressed:bg-accent', 'aria-pressed:text-foreground');
+    expect(pressed.querySelector('svg')).not.toHaveClass('text-primary');
   });
 });
 
 describe('ProjectCardCadPreview', () => {
-  it('should match thumbnail perspective and show card-only edge lines', () => {
+  it('should load only on demand and match thumbnail perspective and edge lines', async () => {
     render(<ProjectCardCadPreview />);
+
+    await screen.findByTestId('cad-preview-viewer');
 
     expect(cadPreviewViewerMock).toHaveBeenCalledWith(
       expect.objectContaining({

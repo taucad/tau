@@ -8,6 +8,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('react-router', () => ({
   Link: ({ children, to }: { readonly children: ReactNode; readonly to: string }) => <a href={to}>{children}</a>,
   Outlet: () => <div data-route-content>Hydrated route content</div>,
+  useLocation: () => ({ key: 'default', pathname: '/' }),
+  NavigationType: { Pop: 'POP', Push: 'PUSH', Replace: 'REPLACE' },
+  useNavigationType: () => 'POP',
 }));
 vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => 'authed' }));
 vi.mock('#flags/use-feature.js', () => ({ useFeatureFlags: () => ({}) }));

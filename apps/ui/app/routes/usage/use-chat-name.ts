@@ -18,7 +18,7 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
  * back empty, and `undefined` while it is still being read.
  */
 export const useChatName = (projectHint: string | null, chatHint: string | null): string | null | undefined => {
-  const { getChatsForResource } = useProjectManager();
+  const { getChatRecordsForResource } = useProjectManager();
   const enabled = projectHint !== null && chatHint !== null;
   const { data, isPending } = useQuery({
     queryKey: ['usage-chat-name', projectHint, chatHint],
@@ -32,7 +32,7 @@ export const useChatName = (projectHint: string | null, chatHint: string | null)
     queryFn: async (): Promise<string | null> => {
       /* Deleted included: a receipt outlives the chat that earned it, and a
          soft-deleted chat still has the name its spend was made under. */
-      const chats = await getChatsForResource(projectHint ?? '', { includeDeleted: true });
+      const chats = await getChatRecordsForResource(projectHint ?? '', { includeDeleted: true });
       return chats.find((chat) => chat.id === chatHint)?.name ?? null;
     },
   });

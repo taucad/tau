@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { createNodeVmFileSystem, resolveUnderRoot } from '#runner/node/node-vm-filesystem.js';
 
 let root: string;
@@ -25,6 +25,18 @@ describe('resolveUnderRoot', () => {
 });
 
 describe('createNodeVmFileSystem', () => {
+  it('should probe an ordinary file without reading its contents', async () => {
+    const probe = await open(join(root, 'main.ts'), 'r');
+    const readFile = vi.spyOn(Object.getPrototypeOf(probe) as typeof probe, 'readFile');
+    await probe.close();
+    try {
+      await expect(createNodeVmFileSystem(root).exists('main.ts')).resolves.toBe(true);
+      expect(readFile).not.toHaveBeenCalled();
+    } finally {
+      readFile.mockRestore();
+    }
+  });
+
   it('should read, write and probe under the root', async () => {
     const filesystem = createNodeVmFileSystem(root);
     expect(await filesystem.exists('main.ts')).toBe(true);
@@ -33,10 +45,13 @@ describe('createNodeVmFileSystem', () => {
     expect(await filesystem.readFile('main.ts', 'utf8')).toBe('export default 1;\n');
     const bytes = await filesystem.readFile('main.ts');
     expect(bytes.byteLength).toBe(18);
+    expect(Buffer.isBuffer(bytes)).toBe(false);
+    expect(new TextDecoder().decode(bytes)).toBe('export default 1;\n');
 
     await filesystem.ensureDir('nested');
     await filesystem.writeFile('nested/deeper/out.txt', 'written');
     expect(await readFile(join(root, 'nested/deeper/out.txt'), 'utf8')).toBe('written');
+    await expect(filesystem.exists('nested')).rejects.toMatchObject({ code: 'EISDIR' });
   });
 
   it('should contain reads and writes across symbolic links', async () => {
@@ -56,6 +71,7 @@ describe('createNodeVmFileSystem', () => {
     await writeFile(join(root, 'inside-target.txt'), 'inside', 'utf8');
     await symlink(join(root, 'inside-target.txt'), join(root, 'inside-link'));
     await expect(filesystem.readFile('inside-link', 'utf8')).resolves.toBe('inside');
+    await expect(filesystem.exists('inside-link')).resolves.toBe(true);
     await expect(filesystem.writeFile('inside-link', 'replacement')).rejects.toMatchObject({ code: 'ELOOP' });
   });
 });

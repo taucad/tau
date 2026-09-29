@@ -485,14 +485,14 @@ function ParameterGroupSelector({
         getValue={getItemValue}
         value={selectedItem}
         placeholder='Select a parameter group'
-        searchPlaceHolder='Search groups...'
+        searchPlaceHolder='Search groups…'
         title='Parameter Groups'
         description='Select a parameter group to apply.'
         isSearchEnabled={groupItems.length > 5}
         shouldCloseOnSelect={shouldCloseOnSelect}
         popoverProperties={{
           align: 'end',
-          className: 'w-[260px]',
+          className: 'w-65',
         }}
         onSelect={handleSelect}
       >
@@ -515,6 +515,45 @@ function ParameterGroupSelector({
   );
 }
 
+/** Longest last render that keeps a drag live on a kernel that cannot cancel a render. Milliseconds. */
+const liveDragRenderBudget = 250;
+
+/**
+ * Whether this unit's last settled render took at most {@link liveDragRenderBudget}.
+ *
+ * Timed from entering `rendering` to reaching `idle` for one request, so a render another request
+ * replaced, one that failed, and one already running at mount are never counted. `false` until the
+ * first render is timed.
+ */
+function useLastRenderWithinBudget(cadRef: ActorRefFrom<typeof cadMachine>): boolean {
+  const [isWithinBudget, setIsWithinBudget] = useState(false);
+
+  useEffect(() => {
+    const initial: SnapshotFrom<typeof cadMachine> = cadRef.getSnapshot();
+    let timed: { requestId: number; startedAt: number | undefined } | undefined = initial.matches('rendering')
+      ? { requestId: initial.context.lastRequestedRenderId, startedAt: undefined }
+      : undefined;
+    const subscription = cadRef.subscribe((snapshot: SnapshotFrom<typeof cadMachine>) => {
+      const { lastRequestedRenderId: requestId } = snapshot.context;
+      if (snapshot.matches('rendering')) {
+        if (timed?.requestId !== requestId) {
+          timed = { requestId, startedAt: performance.now() };
+        }
+        return;
+      }
+      if (timed?.startedAt !== undefined && timed.requestId === requestId && snapshot.matches('idle')) {
+        setIsWithinBudget(performance.now() - timed.startedAt <= liveDragRenderBudget);
+      }
+      timed = undefined;
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [cadRef]);
+
+  return isWithinBudget;
+}
+
 /**
  * Drag-time dispatch for one geometry unit (D2).
  *
@@ -524,16 +563,20 @@ function ParameterGroupSelector({
  * which is what latest-wins means. Nothing here is persisted; the released value is committed
  * through the ordinary checked write.
  *
- * Returns nothing when the active kernel did not declare cooperative cancellation, which leaves
- * `ParameterCommit.scrub` absent and the row previewing the value on its own.
+ * Cancellation only matters at release, when the commit supersedes the last sample, so a kernel
+ * that cannot cancel stays live while its last render fits the budget. Otherwise `scrub` is absent
+ * and the row previews the value on its own. `endScrub` stays, so a drag that loses the lane
+ * mid-gesture still ends the samples it sent.
  */
 function useScrubDispatch(cadRef: ActorRefFrom<typeof cadMachine>): Pick<ParameterCommit, 'scrub' | 'endScrub'> {
-  const canScrub = useSelector(cadRef, (state) => {
+  const isCooperative = useSelector(cadRef, (state) => {
     const kernelId = state.context.activeKernelId;
     return (
       kernelId !== undefined && state.context.capabilities?.renderCapabilities[kernelId]?.cancellation === 'cooperative'
     );
   });
+  const isLastRenderWithinBudget = useLastRenderWithinBudget(cadRef);
+  const canScrub = isCooperative || isLastRenderWithinBudget;
 
   const pending = useRef<Readonly<{ generation: number; parameters: Record<string, unknown> }> | undefined>(undefined);
   const frame = useRef<number | undefined>(undefined);
@@ -602,7 +645,10 @@ function useScrubDispatch(cadRef: ActorRefFrom<typeof cadMachine>): Pick<Paramet
     };
   }, [lane]);
 
-  return useMemo(() => (canScrub ? { scrub: lane.scrub, endScrub: lane.stop } : {}), [canScrub, lane]);
+  return useMemo(
+    () => (canScrub ? { scrub: lane.scrub, endScrub: lane.stop } : { endScrub: lane.stop }),
+    [canScrub, lane],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -693,7 +739,7 @@ function GeometryUnitParameters({
 
   if (parameterManifest !== undefined && parameterActor !== undefined && authorityFailure !== undefined) {
     return (
-      <div className={paneviewAttachedBodyClassName}>
+      <div className={cn(paneviewAttachedBodyClassName, 'max-h-full overflow-y-auto')}>
         <ParameterAuthorityFailure
           entryPath={entryPath}
           manifest={parameterManifest}
@@ -1038,7 +1084,7 @@ export function ParametersPanelBody(): React.JSX.Element {
       <div data-slot='parameters-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
         <SearchInput
           aria-label='Filter parameters'
-          placeholder='Filter parameters...'
+          placeholder='Filter parameters…'
           value={filterTerm}
           className='h-7 min-w-0 bg-background'
           onChange={(event) => {

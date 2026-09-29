@@ -1,11 +1,6 @@
 import { assertRootedPath } from '@taucad/utils/path';
 import type { FileMode } from '@taucad/filesystem';
 
-declare const revisionIdBrand: unique symbol;
-
-/** Opaque identity of one immutable revision. @public */
-export type RevisionId = string & { readonly [revisionIdBrand]: true };
-
 /** One immutable file entry in a revision tree. @public */
 export type RevisionTreeEntry = Readonly<{
   path: string;
@@ -17,25 +12,6 @@ export type RevisionTreeEntry = Readonly<{
 export type RevisionTreeInput = readonly [path: string, content: Uint8Array<ArrayBuffer> | string, mode?: FileMode];
 
 const textEncoder = new TextEncoder();
-
-const assertOpaqueId = (value: string, label: string): void => {
-  if (value.length === 0 || value.length > 256 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)) {
-    throw new TypeError(`${label} must be a non-empty opaque identifier without path separators.`);
-  }
-};
-
-/**
- * Validate and brand an externally supplied revision identity.
- *
- * @param value - Durable opaque revision identifier.
- * @returns The validated nominal identifier.
- * @public
- */
-export const revisionId = (value: string): RevisionId => {
-  assertOpaqueId(value, 'RevisionId');
-  // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- runtime validation establishes the opaque brand.
-  return value as RevisionId;
-};
 
 const canonicalFilePath = (path: string): string => {
   const canonical = assertRootedPath(path);
@@ -52,6 +28,35 @@ const comparePath = (left: string, right: string): number => (left < right ? -1 
 const defaultFileMode: FileMode = '100644';
 
 /**
+ * One file as a tree holds it. The bytes are never handed out and never
+ * written, so two trees may share a record — and a memo keyed on its bytes'
+ * identity is exact (E1–E3).
+ *
+ * @internal
+ */
+export type RevisionTreeFile = Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }>;
+
+const ownedFiles = (entries: Iterable<RevisionTreeInput>): Map<string, RevisionTreeFile> => {
+  const files = new Map<string, RevisionTreeFile>();
+  for (const [rawPath, content, mode = defaultFileMode] of entries) {
+    const path = canonicalFilePath(rawPath);
+    if (files.has(path)) {
+      throw new TypeError(`Duplicate revision tree path: ${path}`);
+    }
+    files.set(path, Object.freeze({ content: ownedBytes(content), mode }));
+  }
+  return files;
+};
+
+/* A tree read through its public surface only: every byte copied. */
+const publicEntries = (tree: ImmutableRevisionTree): RevisionTreeInput[] =>
+  tree.entries().map(({ path, content, mode }): RevisionTreeInput => [path, content, mode]);
+
+/* Set only for the duration of one `adoptRevisionTree` construction. */
+let adopting: Map<string, RevisionTreeFile> | undefined;
+let filesOf: (tree: ImmutableRevisionTree) => ReadonlyMap<string, RevisionTreeFile>;
+
+/**
  * Runtime-immutable file tree. Inputs and returned bytes are defensively copied,
  * so a revision cannot be changed through a retained `Uint8Array` reference.
  * Empty directories are intentionally absent, matching Git tree semantics.
@@ -59,7 +64,7 @@ const defaultFileMode: FileMode = '100644';
  * @public
  */
 export class ImmutableRevisionTree {
-  readonly #files: ReadonlyMap<string, Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }>>;
+  readonly #files: ReadonlyMap<string, RevisionTreeFile>;
   readonly #byteLength: number;
 
   /**
@@ -68,20 +73,15 @@ export class ImmutableRevisionTree {
    * @param entries - File paths and their bytes or UTF-8 text.
    */
   public constructor(entries: Iterable<RevisionTreeInput>) {
-    const files = new Map<string, Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }>>();
+    const files = adopting ?? ownedFiles(entries);
+    adopting = undefined;
     let byteLength = 0;
-    for (const [rawPath, content, mode = defaultFileMode] of entries) {
-      const path = canonicalFilePath(rawPath);
+    for (const [path, { content, mode }] of files) {
       const candidateMode: string = mode;
       if (candidateMode !== '100644' && candidateMode !== '100755') {
         throw new TypeError(`Unsupported revision file mode for ${path}: ${String(mode)}`);
       }
-      if (files.has(path)) {
-        throw new TypeError(`Duplicate revision tree path: ${path}`);
-      }
-      const bytes = ownedBytes(content);
-      files.set(path, { content: bytes, mode });
-      byteLength += bytes.byteLength;
+      byteLength += content.byteLength;
     }
     /* A path that is also a directory prefix is a shape Git cannot represent:
      * `isomorphic-git` writes a tree `git fsck --strict` calls
@@ -99,6 +99,20 @@ export class ImmutableRevisionTree {
     }
     this.#files = files;
     this.#byteLength = byteLength;
+  }
+
+  static {
+    /**
+     * The one reader of `#files` outside the class: `revisionTreeFiles`. A tree
+     * built by another copy of this module (a second bundle, a reset module
+     * graph) has no `#files` this class can read, so its public entries are
+     * copied instead — correct, and simply unshared.
+     *
+     * @param tree - The tree whose records are read.
+     * @returns Its records, uncopied when this module built the tree.
+     */
+    filesOf = (tree: ImmutableRevisionTree): ReadonlyMap<string, RevisionTreeFile> =>
+      #files in tree ? tree.#files : ownedFiles(publicEntries(tree));
   }
 
   /** Number of files in the tree. */
@@ -143,3 +157,35 @@ export class ImmutableRevisionTree {
       .map(([path, entry]) => ({ path, content: new Uint8Array(entry.content), mode: entry.mode }));
   }
 }
+
+/**
+ * A tree's own records, uncopied, for the package's hashing and cleaning.
+ *
+ * The bytes belong to the tree: a caller that writes them changes a revision.
+ *
+ * @internal
+ * @param tree - The tree whose records are read.
+ * @returns Its records by canonical path.
+ */
+export const revisionTreeFiles = (tree: ImmutableRevisionTree): ReadonlyMap<string, RevisionTreeFile> => filesOf(tree);
+
+/**
+ * Build a tree over records without copying them — the way a tree shares every
+ * unchanged file with the one it was derived from (E1).
+ *
+ * The same checks as the constructor, except path canonicalization: every key
+ * must already be canonical, as a key of {@link revisionTreeFiles} is. The
+ * caller gives up the map and must never write a record's bytes.
+ *
+ * @internal
+ * @param files - Records by canonical path; owned by the tree from now on.
+ * @returns The tree over exactly those records.
+ */
+export const adoptRevisionTree = (files: Map<string, RevisionTreeFile>): ImmutableRevisionTree => {
+  adopting = files;
+  try {
+    return new ImmutableRevisionTree([]);
+  } finally {
+    adopting = undefined;
+  }
+};

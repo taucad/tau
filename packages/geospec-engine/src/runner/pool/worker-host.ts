@@ -11,10 +11,18 @@
  * Emscripten handle the very next shard is about to reuse through the loader
  * cache — the D-10 double-delete that aborts the whole wasm instance.
  *
+ * Native subjects are the exception: every shard and collection pass releases
+ * them before it settles (per-load freshness), because the engine retains at
+ * most 32 subjects and one large STEP subject holds hundreds of megabytes.
+ *
  * @module
  */
 
-import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerHostOptions } from 'geospec/runner/worker';
+import type {
+  GeoSpecPoolHostMessage,
+  GeoSpecPoolWorkerHostOptions,
+  GeoSpecPoolWorkerMessage,
+} from 'geospec/runner/worker';
 import type { GeoSpecModuleBundleCache } from 'geospec/runner';
 import { getGeoSpecEngineProtocol } from 'geospec/engine';
 import { forensicSpanAsync, forwardProtocolForensicMeasurement } from '#runner/forensic.js';
@@ -40,23 +48,65 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
   const runner = {
     filesystem: options.filesystem,
     ...(options.modelLoader ? { modelLoader: options.modelLoader } : {}),
+    ...(options.nativeAssertions ? { nativeAssertions: options.nativeAssertions } : {}),
+    ...(options.nativeModelLoader ? { nativeModelLoader: options.nativeModelLoader } : {}),
     ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
     ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),
   };
   const context = createSerialRunContext(runner);
   const bundleCache: GeoSpecModuleBundleCache = new Map();
+  const releaseNativeSubjects = async (): Promise<void> => {
+    await options.nativeModelLoader?.releaseAll();
+  };
+  /**
+   * Release a pass's native subjects, then post its one settlement. Released after the settlement, a
+   * failure could only surface as an initialization-error, which retires a worker whose pass had settled.
+   *
+   * @param reply - The pass's settlement before release.
+   * @param failed - Builds the pass's error settlement.
+   */
+  const releaseAndSettle = async (
+    reply: GeoSpecPoolWorkerMessage,
+    failed: (error: unknown) => GeoSpecPoolWorkerMessage,
+  ): Promise<void> => {
+    let settlement = reply;
+    try {
+      await releaseNativeSubjects();
+    } catch (error) {
+      // A pass that already failed keeps reporting its own failure.
+      if (reply.type !== 'shard-error' && reply.type !== 'list-error') {
+        settlement = failed(error);
+      }
+    }
+    try {
+      options.postMessage(settlement);
+    } catch (error) {
+      // A reply the host cannot structured-clone must still settle its pass.
+      options.postMessage(failed(error));
+    }
+  };
 
   // Shards arrive one at a time, but the host may post the next one before the
   // previous reply is observed; the chain keeps execution strictly serial
   // inside the worker (the OCCT heap is shared).
   let chain: Promise<void> = Promise.resolve();
   const enqueue = (work: () => Promise<void>): void => {
-    // Settled either way: a rejected predecessor must not stall the queue.
+    const predecessor = chain;
     chain = (async () => {
       try {
-        await chain;
-      } finally {
+        await predecessor;
+      } catch {
+        // A rejected predecessor must not stall shutdown behind it.
+      }
+      try {
         await work();
+      } catch (error) {
+        try {
+          options.postMessage({ type: 'initialization-error', message: errorMessage(error) });
+        } catch {
+          // A closed message port has no remaining receiver; do not leak a
+          // rejected queue promise after its worker has been torn down.
+        }
       }
     })();
   };
@@ -75,12 +125,42 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
     }
     if (message.type === 'shutdown') {
       bundleCache.clear();
-      await context.resourceScope.dispose();
-      await options.onShutdown?.();
+      let failed = false;
+      let failure: unknown;
+      try {
+        await context.resourceScope.dispose();
+        await releaseNativeSubjects();
+      } catch (error) {
+        failed = true;
+        failure = error;
+      }
+      try {
+        await options.onShutdown?.();
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+        }
+      }
+      if (failed) {
+        options.postMessage({ type: 'initialization-error', message: errorMessage(failure) });
+        return;
+      }
+      if (options.nativeAssertions) {
+        // Native-only cleanup acknowledgement over the existing worker wire.
+        options.postMessage({ type: 'initialized' });
+      }
       return;
     }
 
     if (message.type === 'list-tests') {
+      const listFailed = (error: unknown): GeoSpecPoolWorkerMessage => ({
+        type: 'list-error',
+        shardId: message.shardId,
+        file: message.file,
+        message: errorMessage(error),
+      });
+      let reply: GeoSpecPoolWorkerMessage;
       try {
         const result = await executeGeoSpecFile({
           runner,
@@ -92,20 +172,11 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
           ...(message.matcherWallBackstop === undefined ? {} : { matcherWallBackstop: message.matcherWallBackstop }),
           ...(message.forensic === undefined ? {} : { forensic: message.forensic }),
         });
-        options.postMessage({
-          type: 'tests-listed',
-          shardId: message.shardId,
-          file: message.file,
-          names: collectedNames(result),
-        });
+        reply = { type: 'tests-listed', shardId: message.shardId, file: message.file, names: collectedNames(result) };
       } catch (error) {
-        options.postMessage({
-          type: 'list-error',
-          shardId: message.shardId,
-          file: message.file,
-          message: errorMessage(error),
-        });
+        reply = listFailed(error);
       }
+      await releaseAndSettle(reply, listFailed);
       return;
     }
 
@@ -128,6 +199,13 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
             });
           })
         : undefined;
+    const shardFailed = (error: unknown): GeoSpecPoolWorkerMessage => ({
+      type: 'shard-error',
+      shardId: shard.id,
+      file: shard.file,
+      message: errorMessage(error),
+    });
+    let reply: GeoSpecPoolWorkerMessage;
     try {
       const result = await forensicSpanAsync(
         'runner.shard',
@@ -152,7 +230,7 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
       );
       const primaryLoadKey = context.fileLoadKey();
       const workerMemoryBytes = options.measureMemoryBytes?.();
-      options.postMessage({
+      reply = {
         type: 'shard-complete',
         shardId: shard.id,
         file: shard.file,
@@ -160,18 +238,14 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
         durationMs: performance.now() - startedAt,
         ...(primaryLoadKey === undefined ? {} : { primaryLoadKey }),
         ...(workerMemoryBytes === undefined ? {} : { workerMemoryBytes }),
-      });
+      };
     } catch (error) {
-      options.postMessage({
-        type: 'shard-error',
-        shardId: shard.id,
-        file: shard.file,
-        message: errorMessage(error),
-      });
+      reply = shardFailed(error);
     } finally {
       unsubscribe?.();
       context.setForensicSink();
     }
+    await releaseAndSettle(reply, shardFailed);
   };
 
   options.onHostMessage((message) => {

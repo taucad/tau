@@ -137,6 +137,10 @@ declare module 'vitest' {
   export interface ProvidedContext {
     webGpuProfile: TargetWebGpuProfile;
     acpLiveEnabled: boolean;
+    /** False when the server was started without COOP/COEP (`TAU_E2E_DISABLE_COI`). */
+    crossOriginIsolation: boolean;
+    /** DP18: the exact STL and GLB of `picovoxel.sphere-minus-beams` every host exports (tau-examples `exact-pins.json`). */
+    picovoxelExactPins: Readonly<Record<'stl' | 'glb', { readonly sha256: string; readonly bytes: number }>>;
   }
 }
 
@@ -164,6 +168,7 @@ export type UiBrowserCommands = {
   uiCloseSecondaryTarget(): Promise<void>;
   uiCloseTarget(): Promise<void>;
   uiCookies(): Promise<TargetCookie[]>;
+  uiCpuProfile(action: 'start' | 'stop', artifactName?: string, surface?: TargetSurface): Promise<string | undefined>;
   uiDragTarget(source: string, target: string, surface?: TargetSurface): Promise<void>;
   uiDownloadTarget(triggerSelector: string): Promise<TargetDownload>;
   uiEmulateColorScheme(colorScheme: 'dark' | 'light' | 'no-preference', surface?: TargetSurface): Promise<void>;
@@ -185,6 +190,7 @@ export type UiBrowserCommands = {
     script?: readonly GatewayScriptTurn[],
     options?: AgentHostGatewayFixtureOptions,
   ): Promise<void>;
+  uiInstallPostHogFixture(apiKey: string): Promise<void>;
   uiKeyboardPress(key: string, surface?: TargetSurface): Promise<void>;
   uiMouseClick(x: number, y: number, options?: TargetClickOptions, surface?: TargetSurface): Promise<void>;
   uiMouseDown(options?: { readonly button?: 'left' | 'middle' | 'right' }, surface?: TargetSurface): Promise<void>;
@@ -198,6 +204,11 @@ export type UiBrowserCommands = {
   uiReadTarget(selector: string, options?: TargetReadOptions, surface?: TargetSurface): Promise<TargetState>;
   uiReadTauVertexOperations(email: string): Promise<TargetTauBillingOperation[]>;
   uiReadAgentHostApiRequests(): Promise<string[]>;
+  uiReadPostHogSummary(sentinels: readonly string[]): Promise<{
+    readonly events: string[];
+    readonly requests: string[];
+    readonly present: Record<string, boolean>;
+  }>;
   uiHoldNextAgentHostGatewayRequest(): Promise<void>;
   uiReadAgentHostGatewayRequests(): Promise<unknown[]>;
   uiReadAgentHostGatewayState(): Promise<TargetGatewayState>;
@@ -229,6 +240,7 @@ export type UiBrowserCommands = {
   uiStartTauServeFixture(options?: { readonly externalAgents?: boolean | 'codex' }): Promise<TargetTauServeFixture>;
   uiStopTauServeFixture(): Promise<void>;
   uiReleaseTauServeGateway(): Promise<void>;
+  uiIsTauServeGatewayHeld(): Promise<boolean>;
   uiReadTauServeFile(relativePath: string): Promise<string | undefined>;
   uiListTauServeChats(): Promise<readonly string[]>;
   uiTargetWorkers(urlSubstring?: string, surface?: TargetSurface): Promise<readonly TargetWorker[]>;
@@ -376,6 +388,13 @@ export const closeSecondary = (): Promise<void> => server.commands.uiCloseSecond
 export const workers = (urlSubstring?: string, surface?: TargetSurface): Promise<readonly TargetWorker[]> =>
   server.commands.uiTargetWorkers(urlSubstring, surface);
 export const cookies = (): Promise<TargetCookie[]> => server.commands.uiCookies();
+/** Begin a CPU profile of one page; see {@link stopCpuProfile}. */
+export const startCpuProfile = async (surface?: TargetSurface): Promise<void> => {
+  await server.commands.uiCpuProfile('start', undefined, surface);
+};
+/** End the page's CPU profile and write it as `artifactName`; resolves to its path. */
+export const stopCpuProfile = async (artifactName: string, surface?: TargetSurface): Promise<string> =>
+  (await server.commands.uiCpuProfile('stop', artifactName, surface)) ?? artifactName;
 export const addCookies = (values: readonly TargetCookie[]): Promise<void> => server.commands.uiAddCookies(values);
 export const authenticateTauTestUser = (account: TargetTauTestAccount): Promise<void> =>
   server.commands.uiAuthenticateTauTestUser(account);
@@ -468,6 +487,7 @@ export const startTauServeFixture = (
 ): Promise<TargetTauServeFixture> => server.commands.uiStartTauServeFixture(options);
 export const stopTauServeFixture = (): Promise<void> => server.commands.uiStopTauServeFixture();
 export const releaseTauServeGateway = (): Promise<void> => server.commands.uiReleaseTauServeGateway();
+export const isTauServeGatewayHeld = (): Promise<boolean> => server.commands.uiIsTauServeGatewayHeld();
 export const readTauServeFile = (relativePath: string): Promise<string | undefined> =>
   server.commands.uiReadTauServeFile(relativePath);
 export const listTauServeChats = (): Promise<readonly string[]> => server.commands.uiListTauServeChats();
@@ -495,6 +515,15 @@ export const waitForAgentHostGatewayGate = (
 ): Promise<TargetGatewayGate> => server.commands.uiWaitForAgentHostGatewayGate(match, timeoutMilliseconds);
 /** Every `/v1/chat/...` path the page asked the (absent) API for since the fixture was installed. */
 export const readAgentHostApiRequests = (): Promise<string[]> => server.commands.uiReadAgentHostApiRequests();
+/** Intercepts first-party PostHog requests and serves the installed recorder locally. */
+export const installPostHogFixture = (apiKey: string): Promise<void> => server.commands.uiInstallPostHogFixture(apiKey);
+export const readPostHogSummary = (
+  sentinels: readonly string[],
+): Promise<{
+  readonly events: string[];
+  readonly requests: string[];
+  readonly present: Record<string, boolean>;
+}> => server.commands.uiReadPostHogSummary(sentinels);
 
 /** The two points a row can park a chat's turn at; see {@link holdChatTurn}. */
 export type ChatTurnHold = 'admission' | 'settlement';

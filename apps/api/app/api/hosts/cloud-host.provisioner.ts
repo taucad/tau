@@ -11,16 +11,26 @@ const run = promisify(execFile);
 export const cloudHostProvisionerToken = 'CLOUD_HOST_PROVISIONER';
 
 /**
- * Everything a container needs to come up as a paired device.
+ * Everything a container needs to come up as a paired device and clone its
+ * project.
  *
- * The credential appears here and nowhere else: it is minted inside
+ * The two credentials appear here and nowhere else: they are minted inside
  * `HostsService.provisionCloudHost`, handed to the provisioner once, and never
  * returned to a browser or stored in plaintext.
  */
 export type CloudHostSpec = {
   readonly deviceId: string;
+  /** The device credential: control socket, model gateway, jobs. */
   readonly credential: string;
+  /** The repository-scoped push credential (D21): `projectId`'s git routes and nothing else. */
+  readonly gitCredential: string;
   readonly ownerId: string;
+  /**
+   * The owner's display name. With `ownerId` it is who the host's revisions are
+   * by (rule 15): the host acts for the owner, not for its container user.
+   */
+  readonly ownerName?: string | undefined;
+  /** The project the entrypoint clones and the host serves. */
   readonly projectId: string;
   /** Relay *and* model-gateway origin — a cloud host reaches Tau at one address. */
   readonly apiUrl: string;
@@ -53,6 +63,13 @@ export type CloudHostProvisioner = {
    */
   stop(deviceId: string): Promise<void>;
 };
+
+/**
+ * One `--env-file` value. The file is line-oriented with no quoting, so a
+ * control character in a user-chosen name would end its line and let the rest
+ * set another variable.
+ */
+const environmentValue = (value: string): string => value.replaceAll(/\p{Cc}+/gu, ' ').trim();
 
 /** Container name for one device: recoverable across API restarts without a second store. */
 const containerName = (deviceId: string): string => `tau-host-${deviceId}`;
@@ -113,7 +130,7 @@ export type DockerCloudHostProvisionerOptions = {
 /**
  * Start cloud hosts as local Docker containers.
  *
- * The credential travels in an `--env-file` rather than repeated `-e` flags:
+ * The credentials travel in an `--env-file` rather than repeated `-e` flags:
  * `execFile` arguments are world-readable in `ps` on every platform the API
  * runs on, which is the same reason `tau serve` refuses to take its agent token
  * on `argv`. The file is mode-0600 in a private temp directory and is removed as
@@ -139,7 +156,11 @@ export const createDockerCloudHostProvisioner = (options: DockerCloudHostProvisi
           [
             `TAU_HOST_DEVICE_ID=${spec.deviceId}`,
             `TAU_HOST_CREDENTIAL=${spec.credential}`,
+            `TAU_HOST_GIT_CREDENTIAL=${spec.gitCredential}`,
+            `TAU_HOST_PROJECT_ID=${spec.projectId}`,
             `TAU_API_URL=${options.apiUrl ?? spec.apiUrl}`,
+            `TAU_HOST_OWNER_ID=${environmentValue(spec.ownerId)}`,
+            ...(spec.ownerName === undefined ? [] : [`TAU_HOST_OWNER_NAME=${environmentValue(spec.ownerName)}`]),
             '',
           ].join('\n'),
           { encoding: 'utf8', mode: 0o600 },

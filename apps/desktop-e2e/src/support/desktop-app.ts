@@ -9,6 +9,7 @@ import type { DownloadItem, Event } from 'electron';
 import { _electron as electron } from 'playwright';
 import type { ElectronApplication, Page } from 'playwright';
 import { expect } from 'vitest';
+import { captureChatLogs, chatLogDestination } from '@taucad/formal/capture';
 import {
   desktopE2EApiUrl,
   desktopE2ECompletedArtifact,
@@ -77,6 +78,8 @@ export type DesktopSession = {
   readonly pickedDirectory: string;
   /** Every PostHog-shaped request any renderer made since launch (D13: zero on desktop). */
   readonly analyticsRequests: readonly string[];
+  /** Chromium net log begun before the first renderer navigation. */
+  readonly startupNetworkLogPath: string | undefined;
   /** Write trace, screenshot, process output and `desktop.log` under `out/`. */
   readonly capture: (label: string) => Promise<string>;
   readonly close: () => Promise<void>;
@@ -154,6 +157,12 @@ export const launchDesktopApp = async (options: {
   readonly env?: Readonly<Record<string, string>> | undefined;
   readonly packaged?: boolean | undefined;
   readonly useProductionEndpointDefaults?: boolean | undefined;
+  /** Reuse a prior throwaway profile for returning-user smoke checks. */
+  readonly profileRoot?: string | undefined;
+  /** The caller will relaunch this profile and dispose it after the final run. */
+  readonly preserveProfile?: boolean | undefined;
+  /** Capture startup traffic before Playwright can attach its request listener. */
+  readonly captureStartupNetwork?: boolean | undefined;
 }): Promise<DesktopSession> => {
   if (desktopE2ECompletedArtifact && options.packaged === false) {
     throw new Error('A completed-artifact run cannot launch the workspace desktop app.');
@@ -164,7 +173,8 @@ export const launchDesktopApp = async (options: {
   ) {
     throw new Error('A completed-artifact run cannot override Node or packaged runtime resource paths.');
   }
-  const userData = await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-'));
+  const userData = options.profileRoot ?? (await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-')));
+  const startupNetworkLogPath = options.captureStartupNetwork ? join(userData, 'startup-network.json') : undefined;
   /* A fixed, already-lowercase leaf inside the random parent: the workspace
    * slug the UI mints is the folder name slugified, so a `mkdtemp` name with
    * capitals would make the routed URL differ from the directory on disk for
@@ -191,7 +201,12 @@ export const launchDesktopApp = async (options: {
 
   const application = await electron.launch({
     ...(packaged ? { executablePath: packagedExecutable } : {}),
-    args: [...(packaged ? [] : [desktopRoot]), `--user-data-dir=${userData}`, ...webGpuArguments()],
+    args: [
+      ...(packaged ? [] : [desktopRoot]),
+      `--user-data-dir=${userData}`,
+      ...(startupNetworkLogPath ? [`--log-net-log=${startupNetworkLogPath}`] : []),
+      ...webGpuArguments(),
+    ],
     cwd: packaged ? userData : desktopRoot,
     env: {
       ...inheritedEnvironment,
@@ -212,7 +227,14 @@ export const launchDesktopApp = async (options: {
       ...(packaged ? {} : { TAU_DESKTOP_CLIENT_ROOT: clientRoot }),
       TAU_DESKTOP_TOKEN: options.token,
       TAU_E2E_PICK_DIRECTORY: pickedDirectory,
+      /* Printer access codes go to the throwaway profile's file vault, never the
+       * person's login keychain, whatever the shell running the suite sets. */
+      TAU_SECRET_VAULT: 'file',
+      /* The per-user machine store and every other Tau config live in the
+       * throwaway profile too, never the person's own. */
+      TAU_CONFIG_DIR: join(userData, 'config'),
       ...options.env,
+      TAU_E2E_HIDE_WINDOW: '1',
     },
   });
   const child = application.process();
@@ -236,6 +258,14 @@ export const launchDesktopApp = async (options: {
   const consoleErrors: string[] = [];
   let page: Page;
   try {
+    await application.evaluate(({ dialog, shell }, selectedDirectory) => {
+      const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
+      shell.openExternal = async (url): Promise<void> => {
+        testState.__TAU_E2E_EXTERNAL_URL__ = url;
+      };
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selectedDirectory] });
+      dialog.showMessageBox = async () => ({ checkboxChecked: false, response: 1 });
+    }, pickedDirectory);
     page = await application.firstWindow();
     await page.waitForLoadState('domcontentloaded');
     page.setDefaultTimeout(60_000);
@@ -246,16 +276,6 @@ export const launchDesktopApp = async (options: {
     });
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
     await page.context().tracing.start({ screenshots: true, snapshots: true });
-    if (packaged) {
-      await application.evaluate(({ dialog, shell }, selectedDirectory) => {
-        const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
-        shell.openExternal = async (url): Promise<void> => {
-          testState.__TAU_E2E_EXTERNAL_URL__ = url;
-        };
-        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selectedDirectory] });
-        dialog.showMessageBox = async () => ({ checkboxChecked: false, response: 1 });
-      }, pickedDirectory);
-    }
   } catch (error) {
     child.kill('SIGKILL');
     /* The shell's own output is the only account of why it went away, and the
@@ -344,28 +364,37 @@ export const launchDesktopApp = async (options: {
             });
           })
         : Promise.resolve();
-    /* `close()` asks the app to quit, and a shell holding a stalled chat run
-     * does not always finish quitting. Left alive they accumulate, and the
-     * next `electron.launch` in the same vitest process comes back with a
-     * window that is already closed — three tests died that way before this
-     * existed. The quit is also bounded: a shell still syncing after a failed
-     * row once held `close()` for 17 minutes, so the row reported the 900 s
-     * test timeout instead of its own assertion (lane H4). */
-    await Promise.race([application.close().catch(() => undefined), wait(30_000)]);
+    /* Routine fixture disposal bypasses quit holds exercised by their own specs. */
+    await Promise.race([
+      application
+        .evaluate(({ app }) => {
+          app.exit(0);
+        })
+        .catch(() => undefined),
+      wait(5000),
+    ]);
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL');
     }
     await exited;
+    /* Field trace validation (formal-verification policy): copy every chat log the
+     * app wrote under Home or the picked project before the roots go. */
+    const chatLogs = chatLogDestination('desktop-e2e', expect.getState().testPath);
+    await captureChatLogs(userData, chatLogs);
+    await captureChatLogs(pickedParent, chatLogs);
     if (captured) {
       /* Keep the evidence a failing run just produced. */
       return;
     }
-    await rm(userData, { force: true, recursive: true });
+    if (!options.preserveProfile) {
+      await rm(userData, { force: true, recursive: true });
+    }
     await rm(pickedParent, { force: true, recursive: true });
   };
 
   return {
     analyticsRequests,
+    startupNetworkLogPath,
     application,
     capture,
     close,

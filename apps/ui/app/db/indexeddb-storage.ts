@@ -4,7 +4,7 @@ import type {
   PendingPermanentDeleteProjectOperation,
   PendingProjectOperation,
 } from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryState } from '#types/project-library.types.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
 
@@ -14,6 +14,41 @@ const legacyProjectsStoreName = 'projects';
 const legacyChatsStoreName = 'chats';
 const appUiPreferencesId = 'singleton';
 const appUiPreferencesMutexKey = 'app-ui-preferences:singleton';
+
+/** The v11 editor row mixed local pixels with project content; v12 keeps only the former. */
+const deviceEditorStateFromLegacy = (raw: unknown): EditorState => {
+  const row = raw as EditorState & {
+    workbenchLayout?: { panels?: Record<string, { params?: { filePath?: string; filesWidth?: number } }> };
+    viewSettings?: Record<string, { graphicsSettings?: { graphicsBackend?: string } }>;
+  };
+  const fileSidebars: Record<string, number> = { ...row.fileSidebars };
+  for (const panel of Object.values(row.workbenchLayout?.panels ?? {})) {
+    const { filePath, filesWidth } = panel.params ?? {};
+    if (
+      typeof filePath === 'string' &&
+      typeof filesWidth === 'number' &&
+      Number.isFinite(filesWidth) &&
+      filesWidth > 0
+    ) {
+      fileSidebars[filePath] = filesWidth;
+    }
+  }
+  const graphicsBackendPreferences = { ...row.graphicsBackendPreferences };
+  for (const [viewId, view] of Object.entries(row.viewSettings ?? {})) {
+    graphicsBackendPreferences[viewId] = view.graphicsSettings?.graphicsBackend === 'webgpu' ? 'webgpu' : 'webgl';
+  }
+  return {
+    projectId: row.projectId,
+    openFiles: row.openFiles,
+    activePaneId: row.activePaneId,
+    focusedChatId: row.focusedChatId,
+    panelState: row.panelState,
+    fileSidebars,
+    graphicsBackendPreferences,
+    previousLayout: row.previousLayout,
+    updatedAt: row.updatedAt,
+  };
+};
 
 /**
  * Raised when an older connection — invariably another Tau tab — holds the
@@ -89,7 +124,7 @@ export class IndexedDbStorageProvider implements StorageProvider {
   }
 
   private get version(): number {
-    return 11;
+    return 12;
   }
 
   public async getAppUiPreferences(): Promise<AppUiPreferences> {
@@ -605,7 +640,20 @@ export class IndexedDbStorageProvider implements StorageProvider {
         if (db.objectStoreNames.contains(legacyChatsStoreName)) {
           db.deleteObjectStore(legacyChatsStoreName);
         }
-        request.transaction?.objectStore(this.editorStoreName).clear();
+        // Q3 clean cut: retain only browser-local editor state. The old
+        // Dockview/layout/view/entry values do not become portable records.
+        const editor = request.transaction?.objectStore(this.editorStoreName);
+        const cursor = editor?.openCursor();
+        if (cursor) {
+          cursor.onsuccess = () => {
+            const row = cursor.result;
+            if (!row) {
+              return;
+            }
+            row.update(deviceEditorStateFromLegacy(row.value));
+            row.continue();
+          };
+        }
       };
     });
   }

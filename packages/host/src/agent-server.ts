@@ -29,11 +29,14 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 
+import { packageVersion } from '@taucad/runtime/metadata';
 import { isOriginAllowed } from '@taucad/runtime/transport/websocket-host';
-import { serveAgentChannel } from '@taucad/agent-host/node-launcher';
-import type { NodeAgentLauncher, ServeAgentChannelOptions } from '@taucad/agent-host/node-launcher';
+import { serveAgentChannel } from '@taucad/agent-host/launcher';
+import type { AgentLauncher, ServeAgentChannelOptions } from '@taucad/agent-host/launcher';
 
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
+import type { HostSessionHandle } from '@taucad/runtime/host';
+import type { NodeMachineChannelHandle, NodeMachineHost } from '@taucad/runtime/host/node';
 import type { ComputeStoreControl } from '@taucad/runtime/types';
 import { isolationHeaders, serveStaticUi } from '#static-ui.js';
 import type { StaticUiHandler } from '#static-ui.js';
@@ -84,7 +87,14 @@ const cookieOf = (cookieHeader: string | undefined, name: string): string => {
 /** Options for {@link startAgentServer}. @public */
 export type AgentServerOptions = {
   /** The always-on host answering the T0 vocabulary. */
-  readonly launcher: NodeAgentLauncher;
+  readonly launcher: AgentLauncher;
+  /** Optional authenticated machines route owned by this host process. */
+  readonly machines?:
+    | Readonly<{
+        host: NodeMachineHost;
+        session: HostSessionHandle;
+      }>
+    | undefined;
   /** The launcher workspace's single revision root. */
   readonly revisions?: ServeAgentChannelOptions['revisions'];
   /**
@@ -166,9 +176,9 @@ const routeOfPath = (pathname: string, pathPrefix: string): string | undefined =
  * ```typescript
  * import { randomBytes } from 'node:crypto';
  * import { startAgentServer } from '@taucad/host';
- * import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+ * import type { AgentLauncher } from '@taucad/agent-host/launcher';
  *
- * declare const launcher: NodeAgentLauncher;
+ * declare const launcher: AgentLauncher;
  * const server = startAgentServer({
  *   launcher,
  *   token: randomBytes(32).toString('base64url'),
@@ -184,7 +194,8 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
   }
   const pathPrefix = options.pathPrefix ?? '/';
   const httpServer: HttpServer = createServer();
-  const socketServer = new WebSocketServer({ noServer: true });
+  const agentSocketServer = new WebSocketServer({ noServer: true });
+  const machineSocketServer = new WebSocketServer({ noServer: true, maxPayload: 1_048_576 });
   const channels = new Set<ReturnType<typeof serveAgentChannel>>();
   const sockets = new Set<WebSocket>();
   const staticUi: StaticUiHandler | undefined = options.uiRoot
@@ -215,7 +226,10 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
     /* The binding lives in the launcher, not here: the Electron services
      * utility hands the same launcher a `MessagePortMain` and gets the same
      * channel, so launcher 2 consumes this host rather than forking it. */
-    const channel = serveAgentChannel(socket, options.launcher, { revisions: options.revisions });
+    const channel = serveAgentChannel(socket, options.launcher, {
+      build: packageVersion,
+      revisions: options.revisions,
+    });
     channels.add(channel);
     socket.on('close', () => {
       sockets.delete(socket);
@@ -226,13 +240,61 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
     });
   };
 
+  const admitMachinesRoute = (): void => {
+    const { machines } = options;
+    if (!machines) {
+      throw new Error('machines capability is unavailable');
+    }
+    machines.host.admitRoute({ session: machines.session });
+  };
+
+  const serveMachineSocket = (socket: WebSocket): void => {
+    const { machines } = options;
+    if (!machines) {
+      socket.close(1008, 'machines capability is unavailable');
+      return;
+    }
+    sockets.add(socket);
+    socket.on('error', () => {
+      socket.terminate();
+    });
+    let released = false;
+    let removeClose = (): void => undefined;
+    let channel: NodeMachineChannelHandle;
+    try {
+      channel = machines.host.serve({ port: socket, session: machines.session });
+    } catch {
+      socket.close(1011, 'machines channel unavailable');
+      return;
+    }
+    const release = (): void => {
+      if (released) {
+        return;
+      }
+      released = true;
+      sockets.delete(socket);
+      removeClose();
+    };
+    removeClose = channel.onClose(() => {
+      release();
+      if (socket.readyState !== socket.CLOSED) {
+        socket.close(1001, 'machines channel closed');
+      }
+    });
+    socket.on('close', () => {
+      release();
+      channel.dispose('machines socket closed');
+    });
+  };
+
   const onUpgrade = (
     request: IncomingMessage,
     socket: Duplex,
     head: Parameters<WebSocketServer['handleUpgrade']>[2],
   ): void => {
     const url = new URL(request.url ?? '/', 'http://localhost');
-    if (routeOfPath(url.pathname, pathPrefix) !== 'agent') {
+    const route = routeOfPath(url.pathname, pathPrefix);
+    if (route !== 'agent' && (route !== 'machines' || !options.machines)) {
       refuseUpgrade(socket, '404 Not Found');
       return;
     }
@@ -244,8 +306,21 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
       refuseUpgrade(socket, '401 Unauthorized');
       return;
     }
+    if (route === 'machines') {
+      try {
+        admitMachinesRoute();
+      } catch {
+        refuseUpgrade(socket, '403 Forbidden');
+        return;
+      }
+    }
+    const socketServer = route === 'agent' ? agentSocketServer : machineSocketServer;
     socketServer.handleUpgrade(request, socket, head, (accepted) => {
-      serveAgentSocket(accepted);
+      if (route === 'agent') {
+        serveAgentSocket(accepted);
+      } else {
+        serveMachineSocket(accepted);
+      }
     });
   };
 
@@ -276,6 +351,32 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
      * with the shell, which would turn discovery into an HTML parse error, and
      * an MCP POST into a 200 nobody can parse. */
     const { pathname } = new URL(request.url ?? '/', 'http://localhost');
+    if (routeOfPath(pathname, pathPrefix) === 'machines') {
+      const headers = { 'cache-control': 'no-store' };
+      if (!options.machines) {
+        response.writeHead(404, headers).end();
+        return;
+      }
+      if (request.method !== 'GET') {
+        response.writeHead(405, { ...headers, allow: 'GET' }).end();
+        return;
+      }
+      if (!isOriginAllowed(request.headers.origin, [...ownOrigins(), ...(options.allowedOrigins ?? [])])) {
+        response.writeHead(403, headers).end();
+        return;
+      }
+      if (!isAdmitted(request)) {
+        response.writeHead(401, headers).end();
+        return;
+      }
+      try {
+        admitMachinesRoute();
+        response.writeHead(204, headers).end();
+      } catch {
+        response.writeHead(403, headers).end();
+      }
+      return;
+    }
     if (pathname === hostDescriptorPath) {
       serveDescriptor(request, response);
       return;
@@ -419,11 +520,16 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
         httpServer.off('upgrade', onUpgrade);
         httpServer.off('request', onRequest);
         await Promise.all([...sockets].map(async (socket) => closeSocket(socket)));
-        await new Promise<void>((resolve) => {
-          socketServer.close(() => {
-            resolve();
-          });
-        });
+        await Promise.all(
+          [agentSocketServer, machineSocketServer].map(
+            async (socketServer) =>
+              new Promise<void>((resolve) => {
+                socketServer.close(() => {
+                  resolve();
+                });
+              }),
+          ),
+        );
         if (httpServer.listening) {
           await new Promise<void>((resolve) => {
             httpServer.close(() => {

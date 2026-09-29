@@ -23,6 +23,7 @@ import {
   refPatternIsHostLocal,
   publishFailureMessage,
   publishOverHttp,
+  readRemoteStorageOverHttp,
   registerProjectFailureMessage,
   registerProjectOverHttp,
   remoteCarriesLargeObjects,
@@ -38,6 +39,12 @@ import type { PublishPublicationActorInput } from '#publish.types.js';
 /* The two W4 rows assert the *consequence* of the code, not only the code: a
    terminal class is what stops `sync.machine` retrying, and that classifier is
    the machine's, not this module's. */
+import {
+  incompleteRepositoryMarker,
+  isCeilingRefusal,
+  isStorageRefusal,
+  quotaRefusalMarker,
+} from '#refusal-markers.js';
 import { syncFailureReason } from '#sync.machine.js';
 import { RevisionPortError } from '#revision-port.js';
 
@@ -62,6 +69,15 @@ describe('remotes', () => {
     expect(tauRemoteUrl('https://api.tau.new///', 'p1')).toBe('https://api.tau.new/v1/git/p1.git');
   });
 
+  it('refuses a project id that could leave the repository path', () => {
+    for (const projectId of ['../x', 'a/b', 'p1?x=1', '']) {
+      expect(() => tauRemoteUrl('https://api.tau.new', projectId)).toThrow(
+        expect.objectContaining({ code: 'INVALID_TRANSPORT' }),
+      );
+    }
+    expect(tauRemoteUrl('https://api.tau.new', 'proj_A-1')).toBe('https://api.tau.new/v1/git/proj_A-1.git');
+  });
+
   it('never offers a host-local ref to a remote (W3a R4)', () => {
     for (const ref of [
       'refs/tau/owners/o1',
@@ -71,13 +87,15 @@ describe('remotes', () => {
       'refs/tau/retention/records/r1',
       'refs/tau/head',
       'refs/remotes/tau/main',
-      'refs/heads/sync',
     ]) {
       expect(isHostLocalRef(ref)).toBe(true);
     }
-    /* The record set is the half the design *does* push (D14, A15, A30). */
+    /* The record set is the half the design *does* push (D14, A15, A30), and a
+     * conflict line travels like any branch (charter D14). */
     for (const ref of [
       'refs/heads/main',
+      'refs/heads/conflicts/main/device-a',
+      'refs/heads/sync/tau/main',
       'refs/tags/v1',
       'refs/tau/chats/c1',
       'refs/tau/evidence/e1',
@@ -101,8 +119,7 @@ describe('remotes', () => {
     ].map((pattern) => [pattern, refPatternIsHostLocal(pattern)] as const);
 
     expect(answers).toStrictEqual([
-      /* The ordinary fetch refspec. It can expand to `refs/heads/sync`, which is
-       * never *offered* — a per-ref rule, enforced where the name is known. */
+      /* The ordinary fetch refspec. */
       ['refs/heads/*', false],
       ['refs/heads/main', false],
       ['refs/heads/sync', false],
@@ -204,8 +221,12 @@ describe('remotes', () => {
   });
 
   it('lets only Tau Cloud carry a project’s large objects (P20)', () => {
-    expect(remoteCarriesLargeObjects('tau')).toBe(true);
-    expect(remoteCarriesLargeObjects('origin')).toBe(false);
+    expect(remoteCarriesLargeObjects(remoteOf('tau', 'https://api.tau.new/v1/git/p1.git'))).toBe(true);
+    expect(remoteCarriesLargeObjects(remoteOf('origin', 'https://git.example/o/r.git'))).toBe(false);
+    /* C34: the provider decides, so a GitHub remote answers the same wherever it is asked. */
+    expect(remoteCarriesLargeObjects(remoteOf('origin', 'https://github.com/o/r.git', { provider: 'github' }))).toBe(
+      true,
+    );
     // The refusal names files, never a count (D16, AC16).
     expect(lfsRemoteUnsupportedMessage(['models/housing.step', 'models/bracket.step'])).toBe(
       'Large files cannot be backed up to a Git remote: models/bracket.step, models/housing.step. Connect Tau Cloud instead, or remove them from the project.',
@@ -224,6 +245,24 @@ describe('remotes', () => {
  * (review R1); and nothing is reached at all before routing is known.
  */
 describe('remoteTransportError', () => {
+  /* W13d: a 429 is a wait the remote names, and only a 429 carries one. */
+  it('carries a 429’s Retry-After as its wait, a bounded default without one, and no wait on a 503', () => {
+    const limited = { data: { statusCode: 429, response: '{"code":"GIT_RATE_LIMITED","message":"Too many"}' } };
+    const stderr = 'error: RPC failed; HTTP 429 curl 22 The requested URL returned error: 429';
+
+    expect(remoteTransportError(limited, { remote: tauRemoteName, retryAfter: '12' })).toMatchObject({
+      code: 'REMOTE_UNAVAILABLE',
+      retryAfterMilliseconds: 12_000,
+    });
+    expect(remoteTransportError(new Error(stderr), { remote: tauRemoteName, stderr }).retryAfterMilliseconds).toBe(
+      30_000,
+    );
+    expect(
+      remoteTransportError({ data: { statusCode: 503, response: '' } }, { remote: tauRemoteName, retryAfter: '5' })
+        .retryAfterMilliseconds,
+    ).toBeUndefined();
+  });
+
   /* D66: a repository transferred out of the App's reach answers 403 in plain
    * text; Tau replaced that with "rejected the saved credentials". */
   it('keeps GitHub’s plain-text refusal as the sentence, and ignores an HTML error page', () => {
@@ -287,12 +326,96 @@ describe('remoteTransportError', () => {
     expect(refusal.message).toContain('huge.bin (5000 bytes)');
   });
 
+  /*
+   * D17: the plan's own refusal comes the same way, with the caller's sentence
+   * and the largest files, and is the same kind of answer: a quota, whose one
+   * action depends on who is asking, never *Sync now*.
+   */
+  it('should read the plan-quota refusal on the sideband as a quota answer, sentence and files intact', () => {
+    const stderr = [
+      'remote: Tau: storage quota exceeded — this push needs 4080 bytes more than the plan allows.',
+      'remote: Tau: This push needs more room than your 1 GB storage plan has left, so it was not backed up.',
+      'remote: Tau: the largest files it adds are:',
+      'remote: Tau:   scan.stl (5000 bytes)',
+      'remote: Tau: nothing was written.',
+      'To https://api.tau.build/v1/git/p1.git',
+      ' ! [remote rejected] refs/heads/main -> refs/heads/main (pre-receive hook declined)',
+    ].join('\n');
+
+    const refusal = remoteTransportError(new Error(stderr), { remote: tauRemoteName, stderr });
+
+    expect(refusal.code).toBe('REMOTE_QUOTA_EXCEEDED');
+    expect(syncFailureReason(refusal)).toBe('quota');
+    expect(refusal.message).toContain('your 1 GB storage plan');
+    expect(refusal.message).toContain('scan.stl (5000 bytes)');
+  });
+
+  it('should spell the quota marker the way the API prints it, and file only storage answers as storage', () => {
+    expect(quotaRefusalMarker).toBe('Tau: storage quota exceeded');
+    expect(isStorageRefusal('Tau: repository size limit exceeded — …')).toBe(true);
+    expect(isStorageRefusal('Tau: refused refs/heads/main — it does not fast-forward')).toBe(false);
+    expect(isStorageRefusal(undefined)).toBe(false);
+    /* F2: the ceiling is the one storage refusal no plan clears. */
+    expect(isCeilingRefusal('Tau: repository size limit exceeded — …')).toBe(true);
+    expect(isCeilingRefusal(`${quotaRefusalMarker}\nTau: …`)).toBe(false);
+    expect(isCeilingRefusal(undefined)).toBe(false);
+  });
+
   /* D18: a Git remote that cannot hold large objects is not a plan problem,
    * so the class that offers *Upgrade* must not claim it. */
   it('should classify a large-object refusal on a Git remote apart from the storage plan', () => {
     const refusal = new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage(['huge.step']));
 
     expect(syncFailureReason(refusal)).toBe('largeFiles');
+  });
+
+  /* D22, L6-F8: a manifest naming a pack the store does not hold is repaired
+   * only by an operator, so it is terminal on both legs — and the 503s that
+   * clear on their own keep their retry. */
+  it.each([
+    [
+      'the browser leg’s JSON envelope',
+      Object.assign(new Error('HTTP Error: 500 Internal Server Error'), {
+        data: {
+          statusCode: 500,
+          response: JSON.stringify({
+            code: 'GIT_REPOSITORY_INCOMPLETE',
+            error: `${incompleteRepositoryMarker}; Tau is repairing it.`,
+          }),
+        },
+      }),
+      undefined,
+    ],
+    [
+      'the native leg’s text/plain sentence',
+      new Error('git push failed'),
+      [
+        `remote: ${incompleteRepositoryMarker}; Tau is repairing it.`,
+        "fatal: unable to access 'https://api.tau.build/v1/git/p1.git/': The requested URL returned error: 500",
+      ].join('\n'),
+    ],
+  ])('files an incomplete repository from %s as damaged, never as unavailable', (_, thrown, stderr) => {
+    const refusal = remoteTransportError(thrown, {
+      remote: tauRemoteName,
+      ...(stderr === undefined ? {} : { stderr }),
+    });
+
+    expect(refusal.code).toBe('REMOTE_DAMAGED');
+    expect(syncFailureReason(refusal)).toBe('damaged');
+    expect(refusal.message).toContain(incompleteRepositoryMarker);
+  });
+
+  it('keeps a 503 race-lost and an unmarked 500 retryable', () => {
+    for (const [statusCode, code] of [
+      [503, 'GIT_PUSH_RACE_LOST'],
+      [500, 'INTERNAL_SERVER_ERROR'],
+    ] as const) {
+      const thrown = Object.assign(new Error(`HTTP Error: ${String(statusCode)}`), {
+        data: { statusCode, response: JSON.stringify({ code, error: 'Try again shortly.' }) },
+      });
+
+      expect(remoteTransportError(thrown, { remote: tauRemoteName }).code).toBe('REMOTE_UNAVAILABLE');
+    }
   });
 
   it('leaves a sideband refusal without the ceiling marker a plain rejection', () => {
@@ -662,6 +785,53 @@ describe('the Tau Cloud publish and register legs', () => {
       expect(refused.calls[1]?.body).toBe(JSON.stringify({}));
     } finally {
       refused.restore();
+    }
+  });
+
+  /* D18: the Sync region's figure, from the owner-scoped usage route. */
+  it('should read the owner’s usage as bytes used of the allowance, on either leg', async () => {
+    const answered = capture(200, { storageBytes: 300, lfsBytes: 40, storageLimitBytes: 1024 });
+    try {
+      expect(await readRemoteStorageOverHttp('https://api.test/', { kind: 'cookie' }, 'p1')).toStrictEqual({
+        used: 340,
+        quota: 1024,
+      });
+      await readRemoteStorageOverHttp('https://api.test', { kind: 'bearer', authorization: 'Bearer t' }, 'p1');
+
+      expect(answered.urls).toEqual(['https://api.test/v1/projects/p1/usage', 'https://api.test/v1/projects/p1/usage']);
+      expect(answered.calls[0]?.credentials).toBe('include');
+      expect((answered.calls[1]?.headers ?? {}) as Record<string, string>).toHaveProperty('Authorization', 'Bearer t');
+    } finally {
+      answered.restore();
+    }
+  });
+
+  it('should read retained packs as their own figure, outside what is used', async () => {
+    const answered = capture(200, { storageBytes: 300, lfsBytes: 40, storageLimitBytes: 1024, retainedBytes: 500 });
+    try {
+      expect(await readRemoteStorageOverHttp('https://api.test', { kind: 'cookie' }, 'p1')).toStrictEqual({
+        used: 340,
+        quota: 1024,
+        retained: 500,
+      });
+    } finally {
+      answered.restore();
+    }
+  });
+
+  it('should draw no figure for a collaborator, a plan that cannot sync or an answer it cannot read', async () => {
+    for (const [status, body] of [
+      [403, { code: 'PROJECT_ROLE_INSUFFICIENT' }],
+      [200, { storageBytes: 0, lfsBytes: 0, storageLimitBytes: 0 }],
+      [200, { storageBytes: '1' }],
+    ] as const) {
+      const answered = capture(status, body);
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one stubbed answer at a time.
+        expect(await readRemoteStorageOverHttp('https://api.test', { kind: 'cookie' }, 'p1')).toBeUndefined();
+      } finally {
+        answered.restore();
+      }
     }
   });
 });

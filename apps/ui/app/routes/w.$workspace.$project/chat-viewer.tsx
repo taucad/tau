@@ -1,5 +1,6 @@
 import { memo, useEffect, useCallback, useMemo, useRef, useState } from 'react';
-import { useSelector } from '@xstate/react';
+import type { SnapshotFrom } from 'xstate';
+import type { FileEntry } from '@taucad/types';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { FileX, FolderOpen, PlayCircle } from 'lucide-react';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
@@ -11,9 +12,12 @@ import { FileSelector } from '#components/files/file-selector.js';
 import { Button } from '@taucad/ui/components/button';
 import { popoverSurfaceVariants } from '@taucad/ui/components/popover.variants';
 import { useProject } from '#hooks/use-project.js';
-import { useFileTreeMap } from '#hooks/use-file-tree.js';
+import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useFileContent } from '#hooks/use-file-content.js';
-import { defaultGraphicsSettings } from '#constants/editor.constants.js';
+import { useRevisionStatus } from '#hooks/use-revision-status.js';
+import { Loader } from '#components/ui/loader.js';
+import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
+import { newViewRecord, viewTabTitle } from '#workbench-records/projection.js';
 import { CadProvider, useCad, useCadSelector } from '#hooks/use-cad.js';
 import {
   GraphicsProvider,
@@ -26,9 +30,6 @@ import type { ViewCameraSeed } from '#services/graphics-camera-registry.js';
 import { ChatStackTrace } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
-import { ChatInterfaceGraphics } from '#routes/w.$workspace.$project/chat-interface-graphics.js';
-import { ChatInterfaceStatus } from '#routes/w.$workspace.$project/chat-interface-status.js';
-import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { ArButton } from '#components/cad/ar-button.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
@@ -36,10 +37,10 @@ import { describeKinematicsHover, getKinematicsUnitState } from '#machines/kinem
 import {
   selectCadGeometry,
   selectCadKernelClient,
-  selectCadUnits,
   selectCadFailureIssues,
   selectIsCadLoading,
 } from '#machines/cad.machine.js';
+import type { cadMachine } from '#machines/cad.machine.js';
 import {
   attachViewerSecondaryGestureTarget,
   beginViewerSecondaryGesture,
@@ -54,10 +55,9 @@ import type {
   ViewerSecondaryGestureState,
 } from '#routes/w.$workspace.$project/chat-viewer-secondary-gesture.js';
 
-/** Horizontal inset sum for bottom controls (`left-2` + `right-2`); pairs with `max-w-[calc(100%-1rem)]` on the overlay. */
-const bottomControlsGutterPx = 16;
 const componentNameBadgeRightEdgeThresholdPx = 220;
-const componentNameBadgeBottomEdgeThresholdPx = 56;
+/** Within this distance of the bottom controls' top edge the badge flips above the pointer. */
+const componentNameBadgeBottomThresholdPx = 56;
 
 const getViewerSecondaryGesturePoint = (event: React.PointerEvent<HTMLDivElement>): ViewerSecondaryGesturePoint => ({
   clientX: event.clientX,
@@ -104,44 +104,81 @@ type ChatViewerProps = {
   readonly profile?: 'editor' | 'shared';
 };
 
+function MissingViewerFile({
+  entryPath,
+  onSelect,
+}: {
+  readonly entryPath: string;
+  readonly onSelect: (path: string) => void;
+}): React.JSX.Element {
+  const checkingRemote = useRevisionStatus()?.sync.state === 'checking';
+  return (
+    <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
+      {checkingRemote ? (
+        <Loader className='size-12 motion-reduce:animate-none' />
+      ) : (
+        <FileX className='size-12 stroke-1' />
+      )}
+      <div className='flex flex-col items-center gap-1' role={checkingRemote ? 'status' : undefined}>
+        <p className='text-sm font-medium'>{checkingRemote ? 'Checking synced files…' : 'File not found'}</p>
+        <p className='max-w-60 truncate text-xs'>{entryPath}</p>
+      </div>
+      <FileSelector
+        selectedFile={undefined}
+        placeholder='Select a file to render…'
+        className='h-8 w-50'
+        title='Viewport File'
+        description='Choose a file to render in the viewport'
+        searchPlaceholder='Search files…'
+        emptyMessage='No files found.'
+        onSelect={onSelect}
+      />
+    </div>
+  );
+}
+
 export const ChatViewer = memo(function ({
   viewId,
   entryPath,
   panelApi,
   profile = 'editor',
 }: ChatViewerProps): React.JSX.Element {
-  const { projectRef, editorRef, viewGraphics, geometryUnits } = useProject();
+  const { projectRef, viewGraphics, viewRecords, entriesRecord, geometryUnits, mainEntryPath, setViewEntryPath } =
+    useProject();
+  const viewCommands = useWorkbenchViewCommands();
   // Get the per-view graphics machine
   const graphicsActor = viewGraphics.get(viewId);
 
   // Get the geometry unit for this view's entry path
   const cadActor = entryPath ? geometryUnits.get(entryPath) : undefined;
 
-  // Lazy tree snapshot for isDirectory checks (prefix / loaded dir entry)
-  const fileTree = useFileTreeMap();
-
-  // Detect if the entry path is a directory.
-  // The fileTree only stores file entries (not directories), so we check
-  // whether entryPath is a prefix of any file path in the tree.
-  const isDirectory = useMemo(() => {
-    if (!entryPath) {
-      return false;
-    }
-
-    const entry = fileTree.get(entryPath);
-    if (entry) {
-      return entry.type === 'dir';
-    }
-
-    const directoryPrefix = `${entryPath}/`;
-    for (const key of fileTree.keys()) {
-      if (key.startsWith(directoryPrefix)) {
-        return true;
+  // Detect if the entry path is a directory: a listed directory entry, or a
+  // prefix of a listed path when its directory has not been listed itself.
+  // Selected as a boolean so a tree publication (every file write) re-renders
+  // the viewer only when the answer changes.
+  const selectIsDirectory = useCallback(
+    (fileTree: ReadonlyMap<string, FileEntry>): boolean => {
+      if (!entryPath) {
+        return false;
       }
-    }
 
-    return false;
-  }, [entryPath, fileTree]);
+      const entry = fileTree.get(entryPath);
+      if (entry) {
+        return entry.type === 'dir';
+      }
+
+      const directoryPrefix = `${entryPath}/`;
+      for (const key of fileTree.keys()) {
+        if (key.startsWith(directoryPrefix)) {
+          return true;
+        }
+      }
+
+      return false;
+    },
+    [entryPath],
+  );
+  const isDirectory = useFileTreeSelector(selectIsDirectory);
 
   // Derive isMissing from content service orphan outcome (VS Code pattern).
   // useFileContent auto-loads on cache miss; missing files resolve to the
@@ -149,16 +186,15 @@ export const ChatViewer = memo(function ({
   const fileContent = useFileContent(entryPath);
   const isMissing = fileContent.kind === 'orphaned' && !isDirectory;
 
-  // Get the current view settings from editor state for this panel
-  const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
-  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
+  // The project view record is the camera seed for this pane.
+  const viewRecord = viewRecords.get(viewId);
   /* Create-only seed for this view's camera session, built when the viewer mounts its canvas. The
    * canvas-less branches mount no provider, so a directory or a missing file builds no camera (R8). */
   const cameraSeed: ViewCameraSeed = {
     identity: entryPath,
     camera: {
-      cameraFovAngle: viewSettings[viewId]?.graphicsSettings.cameraFovAngle,
-      cameraView: viewSettings[viewId]?.graphicsSettings.cameraView,
+      cameraFovAngle: viewRecord?.fieldOfView,
+      cameraView: viewRecord?.camera.kind === 'pose' ? viewRecord.camera : undefined,
     },
   };
 
@@ -170,49 +206,67 @@ export const ChatViewer = memo(function ({
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath: path,
-          renderTimeout: unitSettings[path]?.renderTimeout,
+          renderTimeout: entriesRecord?.entries[path]?.renderTimeout,
         });
       }
 
-      /* The cut is entry-scoped and the graphics actor is retained across a file switch, so the
-       * live cut is closed here too. Clearing only the record would let the next persist write the
-       * previous file's cut -- pivoted on geometry that is gone -- straight back into it. */
-      graphicsActor?.send({ type: 'setSectionViewActive', payload: false });
+      /* Cuts and measurements are entry-scoped and the graphics actor is retained across a file switch,
+       * so the live ones are removed here too; removing the last cut ends Section. Turning Section off
+       * would keep the cuts, and the next persist would write the previous file's cuts and pinned
+       * measurements -- placed on geometry that is gone -- into the new file's record. */
+      const graphicsContext = graphicsActor?.getSnapshot().context;
+      for (const { id } of graphicsContext?.sectionCuts ?? []) {
+        graphicsActor?.send({ type: 'removeSectionCut', payload: id });
+      }
+      for (const { id } of graphicsContext?.measurements ?? []) {
+        graphicsActor?.send({ type: 'clearMeasurement', payload: id });
+      }
+      graphicsActor?.send({ type: 'cancelCurrentMeasurement' });
 
-      // Preserve existing view settings (FOV, visibility, environment preset, etc.)
-      // But clear geometry-dependent state (camera pose, measurements) on file switch
-      const existingGraphics = viewSettings[viewId]?.graphicsSettings;
-
-      editorRef.send({
-        type: 'setViewSettings',
-        viewId,
-        viewState: {
-          entryPath: path,
-          graphicsSettings: {
-            ...(existingGraphics ?? defaultGraphicsSettings),
-            // Clear geometry-dependent state on file switch
-            cameraView: undefined,
-            sectionView: undefined,
-            pinnedMeasurements: undefined,
-          },
-        },
-      });
+      void viewCommands.edit(viewId, (current) => ({
+        ...(current ?? newViewRecord(path)),
+        entryPath: path,
+        camera: { kind: 'preset', preset: 'isometric' },
+        section: { active: false, cuts: [] },
+        measurements: [],
+      }));
+      setViewEntryPath(viewId, path);
 
       // Update Dockview panel params so the component re-renders with new entryPath
       panelApi.updateParameters({ entryPath: path });
 
       // Update the Dockview panel title
-      const fileName = path.split('/').pop() ?? path;
-      panelApi.setTitle(fileName);
+      panelApi.setTitle(viewTabTitle({ ...(viewRecord ?? newViewRecord(path)), entryPath: path }));
     },
-    [projectRef, editorRef, geometryUnits, graphicsActor, viewId, panelApi, viewSettings, unitSettings],
+    [
+      entriesRecord,
+      projectRef,
+      geometryUnits,
+      graphicsActor,
+      viewId,
+      panelApi,
+      setViewEntryPath,
+      viewCommands,
+      viewRecord,
+    ],
   );
+
+  // A cloud project opens with a placeholder main file. Follow the real main
+  // when its synced manifest arrives, but keep viewers on other chosen files.
+  const previousMainEntryPath = useRef(mainEntryPath);
+  useEffect(() => {
+    const previous = previousMainEntryPath.current;
+    previousMainEntryPath.current = mainEntryPath;
+    if (entryPath === previous && mainEntryPath && mainEntryPath !== previous) {
+      handleFileSelect(mainEntryPath);
+    }
+  }, [entryPath, handleFileSelect, mainEntryPath]);
 
   // If no graphics actor yet, render a placeholder
   if (!graphicsActor) {
     return (
       <div className='flex h-full items-center justify-center text-muted-foreground'>
-        <span className='text-sm'>Initializing viewer...</span>
+        <span className='text-sm'>Initializing viewer…</span>
       </div>
     );
   }
@@ -224,11 +278,11 @@ export const ChatViewer = memo(function ({
         <span className='text-sm'>No file selected</span>
         <FileSelector
           selectedFile={undefined}
-          placeholder='Select file to render...'
-          className='h-8 w-[200px]'
+          placeholder='Select file to render…'
+          className='h-8 w-50'
           title='Viewport File'
           description='Choose which file to render in the viewport'
-          searchPlaceholder='Search files...'
+          searchPlaceholder='Search files…'
           emptyMessage='No files found.'
           onSelect={handleFileSelect}
         />
@@ -245,11 +299,11 @@ export const ChatViewer = memo(function ({
         <FileSelector
           selectedFile={undefined}
           initialPath={entryPath}
-          placeholder='Select a file to render...'
-          className='h-8 w-[200px]'
+          placeholder='Select a file to render…'
+          className='h-8 w-50'
           title='Viewport File'
           description='Choose a file to render in the viewport'
-          searchPlaceholder='Search files...'
+          searchPlaceholder='Search files…'
           emptyMessage='No files found.'
           onSelect={handleFileSelect}
         />
@@ -259,25 +313,7 @@ export const ChatViewer = memo(function ({
 
   // If the entry path doesn't exist in the file tree, show a friendly "not found" screen
   if (isMissing) {
-    return (
-      <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
-        <FileX className='size-12 stroke-1' />
-        <div className='flex flex-col items-center gap-1'>
-          <p className='text-sm font-medium'>File not found</p>
-          <p className='max-w-60 truncate text-xs'>{entryPath}</p>
-        </div>
-        <FileSelector
-          selectedFile={undefined}
-          placeholder='Select a file to render...'
-          className='h-8 w-[200px]'
-          title='Viewport File'
-          description='Choose a file to render in the viewport'
-          searchPlaceholder='Search files...'
-          emptyMessage='No files found.'
-          onSelect={handleFileSelect}
-        />
-      </div>
-    );
+    return <MissingViewerFile entryPath={entryPath} onSelect={handleFileSelect} />;
   }
 
   return (
@@ -288,6 +324,19 @@ export const ChatViewer = memo(function ({
     </CadProvider>
   );
 });
+
+/** Stands in for geometry that has not arrived; subscribes to loading so the viewer does not. */
+function GeometryPlaceholder(): React.JSX.Element {
+  const isCadLoading = useCadSelector(selectIsCadLoading, false);
+  return (
+    <div
+      role='status'
+      aria-label={isCadLoading ? 'Loading geometry' : 'Waiting for geometry'}
+      aria-busy={isCadLoading || undefined}
+      className='size-full bg-background'
+    />
+  );
+}
 
 /**
  * Inner content of a viewer panel with an active file.
@@ -304,12 +353,10 @@ const ViewerContent = memo(function ({
   readonly entryPath: string;
   readonly profile: 'editor' | 'shared';
 }): React.JSX.Element {
-  const { editorRef, projectRef } = useProject();
+  const { projectRef, entriesRecord } = useProject();
   const cadRef = useCad();
   const geometry = useCadSelector(selectCadGeometry, undefined);
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
-  const isCadLoading = useCadSelector(selectIsCadLoading, false);
-  const units = useCadSelector(selectCadUnits, undefined);
   const kernelClient = useCadSelector(selectCadKernelClient, undefined);
   const failureMessage =
     failureIssues?.find((issue) => issue.severity === 'error')?.message ?? failureIssues?.[0]?.message;
@@ -320,27 +367,40 @@ const ViewerContent = memo(function ({
   // stays open. Surface a "Reopen renderer" overlay so the user can re-spawn
   // the cad actor without having to re-add the panel.
   const isGeometryUnitClosed = !cadRef;
-  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
   const handleReopenRenderer = useCallback(() => {
     projectRef.send({
       type: 'createGeometryUnit',
       entryPath,
-      renderTimeout: unitSettings[entryPath]?.renderTimeout,
+      renderTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
     });
-  }, [projectRef, entryPath, unitSettings]);
+  }, [entriesRecord, projectRef, entryPath]);
 
-  // Bridge geometry data from the headless CadMachine to the per-view GraphicsMachine
+  // Bridge geometry from the headless CadMachine to the per-view GraphicsMachine in
+  // the same tick the cad machine publishes it. The canvas then renders a new
+  // geometry together with the presentation revision the graphics machine
+  // assigns it; bridged after the commit instead, the mesh would render (and
+  // start preparing) the new geometry under the previous revision first, then
+  // again under its own.
   const graphicsActor = useGraphics();
   useEffect(() => {
-    if (units && geometry) {
-      graphicsActor.send({
-        type: 'updateGeometry',
-        geometry,
-        units,
-        sourceFile: entryPath,
-      });
+    if (!cadRef) {
+      return undefined;
     }
-  }, [entryPath, graphicsActor, geometry, units]);
+
+    let forwarded: Pick<SnapshotFrom<typeof cadMachine>['context'], 'geometry' | 'units'> | undefined;
+    const forward = ({ context: { geometry, units } }: SnapshotFrom<typeof cadMachine>): void => {
+      if (!geometry || (geometry === forwarded?.geometry && units === forwarded.units)) {
+        return;
+      }
+      forwarded = { geometry, units };
+      graphicsActor.send({ type: 'updateGeometry', geometry, units, sourceFile: entryPath });
+    };
+    forward(cadRef.getSnapshot());
+    const subscription = cadRef.subscribe(forward);
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [cadRef, entryPath, graphicsActor]);
 
   // Select individual primitive values so that useSelector's reference equality
   // check works correctly. An object-returning selector creates a new reference
@@ -353,11 +413,9 @@ const ViewerContent = memo(function ({
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
   const viewerLayoutRef = useRef<HTMLDivElement>(null);
+  const bottomControlsRef = useRef<HTMLDivElement>(null);
   const canvasRegionRef = useRef<HTMLDivElement>(null);
   const canvasEventSource = canvasRegionRef as React.RefObject<HTMLElement>;
-  const { width: viewerLayoutWidth } = useResizeObserver({ ref: viewerLayoutRef });
-  const toolbarAvailableWidth =
-    viewerLayoutWidth === undefined ? undefined : Math.max(0, viewerLayoutWidth - bottomControlsGutterPx);
   const [isPointerOverViewer, setIsPointerOverViewer] = useState(false);
   const [viewerActionMenu, setViewerActionMenu] = useState<ViewerSecondaryGestureMenu | undefined>(undefined);
   const secondaryGestureRef = useRef<ViewerSecondaryGestureState>(idleViewerSecondaryGestureState);
@@ -419,6 +477,9 @@ const ViewerContent = memo(function ({
 
     const x = Math.max(0, Math.min(event.clientX - viewerBounds.left, viewerBounds.width));
     const y = Math.max(0, Math.min(event.clientY - viewerBounds.top, viewerBounds.height));
+    // Read at each move rather than kept: the bar grows and shrinks as tools start and stop.
+    const controlsTop =
+      (bottomControlsRef.current?.getBoundingClientRect().top ?? viewerBounds.bottom) - viewerBounds.top;
     layout.style.setProperty('--viewer-hover-label-x', `${x}px`);
     layout.style.setProperty('--viewer-hover-label-y', `${y}px`);
     layout.style.setProperty(
@@ -427,7 +488,7 @@ const ViewerContent = memo(function ({
     );
     layout.style.setProperty(
       '--viewer-hover-label-translate-y',
-      y > viewerBounds.height - componentNameBadgeBottomEdgeThresholdPx ? 'calc(-100% - 10px)' : '10px',
+      y > controlsTop - componentNameBadgeBottomThresholdPx ? 'calc(-100% - 10px)' : '10px',
     );
     setIsPointerOverViewer(true);
   }, []);
@@ -521,10 +582,14 @@ const ViewerContent = memo(function ({
   }, [isGeometryUnitClosed]);
 
   return (
-    <div ref={viewerLayoutRef} data-testid='chat-viewer-layout' className='group/viewer relative flex h-full flex-col'>
+    <div
+      ref={viewerLayoutRef}
+      data-testid='chat-viewer-layout'
+      data-viewer-frame
+      className='group/viewer @container/viewer relative flex h-full flex-col'
+    >
       {/* Status overlays */}
       <div className='absolute top-[10%] right-2 left-2 z-10 mx-auto flex w-fit max-w-full flex-col gap-2'>
-        <ChatInterfaceStatus />
         <ChatViewerStatus />
       </div>
 
@@ -569,12 +634,7 @@ const ViewerContent = memo(function ({
             className='size-full flex-col justify-center gap-3 bg-background text-center [&>svg]:size-10'
           />
         ) : (
-          <div
-            role='status'
-            aria-label={isCadLoading ? 'Loading geometry' : 'Waiting for geometry'}
-            aria-busy={isCadLoading || undefined}
-            className='size-full bg-background'
-          />
+          <GeometryPlaceholder />
         )}
         {geometry && overlayFailureMessage ? (
           <RuntimeErrorOverlay
@@ -610,21 +670,18 @@ const ViewerContent = memo(function ({
         </div>
       )}
 
-      {/* AR button — mobile iOS only, positioned bottom-right above controls */}
-      <ArButton geometry={geometry} kernelClient={kernelClient} className='absolute right-3 bottom-14 z-10' />
-
-      {/* Bottom controls */}
+      {/* Bottom controls: the bar is centred on the last line and grows upward as tools start. The issues card and
+          the AR button (mobile iOS only) share the line above it, so the bar never covers them. In a pane narrower
+          than the bar, the bar starts at the left edge, keeping the grid readout and Section in view. */}
       <div
-        data-testid='chat-viewer-bottom-controls-overlay'
-        className='pointer-events-none absolute bottom-2 left-2 z-10 flex max-w-[calc(100%-1rem)] shrink-0 flex-col items-start gap-2 [&>*]:pointer-events-auto'
+        ref={bottomControlsRef}
+        className='pointer-events-none absolute inset-x-2 bottom-2 z-10 flex flex-col items-center-safe gap-2'
       >
-        <ChatInterfaceGraphics />
-        {profile === 'editor' ? <ChatStackTrace entryPath={entryPath} side='bottom' /> : null}
-        <ChatViewerControls
-          availableWidth={toolbarAvailableWidth}
-          className='self-stretch'
-          shouldEnableCapture={profile === 'editor'}
-        />
+        <div className='flex w-full items-end gap-2 [&>*]:pointer-events-auto'>
+          {profile === 'editor' ? <ChatStackTrace entryPath={entryPath} side='bottom' /> : null}
+          <ArButton geometry={geometry} kernelClient={kernelClient} className='ml-auto shrink-0' />
+        </div>
+        <ChatViewerControls shouldEnableCapture={profile === 'editor'} />
       </div>
     </div>
   );

@@ -6,21 +6,22 @@ import { measureProjectCardForeground } from '#support/project-card-framing.js';
 test('project card thumbnail and preview parity', async () => {
   await target.setViewport({ width: 1440, height: 1000 });
   await target.navigate('/community');
-  const search = selectors.getByPlaceholder('Search projects...');
+  const search = selectors.getByRole('searchbox', { name: 'Search examples' });
   await target.expectVisible(search, 60_000);
-  await target.fill(search, 'Involute Gear');
+  await target.fill(search, 'Cycloidal Gear');
 
-  const card = '[data-slot="card"]:has(img[alt="Involute Gear"])';
-  const thumbnail = selectors.getByCss(`${card} img[alt="Involute Gear"]`);
+  /* The card is named by its link ("Open <name>"); the thumbnail beside the heading is decorative. */
+  const card = '[data-slot="card"]:has(a:has-text("Open Cycloidal Gear"))';
+  const thumbnail = selectors.getByCss(`${card} img`);
   await target.expectVisible(thumbnail);
   await expect
     .poll(async () =>
       target.evaluateLocator(thumbnail, (element) => {
         const image = element as HTMLImageElement;
-        return image.complete && image.naturalWidth;
+        return image.complete ? { width: image.naturalWidth, height: image.naturalHeight } : undefined;
       }),
     )
-    .toBe(768);
+    .toEqual({ width: 1536, height: 1152 });
 
   const toggle = `${card} button[aria-label="Preview model"]`;
   const media = `${card} div:has(> button[aria-label="Preview model"])`;

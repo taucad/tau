@@ -2,7 +2,6 @@ import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useR
 import { useLocation, useMatch, useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
 import type { Handle } from '#types/matches.types.js';
-import { ProjectCommandPaletteItems } from '#routes/w.$workspace.$project/project-command-items.js';
 import { SharedWorkerGate } from '#hooks/use-file-manager.js';
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
 // (see `apps/ui/app/components/global-chat-flush-guard.tsx`). The project
@@ -12,10 +11,10 @@ import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { Loader } from '#components/ui/loader.js';
 import {
   deriveProjectRouteState,
+  ProjectRouteRetryContext,
   ProjectRouteStateContext,
 } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { ProjectRouteSlugs } from '#routes/w.$workspace.$project/project-route-state.js';
-import { ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-notices.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 import type { ProjectSessionFlushRegistration } from '#routes/w.$workspace.$project/project-live-sessions.js';
 import { isKernelAvailable, nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
@@ -29,22 +28,17 @@ import { stringParameter } from '#utils/search-parameter.codecs.js';
 /*
  * D19/W21: the CAD workspace is not in the root layout's module graph. Everything a live project
  * needs — Monaco, three.js, the chat surface — is behind this boundary, which mounts only once a
- * project is live, and is prefetched off the critical path once the shell is idle.
+ * project is live. Project links warm it on navigation intent.
  */
 const LiveProjectSessions = lazy(async () => {
   const module = await import('#routes/w.$workspace.$project/project-live-sessions.js');
   return { default: module.LiveProjectSessions };
 });
 
-const prefetchLiveProjectSessions = async (): Promise<void> => {
-  try {
-    await import('#routes/w.$workspace.$project/project-live-sessions.js');
-  } catch {
-    /* A warm-up, not a load: the `lazy()` above is what actually needs the
-     * chunk, and it reports its own failure. Swallowing this one keeps a flaky
-     * idle fetch out of the console as an unhandled rejection (9g). */
-  }
-};
+const ProjectCommandPaletteItems = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/project-command-items.js');
+  return { default: module.ProjectCommandPaletteItems };
+});
 
 /* Module scope: the setter is memoised on the codec's identity. */
 const cloudOpenParameter = stringParameter();
@@ -218,11 +212,11 @@ export function ProjectRouteGate({
       controller.abort();
     };
     /*
-     * `libraryRevision` (W2): trashing or restoring the project on screen must
-     * re-resolve access. Without it the route kept a one-shot answer and showed
-     * the closed notice for a project that is in the Trash (Finding 2).
+     * Trashing or restoring the project on screen must re-resolve access (W2,
+     * Finding 2). The manager's value carries `libraryRevision`, so it moves
+     * with the library and `projectManager` alone re-runs this effect (P66).
      */
-  }, [requestedProjectId, projectManager, loadAttempt, projectManager.libraryRevision]);
+  }, [requestedProjectId, projectManager, loadAttempt]);
 
   /*
    * Liveness is orthogonal to navigation (A35, I22).
@@ -380,20 +374,6 @@ export const projectRoutePath = '/w/:workspace/:project';
 /** Mount every live project below the app registry and place route chrome in the focused one. */
 export function ProjectSessionsHost({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const match = useMatch({ path: projectRoutePath, end: true });
-  /* Opening a project must not pay for the split: fetch the workspace chunk once the shell has
-   * nothing better to do, so it is already there when a project goes live. */
-  useEffect(() => {
-    if (!('requestIdleCallback' in globalThis)) {
-      const timer = setTimeout(prefetchLiveProjectSessions, 1000);
-      return () => {
-        clearTimeout(timer);
-      };
-    }
-    const handle = globalThis.requestIdleCallback(prefetchLiveProjectSessions);
-    return () => {
-      globalThis.cancelIdleCallback(handle);
-    };
-  }, []);
   const location = useLocation();
   const navigate = useNavigate();
   const workspace = match?.params.workspace ?? '';
@@ -513,7 +493,11 @@ export function ProjectRouteProviders({
 /** Chrome shared by every project route. */
 export const projectRouteHandle: Omit<Handle, 'providers'> = {
   commandPalette(match) {
-    return <ProjectCommandPaletteItems match={match} />;
+    return (
+      <Suspense fallback={null}>
+        <ProjectCommandPaletteItems match={match} />
+      </Suspense>
+    );
   },
   enablePageHeader: false,
 };

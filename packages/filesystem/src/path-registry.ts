@@ -15,9 +15,9 @@
  * A path no row names is authored, versioned, agent-writable and observed on
  * the UI plane — except inside `.tau`, where the default is
  * {@link reservedTauPathClassification} (P13). The authored `.tau` controls —
- * `.tau/parameters/**`, `.tau/skills/**`, `.tau/AGENTS.md` — are rows of their
- * own, which is what keeps that default from swallowing them the way a blanket
- * `.tau` exclusion once did.
+ * `.tau/parameters/**`, `.tau/machines/**`, `.tau/skills/**`, `.tau/AGENTS.md` —
+ * are rows of their own, which is what keeps that default from swallowing them
+ * the way a blanket `.tau` exclusion once did.
  *
  * Every row is compared as the filesystem folds it rather than as spelled: one
  * rule, no row that is reserved under one spelling and the user's under another.
@@ -83,10 +83,10 @@ export const unlistedPathClassification: PathClassification = Object.freeze({
  *
  * It is the fallback rather than a row because a row would name `.tau` itself:
  * the directory holds the authored controls too, and hiding the container hides
- * their discovery. It stays out of {@link pathRegistry} for the same reason the
- * generated ignore file must not carry `/.tau/` — git cannot re-include a path
- * under an excluded directory, so that one pattern would un-version
- * `.tau/parameters` in the user's own checkout.
+ * their discovery. The generated ignore file excludes it the same way — the
+ * members, `/.tau/*`, then each authored control re-included — never `/.tau/`:
+ * git cannot re-include a path under an excluded directory, so that one pattern
+ * would un-version `.tau/parameters` in the user's own checkout.
  *
  * @public
  */
@@ -96,6 +96,17 @@ export const reservedTauPathClassification: PathClassification = Object.freeze({
   agentAccess: 'hidden',
   watch: 'ui',
 });
+
+/**
+ * Tau's own directory: the one prefix whose unlisted members answer
+ * {@link reservedTauPathClassification}.
+ *
+ * Exported so the generated ignore block can exclude those members without
+ * restating the layout (PP5).
+ *
+ * @public
+ */
+export const reservedTauDirectory = '.tau';
 
 /**
  * The reserved project layout, most specific first.
@@ -197,6 +208,18 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     match: 'root',
     directory: true,
   },
+  /* The project's print intent (`printer.json`). The printers themselves are
+   * per-user files outside every project, never here. */
+  {
+    prefix: '.tau/machines',
+    class: 'authored',
+    versioned: true,
+    agentAccess: 'read-write',
+    watch: 'ui',
+    anchored: true,
+    match: 'root',
+    directory: true,
+  },
   {
     prefix: '.tau/skills',
     class: 'authored',
@@ -218,8 +241,19 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     directory: false,
   },
 
-  /* Records: host-written bytes inside the project. Read-only to agents, never
-   * versioned (they ship on their own refs when sync is on). */
+  /* Records are unversioned and travel on their own refs when sync is on.
+   * Workbench records are the agent-writable exception; the remaining rows
+   * are host-written and read-only to agents. */
+  {
+    prefix: '.tau/workbench',
+    class: 'records',
+    versioned: false,
+    agentAccess: 'read-write',
+    watch: 'ui',
+    anchored: true,
+    match: 'root',
+    directory: true,
+  },
   {
     prefix: '.tau/chats',
     class: 'records',
@@ -285,6 +319,20 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     anchored: true,
     match: 'root',
     directory: true,
+  },
+  /* The per-device trash tombstone the project library mirrors to disk
+   * (`use-project-manager.tsx`). It answers exactly the reserved `.tau` default
+   * it fell to before; the row exists so the generated ignore file names it and
+   * stock Git stops listing it as untracked (R14 R7). */
+  {
+    prefix: '.tau/library.json',
+    class: 'records',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'ui',
+    anchored: true,
+    match: 'root',
+    directory: false,
   },
   {
     prefix: 'exports',
@@ -404,9 +452,6 @@ const foldSpelling = (relative: string): string =>
     .replaceAll(/:[^/]*(?=\/|$)/gu, '')
     .replaceAll(/[. ]+(?=\/|$)/gu, '');
 
-/** Tau's own directory: the one prefix that decides the reserved fallback. */
-const reservedTau = '.tau';
-
 /**
  * Every row with its prefix folded, so one comparison answers every spelling.
  *
@@ -444,7 +489,7 @@ export const classify = (projectRelativePath: string): PathClassification => {
   const index = foldedRegistry.findIndex((row) => covers(row, subject));
   return (
     rowClassifications[index] ??
-    (subject.startsWith(`${reservedTau}/`) ? reservedTauPathClassification : unlistedPathClassification)
+    (subject.startsWith(`${reservedTauDirectory}/`) ? reservedTauPathClassification : unlistedPathClassification)
   );
 };
 

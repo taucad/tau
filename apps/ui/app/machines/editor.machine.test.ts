@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor } from 'xstate';
 import type { EditorState } from '#types/editor.types.js';
-import { defaultGraphicsSettings, defaultPanelState } from '#constants/editor.constants.js';
+import { defaultPanelState } from '#constants/editor.constants.js';
 import { editorMachine } from '#machines/editor.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
@@ -22,9 +22,8 @@ const stubEditorState: EditorState = {
   activePaneId: stubPaneIdMain,
   focusedChatId: 'chat-1',
   panelState: defaultPanelState,
-  workbenchLayout: undefined,
-  viewerLayout: undefined,
-  viewSettings: {},
+  fileSidebars: {},
+  graphicsBackendPreferences: {},
   updatedAt: Date.now(),
 };
 
@@ -107,6 +106,36 @@ async function startAndLoad(options?: Parameters<typeof createTestActor>[0]) {
 describe('editorMachine', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('hydrates and edits device widths, backend preferences, and exact Restore payload without portable state', async () => {
+    const previousLayout: EditorState['previousLayout'] = {
+      layout: {
+        version: 1,
+        lanes: { chat: true, workbench: true },
+        viewer: { kind: 'group', tabs: [] },
+        workbench: { kind: 'group', tabs: [] },
+      },
+      views: {},
+    };
+    const actor = await startAndLoad({
+      loadResult: {
+        ...stubEditorState,
+        fileSidebars: { 'src/main.ts': 280 },
+        graphicsBackendPreferences: { 'v-main': 'webgpu' },
+        previousLayout,
+      },
+    });
+    expect(actor.getSnapshot().context.fileSidebars['src/main.ts']).toBe(280);
+    expect(actor.getSnapshot().context.graphicsBackendPreferences['v-main']).toBe('webgpu');
+    expect(actor.getSnapshot().context.previousLayout).toEqual(previousLayout);
+    actor.send({ type: 'setFileSidebarWidth', path: 'src/main.ts', width: 320 });
+    actor.send({ type: 'setGraphicsBackendPreference', viewId: 'v-main', preference: 'webgl' });
+    actor.send({ type: 'renameFile', oldPath: 'src/main.ts', newPath: 'src/renamed.ts' });
+    expect(actor.getSnapshot().context.fileSidebars).toEqual({ 'src/renamed.ts': 320 });
+    expect(actor.getSnapshot().context.graphicsBackendPreferences).toEqual({ 'v-main': 'webgl' });
+    expect(actor.getSnapshot().context.previousLayout).toEqual(previousLayout);
+    actor.stop();
   });
 
   // =========================================================================
@@ -250,113 +279,6 @@ describe('editorMachine', () => {
       actor.stop();
     });
 
-    it('should rekey viewer entry paths and component display units on rename', async () => {
-      const oldMainUnitId = 'file:src/main.ts';
-      const newMainUnitId = 'file:src/index.ts';
-      const otherUnitId = 'file:src/other.ts';
-      const cameraView = {
-        frameId: 'tau:root',
-        target: [3, 4, 5],
-        direction: [1, 0, 0],
-        up: [0, 0, 1],
-        verticalSpan: 12,
-        perspectiveZoom: 1.25,
-      } as const;
-      const actor = await startAndLoad({
-        loadResult: {
-          ...stubEditorState,
-          modelComponentDisplay: {
-            schemaVersion: 1,
-            unitsById: {
-              [oldMainUnitId]: { hiddenComponentIds: ['component:Housing'] },
-              [otherUnitId]: { hiddenComponentIds: ['component:Other'] },
-            },
-          },
-          viewSettings: {
-            view1: {
-              entryPath: 'src/main.ts',
-              graphicsSettings: {
-                ...defaultGraphicsSettings,
-                cameraView,
-              },
-            },
-          },
-        },
-      });
-
-      actor.send({ type: 'renameFile', oldPath: 'src/main.ts', newPath: 'src/index.ts' });
-
-      const settings = actor.getSnapshot().context.viewSettings['view1'];
-      expect(settings?.entryPath).toBe('src/index.ts');
-      expect(settings?.graphicsSettings.cameraView).toEqual(cameraView);
-      expect(actor.getSnapshot().context.modelComponentDisplay).toEqual({
-        schemaVersion: 1,
-        unitsById: {
-          [newMainUnitId]: { hiddenComponentIds: ['component:Housing'] },
-          [otherUnitId]: { hiddenComponentIds: ['component:Other'] },
-        },
-      });
-      actor.stop();
-    });
-
-    it('should merge legacy per-view display state into the project field in stable view order', async () => {
-      const legacyState = {
-        ...stubEditorState,
-        viewSettings: {
-          'view-b': {
-            entryPath: 'src/main.ts',
-            graphicsSettings: {
-              ...defaultGraphicsSettings,
-              schemaVersion: 6,
-              componentDisplay: {
-                schemaVersion: 1,
-                unitsById: {
-                  'file:src/main.ts': {
-                    isolatedComponentIds: ['component:Gear'],
-                    opacityByComponentId: { 'component:Housing': 0.7 },
-                  },
-                },
-              },
-            },
-          },
-          'view-a': {
-            entryPath: 'src/main.ts',
-            graphicsSettings: {
-              ...defaultGraphicsSettings,
-              schemaVersion: 6,
-              componentDisplay: {
-                schemaVersion: 1,
-                unitsById: {
-                  'file:src/main.ts': {
-                    hiddenComponentIds: ['component:Cover'],
-                    opacityByComponentId: { 'component:Housing': 0.3 },
-                  },
-                },
-              },
-            },
-          },
-        },
-      } as unknown as EditorState;
-      const actor = await startAndLoad({ loadResult: legacyState });
-
-      expect(actor.getSnapshot().context.modelComponentDisplay).toEqual({
-        schemaVersion: 1,
-        unitsById: {
-          'file:src/main.ts': {
-            hiddenComponentIds: ['component:Cover'],
-            isolatedComponentIds: ['component:Gear'],
-            opacityByComponentId: { 'component:Housing': 0.7 },
-          },
-        },
-      });
-      expect(actor.getSnapshot().context.needsModelComponentDisplayMigration).toBe(true);
-      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings).not.toHaveProperty(
-        'componentDisplay',
-      );
-      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(11);
-      actor.stop();
-    });
-
     it('should emit fileOpened event', async () => {
       const actor = await startAndLoad({ loadResult: undefined });
       const emitted: unknown[] = [];
@@ -390,179 +312,25 @@ describe('editorMachine', () => {
       actor.stop();
     });
 
-    it('should rekey nested component display units on directory rename', async () => {
-      const oldMainUnitId = 'file:src/foo/main.ts';
-      const oldNestedUnitId = 'file:src/foo/nested/part.ts';
-      const newMainUnitId = 'file:src/bar/main.ts';
-      const newNestedUnitId = 'file:src/bar/nested/part.ts';
-      const actor = await startAndLoad({
-        loadResult: {
-          ...stubEditorState,
-          modelComponentDisplay: {
-            schemaVersion: 1,
-            unitsById: {
-              [oldMainUnitId]: { hiddenComponentIds: ['component:Housing'] },
-              [oldNestedUnitId]: { isolatedComponentIds: ['component:Gear'] },
-            },
-          },
-          viewSettings: {
-            view1: {
-              entryPath: 'src/foo/main.ts',
-              graphicsSettings: {
-                ...defaultGraphicsSettings,
-              },
-            },
-          },
+    it('should emit Kinematics reveal requests', async () => {
+      const actor = await startAndLoad({ loadResult: undefined });
+      const emitted: unknown[] = [];
+      actor.on('kinematicsRevealRequested', (event) => emitted.push(event));
+
+      actor.send({
+        type: 'revealModelComponentInKinematics',
+        entryPath: 'src/main.ts',
+        unitId: 'file:src/main.ts',
+        componentId: 'component:blocker-door-3',
+      });
+      expect(emitted).toEqual([
+        {
+          type: 'kinematicsRevealRequested',
+          entryPath: 'src/main.ts',
+          unitId: 'file:src/main.ts',
+          componentId: 'component:blocker-door-3',
         },
-      });
-
-      actor.send({ type: 'renameFile', oldPath: 'src/foo', newPath: 'src/bar' });
-
-      const settings = actor.getSnapshot().context.viewSettings['view1'];
-      expect(settings?.entryPath).toBe('src/bar/main.ts');
-      expect(actor.getSnapshot().context.modelComponentDisplay).toEqual({
-        schemaVersion: 1,
-        unitsById: {
-          [newMainUnitId]: { hiddenComponentIds: ['component:Housing'] },
-          [newNestedUnitId]: { isolatedComponentIds: ['component:Gear'] },
-        },
-      });
-      actor.stop();
-    });
-
-    /* Schema v11 (E1): `renderTimeout` is owned per file by the entry's CAD actor, so two panes on
-     * one path cannot hold two values. The longer timeout never breaks a render the shorter allowed. */
-    it('should hoist the longest per-view render timeout into the per-entry record', async () => {
-      const actor = await startAndLoad({
-        loadResult: {
-          ...stubEditorState,
-          viewSettings: {
-            'view-a': {
-              entryPath: 'src/main.ts',
-              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 30_000 },
-            },
-            'view-b': {
-              entryPath: 'src/main.ts',
-              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 60_000 },
-            },
-            'view-c': {
-              entryPath: 'src/utils.ts',
-              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 45_000 },
-            },
-          },
-        } as unknown as EditorState,
-      });
-
-      expect(actor.getSnapshot().context.unitSettings).toEqual({
-        'src/main.ts': { renderTimeout: 60_000 },
-        'src/utils.ts': { renderTimeout: 45_000 },
-      });
-      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings).not.toHaveProperty('renderTimeout');
-      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(11);
-      actor.stop();
-    });
-
-    it('should hoist a legacy seconds-based render timeout as milliseconds', async () => {
-      const actor = await startAndLoad({
-        loadResult: {
-          ...stubEditorState,
-          viewSettings: {
-            view1: {
-              entryPath: 'src/main.ts',
-              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: undefined, renderTimeout: 30 },
-            },
-          },
-        } as unknown as EditorState,
-      });
-
-      expect(actor.getSnapshot().context.unitSettings['src/main.ts']).toEqual({ renderTimeout: 30_000 });
-      actor.stop();
-    });
-
-    it('should parse a v10 record without a section view into inactive defaults', async () => {
-      const actor = await startAndLoad({
-        loadResult: {
-          ...stubEditorState,
-          viewSettings: {
-            view1: {
-              entryPath: 'src/main.ts',
-              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 30_000 },
-            },
-          },
-        } as unknown as EditorState,
-      });
-
-      const settings = actor.getSnapshot().context.viewSettings['view1']?.graphicsSettings;
-      expect(settings?.sectionView).toBeUndefined();
-      expect(settings?.sectionDisplay).toBeUndefined();
-      actor.stop();
-    });
-
-    it('should keep the per-entry record aligned with renames and deletions', async () => {
-      const actor = await startAndLoad({
-        loadResult: {
-          ...stubEditorState,
-          viewSettings: {
-            view1: {
-              entryPath: 'src/foo/main.ts',
-              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 30_000 },
-            },
-          },
-        } as unknown as EditorState,
-      });
-
-      actor.send({ type: 'renameFile', oldPath: 'src/foo', newPath: 'src/bar' });
-      expect(actor.getSnapshot().context.unitSettings).toEqual({ 'src/bar/main.ts': { renderTimeout: 30_000 } });
-
-      actor.send({ type: 'pruneComponentDisplayForDeletedPath', path: 'src/bar' });
-      expect(actor.getSnapshot().context.unitSettings).toEqual({});
-      actor.stop();
-    });
-
-    it('should record a per-entry render timeout sent by the write side', async () => {
-      const actor = await startAndLoad();
-
-      actor.send({ type: 'setUnitSettings', entryPath: 'src/main.ts', settings: { renderTimeout: 90_000 } });
-
-      expect(actor.getSnapshot().context.unitSettings['src/main.ts']).toEqual({ renderTimeout: 90_000 });
-      actor.stop();
-    });
-
-    it('should prune component display units for deleted files and directories', async () => {
-      const mainUnitId = 'file:src/foo/main.ts';
-      const nestedUnitId = 'file:src/foo/nested/part.ts';
-      const keepUnitId = 'file:src/keep.ts';
-      const actor = await startAndLoad({
-        loadResult: {
-          ...stubEditorState,
-          modelComponentDisplay: {
-            schemaVersion: 1,
-            unitsById: {
-              [mainUnitId]: { hiddenComponentIds: ['component:Housing'] },
-              [nestedUnitId]: { isolatedComponentIds: ['component:Gear'] },
-              [keepUnitId]: { hiddenComponentIds: ['component:Keep'] },
-            },
-          },
-          viewSettings: {
-            view1: {
-              entryPath: 'src/foo/main.ts',
-              graphicsSettings: {
-                ...defaultGraphicsSettings,
-              },
-            },
-          },
-        },
-      });
-
-      actor.send({ type: 'pruneComponentDisplayForDeletedPath', path: 'src/foo' });
-
-      expect(actor.getSnapshot().context.modelComponentDisplay).toEqual({
-        schemaVersion: 1,
-        unitsById: {
-          [keepUnitId]: { hiddenComponentIds: ['component:Keep'] },
-        },
-      });
-      expect(actor.getSnapshot().context.viewSettings['view1']?.entryPath).toBeUndefined();
+      ]);
       actor.stop();
     });
 
@@ -924,32 +692,6 @@ describe('editorMachine', () => {
         await waitFor(actor, (s) => s.matches({ ready: { storing: 'idle' } }));
 
         expect(savedFocusedChatId).toBe('chat-42');
-        actor.stop();
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it('should persist project-scoped model component display through the storing region', async () => {
-      vi.useFakeTimers();
-      try {
-        let savedDisplay: EditorState['modelComponentDisplay'];
-        const actor = await startAndLoad({
-          loadResult: undefined,
-          saveResult: async () => {
-            savedDisplay = actor.getSnapshot().context.modelComponentDisplay;
-          },
-        });
-        const modelComponentDisplay: NonNullable<EditorState['modelComponentDisplay']> = {
-          schemaVersion: 1,
-          unitsById: { 'file:src/main.ts': { hiddenComponentIds: ['component:Housing'] } },
-        };
-
-        actor.send({ type: 'setModelComponentDisplay', componentDisplay: modelComponentDisplay });
-        await vi.advanceTimersByTimeAsync(500);
-        await waitFor(actor, (state) => state.matches({ ready: { storing: 'idle' } }));
-
-        expect(savedDisplay).toEqual(modelComponentDisplay);
         actor.stop();
       } finally {
         vi.useRealTimers();

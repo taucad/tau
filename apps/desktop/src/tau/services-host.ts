@@ -30,6 +30,11 @@ const authorityDirectory = process.env['TAU_DESKTOP_AUTHORITY_DIR'];
 if (!authorityDirectory) {
   throw new Error('The Tau services host requires a host-owned filesystem authority directory.');
 }
+/* Optional on purpose: a build that names no machine store serves every other
+ * concern and refuses the machines concern. Main names the app's old machine
+ * directory only when it is not the store itself. */
+const machinesDirectory = process.env['TAU_DESKTOP_MACHINES_DIR'];
+const legacyMachinesDirectory = process.env['TAU_DESKTOP_LEGACY_MACHINES_DIR'];
 const diagnostics =
   logDirectory === undefined ? undefined : createDiagnosticsLog({ directory: logDirectory, producer: 'services' });
 const pendingRuntimePorts = new Map<
@@ -43,6 +48,38 @@ const pendingRuntimePorts = new Map<
     }): void;
   }
 >();
+const pendingGeometryPorts = new Map<
+  string,
+  {
+    readonly geometryPortTimeout: ReturnType<typeof setTimeout>;
+    resolve(port: UtilityMessage['ports'][number]): void;
+    reject(error: Error): void;
+  }
+>();
+const requestGeometryPort = async (
+  workspaceRoot: string,
+  engine: 'native' | 'legacy',
+): Promise<UtilityMessage['ports'][number]> => {
+  const requestId = randomUUID();
+  const answer = new Promise<UtilityMessage['ports'][number]>((resolve, reject) => {
+    const geometryPortTimeout = setTimeout(() => {
+      pendingGeometryPorts.delete(requestId);
+      reject(new Error('Main did not answer the geometry-runner port request within 10 seconds.'));
+    }, 10_000);
+    pendingGeometryPorts.set(requestId, { geometryPortTimeout, resolve, reject });
+  });
+  try {
+    parentPort.postMessage({ type: 'geometry-port-request', requestId, workspaceRoot, engine });
+  } catch (error) {
+    const pending = pendingGeometryPorts.get(requestId);
+    if (pending) {
+      pendingGeometryPorts.delete(requestId);
+      clearTimeout(pending.geometryPortTimeout);
+      pending.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+  return answer;
+};
 const requestRuntimePort = async (
   workspaceRoot: string,
 ): Promise<{
@@ -57,7 +94,11 @@ const requestRuntimePort = async (
     const runtimePortTimeout = setTimeout(() => {
       pendingRuntimePorts.delete(requestId);
       parentPort.postMessage({ type: 'runtime-port-release', requestId });
-      reject(new Error('Main did not answer the desktop runtime-port request within 10 seconds.'));
+      reject(
+        Object.assign(new Error('Main did not answer the desktop runtime-port request within 10 seconds.'), {
+          code: 'TIMEOUT',
+        }),
+      );
     }, 10_000);
     pendingRuntimePorts.set(requestId, { resolve, reject, runtimePortTimeout });
   });
@@ -79,7 +120,10 @@ const gitExecutable = process.env['TAU_GIT_EXECUTABLE'];
 
 const host = createServicesHost({
   authorityDirectory,
+  ...(machinesDirectory === undefined || machinesDirectory === '' ? {} : { machinesDirectory }),
+  ...(legacyMachinesDirectory === undefined || legacyMachinesDirectory === '' ? {} : { legacyMachinesDirectory }),
   requestRuntimePort,
+  requestGeometryPort,
   ...(gitExecutable === undefined || gitExecutable === '' ? {} : { gitExecutable }),
   runtimeContext: (action, workspaceRoot, projectRoot) => {
     parentPort.postMessage({ type: `runtime-context-${action}`, workspaceRoot, projectRoot });
@@ -95,6 +139,13 @@ const host = createServicesHost({
       requestId,
     });
   },
+  machineBindingCompleted: (requestId, result) => {
+    parentPort.postMessage(
+      'error' in result
+        ? { type: 'machine-binding-complete-failed', requestId, message: result.error }
+        : { type: 'machine-binding-completed', requestId, outcome: result.outcome },
+    );
+  },
   ...(diagnostics === undefined
     ? {}
     : {
@@ -109,12 +160,36 @@ process.once('exit', () => {
     pending.reject(new Error('The services utility exited before main supplied a runtime port.'));
   }
   pendingRuntimePorts.clear();
+  for (const pending of pendingGeometryPorts.values()) {
+    clearTimeout(pending.geometryPortTimeout);
+    pending.reject(new Error('The services utility exited before main supplied a geometry-runner port.'));
+  }
+  pendingGeometryPorts.clear();
   host.dispose();
 });
 parentPort.on('message', (message) => {
   const frame = message.data;
   if (frame && typeof frame === 'object') {
     const { message: refusal, requestId, type } = frame as Record<string, unknown>;
+    if (typeof requestId === 'string' && (type === 'geometry-port' || type === 'geometry-port-refused')) {
+      const pending = pendingGeometryPorts.get(requestId);
+      if (pending) {
+        pendingGeometryPorts.delete(requestId);
+        clearTimeout(pending.geometryPortTimeout);
+        const [port] = message.ports;
+        if (type === 'geometry-port' && port) {
+          pending.resolve(port);
+        } else {
+          port?.close();
+          pending.reject(new Error(typeof refusal === 'string' ? refusal : 'Main refused the geometry-runner port.'));
+        }
+      } else {
+        for (const latePort of message.ports) {
+          latePort.close();
+        }
+      }
+      return;
+    }
     if (typeof requestId === 'string' && (type === 'runtime-port' || type === 'runtime-port-refused')) {
       const pending = pendingRuntimePorts.get(requestId);
       if (pending) {

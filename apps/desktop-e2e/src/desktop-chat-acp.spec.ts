@@ -15,6 +15,7 @@ import type { DesktopSession } from '#support/desktop-app.js';
 import { durableMessages, latestCompletedRun, toolResult } from '#support/acp-evidence.js';
 import { gatewayFixtureFinalText, gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
+import { historyRows, restoreFromHistory } from '#support/revisions-pane.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   activeChatId,
@@ -96,6 +97,22 @@ const codexAvailable = ((): boolean => {
     return false;
   }
 })();
+
+/**
+ * One captured view's pixels as a data URL.
+ *
+ * An in-app capture carries them inline; one an external agent took through
+ * Tau's MCP endpoint was saved as a chat attachment and names its file instead.
+ *
+ * @param image - A captured view, inline or saved.
+ * @returns The image as a `data:` URL.
+ */
+const captureDataUrl = (
+  image: { readonly dataUrl: string } | { readonly mimeType: string; readonly absolutePath: string },
+): string =>
+  'dataUrl' in image
+    ? image.dataUrl
+    : `data:${image.mimeType};base64,${readFileSync(image.absolutePath).toString('base64')}`;
 
 let session: DesktopSession | undefined;
 let fixture: GatewayFixture | undefined;
@@ -190,7 +207,7 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
     const capture = screenshotOutputSchema.parse(
       toolResult(events, { runId, toolName: 'screenshot', targetFile: 'main.scad' }),
     );
-    expect(capture.images.every((image) => image.dataUrl.startsWith('data:image/'))).toBe(true);
+    expect(capture.images.every((image) => captureDataUrl(image).startsWith('data:image/'))).toBe(true);
     await expect
       .poll(() => finalizedRevisions(eventsPathNow()).at(-1)?.changedPaths.includes('main.scad'), { timeout: 60_000 })
       .toBe(true);
@@ -281,9 +298,10 @@ it('conformance other volume and envelope', async () => {
           toolResult(current, { runId: currentRun, toolName: 'test_model', targetFile: 'conformance.geospec.ts' }),
         );
         expect(tests).toMatchObject({ passed: 2, total: 2, failures: [] });
-        return screenshotOutputSchema.parse(
-          toolResult(current, { runId: currentRun, toolName: 'screenshot', targetFile }),
-        ).images[0]!.dataUrl;
+        return captureDataUrl(
+          screenshotOutputSchema.parse(toolResult(current, { runId: currentRun, toolName: 'screenshot', targetFile }))
+            .images[0]!,
+        );
       });
       expect(captures[0]).not.toBe(captures[1]);
       if (previousCapture !== undefined) {
@@ -334,7 +352,7 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
       await selectKernel(page, 'Build123d');
       await connectPickedFolder(session);
       if (nativeTurbojet) {
-        await selectChatModel(page, 'GPT-5.6 Luna');
+        await selectChatModel(page, 'GPT-6 Luna');
       } else {
         const rows = await openAgentList(page);
         expect(rows).toContainEqual(expect.stringMatching(/^Codex/u));
@@ -443,7 +461,7 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
           );
         }
         return { colors: colors.size, height, luminanceRange: maximum - minimum, opaque, width };
-      }, image.dataUrl);
+      }, captureDataUrl(image));
       expect(pixels.width).toBeGreaterThan(100);
       expect(pixels.height).toBeGreaterThan(100);
       expect(pixels.opaque).toBeGreaterThan(1000);
@@ -469,6 +487,112 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
       );
     } catch (error) {
       await session.capture('acp-turbojet-failure');
+      throw error;
+    }
+  },
+  900_000,
+);
+
+test.skipIf(!codexAvailable || !packaged || process.env['TAU_E2E_ACP_KINEMATICS'] !== 'true')(
+  'animates a Codex GPT-5.6-Sol hinged model in the packaged Kinematics pane',
+  async () => {
+    const account = tauTestAccount('acp-kinematics');
+    seededEmail = account.email;
+    const token = await seedTauTestUser(account);
+    session = await launchDesktopApp({ token, packaged: true });
+    await authenticatePackagedDesktop(session, token);
+    const { page } = session;
+
+    try {
+      await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+      await expectSignedIn(page);
+      await page.evaluate(() => {
+        localStorage.setItem('tau:flags', JSON.stringify({ tauDebug: true }));
+      });
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+      await connectPickedFolder(session);
+      expect(await selectAgent(page, 'Codex', 'GPT-5.6-Sol')).toMatch(/Runs with your local Codex login/u);
+      await selectKernel(page, 'Replicad');
+      expect(await page.evaluate(() => localStorage.getItem('tau-cad-kernel'))).toBe('"replicad"');
+
+      const slug = await submitPrompt(
+        page,
+        'Create a simple hinged storage box with exactly two named parts, Base and Lid. The Lid should open around a back hinge; keep both as separate solids. Verify the model.',
+      );
+      await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.ts', page });
+      const sourcePath = join(session.pickedDirectory, slug, 'main.ts');
+      await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
+      const eventsPath = join(session.pickedDirectory, slug, '.tau/chats', activeChatId(page), 'events.jsonl');
+      const chat = readFileSync(join(dirname(eventsPath), 'chat.json'), 'utf8');
+      expect(chat).toMatch(/"activeKernel":\s*"replicad"/u);
+      expect(chat).toMatch(/"model":\s*"gpt-5\.6-sol"/u);
+      await expect.poll(() => readLog(eventsPath), { timeout: 600_000 }).toMatch(/"state":"completed"/u);
+      const events = readLog(eventsPath);
+      expect(events).toMatch(/cad-replicad\/SKILL\.md/u);
+      expect(events).toContain('kinematics-reference.md');
+      expect(readFileSync(sourcePath, 'utf8')).toMatch(/export\s+(?:async\s+)?(?:function|const)\s+mechanism\b/u);
+
+      await page.keyboard.press('Control+m');
+      await expectVisible(page.getByTestId('kinematics-pane'), 60_000);
+      await expect
+        .poll(async () => page.locator('[data-testid^="kinematics-dof-"]').count(), { timeout: 60_000 })
+        .toBe(1);
+      const state = async () =>
+        page.evaluate(() =>
+          (
+            globalThis as typeof globalThis & {
+              __TAU_KINEMATICS_TEST__?: {
+                getState(unitId: string): { revision: number; coordinates: Record<string, number> } | undefined;
+              };
+            }
+          ).__TAU_KINEMATICS_TEST__?.getState('file:main.ts'),
+        );
+      const lidMatrix = async () =>
+        page.evaluate(() =>
+          (
+            globalThis as typeof globalThis & {
+              __TAU_KINEMATICS_TEST__?: {
+                getComponentWorldMatrix(unitId: string, componentId: string): number[] | undefined;
+              };
+            }
+          ).__TAU_KINEMATICS_TEST__?.getComponentWorldMatrix('file:main.ts', 'component:lid'),
+        );
+      await expect.poll(state, { timeout: 60_000 }).toBeDefined();
+      const before = await state();
+      const baseMatrix = await lidMatrix();
+      expect(baseMatrix).toBeDefined();
+
+      await page.getByRole('button', { name: /^Animation:/u }).click();
+      const clips = page.getByRole('option');
+      await expect.poll(async () => clips.count()).toBeGreaterThan(1);
+      await clips.first().click();
+      if ((await page.getByTestId('kinematics-play').count()) > 0) {
+        await page.getByTestId('kinematics-play').click();
+      }
+      await expect
+        .poll(
+          async () => {
+            const current = await state();
+            return current?.revision ?? 0;
+          },
+          { timeout: 30_000 },
+        )
+        .toBeGreaterThan(before?.revision ?? 0);
+      await expect
+        .poll(
+          async () => {
+            const posed = await lidMatrix();
+            return posed && baseMatrix
+              ? Math.max(...posed.map((value, index) => Math.abs(value - baseMatrix[index]!)))
+              : 0;
+          },
+          { timeout: 30_000 },
+        )
+        .toBeGreaterThan(1e-5);
+      await session.capture('acp-kinematics-sol-playback');
+    } catch (error) {
+      await session.capture('acp-kinematics-sol-failure');
       throw error;
     }
   },
@@ -616,7 +740,7 @@ const openRevisionHistory = async (page: Page): Promise<void> => {
     .getByRole('button', { name: /Search/u })
     .first()
     .click();
-  await page.getByPlaceholder('Search projects, chats, and actions...').fill('Open revision history');
+  await page.getByPlaceholder('Search projects, chats, and actions…').fill('Open revision history');
   await page.getByText('Open revision history', { exact: true }).first().click();
 };
 
@@ -662,8 +786,9 @@ test.skipIf(!codexAvailable)(
       await authenticatePackagedDesktop(session, token);
     }
     const { page } = session;
-    /* The shell opens at 1440×900 (`apps/desktop/src/main/main.ts`), and at that
-     * width the project route's composer is narrow enough that its right-hand
+    /* The shell opens filling the display work area
+     * (`apps/desktop/src/main/main.ts`); on a 1440 px wide area the project
+     * route's composer is narrow enough that its right-hand
      * action group sits *over* the left group's last controls — the revision
      * selector included, which is the one control this spec has to click.
      * Maximizing does not clear it (the chat pane still opens at its Allotment
@@ -822,11 +947,13 @@ test.skipIf(!codexAvailable)(
        * tree over the other. */
       // Selecting a chat checkout does not move the independently browsed workbench.
       await expectCurrentBranch(page, 'main');
+      /* The chat's card opens in place and reaches the same verbs History does: View revision and its More. */
       await openRevisionCard(page, candidateRevisionNumber);
       await expectVisible(
-        page.getByRole('button', { name: `Restore to Revision ${String(candidateRevisionNumber)}`, exact: true }),
+        page.getByRole('button', { name: `More actions for Rev ${String(candidateRevisionNumber)}`, exact: true }),
         60_000,
       );
+      await expectVisible(page.getByRole('button', { name: 'View revision', exact: true }), 60_000);
       expect(liveSource()).toBe(seededSource);
 
       await branchRow(page, candidateBranch)
@@ -899,8 +1026,20 @@ test.skipIf(!codexAvailable)(
       expect(finalizedRevisions(logOf(candidateChatId)).at(-1)?.branch).toBe('main');
 
       /* Restore to the direct turn's revision through the Revisions pane's history
-       * (the candidate chat holds no Rev 2 card): the live folder is the seed again. */
-      await page.getByRole('button', { name: 'Restore to Revision 2', exact: true }).first().click();
+       * (the candidate chat holds no Rev 2 card): its row opens, *Restore Rev 2*
+       * restores it, and the live folder is the seed again. */
+      await openRevisionHistory(page);
+      await restoreFromHistory(
+        page,
+        page
+          .getByRole('list', { name: 'Revision history' })
+          .first()
+          .getByRole('button', { name: /^Rev 2 · /u }),
+        (n) =>
+          historyRows(page)
+            .filter({ hasText: 'Current' })
+            .filter({ hasText: `Restored Rev ${n}` }),
+      );
       await expect.poll(liveSource, { timeout: 120_000 }).toBe(seededSource);
       await session.capture('rev-branches-after-restore');
 

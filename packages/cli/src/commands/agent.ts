@@ -4,18 +4,18 @@ import { join, resolve } from 'node:path';
 
 import { defineCommand } from 'citty';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
+import type { CommandAnswer } from '@taucad/agent-host/wire';
 
 import {
   eventLine,
-  expectResult,
   isSettled,
   oneLine,
   openAgentChannel,
   pendingInterrupts,
-  readPage,
   readPrompt,
   refusalText,
   replayChat,
+  sendCommand,
 } from '#commands/agent/client.js';
 import type { ExternalRefusal } from '#commands/agent/client.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
@@ -61,24 +61,47 @@ const withChannel = async <T>(
   }
 };
 
+/** An answer the host applied: recorded at a cursor, or naming the state it found. */
+type AppliedAnswer = Exclude<CommandAnswer, { status: 'refused' }>;
+
 /**
- * Write a run projection as plain lines or as one JSON record.
+ * The state an answer that recorded nothing names, when it names one.
  *
  * @internal
- * @param input - The operation the daemon reported, its run projection, and the machine-mode flag.
+ * @param answer - The host's answer.
+ * @returns `details.state`, or nothing.
+ */
+const stateOf = (answer: AppliedAnswer): string | undefined => {
+  const state = answer.effect === 'not-applied' ? answer.details['state'] : undefined;
+  return typeof state === 'string' ? state : undefined;
+};
+
+/**
+ * Write a command's answer as plain lines or as one JSON record.
+ *
+ * @internal
+ * @param input - The verb sent, the run it named, the host's answer, and the machine-mode flag.
  * @returns A promise that settles once the result is flushed.
  */
 const reportOperation = async (input: {
   readonly operation: string;
   readonly runId: string;
-  readonly state: string;
+  readonly answer: AppliedAnswer;
   readonly json: boolean;
 }): Promise<void> => {
+  const { answer } = input;
+  const state = stateOf(answer);
+  const facts = {
+    status: answer.status,
+    ...(answer.effect === 'durable' ? { cursor: answer.cursor } : {}),
+    ...(state === undefined ? {} : { state }),
+  };
   if (input.json) {
-    await emit({ kind: 'agent', ok: true, operation: input.operation, run: input.runId, state: input.state });
+    await emit({ kind: 'agent', ok: true, operation: input.operation, run: input.runId, ...facts });
     return;
   }
-  await writeStdout(`operation\t${input.operation}\nrun\t${input.runId}\nstate\t${input.state}\n`);
+  const lines = [['operation', input.operation], ['run', input.runId], ...Object.entries(facts)];
+  await writeStdout(lines.map(([key, value]) => `${String(key)}\t${String(value)}\n`).join(''));
 };
 
 /**
@@ -256,15 +279,15 @@ const runCommand = defineCommand({
     }
 
     const outcome = await withChannel(args.host, async (client) => {
-      /* Where this turn starts, so following it replays this run rather than
-       * every turn the chat has ever held. */
-      const { endCursor } = await readPage({ client, chatId: args.chat, cursor: 0 });
-      const started = expectResult(
-        await client.execute({
-          type: 'start',
-          trigger: 'submit',
+      /* One key for this invocation: the channel re-sends it after a redial, and
+       * a start that already landed answers `replayed` instead of a second run. */
+      const started = await sendCommand(client, {
+        type: 'start',
+        commandId: randomUUID(),
+        payload: {
           chatId: args.chat,
           runId,
+          trigger: 'submit',
           message: { id: randomUUID(), role: 'user', content: prompt },
           ...(args.agent === undefined
             ? {}
@@ -278,28 +301,28 @@ const runCommand = defineCommand({
                   toolChoice: 'auto',
                 } as const,
               }),
-        }),
-      );
+        },
+      });
 
       if (args.detach === true) {
         /* The only host this command can reach is a resident daemon it dialled,
          * and it has answered with an admitted run — which is exactly the
-         * condition a detached run needs. A host that answered anything else
-         * never reaches here: `expectResult` refuses it. */
-        await reportOperation({ operation: started.operation, runId, state: started.snapshot.state, json: jsonl });
+         * condition a detached run needs. A refusal never reaches here:
+         * `sendCommand` throws it under the host's own code. */
+        await reportOperation({ operation: 'start', runId, answer: started, json: jsonl });
         if (jsonl) {
           /* A `--jsonl` stream ends in an outcome record even when nothing was
            * followed; a missing one reads as truncation to a machine reader. */
-          await emit({ kind: 'outcome', ok: true, chatId: args.chat, run: runId, state: started.snapshot.state });
+          await emit({ kind: 'outcome', ok: true, chatId: args.chat, run: runId, status: started.status });
         }
         /* A detached caller followed nothing, so it saw no refusal either: the
          * run's own transcript is where a later `tau agent tail` reads one. */
-        return { followed: false, state: started.snapshot.state, refusal: undefined };
+        return { followed: false, state: stateOf(started), refusal: undefined };
       }
-      return {
-        followed: true,
-        ...(await streamChat({ client, chatId: args.chat, from: endCursor, follow: true, jsonl })),
-      };
+      /* The admission row's cursor is where this turn starts, so following it
+       * replays this run rather than every turn the chat has ever held. */
+      const from = started.effect === 'durable' ? started.cursor : 0;
+      return { followed: true, ...(await streamChat({ client, chatId: args.chat, from, follow: true, jsonl })) };
     });
 
     const { state } = outcome;
@@ -332,20 +355,16 @@ const cancelCommand = defineCommand({
   args: { chat: chatArgument, run: runArgument, host: hostArgument, json: jsonArgument },
   async run({ args }) {
     const answer = await withChannel(args.host, async (client) =>
-      expectResult(await client.execute({ type: 'cancel', chatId: args.chat, runId: args.run })),
+      sendCommand(client, { type: 'cancel', commandId: randomUUID(), payload: { chatId: args.chat, runId: args.run } }),
     );
-    /* The daemon names the operation it performed; "cancelled" is a state this
-     * command reports only when the projection says so. */
-    await reportOperation({
-      operation: answer.operation,
-      runId: args.run,
-      state: answer.snapshot.state,
-      json: args.json === true,
-    });
-    if (!isSettled(answer.snapshot.state)) {
+    await reportOperation({ operation: 'cancel', runId: args.run, answer, json: args.json === true });
+    /* A durable answer is the terminal row itself (I18); one that recorded
+     * nothing names the state the run was already in. */
+    const state = stateOf(answer);
+    if (answer.effect === 'not-applied' && !isSettled(state)) {
       throw cliError(
         'CANCEL_NOT_SETTLED',
-        `Cancellation was requested; run ${args.run} is still "${answer.snapshot.state}". Watch it settle with \`tau agent tail ${args.chat}\`.`,
+        `Cancellation was requested; run ${args.run} is still "${state ?? 'unknown'}". Watch it settle with \`tau agent tail ${args.chat}\`.`,
         exitCodes.unknown,
       );
     }
@@ -366,14 +385,13 @@ const steerCommand = defineCommand({
   },
   async run({ args }) {
     const answer = await withChannel(args.host, async (client) =>
-      expectResult(await client.execute({ type: 'steer', chatId: args.chat, runId: args.run, message: args.message })),
+      sendCommand(client, {
+        type: 'steer',
+        commandId: randomUUID(),
+        payload: { chatId: args.chat, runId: args.run, message: args.message },
+      }),
     );
-    await reportOperation({
-      operation: answer.operation,
-      runId: args.run,
-      state: answer.snapshot.state,
-      json: args.json === true,
-    });
+    await reportOperation({ operation: 'steer', runId: args.run, answer, json: args.json === true });
   },
 });
 
@@ -425,24 +443,20 @@ const respondCommand = defineCommand({
           exitCodes.refused,
         );
       }
-      return expectResult(
-        await client.execute({
-          type: 'resolve-interrupt',
+      return sendCommand(client, {
+        type: 'resolve-interrupt',
+        commandId: randomUUID(),
+        payload: {
           chatId: args.chat,
           runId: args.run,
           interruptId: args.interrupt,
           outcome,
           ...(args.option === undefined ? {} : { optionId: args.option }),
-        }),
-      );
+        },
+      });
     });
 
-    await reportOperation({
-      operation: answer.operation,
-      runId: args.run,
-      state: answer.snapshot.state,
-      json: args.json === true,
-    });
+    await reportOperation({ operation: 'resolve-interrupt', runId: args.run, answer, json: args.json === true });
   },
 });
 

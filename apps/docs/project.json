@@ -5,6 +5,16 @@
   "projectType": "application",
   "tags": ["scope:ui", "type:app", "layer:feature"],
   "targets": {
+    "generate-fumadocs": {
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/node_modules/.cache/fumadocs/apps/docs"],
+      "options": {
+        "command": "fumadocs-mdx apps/docs/app/lib/fumadocs/source.config.ts node_modules/.cache/fumadocs/apps/docs"
+      }
+    },
+    "typecheck": {
+      "dependsOn": ["generate-fumadocs"]
+    },
     "build": {
       "dependsOn": [],
       "options": {

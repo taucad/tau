@@ -98,6 +98,8 @@ describe('importableSpecifiers', () => {
       '@taucad/geospec-engine/register/node',
       '@taucad/geospec-engine/native/opencascade/single',
       '@taucad/geospec-engine/native/opencascade/single/wasm-url',
+      '@taucad/geospec-engine/node-filesystem',
+      '@taucad/geospec-engine/native-pool/node',
     ]);
     expect(importableSpecifiers(publishedManifest('packages/runtime'))).toContain('@taucad/runtime/plugin');
     expect(importableSpecifiers(publishedManifest('packages/runtime'))).not.toContain('@taucad/runtime/presets');

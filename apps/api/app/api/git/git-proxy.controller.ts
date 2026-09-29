@@ -263,10 +263,17 @@ const lfsVerifyLimitBytes = 64 * 1024;
 /**
  * Proxied requests one user may make per minute. A 2 s sync debounce with a
  * push's three or four requests is ~120, so this bounds abuse without touching
- * a busy session. The LFS relay is not counted: it only reaches actions an
- * upstream batch answer issued.
+ * a busy session. The LFS relay has a budget of its own, below.
  */
 const proxyRequestsPerUserPerMinute = 600;
+
+/**
+ * Relayed LFS requests one user may make per minute (I11). The relay only
+ * reaches actions an upstream batch answer issued, but a sealed handle is
+ * replayable until it expires, so it is bounded like every other git route:
+ * two requests (transfer and verify) per object, a thousand objects a minute.
+ */
+const lfsRelayRequestsPerUserPerMinute = 2000;
 
 /** The fixed-window counter `repositories.service.ts` uses for its per-IP limits. */
 const incrementWithExpiryLua = `
@@ -482,7 +489,7 @@ export class GitProxyController {
     userId: string,
   ): Promise<StreamableFile> {
     let target = this.resolveTarget(rawUrl);
-    await this.consumeRequestSlot(userId);
+    await this.consumeRequestSlot(userId, { family: 'proxy', limit: proxyRequestsPerUserPerMinute });
     const proxyAuthorization = request.headers[proxyAuthorizationHeader];
     const accept = lfsAccept(request);
     const headers = new Headers({
@@ -688,6 +695,7 @@ export class GitProxyController {
     if (!relayHandlePattern.test(handle)) {
       throw new BadRequestException({ code: 'GIT_LFS_HANDLE_INVALID' });
     }
+    await this.consumeRequestSlot(userId, { family: 'lfs-relay', limit: lfsRelayRequestsPerUserPerMinute });
     const key = request.headers[httpHeader.xTauLfsKey];
     if (typeof key !== 'string' || !relayKeyPattern.test(key)) {
       throw new BadRequestException({ code: 'GIT_LFS_HANDLE_REFUSED' });
@@ -792,15 +800,22 @@ export class GitProxyController {
   }
 
   /**
-   * Take one of the caller's proxied requests for this minute (D21).
+   * Take one of the caller's proxied requests for this minute (D21), from the
+   * proxy's budget or, for the LFS relay, the relay's own (I11).
    *
    * @param userId - The signed-in caller.
+   * @param budget - Which per-minute budget, and its ceiling.
    * @throws HttpException 429 `GIT_PROXY_RATE_LIMITED` once the minute's budget is spent.
    */
-  private async consumeRequestSlot(userId: string): Promise<void> {
+  private async consumeRequestSlot(userId: string, budget: Readonly<{ family: string; limit: number }>): Promise<void> {
     const minute = new Date().toISOString().slice(0, 16);
-    const count = await this.redis.client.eval(incrementWithExpiryLua, 1, `git:proxy:rl:${userId}:${minute}`, '60');
-    if (Number(count) > proxyRequestsPerUserPerMinute) {
+    const count = await this.redis.client.eval(
+      incrementWithExpiryLua,
+      1,
+      `git:${budget.family}:rl:${userId}:${minute}`,
+      '60',
+    );
+    if (Number(count) > budget.limit) {
       throw new HttpException(
         { code: 'GIT_PROXY_RATE_LIMITED', message: 'Too many git requests; try again in a minute' },
         HttpStatus.TOO_MANY_REQUESTS,

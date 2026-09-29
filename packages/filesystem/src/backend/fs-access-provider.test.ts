@@ -647,6 +647,17 @@ describe('FileSystemAccessProvider', () => {
   });
 
   describe('readdirWithStats', () => {
+    it('returns head-only text metadata after one bounded slice while exact stat still counts lines', async () => {
+      await provider.writeFile('large.txt', `${'a'.repeat(1024)}\nend`);
+      const slice = vi.spyOn(File.prototype, 'slice');
+
+      const rows = await provider.readdirWithStats('', { content: 'head' });
+      expect(rows[0]).toMatchObject({ name: 'large.txt', contentKind: 'text', size: 1028 });
+      expect(rows[0]).not.toHaveProperty('lineCount');
+      expect(slice.mock.calls).toEqual([[0, 512]]);
+      expect(await provider.stat('large.txt')).toMatchObject({ contentKind: 'text', lineCount: 2 });
+    });
+
     it('should return entries with type and size in single pass', async () => {
       await provider.mkdir('src');
       await provider.writeFile('src/index.ts', 'export {}');

@@ -55,6 +55,46 @@ afterEach(() => {
 });
 
 describe('WorkspaceFileService cross-tab authority delivery', () => {
+  it('deletes once under checked locks and emits no event for conflict or unchanged', async () => {
+    const tails = new Map<string, Promise<void>>();
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async (name: string, _options: LockOptions, operation: () => Promise<unknown>) => {
+          const predecessor = tails.get(name) ?? Promise.resolve();
+          const settled = Promise.withResolvers<void>();
+          tails.set(name, settled.promise);
+          await predecessor;
+          try {
+            return await operation();
+          } finally {
+            settled.resolve();
+          }
+        },
+      },
+    });
+    const databasePrefix = `checked-delete-${databaseSequence++}`;
+    const first = await createAuthority(databasePrefix, { disableChannel: true });
+    const second = await createAuthority(databasePrefix, { disableChannel: true });
+    await first.service.writeFile('/target.txt', 'old');
+    const events: ChangeEvent[] = [];
+    const stop = first.eventBus.subscribe((event) => events.push(event));
+    const input = { path: '/target.txt', preconditions: [{ path: '/target.txt', expected: 'old' }] };
+    const results = await Promise.all([
+      first.service.deleteFileChecked(input),
+      second.service.deleteFileChecked(input),
+    ]);
+    expect(results.map(({ status }) => status).sort()).toEqual(['applied', 'conflict']);
+    expect(events.filter((event) => event.type === 'fileDeleted' && event.path === '/target.txt')).toHaveLength(1);
+    expect(
+      await first.service.deleteFileChecked({
+        path: '/target.txt',
+        preconditions: [{ path: '/target.txt', expected: null }],
+      }),
+    ).toMatchObject({ status: 'unchanged' });
+    expect(events.filter((event) => event.type === 'fileDeleted' && event.path === '/target.txt')).toHaveLength(1);
+    stop();
+  });
+
   it('admits one real-provider checked writer and returns refreshed conflict bytes to the loser', async () => {
     const tails = new Map<string, Promise<void>>();
     vi.stubGlobal('navigator', {
@@ -132,6 +172,35 @@ describe('WorkspaceFileService cross-tab authority delivery', () => {
     ).resolves.toMatchObject({ status: 'conflict', conflicts: [{ path: '/source.txt' }] });
     await expect(first.service.readFile('/target.txt')).resolves.toEqual(winner);
     stop();
+    vi.unstubAllGlobals();
+  });
+
+  it('reads a checked write destination once when it is the only precondition', async () => {
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async (_name: string, _options: LockOptions, operation: () => Promise<unknown>) => operation(),
+      },
+    });
+    const authority = await createAuthority(`checked-single-read-${databaseSequence++}`, { disableChannel: true });
+    await authority.service.writeFile('/target.txt', 'old');
+    const readFile = vi.spyOn(authority.provider, 'readFile');
+
+    await expect(
+      authority.service.writeFileChecked({
+        path: '/target.txt',
+        data: 'new',
+        preconditions: [{ path: '/target.txt', expected: 'old' }],
+      }),
+    ).resolves.toMatchObject({ status: 'applied' });
+    expect(readFile).toHaveBeenCalledTimes(1);
+    await expect(
+      authority.service.writeFileChecked({
+        path: '/target.txt',
+        data: 'new',
+        preconditions: [{ path: '/target.txt', expected: 'new' }],
+      }),
+    ).resolves.toMatchObject({ status: 'unchanged', content: new TextEncoder().encode('new') });
+    expect(readFile).toHaveBeenCalledTimes(2);
     vi.unstubAllGlobals();
   });
 

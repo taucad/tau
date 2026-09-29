@@ -19,7 +19,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Copy, Plus, Server, Zap } from 'lucide-react';
 import type { AcpAgentExecution, TauAgentHostId } from '@taucad/chat';
 import type { ReasoningLevel } from '@taucad/chat/constants';
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { Button } from '@taucad/ui/components/button';
 import {
   Command,
@@ -45,7 +45,7 @@ import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { configOptionOf, configValues } from '#components/chat/use-agent-config.js';
 import type { AgentConfig, AgentConfigOption } from '#components/chat/use-agent-config.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
-import { useAgentHostPlacements, useBrowserAgentHostProjectAvailability } from '#hooks/use-cad-agent-config.js';
+import { useBrowserAgentHostProjectAvailability } from '#hooks/use-cad-agent-config.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useModels } from '#hooks/use-models.js';
 import type { Model } from '#hooks/use-models.js';
@@ -765,7 +765,7 @@ function ModelList({
     <Command className='min-h-0 flex-1 bg-transparent' onKeyDown={backOnEmpty(query, onBack)}>
       <CommandInput
         autoFocus
-        placeholder={agent.kind === 'tau' ? 'Search models...' : `Search ${agent.displayName} models...`}
+        placeholder={agent.kind === 'tau' ? 'Search models…' : `Search ${agent.displayName} models…`}
         value={query}
         onValueChange={setQuery}
       />
@@ -925,7 +925,7 @@ function AgentList({
       defaultValue={current.key}
       onKeyDown={backOnEmpty(query, onBack)}
     >
-      <CommandInput autoFocus placeholder='Search agents...' value={query} onValueChange={setQuery} />
+      <CommandInput autoFocus placeholder='Search agents…' value={query} onValueChange={setQuery} />
       <CommandList className='max-h-none min-h-0 flex-1'>
         <CommandEmpty className='mx-2'>No agents match “{query}”.</CommandEmpty>
         <CommandGroup>{agents.filter((agent) => agent.kind === 'tau').map((agent) => row(agent))}</CommandGroup>
@@ -978,7 +978,7 @@ function Sheet({
   /* The agent whose models the list shows: the chat's own, or one browsed from the agents. */
   const [browseKey, setBrowseKey] = useState(current.key);
   const [isFromAgents, setIsFromAgents] = useState(false);
-  const hasNavigated = useRef(false);
+  const [hasNavigated, setHasNavigated] = useState(false);
   /* Back returns focus to the row the person left from; a choice, to the chosen level. */
   const returnTo = useRef<'agent' | 'model' | 'level'>('level');
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -987,7 +987,7 @@ function Sheet({
   const hasChoice = agents.length > 1;
   const browsed = agents.find((agent) => agent.key === browseKey) ?? current;
   useEffect(() => {
-    if (!hasNavigated.current || view !== 'settings') {
+    if (!hasNavigated || view !== 'settings') {
       return;
     }
     if (returnTo.current === 'level') {
@@ -995,9 +995,9 @@ function Sheet({
     } else {
       (returnTo.current === 'agent' ? agentRowRef : modelRowRef).current?.focus();
     }
-  }, [view]);
+  }, [hasNavigated, view]);
   const go = (next: SheetView): void => {
-    hasNavigated.current = true;
+    setHasNavigated(true);
     setView(next);
   };
   const back = (): void => {
@@ -1034,6 +1034,11 @@ function Sheet({
       const { model: _model, ...base }: AcpAgentExecution = isSameAgent
         ? execution
         : { kind: 'acp', hostId: agent.hostId, agentId: agent.agentId };
+      const thoughtId = configOptionOf(agentConfig, 'thought_level')?.id;
+      if (isSameAgent && execution.model !== modelId && thoughtId && base.config) {
+        const config = Object.fromEntries(Object.entries(base.config).filter(([id]) => id !== thoughtId));
+        base.config = Object.keys(config).length === 0 ? undefined : config;
+      }
       setActiveExecution(modelId === undefined ? base : { ...base, model: modelId });
     }
     returnTo.current = 'level';
@@ -1051,7 +1056,7 @@ function Sheet({
           /* Opening is instant; only a return from a sub-view slides. */
           className={cn(
             'flex flex-col',
-            hasNavigated.current && 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2',
+            hasNavigated && 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2',
           )}
         >
           {hasChoice ? (
@@ -1162,17 +1167,18 @@ function Sheet({
  */
 export function ChatAgentSheet({
   agentConfig,
+  placements,
   focusEditor,
   enableShortcut = true,
 }: {
   readonly agentConfig: AgentConfig;
+  readonly placements: readonly AgentHostPlacementTarget[];
   readonly focusEditor: () => void;
   /** Only the composer being typed in owns ⌘/ (F6). */
   readonly enableShortcut?: boolean | (() => boolean);
 }): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const isMobile = useIsMobile();
-  const { targets: placements } = useAgentHostPlacements();
   const { agents, current } = useSheetAgents(placements);
   const sheetModel = useSheetModel(current, agentConfig);
   const name = triggerName(current, sheetModel);

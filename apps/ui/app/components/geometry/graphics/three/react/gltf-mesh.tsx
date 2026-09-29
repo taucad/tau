@@ -37,6 +37,9 @@ import {
   updateLineMaterialResolution,
 } from '#components/geometry/graphics/three/materials/gltf-edges.js';
 import { applyGltfSurfaceDepthBiasToScene } from '#components/geometry/graphics/three/materials/gltf-surface-depth-bias.js';
+import { transferSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
+import { useSectionClip } from '#components/geometry/graphics/three/react/section-clipping-group.js';
+import { installSectionClipUnder } from '#components/geometry/graphics/three/react/section-view.utils.js';
 import {
   gltfEdgeColorDarkMode,
   gltfEdgeColorLightMode,
@@ -44,7 +47,12 @@ import {
 import { Theme, useTheme } from '#hooks/use-theme.js';
 import { darkModeIntensityScale } from '#components/geometry/graphics/three/utils/lights.utils.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
-import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+import {
+  buildGltfComponentManifest,
+  buildGltfMeasurementFeatures,
+  gltfPrimitiveOccurrenceKey,
+} from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+import type { GltfMeasurementFeatures } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import {
   createGltfComponentOwnership,
   getComponentAncestorIds,
@@ -68,12 +76,14 @@ import {
   useCameraRig,
   useGraphics,
   useGraphicsSelector,
+  useKinematicsSelector,
   useModelInteractionSelector,
   useRenderFrame,
   useRenderFrameRetarget,
 } from '#hooks/use-graphics.js';
 import type { RenderFrame } from '@taucad/spatial';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
+import { getKinematicsUnitState } from '#machines/kinematics.machine.js';
 import type { ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import {
   resolveSectionViewRaycastClip,
@@ -283,7 +293,7 @@ function saveOriginalMaterials(scene: Group): Map<number, Material | Material[]>
  * Restore clones of saved original materials onto a scene.
  * The saved map remains an immutable ownership inventory for final disposal.
  */
-function restoreOriginalMaterials(scene: Group, saved: Map<number, Material | Material[]>): void {
+export function restoreOriginalMaterials(scene: Group, saved: Map<number, Material | Material[]>): void {
   scene.traverse((child) => {
     if ('isMesh' in child && child.isMesh && !isFatLineSegmentsMesh(child)) {
       const mesh = child as Mesh;
@@ -292,15 +302,14 @@ function restoreOriginalMaterials(scene: Group, saved: Map<number, Material | Ma
         return;
       }
 
-      // Preserve clipping planes so section-view clipping survives material restoration
+      // The section clip carries over to the restored materials.
       const currentMats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       const replacement = Array.isArray(original) ? original.map((material) => material.clone()) : original.clone();
       const restoredMats = Array.isArray(replacement) ? replacement : [replacement];
-      for (let i = 0; i < restoredMats.length && i < currentMats.length; i++) {
-        const currentMat = currentMats[i];
-        const restoredMat = restoredMats[i];
-        if (currentMat && restoredMat && currentMat.clippingPlanes?.length) {
-          restoredMat.clippingPlanes = currentMat.clippingPlanes;
+      for (const [index, restoredMat] of restoredMats.entries()) {
+        const currentMat = currentMats[index] ?? currentMats[0];
+        if (currentMat) {
+          transferSectionClip(currentMat, restoredMat);
         }
       }
 
@@ -801,6 +810,7 @@ export function annotateSceneComponents(
   options: {
     readonly unitId: string;
     readonly associations?: ReadonlyMap<Object3D, GltfLoaderAssociation>;
+    readonly measurementFeatures?: ReadonlyMap<string, GltfMeasurementFeatures>;
   },
 ): void {
   const childComponentIds = manifest.nodesById[manifest.rootId]?.childIds ?? [];
@@ -833,6 +843,22 @@ export function annotateSceneComponents(
   let fallbackIndex = 0;
   let primitiveFallbackIndex = 0;
 
+  const setMeasurementFeatures = (
+    object: Object3D,
+    componentId: string,
+    reference: GeometryComponentPrimitiveRef | undefined,
+  ): void => {
+    if (!options.measurementFeatures) {
+      return;
+    }
+    const features = reference && options.measurementFeatures.get(gltfPrimitiveOccurrenceKey(reference));
+    if (features?.componentId === componentId) {
+      object.userData['measurementFeatures'] = features;
+    } else {
+      delete object.userData['measurementFeatures'];
+    }
+  };
+
   const annotateObject = ({
     object,
     inheritedComponentId,
@@ -844,33 +870,34 @@ export function annotateSceneComponents(
     previousSiblingRenderableComponentId: string | undefined;
     inheritedNodeIndex: number | undefined;
   }): string | undefined => {
+    const association = options.associations?.get(object);
+    const nodeIndex = association?.nodes ?? inheritedNodeIndex;
+    const primitiveReference =
+      nodeIndex !== undefined && association?.meshes !== undefined && association.primitives !== undefined
+        ? { nodeIndex, meshIndex: association.meshes, primitiveIndex: association.primitives }
+        : undefined;
     const existingComponentId = getModelComponentId(object);
     if (typeof existingComponentId === 'string') {
       setModelComponentOwner(object, {
         unitId: options.unitId,
         componentId: existingComponentId,
       });
+      const previousFeatures = object.userData['measurementFeatures'] as GltfMeasurementFeatures | undefined;
+      setMeasurementFeatures(object, existingComponentId, primitiveReference ?? previousFeatures?.primitive);
       for (const child of object.children) {
         annotateObject({
           object: child,
           inheritedComponentId: existingComponentId,
           previousSiblingRenderableComponentId: undefined,
-          inheritedNodeIndex,
+          inheritedNodeIndex: nodeIndex,
         });
       }
       return existingComponentId;
     }
 
-    const association = options.associations?.get(object);
-    const nodeIndex = association?.nodes ?? inheritedNodeIndex;
-    const primitiveComponentId =
-      nodeIndex !== undefined && association?.meshes !== undefined && association.primitives !== undefined
-        ? getGltfPrimitiveComponentId(ownership, {
-            nodeIndex,
-            meshIndex: association.meshes,
-            primitiveIndex: association.primitives,
-          })
-        : undefined;
+    const primitiveComponentId = primitiveReference
+      ? getGltfPrimitiveComponentId(ownership, primitiveReference)
+      : undefined;
     const associatedComponentId = primitiveComponentId ?? ownership.componentIdByNodeIndex.get(nodeIndex ?? -1);
     let componentId = associatedComponentId ?? inheritedComponentId;
 
@@ -894,6 +921,7 @@ export function annotateSceneComponents(
 
       if (componentId) {
         setModelComponentOwner(object, { unitId: options.unitId, componentId });
+        setMeasurementFeatures(object, componentId, primitiveReference);
       }
     }
 
@@ -957,7 +985,10 @@ export type ApplyModelComponentVisualStateToSceneOptions = Readonly<{
     | 'opacityByComponentId'
     | 'hoveredComponentId'
     | 'selectedComponentIds'
-  >;
+  > & {
+    /** Parts the Kinematics pane points at; they light as a hovered part does. */
+    readonly kinematicsHoveredComponentIds?: readonly string[];
+  };
   enableSurfaces: boolean;
   enableLines: boolean;
 }>;
@@ -980,7 +1011,10 @@ export function applyModelComponentVisualStateToScene({
   const emphasisComponents = {
     focused: new Set(modelVisualState.focusedComponentId ? [modelVisualState.focusedComponentId] : []),
     selected: new Set(modelVisualState.selectedComponentIds),
-    hovered: new Set(modelVisualState.hoveredComponentId ? [modelVisualState.hoveredComponentId] : []),
+    hovered: new Set([
+      ...(modelVisualState.hoveredComponentId ? [modelVisualState.hoveredComponentId] : []),
+      ...(modelVisualState.kinematicsHoveredComponentIds ?? []),
+    ]),
   };
   const opacityByComponentId =
     Object.keys(modelVisualState.opacityByComponentId).length > 0 ? modelVisualState.opacityByComponentId : undefined;
@@ -1011,7 +1045,12 @@ export function applyModelComponentVisualStateToScene({
       // Edges share one base material per presentation, so emphasis is a per-object material
       // swap rather than a tint on the shared material (which would let the last-visited
       // component win). Edge opacity is not per-component; see the edge emphasis blueprint.
+      const [worn] = getObjectMaterials(object);
       setGltfFatLineEmphasis(object, emphasis);
+      const [next] = getObjectMaterials(object);
+      if (worn && next) {
+        transferSectionClip(worn, next);
+      }
       return;
     }
 
@@ -1069,6 +1108,7 @@ export function GltfMesh({
 }: GltfMeshDisplayProperties): React.JSX.Element | undefined {
   const graphicsActor = useGraphics();
   const graphicsBackendThree = useThreeGraphicsBackend();
+  const sectionClip = useSectionClip();
   const sectionView = useSectionViewFlags();
   const cameraRig = useCameraRig();
   const renderFrame = useRenderFrame();
@@ -1090,16 +1130,14 @@ export function GltfMesh({
   const scene = presentation?.scene;
   const componentManifest = presentation?.manifest;
   const unitId = presentation?.unitId ?? requestedUnitId;
-  const sectionBarrierRef = useRef<GltfPresentationBarrier>(
-    sectionView.isActive && sectionView.enableMesh ? 'analysis-ready' : 'display-ready',
-  );
+  const sectionBarrierRef = useRef<GltfPresentationBarrier>(sectionView.isActive ? 'analysis-ready' : 'display-ready');
   const materialOptionsRef = useRef({ enableMatcap, matcapTint });
   const materialSignaturesRef = useRef(new WeakMap<PreparedGltfPresentation, string>());
 
   useEffect(() => {
-    sectionBarrierRef.current = sectionView.isActive && sectionView.enableMesh ? 'analysis-ready' : 'display-ready';
+    sectionBarrierRef.current = sectionView.isActive ? 'analysis-ready' : 'display-ready';
     materialOptionsRef.current = { enableMatcap, matcapTint };
-  }, [enableMatcap, matcapTint, sectionView.enableMesh, sectionView.isActive]);
+  }, [enableMatcap, matcapTint, sectionView.isActive]);
 
   // Memoize resolution vector to avoid creating new objects on each render
   const resolutionRef = useRef(new Vector2(size.width, size.height));
@@ -1112,9 +1150,12 @@ export function GltfMesh({
   const isViewerHoverSuppressed = useGraphicsSelector(
     (state) => state.context.viewerHoverSuppressionReasons.length > 0,
   );
+  const kinematicsHoveredComponentIds = useKinematicsSelector(
+    (state) => getKinematicsUnitState(state.context, unitId).hoveredComponentIds,
+  );
   const modelVisualState = useMemo(
-    () => ({ ...modelUnitState, isViewerHoverSuppressed }),
-    [isViewerHoverSuppressed, modelUnitState],
+    () => ({ ...modelUnitState, isViewerHoverSuppressed, kinematicsHoveredComponentIds }),
+    [isViewerHoverSuppressed, kinematicsHoveredComponentIds, modelUnitState],
   );
   const getModelPickableMeshes = useCallback((): readonly Mesh[] => {
     if (!scene) {
@@ -1143,7 +1184,7 @@ export function GltfMesh({
     // oxlint-disable-next-line react/immutability -- This presentation owns the external Three.js scene and restores its imperative raycast hook on teardown.
     scene.raycast = (raycaster, intersections): false => {
       const { context } = graphicsActor.getSnapshot();
-      // A section gizmo drag owns the pointer and suppresses model hover, so its moves skip the model query.
+      // A section handle drag owns the pointer and suppresses model hover, so its moves skip the model query.
       // The model's presses (secondary, and a primary one that starts a kinematics drag) never start that
       // drag, and the release's click raycasts after pointer-up has lifted the suppression.
       if (context.viewerHoverSuppressionReasons.includes('sectionViewTransform')) {
@@ -1327,10 +1368,11 @@ export function GltfMesh({
 
       const manifestStartedAt = performance.now();
       const manifest = buildGltfComponentManifest(gltfFile, { sourceFile, geometryHash });
+      const measurementFeatures = buildGltfMeasurementFeatures(gltfFile, manifest);
       timings.manifest = performance.now() - manifestStartedAt;
       const annotationStartedAt = performance.now();
       // Component ids are unchanged with the topology, so this only re-keys them to the new unit.
-      annotateSceneComponents(committed.scene, manifest, { unitId: requestedUnitId });
+      annotateSceneComponents(committed.scene, manifest, { unitId: requestedUnitId, measurementFeatures });
       timings.annotation = performance.now() - annotationStartedAt;
 
       const bundle: PreparedGltfPresentation = {
@@ -1387,11 +1429,13 @@ export function GltfMesh({
 
         const manifestStartedAt = performance.now();
         const manifest = buildGltfComponentManifest(gltfFile, { sourceFile, geometryHash });
+        const measurementFeatures = buildGltfMeasurementFeatures(gltfFile, manifest);
         timings.manifest = performance.now() - manifestStartedAt;
         const annotationStartedAt = performance.now();
         annotateSceneComponents(gltf.scene, manifest, {
           unitId: requestedUnitId,
           associations: gltf.parser.associations as ReadonlyMap<Object3D, GltfLoaderAssociation>,
+          measurementFeatures,
         });
         timings.annotation = performance.now() - annotationStartedAt;
         setGltfSectionSurfaceRegistrationState(gltf.scene, 'pending');
@@ -1414,6 +1458,8 @@ export function GltfMesh({
           await applyMatcap({ scene: gltf.scene }, materialOptions.matcapTint, graphicsBackendThree);
         }
         applyGltfSurfaceDepthBiasToScene(gltf.scene, graphicsBackendThree);
+        // In before the warm-up and the commit: the first frame draws the programs warmed here, already cut.
+        installSectionClipUnder(gltf.scene, sectionClip);
         seedSceneMaterialAppearances(gltf.scene);
         timings.materials = performance.now() - materialsStartedAt;
         const bundle: PreparedGltfPresentation = {
@@ -1602,6 +1648,7 @@ export function GltfMesh({
     presentationRevision,
     ensureSectionAnalysis,
     emitTelemetry,
+    sectionClip,
   ]);
 
   // Theme-aware edge tint without re-parsing the GLTF binary.
@@ -1641,11 +1688,11 @@ export function GltfMesh({
    * 100k triangles and 1.7 s at 1M, against a 16 ms pipeline. An active section view still submits
    * immediately and awaits the same promise before its next swap. */
   useEffect(() => {
-    if (presentation?.sectionStatus !== 'pending' || !sectionView.isActive || !sectionView.enableMesh) {
+    if (presentation?.sectionStatus !== 'pending' || !sectionView.isActive) {
       return;
     }
     void ensureSectionAnalysis(presentation);
-  }, [ensureSectionAnalysis, presentation, sectionView.enableMesh, sectionView.isActive]);
+  }, [ensureSectionAnalysis, presentation, sectionView.isActive]);
 
   useFrame(() => {
     if (!scene && frameProbeRef.current) {

@@ -1,83 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
-import {
-  applyMeshClipping,
-  collectClippableTargets,
-  enforceMaterialClipping,
-} from '#components/geometry/graphics/three/react/section-view.utils.js';
+import { LineSegments2 as WebGpuLineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
+import { collectClippableTargets } from '#components/geometry/graphics/three/react/section-view.utils.js';
 import { sceneTag, sceneTagData } from '#components/geometry/graphics/three/utils/scene-tags.js';
 
-const testPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-
-function createDoubleSidedMesh(): THREE.Mesh {
-  const geometry = new THREE.BoxGeometry(1, 1, 1);
-  const material = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide });
-  return new THREE.Mesh(geometry, material);
+function createMesh(): THREE.Mesh {
+  return new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ side: THREE.DoubleSide }));
 }
-
-function createFrontSidedMesh(): THREE.Mesh {
-  const geometry = new THREE.BoxGeometry(1, 1, 1);
-  const material = new THREE.MeshStandardMaterial({ side: THREE.FrontSide });
-  return new THREE.Mesh(geometry, material);
-}
-
-describe('applyMeshClipping', () => {
-  it('should set clippingPlanes when enabled', () => {
-    const mesh = createDoubleSidedMesh();
-
-    applyMeshClipping(mesh, { enable: true, plane: testPlane });
-
-    const mat = mesh.material as THREE.MeshStandardMaterial;
-    expect(mat.clippingPlanes).toHaveLength(1);
-    expect(mat.clippingPlanes![0]).toBe(testPlane);
-  });
-
-  it('should preserve DoubleSide on materials when enabled', () => {
-    const mesh = createDoubleSidedMesh();
-
-    applyMeshClipping(mesh, { enable: true, plane: testPlane });
-
-    const mat = mesh.material as THREE.MeshStandardMaterial;
-    expect(mat.side).toBe(THREE.DoubleSide);
-  });
-
-  it('should preserve FrontSide on materials when enabled', () => {
-    const mesh = createFrontSidedMesh();
-
-    applyMeshClipping(mesh, { enable: true, plane: testPlane });
-
-    const mat = mesh.material as THREE.MeshStandardMaterial;
-    expect(mat.side).toBe(THREE.FrontSide);
-  });
-
-  it('should clear clippingPlanes when disabled', () => {
-    const mesh = createDoubleSidedMesh();
-
-    applyMeshClipping(mesh, { enable: true, plane: testPlane });
-    applyMeshClipping(mesh, { enable: false, plane: testPlane });
-
-    const mat = mesh.material as THREE.MeshStandardMaterial;
-    expect(mat.side).toBe(THREE.DoubleSide);
-    expect(mat.clippingPlanes).toHaveLength(0);
-  });
-
-  it('should handle mesh with material array', () => {
-    const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const materials = [
-      new THREE.MeshStandardMaterial({ side: THREE.DoubleSide }),
-      new THREE.MeshStandardMaterial({ side: THREE.FrontSide }),
-    ];
-    const mesh = new THREE.Mesh(geometry, materials);
-
-    applyMeshClipping(mesh, { enable: true, plane: testPlane });
-
-    expect(materials[0]!.side).toBe(THREE.DoubleSide);
-    expect(materials[0]!.clippingPlanes).toHaveLength(1);
-    expect(materials[1]!.side).toBe(THREE.FrontSide);
-    expect(materials[1]!.clippingPlanes).toHaveLength(1);
-  });
-});
 
 describe('collectClippableTargets', () => {
   function createTestSceneGraph(): {
@@ -88,8 +18,8 @@ describe('collectClippableTargets', () => {
   } {
     const rootGroup = new THREE.Group();
 
-    const mesh1 = createDoubleSidedMesh();
-    const mesh2 = createDoubleSidedMesh();
+    const mesh1 = createMesh();
+    const mesh2 = createMesh();
     const lineGeometry = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0),
       new THREE.Vector3(1, 1, 1),
@@ -106,12 +36,7 @@ describe('collectClippableTargets', () => {
   it('should collect meshes and lines separately', () => {
     const { rootGroup, mesh1, mesh2, lineSegments } = createTestSceneGraph();
 
-    const result = collectClippableTargets(rootGroup, {
-      enableSection: true,
-      enableLines: true,
-      enableMesh: true,
-      plane: testPlane,
-    });
+    const result = collectClippableTargets(rootGroup);
 
     expect(result.meshes).toHaveLength(2);
     expect(result.meshes).toContain(mesh1);
@@ -119,247 +44,71 @@ describe('collectClippableTargets', () => {
     expect(result.lines).toEqual([lineSegments]);
   });
 
-  it('should apply clippingPlanes to all mesh materials when enableMesh is true', () => {
-    const { rootGroup } = createTestSceneGraph();
+  it('should list line strips, line loops and points, and keep their transforms updating', () => {
+    const rootGroup = new THREE.Group();
+    const mesh = createMesh();
+    const strip = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial());
+    const loop = new THREE.LineLoop(new THREE.BufferGeometry(), new THREE.LineBasicMaterial());
+    const points = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial());
+    rootGroup.add(mesh, strip, loop, points);
 
-    const result = collectClippableTargets(rootGroup, {
-      enableSection: true,
-      enableLines: true,
-      enableMesh: true,
-      plane: testPlane,
-    });
+    const result = collectClippableTargets(rootGroup);
 
-    for (const mesh of result.meshes) {
-      const mat = mesh.material as THREE.Material;
-      expect(mat.clippingPlanes).toHaveLength(1);
-      expect(mat.clippingPlanes![0]).toBe(testPlane);
-    }
+    expect(result).toEqual({ meshes: [mesh], lines: [strip, loop], points: [points] });
+    expect([strip, loop, points].map((object) => object.matrixAutoUpdate)).toEqual([true, true, true]);
   });
 
-  it('should clear mesh clippingPlanes when enableMesh is false but still return meshes', () => {
-    const { rootGroup } = createTestSceneGraph();
+  it('should leave materials untouched', () => {
+    const { rootGroup, mesh1, lineSegments } = createTestSceneGraph();
 
-    const result = collectClippableTargets(rootGroup, {
-      enableSection: true,
-      enableLines: true,
-      enableMesh: false,
-      plane: testPlane,
-    });
+    collectClippableTargets(rootGroup);
 
-    expect(result.meshes).toHaveLength(2);
-    for (const mesh of result.meshes) {
-      const mat = mesh.material as THREE.Material;
-      expect(mat.clippingPlanes).toHaveLength(0);
-    }
-  });
-
-  it('should apply clippingPlanes to LineSegments when enableLines is true', () => {
-    const { rootGroup, lineSegments } = createTestSceneGraph();
-
-    collectClippableTargets(rootGroup, {
-      enableSection: true,
-      enableLines: true,
-      enableMesh: true,
-      plane: testPlane,
-    });
-
-    const mat = lineSegments.material as THREE.Material;
-    expect(mat.clippingPlanes).toHaveLength(1);
-  });
-
-  it('should clear LineSegments clippingPlanes when enableLines is false', () => {
-    const { rootGroup, lineSegments } = createTestSceneGraph();
-
-    collectClippableTargets(rootGroup, {
-      enableSection: true,
-      enableLines: false,
-      enableMesh: true,
-      plane: testPlane,
-    });
-
-    const mat = lineSegments.material as THREE.Material;
-    expect(mat.clippingPlanes).toHaveLength(0);
-  });
-
-  it('should clear all clipping when enableSection is false', () => {
-    const { rootGroup, mesh1, mesh2, lineSegments } = createTestSceneGraph();
-
-    collectClippableTargets(rootGroup, {
-      enableSection: true,
-      enableLines: true,
-      enableMesh: true,
-      plane: testPlane,
-    });
-
-    const result = collectClippableTargets(rootGroup, {
-      enableSection: false,
-      enableLines: true,
-      enableMesh: true,
-      plane: testPlane,
-    });
-
-    expect(result.meshes).toHaveLength(2);
-    expect(result.lines).toHaveLength(1);
-
-    for (const mesh of [mesh1, mesh2]) {
-      const mat = mesh.material as THREE.MeshStandardMaterial;
-      expect(mat.clippingPlanes).toHaveLength(0);
-      expect(mat.side).toBe(THREE.DoubleSide);
-    }
-
-    expect((lineSegments.material as THREE.Material).clippingPlanes).toHaveLength(0);
+    const material = mesh1.material as THREE.MeshStandardMaterial;
+    expect(material.clippingPlanes).toBeNull();
+    expect(material.side).toBe(THREE.DoubleSide);
+    expect(material.version).toBe(0);
+    expect((lineSegments.material as THREE.Material).clippingPlanes).toBeNull();
   });
 
   it('should set matrixAutoUpdate to false on collected meshes', () => {
     const { rootGroup, mesh1, mesh2 } = createTestSceneGraph();
 
-    collectClippableTargets(rootGroup, {
-      enableSection: true,
-      enableLines: true,
-      enableMesh: true,
-      plane: testPlane,
-    });
+    collectClippableTargets(rootGroup);
 
     expect(mesh1.matrixAutoUpdate).toBe(false);
     expect(mesh2.matrixAutoUpdate).toBe(false);
   });
 
-  it('should not mutate or collect meshes tagged as sectionViewHelper', () => {
+  it('should not collect or touch meshes tagged as sectionViewHelper', () => {
     const rootGroup = new THREE.Group();
-    const userMesh = createDoubleSidedMesh();
-    const helperMesh = createDoubleSidedMesh();
+    const userMesh = createMesh();
+    const helperMesh = createMesh();
     helperMesh.userData = sceneTagData(sceneTag.sectionViewHelper);
 
     rootGroup.add(userMesh);
     rootGroup.add(helperMesh);
 
-    const result = collectClippableTargets(rootGroup, {
-      enableSection: true,
-      enableLines: true,
-      enableMesh: true,
-      plane: testPlane,
-    });
+    const result = collectClippableTargets(rootGroup);
 
     expect(result.meshes).toEqual([userMesh]);
-    expect((helperMesh.material as THREE.MeshStandardMaterial).clippingPlanes).toBeNull();
+    expect(helperMesh.matrixAutoUpdate).toBe(true);
   });
 
-  it('should include LineSegments2 in lines array', () => {
+  it.each([
+    ['WebGL', (): THREE.Mesh => new LineSegments2()],
+    ['WebGPU', (): THREE.Mesh => new WebGpuLineSegments2()],
+  ])('should list %s fat lines as lines and keep their transforms updating', (_backend, createFatLine) => {
     const rootGroup = new THREE.Group();
-    const mesh = createDoubleSidedMesh();
-    const fatLine = new LineSegments2();
+    const mesh = createMesh();
+    const fatLine = createFatLine();
 
     rootGroup.add(mesh);
     rootGroup.add(fatLine);
 
-    const result = collectClippableTargets(rootGroup, {
-      enableSection: true,
-      enableLines: true,
-      enableMesh: true,
-      plane: testPlane,
-    });
+    const result = collectClippableTargets(rootGroup);
 
-    expect(result.lines).toContain(fatLine);
-    expect(fatLine.material.clippingPlanes).toHaveLength(1);
-  });
-});
-
-describe('enforceMaterialClipping', () => {
-  it('should set clippingPlanes when material has none (post-applyMatcap scenario)', () => {
-    const mesh = createDoubleSidedMesh();
-    const mat = mesh.material as THREE.MeshStandardMaterial;
-    expect(mat.clippingPlanes).toBeNull();
-
-    enforceMaterialClipping([mesh], testPlane, true);
-
-    expect(mat.clippingPlanes).toHaveLength(1);
-    expect(mat.clippingPlanes![0]).toBe(testPlane);
-  });
-
-  it('should be a no-op when clippingPlanes already reference the correct plane', () => {
-    const mesh = createDoubleSidedMesh();
-    const mat = mesh.material as THREE.MeshStandardMaterial;
-    const existingPlanes = [testPlane];
-    mat.clippingPlanes = existingPlanes;
-
-    enforceMaterialClipping([mesh], testPlane, true);
-
-    expect(mat.clippingPlanes).toBe(existingPlanes);
-  });
-
-  it('should replace clippingPlanes when they reference a different plane', () => {
-    const mesh = createDoubleSidedMesh();
-    const mat = mesh.material as THREE.MeshStandardMaterial;
-    const stalePlane = new THREE.Plane(new THREE.Vector3(1, 0, 0), 5);
-    mat.clippingPlanes = [stalePlane];
-
-    enforceMaterialClipping([mesh], testPlane, true);
-
-    expect(mat.clippingPlanes).toHaveLength(1);
-    expect(mat.clippingPlanes[0]).toBe(testPlane);
-  });
-
-  it('should clear clippingPlanes when enableMesh is false', () => {
-    const mesh = createDoubleSidedMesh();
-    const mat = mesh.material as THREE.MeshStandardMaterial;
-    mat.clippingPlanes = [testPlane];
-
-    enforceMaterialClipping([mesh], testPlane, false);
-
-    expect(mat.clippingPlanes).toHaveLength(0);
-  });
-
-  it('should be a no-op when enableMesh is false and clippingPlanes already empty', () => {
-    const mesh = createDoubleSidedMesh();
-    const mat = mesh.material as THREE.MeshStandardMaterial;
-    mat.clippingPlanes = [];
-
-    enforceMaterialClipping([mesh], testPlane, false);
-
-    expect(mat.clippingPlanes).toHaveLength(0);
-  });
-
-  it('should handle mesh with material array', () => {
-    const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const materials = [
-      new THREE.MeshStandardMaterial({ side: THREE.DoubleSide }),
-      new THREE.MeshStandardMaterial({ side: THREE.FrontSide }),
-    ];
-    const mesh = new THREE.Mesh(geometry, materials);
-
-    enforceMaterialClipping([mesh], testPlane, true);
-
-    expect(materials[0]!.clippingPlanes).toHaveLength(1);
-    expect(materials[0]!.clippingPlanes![0]).toBe(testPlane);
-    expect(materials[1]!.clippingPlanes).toHaveLength(1);
-    expect(materials[1]!.clippingPlanes![0]).toBe(testPlane);
-  });
-
-  it('should handle multiple meshes', () => {
-    const mesh1 = createDoubleSidedMesh();
-    const mesh2 = createFrontSidedMesh();
-
-    enforceMaterialClipping([mesh1, mesh2], testPlane, true);
-
-    const mat1 = mesh1.material as THREE.MeshStandardMaterial;
-    const mat2 = mesh2.material as THREE.MeshStandardMaterial;
-    expect(mat1.clippingPlanes).toHaveLength(1);
-    expect(mat2.clippingPlanes).toHaveLength(1);
-  });
-
-  it('should share one clipping-plane list per plane across materials and frames', () => {
-    const mesh1 = createDoubleSidedMesh();
-    const mesh2 = createFrontSidedMesh();
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 2);
-
-    enforceMaterialClipping([mesh1, mesh2], plane, true);
-    const planes = (mesh1.material as THREE.MeshStandardMaterial).clippingPlanes;
-    // A material replaced between frames (a matcap toggle) picks up the same list.
-    mesh2.material = new THREE.MeshStandardMaterial();
-    enforceMaterialClipping([mesh1, mesh2], plane, true);
-
-    expect(planes).toEqual([plane]);
-    expect((mesh1.material as THREE.MeshStandardMaterial).clippingPlanes).toBe(planes);
-    expect((mesh2.material as THREE.MeshStandardMaterial).clippingPlanes).toBe(planes);
+    expect(result.lines).toEqual([fatLine]);
+    expect(result.meshes).toEqual([mesh]);
+    expect(fatLine.matrixAutoUpdate).toBe(true);
   });
 });

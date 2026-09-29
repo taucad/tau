@@ -11,8 +11,15 @@
 import type { z } from 'zod';
 import { Topic } from '@taucad/events';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
-import type { CheckedFileWrite, CheckedFileWriteResult } from '@taucad/types';
-import type { ExternalChangeFact, FileMode, FileStat, ProviderCapabilities, WatchRequest } from '#types.js';
+import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
+import type {
+  ExternalChangeFact,
+  FileMode,
+  FileStat,
+  HeadFileStat,
+  ProviderCapabilities,
+  WatchRequest,
+} from '#types.js';
 import type { NodeFsPort } from '#backend/node/port.js';
 import type { NodeFsRequest, NodeFsResponse, NodeFsWatchEvent } from '#backend/node/protocol.js';
 import {
@@ -262,6 +269,10 @@ export class NodeFsChannel {
  * @public
  */
 export class NodeFsProviderClient extends AbstractFileSystemProvider {
+  /** @returns `true` for the supported head listing mode. */
+  public get supportsHeadListing(): true {
+    return true;
+  }
   public readonly capabilities: ProviderCapabilities = {
     persistent: true,
     writable: true,
@@ -322,6 +333,30 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
     }
   }
 
+  public async deleteFileChecked(input: {
+    path: string;
+    preconditions: readonly FileWritePrecondition[];
+  }): Promise<CheckedFileWriteResult> {
+    this._assertRootedPath(input.path);
+    for (const precondition of input.preconditions) {
+      this._assertRootedPath(precondition.path);
+    }
+    try {
+      return await this._channel.request({ root: this._root, op: 'deleteFileChecked', ...input });
+    } catch (error) {
+      if ((error as { applicationState?: unknown }).applicationState !== undefined) {
+        throw error;
+      }
+      throw Object.assign(
+        new Error('Checked delete outcome is unknown because its reply was unavailable.', { cause: error }),
+        {
+          code: 'CHECKED_WRITE_POTENTIALLY_APPLIED',
+          applicationState: 'potentially-applied',
+        },
+      );
+    }
+  }
+
   public async readdir(path: string): Promise<string[]> {
     this._assertRootedPath(path);
     return this._channel.request({ root: this._root, op: 'readdir', path });
@@ -334,9 +369,19 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
    * @param path - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
    */
-  public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
+  public readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
+  public readdirWithStats(
+    path: string,
+    options: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & HeadFileStat>>;
+  public async readdirWithStats(
+    path: string,
+    options?: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
     this._assertRootedPath(path);
-    return this._channel.request({ root: this._root, op: 'readdirWithStats', path });
+    return options === undefined
+      ? this._channel.request({ root: this._root, op: 'readdirWithStats', path })
+      : this._channel.request({ root: this._root, op: 'readdirHeadWithStats', path });
   }
 
   public async stat(path: string): Promise<FileStat> {

@@ -147,10 +147,60 @@ export const leaveProjectStorageHeadroom = async (
   );
 };
 
+/** Set the LFS bytes one project is charged, leaving its pack bytes as they are. */
+export const setProjectLfsBytes = async (projectId: string, bytes: number): Promise<void> => {
+  await psql(
+    `INSERT INTO project_git (project_id, storage_bytes, lfs_bytes) VALUES ('${projectId}', 0, ${String(bytes)}) ` +
+      `ON CONFLICT (project_id) DO UPDATE SET lfs_bytes = ${String(bytes)};`,
+  );
+};
+
 /** Read the verified LFS bytes charged to one Tau Hosted Remote project. */
 export const projectLfsBytes = async (projectId: string): Promise<number> => {
   const value = await psql(`SELECT lfs_bytes FROM project_git WHERE project_id = '${projectId}';`);
   return value === '' ? 0 : Number(value);
+};
+
+/** Make one account a collaborator on the owner's project, as an accepted invitation leaves it (D27). */
+export const addProjectCollaborator = async (
+  input: Readonly<{
+    projectId: string;
+    collaborator: TauCloudOwnerIds;
+    role: 'read' | 'write';
+    invitedBy: TauCloudOwnerIds;
+  }>,
+): Promise<void> => {
+  const { projectId, collaborator, role, invitedBy } = input;
+  await psql(
+    `INSERT INTO project_collaborator (project_id, user_id, role, invited_by) ` +
+      `VALUES ('${projectId}', '${collaborator.userId}', '${role}', '${invitedBy.userId}') ` +
+      `ON CONFLICT (project_id, user_id) DO UPDATE SET role = '${role}';`,
+  );
+};
+
+/** The owner's account-wide figures `GET /v1/projects/:projectId/usage` answers (D18). */
+export type StorageUsage = Readonly<{
+  storageBytes: number;
+  lfsBytes: number;
+  retainedBytes: number;
+  storageLimitBytes: number;
+}>;
+
+/**
+ * Read the usage route as one account, the way a Sync region does.
+ *
+ * @param projectId - The project whose owner's account is asked about.
+ * @param bearer - The asking account's session.
+ * @returns The status, and the figures when it answered `200`.
+ */
+export const readStorageUsage = async (
+  projectId: string,
+  bearer: string,
+): Promise<Readonly<{ status: number; usage: StorageUsage | undefined }>> => {
+  const response = await fetch(`${desktopE2EApiUrl}/v1/projects/${projectId}/usage`, {
+    headers: { authorization: `Bearer ${bearer}`, origin: desktopE2EFrontendUrl },
+  });
+  return { status: response.status, usage: response.ok ? ((await response.json()) as StorageUsage) : undefined };
 };
 
 /** Remove the projects one owner registered, so a re-run starts from the same state. */

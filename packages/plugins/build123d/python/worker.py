@@ -704,9 +704,15 @@ def _load_model(workspace: Path, entry_path: str, parameters: Any, adapter: Any 
             raise TypeError("Async main functions are not supported")
         from build123d import Shape
 
-        values = (result,) if isinstance(result, Shape) else tuple(result) if isinstance(result, (list, tuple)) else ()
-        if not values or any(not isinstance(shape, Shape) for shape in values):
-            raise TypeError("main(params) must return a Shape or a non-empty list/tuple of Shapes")
+        # None or an empty list is an empty scene, like the TypeScript kernels' empty main().
+        if result is None:
+            values: tuple[Any, ...] = ()
+        elif isinstance(result, Shape):
+            values = (result,)
+        elif isinstance(result, (list, tuple)) and all(isinstance(shape, Shape) for shape in result):
+            values = tuple(result)
+        else:
+            raise TypeError("main(params) must return None, a Shape or a list/tuple of Shapes")
         _validate_results(values)
         explicit_labels = [shape.label.strip() for shape in values if shape.label and shape.label.strip()]
         duplicates = sorted({label for label in explicit_labels if explicit_labels.count(label) > 1})
@@ -1033,6 +1039,8 @@ class Worker:
             if params["format"] != "step":
                 raise ValueError(f"Unsupported Build123d export format: {params['format']}")
             shapes = self.handles[params["handleId"]]
+            if not shapes:
+                raise ValueError("main(params) returned no shapes to export")
             from build123d import Compound, export_step
 
             artifact = self._artifact("step")

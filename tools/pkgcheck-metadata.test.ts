@@ -5,7 +5,6 @@ import {
   bundledArtifactIssues,
   bundledWorkspaceMirrors,
   bundleDeclarationClosure,
-  bundleOwnershipIssues,
   bundleWitnessIssues,
   copyTargetPaths,
   doubledPathSegments,
@@ -73,26 +72,15 @@ describe('pkgcheck metadata', () => {
     ]);
   });
 
-  it('reports workspace modules bundled by more than one publishable root', () => {
-    expect(
-      bundleOwnershipIssues([
-        { owner: '@taucad/runtime', bundled: ['@taucad/vm'] },
-        { owner: 'geospec', bundled: ['@taucad/vm'] },
-      ]),
-    ).toEqual(['@taucad/vm is bundled by both @taucad/runtime and geospec']);
-  });
-
-  it('reports a mirror the manifest/tag rule never permitted, and leaves multi-owner rules alone', () => {
+  it('permits independent mirrors while rejecting one outside an owner’s manifest/tag rule', () => {
     expect(
       bundleWitnessIssues(
         [
           { owner: '@taucad/runtime', bundled: ['@taucad/runtime', '@taucad/rpc', '@taucad/billing'] },
-          { owner: '@taucad/esbuild', bundled: ['@taucad/vm'] },
+          { owner: '@taucad/esbuild', bundled: ['@taucad/rpc', '@taucad/vm'] },
         ],
         new Map([
           ['@taucad/runtime', ['@taucad/rpc']],
-          // A library the rule permits two owners is the release resolver's own
-          // invariant (`bundleOwnershipIssues`), not a mirror-side witness failure.
           ['@taucad/esbuild', ['@taucad/vm', '@taucad/rpc']],
         ]),
       ),
@@ -703,7 +691,9 @@ describe('hostTargetIssues', () => {
         dependencyNames: [],
         hasPayloadGuardTest: false,
       }),
-    ).toEqual(['@taucad/occt-core: package.json taucad.hostTarget is not declared (expected "browser" or "node")']);
+    ).toEqual([
+      '@taucad/occt-core: package.json taucad.hostTarget is not declared (expected "browser", "daemon", "native", "node", "python")',
+    ]);
   });
 
   it('holds a browser package to its guard test and to browser-safe dependencies', () => {
@@ -734,6 +724,17 @@ describe('hostTargetIssues', () => {
         packageName: '@taucad/cli',
         hostTarget: 'node',
         dependencyNames: ['fs-extra'],
+        hasPayloadGuardTest: false,
+      }),
+    ).toEqual([]);
+  });
+
+  it.each(['daemon', 'native', 'python'] as const)('accepts the generator-supported %s host target', (hostTarget) => {
+    expect(
+      hostTargetIssues({
+        packageName: '@taucad/example',
+        hostTarget,
+        dependencyNames: ['ws'],
         hasPayloadGuardTest: false,
       }),
     ).toEqual([]);

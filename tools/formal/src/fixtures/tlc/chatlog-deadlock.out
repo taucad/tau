@@ -1,0 +1,54 @@
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-25 11:05:06.
+Error: Deadlock reached.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ row = 1
+/\ next = [ type |-> "run.lifecycle",
+  runId |-> "req_492PUHorNaqBgHCsOvekt",
+  leaderEpoch |-> "0d009f3c94137aa790722d833a62692b",
+  sequence |-> 0 ]
+/\ broken = {}
+
+State 2: <Action line 73, col 21 to line 73, col 53 of module ChatLog>
+/\ row = 2
+/\ next = [ type |-> "turn.history-projection-committed",
+  runId |-> "req_492PUHorNaqBgHCsOvekt",
+  leaderEpoch |-> "0d009f3c94137aa790722d833a62692b",
+  sequence |-> 1 ]
+/\ broken = {}
+
+State 3: <Action line 73, col 21 to line 73, col 53 of module ChatLog>
+/\ row = 3
+/\ next = [ type |-> "run.lifecycle",
+  runId |-> "req_492PUHorNaqBgHCsOvekt",
+  leaderEpoch |-> "0d009f3c94137aa790722d833a62692b",
+  sequence |-> 2 ]
+/\ broken = {}
+
+State 4: <Action line 73, col 21 to line 73, col 53 of module ChatLog>
+/\ row = 4
+/\ next = [ type |-> "message.appended",
+  runId |-> "req_492PUHorNaqBgHCsOvekt",
+  leaderEpoch |-> "0d009f3c94137aa790722d833a62692b",
+  sequence |-> 3 ]
+/\ broken = {}
+
+State 5: <Action line 73, col 21 to line 73, col 53 of module ChatLog>
+/\ row = 5
+/\ next = [ type |-> "message.appended",
+  runId |-> "req_492PUHorNaqBgHCsOvekt",
+  leaderEpoch |-> "0d009f3c94137aa790722d833a62692b",
+  sequence |-> 4 ]
+/\ broken = {}
+
+State 6: <Action line 73, col 21 to line 73, col 53 of module ChatLog>
+/\ row = 6
+/\ next = [ type |-> "message.envelope-replaced",
+  runId |-> "req_492PUHorNaqBgHCsOvekt",
+  leaderEpoch |-> "0d009f3c94137aa790722d833a62692b",
+  sequence |-> 6 ]
+/\ broken = {"SequenceContiguous"}
+
+6 states generated, 6 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 6.

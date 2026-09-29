@@ -25,6 +25,11 @@ const admitted: ReadonlyArray<readonly [string, string, DeepLink]> = [
     { kind: 'share', route: '/s/github-gist~0a1b2c3d' },
   ],
   [
+    'a builtin example slug carrying a dot',
+    'tau://s/builtin~replicad.birdhouse',
+    { kind: 'share', route: '/s/builtin~replicad.birdhouse' },
+  ],
+  [
     'a direct share carrying its payload in the fragment',
     'tau://s/direct#v=2&jwe=a.b.c.d.e',
     { kind: 'share', route: '/s/direct#v=2&jwe=a.b.c.d.e' },

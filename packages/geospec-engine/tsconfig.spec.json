@@ -20,6 +20,7 @@
     "experiments/load-path/profiler.test.ts",
     "experiments/load-path/summary.ts",
     "experiments/load-path/summary.test.ts",
+    "experiments/performance-lab/*.ts",
     "scripts/coverage-source-policy.test.mts",
     "scripts/generate-provenance.mjs",
     "scripts/package-audit.mts",

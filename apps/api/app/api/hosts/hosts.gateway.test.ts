@@ -14,6 +14,8 @@ import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '#config/environment.config.js';
 import type { DatabaseService } from '#database/database.service.js';
 import type { RedisService } from '#redis/redis.service.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
 
 /** A `ws` socket as the gateway uses one: it closes, listens, and holds its frames while paused. */
 const routeSocket = (): WebSocket =>
@@ -473,4 +475,51 @@ describe('HostsGateway control message failures', () => {
       process.off('unhandledRejection', onUnhandled);
     }
   });
+});
+
+describe('HostsGateway in production', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('closes a socket 1012 the moment the process begins to stop, even one still in admission', async () => {
+    vi.stubEnv('DEV', false);
+    const server = createServer();
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const shutdown = new ShutdownService();
+    // Admission never finishes, so no service ever registers this socket.
+    const hostsService = {
+      authenticateDevice: vi.fn(async () => Promise.withResolvers<never>().promise),
+    } as unknown as HostsService;
+    const gateway = new HostsGateway(
+      hostsService,
+      {} as DevWebSocketService,
+      {} as Auth,
+      { httpAdapter: { getInstance: () => ({ server }) } } as unknown as HttpAdapterHost,
+      new UpgradeRouter(shutdown),
+      shutdown,
+    );
+    try {
+      await gateway.onModuleInit();
+      const { port } = server.address() as AddressInfo;
+      const client = new WebSocket(`ws://127.0.0.1:${port}/v1/agents/control`);
+      await new Promise((resolve) => {
+        client.once('open', resolve);
+      });
+      const closed = new Promise<number>((resolve) => {
+        client.once('close', resolve);
+      });
+
+      shutdown.stop();
+
+      await expect(closed).resolves.toBe(1012);
+    } finally {
+      await gateway.onModuleDestroy();
+      server.closeAllConnections();
+      server.close();
+    }
+    // Well under `ws`'s 30 s close timeout: the close handshake completes, so the socket cannot hold a drain.
+  }, 5000);
 });

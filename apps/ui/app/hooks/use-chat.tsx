@@ -20,7 +20,7 @@
  *   provider — marketing-route composers consume these for clearDraft /
  *   draft-image dispatch without pulling the rest of the contract.
  * - **Session-required** ({@link useChatContext} / {@link useChatSelector} /
- *   {@link useChatActions} / {@link useChatById} / {@link useChatRetrySnapshot}):
+ *   {@link useChatActions} / {@link useChatById}):
  *   work under `<ActiveChatProvider>` only. The session's existence is a
  *   compile-time guarantee through {@link useActiveChatSession}.
  *
@@ -32,8 +32,8 @@
  *   `<ChatComposerProvider>` cannot call these hooks.
  * - Passing `chatId` resolves to that exact chat from the store. The
  *   caller is responsible for keeping the session live (typically by
- *   wrapping the subtree in `<ActiveChatProvider chatId={chatId}>` or
- *   calling `useChatSession(chatId)` directly). When the explicit chat is
+ *   wrapping the subtree in `<ActiveChatProvider chatId={chatId} projectId={projectId}>` or
+ *   calling `useChatSession(chatId, projectId)` directly). When the explicit chat is
  *   not the active session (cross-chat read), action mutators warn-and-no-op
  *   on missing sessions to keep cross-chat dispatch safe.
  */
@@ -43,12 +43,15 @@ import { useSelector } from '@xstate/react';
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
+import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import type { KernelId } from '@taucad/types/constants';
 import type { ActorRefFrom } from 'xstate';
 import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import type { ChatSession } from '#services/chat-session-store.js';
+import type { TurnGroup } from '#routes/w.$workspace.$project/chat-turn-groups.js';
+import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import type {
   DraftAttachment,
@@ -56,7 +59,7 @@ import type {
   DraftAttachmentSource,
   draftMachine,
 } from '#hooks/draft.machine.js';
-import type { AttachmentReference } from '#utils/attachment.utils.js';
+import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import type { ChatMode } from '#routes/w.$workspace.$project/chat-mode-selector.js';
 
 type ChatInstance = AiSdkChat<MyUIMessage>;
@@ -64,49 +67,6 @@ type ChatInstance = AiSdkChat<MyUIMessage>;
 type SendMessageInput = Parameters<ChatInstance['sendMessage']>[0];
 
 const emptyMessages: readonly MyUIMessage[] = Object.freeze([]);
-const emptyMessageOrder: readonly string[] = Object.freeze([]);
-const emptyMessagesById: ReadonlyMap<string, MyUIMessage> = new Map();
-
-const messagesByIdCache = new WeakMap<readonly MyUIMessage[], Map<string, MyUIMessage>>();
-const messageOrderCache = new WeakMap<
-  ChatInstance,
-  {
-    readonly length: number;
-    readonly order: readonly string[];
-  }
->();
-
-function getMessagesById(messages: readonly MyUIMessage[]): ReadonlyMap<string, MyUIMessage> {
-  if (messages === emptyMessages) {
-    return emptyMessagesById;
-  }
-  let cached = messagesByIdCache.get(messages);
-  if (!cached) {
-    cached = new Map<string, MyUIMessage>();
-    for (const message of messages) {
-      cached.set(message.id, message);
-    }
-    messagesByIdCache.set(messages, cached);
-  }
-  return cached;
-}
-
-function getMessageOrder(chat: ChatInstance | undefined, messages: readonly MyUIMessage[]): readonly string[] {
-  if (!chat || messages.length === 0) {
-    return emptyMessageOrder;
-  }
-  const cached = messageOrderCache.get(chat);
-  if (
-    cached &&
-    cached.length === messages.length &&
-    messages.every((message, index) => cached.order[index] === message.id)
-  ) {
-    return cached.order;
-  }
-  const order = messages.map((message) => message.id);
-  messageOrderCache.set(chat, { length: messages.length, order });
-  return order;
-}
 
 // ---------------------------------------------------------------------------
 // Context surface (session-required)
@@ -190,10 +150,15 @@ export type CombinedChatState = {
   messages: readonly MyUIMessage[];
   messagesById: ReadonlyMap<string, MyUIMessage>;
   messageOrder: readonly string[];
+  turnGroups: readonly TurnGroup[];
+  agentInvocations: string;
   status: ChatInstance['status'];
   error: Error | undefined;
   /** Persisted error survives reload (from the chat entity in IndexedDB). */
   persistedError: ChatError | undefined;
+  /** Durable host facts and the current read-only attachment, not SDK stream state. */
+  projection?: ChatProjection;
+  attachmentStatus?: ReturnType<ReturnType<typeof useChatSessionStore>['getAttachmentStatus']>;
   isLoading: boolean;
   /** Chat-scoped execution target mirrored from durable persistence. */
   activeExecution: CadAgentExecution | undefined;
@@ -257,10 +222,12 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
   const subscribe = useCallback(
     (listener: () => void) => {
       const unsubscribeChat = store.subscribeChat(activeChatId, listener);
+      const unsubscribeProjection = store.subscribeProjection(activeChatId, listener);
       const draftSubscription = draftActorRef.subscribe(listener);
       const persistenceSubscription = persistenceActorRef?.subscribe(listener);
       return () => {
         unsubscribeChat();
+        unsubscribeProjection();
         draftSubscription.unsubscribe();
         persistenceSubscription?.unsubscribe();
       };
@@ -270,20 +237,29 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
   const getSnapshot = useCallback((): T => {
     const chat = store.get(activeChatId)?.chat;
     const messages = chat?.messages ?? emptyMessages;
-    const status = chat?.status ?? 'ready';
+    const projection = store.getProjection(activeChatId);
+    const status = selectVisibleChatStatus(chat?.status ?? 'ready', projection);
     const draftContext = draftActorRef.getSnapshot().context;
     const persistenceContext = persistenceActorRef?.getSnapshot().context;
     const state: CombinedChatState = {
       messages,
       get messagesById() {
-        return getMessagesById(messages);
+        return store.getMessagePresentation(activeChatId).messagesById;
       },
       get messageOrder() {
-        return getMessageOrder(chat, messages);
+        return store.getMessagePresentation(activeChatId).order;
+      },
+      get turnGroups() {
+        return store.getMessagePresentation(activeChatId).groups;
+      },
+      get agentInvocations() {
+        return store.getMessagePresentation(activeChatId).agentInvocations;
       },
       status,
       error: chat?.error,
       persistedError: persistenceContext?.persistedError,
+      projection,
+      attachmentStatus: store.getAttachmentStatus(activeChatId),
       isLoading: status === 'streaming',
       activeExecution: persistenceContext?.activeExecution,
       activeKernel: persistenceContext?.activeKernel,
@@ -313,42 +289,11 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
  * Read state from a non-active chat (e.g. an agents-panel row showing a
  * background chat's status while a different chat is focused). The caller
  * is responsible for ensuring a session for `chatId` is alive (typically
- * by mounting `<ActiveChatProvider chatId={chatId}>` higher up or calling
- * `useChatSession(chatId)` in the same component).
+ * by mounting `<ActiveChatProvider chatId={chatId} projectId={projectId}>` higher up or calling
+ * `useChatSession(chatId, projectId)` in the same component).
  */
 export function useChatById<T>(chatId: string, selector: (state: CombinedChatState) => T): T {
   return useChatSelector(selector, chatId);
-}
-
-/**
- * Snapshot of the chatPersistenceMachine's transparent auto-retry counters
- * for the resolved chat. Returns `{ retryAttempt: 0 }` when no session is
- * mounted so consumers can render unconditionally.
- *
- * Components use this (instead of reaching into `persistenceActorRef`
- * directly) to render a "Reconnecting... N/M" indicator while the
- * `requestLifecycle.retrying` substate is active between attempts.
- */
-export type ChatRetrySnapshot = {
-  retryAttempt: number;
-  retryMaxAttempts: number;
-};
-
-const emptyRetrySnapshot: ChatRetrySnapshot = { retryAttempt: 0, retryMaxAttempts: 0 };
-
-export function useChatRetrySnapshot(chatId?: string): ChatRetrySnapshot {
-  const { persistenceActorRef } = useChatContext(chatId);
-  return useSelector(
-    persistenceActorRef,
-    (state) => {
-      if (!state) {
-        return emptyRetrySnapshot;
-      }
-      const { retryAttempt, retryMaxAttempts } = state.context;
-      return { retryAttempt, retryMaxAttempts };
-    },
-    (a, b) => a.retryAttempt === b.retryAttempt && a.retryMaxAttempts === b.retryMaxAttempts,
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -516,19 +461,16 @@ export function useDraftActions(): DraftActions {
  * was a second admission policy, and the two disagreed (F10).
  */
 export type ChatActions = DraftActions & {
-  sendMessage: (message: SendMessageInput, options?: { attachments?: readonly AttachmentReference[] }) => Promise<void>;
+  sendMessage: (message: SendMessageInput, options?: { attachments?: readonly StoredAttachmentRef[] }) => Promise<void>;
   regenerate: () => void;
   /**
-   * Re-run the chat's last turn after a failure the person chose to retry.
-   *
-   * A stream the host can still continue is resumed rather than re-run, so
-   * assistant parts that already landed survive; the admission decides which,
-   * because only it knows whether the run is resumable.
+   * Resume a run the host still holds, preserving its already-settled work.
+   * An unavailable resume is refused; replay is the separate regenerate verb.
    */
   continueChat: () => void;
   stop: () => void;
   setMessages: (messages: MyUIMessage[]) => void;
-  editMessage: (messageId: string, content: string, options?: { attachments?: readonly AttachmentReference[] }) => void;
+  editMessage: (messageId: string, content: string, options?: { attachments?: readonly StoredAttachmentRef[] }) => void;
 };
 
 function warnNoCrossChatSession(action: string, chatId: string): void {
@@ -584,13 +526,12 @@ export function useChatActions(chatId?: string): ChatActions {
         }
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- AI SDK sendMessage union narrows to MyUIMessage at all call sites
         const outgoingMessage = message as MyUIMessage;
-        void store.touchChatRecency(resolvedChatId, outgoingMessage.metadata?.createdAt ?? Date.now());
         /* I5: the composer is this message's only copy until the dispatch
          * appends it to the transcript, so `requestTurn` owns when it is
          * cleared — and when the draft-stage bytes behind it are released. It
          * is the only caller that knows whether the gesture was taken, queued,
-         * parked, displaced or refused. Clearing here first meant each of those
-         * last three deleted what the person wrote; releasing here afterwards
+         * displaced or refused. Clearing here first meant the last two deleted
+         * what the person wrote; releasing here afterwards
          * deleted the files of the very message it had just handed back. */
         await store.requestTurn(resolvedChatId, {
           kind: 'send',
@@ -602,14 +543,12 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!requireSession('regenerate')) {
           return;
         }
-        void store.touchChatRecency(resolvedChatId, Date.now());
         void store.requestTurn(resolvedChatId, { kind: 'regenerate' });
       },
       continueChat() {
         if (!requireSession('continueChat')) {
           return;
         }
-        void store.touchChatRecency(resolvedChatId, Date.now());
         void store.requestTurn(resolvedChatId, { kind: 'continue' });
       },
       stop() {
@@ -617,14 +556,14 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!session) {
           return;
         }
-        session.persistenceActorRef.send({ type: 'stopRequest' });
+        store.stopRun(resolvedChatId);
       },
       setMessages(messages: MyUIMessage[]) {
         const session = requireSession('setMessages');
         if (!session) {
           return;
         }
-        session.chat.messages = messages;
+        store.replaceMessages(resolvedChatId, messages);
       },
 
       startEditingMessage(messageId: string, originalMessage?: MyUIMessage) {
@@ -642,7 +581,6 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!session.chat.messages.some((m) => m.id === messageId)) {
           return;
         }
-        void store.touchChatRecency(resolvedChatId, Date.now());
         void store.requestTurn(resolvedChatId, {
           kind: 'edit',
           messageId,

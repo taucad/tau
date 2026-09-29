@@ -20,7 +20,7 @@ import type { RemoteFacet } from '@taucad/revisions';
 /* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' } }));
 
-const { cloudProjectsQueryKey, isSyncReadOnly, useProjectAccessRole } = await import('#hooks/use-cloud-projects.js');
+const { cloudProjectsQueryKeyFor, isSyncReadOnly, useProjectAccessRole } = await import('#hooks/use-cloud-projects.js');
 
 const openProjectId = 'proj_open0000000000000';
 
@@ -71,7 +71,7 @@ describe('useProjectAccessRole', () => {
   it('re-reads a cached listing when the project connects, never answering revoked from it', async () => {
     answerProjects([{ id: openProjectId, name: 'Open', role: 'owner' }]);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(cloudProjectsQueryKey, []);
+    client.setQueryData(cloudProjectsQueryKeyFor(undefined), []);
     const seen: unknown[] = [];
     const { result, rerender } = renderHook(
       ({ connected }: { readonly connected: boolean }) => {

@@ -102,15 +102,28 @@ export const createNodeVmFileSystem = (root: string): VmFileSystem => {
     return target;
   };
   const at = async (path: string): Promise<string> => admitTarget(resolveUnderRoot(absoluteRoot, path), path);
+  const readBytes = async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
+    const bytes = await readFile(await at(path));
+    // A plain view of the read's own (never shared) buffer, not a copy: callers own it.
+    return new Uint8Array(bytes.buffer as ArrayBuffer, bytes.byteOffset, bytes.byteLength);
+  };
   const read = (async (path: string, encoding?: 'utf8') =>
-    encoding === 'utf8'
-      ? readFile(await at(path), 'utf8')
-      : new Uint8Array(await readFile(await at(path)))) as VmFileSystem['readFile'];
+    encoding === 'utf8' ? readFile(await at(path), 'utf8') : readBytes(path)) as VmFileSystem['readFile'];
   return {
     exists: async (path: string) => {
       try {
-        await readFile(await at(path));
-        return true;
+        const handle = await open(await at(path), 'r');
+        try {
+          // Ordinary source files need only a readable handle, not their entire contents.
+          // Retain readFile's error behavior for directories and unusual file kinds.
+          const stat = await handle.stat();
+          if (!stat.isFile()) {
+            await handle.readFile();
+          }
+          return true;
+        } finally {
+          await handle.close();
+        }
       } catch (error) {
         const { code } = error as NodeJS.ErrnoException;
         if (code === 'ENOENT' || code === 'ENOTDIR') {

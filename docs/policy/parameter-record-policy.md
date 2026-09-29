@@ -3,7 +3,9 @@ title: 'Parameter Record Policy'
 description: 'What the parameter sidecar may store, and how concurrency, echoes and rendering are decided around it.'
 status: active
 created: '2026-09-17'
-updated: '2026-09-22'
+updated: '2026-09-29'
+related:
+  - docs/research/agent-workbench-control-blueprint.md
 ---
 
 # Parameter Record Policy
@@ -14,11 +16,15 @@ Internal reference for the durable parameter record at `.tau/parameters/<entry>.
 
 The record had grown into a protocol ledger: a version, a profile, an ordering, per-field bindings, the last operation and a request receipt all lived beside the values. Every one of those is derivable from the live manifest or belongs to a single in-flight exchange, so each added a way for the file to disagree with the producer and a second answer to "what is current". The record now holds only what a person authored, and the live manifest answers everything else.
 
+This rule governs `.tau/parameters/**`. The unversioned, agent-writable, UI-watched `.tau/workbench/**` records carry a named `version` exception under the approved records guide's `wr-version` ruling: their reader upgrades older shapes in memory and refuses a newer version without offering Reset. A layout or hand-written view cannot be safely treated as disposable parameter state.
+
 ## Rules
 
 ### 1. Store only what a person authored
 
 The record is exactly `activeGroup` plus a `groups` object with at least one group. Every group contains `values` and may contain `units` and `sourceUnits` maps keyed by RFC 6901 instance pointers beginning with `/`. `activeGroup` must name one of those groups. Group key order is display order. Nothing else may be stored.
+
+Apply the no-version rule to parameter records only. The `wr-version` exception permits a `version` field on `.tau/workbench/**` records, which are unversioned, agent read-write and UI-watched by the path registry; their reader upgrades older versions and refuses newer versions without offering Reset.
 
 `units[p]` is the unit a person chose. `sourceUnits[p]` marks the stored number for conversion from that chosen unit to the producer unit, and the schema therefore requires `sourceUnits[p] === units[p]`. A pointer in `units` alone is a relabel: its stored number and numeric bounds keep their values and are not converted.
 

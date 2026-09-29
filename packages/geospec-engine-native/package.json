@@ -1,0 +1,111 @@
+{
+  "name": "@taucad/geospec-engine-native",
+  "version": "0.0.1",
+  "description": "Portable GeoSpec native engine",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/geospec-engine-native"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/geospec-engine-native#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "!dist/**/*.node",
+    "NOTICE",
+    "licenses",
+    "trust/canonicalize.mjs",
+    "trust/evaluate-worker.mjs",
+    "trust/index.d.mts",
+    "trust/run.mjs",
+    "trust/verify.py"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json",
+    "./node": {
+      "types": "./src/node.ts",
+      "node": "./src/node.ts"
+    },
+    "./wasm": "./src/wasm.ts",
+    "./wasm-binary": "./bindings/emscripten/generated/geospec_engine_native.wasm",
+    "./trust": {
+      "types": "./trust/index.d.mts",
+      "node": "./trust/run.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json",
+      "./node": {
+        "types": "./dist/node.d.mts",
+        "node": "./dist/node.mjs"
+      },
+      "./wasm": {
+        "types": "./dist/wasm.d.mts",
+        "import": "./dist/wasm.mjs",
+        "default": "./dist/wasm.mjs"
+      },
+      "./wasm-binary": "./dist/bindings/mixed-wasm/geospec_engine_native.wasm",
+      "./trust": {
+        "types": "./trust/index.d.mts",
+        "node": "./trust/run.mjs"
+      }
+    },
+    "imports": {
+      "#native-binding": {
+        "node": "./dist/native/index.js"
+      },
+      "#mixed-wasm-binding": "./dist/bindings/mixed-wasm/geospec_engine_native.mjs"
+    }
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*",
+    "#native-binding": {
+      "types": "./bindings/node/types/generated/index.d.ts",
+      "node": "./bindings/node/generated/index.js"
+    },
+    "#bench/*": "./bench/*.ts",
+    "#mixed-wasm-binding": {
+      "types": "./src/mixed-wasm-binding.d.ts",
+      "default": "./bindings/emscripten/generated/geospec_engine_native.mjs"
+    }
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "catalog:",
+    "playwright": "catalog:",
+    "vite": "catalog:"
+  },
+  "napi": {
+    "binaryName": "geospec-engine-native",
+    "packageName": "@taucad/geospec-engine-native",
+    "targets": [
+      "aarch64-apple-darwin"
+    ]
+  }
+}

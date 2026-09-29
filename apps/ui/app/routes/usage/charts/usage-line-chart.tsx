@@ -43,7 +43,7 @@ function UsageLineChartComponent({
           <CardTitle>{title}</CardTitle>
           {description ? <CardDescription>{description}</CardDescription> : undefined}
         </CardHeader>
-        <CardContent className='flex h-[300px] items-center justify-center'>
+        <CardContent className='flex h-75 items-center justify-center'>
           <p className='text-sm text-muted-foreground'>No usage in this range</p>
         </CardContent>
       </Card>
@@ -57,7 +57,7 @@ function UsageLineChartComponent({
         {description ? <CardDescription>{description}</CardDescription> : undefined}
       </CardHeader>
       <CardContent className='min-w-0'>
-        <ChartContainer config={chartConfig} className='h-[300px] w-full min-w-0'>
+        <ChartContainer config={chartConfig} className='h-75 w-full min-w-0'>
           <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} accessibilityLayer>
             <CartesianGrid strokeDasharray='3 3' vertical={false} />
             <XAxis dataKey='dateLabel' tickLine={false} axisLine={false} tickMargin={8} />

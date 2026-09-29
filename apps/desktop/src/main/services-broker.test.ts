@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createServicesBroker, rendererServicesConcerns, servicesConcerns } from '#main/services-broker.js';
+import {
+  createServicesBroker,
+  rendererServicesConcerns,
+  servicesConcerns,
+  ServicesQuiescingError,
+} from '#main/services-broker.js';
 import type { ServicesBrokerOptions } from '#main/services-broker.js';
 
 type Spawned = {
@@ -48,6 +53,7 @@ const spawnUtility = (): Spawned => {
 
 const brokerHarness = () => {
   const spawns: Spawned[] = [];
+  const log = vi.fn();
   const runtimeExits: Array<() => void> = [];
   const channels: Array<{
     readonly port1: { readonly id: 'renderer'; readonly close: ReturnType<typeof vi.fn> };
@@ -66,6 +72,17 @@ const brokerHarness = () => {
     }),
     dispose: vi.fn(),
   }));
+  const connectGeometry = vi.fn(
+    (
+      _input: Readonly<{
+        root: string;
+        context: Readonly<Record<string, string>>;
+        engine: 'native' | 'legacy';
+        stillAuthorized: () => boolean;
+      }>,
+    ) => ({ id: 'geometry' }),
+  );
+  const revokeGeometry = vi.fn();
   const options = {
     utilityEntry: '/dist/main/chunks/services-host.js',
     env: { PATH: '/usr/bin' },
@@ -79,14 +96,153 @@ const brokerHarness = () => {
       return channel;
     },
     connectRuntime,
+    connectGeometry,
+    revokeGeometry,
+    log,
   } as unknown as ServicesBrokerOptions;
-  return { broker: createServicesBroker(options), channels, connectRuntime, fork, runtimeExits, spawns };
+  return {
+    broker: createServicesBroker(options),
+    channels,
+    connectRuntime,
+    connectGeometry,
+    revokeGeometry,
+    fork,
+    log,
+    runtimeExits,
+    spawns,
+  };
 };
 
 describe('createServicesBroker', () => {
   it('keeps the rooted runtime filesystem concern main-only', () => {
     expect(servicesConcerns).toContain('runtimeFileSystem');
-    expect(rendererServicesConcerns).toEqual(['nodeFs', 'agentHost']);
+    expect(servicesConcerns).not.toContain('exactMeasurement');
+    expect(servicesConcerns).not.toContain('geospecPerformance');
+    expect(rendererServicesConcerns).toEqual([
+      'nodeFs',
+      'agentHost',
+      'geospecPerformance',
+      'exactMeasurement',
+      'machines',
+    ]);
+  });
+
+  it('grants geometry runner ports only for registered project roots', () => {
+    const { broker, connectGeometry, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/projects/widget', projectId: 'widget', computeMode: 'memory' });
+    const utility = spawns[0]!;
+    utility.message({
+      type: 'geometry-port-request',
+      requestId: 'wrong',
+      workspaceRoot: '/projects/other',
+      engine: 'native',
+    });
+    expect(connectGeometry).not.toHaveBeenCalled();
+    expect(utility.posted.at(-1)).toEqual({
+      type: 'geometry-port-refused',
+      requestId: 'wrong',
+      message: 'Main refused an unadmitted GeoSpec runner root or engine.',
+    });
+    utility.message({
+      type: 'geometry-port-request',
+      requestId: 'allowed',
+      workspaceRoot: '/projects/widget',
+      engine: 'native',
+    });
+    expect(connectGeometry.mock.calls[0]?.[0]).toMatchObject({
+      root: '/projects/widget',
+      context: { projectRoot: '/projects/widget' },
+      engine: 'native',
+    });
+    expect(utility.postMessage).toHaveBeenLastCalledWith({ type: 'geometry-port', requestId: 'allowed' }, [
+      expect.objectContaining({ id: 'geometry' }),
+    ]);
+  });
+
+  it('keeps a geometry grant through an equivalent agent-host reconnect but revokes on compute change', () => {
+    const { broker, connectGeometry, revokeGeometry, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'widget', computeMode: 'durable' });
+    spawns[0]!.message({
+      type: 'geometry-port-request',
+      requestId: 'suite',
+      workspaceRoot: '/home/widget',
+      engine: 'native',
+    });
+    const grant = connectGeometry.mock.calls[0]?.[0];
+    expect(grant?.stillAuthorized()).toBe(true);
+    revokeGeometry.mockClear();
+
+    broker.retainAgentHost({ workspaceRoot: '/home/widget', projectId: 'widget', attachmentId: 'second-window' });
+    broker.connect('agentHost', { workspaceRoot: '/home/widget/.', projectId: 'widget', computeMode: 'durable' });
+    expect(grant?.stillAuthorized()).toBe(true);
+    expect(revokeGeometry).not.toHaveBeenCalled();
+
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'widget', computeMode: 'off' });
+    expect(grant?.stillAuthorized()).toBe(false);
+    expect(revokeGeometry).toHaveBeenCalledOnce();
+  });
+
+  it('revokes a geometry grant when an agent-host reconnect changes the project identity', () => {
+    const { broker, connectGeometry, revokeGeometry, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'widget-a', computeMode: 'durable' });
+    spawns[0]!.message({
+      type: 'geometry-port-request',
+      requestId: 'suite',
+      workspaceRoot: '/home/widget',
+      engine: 'native',
+    });
+    const grant = connectGeometry.mock.calls[0]?.[0];
+    revokeGeometry.mockClear();
+
+    broker.retainAgentHost({ workspaceRoot: '/home/widget', projectId: 'widget-b', attachmentId: 'new-project' });
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'widget-b', computeMode: 'durable' });
+    expect(grant?.stillAuthorized()).toBe(false);
+    expect(revokeGeometry).toHaveBeenCalledOnce();
+  });
+
+  it('does not treat a failed project-owner transfer as an admitted geometry grant', () => {
+    const { broker, connectGeometry, revokeGeometry, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'widget-a', computeMode: 'durable' });
+    spawns[0]!.message({
+      type: 'geometry-port-request',
+      requestId: 'suite',
+      workspaceRoot: '/home/widget',
+      engine: 'native',
+    });
+    const grant = connectGeometry.mock.calls[0]?.[0];
+    revokeGeometry.mockClear();
+    spawns[0]!.postMessage.mockImplementationOnce(() => {
+      throw new Error('transfer failed');
+    });
+
+    expect(() =>
+      broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'widget-b', computeMode: 'durable' }),
+    ).toThrow('transfer failed');
+    expect(grant?.stillAuthorized()).toBe(true);
+    expect(revokeGeometry).not.toHaveBeenCalled();
+
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'widget-b', computeMode: 'durable' });
+    expect(grant?.stillAuthorized()).toBe(false);
+    expect(revokeGeometry).toHaveBeenCalledOnce();
+  });
+
+  it('signals geometry to abort an admitted suite when its candidate grant is released', () => {
+    const { broker, connectGeometry, revokeGeometry, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'project-widget', computeMode: 'durable' });
+    const checkout = '/home/.tau/checkouts/project-widget/trun-1';
+    spawns[0]!.message({ type: 'runtime-context-register', workspaceRoot: checkout, projectRoot: '/home/widget' });
+    spawns[0]!.message({
+      type: 'geometry-port-request',
+      requestId: 'suite',
+      workspaceRoot: checkout,
+      engine: 'native',
+    });
+    const grant = connectGeometry.mock.calls[0]?.[0];
+    expect(grant?.stillAuthorized()).toBe(true);
+    revokeGeometry.mockClear();
+    spawns[0]!.message({ type: 'runtime-context-release', workspaceRoot: checkout, projectRoot: '/home/widget' });
+    expect(grant?.stillAuthorized()).toBe(false);
+    expect(revokeGeometry).toHaveBeenCalledOnce();
   });
 
   it('forks nothing until the first concern is connected', () => {
@@ -145,6 +301,80 @@ describe('createServicesBroker', () => {
       { type: 'concern', concern: 'agentHost', context: { workspaceRoot: '/home/widget' } },
       [expect.objectContaining({ id: 'utility' })],
     ]);
+  });
+
+  it('should complete a machine binding through the utility and settle on its own answer', async () => {
+    const { broker, spawns } = brokerHarness();
+    const bindingFrames = (): Array<Record<string, unknown>> =>
+      (spawns[0]?.posted ?? []).filter(
+        (message): message is Record<string, unknown> =>
+          typeof message === 'object' &&
+          message !== null &&
+          'type' in message &&
+          message['type'] === 'machine-binding-complete',
+      );
+
+    const bound = broker.completeMachineBinding(
+      { ceremonyId: 'ceremony-1', address: '10.0.0.5', accessCode: '1234' },
+      1000,
+    );
+    /* The secret rides the utility frame and nothing else: no renderer relay,
+     * no log line, one control frame to the process that keeps it. */
+    expect(bindingFrames()[0]).toMatchObject({ ceremonyId: 'ceremony-1', address: '10.0.0.5', accessCode: '1234' });
+    spawns[0]?.message({
+      type: 'machine-binding-completed',
+      requestId: bindingFrames()[0]?.['requestId'],
+      outcome: { status: 'bound', machineId: 'bambu:sim' },
+    });
+    await expect(bound).resolves.toEqual({ status: 'bound', machineId: 'bambu:sim' });
+
+    const failed = broker.completeMachineBinding({ ceremonyId: 'ceremony-2' }, 1000);
+    spawns[0]?.message({
+      type: 'machine-binding-complete-failed',
+      requestId: bindingFrames()[1]?.['requestId'],
+      message: 'MACHINE_BINDING_UNKNOWN',
+    });
+    await expect(failed).rejects.toThrow('MACHINE_BINDING_UNKNOWN');
+  });
+
+  it('should never replay or log an access code, and complete without one when none was typed', async () => {
+    const { broker, log, spawns } = brokerHarness();
+    const bindingFrames = (spawned: Spawned | undefined): Array<Record<string, unknown>> =>
+      (spawned?.posted ?? []).filter(
+        (message): message is Record<string, unknown> =>
+          typeof message === 'object' &&
+          message !== null &&
+          'type' in message &&
+          message['type'] === 'machine-binding-complete',
+      );
+    broker.post({ type: 'allowRoots', roots: ['/home'] });
+
+    const typed = broker.completeMachineBinding({ ceremonyId: 'ceremony-1', accessCode: '12345678' }, 1000);
+    spawns[0]?.message({
+      type: 'machine-binding-completed',
+      requestId: bindingFrames(spawns[0])[0]?.['requestId'],
+      outcome: { status: 'bound', machineId: 'workshop-x1c' },
+    });
+    await expect(typed).resolves.toEqual({ status: 'bound', machineId: 'workshop-x1c' });
+
+    /* A fresh fork gets every control frame replayed, and never the code. */
+    spawns[0]?.exit();
+    broker.connect('nodeFs');
+    expect(spawns[1]?.posted).toContainEqual({ type: 'allowRoots', roots: ['/home'] });
+    expect(JSON.stringify(spawns[1]?.posted)).not.toContain('12345678');
+
+    /* A saved code is the utility's to reuse: main sends no code at all. */
+    const reused = broker.completeMachineBinding({ ceremonyId: 'ceremony-2' }, 1000);
+    const [reuseFrame] = bindingFrames(spawns[1]);
+    expect(reuseFrame).toMatchObject({ ceremonyId: 'ceremony-2' });
+    expect(reuseFrame).not.toHaveProperty('accessCode');
+    spawns[1]?.message({
+      type: 'machine-binding-completed',
+      requestId: reuseFrame?.['requestId'],
+      outcome: { status: 'bound', machineId: 'workshop-x1c' },
+    });
+    await expect(reused).resolves.toEqual({ status: 'bound', machineId: 'workshop-x1c' });
+    expect(JSON.stringify(log.mock.calls)).not.toContain('12345678');
   });
 
   it('releases only the last project attachment and leaves another project served', async () => {
@@ -276,6 +506,32 @@ describe('createServicesBroker', () => {
       requestId: 'runtime-a',
       message: 'The desktop shell has not admitted /home/a as a runtime root.',
     });
+  });
+
+  /* L6 N3 / W0.11: a release that outlives its deadline may still be closing
+   * in the utility. Had main restarted the root's generation, the next
+   * adoption would reuse that release's number and the stale release would
+   * pass the utility's checks and delete the new session's launcher. */
+  it('never reuses a timed-out release generation for the next adoption', async () => {
+    const { broker, spawns } = brokerHarness();
+    const posted = (): Array<Record<string, unknown>> =>
+      (spawns[0]?.posted ?? []).filter(
+        (message): message is Record<string, unknown> => typeof message === 'object' && message !== null,
+      );
+    broker.retainAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' });
+    broker.connect('agentHost', { workspaceRoot: '/home/a', projectId: 'a' });
+    await expect(
+      broker.releaseAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' }, 0),
+    ).rejects.toThrow('timed out');
+    const staleGeneration = posted().find((message) => message['type'] === 'agent-host-release')?.[
+      'attachmentGeneration'
+    ];
+
+    broker.retainAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' });
+    broker.connect('agentHost', { workspaceRoot: '/home/a', projectId: 'a' });
+
+    const remount = posted().at(-1) as { context?: Record<string, string> };
+    expect(Number(remount.context?.['attachmentGeneration'])).toBeGreaterThan(Number(staleGeneration));
   });
 
   it('mints runtime ports only from a main-admitted agent context', () => {
@@ -659,6 +915,8 @@ describe('createServicesBroker — the quit hold (W19, D31)', () => {
     broker.connect('nodeFs');
 
     const quiescing = broker.quiesce(5000);
+    /* Typed, so main answers it as shutdown rather than as a failed connection. */
+    expect(() => broker.connect('nodeFs')).toThrow(ServicesQuiescingError);
     expect(() => broker.connect('nodeFs')).toThrow(/accepts no new concerns/u);
     spawns[0]!.message({ type: 'quiesce-failed', message: 'checked write drain failed' });
 

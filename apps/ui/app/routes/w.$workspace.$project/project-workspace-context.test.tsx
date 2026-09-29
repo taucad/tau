@@ -1,8 +1,17 @@
 import { act, fireEvent, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WorkbenchLaneNode, WorkbenchLayout } from '@taucad/workbench';
 import type * as KeyboardModule from '#hooks/use-keyboard.js';
+import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 
-const state = vi.hoisted(() => ({ isMobile: false }));
+const state = vi.hoisted(() => ({ isMobile: false, isEditorReady: true }));
+const route = vi.hoisted<{
+  key: string;
+  state: { openChat?: boolean; focusChatComposer?: boolean } | undefined;
+}>(() => ({
+  key: 'initial',
+  state: undefined,
+}));
 const send = vi.fn();
 type EditorOutputEvent = {
   readonly type: string;
@@ -28,6 +37,11 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ editorRef, mainEntryPath: 'main.ts' }),
 }));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => state.isMobile }));
+vi.mock('react-router', () => ({ useLocation: () => route }));
+vi.mock('@xstate/react', () => ({
+  useSelector: (_actor: unknown, selector: (snapshot: { matches: () => boolean }) => unknown) =>
+    selector({ matches: () => state.isEditorReady }),
+}));
 const stubKeybinding = (): ReturnType<typeof KeyboardModule.useKeybinding> => ({ formattedKeyCombination: '' });
 const keyboard = vi.hoisted(() => ({ useKeybinding: vi.fn<typeof KeyboardModule.useKeybinding>() }));
 vi.mock('#hooks/use-keyboard.js', async (importOriginal) => ({
@@ -50,12 +64,15 @@ function Probe(): React.JSX.Element {
 describe('ProjectWorkspaceProvider', () => {
   beforeEach(() => {
     state.isMobile = false;
+    state.isEditorReady = true;
+    route.key = 'initial';
+    route.state = undefined;
     send.mockClear();
     listeners.clear();
     keyboard.useKeybinding.mockImplementation(stubKeybinding);
   });
 
-  it('routes Files through the connected Workbench opener', () => {
+  it('reveals the Workbench lane for Files before its launcher mounts', () => {
     render(
       <ProjectWorkspaceProvider>
         <Probe />
@@ -79,7 +96,66 @@ describe('ProjectWorkspaceProvider', () => {
     act(() => {
       workspace.connectWorkbench(opener);
     });
+    expect(opener).not.toHaveBeenCalled();
+  });
+
+  it('opens Files immediately when the Workbench opener is connected', () => {
+    render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    const opener = vi.fn();
+    act(() => {
+      workspace.connectWorkbench(opener);
+      workspace.openPanel('files');
+    });
     expect(opener).toHaveBeenCalledExactlyOnceWith('files');
+  });
+
+  it('should reopen the chat pane on a sidebar chat navigation, including the selected chat', () => {
+    const rendered = render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    expect(send).not.toHaveBeenCalled();
+
+    route.key = 'clicked-chat';
+    route.state = { openChat: true };
+    rendered.rerender(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      type: 'setPanelState',
+      panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' } },
+    });
+  });
+
+  it('should wait for the destination project editor before opening its chat pane', () => {
+    state.isEditorReady = false;
+    route.state = { openChat: true };
+    const rendered = render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    expect(send).not.toHaveBeenCalled();
+
+    state.isEditorReady = true;
+    rendered.rerender(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      type: 'setPanelState',
+      panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' } },
+    });
   });
 
   it('opens Share in the desktop Workbench', () => {
@@ -100,15 +176,41 @@ describe('ProjectWorkspaceProvider', () => {
     expect(opener).toHaveBeenCalledExactlyOnceWith('share');
   });
 
-  it('keeps only the latest queued utility request before the Workbench connects', () => {
+  it('records utility intent in the layout owner before the Dockview connects', () => {
     render(
       <ProjectWorkspaceProvider>
         <Probe />
       </ProjectWorkspaceProvider>,
     );
 
+    const layout: WorkbenchLayout = {
+      version: 1,
+      lanes: { chat: true, workbench: true },
+      viewer: { kind: 'group', tabs: [] },
+      workbench: { kind: 'group', tabs: [] },
+    };
+    let workbench: WorkbenchLaneNode = layout.workbench;
+    const controller: WorkbenchLayoutController = {
+      snapshot: () => ({ layout: { ...layout, workbench }, layoutDigest: 'missing', refused: [] }),
+      subscribe: () => () => undefined,
+      restorePreviousArrangement: async () => true,
+      registerViewer: () => () => undefined,
+      registerWorkbench: (apply) => {
+        apply(workbench, () => undefined);
+        return () => undefined;
+      },
+      personViewerChanged: () => undefined,
+      personWorkbenchChanged: (next) => {
+        workbench = typeof next === 'function' ? next(workbench) : next;
+      },
+    };
+    act(() => {
+      workspace.registerLayoutController(controller);
+    });
+
     act(() => {
       workspace.openPanel('files');
+      workspace.openPanel('parameters');
       workspace.openPanel('revisions');
     });
 
@@ -116,7 +218,20 @@ describe('ProjectWorkspaceProvider', () => {
     act(() => {
       workspace.connectWorkbench(opener);
     });
-    expect(opener).toHaveBeenCalledExactlyOnceWith('revisions');
+    expect(opener).not.toHaveBeenCalled();
+    expect(workbench).toEqual({
+      kind: 'group',
+      tabs: [
+        { kind: 'pane', pane: 'parameters' },
+        { kind: 'pane', pane: 'revisions' },
+      ],
+      active: 1,
+    });
+    const adopt = vi.fn();
+    act(() => {
+      workspace.layoutController.registerWorkbench(adopt);
+    });
+    expect(adopt).toHaveBeenCalledExactlyOnceWith(workbench, expect.any(Function));
   });
 
   it('maps supported Workbench actions to the existing mobile drawer tabs', () => {

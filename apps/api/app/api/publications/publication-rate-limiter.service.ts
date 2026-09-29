@@ -29,7 +29,7 @@ export class PublicationRateLimiterService {
     publicationId: string;
     viewerHash: string;
   }): Promise<{ allowed: boolean; count: number }> {
-    const count = await this.consumeDailySlots({
+    const count = await this.consumeSlots({
       key: `pub:${args.publicationId}:rl:${args.viewerHash}:${dayBucket()}`,
       count: 1,
     });
@@ -45,7 +45,7 @@ export class PublicationRateLimiterService {
     ownerId: string;
     count: number;
   }): Promise<{ allowed: boolean; count: number }> {
-    const count = await this.consumeDailySlots({
+    const count = await this.consumeSlots({
       key: `pub:invite-email:rl:${args.ownerId}:${dayBucket()}`,
       count: args.count,
     });
@@ -73,7 +73,7 @@ export class PublicationRateLimiterService {
     limit: number;
     count?: number;
   }): Promise<{ allowed: boolean; count: number }> {
-    const count = await this.consumeDailySlots({
+    const count = await this.consumeSlots({
       key: `${args.key}:${dayBucket()}`,
       count: args.count ?? 1,
     });
@@ -81,12 +81,44 @@ export class PublicationRateLimiterService {
     return { allowed: count <= args.limit, count };
   }
 
-  private async consumeDailySlots(args: { key: string; count: number }): Promise<number> {
+  /**
+   * Consume slots from a fixed window aligned to the Unix epoch.
+   *
+   * The same Redis bucket as the daily budgets, with a window the caller names
+   * and the seconds until it ends, which is what a `429` owes the client as
+   * `Retry-After`. A window of 86 400 seconds is the UTC day, because epoch
+   * seconds carry no leap seconds.
+   *
+   * @param args - The key prefix, the ceiling per window, the window length and how many slots to take.
+   * @returns Whether the call is within budget, the running count, and the seconds left in the window.
+   */
+  public async consumeWindowBudget(args: {
+    key: string;
+    limit: number;
+    windowSeconds: number;
+    count?: number;
+  }): Promise<{ allowed: boolean; count: number; retryAfterSeconds: number }> {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const window = Math.floor(nowSeconds / args.windowSeconds);
+    const count = await this.consumeSlots({
+      key: `${args.key}:w${String(args.windowSeconds)}:${String(window)}`,
+      count: args.count ?? 1,
+      expirySeconds: args.windowSeconds,
+    });
+
+    return {
+      allowed: count <= args.limit,
+      count,
+      retryAfterSeconds: Math.max(1, (window + 1) * args.windowSeconds - nowSeconds),
+    };
+  }
+
+  private async consumeSlots(args: { key: string; count: number; expirySeconds?: number }): Promise<number> {
     const countRaw = await this.redisService.client.eval(
       incrByExpireLua,
       1,
       args.key,
-      rateLimitExpirySeconds.toString(),
+      (args.expirySeconds ?? rateLimitExpirySeconds).toString(),
       args.count.toString(),
     );
 

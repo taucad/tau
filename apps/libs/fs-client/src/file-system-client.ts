@@ -1,4 +1,10 @@
-import type { CheckedFileWrite, CheckedFileWriteResult, FileStat, ProjectManifest } from '@taucad/types';
+import type {
+  CheckedFileWrite,
+  CheckedFileWriteResult,
+  FileWritePrecondition,
+  FileStat,
+  ProjectManifest,
+} from '@taucad/types';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type {
   FileTreeNode,
@@ -111,6 +117,10 @@ export type FileSystemClient = {
   readFile(filepath: string, options?: { encoding?: undefined }): Promise<Uint8Array<ArrayBuffer>>;
   writeFile(filepath: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
   writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+  deleteFileChecked(input: {
+    path: string;
+    preconditions: readonly FileWritePrecondition[];
+  }): Promise<CheckedFileWriteResult>;
   writeFiles(files: Record<string, { content: Uint8Array<ArrayBuffer> }>): Promise<void>;
   mkdir(path: string, options?: MkdirOptions): Promise<void>;
   readdir(path: string): Promise<string[]>;
@@ -195,8 +205,8 @@ export type FileSystemClient = {
   commitPendingProjectDirectory(
     input: CommitPendingProjectDirectoryInput,
   ): Promise<CommitPendingProjectDirectoryResult>;
-  /** Mint a fresh identity for an `adoption-required` project directory (R11). */
-  adoptProjectDirectory(locator: ProjectLocator): Promise<ProjectManifest>;
+  /** Give an `adoption-required` project directory an identity: `id` restores its route's previous one (R11). */
+  adoptProjectDirectory(locator: ProjectLocator, options?: { readonly id?: string }): Promise<ProjectManifest>;
   /** Permanently remove one exact physical project after verifying its manifest identity. */
   permanentlyDeleteProjectDirectory(
     input: PermanentDeleteProjectDirectoryInput,

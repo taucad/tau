@@ -26,8 +26,10 @@ export const rpcName = {
   applyParameterOperation: 'apply_parameter_operation',
   appendFile: 'append_file',
   editFile: 'edit_file',
+  arrangeWorkbench: 'arrange_workbench',
   resolveSkill: 'resolve_skill',
   readRevisions: 'read_revisions',
+  writeTodos: 'write_todos',
 } as const satisfies Record<string, string>;
 
 /**
@@ -58,7 +60,9 @@ export const mutatingRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
   rpcName.deleteFile,
   rpcName.appendFile,
   rpcName.editFile,
+  rpcName.arrangeWorkbench,
   rpcName.applyParameterOperation,
+  rpcName.writeTodos,
 ]);
 
 /**

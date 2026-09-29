@@ -1,0 +1,484 @@
+{
+  "taskId": "MATCHER-POINT-ORACLE-A1",
+  "status": "independent-precomparison-successor",
+  "namedValues": 8,
+  "planAndNeutralReplacementSites": 16,
+  "submitReplacementSites": 8,
+  "submitProvenance": "Pure transport wrapper derived from frozen neutral result and original requestId; no public execution.",
+  "rows": [
+    {
+      "id": "family/toHaveBoundingBox/positive",
+      "source": {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/metadata-installed-b19/joined-inputs.json",
+        "rowIndex": 0,
+        "id": "family/toHaveBoundingBox/positive"
+      },
+      "authoredRequestJson": {
+        "utf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"family.toHaveBoundingBox.positive\",\"payload\":{\"expected\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104],\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"11154a150d2a1964f99182f7a3ca28fec83eb509d0c7abad38a47cd1e29a1844\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"oracle\"}",
+        "sha256": "25cba319e41df5387e26b94ce386986e03fdf8e0d35f7347eceb5ff3cafe0d7d",
+        "bytes": 700
+      },
+      "original": {
+        "canonicalPlanUtf8": {
+          "utf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"family.toHaveBoundingBox.positive\",\"payload\":{\"expected\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104],\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"11154a150d2a1964f99182f7a3ca28fec83eb509d0c7abad38a47cd1e29a1844\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "sha256": "446deb34530058319b6673b2edb3f0afdd75e7b6eaa99a57fb5f2f78810f5b53",
+          "bytes": 705
+        },
+        "evaluatePlanResultUtf8": {
+          "utf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"family.toHaveBoundingBox.positive\",\"diagnostics\":[],\"evidence\":{\"measured\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104]},\"normalizedExpected\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104],\"tolerance\":0},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2\",\"witnesses\":{\"axisFailures\":[],\"source\":\"brep\",\"tolerance\":0}},\"status\":\"passed\"}]}",
+          "sha256": "972a0535045fb31fec92c77ce8109193fba802bdfaead091a281886e63c03122",
+          "bytes": 900
+        },
+        "submitClaimsResultUtf8": {
+          "utf8": "{\"requestId\":\"oracle\",\"result\":{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"family.toHaveBoundingBox.positive\",\"diagnostics\":[],\"evidence\":{\"measured\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104]},\"normalizedExpected\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104],\"tolerance\":0},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2\",\"witnesses\":{\"axisFailures\":[],\"source\":\"brep\",\"tolerance\":0}},\"status\":\"passed\"}]}}",
+          "sha256": "93aaaca4f88755c066de046931fe75f9a7159207bec5055a9fbf382890ceaa6c",
+          "bytes": 932
+        }
+      },
+      "successor": {
+        "canonicalPlanUtf8": {
+          "utf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"family.toHaveBoundingBox.positive\",\"payload\":{\"expected\":{\"center\":{\"x\":0,\"y\":0,\"z\":14.999999999999996},\"max\":{\"x\":35.004949762557565,\"y\":35.004949762557565,\"z\":31.080942214060517},\"min\":{\"x\":-35.004949762557565,\"y\":-35.004949762557565,\"z\":-1.0809422140605254},\"size\":{\"x\":70.00989952511513,\"y\":70.00989952511513,\"z\":32.16188442812104},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"11154a150d2a1964f99182f7a3ca28fec83eb509d0c7abad38a47cd1e29a1844\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "sha256": "914dd7d8933017423a1c4ed6f18c4d739668268b979e9c26d545944c14fa5d92",
+          "bytes": 753
+        },
+        "evaluatePlanResultUtf8": {
+          "utf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"family.toHaveBoundingBox.positive\",\"diagnostics\":[],\"evidence\":{\"measured\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104]},\"normalizedExpected\":{\"center\":{\"x\":0,\"y\":0,\"z\":14.999999999999996},\"max\":{\"x\":35.004949762557565,\"y\":35.004949762557565,\"z\":31.080942214060517},\"min\":{\"x\":-35.004949762557565,\"y\":-35.004949762557565,\"z\":-1.0809422140605254},\"size\":{\"x\":70.00989952511513,\"y\":70.00989952511513,\"z\":32.16188442812104},\"tolerance\":0},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2\",\"witnesses\":{\"axisFailures\":[],\"source\":\"brep\",\"tolerance\":0}},\"status\":\"passed\"}]}",
+          "sha256": "3990688940960657621a7c79a3a792876d90e22f2447961f739a5cecd73e4560",
+          "bytes": 948
+        },
+        "submitClaimsResultUtf8": {
+          "utf8": "{\"requestId\":\"oracle\",\"result\":{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"family.toHaveBoundingBox.positive\",\"diagnostics\":[],\"evidence\":{\"measured\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104]},\"normalizedExpected\":{\"center\":{\"x\":0,\"y\":0,\"z\":14.999999999999996},\"max\":{\"x\":35.004949762557565,\"y\":35.004949762557565,\"z\":31.080942214060517},\"min\":{\"x\":-35.004949762557565,\"y\":-35.004949762557565,\"z\":-1.0809422140605254},\"size\":{\"x\":70.00989952511513,\"y\":70.00989952511513,\"z\":32.16188442812104},\"tolerance\":0},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2\",\"witnesses\":{\"axisFailures\":[],\"source\":\"brep\",\"tolerance\":0}},\"status\":\"passed\"}]}}",
+          "sha256": "159b0e3044576ab1d6131107c5d1756076da2467b9e6e8d260a3871ce667719d",
+          "bytes": 980
+        }
+      },
+      "changedPaths": [
+        {
+          "document": "canonicalPlanUtf8",
+          "path": "/plan/claims/0/payload/expected/min",
+          "before": {
+            "utf8": "[-35.004949762557565,-35.004949762557565,-1.0809422140605254]",
+            "sha256": "de30e34c27d66562c6439d07bb9dd12381a7a07900564d0dd323bb906bcedc7b",
+            "bytes": 61
+          },
+          "after": {
+            "utf8": "{\"x\":-35.004949762557565,\"y\":-35.004949762557565,\"z\":-1.0809422140605254}",
+            "sha256": "52089425bff2043cce94d99c19a74af57f689c8d678c3791698b8f804abd90c9",
+            "bytes": 73
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "evaluatePlanResultUtf8",
+          "path": "/results/0/evidence/normalizedExpected/min",
+          "before": {
+            "utf8": "[-35.004949762557565,-35.004949762557565,-1.0809422140605254]",
+            "sha256": "de30e34c27d66562c6439d07bb9dd12381a7a07900564d0dd323bb906bcedc7b",
+            "bytes": 61
+          },
+          "after": {
+            "utf8": "{\"x\":-35.004949762557565,\"y\":-35.004949762557565,\"z\":-1.0809422140605254}",
+            "sha256": "52089425bff2043cce94d99c19a74af57f689c8d678c3791698b8f804abd90c9",
+            "bytes": 73
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "submitClaimsResultUtf8",
+          "path": "/result/results/0/evidence/normalizedExpected/min",
+          "before": {
+            "utf8": "[-35.004949762557565,-35.004949762557565,-1.0809422140605254]",
+            "sha256": "de30e34c27d66562c6439d07bb9dd12381a7a07900564d0dd323bb906bcedc7b",
+            "bytes": 61
+          },
+          "after": {
+            "utf8": "{\"x\":-35.004949762557565,\"y\":-35.004949762557565,\"z\":-1.0809422140605254}",
+            "sha256": "52089425bff2043cce94d99c19a74af57f689c8d678c3791698b8f804abd90c9",
+            "bytes": 73
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "canonicalPlanUtf8",
+          "path": "/plan/claims/0/payload/expected/max",
+          "before": {
+            "utf8": "[35.004949762557565,35.004949762557565,31.080942214060517]",
+            "sha256": "c12400e4f5502d3343a0505fcdefc523f3c14eb39b6ebb852995e53b310946c8",
+            "bytes": 58
+          },
+          "after": {
+            "utf8": "{\"x\":35.004949762557565,\"y\":35.004949762557565,\"z\":31.080942214060517}",
+            "sha256": "189f8a2ce08ca506a672e1ab4cb07a8ce5fd2eebfd010bd46c951f928aa6ac69",
+            "bytes": 70
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "evaluatePlanResultUtf8",
+          "path": "/results/0/evidence/normalizedExpected/max",
+          "before": {
+            "utf8": "[35.004949762557565,35.004949762557565,31.080942214060517]",
+            "sha256": "c12400e4f5502d3343a0505fcdefc523f3c14eb39b6ebb852995e53b310946c8",
+            "bytes": 58
+          },
+          "after": {
+            "utf8": "{\"x\":35.004949762557565,\"y\":35.004949762557565,\"z\":31.080942214060517}",
+            "sha256": "189f8a2ce08ca506a672e1ab4cb07a8ce5fd2eebfd010bd46c951f928aa6ac69",
+            "bytes": 70
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "submitClaimsResultUtf8",
+          "path": "/result/results/0/evidence/normalizedExpected/max",
+          "before": {
+            "utf8": "[35.004949762557565,35.004949762557565,31.080942214060517]",
+            "sha256": "c12400e4f5502d3343a0505fcdefc523f3c14eb39b6ebb852995e53b310946c8",
+            "bytes": 58
+          },
+          "after": {
+            "utf8": "{\"x\":35.004949762557565,\"y\":35.004949762557565,\"z\":31.080942214060517}",
+            "sha256": "189f8a2ce08ca506a672e1ab4cb07a8ce5fd2eebfd010bd46c951f928aa6ac69",
+            "bytes": 70
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "canonicalPlanUtf8",
+          "path": "/plan/claims/0/payload/expected/size",
+          "before": {
+            "utf8": "[70.00989952511513,70.00989952511513,32.16188442812104]",
+            "sha256": "74d6afbcd8d9d2f94cbea8f252540093119a2c2daf322d0ce404e0d2609239b5",
+            "bytes": 55
+          },
+          "after": {
+            "utf8": "{\"x\":70.00989952511513,\"y\":70.00989952511513,\"z\":32.16188442812104}",
+            "sha256": "1b80d26e70da1ccfe09c16a6815cb0ff7479c97b6eef9512f4b787941e24c3eb",
+            "bytes": 67
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "evaluatePlanResultUtf8",
+          "path": "/results/0/evidence/normalizedExpected/size",
+          "before": {
+            "utf8": "[70.00989952511513,70.00989952511513,32.16188442812104]",
+            "sha256": "74d6afbcd8d9d2f94cbea8f252540093119a2c2daf322d0ce404e0d2609239b5",
+            "bytes": 55
+          },
+          "after": {
+            "utf8": "{\"x\":70.00989952511513,\"y\":70.00989952511513,\"z\":32.16188442812104}",
+            "sha256": "1b80d26e70da1ccfe09c16a6815cb0ff7479c97b6eef9512f4b787941e24c3eb",
+            "bytes": 67
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "submitClaimsResultUtf8",
+          "path": "/result/results/0/evidence/normalizedExpected/size",
+          "before": {
+            "utf8": "[70.00989952511513,70.00989952511513,32.16188442812104]",
+            "sha256": "74d6afbcd8d9d2f94cbea8f252540093119a2c2daf322d0ce404e0d2609239b5",
+            "bytes": 55
+          },
+          "after": {
+            "utf8": "{\"x\":70.00989952511513,\"y\":70.00989952511513,\"z\":32.16188442812104}",
+            "sha256": "1b80d26e70da1ccfe09c16a6815cb0ff7479c97b6eef9512f4b787941e24c3eb",
+            "bytes": 67
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "canonicalPlanUtf8",
+          "path": "/plan/claims/0/payload/expected/center",
+          "before": {
+            "utf8": "[0,0,14.999999999999996]",
+            "sha256": "8e7f1b89357960cba803da9128fb4beb53adea4802f2a6c70fb5144824133dc6",
+            "bytes": 24
+          },
+          "after": {
+            "utf8": "{\"x\":0,\"y\":0,\"z\":14.999999999999996}",
+            "sha256": "43ddc45a821644ed8b448afd13e64b627a2c10ee5bf9b7f094cec51899c9b92a",
+            "bytes": 36
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "evaluatePlanResultUtf8",
+          "path": "/results/0/evidence/normalizedExpected/center",
+          "before": {
+            "utf8": "[0,0,14.999999999999996]",
+            "sha256": "8e7f1b89357960cba803da9128fb4beb53adea4802f2a6c70fb5144824133dc6",
+            "bytes": 24
+          },
+          "after": {
+            "utf8": "{\"x\":0,\"y\":0,\"z\":14.999999999999996}",
+            "sha256": "43ddc45a821644ed8b448afd13e64b627a2c10ee5bf9b7f094cec51899c9b92a",
+            "bytes": 36
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "submitClaimsResultUtf8",
+          "path": "/result/results/0/evidence/normalizedExpected/center",
+          "before": {
+            "utf8": "[0,0,14.999999999999996]",
+            "sha256": "8e7f1b89357960cba803da9128fb4beb53adea4802f2a6c70fb5144824133dc6",
+            "bytes": 24
+          },
+          "after": {
+            "utf8": "{\"x\":0,\"y\":0,\"z\":14.999999999999996}",
+            "sha256": "43ddc45a821644ed8b448afd13e64b627a2c10ee5bf9b7f094cec51899c9b92a",
+            "bytes": 36
+          },
+          "numericComponentsUnchanged": true
+        }
+      ],
+      "preservation": {
+        "authoredRequestUnchanged": true,
+        "restoreExactFullStrings": true,
+        "measuredUnchanged": true,
+        "witnessesUnchanged": true,
+        "diagnosticsUnchanged": true,
+        "budgetAndPolarityUnchanged": true
+      }
+    },
+    {
+      "id": "family/toHaveBoundingBox/negative",
+      "source": {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/metadata-installed-b19/joined-inputs.json",
+        "rowIndex": 1,
+        "id": "family/toHaveBoundingBox/negative"
+      },
+      "authoredRequestJson": {
+        "utf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"family.toHaveBoundingBox.negative\",\"payload\":{\"expected\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104],\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"11154a150d2a1964f99182f7a3ca28fec83eb509d0c7abad38a47cd1e29a1844\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"oracle\"}",
+        "sha256": "732fc3f604d14e5a18daebb5ca76368d72f64b1310ffb678c289b55a5c132536",
+        "bytes": 700
+      },
+      "original": {
+        "canonicalPlanUtf8": {
+          "utf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"family.toHaveBoundingBox.negative\",\"payload\":{\"expected\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104],\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"11154a150d2a1964f99182f7a3ca28fec83eb509d0c7abad38a47cd1e29a1844\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "sha256": "cd75a937fa10b85a2a1fd12b0517c50e4d57e6663b1be53b1e8463f2c250a8c9",
+          "bytes": 705
+        },
+        "evaluatePlanResultUtf8": {
+          "utf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"family.toHaveBoundingBox.negative\",\"diagnostics\":[{\"code\":\"GEOSPEC_NEGATED_MATCH\",\"details\":{\"matcher\":\"toHaveBoundingBox\",\"polarity\":\"negative\"},\"message\":\"GeoSpec matcher 'toHaveBoundingBox' satisfies the declared requirement, but the claim requires it not to.\",\"severity\":\"error\",\"suggestion\":\"Correct the model, or revise the negated requirement.\"}],\"evidence\":{\"measured\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104]},\"normalizedExpected\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104],\"tolerance\":0},\"polarity\":\"negative\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2\",\"witnesses\":{\"axisFailures\":[],\"source\":\"brep\",\"tolerance\":0}},\"status\":\"failed\"}]}",
+          "sha256": "ba771fdcd7aa1949dd114a9dfe321db103a58ef6fca2c8766d16bcf0ebe83446",
+          "bytes": 1202
+        },
+        "submitClaimsResultUtf8": {
+          "utf8": "{\"requestId\":\"oracle\",\"result\":{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"family.toHaveBoundingBox.negative\",\"diagnostics\":[{\"code\":\"GEOSPEC_NEGATED_MATCH\",\"details\":{\"matcher\":\"toHaveBoundingBox\",\"polarity\":\"negative\"},\"message\":\"GeoSpec matcher 'toHaveBoundingBox' satisfies the declared requirement, but the claim requires it not to.\",\"severity\":\"error\",\"suggestion\":\"Correct the model, or revise the negated requirement.\"}],\"evidence\":{\"measured\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104]},\"normalizedExpected\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104],\"tolerance\":0},\"polarity\":\"negative\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2\",\"witnesses\":{\"axisFailures\":[],\"source\":\"brep\",\"tolerance\":0}},\"status\":\"failed\"}]}}",
+          "sha256": "b154d9ee576634453702e7b4e4f7f41cc0fac8ac38648a8e06f8cc0fdaa3cda7",
+          "bytes": 1234
+        }
+      },
+      "successor": {
+        "canonicalPlanUtf8": {
+          "utf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"family.toHaveBoundingBox.negative\",\"payload\":{\"expected\":{\"center\":{\"x\":0,\"y\":0,\"z\":14.999999999999996},\"max\":{\"x\":35.004949762557565,\"y\":35.004949762557565,\"z\":31.080942214060517},\"min\":{\"x\":-35.004949762557565,\"y\":-35.004949762557565,\"z\":-1.0809422140605254},\"size\":{\"x\":70.00989952511513,\"y\":70.00989952511513,\"z\":32.16188442812104},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"11154a150d2a1964f99182f7a3ca28fec83eb509d0c7abad38a47cd1e29a1844\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+          "sha256": "56fbe43a986f5447ee67179124e1e079f1f0d658d68af8fc60243b5fa4181486",
+          "bytes": 753
+        },
+        "evaluatePlanResultUtf8": {
+          "utf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"family.toHaveBoundingBox.negative\",\"diagnostics\":[{\"code\":\"GEOSPEC_NEGATED_MATCH\",\"details\":{\"matcher\":\"toHaveBoundingBox\",\"polarity\":\"negative\"},\"message\":\"GeoSpec matcher 'toHaveBoundingBox' satisfies the declared requirement, but the claim requires it not to.\",\"severity\":\"error\",\"suggestion\":\"Correct the model, or revise the negated requirement.\"}],\"evidence\":{\"measured\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104]},\"normalizedExpected\":{\"center\":{\"x\":0,\"y\":0,\"z\":14.999999999999996},\"max\":{\"x\":35.004949762557565,\"y\":35.004949762557565,\"z\":31.080942214060517},\"min\":{\"x\":-35.004949762557565,\"y\":-35.004949762557565,\"z\":-1.0809422140605254},\"size\":{\"x\":70.00989952511513,\"y\":70.00989952511513,\"z\":32.16188442812104},\"tolerance\":0},\"polarity\":\"negative\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2\",\"witnesses\":{\"axisFailures\":[],\"source\":\"brep\",\"tolerance\":0}},\"status\":\"failed\"}]}",
+          "sha256": "8c4b2474238ab5e285a626ac11b06f297fd078943bb9c6710c9349f117c81738",
+          "bytes": 1250
+        },
+        "submitClaimsResultUtf8": {
+          "utf8": "{\"requestId\":\"oracle\",\"result\":{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"family.toHaveBoundingBox.negative\",\"diagnostics\":[{\"code\":\"GEOSPEC_NEGATED_MATCH\",\"details\":{\"matcher\":\"toHaveBoundingBox\",\"polarity\":\"negative\"},\"message\":\"GeoSpec matcher 'toHaveBoundingBox' satisfies the declared requirement, but the claim requires it not to.\",\"severity\":\"error\",\"suggestion\":\"Correct the model, or revise the negated requirement.\"}],\"evidence\":{\"measured\":{\"center\":[0,0,14.999999999999996],\"max\":[35.004949762557565,35.004949762557565,31.080942214060517],\"min\":[-35.004949762557565,-35.004949762557565,-1.0809422140605254],\"size\":[70.00989952511513,70.00989952511513,32.16188442812104]},\"normalizedExpected\":{\"center\":{\"x\":0,\"y\":0,\"z\":14.999999999999996},\"max\":{\"x\":35.004949762557565,\"y\":35.004949762557565,\"z\":31.080942214060517},\"min\":{\"x\":-35.004949762557565,\"y\":-35.004949762557565,\"z\":-1.0809422140605254},\"size\":{\"x\":70.00989952511513,\"y\":70.00989952511513,\"z\":32.16188442812104},\"tolerance\":0},\"polarity\":\"negative\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2\",\"witnesses\":{\"axisFailures\":[],\"source\":\"brep\",\"tolerance\":0}},\"status\":\"failed\"}]}}",
+          "sha256": "6cf21a30cadf17edfee2a94ca247bfc0d9c60f5c03b29031f2d2d6a6d8ef170a",
+          "bytes": 1282
+        }
+      },
+      "changedPaths": [
+        {
+          "document": "canonicalPlanUtf8",
+          "path": "/plan/claims/0/payload/expected/min",
+          "before": {
+            "utf8": "[-35.004949762557565,-35.004949762557565,-1.0809422140605254]",
+            "sha256": "de30e34c27d66562c6439d07bb9dd12381a7a07900564d0dd323bb906bcedc7b",
+            "bytes": 61
+          },
+          "after": {
+            "utf8": "{\"x\":-35.004949762557565,\"y\":-35.004949762557565,\"z\":-1.0809422140605254}",
+            "sha256": "52089425bff2043cce94d99c19a74af57f689c8d678c3791698b8f804abd90c9",
+            "bytes": 73
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "evaluatePlanResultUtf8",
+          "path": "/results/0/evidence/normalizedExpected/min",
+          "before": {
+            "utf8": "[-35.004949762557565,-35.004949762557565,-1.0809422140605254]",
+            "sha256": "de30e34c27d66562c6439d07bb9dd12381a7a07900564d0dd323bb906bcedc7b",
+            "bytes": 61
+          },
+          "after": {
+            "utf8": "{\"x\":-35.004949762557565,\"y\":-35.004949762557565,\"z\":-1.0809422140605254}",
+            "sha256": "52089425bff2043cce94d99c19a74af57f689c8d678c3791698b8f804abd90c9",
+            "bytes": 73
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "submitClaimsResultUtf8",
+          "path": "/result/results/0/evidence/normalizedExpected/min",
+          "before": {
+            "utf8": "[-35.004949762557565,-35.004949762557565,-1.0809422140605254]",
+            "sha256": "de30e34c27d66562c6439d07bb9dd12381a7a07900564d0dd323bb906bcedc7b",
+            "bytes": 61
+          },
+          "after": {
+            "utf8": "{\"x\":-35.004949762557565,\"y\":-35.004949762557565,\"z\":-1.0809422140605254}",
+            "sha256": "52089425bff2043cce94d99c19a74af57f689c8d678c3791698b8f804abd90c9",
+            "bytes": 73
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "canonicalPlanUtf8",
+          "path": "/plan/claims/0/payload/expected/max",
+          "before": {
+            "utf8": "[35.004949762557565,35.004949762557565,31.080942214060517]",
+            "sha256": "c12400e4f5502d3343a0505fcdefc523f3c14eb39b6ebb852995e53b310946c8",
+            "bytes": 58
+          },
+          "after": {
+            "utf8": "{\"x\":35.004949762557565,\"y\":35.004949762557565,\"z\":31.080942214060517}",
+            "sha256": "189f8a2ce08ca506a672e1ab4cb07a8ce5fd2eebfd010bd46c951f928aa6ac69",
+            "bytes": 70
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "evaluatePlanResultUtf8",
+          "path": "/results/0/evidence/normalizedExpected/max",
+          "before": {
+            "utf8": "[35.004949762557565,35.004949762557565,31.080942214060517]",
+            "sha256": "c12400e4f5502d3343a0505fcdefc523f3c14eb39b6ebb852995e53b310946c8",
+            "bytes": 58
+          },
+          "after": {
+            "utf8": "{\"x\":35.004949762557565,\"y\":35.004949762557565,\"z\":31.080942214060517}",
+            "sha256": "189f8a2ce08ca506a672e1ab4cb07a8ce5fd2eebfd010bd46c951f928aa6ac69",
+            "bytes": 70
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "submitClaimsResultUtf8",
+          "path": "/result/results/0/evidence/normalizedExpected/max",
+          "before": {
+            "utf8": "[35.004949762557565,35.004949762557565,31.080942214060517]",
+            "sha256": "c12400e4f5502d3343a0505fcdefc523f3c14eb39b6ebb852995e53b310946c8",
+            "bytes": 58
+          },
+          "after": {
+            "utf8": "{\"x\":35.004949762557565,\"y\":35.004949762557565,\"z\":31.080942214060517}",
+            "sha256": "189f8a2ce08ca506a672e1ab4cb07a8ce5fd2eebfd010bd46c951f928aa6ac69",
+            "bytes": 70
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "canonicalPlanUtf8",
+          "path": "/plan/claims/0/payload/expected/size",
+          "before": {
+            "utf8": "[70.00989952511513,70.00989952511513,32.16188442812104]",
+            "sha256": "74d6afbcd8d9d2f94cbea8f252540093119a2c2daf322d0ce404e0d2609239b5",
+            "bytes": 55
+          },
+          "after": {
+            "utf8": "{\"x\":70.00989952511513,\"y\":70.00989952511513,\"z\":32.16188442812104}",
+            "sha256": "1b80d26e70da1ccfe09c16a6815cb0ff7479c97b6eef9512f4b787941e24c3eb",
+            "bytes": 67
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "evaluatePlanResultUtf8",
+          "path": "/results/0/evidence/normalizedExpected/size",
+          "before": {
+            "utf8": "[70.00989952511513,70.00989952511513,32.16188442812104]",
+            "sha256": "74d6afbcd8d9d2f94cbea8f252540093119a2c2daf322d0ce404e0d2609239b5",
+            "bytes": 55
+          },
+          "after": {
+            "utf8": "{\"x\":70.00989952511513,\"y\":70.00989952511513,\"z\":32.16188442812104}",
+            "sha256": "1b80d26e70da1ccfe09c16a6815cb0ff7479c97b6eef9512f4b787941e24c3eb",
+            "bytes": 67
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "submitClaimsResultUtf8",
+          "path": "/result/results/0/evidence/normalizedExpected/size",
+          "before": {
+            "utf8": "[70.00989952511513,70.00989952511513,32.16188442812104]",
+            "sha256": "74d6afbcd8d9d2f94cbea8f252540093119a2c2daf322d0ce404e0d2609239b5",
+            "bytes": 55
+          },
+          "after": {
+            "utf8": "{\"x\":70.00989952511513,\"y\":70.00989952511513,\"z\":32.16188442812104}",
+            "sha256": "1b80d26e70da1ccfe09c16a6815cb0ff7479c97b6eef9512f4b787941e24c3eb",
+            "bytes": 67
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "canonicalPlanUtf8",
+          "path": "/plan/claims/0/payload/expected/center",
+          "before": {
+            "utf8": "[0,0,14.999999999999996]",
+            "sha256": "8e7f1b89357960cba803da9128fb4beb53adea4802f2a6c70fb5144824133dc6",
+            "bytes": 24
+          },
+          "after": {
+            "utf8": "{\"x\":0,\"y\":0,\"z\":14.999999999999996}",
+            "sha256": "43ddc45a821644ed8b448afd13e64b627a2c10ee5bf9b7f094cec51899c9b92a",
+            "bytes": 36
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "evaluatePlanResultUtf8",
+          "path": "/results/0/evidence/normalizedExpected/center",
+          "before": {
+            "utf8": "[0,0,14.999999999999996]",
+            "sha256": "8e7f1b89357960cba803da9128fb4beb53adea4802f2a6c70fb5144824133dc6",
+            "bytes": 24
+          },
+          "after": {
+            "utf8": "{\"x\":0,\"y\":0,\"z\":14.999999999999996}",
+            "sha256": "43ddc45a821644ed8b448afd13e64b627a2c10ee5bf9b7f094cec51899c9b92a",
+            "bytes": 36
+          },
+          "numericComponentsUnchanged": true
+        },
+        {
+          "document": "submitClaimsResultUtf8",
+          "path": "/result/results/0/evidence/normalizedExpected/center",
+          "before": {
+            "utf8": "[0,0,14.999999999999996]",
+            "sha256": "8e7f1b89357960cba803da9128fb4beb53adea4802f2a6c70fb5144824133dc6",
+            "bytes": 24
+          },
+          "after": {
+            "utf8": "{\"x\":0,\"y\":0,\"z\":14.999999999999996}",
+            "sha256": "43ddc45a821644ed8b448afd13e64b627a2c10ee5bf9b7f094cec51899c9b92a",
+            "bytes": 36
+          },
+          "numericComponentsUnchanged": true
+        }
+      ],
+      "preservation": {
+        "authoredRequestUnchanged": true,
+        "restoreExactFullStrings": true,
+        "measuredUnchanged": true,
+        "witnessesUnchanged": true,
+        "diagnosticsUnchanged": true,
+        "budgetAndPolarityUnchanged": true
+      }
+    }
+  ]
+}

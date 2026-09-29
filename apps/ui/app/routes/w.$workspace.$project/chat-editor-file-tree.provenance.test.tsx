@@ -7,15 +7,23 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry, FileProvenance } from '@taucad/types';
+import type * as FileUtils from '@taucad/utils/file';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 
 const tree = vi.hoisted(() => ({ current: new Map<string, FileEntry>() }));
 const editorSend = vi.hoisted(() => vi.fn());
 const overrideUnit = vi.hoisted(() => vi.fn(async () => undefined));
+const readRawBytes = vi.hoisted(() => vi.fn(async () => new Uint8Array([0x50, 0x4b, 0x03, 0x04])));
+const downloadBlob = vi.hoisted(() => vi.fn());
+
+vi.mock('@taucad/utils/file', async (importOriginal) => ({
+  ...(await importOriginal<typeof FileUtils>()),
+  downloadBlob,
+}));
 
 const actorStub = vi.hoisted(() => {
   const snapshot = {
@@ -30,6 +38,7 @@ const actorStub = vi.hoisted(() => {
 
 vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeMap: () => tree.current,
+  useFileTreeSelector: <T,>(select: (snapshot: typeof tree.current) => T): T => select(tree.current),
   useFileTreeEntry: () => undefined,
 }));
 vi.mock('#hooks/use-keyboard.js', () => ({
@@ -38,6 +47,12 @@ vi.mock('#hooks/use-keyboard.js', () => ({
 /* The tree reads the scheduler's facet for the open pull's first window (W13
  * P34); this suite is about provenance and renders outside a router. */
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));
+vi.mock('#workbench-records/view-actions.js', () => ({
+  useWorkbenchViewCommands: () => ({
+    edit: async () => true,
+    remove: async () => true,
+  }),
+}));
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectRef: actorStub, editorRef: { ...actorStub, send: editorSend } }),
 }));
@@ -47,6 +62,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     contentService: undefined,
     treeService: undefined,
     runtimeFileSystem: undefined,
+    whenServicesReady: async () => ({ contentService: { readRawBytes } }),
     readFile: vi.fn(),
     writeFile: vi.fn(),
     renameFile: vi.fn(),
@@ -92,7 +108,11 @@ const directory = (path: string, provenance?: FileProvenance): [string, FileEntr
   },
 ];
 
-const file = (path: string, provenance?: FileProvenance): [string, FileEntry] => [
+const file = (
+  path: string,
+  provenance?: FileProvenance,
+  contentKind: 'text' | 'binary' = 'text',
+): [string, FileEntry] => [
   path,
   {
     path,
@@ -101,8 +121,7 @@ const file = (path: string, provenance?: FileProvenance): [string, FileEntry] =>
     size: 12,
     mtimeMs: 0,
     isLoaded: true,
-    contentKind: 'text',
-    lineCount: 1,
+    ...(contentKind === 'text' ? { contentKind: 'text', lineCount: 1 } : { contentKind: 'binary' }),
     ...(provenance === undefined ? {} : { provenance }),
   },
 ];
@@ -112,6 +131,8 @@ const bundleIdentity = 'skill:cad-openscad@1.4.0#abc123';
 beforeEach(() => {
   editorSend.mockClear();
   overrideUnit.mockClear();
+  readRawBytes.mockClear();
+  downloadBlob.mockClear();
   tree.current = new Map<string, FileEntry>([
     directory('.agents', project(true)),
     directory('.agents/skills', project(true)),
@@ -119,6 +140,9 @@ beforeEach(() => {
     file('.agents/skills/cad-openscad/SKILL.md', overlay(bundleIdentity)),
     directory('.tau', project(true)),
     directory('.tau/chats', project(false)),
+    directory('.tau/artifacts', project(false)),
+    directory('.tau/artifacts/digest', project(false)),
+    file('.tau/artifacts/digest/main.gcode.3mf', project(false), 'binary'),
     /* The root listing carries the mount as one stamped row (close-out W3), so
      * the lock and the dashed rail are anchored by provenance, not by a path. */
     directory('node_modules', dependency),
@@ -141,6 +165,27 @@ const expand = async (name: string): Promise<void> => {
 };
 
 describe('Files tree provenance rows (north star W4)', () => {
+  it('downloads a binary project artifact through the raw-byte reader', async () => {
+    renderTree();
+    await expand('.tau');
+    await expand('artifacts');
+    await expand('digest');
+    await userEvent.pointer({
+      keys: '[MouseRight]',
+      target: screen.getByRole('treeitem', { name: 'main.gcode.3mf' }),
+    });
+    await userEvent.click(within(await screen.findByRole('menu')).getByText('Download'));
+
+    await waitFor(() => {
+      expect(downloadBlob).toHaveBeenCalledOnce();
+    });
+    expect(readRawBytes).toHaveBeenCalledWith('.tau/artifacts/digest/main.gcode.3mf', {
+      sizeLimit: Number.MAX_SAFE_INTEGER,
+    });
+    expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'main.gcode.3mf');
+    expect(vi.mocked(downloadBlob).mock.calls[0]?.[0]).toHaveProperty('size', 4);
+  });
+
   it('right-aligns a lowercase system badge without a redundant lock or mutation verbs', async () => {
     renderTree();
     await expand('.agents');

@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using PicoGK;
 
 namespace Tau.PicoGK.Worker;
@@ -10,7 +11,7 @@ namespace Tau.PicoGK.Worker;
 internal sealed record ExtractedComponent(
     string Id,
     string Kind,
-    string Name,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Name,
     float[] Color,
     float Metallic,
     float Roughness,
@@ -30,7 +31,9 @@ internal sealed record ModelExecutionResult(
     IReadOnlyList<ExtractedComponent> Components,
     long PicoGkNativeBytes,
     bool RecycleAfterResponse,
-    ModelTimings Timings);
+    ModelTimings Timings,
+    JsonElement? Mechanism,
+    IReadOnlyList<Issue> Warnings);
 
 internal static class ModelRunner
 {

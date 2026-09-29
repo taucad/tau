@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEsbuildModuleVm } from '#vm/module-vm.js';
 import type { ModuleVm } from '#vm/module-vm.js';
@@ -244,11 +245,14 @@ describe('createEsbuildModuleVm', () => {
     try {
       const code = [
         `globalThis.${key} = (globalThis.${key} ?? 0) + 1;`,
+        'export function fail() {',
+        '  throw new Error("cached stack");',
+        '}',
         `export const count = globalThis.${key};`,
       ].join('\n');
 
-      const first = await vm.execute<{ count: number }>(code);
-      const second = await vm.execute<{ count: number }>(code);
+      const first = await vm.execute<{ count: number; fail: () => void }>(code);
+      const second = await vm.execute<{ count: number; fail: () => void }>(code);
 
       expect(first.success).toBe(true);
       expect(second.success).toBe(true);
@@ -256,14 +260,51 @@ describe('createEsbuildModuleVm', () => {
         expect(first.value).toBe(second.value);
         expect(first.value.count).toBe(1);
         expect(second.value.count).toBe(1);
+        expect(first.entryUrl).toMatch(/^file:\/\//u);
+        expect(second.entryUrl).toBe(first.entryUrl);
+        if (first.entryUrl === undefined || second.entryUrl === undefined) {
+          throw new Error('Expected both successful executions to have an entry URL.');
+        }
+
+        const thrownStack = (fail: () => void): string => {
+          try {
+            fail();
+          } catch (error) {
+            if (error instanceof Error) {
+              return error.stack ?? '';
+            }
+          }
+          throw new Error('Expected the cached module function to throw an Error.');
+        };
+        expect(thrownStack(first.value.fail)).toContain(`${fileURLToPath(first.entryUrl)}:3:`);
+        expect(thrownStack(second.value.fail)).toContain(`${fileURLToPath(second.entryUrl)}:3:`);
       }
 
       vm.clearExecutionCache(code);
-      const third = await vm.execute<{ count: number }>(code);
+      const third = await vm.execute<{ count: number; fail: () => void }>(code);
       expect(third.success).toBe(true);
-      if (third.success) {
+      if (third.success && first.success) {
         expect(third.value.count).toBe(2);
+        expect(third.entryUrl).not.toBe(first.entryUrl);
       }
+    } finally {
+      Reflect.deleteProperty(globalThis, key);
+    }
+  });
+
+  it('should retry failed executions when execution caching is enabled', async () => {
+    const key = '__TAU_VM_FAILED_EXECUTION__';
+    const vm = await createEsbuildModuleVm({ filesystem: new MemoryFileSystem(), cacheExecution: true });
+    activeVm = vm;
+
+    try {
+      const code = [`globalThis.${key} = (globalThis.${key} ?? 0) + 1;`, 'throw new Error("retry me");'].join('\n');
+      const first = await vm.execute(code);
+      const second = await vm.execute(code);
+
+      expect(first).toMatchObject({ success: false, issues: [{ message: 'retry me' }] });
+      expect(second).toMatchObject({ success: false, issues: [{ message: 'retry me' }] });
+      expect(Reflect.get(globalThis, key)).toBe(2);
     } finally {
       Reflect.deleteProperty(globalThis, key);
     }

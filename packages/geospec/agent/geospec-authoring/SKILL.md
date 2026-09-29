@@ -5,51 +5,49 @@ description: Guides deterministic GeoSpec test authoring and repair. Use before 
 
 # GeoSpec authoring
 
-Write tests before implementation. Keep each assertion deterministic and focused on one measurable property.
+Write tests before implementation; assert deterministic, measurable properties.
 
 ## Test shape
 
-- Put tests in `*.geospec.ts` or `*.geospec.js`.
-- Import `describe`, `it`, and `expectGeo` from `geospec`; import `loadModel` from `geospec/model`.
-- Omit `parameters` to test model-code defaults. Pass a test-local object to `loadModel({ file, parameters })` for an intentional variant.
-- Assert through `expectGeo(model)`; the loaded subject is opaque.
+- Use `*.geospec.ts` or `*.geospec.js`. Follow the selected API recipe in `test_model`; legacy is the default.
+- Both families import `describe` and `it` from `geospec`. Keep loaders/matchers paired; never alias or rebind families.
+- Legacy: `expectGeo` from `geospec`, `loadModel` from `geospec/model`; assert with `expectGeo(model)`.
+- Native: `expectNativeGeo` from `geospec`, `loadNativeModel` from `geospec/runner/native`; await every `expectNativeGeo(model)` assertion.
+- Await or return the complete model-load chain from the test callback; detached future loads are not part of a completed test.
+- Omit `parameters` for model-code defaults; use `{ file, parameters }` for variants. Loaded subjects are opaque.
+
+When `test_model` selects native:
 
 ```ts
-import { describe, expectGeo, it } from 'geospec';
-import { loadModel } from 'geospec/model';
+import { describe, expectNativeGeo, it } from 'geospec';
+import { loadNativeModel } from 'geospec/runner/native';
 
 describe('main geometry', () => {
   it('has the intended envelope', async () => {
-    const model = await loadModel({ file: 'main.ts', parameters: { width: 120 } });
-    expectGeo(model).toHaveBoundingBox({ size: { x: 120 }, tolerance: 1 });
-  });
-
-  it('is closed', async () => {
-    expectGeo(await loadModel({ file: 'main.ts' })).toBeWatertight();
+    const model = await loadNativeModel({ file: 'main.ts', parameters: { width: 120 } });
+    await expectNativeGeo(model).toHaveBoundingBox({ size: { x: 120 }, tolerance: 1 });
   });
 });
 ```
 
 ## Coverage
 
-A whole-model bounding box plus physical properties is insufficient for a production or high-fidelity assembly. Cover every major component and named visible feature, parameter variants, dimensions/positions, spatially disjoint part count, watertight solids, interference, and supported exact features. State unsupported coverage and add the nearest honest proxy.
+Whole-model bounds and physical properties alone are insufficient. Cover every major component and named visible feature, variants, dimensions/positions, disjoint part count, watertight solids, interference, and supported exact features. State unsupported coverage with the nearest honest proxy.
 
-Choose matchers by question:
-
-- `toHaveBoundingBox`: size or position.
-- `toHaveConnectedComponents`: spatially disjoint chunks; adjust tolerance only when parts physically touch.
-- `toBeWatertight`: whether each geometry unit is a closed manifold; use this—not connected components—to prove a boolean fuse.
+- `toHaveBoundingBox`: size/position.
+- `toHaveConnectedComponents`: disjoint chunks; adjust tolerance only for physically touching parts.
+- `toBeWatertight`: each geometry unit is a closed manifold; use this, not component count, to prove a boolean fuse.
 - `toHaveSurfaceArea`, `toHaveVolume`, `toHaveCenterOfMass`, `toHaveMass`: physical measurements.
-- `toHaveNoComponentInterference`: unintended overlap; encode deliberate press fits as allowances.
-- With `loadModel({ file, format: 'step' })`: BRep validity, topology, units, product structure, planar/cylindrical faces, holes/patterns, fillets, chamfers, wall thickness, and spatial relationships.
+- `toHaveNoComponentInterference`: overlap; allow deliberate press fits.
+- Selected loader's `{ file, format: 'step' }`: BRep validity, topology, units, product structure, planar/cylindrical faces, holes/patterns, fillets, chamfers, wall thickness, spatial relationships.
 
-Test the assembly and its independently renderable geometry units. When adding a source file, add or update its matching test and preserve sibling coverage. If a target lacks top-level geometry, add the kernel-specific export/invocation; never drop the test.
+Test assembly and independently renderable units. Add/update tests for new source files; preserve sibling coverage. Targets without top-level geometry need kernel-specific export/invocation, not test removal.
 
-On failure, fix the modeled geometry at its root. Do not weaken tolerances, delete assertions, or reduce detail merely to turn the test green.
+Fix geometry at its root; never weaken tolerances, delete assertions, or reduce detail to pass.
 
 ## API reference
 
-All 185 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
+All 367 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
 
 - `api-functions.md` — Functions
 - `api-constants.md` — Constants

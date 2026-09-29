@@ -389,6 +389,11 @@ const config = [
       // and checks them against a baked evidence digest, so any byte change makes the splash
       // throw. They are model data outside every tsconfig, so the project service cannot parse them.
       'apps/ui/app/components/geometry/splash/planetary/**',
+      // Same class: byte-pinned PicoVoxel upstream ports (`provenance.json` hashes); only Tau's
+      // `main.ts` adapters and GeoSpec suites are linted.
+      'libs/tau-examples/src/kernels/picovoxel/*/*.ts',
+      '!libs/tau-examples/src/kernels/picovoxel/*/main.ts',
+      '!libs/tau-examples/src/kernels/picovoxel/*/*.geospec.ts',
       '**/content/docs/**/props/**',
       '**/vitest.integration.config.ts',
       'experiments/**',
@@ -409,10 +414,15 @@ const config = [
       // inputs run through the runtime VM (see fixtures/README.md), not
       // library sources — same class as prompt examples and experiments.
       'packages/geospec-engine/fixtures/scripts/**',
+      // Pinned external CAD model sources are fixture bytes, not GeoSpec library code.
+      'packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/**',
       // Registry-gate fixtures are inert artifact inputs the gate parses as
       // text: their imports deliberately name packages that do not resolve,
       // and they live in no tsconfig project.
       'scripts/src/fixtures/**',
+      // Same class: a bundler fixture whose asset queries, JSX and untyped modules
+      // the bundler suites check; it is outside the tau-examples tsconfig.
+      'libs/tau-examples/src/kernels/replicad/bundler-feature-matrix/**',
       // Opt-in benchmark experiments: engine-internal, unpublished, and outside
       // the package tsconfig until PE2 rebuilds what they measure.
       'packages/geospec-engine/experiments/**',

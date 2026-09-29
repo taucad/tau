@@ -1,0 +1,35 @@
+---
+title: Compute Reuse API
+description: Bind an authority-owned compute store and distinguish resident reuse, batched publication, and durable retention.
+docType: reference
+wordBudgetOverride: 1100
+---
+
+# Compute Reuse API
+
+Import compute contracts from `@taucad/runtime/types`, IndexedDB and memory factories from `@taucad/runtime/host`, and SQLite factories from `@taucad/runtime/node`. A `ComputeBinding` is `off`, `memory`, or `durable` with an opaque `ComputeStore`. `off` installs no reuse hook; a library omission defaults to memory. Only the owning host creates a durable store handle, using `fromIndexedDb` or `fromSqlite`.
+
+## Store sessions
+
+`ComputeStoreEngine.open` yields a fresh `ComputeStoreSession` for one workspace. The session exposes batched `get`, `put`, `pin`, `release`, and `close`; it carries a `ComputeGeneration` that changes on clear. `ComputeStoreEntry` couples a canonical action and action digest to bytes, content digest, media type, required content, and byte-exact or equivalent determinism.
+
+`ComputeGetInput` bounds requested digests and fetch size; `ComputeGetResult` separates returned entries from missing, poisoned, or budget-omitted identities. `ComputePutInput` publishes a batch with a generation and disposable or required durability. `ComputePutResult` reports committed entries, conflicts, quota, unavailable storage, or a stale generation. Equivalent divergence keeps the first writer; byte-exact divergence poisons the identity. A stale generation means the caller must not treat old reusable bytes as current.
+
+`ComputePinInput` and `ComputePinResult` promote known entries to required durability. Required work needs an authorized `ComputeRetention` owner; `no-durable-storage` is not a success. `ComputeReleaseInput` releases that owner's recovered roots. Host-only `ComputeStoreControl` offers inspect, clear, and collection. `ComputeStoreReport` separates logical and pinned bytes from physical byte measurements whose status may be unsupported.
+
+## Kernel scope and resident cache
+
+`KernelComputeCapability` is the kernel-facing reuse contract. A runtime opens it with `OpenComputeScopeInput` and closes with `CloseComputeScopeInput`; cancellation publishes nothing. `ComputeAnnouncement` identifies an action and provisional cost synchronously. `ComputeAnnounceResult` records admission; `ComputeWarmInput` and `ComputeWarmResult` provide a bounded fetch after authority checks. `ComputeScopeReceipt` settles once as `ComputeScopeSettlement`; `ComputeReuseScope` owns the per-operation tail. `BuildReuse` distinguishes eligible work from a reasoned ineligible result.
+
+A kernel's `ResidentCacheBinding` imports and exports native entries within its own lifetime. `ResidentExportEntry` has a content identity; `ResidentCacheStats` reports logical charges, codec bytes, and unsupported native-memory measurements separately. The host store is not a native-object cache.
+
+## Backends and channels
+
+`createMemoryComputeEngine` returns a `MemoryComputeEngine` for non-durable use. `createIndexedDbComputeEngine` accepts `IndexedDbComputeEngineOptions` and returns an `IndexedDbComputeEngine`; `createSqliteComputeEngine` likewise takes `SqliteComputeEngineOptions` and returns a `SqliteComputeEngine`. `fromIndexedDb` and `fromSqlite` wrap authority-owned backends as opaque store bindings.
+
+`connectComputeStoreChannel` and `exposeComputeStoreChannel` connect a session over a host-controlled channel. The Node SQLite worker path uses `connectSqliteComputeStoreWorker`, `SqliteComputeWorker`, `serveSqliteComputeStoreWorker`, `SqliteComputeWorkerConnect`, and `sqliteComputeWorkerConnectType`. These carry store requests; they do not grant filesystem authority by themselves.
+
+## Related
+
+- [Transport API](./transport)
+- [Runtime architecture](../concepts/architecture)

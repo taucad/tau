@@ -276,7 +276,7 @@ describe('external agent (AV-5)', () => {
     await target.stopTauServeFixture();
   }, 420_000);
 
-  test('renders the agent’s permission request from the durable log and resumes it on approval', async () => {
+  test('resolves an approval after a reload without a second admission', async () => {
     const { origin } = await target.startTauServeFixture({ externalAgents: true });
     await target.setViewport({ width: 1440, height: 900 });
 
@@ -319,6 +319,10 @@ describe('external agent (AV-5)', () => {
       await target.reload();
       await ensureChatOpen();
       await target.expectVisible(banner, 120_000);
+      const reattachedEvents = await durableEvents();
+      expect(
+        reattachedEvents.filter(({ type, state }) => type === 'run.lifecycle' && state === 'admitted'),
+      ).toHaveLength(1);
 
       await target.click(banner.getByRole('button', { name: 'Allow', exact: true }));
 
@@ -363,6 +367,7 @@ describe('external agent (AV-5)', () => {
       'running',
       'completed',
     ]);
+    expect(events.filter(({ type, state }) => type === 'run.lifecycle' && state === 'admitted')).toHaveLength(1);
 
     // The approved tool actually ran, in the project's tree and nowhere else (V2).
     await expect

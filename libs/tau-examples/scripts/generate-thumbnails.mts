@@ -10,7 +10,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { createExampleRuntimeClient, exampleKernelIds } from '#scripts/runtime.js';
@@ -24,6 +24,7 @@ type ManifestEntry = {
   readonly name: string;
   readonly mainFile?: string;
   readonly files: readonly string[];
+  readonly featured?: true;
 };
 
 type RenderedThumbnail = {
@@ -45,8 +46,15 @@ const only = new Set(
     .split(',')
     .filter(Boolean) ?? [],
 );
-const thumbnailOptions = { width: 768, height: 576 } as const;
+// Twice the largest card slot (a featured card is ~750 CSS px wide) so 2× displays and share previews stay sharp.
+const thumbnailOptions = { width: 1536, height: 1152 } as const;
 const thumbnailMargin = 0.1;
+// Edge widths are output pixels. A featured card is drawn at twice a card's size, so its
+// thumbnail halves the width to keep the same on-screen line weight.
+const variants = [
+  { file: 'thumbnail.webp', lineWidth: 6 },
+  { file: 'thumbnail-featured.webp', lineWidth: 3 },
+] as const;
 
 const supportedKernels: ReadonlySet<string> = exampleKernelIds;
 const engineIdForFixtureFamily = (kernel: string): string => (kernel === 'openscad' ? 'openrscad' : kernel);
@@ -195,88 +203,98 @@ for (const entry of isolated ? renderable : []) {
   // fixture's bytes depend on the 47 fixtures rendered before it. A clean
   // instance is bit-reproducible. See
   // docs/research/tau-examples-thumbnail-nondeterminism.md (costs ~1s/fixture).
+  // PicoGK's sandbox mirrors files beside the entry; C# File.ReadAllText uses that root.
+  const picogkRoot = entry.kernel === 'picogk' ? join(kernelsDirectory, entry.kernel, entry.name) : undefined;
   // oxlint-disable-next-line eslint/no-await-in-loop -- Serial by design; see above.
-  const client = await createExampleRuntimeClient(kernelsDirectory);
+  const client = await createExampleRuntimeClient(picogkRoot ?? kernelsDirectory);
   client.on('log', (logEntry) => {
     if (logEntry.level === 'error' || logEntry.level === 'warn') {
       console.warn(`[runtime:${logEntry.level}] ${logEntry.message}`);
     }
   });
   try {
-    const sourcePath = `${entry.kernel}/${entry.name}/${entry.mainFile}`;
+    const sourcePath = picogkRoot ? entry.mainFile : `${entry.kernel}/${entry.name}/${entry.mainFile}`;
     console.log(`Rendering ${entry.kernel}/${entry.name}`);
     // oxlint-disable-next-line eslint/no-await-in-loop -- One shared runtime/GPU queue renders fixtures serially.
     const outcome = await client.render({
       source: { path: sourcePath },
       content: { includeEdges: true },
+      // Pinned bytes come from PicoVoxel's exact lane, never the fast viewer preview.
+      ...(entry.kernel === 'picovoxel' && { renderOptions: { lane: 'exact' } }),
     });
     if (outcome.superseded) {
       throw new Error(`Thumbnail render failed for ${entry.kernel}/${entry.name}: render was superseded`);
     }
-    if (outcome.geometry.success && outcome.geometry.data.format === 'svg') {
-      // oxlint-disable-next-line eslint/no-await-in-loop -- Preserve manifest order and the shared render queue.
-      const bytes = await renderSvgThumbnail(outcome.geometry.data.content);
-      thumbnails.push({
-        entry,
-        bytes,
-        path: join(kernelsDirectory, entry.kernel, entry.name, 'thumbnail.webp'),
-      });
-      continue;
-    }
-    // oxlint-disable-next-line eslint/no-await-in-loop -- Re-export the settled 3D render through the image transcoder.
-    const result = await client.export('webp', {
-      ...(!outcome.geometry.success && { source: { path: sourcePath } }),
-      content: { includeEdges: true },
-      exportOptions: {
-        mode: 'single',
-        ...thumbnailOptions,
-        lineWidth: 3,
-        camera: {
-          framing: 'bounds',
-          direction: [0.6123724357, -0.6123724357, 0.5],
-          up: [0, 0, 1],
-          margin: thumbnailMargin,
-          projection: { kind: 'perspective', verticalFieldOfView: 45 },
+    for (const { file, lineWidth } of entry.featured ? variants : variants.slice(0, 1)) {
+      const path = join(kernelsDirectory, entry.kernel, entry.name, file);
+      if (outcome.geometry.success && outcome.geometry.data.format === 'svg') {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- Preserve manifest order and the shared render queue.
+        const bytes = await renderSvgThumbnail(outcome.geometry.data.content);
+        thumbnails.push({ entry, bytes, path });
+        continue;
+      }
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Re-export the settled 3D render through the image transcoder.
+      const result = await client.export('webp', {
+        ...(!outcome.geometry.success && { source: { path: sourcePath } }),
+        content: { includeEdges: true },
+        exportOptions: {
+          mode: 'single',
+          ...thumbnailOptions,
+          lineWidth,
+          camera: {
+            framing: 'bounds',
+            direction: [0.6123724357, -0.6123724357, 0.5],
+            up: [0, 0, 1],
+            margin: thumbnailMargin,
+            projection: { kind: 'perspective', verticalFieldOfView: 45 },
+          },
+          quality: 0.9,
+          ao: {},
         },
-        quality: 0.9,
-        ao: {},
-      },
-    });
-    if (!result.success) {
-      throw new Error(
-        `Thumbnail export failed for ${entry.kernel}/${entry.name}: ${result.issues
-          .map((issue) => issue.message)
-          .join('; ')}`,
-      );
+      });
+      if (!result.success) {
+        throw new Error(
+          `Thumbnail export failed for ${entry.kernel}/${entry.name}: ${result.issues
+            .map((issue) => issue.message)
+            .join('; ')}`,
+        );
+      }
+      const thumbnail = result.data[0];
+      if (result.data.length !== 1 || thumbnail?.mimeType !== 'image/webp' || !isWebp(thumbnail.bytes)) {
+        throw new Error(
+          `Thumbnail export expected exactly one valid image/webp artifact, received: ${result.data.map((file) => `${file.mimeType} (${file.bytes.length} bytes)`).join(', ')}`,
+        );
+      }
+      thumbnails.push({ entry, bytes: thumbnail.bytes, path });
     }
-    const thumbnail = result.data[0];
-    if (result.data.length !== 1 || thumbnail?.mimeType !== 'image/webp' || !isWebp(thumbnail.bytes)) {
-      throw new Error(
-        `Thumbnail export expected exactly one valid image/webp artifact, received: ${result.data.map((file) => `${file.mimeType} (${file.bytes.length} bytes)`).join(', ')}`,
-      );
-    }
-    thumbnails.push({
-      entry,
-      bytes: thumbnail.bytes,
-      path: join(kernelsDirectory, entry.kernel, entry.name, 'thumbnail.webp'),
-    });
   } finally {
     client.terminate();
   }
 }
 
-const assetMap = only.size === 0 ? generateAssetMap(allRenderable) : undefined;
+// The asset map follows manifest rows with an actual thumbnail, independent of
+// which native runtimes are composed for this invocation. A selected run can
+// therefore add a new fixture without re-rendering unrelated kernels.
+const assetMap = isolated
+  ? undefined
+  : generateAssetMap(
+      entries.filter(
+        (entry) =>
+          entry.mainFile !== undefined &&
+          existsSync(join(kernelsDirectory, entry.kernel, entry.name, 'thumbnail.webp')),
+      ),
+    );
 if (check) {
   const drift: string[] = [];
   for (const thumbnail of thumbnails) {
     if (!existsSync(thumbnail.path)) {
-      drift.push(`${thumbnail.entry.kernel}/${thumbnail.entry.name}: missing thumbnail.webp`);
+      drift.push(`${thumbnail.entry.kernel}/${thumbnail.entry.name}: missing ${basename(thumbnail.path)}`);
       continue;
     }
     const existing = new Uint8Array(readFileSync(thumbnail.path));
     // oxlint-disable-next-line eslint/no-await-in-loop -- Compare serially with the corresponding generated fixture.
     if (!(await imagesEquivalent(existing, thumbnail.bytes))) {
-      drift.push(`${thumbnail.entry.kernel}/${thumbnail.entry.name}: thumbnail pixels differ`);
+      drift.push(`${thumbnail.entry.kernel}/${thumbnail.entry.name}: ${basename(thumbnail.path)} pixels differ`);
     }
   }
   if (assetMap !== undefined && (!existsSync(assetMapPath) || readFileSync(assetMapPath, 'utf8') !== assetMap)) {

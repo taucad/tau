@@ -1,4 +1,4 @@
-import { version } from 'package.json';
+import { version } from '#package.json';
 
 /**
  * Meta config. Contains infrequently changing information about the app.

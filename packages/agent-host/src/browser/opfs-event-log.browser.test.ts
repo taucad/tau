@@ -44,10 +44,10 @@ it('uses a dedicated-worker OPFS sync handle on a real origin', async () => {
   expect(result.origin).not.toBe('null');
   expect(result.healedCount).toBe(1);
   expect(result.persistedCount).toBe(2);
-  expect(result.firstAppend).toEqual({ appended: true });
-  expect(result.duplicateAppend).toEqual({ appended: false });
+  expect(result.firstAppend).toMatchObject({ appended: true });
+  expect(result.duplicateAppend).toMatchObject({ appended: false });
   expect(result.partialWriteRejected).toBe(true);
-  expect(result.recoveredAppend).toEqual({ appended: true });
+  expect(result.recoveredAppend).toMatchObject({ appended: true });
   expect(result.recoveredCount).toBe(1);
   expect(result.recoveryLookups).toBe(2);
   expect(result.providerFetches).toBe(0);

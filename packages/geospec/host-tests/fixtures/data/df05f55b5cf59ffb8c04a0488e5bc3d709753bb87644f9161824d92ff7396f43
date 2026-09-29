@@ -1,0 +1,402 @@
+{
+  "time": "2026-09-08T14:11:18.013990+00:00",
+  "scope": "EFFECTIVEDEFAULTS01/ALLOWANCEKIND01 independent expected amendments",
+  "freezeHash": "5e47e636a714c69cd50f8de366789fc2df33bbed9a0bf6ea8c87595d50c403df",
+  "sourcesVerified": 81,
+  "artifactHashesVerified": 22,
+  "sourceRowsReconstructed": 339,
+  "changedRows": [
+    "family/toHaveVoidContinuity/positive",
+    "family/toHaveVoidContinuity/negative",
+    "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#relationships[0]/positive",
+    "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[1]/positive",
+    "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[1]/positive",
+    "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[2]/positive",
+    "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[1]/positive",
+    "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[2]/positive",
+    "analytic-relationship/parallel/reversed-directions/positive/positive",
+    "analytic-relationship/parallel/reversed-directions/positive/negative",
+    "analytic-relationship/parallel/forty-five-degrees/negative/positive",
+    "analytic-relationship/parallel/forty-five-degrees/negative/negative",
+    "analytic-relationship/perpendicular/orthogonal-directions/positive/positive",
+    "analytic-relationship/perpendicular/orthogonal-directions/positive/negative",
+    "analytic-relationship/perpendicular/forty-five-degrees/negative/positive",
+    "analytic-relationship/perpendicular/forty-five-degrees/negative/negative",
+    "amendment/W5-VOID-CONTINUOUS-01/minCrossSection/positive",
+    "amendment/W5-VOID-CONTINUOUS-01/minCrossSection/negative"
+  ],
+  "changes": [
+    {
+      "id": "family/toHaveVoidContinuity/positive",
+      "document": "canonicalPlanUtf8",
+      "path": "/plan/claims/0/payload/expected/isolatedFrom",
+      "after": []
+    },
+    {
+      "id": "family/toHaveVoidContinuity/negative",
+      "document": "canonicalPlanUtf8",
+      "path": "/plan/claims/0/payload/expected/isolatedFrom",
+      "after": []
+    },
+    {
+      "id": "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#relationships[0]/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/diagnostics/0/details/relationship/angularToleranceDegrees",
+      "after": 0.5
+    },
+    {
+      "id": "relationship/packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/manifest.json#relationships[0]/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/diagnostics/0/details/relationship/angularToleranceDegrees",
+      "after": 0.5
+    },
+    {
+      "id": "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[1]/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/diagnostics/0/details/relationship/angularToleranceDegrees",
+      "after": 0.5
+    },
+    {
+      "id": "relationship/packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/manifest.json#relationships[1]/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/diagnostics/0/details/relationship/angularToleranceDegrees",
+      "after": 0.5
+    },
+    {
+      "id": "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[1]/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/diagnostics/0/details/relationship/angularToleranceDegrees",
+      "after": 0.5
+    },
+    {
+      "id": "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[1]/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/diagnostics/0/details/relationship/angularToleranceDegrees",
+      "after": 0.5
+    },
+    {
+      "id": "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[2]/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/diagnostics/0/details/relationship/angularToleranceDegrees",
+      "after": 0.5
+    },
+    {
+      "id": "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/manifest.json#relationships[2]/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/diagnostics/0/details/relationship/angularToleranceDegrees",
+      "after": 0.5
+    },
+    {
+      "id": "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[1]/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/diagnostics/0/details/relationship/angularToleranceDegrees",
+      "after": 0.5
+    },
+    {
+      "id": "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[1]/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/diagnostics/0/details/relationship/angularToleranceDegrees",
+      "after": 0.5
+    },
+    {
+      "id": "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[2]/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/diagnostics/0/details/relationship/angularToleranceDegrees",
+      "after": 0.5
+    },
+    {
+      "id": "relationship/packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/manifest.json#relationships[2]/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/diagnostics/0/details/relationship/angularToleranceDegrees",
+      "after": 0.5
+    },
+    {
+      "id": "analytic-relationship/parallel/reversed-directions/positive/positive",
+      "document": "canonicalPlanUtf8",
+      "path": "/plan/claims/0/payload/expected/relationships/0/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/reversed-directions/positive/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/reversed-directions/positive/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/reversed-directions/positive/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/reversed-directions/positive/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/reversed-directions/positive/negative",
+      "document": "canonicalPlanUtf8",
+      "path": "/plan/claims/0/payload/expected/relationships/0/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/reversed-directions/positive/negative",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/reversed-directions/positive/negative",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/reversed-directions/positive/negative",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/reversed-directions/positive/negative",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/forty-five-degrees/negative/positive",
+      "document": "canonicalPlanUtf8",
+      "path": "/plan/claims/0/payload/expected/relationships/0/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/forty-five-degrees/negative/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/diagnostics/0/details/relationship/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/forty-five-degrees/negative/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/forty-five-degrees/negative/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/forty-five-degrees/negative/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/diagnostics/0/details/relationship/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/forty-five-degrees/negative/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/forty-five-degrees/negative/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/forty-five-degrees/negative/negative",
+      "document": "canonicalPlanUtf8",
+      "path": "/plan/claims/0/payload/expected/relationships/0/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/forty-five-degrees/negative/negative",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/forty-five-degrees/negative/negative",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/forty-five-degrees/negative/negative",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/parallel/forty-five-degrees/negative/negative",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 0
+    },
+    {
+      "id": "analytic-relationship/perpendicular/orthogonal-directions/positive/positive",
+      "document": "canonicalPlanUtf8",
+      "path": "/plan/claims/0/payload/expected/relationships/0/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/orthogonal-directions/positive/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/orthogonal-directions/positive/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/orthogonal-directions/positive/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/orthogonal-directions/positive/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/orthogonal-directions/positive/negative",
+      "document": "canonicalPlanUtf8",
+      "path": "/plan/claims/0/payload/expected/relationships/0/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/orthogonal-directions/positive/negative",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/orthogonal-directions/positive/negative",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/orthogonal-directions/positive/negative",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/orthogonal-directions/positive/negative",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/forty-five-degrees/negative/positive",
+      "document": "canonicalPlanUtf8",
+      "path": "/plan/claims/0/payload/expected/relationships/0/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/forty-five-degrees/negative/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/diagnostics/0/details/relationship/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/forty-five-degrees/negative/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/forty-five-degrees/negative/positive",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/forty-five-degrees/negative/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/diagnostics/0/details/relationship/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/forty-five-degrees/negative/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/forty-five-degrees/negative/positive",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/forty-five-degrees/negative/negative",
+      "document": "canonicalPlanUtf8",
+      "path": "/plan/claims/0/payload/expected/relationships/0/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/forty-five-degrees/negative/negative",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/forty-five-degrees/negative/negative",
+      "document": "evaluatePlanResultUtf8",
+      "path": "/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/forty-five-degrees/negative/negative",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/normalizedExpected/relationships/0/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "analytic-relationship/perpendicular/forty-five-degrees/negative/negative",
+      "document": "submitClaimsResultUtf8",
+      "path": "/result/results/0/evidence/witnesses/relationships/0/relationship/angleDegrees",
+      "after": 90
+    },
+    {
+      "id": "amendment/W5-VOID-CONTINUOUS-01/minCrossSection/positive",
+      "document": "canonicalPlanUtf8",
+      "path": "/plan/claims/0/payload/expected/isolatedFrom",
+      "after": []
+    },
+    {
+      "id": "amendment/W5-VOID-CONTINUOUS-01/minCrossSection/negative",
+      "document": "canonicalPlanUtf8",
+      "path": "/plan/claims/0/payload/expected/isolatedFrom",
+      "after": []
+    }
+  ],
+  "unchangedNumericChecks": 1572,
+  "successorHash": "e620719b8024577dc10b66725427754f131c455cac324eae65bf444ea0977fa9",
+  "controlHash": "7cf3e4674e827c0baa8edc5546d8adca8d6eaabd7a32597be55385af95eb13a9",
+  "readback": "execution/effective-default-oracle-readback.log",
+  "acceptance": "Activate only18 exact whole-document amendments and2 unchanged allowance rows;32 independent canonical controls. Original qualification gaps retained.",
+  "gaps": [
+    "Two family void rows have no independent full results.",
+    "No valid ordered nonempty isolation control.",
+    "Thirty controls canonical-only; no invented full result for changed input.",
+    "Historical unused documentary metadata remains historical; separate current bindings only.",
+    "No native or crosshost runtime acceptance from this oracle review."
+  ]
+}

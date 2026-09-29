@@ -1,3 +1,4 @@
+import { StepClock } from '@taucad/xstate-testing/clock';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderMessage } from '#log/event-types.js';
 import type { ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
@@ -20,6 +21,7 @@ const pdfBytes = new TextEncoder().encode('%PDF-1.4 body');
 const base64 = (bytes: Uint8Array<ArrayBuffer>): string => Buffer.from(bytes).toString('base64');
 
 class RecordingTransport implements ModelTransport {
+  public readonly funding = { type: 'unfunded' } as const;
   public readonly requests: ModelStreamRequest[] = [];
 
   public async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
@@ -231,7 +233,7 @@ describe('start-of-turn compaction refusal', () => {
 
     const firstTransport = new RecordingTransport();
     const first = await refusedSession('run-refused', firstTransport);
-    await first.prompt({ id: 'user-after-oversized', role: 'user', content: 'continue' });
+    const refused = await first.prompt({ id: 'user-after-oversized', role: 'user', content: 'continue' });
     await first.close();
 
     const secondTransport = new RecordingTransport();
@@ -241,11 +243,7 @@ describe('start-of-turn compaction refusal', () => {
 
     const log = await file.open();
     const events = await log.read();
-    const failures = events.flatMap((event) =>
-      event.type === 'run.lifecycle' && event.state === 'failed' ? [event.detail?.code] : [],
-    );
-
-    expect(failures).toEqual(['NO_EVICTABLE_HISTORY']);
+    expect(refused).toMatchObject({ outcome: 'failed', failure: { code: 'NO_EVICTABLE_HISTORY' } });
     // Only the one-message history is unevictable. The next turn supplies a
     // valid cut, so the chat compacts it and reaches the provider.
     expect(JSON.stringify(events)).not.toContain('CIRCUIT_BREAKER_OPEN');
@@ -255,5 +253,108 @@ describe('start-of-turn compaction refusal', () => {
     expect(firstTransport.requests).toEqual([]);
     expect(secondTransport.requests).toHaveLength(1);
     await log.close();
+  });
+});
+
+describe('the model-stream stall bound (RA-S12, E9)', () => {
+  /** A stream that sends one delta, then nothing, until its request is aborted. */
+  const silentAfterFirst = (): ModelTransport & { aborted: () => boolean } => {
+    let aborted = false;
+    return {
+      funding: { type: 'unfunded' },
+      aborted: () => aborted,
+      async *stream(request): AsyncGenerator<ModelStreamEvent> {
+        yield { type: 'text-delta', text: 'Thinking' };
+        await new Promise<void>((resolve) => {
+          request.signal.addEventListener('abort', () => {
+            aborted = true;
+            resolve();
+          });
+        });
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      },
+    };
+  };
+
+  it('should fail MODEL_STREAM_STALLED when the stream stops sending events', async () => {
+    const clock = new StepClock();
+    const transport = silentAfterFirst();
+    const session = await createAgentSession({
+      chatId: 'chat-stall',
+      runId: 'run-stall',
+      leaderEpoch: 'epoch-stall',
+      systemPrompt: 'system',
+      model: { id: 'stub', contextWindow: 200_000 },
+      modelTransport: transport,
+      toolRegistry: { list: () => [], invoke: vi.fn() },
+      eventLog: await createMemoryEventLogFile().open(),
+      clock,
+      streamStall: 300_000,
+    });
+
+    const ended = session.prompt({ id: 'user-stall', role: 'user', content: 'Answer.' });
+    await vi.waitFor(() => {
+      expect(clock.nextDue()).toBeDefined();
+    });
+    clock.increment(299_999);
+    expect(transport.aborted()).toBe(false);
+    clock.increment(1);
+
+    await expect(ended).resolves.toMatchObject({ outcome: 'failed', failure: { code: 'MODEL_STREAM_STALLED' } });
+    expect(transport.aborted()).toBe(true);
+    await session.close();
+  });
+
+  it('should re-arm once when the bound fires a whole bound late, as after a frozen process', async () => {
+    let now = 0;
+    let armed = 0;
+    const timers = new Map<number, () => void>();
+    const clock = {
+      now: () => now,
+      setTimeout: (function_: () => void) => {
+        armed++;
+        timers.set(armed, function_);
+        return armed;
+      },
+      clearTimeout: (id: number) => {
+        timers.delete(id);
+      },
+    };
+    /** Fire the one live timer. */
+    const fire = (): void => {
+      const [[id, function_] = []] = timers;
+      if (id !== undefined) {
+        timers.delete(id);
+        function_?.();
+      }
+    };
+    const transport = silentAfterFirst();
+    const session = await createAgentSession({
+      chatId: 'chat-frozen',
+      runId: 'run-frozen',
+      leaderEpoch: 'epoch-frozen',
+      systemPrompt: 'system',
+      model: { id: 'stub', contextWindow: 200_000 },
+      modelTransport: transport,
+      toolRegistry: { list: () => [], invoke: vi.fn() },
+      eventLog: await createMemoryEventLogFile().open(),
+      clock,
+      streamStall: 1000,
+    });
+
+    const ended = session.prompt({ id: 'user-frozen', role: 'user', content: 'Answer.' });
+    // The first event's bound was cleared; the second waits on the silent stream.
+    await vi.waitFor(() => {
+      expect(armed).toBe(2);
+    });
+    now = 2000;
+    fire();
+    expect(armed).toBe(3);
+    expect(transport.aborted()).toBe(false);
+
+    now = 3000;
+    fire();
+    await expect(ended).resolves.toMatchObject({ outcome: 'failed', failure: { code: 'MODEL_STREAM_STALLED' } });
+    await session.close();
   });
 });

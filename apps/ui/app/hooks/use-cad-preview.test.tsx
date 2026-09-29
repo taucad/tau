@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockClientWriteFiles = vi.fn<(files: Record<string, { content: Uint8Array<ArrayBuffer> }>) => Promise<void>>();
 const mockMount = vi.fn<(prefix: string, config: unknown) => Promise<void>>();
 const mockUnmount = vi.fn<(prefix: string) => void>();
+const mockDisposeCadRuntime = vi.fn();
 const mockProjectKernelOptions = vi.fn(() => ({
   kernelOptionsFactory: vi.fn(),
   key: 'local:0',
@@ -83,7 +84,11 @@ vi.mock('#machines/cad.machine.js', async () => {
       },
       states: { idle: {} },
     });
-  return { cadMachine, selectCadFailureIssues: () => mockCadSelection.failureIssues };
+  return {
+    cadMachine,
+    disposeCadRuntime: mockDisposeCadRuntime,
+    selectCadFailureIssues: () => mockCadSelection.failureIssues,
+  };
 });
 
 vi.mock('#machines/graphics.machine.js', async () => {
@@ -210,6 +215,48 @@ describe('CadPreviewProvider isolated filesystem contract', () => {
 
     expect(mockProjectKernelOptions).not.toHaveBeenCalled();
     result.unmount();
+  });
+
+  it('releases the preview kernel client on unmount', () => {
+    const result = render(
+      <CadPreviewProvider projectId='proj_release' mainFile='main.scad'>
+        <div data-testid='child' />
+      </CadPreviewProvider>,
+    );
+    expect(mockDisposeCadRuntime).not.toHaveBeenCalled();
+
+    result.unmount();
+
+    expect(mockDisposeCadRuntime).toHaveBeenCalledOnce();
+  });
+
+  it('unmounts a preview mount that settles after the preview unmounted', async () => {
+    let settleMount: () => void = () => undefined;
+    mockMount.mockImplementationOnce(
+      async () =>
+        new Promise<void>((resolve) => {
+          settleMount = resolve;
+        }),
+    );
+    const result = render(
+      <CadPreviewProvider projectId='import-preview-late' mainFile='main.scad' files={makeFiles([['main.scad', [1]]])}>
+        <div data-testid='child' />
+      </CadPreviewProvider>,
+    );
+    await vi.waitFor(() => {
+      expect(mockMount).toHaveBeenCalled();
+    });
+    const previewPrefix = mockMount.mock.calls[0]?.[0];
+
+    result.unmount();
+    expect(mockUnmount).not.toHaveBeenCalled();
+    await act(async () => {
+      settleMount();
+      await Promise.resolve();
+    });
+
+    expect(mockUnmount).toHaveBeenCalledWith(previewPrefix);
+    expect(mockClientWriteFiles).not.toHaveBeenCalled();
   });
 
   it('still unmounts the preview-owned prefix when files.writeFiles rejects', async () => {

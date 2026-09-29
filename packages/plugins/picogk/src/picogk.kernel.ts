@@ -11,7 +11,7 @@ import type { KernelIssue } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
 
 import { picogkArtifactToGlb } from '#picogk-mesh.js';
-import { picogkAnalysisSchema, picogkBuildSchema } from '#picogk.protocol.js';
+import { picogkAnalysisSchema, picogkBuildSchema, picogkResolveSchema } from '#picogk.protocol.js';
 import { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';
 import { PicogkSession, PicogkWorkerError } from '#picogk-session.js';
 
@@ -56,7 +56,7 @@ export const picogkKernel = defineKernel({
   id: 'picogk',
   extensions: ['cs'],
   name: 'PicogkKernel',
-  version: '2.3.0+dotnet10.roslyn5.9.host2.protocol4.topology1',
+  version: '2.5.0+dotnet10.roslyn5.9.host3.protocol6.mechanism1',
   optionsSchema: picogkOptionsSchema,
   // D2: `cancel` stops an in-flight build at the model's next viewer call and keeps the worker warm.
   cancellation: 'cooperative',
@@ -80,9 +80,30 @@ export const picogkKernel = defineKernel({
 
   async getDependencies({ entryPath }, runtime, context) {
     try {
-      const paths = await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+      const paths = await context.mirror.sync(runtime.filesystem, runtime.fileContentCache, runtime.operationId);
+      /* The worker's Roslyn parse picks the C# this entry compiles with: its program and every
+       * helper. Another program in the project is an independent model, so its edits never
+       * re-render this one. Other files stay dependencies: a model may read any project asset. */
+      let compiled: ReadonlySet<string> | undefined;
+      try {
+        const { sources } = await context.session.request({
+          method: 'resolve',
+          params: { entryPath },
+          schema: picogkResolveSchema,
+          signal: runtime.signal,
+        });
+        compiled = new Set(sources);
+      } catch (error) {
+        /* An entry the worker cannot select, such as a helper two programs could claim, depends on
+         * every file, because any edit can settle it. `analyze` then reports why, located. */
+        if (!(error instanceof PicogkWorkerError)) {
+          throw error;
+        }
+      }
       return {
-        resolved: paths.filter((path) => !tauSystemArtifacts.has(path)),
+        resolved: paths.filter(
+          (path) => !tauSystemArtifacts.has(path) && (!path.endsWith('.cs') || (compiled?.has(path) ?? true)),
+        ),
         unresolved: [],
       };
     } catch (error) {
@@ -91,7 +112,7 @@ export const picogkKernel = defineKernel({
   },
 
   async getParameters({ entryPath }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache, runtime.operationId);
     /* D8: the worker's own stage timings are attributes on the span that measured the request. The
      * span's duration is the total, so nothing here times the call a second time. */
     const span = runtime.tracer.startSpan('picogk.analyze', { entryPath });
@@ -119,7 +140,7 @@ export const picogkKernel = defineKernel({
   },
 
   async createGeometry({ entryPath, parameters }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache, runtime.operationId);
     const span = runtime.tracer.startSpan('picogk.build', { entryPath });
     try {
       const result = await context.session.request({
@@ -140,8 +161,16 @@ export const picogkKernel = defineKernel({
         }
         const transformSpan = runtime.tracer.startSpan('picogk.glb-transform');
         let glb;
+        const issues: KernelIssue[] = (result.warnings ?? []).map(
+          ({ code: workerCode, type: workerType, ...warning }) => ({
+            ...warning,
+            code: 'INVALID_ANNOTATION',
+            type: 'kernel',
+            details: { producer: { kernelId: 'picogk' }, workerCode, workerType },
+          }),
+        );
         try {
-          glb = picogkArtifactToGlb(artifact, result);
+          glb = picogkArtifactToGlb(artifact, result, (mechanismIssues) => issues.push(...mechanismIssues));
         } finally {
           transformSpan.end();
         }
@@ -150,6 +179,7 @@ export const picogkKernel = defineKernel({
         return {
           geometry: { format: 'gltf', content: glb },
           nativeHandle: { glb },
+          issues,
         };
       } finally {
         if (result.recycleAfterResponse) {
@@ -168,6 +198,7 @@ export const picogkKernel = defineKernel({
       const bytes = await transformGltfExportBytes(input.nativeHandle.glb, {
         format: 'glb',
         ...input.options,
+        preserveMeshTopology: true,
       });
       return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(bytes))]);
     } catch (error) {

@@ -42,7 +42,7 @@ export function ModifiedIndicator({
         >
           <span
             data-slot='dot'
-            className='size-1.5 rounded-full bg-yellow opacity-0 transition-opacity md:opacity-100 md:group-hover/modified:opacity-0 dark:bg-yellow'
+            className='size-1.5 rounded-full bg-warning opacity-0 transition-opacity md:opacity-100 md:group-hover/modified:opacity-0'
           />
           <RefreshCcwDot
             data-slot='icon'

@@ -18,6 +18,8 @@ export type ChatStartupRequest = {
   id: string;
   kind: 'regenerate-tail';
   messageId: string;
+  /** Exact pending command input until the host durably accepts Start; absent in older records. */
+  message?: MyUIMessage;
   source: 'homepage-initial-message' | 'fix-with-ai-new-chat' | 'resolve-conflict-new-chat';
   createdAt: number;
 };

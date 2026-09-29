@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "profile": "mixed-wasm-entry",
+  "sourceRevision": "abda45d29347115685b226bffe26bbb3678a27e0",
+  "comparisonStatus": "not-started-toolchain-handoff-pending",
+  "initializationOracle": {
+    "rulingPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/configuration-ruling.json",
+    "rulingSha256": "abb29e93d82b0f7844b88fce691d7a64f0ade435be0786996daab78814acb21c",
+    "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"initialize\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"configuration\"}",
+    "expectedUtf8": "{\"requestId\":\"configuration\",\"result\":{\"canonicalProfile\":\"geospec-jcs-v1\",\"capabilities\":[{\"name\":\"toHaveBoundingBox\",\"registryVersion\":4,\"scope\":\"mesh-buffer-whole-subject\"}],\"configuration\":{\"analysisRetentionLimits\":{\"maxMeshBytes\":268435456,\"maxMeshEntries\":256,\"maxSolidEntries\":256},\"backends\":{\"brep\":true,\"csg\":true},\"binaryAdmissionLimits\":{\"maxOccurrences\":65536,\"maxResourceBytes\":67108864,\"maxSubjectBytes\":67108864,\"maxTotalBinaryBytes\":134217728,\"maxTriangles\":4000000,\"maxVertices\":2000000,\"profileId\":\"geospec-entry-binary-v1\"},\"configurationProfile\":\"geospec-entry-config-v1\",\"defaultWorkUnitBudget\":8000000,\"maxRetainedSubjects\":32,\"productionCapacityQualified\":false},\"protocolVersion\":3,\"qualification\":\"experimental\",\"registryVersion\":4}}",
+    "status": "adopted-before-candidate-comparison"
+  },
+  "expectedAbiSymbols": [
+    "_geospec_engine_native_engine_new",
+    "_geospec_engine_native_engine_drop",
+    "_geospec_engine_native_input_alloc",
+    "_geospec_engine_native_input_free",
+    "_geospec_engine_native_canonicalize",
+    "_geospec_engine_native_ingest_mesh",
+    "_geospec_engine_native_ingest_subject",
+    "_geospec_engine_native_process_request",
+    "_geospec_engine_native_canonical_plan",
+    "_geospec_engine_native_evaluate_plan",
+    "_geospec_engine_native_result_is_error",
+    "_geospec_engine_native_result_length",
+    "_geospec_engine_native_result_copy",
+    "_geospec_engine_native_result_code_length",
+    "_geospec_engine_native_result_code_copy",
+    "_geospec_engine_native_result_message_length",
+    "_geospec_engine_native_result_message_copy",
+    "_geospec_engine_native_result_drop",
+    "_malloc",
+    "_free"
+  ],
+  "oracles": [
+    {
+      "path": "packages/geospec-engine-native/conformance/early-corpus.json",
+      "sha256": "3d43750d055dceec2b7d57c92d4a953c4f7dcd40c2abb1452a82de83ea729476",
+      "records": 320,
+      "status": "frozen-independent"
+    },
+    {
+      "path": "packages/geospec-engine-native/conformance/subject-identity-controls.json",
+      "sha256": "0902649f3c8dc1027059bb308a0395529647491e25b1398b2d3274dd2584ff76",
+      "records": 4,
+      "status": "pending-final-corpus-qualification"
+    },
+    {
+      "path": "packages/geospec-engine-native/conformance/selector-regexp-corpus.json",
+      "sha256": "6e0749a554aa4a0c513e09e98b81d42f0bcddbd98a569e824b7c9d5ff97812a9",
+      "records": 26,
+      "status": "ordinary-controls-valid-v-profile-unavailable"
+    }
+  ],
+  "comparisonRules": [
+    "Compare exact expected and actual bytes without rewriting fixtures or tolerances.",
+    "Run the actual packaged mixed artifact through ordinary Node and browser routes.",
+    "Report unsupported profile cells explicitly instead of reinterpreting them as successes.",
+    "Do not promote compilation or selected rows to full corpus parity."
+  ]
+}

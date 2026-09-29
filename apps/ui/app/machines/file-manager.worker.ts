@@ -7,7 +7,7 @@
  * conflict paths; independent authority subtrees can still run in parallel.
  */
 
-/* eslint-disable tau-lint/no-direct-indexeddb -- This worker is the browser compute-store authority. */
+/* oxlint-disable tau-lint/no-direct-indexeddb -- This worker is the browser compute-store authority. */
 
 import { exposeFileSystem, workerReadyMessageType, workspaceBridgeService } from '@taucad/fs-bridge';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -21,7 +21,7 @@ import {
   sendKeepalivePush,
 } from '@taucad/revisions';
 import type { PushRecorder } from '@taucad/revisions';
-import { randomUuid } from '@taucad/utils/id';
+import { serveTurnPlacementChannel } from '@taucad/agent-host/channel-client';
 import { createIndexedDbComputeEngine, exposeComputeStoreChannel } from '@taucad/runtime/host';
 
 import type { WorkspaceScope } from '@taucad/filesystem';
@@ -34,14 +34,15 @@ import {
   WorkspaceFileService,
 } from '@taucad/filesystem';
 import { SharedPool } from '@taucad/memory';
-import { authoringTypeMaps } from '@taucad/api-extractor/authoring-types';
-import { kernelTypePackageMaps } from '@taucad/api-extractor/kernel-types';
+import type { kernelTypePackageMaps as KernelTypePackageMaps } from '@taucad/api-extractor/kernel-types';
+import type { authoringTypeMaps as AuthoringTypeMaps } from '@taucad/api-extractor/authoring-types';
 import type { SyncFsWorkspaceAdapter } from '@taucad/lsp-fs/sync';
 import { attachSyncFsServer } from '@taucad/lsp-fs/sync';
 import { metaConfig } from '#constants/meta.constants.js';
 import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
 import type { BundledTypesMountEntry, BundledTypesRoot } from '#machines/bundled-types-mount.js';
 import { ensureBundledTypesMount } from '#machines/bundled-types-sentinel.js';
+import { createLazyBundledTypesReads } from '#machines/bundled-types-lazy.js';
 import { homeBackendFromWorkerName } from '#machines/file-manager-worker-name.js';
 import { listWorkspaceDirectories } from '#machines/file-manager-sync-fs-adapter.js';
 import {
@@ -65,13 +66,19 @@ let nodeFsDelivery = Promise.withResolvers<MessagePort>();
 /** Nobody may await a port the previous channel already consumed and killed. */
 let nodeFsPortClaimed = false;
 const nodeFsHomeRoot = Promise.withResolvers<string>();
-self.addEventListener('message', (event: MessageEvent<{ type?: string; port?: unknown; homeRoot?: unknown }>) => {
-  const { data } = event;
-  if (data.type === 'nodeFsPort' && data.port instanceof MessagePort && typeof data.homeRoot === 'string') {
-    nodeFsHomeRoot.resolve(data.homeRoot);
-    nodeFsDelivery.resolve(data.port);
-  }
-});
+self.addEventListener(
+  'message',
+  (event: MessageEvent<{ type?: string; port?: unknown; homeRoot?: unknown; message?: unknown }>) => {
+    const { data } = event;
+    if (data.type === 'nodeFsPort' && data.port instanceof MessagePort && typeof data.homeRoot === 'string') {
+      nodeFsHomeRoot.resolve(data.homeRoot);
+      nodeFsDelivery.resolve(data.port);
+    } else if (data.type === 'nodeFsPortError' && typeof data.message === 'string') {
+      nodeFsPortClaimed = true;
+      nodeFsDelivery.reject(new Error(data.message));
+    }
+  },
+);
 
 const providerRegistry = new ProviderRegistry({
   databasePrefix: metaConfig.databasePrefix,
@@ -192,7 +199,10 @@ async function createNodeModulesMount(): Promise<BundledTypesRoot | undefined> {
   }
 }
 
-const buildBundledTypesPayload = (): readonly BundledTypesMountEntry[] =>
+const buildBundledTypesPayload = (
+  kernelTypePackageMaps: typeof KernelTypePackageMaps,
+  authoringTypeMaps: typeof AuthoringTypeMaps,
+): readonly BundledTypesMountEntry[] =>
   [...kernelTypePackageMaps, ...authoringTypeMaps].flatMap((typesMap) =>
     Object.entries(typesMap).map(
       ([packageName, entry]): BundledTypesMountEntry => ({
@@ -258,27 +268,25 @@ try {
 // Fail-soft by contract: the route is either mounted and writable, or absent.
 const nodeModules = await createNodeModulesMount();
 
-try {
-  const outcome =
-    nodeModules === undefined
-      ? 'unavailable'
-      : await ensureBundledTypesMount(fileService, buildBundledTypesPayload(), {
-          populate: async (payload) => populateBundledTypesMount(nodeModules, payload),
-          // Vite substitutes this define inside worker bundles too (verified against
-          // vite 8.0.10); a realm without it falls back to the payload digest.
-          buildIdentity: typeof tauBuildId === 'number' ? String(tauBuildId) : undefined,
-        });
-  const populationLabel =
-    outcome === 'unavailable'
-      ? 'bundled types skipped, /node_modules unavailable'
-      : outcome === 'skipped'
-        ? 'bundled types current, skipped'
-        : 'bundled types populated';
-  console.debug(`[FM-Worker] ${populationLabel} +${(performance.now() - t0).toFixed(1)}ms`);
-} catch (error) {
-  postWorkerInitError('populateBundledTypesMount', error);
-  throw error;
-}
+const installBundledTypes = async (): Promise<void> => {
+  if (nodeModules === undefined) {
+    return;
+  }
+  const [{ kernelTypePackageMaps }, { authoringTypeMaps }] = await Promise.all([
+    import('@taucad/api-extractor/kernel-types'),
+    import('@taucad/api-extractor/authoring-types'),
+  ]);
+  const outcome = await ensureBundledTypesMount(
+    fileService,
+    buildBundledTypesPayload(kernelTypePackageMaps, authoringTypeMaps),
+    {
+      populate: async (payload) => populateBundledTypesMount(nodeModules, payload),
+      buildIdentity: typeof tauBuildId === 'number' ? String(tauBuildId) : undefined,
+    },
+  );
+  console.debug(`[FM-Worker] bundled types ${outcome} +${(performance.now() - t0).toFixed(1)}ms`);
+};
+const withLazyBundledTypesReads = createLazyBundledTypesReads(installBundledTypes);
 
 exposeFileSystem(workspaceBridgeService(fileService), {
   /*
@@ -304,7 +312,8 @@ exposeFileSystem(workspaceBridgeService(fileService), {
      * `writeFiles` and the four preflights — which the pipeline executes as one
      * batch and the view mask-checks before any provider I/O (D4).
      */
-    return withReadContentOps(view, policy);
+    const handlers = withReadContentOps(view, policy);
+    return root === dependencyMountRoot ? withLazyBundledTypesReads(handlers) : handlers;
   },
   /* The same layout the views above enforce, so a masked connection is not told
    * about a path it may not read (CI1). */
@@ -323,19 +332,10 @@ exposeFileSystem(workspaceBridgeService(fileService), {
  * mount table can give each checkout route its own rooted provider and where
  * every content change is already observed.
  *
- * The authority epoch is the **project session's** identity (W19, W3c review
- * R4): a lease written under any other epoch belongs to a session that no
- * longer owns the project — another document, or an earlier session of this
- * one — and `sweepLeases` retires it on open (N3). Only the session that owns
- * a project's revisions actor system may sweep its leases, which is what makes
- * the rule hold across processes and not merely across documents.
- *
- * The page sends its session's epoch with `revisionsConnect`; a connection
- * that names none falls back to this document's, so a host that has no session
- * layer still gets the old per-document guarantee.
+ * No lease is swept by epoch (W8 TS-S7): the resident agent host reconciles
+ * the leases it finds through its placement session, which this registry
+ * serves on the port the page brokers (`placementConnect`, TS-S5).
  */
-const documentAuthorityEpoch = randomUuid();
-const projectAuthorityEpochs = new Map<string, string>();
 /* One place a linked checkout's files live, for the port that creates them
  * (W7 review R2/P24). Without it `capabilities.checkouts` is false and no
  * browser project can hold a second branch at all. */
@@ -388,14 +388,18 @@ const revisionRegistry = createWorkerRevisionRegistry({
     pushRecorders.delete(projectId);
   },
   filesystem: (root) => fileService.createRootedFileSystem(root),
-  observe: (projectId, onChanged) =>
+  /* Every write in this worker raises its change event inside the write, so a
+   * cut can capture only the paths the bus named (E1). */
+  completeChanges: true,
+  observe: (root, onChanged) =>
     eventBus.subscribe((event) => {
-      const paths = versionedChangePaths(event, `/projects/${projectId}`);
+      const paths = versionedChangePaths(event, root);
       if (paths.length > 0) {
         onChanged(paths);
       }
     }),
-  authorityEpoch: (projectId) => projectAuthorityEpochs.get(projectId) ?? documentAuthorityEpoch,
+  /* W8 TS-S5: the agent channel's own transport, injected so the registry holds no rpc (R3). */
+  servePlacement: ({ port, projectId, session }) => serveTurnPlacementChannel({ port, projectId, session }),
 });
 
 let languageFsSyncDispose: { dispose(): void } | undefined;
@@ -518,7 +522,6 @@ self.addEventListener(
       rootDirectory?: string;
       projectId?: unknown;
       hostServesRevisions?: unknown;
-      sessionEpoch?: unknown;
       action?: unknown;
       budget?: unknown;
       cursor?: unknown;
@@ -551,12 +554,24 @@ self.addEventListener(
         } else {
           hostServedProjects.delete(data.projectId);
         }
-        if (typeof data.sessionEpoch === 'string' && data.sessionEpoch.length > 0) {
-          projectAuthorityEpochs.set(data.projectId, data.sessionEpoch);
-        }
         revisionRegistry.connect(data.port, data.projectId);
       } else {
         data.port.close();
+      }
+      return;
+    }
+
+    /* W8 TS-S5: the resident agent host's placement session and its `revisions` tool reader, brokered by the page. */
+    if (
+      (data.type === 'placementConnect' || data.type === 'revisionsReaderConnect') &&
+      data.port instanceof MessagePort
+    ) {
+      if (typeof data.projectId !== 'string' || data.projectId.length === 0) {
+        data.port.close();
+      } else if (data.type === 'placementConnect') {
+        revisionRegistry.connectPlacement(data.port, data.projectId);
+      } else {
+        revisionRegistry.connectReader(data.port, data.projectId);
       }
       return;
     }

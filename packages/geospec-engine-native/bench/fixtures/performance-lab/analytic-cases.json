@@ -1,0 +1,618 @@
+[
+  {
+    "id": "analytic-through-positive",
+    "fixtureId": "through-bore-step",
+    "matcher": "toHaveCircularHole",
+    "arguments": [
+      {
+        "diameter": 2,
+        "through": true,
+        "axis": "z"
+      }
+    ],
+    "claim": {
+      "claimId": "simd-lab/analytic-through-positive",
+      "capability": "toHaveCircularHole",
+      "payload": {
+        "kind": "circularHole",
+        "expected": {
+          "diameter": 2,
+          "through": true,
+          "axis": "z"
+        }
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "analyticAuthority": {
+      "subjectSha256": "00e2bacbcfafa1ac4ec56a2c1b1676cc772ced4ef376afb6424e6f4051016bd0",
+      "sourceIds": [
+        "bores-intent.json",
+        "bores-analytic-proof.json",
+        "bores-fixture-manifest.json",
+        "bores-generate-read.cpp",
+        "bore-test",
+        "native-contract",
+        "public-contract",
+        "native-defaults"
+      ],
+      "tolerance": {
+        "valueMm": 0.02,
+        "sourceId": "native-defaults",
+        "locator": "DEFAULT_LINEAR_TOLERANCE",
+        "authored": "omitted; current public default"
+      },
+      "intentCase": "through",
+      "nominalParameters": {
+        "radiusMm": 1,
+        "diameterMm": 2,
+        "axis": "z",
+        "through": true,
+        "boreCount": 1
+      },
+      "derivation": "B minus radius-1 cylinder from z=-1 through z=11; complete circular cylindrical side band over z=[0,10] with open circular mouths at z=0 and z=10. Diameter is 2*radius. The mismatch requests the opposite termination."
+    },
+    "note": "Expected from frozen fixture construction and current public contract; no candidate execution or calibration."
+  },
+  {
+    "id": "analytic-through-mismatch",
+    "fixtureId": "through-bore-step",
+    "matcher": "toHaveCircularHole",
+    "arguments": [
+      {
+        "diameter": 2,
+        "through": false,
+        "axis": "z"
+      }
+    ],
+    "claim": {
+      "claimId": "simd-lab/analytic-through-mismatch",
+      "capability": "toHaveCircularHole",
+      "payload": {
+        "kind": "circularHole",
+        "expected": {
+          "diameter": 2,
+          "through": false,
+          "axis": "z"
+        }
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "analyticAuthority": {
+      "subjectSha256": "00e2bacbcfafa1ac4ec56a2c1b1676cc772ced4ef376afb6424e6f4051016bd0",
+      "sourceIds": [
+        "bores-intent.json",
+        "bores-analytic-proof.json",
+        "bores-fixture-manifest.json",
+        "bores-generate-read.cpp",
+        "bore-test",
+        "native-contract",
+        "public-contract",
+        "native-defaults"
+      ],
+      "tolerance": {
+        "valueMm": 0.02,
+        "sourceId": "native-defaults",
+        "locator": "DEFAULT_LINEAR_TOLERANCE",
+        "authored": "omitted; current public default"
+      },
+      "intentCase": "through",
+      "nominalParameters": {
+        "radiusMm": 1,
+        "diameterMm": 2,
+        "axis": "z",
+        "through": true,
+        "boreCount": 1
+      },
+      "derivation": "B minus radius-1 cylinder from z=-1 through z=11; complete circular cylindrical side band over z=[0,10] with open circular mouths at z=0 and z=10. Diameter is 2*radius. The mismatch requests the opposite termination."
+    },
+    "note": "Expected from frozen fixture construction and current public contract; no candidate execution or calibration."
+  },
+  {
+    "id": "analytic-blind-positive",
+    "fixtureId": "blind-bore-step",
+    "matcher": "toHaveCircularHole",
+    "arguments": [
+      {
+        "diameter": 2,
+        "through": false,
+        "axis": "z"
+      }
+    ],
+    "claim": {
+      "claimId": "simd-lab/analytic-blind-positive",
+      "capability": "toHaveCircularHole",
+      "payload": {
+        "kind": "circularHole",
+        "expected": {
+          "diameter": 2,
+          "through": false,
+          "axis": "z"
+        }
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "analyticAuthority": {
+      "subjectSha256": "a611c95e238d10a5a8e80d461b496be06f602a1a6772cb1007bef7152fcd8c7d",
+      "sourceIds": [
+        "bores-intent.json",
+        "bores-analytic-proof.json",
+        "bores-fixture-manifest.json",
+        "bores-generate-read.cpp",
+        "bore-test",
+        "native-contract",
+        "public-contract",
+        "native-defaults"
+      ],
+      "tolerance": {
+        "valueMm": 0.02,
+        "sourceId": "native-defaults",
+        "locator": "DEFAULT_LINEAR_TOLERANCE",
+        "authored": "omitted; current public default"
+      },
+      "intentCase": "blind",
+      "nominalParameters": {
+        "radiusMm": 1,
+        "diameterMm": 2,
+        "axis": "z",
+        "through": false,
+        "boreCount": 1
+      },
+      "derivation": "B minus radius-1 cylinder from z=2 through z=11; one open circular mouth at z=10, one planar disk bottom at z=2, cylindrical band length 8. Diameter is 2*radius. The mismatch requests the opposite termination."
+    },
+    "note": "Expected from frozen fixture construction and current public contract; no candidate execution or calibration."
+  },
+  {
+    "id": "analytic-blind-mismatch",
+    "fixtureId": "blind-bore-step",
+    "matcher": "toHaveCircularHole",
+    "arguments": [
+      {
+        "diameter": 2,
+        "through": true,
+        "axis": "z"
+      }
+    ],
+    "claim": {
+      "claimId": "simd-lab/analytic-blind-mismatch",
+      "capability": "toHaveCircularHole",
+      "payload": {
+        "kind": "circularHole",
+        "expected": {
+          "diameter": 2,
+          "through": true,
+          "axis": "z"
+        }
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "analyticAuthority": {
+      "subjectSha256": "a611c95e238d10a5a8e80d461b496be06f602a1a6772cb1007bef7152fcd8c7d",
+      "sourceIds": [
+        "bores-intent.json",
+        "bores-analytic-proof.json",
+        "bores-fixture-manifest.json",
+        "bores-generate-read.cpp",
+        "bore-test",
+        "native-contract",
+        "public-contract",
+        "native-defaults"
+      ],
+      "tolerance": {
+        "valueMm": 0.02,
+        "sourceId": "native-defaults",
+        "locator": "DEFAULT_LINEAR_TOLERANCE",
+        "authored": "omitted; current public default"
+      },
+      "intentCase": "blind",
+      "nominalParameters": {
+        "radiusMm": 1,
+        "diameterMm": 2,
+        "axis": "z",
+        "through": false,
+        "boreCount": 1
+      },
+      "derivation": "B minus radius-1 cylinder from z=2 through z=11; one open circular mouth at z=10, one planar disk bottom at z=2, cylindrical band length 8. Diameter is 2*radius. The mismatch requests the opposite termination."
+    },
+    "note": "Expected from frozen fixture construction and current public contract; no candidate execution or calibration."
+  },
+  {
+    "id": "analytic-two-bore-pattern-positive",
+    "fixtureId": "shared-bore-step",
+    "matcher": "toHaveCircularHolePattern",
+    "arguments": [
+      {
+        "count": 2,
+        "holeDiameter": 2,
+        "axis": "z"
+      }
+    ],
+    "claim": {
+      "claimId": "simd-lab/analytic-two-bore-pattern-positive",
+      "capability": "toHaveCircularHolePattern",
+      "payload": {
+        "kind": "circularHolePattern",
+        "expected": {
+          "count": 2,
+          "holeDiameter": 2,
+          "axis": "z"
+        }
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "analyticAuthority": {
+      "subjectSha256": "b399d155fe7255965be2e9cb5674a03838d830ded1caad358e2c672a7f343807",
+      "sourceIds": [
+        "bores-intent.json",
+        "bores-analytic-proof.json",
+        "bores-fixture-manifest.json",
+        "bores-generate-read.cpp",
+        "bore-test",
+        "native-contract",
+        "public-contract",
+        "native-defaults"
+      ],
+      "tolerance": {
+        "valueMm": 0.02,
+        "sourceId": "native-defaults",
+        "locator": "DEFAULT_LINEAR_TOLERANCE",
+        "authored": "omitted; current public default"
+      },
+      "intentCase": "shared-instance",
+      "nominalParameters": {
+        "radiusMm": 1,
+        "diameterMm": 2,
+        "axis": "z",
+        "through": true,
+        "boreCount": 2,
+        "occurrenceTranslationsMm": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            20,
+            0,
+            0
+          ]
+        ]
+      },
+      "derivation": "Frozen through-shape instances use identity and translation(20,0,0). circular_bores.rs declares two qualified radius-1 bores. Current derive_patterns groups equal axis/diameter/through bores at one axial station and admits pads of at least two. Count 2 passes; count 3 fails. No ring regularity, center, or bolt-circle claim is added."
+    },
+    "note": "Expected from frozen fixture construction and current public contract; no candidate execution or calibration."
+  },
+  {
+    "id": "analytic-two-bore-pattern-mismatch",
+    "fixtureId": "shared-bore-step",
+    "matcher": "toHaveCircularHolePattern",
+    "arguments": [
+      {
+        "count": 3,
+        "holeDiameter": 2,
+        "axis": "z"
+      }
+    ],
+    "claim": {
+      "claimId": "simd-lab/analytic-two-bore-pattern-mismatch",
+      "capability": "toHaveCircularHolePattern",
+      "payload": {
+        "kind": "circularHolePattern",
+        "expected": {
+          "count": 3,
+          "holeDiameter": 2,
+          "axis": "z"
+        }
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "analyticAuthority": {
+      "subjectSha256": "b399d155fe7255965be2e9cb5674a03838d830ded1caad358e2c672a7f343807",
+      "sourceIds": [
+        "bores-intent.json",
+        "bores-analytic-proof.json",
+        "bores-fixture-manifest.json",
+        "bores-generate-read.cpp",
+        "bore-test",
+        "native-contract",
+        "public-contract",
+        "native-defaults"
+      ],
+      "tolerance": {
+        "valueMm": 0.02,
+        "sourceId": "native-defaults",
+        "locator": "DEFAULT_LINEAR_TOLERANCE",
+        "authored": "omitted; current public default"
+      },
+      "intentCase": "shared-instance",
+      "nominalParameters": {
+        "radiusMm": 1,
+        "diameterMm": 2,
+        "axis": "z",
+        "through": true,
+        "boreCount": 2,
+        "occurrenceTranslationsMm": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            20,
+            0,
+            0
+          ]
+        ]
+      },
+      "derivation": "Frozen through-shape instances use identity and translation(20,0,0). circular_bores.rs declares two qualified radius-1 bores. Current derive_patterns groups equal axis/diameter/through bores at one axial station and admits pads of at least two. Count 2 passes; count 3 fails. No ring regularity, center, or bolt-circle claim is added."
+    },
+    "note": "Expected from frozen fixture construction and current public contract; no candidate execution or calibration."
+  },
+  {
+    "id": "analytic-chamfer-positive",
+    "fixtureId": "chamfer-step",
+    "matcher": "toHaveChamferFeature",
+    "arguments": [
+      {
+        "distance": 1,
+        "tolerance": 0.01
+      }
+    ],
+    "claim": {
+      "claimId": "simd-lab/analytic-chamfer-positive",
+      "capability": "toHaveChamferFeature",
+      "payload": {
+        "kind": "chamferFeature",
+        "expected": {
+          "distance": 1,
+          "tolerance": 0.01
+        }
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "analyticAuthority": {
+      "subjectSha256": "4c0618de7cce3812a9fa0704db928f0667f7655ace102c87d4f35a8a45cf706f",
+      "sourceIds": [
+        "edges-intent.json",
+        "edges-analytic-proof.json",
+        "edges-fixture-manifest.json",
+        "edges-generate-read.cpp",
+        "edge-test",
+        "native-contract",
+        "public-contract"
+      ],
+      "intentCase": "planar-chamfer",
+      "nominalParameters": {
+        "distanceMm": 1,
+        "extrusionMm": 14,
+        "supportPlanes": [
+          "x=10",
+          "y=12"
+        ]
+      },
+      "tolerance": {
+        "valueMm": 0.01,
+        "sourceId": "edges-intent.json",
+        "locator": "/nominalMatcherOptions/chamfer",
+        "authored": "copied exactly from pre-export member and mismatch options"
+      },
+      "derivation": "Exact source-declared member/mismatch options copied from the frozen intent. Analytic construction and edge_treatments.rs establish one qualified distance-1 planar chamfer; current matcher compares its metric with the authored tolerance."
+    },
+    "note": "Expected from frozen fixture construction and current public contract; no candidate execution or calibration."
+  },
+  {
+    "id": "analytic-chamfer-mismatch",
+    "fixtureId": "chamfer-step",
+    "matcher": "toHaveChamferFeature",
+    "arguments": [
+      {
+        "distance": 1.25,
+        "tolerance": 0.01
+      }
+    ],
+    "claim": {
+      "claimId": "simd-lab/analytic-chamfer-mismatch",
+      "capability": "toHaveChamferFeature",
+      "payload": {
+        "kind": "chamferFeature",
+        "expected": {
+          "distance": 1.25,
+          "tolerance": 0.01
+        }
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "analyticAuthority": {
+      "subjectSha256": "4c0618de7cce3812a9fa0704db928f0667f7655ace102c87d4f35a8a45cf706f",
+      "sourceIds": [
+        "edges-intent.json",
+        "edges-analytic-proof.json",
+        "edges-fixture-manifest.json",
+        "edges-generate-read.cpp",
+        "edge-test",
+        "native-contract",
+        "public-contract"
+      ],
+      "intentCase": "planar-chamfer",
+      "nominalParameters": {
+        "distanceMm": 1,
+        "extrusionMm": 14,
+        "supportPlanes": [
+          "x=10",
+          "y=12"
+        ]
+      },
+      "tolerance": {
+        "valueMm": 0.01,
+        "sourceId": "edges-intent.json",
+        "locator": "/nominalMatcherOptions/chamfer",
+        "authored": "copied exactly from pre-export member and mismatch options"
+      },
+      "derivation": "Exact source-declared member/mismatch options copied from the frozen intent. Analytic construction and edge_treatments.rs establish one qualified distance-1 planar chamfer; current matcher compares its metric with the authored tolerance."
+    },
+    "note": "Expected from frozen fixture construction and current public contract; no candidate execution or calibration."
+  },
+  {
+    "id": "analytic-fillet-positive",
+    "fixtureId": "fillet-step",
+    "matcher": "toHaveFilletFeature",
+    "arguments": [
+      {
+        "radius": 2,
+        "tolerance": 0.01
+      }
+    ],
+    "claim": {
+      "claimId": "simd-lab/analytic-fillet-positive",
+      "capability": "toHaveFilletFeature",
+      "payload": {
+        "kind": "filletFeature",
+        "expected": {
+          "radius": 2,
+          "tolerance": 0.01
+        }
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "analyticAuthority": {
+      "subjectSha256": "7f82ffa3bf0aa990d680cc42ce85839b25876727832bfbf2e77152216913c6ed",
+      "sourceIds": [
+        "edges-intent.json",
+        "edges-analytic-proof.json",
+        "edges-fixture-manifest.json",
+        "edges-generate-read.cpp",
+        "edge-test",
+        "native-contract",
+        "public-contract"
+      ],
+      "intentCase": "cylindrical-fillet",
+      "nominalParameters": {
+        "radiusMm": 2,
+        "extrusionMm": 14,
+        "supportPlanes": [
+          "x=10",
+          "y=12"
+        ]
+      },
+      "tolerance": {
+        "valueMm": 0.01,
+        "sourceId": "edges-intent.json",
+        "locator": "/nominalMatcherOptions/filletRadius2",
+        "authored": "copied exactly from pre-export member and mismatch options"
+      },
+      "derivation": "Exact source-declared member/mismatch options copied from the frozen intent. Analytic construction and edge_treatments.rs establish one qualified radius-2 cylindrical fillet; current matcher compares its metric with the authored tolerance."
+    },
+    "note": "Expected from frozen fixture construction and current public contract; no candidate execution or calibration."
+  },
+  {
+    "id": "analytic-fillet-mismatch",
+    "fixtureId": "fillet-step",
+    "matcher": "toHaveFilletFeature",
+    "arguments": [
+      {
+        "radius": 2.25,
+        "tolerance": 0.01
+      }
+    ],
+    "claim": {
+      "claimId": "simd-lab/analytic-fillet-mismatch",
+      "capability": "toHaveFilletFeature",
+      "payload": {
+        "kind": "filletFeature",
+        "expected": {
+          "radius": 2.25,
+          "tolerance": 0.01
+        }
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "analyticAuthority": {
+      "subjectSha256": "7f82ffa3bf0aa990d680cc42ce85839b25876727832bfbf2e77152216913c6ed",
+      "sourceIds": [
+        "edges-intent.json",
+        "edges-analytic-proof.json",
+        "edges-fixture-manifest.json",
+        "edges-generate-read.cpp",
+        "edge-test",
+        "native-contract",
+        "public-contract"
+      ],
+      "intentCase": "cylindrical-fillet",
+      "nominalParameters": {
+        "radiusMm": 2,
+        "extrusionMm": 14,
+        "supportPlanes": [
+          "x=10",
+          "y=12"
+        ]
+      },
+      "tolerance": {
+        "valueMm": 0.01,
+        "sourceId": "edges-intent.json",
+        "locator": "/nominalMatcherOptions/filletRadius2",
+        "authored": "copied exactly from pre-export member and mismatch options"
+      },
+      "derivation": "Exact source-declared member/mismatch options copied from the frozen intent. Analytic construction and edge_treatments.rs establish one qualified radius-2 cylindrical fillet; current matcher compares its metric with the authored tolerance."
+    },
+    "note": "Expected from frozen fixture construction and current public contract; no candidate execution or calibration."
+  }
+]

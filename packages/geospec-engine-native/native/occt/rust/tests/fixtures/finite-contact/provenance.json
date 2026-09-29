@@ -1,0 +1,141 @@
+{
+  "description": "Frozen Tau GeoSpec finite-contact and local-engagement product regressions. These fixtures are required by the three finite_contact adapter tests; no research checkout is needed at runtime.",
+  "table": {
+    "path": "original44.tsv",
+    "bytes": 53040,
+    "sha256": "eca78e5fd7cc46d36892159cb5ddb3dd5eb8776af8550aa6c62a3aa18a2e0de2",
+    "columns": [
+      "original case ID",
+      "independent expected status",
+      "fixture-relative STEP path",
+      "original ingest request JSON",
+      "original claim request JSON"
+    ],
+    "rows": 44
+  },
+  "assets": [
+    {
+      "path": "assets/8146b9dc39ebf7948106b413796946749d0270a05752285c32613d270d7e996e.step",
+      "bytes": 41285,
+      "sha256": "8146b9dc39ebf7948106b413796946749d0270a05752285c32613d270d7e996e",
+      "originalSource": "packages/geospec-engine/fixtures/contact/aabb-overlap-false-positive/model.step"
+    },
+    {
+      "path": "assets/83ff405e40ac3ebdbd2bee8f41311ef31fcbf55c6036047ee70acee63ed190c1.step",
+      "bytes": 34481,
+      "sha256": "83ff405e40ac3ebdbd2bee8f41311ef31fcbf55c6036047ee70acee63ed190c1",
+      "originalSource": "packages/geospec-engine/fixtures/contact/edge-only-negative/model.step"
+    },
+    {
+      "path": "assets/53b154c0c6e51e2c9df18a58b65cc143bd09d121a7eb80866174eb667629e523.step",
+      "bytes": 34429,
+      "sha256": "53b154c0c6e51e2c9df18a58b65cc143bd09d121a7eb80866174eb667629e523",
+      "originalSource": "packages/geospec-engine/fixtures/contact/flange-face-gap-negative/model.step"
+    },
+    {
+      "path": "assets/916e6d894e5731dd1757819d60651c5c193aa6ef586a477e7b4fec3480b7a353.step",
+      "bytes": 34428,
+      "sha256": "916e6d894e5731dd1757819d60651c5c193aa6ef586a477e7b4fec3480b7a353",
+      "originalSource": "packages/geospec-engine/fixtures/contact/flange-face-positive/model.step"
+    },
+    {
+      "path": "assets/910615d25257ed938c167efe54d52347f783d949733ef33e4db7d35113947bde.step",
+      "bytes": 34484,
+      "sha256": "910615d25257ed938c167efe54d52347f783d949733ef33e4db7d35113947bde",
+      "originalSource": "packages/geospec-engine/fixtures/contact/flange-face-tilted-negative/model.step"
+    },
+    {
+      "path": "assets/4cfa4bc016587e62cc1d8e7a3910498e790b3798bfb0c0e0278954ae05765233.step",
+      "bytes": 51165,
+      "sha256": "4cfa4bc016587e62cc1d8e7a3910498e790b3798bfb0c0e0278954ae05765233",
+      "originalSource": "packages/geospec-engine/fixtures/contact/gasket-sandwich-gap-negative/model.step"
+    },
+    {
+      "path": "assets/2652031ce90e9acc60d6b8ebac4312b5ff4b7d0dc28cc4e1f57bc1bf0540616b.step",
+      "bytes": 51165,
+      "sha256": "2652031ce90e9acc60d6b8ebac4312b5ff4b7d0dc28cc4e1f57bc1bf0540616b",
+      "originalSource": "packages/geospec-engine/fixtures/contact/gasket-sandwich-positive/model.step"
+    },
+    {
+      "path": "assets/904eb404f782faa1f60c386a6f500b0b70490d75b8cacdb8022740a70f9ae1ec.step",
+      "bytes": 40998,
+      "sha256": "904eb404f782faa1f60c386a6f500b0b70490d75b8cacdb8022740a70f9ae1ec",
+      "originalSource": "packages/geospec-engine/fixtures/contact/plug-seat-positive/model.step"
+    },
+    {
+      "path": "assets/03daaf6ac5524806b48d005ab6b49c3250d6abbd8c39ef5710ac40ee32704fb1.step",
+      "bytes": 24710,
+      "sha256": "03daaf6ac5524806b48d005ab6b49c3250d6abbd8c39ef5710ac40ee32704fb1",
+      "originalSource": "packages/geospec-engine/fixtures/contact/valve-seat-cone-positive/model.step"
+    },
+    {
+      "path": "assets/5c250e57746cef5c1d6a029b40860de0459baa758325c41a8a4fc7e52093916b.step",
+      "bytes": 40998,
+      "sha256": "5c250e57746cef5c1d6a029b40860de0459baa758325c41a8a4fc7e52093916b",
+      "originalSource": "packages/geospec-engine/fixtures/containment/spark-plug-thread-positive/model.step"
+    },
+    {
+      "path": "assets/4233c74ae571e5634a91fc3fa6a64233feef37b0128d782e18cac3313b57c027.step",
+      "bytes": 83467,
+      "sha256": "4233c74ae571e5634a91fc3fa6a64233feef37b0128d782e18cac3313b57c027",
+      "originalSource": "packages/geospec-engine/fixtures/mate/aabb-pass-real-fail/model.step"
+    },
+    {
+      "path": "assets/3305d8a9c5aaf77f6f0c86b6d424c765de948b965fd4aaab895d400736624dfe.step",
+      "bytes": 92494,
+      "sha256": "3305d8a9c5aaf77f6f0c86b6d424c765de948b965fd4aaab895d400736624dfe",
+      "originalSource": "packages/geospec-engine/fixtures/mate/dowel-located-flange-offset-negative/model.step"
+    },
+    {
+      "path": "assets/e6f0dcbe58c517648898a647d4e34a7fd2fb5a169fffb139a262cd703ad6f9fb.step",
+      "bytes": 92493,
+      "sha256": "e6f0dcbe58c517648898a647d4e34a7fd2fb5a169fffb139a262cd703ad6f9fb",
+      "originalSource": "packages/geospec-engine/fixtures/mate/dowel-located-flange-positive/model.step"
+    },
+    {
+      "path": "assets/57300928a77da014119780c6a1bc19dcf64856fae3c0fd9658927f78fe8bc969.step",
+      "bytes": 92522,
+      "sha256": "57300928a77da014119780c6a1bc19dcf64856fae3c0fd9658927f78fe8bc969",
+      "originalSource": "packages/geospec-engine/fixtures/mate/dowel-located-flange-rotated-negative/model.step"
+    },
+    {
+      "path": "assets/f72143e5bbfbe2d312b3f3c1b4f1c6d9c4cfccaad8539b7b7abee005c67d123a.step",
+      "bytes": 83463,
+      "sha256": "f72143e5bbfbe2d312b3f3c1b4f1c6d9c4cfccaad8539b7b7abee005c67d123a",
+      "originalSource": "packages/geospec-engine/fixtures/mate/flanged-pipe-port-positive/model.step"
+    },
+    {
+      "path": "assets/766b023c6849c4eab7f7e99bec1fde959427a8aaa8380890223273702684e2d3.step",
+      "bytes": 22311,
+      "sha256": "766b023c6849c4eab7f7e99bec1fde959427a8aaa8380890223273702684e2d3",
+      "originalSource": "packages/geospec-engine/fixtures/mate/shaft-shoulder-bearing-positive/model.step"
+    },
+    {
+      "path": "assets/126354deac9bb10658b5f49d76665975e893f80c352ee94c4da63c3b9059f944.step",
+      "bytes": 22311,
+      "sha256": "126354deac9bb10658b5f49d76665975e893f80c352ee94c4da63c3b9059f944",
+      "originalSource": "packages/geospec-engine/fixtures/mate/shaft-shoulder-stand-off-negative/model.step"
+    },
+    {
+      "path": "assets/67a79282812d725cf3750b20fecd904ed4a7f7e2ef0e0bfb2a2cffb1c6711ed2.step",
+      "bytes": 30334,
+      "sha256": "67a79282812d725cf3750b20fecd904ed4a7f7e2ef0e0bfb2a2cffb1c6711ed2",
+      "originalSource": "node_modules/.cache/geospec-engine-native/matcher-full-oracle-public49-a2/fixtures/contact/touching-boxes/positive/model.step"
+    },
+    {
+      "path": "assets/e06e3a53c9d73b4e2813bcc6a5f98f69038794ccfe3c286874bbde0a88aa824c.step",
+      "bytes": 30334,
+      "sha256": "e06e3a53c9d73b4e2813bcc6a5f98f69038794ccfe3c286874bbde0a88aa824c",
+      "originalSource": "node_modules/.cache/geospec-engine-native/matcher-full-oracle-public49-a2/fixtures/contact/separated-boxes/negative/model.step"
+    }
+  ],
+  "attribution": "Original Tau GeoSpec fixture corpus and independently authored analytic box controls; copied byte-for-byte, not regenerated.",
+  "expectationProvenance": {
+    "frozenBeforeCandidateRuntime": true,
+    "sourceTask": "M3-FINITE-CONTACT-ENGAGEMENT-IMPLEMENTATION-A1",
+    "originalInputReceiptSha256": "113fb312ad320404cd638482e508088bffc8c6862b93f826ab072feaeb006966",
+    "decisions": "42 original contact polarity rows and 2 local-engagement polarity rows. Preserve each row's expected status independently of candidate output.",
+    "transportBinding": "The test replaces only the original subjectHash with actual current connector admission; original payloads, thresholds and polarity remain unchanged."
+  },
+  "runtime": "original44.tsv and assets/*.step in this directory are the entire input closure. originalSource values are attribution, not runtime paths."
+}

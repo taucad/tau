@@ -128,7 +128,7 @@ const issueSeverities = new Set(['error', 'warning', 'info']);
  *
  * A row the schema rejects is not a degraded frame — the receiving channel
  * drops the whole notify silently, so a kernel's issues, a render's failure or
- * an export's diagnosis vanish entirely (`libs/rpc/src/channel.ts`,
+ * an export's diagnosis vanish entirely (`packages/rpc/src/channel.ts`,
  * `handleNotifyFrame`). `severity` is repaired for the same reason `code` is:
  * these rows cross the boundary from arbitrary kernel and middleware code, and
  * the wire is the last place that can still see them.

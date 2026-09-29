@@ -1,8 +1,10 @@
+import { PageContent } from '#components/layout/page-content.js';
+import { PageHeader } from '#components/layout/page-header.js';
 import { Link, useLoaderData, useLocation, useNavigate } from 'react-router';
 import type { MetaDescriptor } from 'react-router';
 import { useEffect, useId, useRef, useState, useCallback, useMemo } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
-import { AlertCircle, X, XCircle } from 'lucide-react';
+import { ArrowRight, X } from 'lucide-react';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
 // oxlint-disable-next-line import/extensions -- React Router generates this virtual route-type module.
@@ -10,12 +12,11 @@ import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
 import { importGitHubMachine } from '#machines/import-github.machine.js';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
-import { Loader } from '#components/ui/loader.js';
-import { Progress } from '@taucad/ui/components/progress';
+import { PageNotice } from '#components/layout/page-notice.js';
+import { Checkbox } from '@taucad/ui/components/checkbox';
+import { Label } from '@taucad/ui/components/label';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
-import { SvgIcon } from '#components/icons/svg-icon.js';
-import { formatFileSize } from '#components/geometry/converter/converter-utils.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { RepositoryCard } from '#routes/import.$/repository-card.js';
@@ -25,6 +26,8 @@ import { SuggestedClones } from '#routes/import.$/suggested-clones.js';
 import { UploadCard } from '#routes/import.$/upload-card.js';
 import {
   describeGitHubImport,
+  parseGitHubUrl,
+  normalizeGitHubUrl,
   resolveGitHubImportTarget,
   supportedKernelExtensions,
   findMainFile,
@@ -86,7 +89,7 @@ const linkedSetupBranch = (repositoryName: string): string => {
 export function meta({ params, location }: Route.MetaArgs): MetaDescriptor[] {
   const target = resolveGitHubImportTarget(readSplatPath(params), location.search);
   if (!target?.owner) {
-    return [{ title: 'Import from GitHub into Tau' }];
+    return [{ title: 'Import · Tau' }];
   }
 
   const { title, description } = describeGitHubImport(target);
@@ -118,6 +121,7 @@ type ImportMode = 'github' | 'disk';
 // oxlint-disable-next-line complexity -- TODO: consider refactoring.
 export default function ImportRoute(): React.JSX.Element {
   const { owner, repo, ref, mainFile } = useLoaderData<typeof clientLoader>();
+  const [arrivalRepository] = useState({ owner, repo });
   const navigate = useNavigate();
   const projectManager = useProjectManager();
   const presentLocationError = useProjectCreationLocationError();
@@ -135,6 +139,10 @@ export default function ImportRoute(): React.JSX.Element {
 
   // Track active import mode
   const [activeMode, setActiveMode] = useState<ImportMode | undefined>(undefined);
+  const [localOperation, setLocalOperation] = useState<'read' | 'extract'>('read');
+  const [repoUrlDraft, setRepoUrlDraft] = useState<string>();
+  const repoUrlInput = useRef<HTMLInputElement>(null);
+  const repoUrlHintId = useId();
 
   // Create GitHub import machine actor
   const gitHubActorRef = useActorRef(
@@ -300,6 +308,7 @@ export default function ImportRoute(): React.JSX.Element {
           return;
         }
         setActiveMode('disk');
+        setLocalOperation('read');
         diskActorRef.send({
           type: 'processFiles',
           files: opened.map((file) => new File([file.bytes], file.name)),
@@ -400,6 +409,7 @@ export default function ImportRoute(): React.JSX.Element {
   const handleFilesSelected = useCallback(
     (files: FileList | File[]) => {
       setActiveMode('disk');
+      setLocalOperation('read');
       diskActorRef.send({ type: 'processFiles', files });
     },
     [diskActorRef],
@@ -408,6 +418,7 @@ export default function ImportRoute(): React.JSX.Element {
   const handleFolderSelected = useCallback(
     (files: FileList) => {
       setActiveMode('disk');
+      setLocalOperation('read');
       diskActorRef.send({ type: 'processFiles', files });
     },
     [diskActorRef],
@@ -416,6 +427,7 @@ export default function ImportRoute(): React.JSX.Element {
   const handleZipSelected = useCallback(
     (file: File) => {
       setActiveMode('disk');
+      setLocalOperation('extract');
       diskActorRef.send({ type: 'processZip', file });
     },
     [diskActorRef],
@@ -424,6 +436,7 @@ export default function ImportRoute(): React.JSX.Element {
   const handleDataTransfer = useCallback(
     (items: DataTransferItemList) => {
       setActiveMode('disk');
+      setLocalOperation('read');
       diskActorRef.send({ type: 'processDataTransfer', items });
     },
     [diskActorRef],
@@ -432,6 +445,7 @@ export default function ImportRoute(): React.JSX.Element {
   const handleDirectoryHandleSelected = useCallback(
     (handle: FileSystemDirectoryHandle) => {
       setActiveMode('disk');
+      setLocalOperation('read');
       diskActorRef.send({ type: 'processDirectoryHandle', handle });
     },
     [diskActorRef],
@@ -466,7 +480,7 @@ export default function ImportRoute(): React.JSX.Element {
   }, []);
 
   const importLinkedRepository = useCallback(async (): Promise<void> => {
-    if (linkedSelection === undefined || linkedMainFile === '' || linkedTargetBranch === '') {
+    if (linkedSelection === undefined || linkedMainFile === '' || linkedTargetBranch.trim() === '') {
       return;
     }
     setLinkedBusy(true);
@@ -537,6 +551,22 @@ export default function ImportRoute(): React.JSX.Element {
     projectManager,
   ]);
 
+  const publicRepoUrl = repoUrlDraft ?? repoUrl;
+  const canReviewRepository = parseGitHubUrl(normalizeGitHubUrl(publicRepoUrl.trim())) !== undefined;
+  const cancelRepositoryReview = (): void => {
+    setRepoUrlDraft(repoUrl);
+    setLinkedSelection(undefined);
+    setActiveMode(undefined);
+    gitHubActorRef.send({ type: 'updateRepoUrl', url: '' });
+    requestAnimationFrame(() => repoUrlInput.current?.focus());
+  };
+  const reviewPublicRepository = (): void => {
+    if (canReviewRepository) {
+      setActiveMode('github');
+      gitHubActorRef.send({ type: 'updateRepoUrl', url: normalizeGitHubUrl(publicRepoUrl.trim()) });
+    }
+  };
+
   // Determine if disk import is active
   const isDiskActive =
     activeMode === 'disk' ||
@@ -551,11 +581,10 @@ export default function ImportRoute(): React.JSX.Element {
   if (isDiskActive && diskState.matches('selectingMainFile')) {
     return (
       <ImportMainFileView
-        title='Review Import'
+        title='Review import'
         subtitle={diskImportName}
         files={diskFiles}
         selectedMainFile={diskSelectedMainFile}
-        variant='disk'
         repo={diskImportName}
         onSelectMainFile={(file) => {
           diskActorRef.send({ type: 'selectMainFile', file });
@@ -584,18 +613,15 @@ export default function ImportRoute(): React.JSX.Element {
       diskState.matches('reading') ||
       diskState.matches('readingDataTransfer') ||
       diskState.matches('readingDirectoryHandle');
-    const isExtracting = diskState.matches('extracting');
     const isCreating = diskState.matches('creating');
-
-    const title = isReading ? 'Reading Files' : isExtracting ? 'Extracting ZIP' : 'Creating Project';
-    const statusText = isReading ? 'Reading files...' : isExtracting ? 'Extracting files...' : 'Creating project...';
 
     return (
       <ImportProcessingView
-        title={title}
-        statusText={statusText}
+        title={diskImportName}
+        phase={isReading ? 'read' : isCreating ? 'create' : 'extract'}
+        source='local'
+        localOperation={localOperation}
         progress={diskProgress}
-        variant='disk'
         onCancel={
           isCreating
             ? undefined
@@ -621,6 +647,10 @@ export default function ImportRoute(): React.JSX.Element {
     );
   }
 
+  if (isDiskActive && diskState.matches('success')) {
+    return <ImportProcessingView isComplete title={diskImportName} source='local' phase='create' />;
+  }
+
   // GitHub import flow (existing logic)
   switch (true) {
     case gitHubState.matches('enteringDetails') ||
@@ -633,113 +663,61 @@ export default function ImportRoute(): React.JSX.Element {
       const isFetchingFiles = gitHubState.matches('fetchingFiles');
 
       return (
-        <div className='flex min-h-full flex-col items-center justify-start px-4 pt-6 pb-16 md:justify-center md:pt-8'>
-          <div className='w-full max-w-4xl space-y-6'>
-            <div className='flex flex-col items-center gap-4'>
-              <div className='text-center'>
-                <h1 className='text-2xl font-semibold'>Import Project</h1>
-                <p className='text-sm text-muted-foreground'>Import from GitHub or upload from your computer</p>
+        <PageContent className='space-y-6'>
+          <PageHeader title='Import' />
+          {/* Keep the shared-link offer scoped to the repository named on arrival. */}
+          {arrivalRepository.owner.length > 0 &&
+          arrivalRepository.owner === repoOwner &&
+          arrivalRepository.repo === repoName ? (
+            <OpenInDesktop continueLabel='Import in the browser' />
+          ) : undefined}
+          {isValidRepo ? (
+            <section aria-labelledby='review-repository' className='space-y-6 border-t pt-6'>
+              <div className='space-y-1'>
+                <h2 id='review-repository' className='text-base font-medium'>
+                  Review repository
+                </h2>
+                <p className='text-sm text-muted-foreground'>A copy of the chosen branch is added to your projects.</p>
               </div>
-              {/* Only when a shared `/i/<repo>` link brought them here: the
-                  bare import page names no repository for the app to open. */}
-              <OpenInDesktop continueLabel='Import in the browser' />
-            </div>
-
-            {/* Side-by-side cards when no valid repo */}
-            {isValidRepo ? (
-              <div className='space-y-4'>
-                {/* Repository URL Input */}
-                <div className='space-y-2 rounded-lg border bg-sidebar p-6'>
-                  <label htmlFor='repo-url' className='text-sm font-medium'>
-                    Repository URL
-                  </label>
-                  <div className='group relative'>
-                    <Input
-                      id='repo-url'
-                      type='url'
-                      placeholder='https://github.com/owner/repo'
-                      value={repoUrl}
-                      className='pr-8 font-mono text-sm'
-                      onChange={(event) => {
-                        gitHubActorRef.send({ type: 'updateRepoUrl', url: event.target.value });
-                      }}
-                    />
-                    {repoUrl.length > 0 ? (
-                      <Button
-                        variant='secondary'
-                        size='icon'
-                        className='absolute top-1/2 right-1.5 size-5 -translate-y-1/2 bg-neutral/10 p-0 text-muted-foreground hover:text-foreground'
-                        type='button'
-                        aria-label='Clear URL'
-                        onClick={() => {
-                          gitHubActorRef.send({ type: 'updateRepoUrl', url: '' });
-                        }}
-                      >
-                        <X className='size-3.5' />
-                      </Button>
-                    ) : undefined}
-                  </div>
+              {!isCheckingOrFetching && !repoMetadata ? (
+                <PageNotice
+                  title='Couldn’t open this repository'
+                  message='Check the public repository address or choose a repository from your GitHub account.'
+                  detail={gitHubError?.message ?? "Tau couldn't find a public repository at this address."}
+                >
+                  {githubConnectionAvailable === false ? undefined : (
+                    <Button
+                      variant='outline'
+                      className='h-auto min-h-8 whitespace-normal'
+                      onClick={cancelRepositoryReview}
+                    >
+                      Choose a private repository from GitHub
+                    </Button>
+                  )}
+                </PageNotice>
+              ) : undefined}
+              <div className='grid gap-x-8 gap-y-5 md:grid-cols-[12rem_minmax(0,1fr)]'>
+                <span className='text-sm font-medium'>Repository</span>
+                <div className='min-w-0 space-y-4'>
+                  <RepositoryCard
+                    metadata={repoMetadata}
+                    owner={repoOwner}
+                    repo={repoName}
+                    isLoading={isCheckingOrFetching}
+                  />
+                  {!isCheckingOrFetching && repoMetadata?.isPrivate ? (
+                    <p className='text-sm text-muted-foreground'>
+                      This is a private repository. Make sure you have access permissions to import it.
+                    </p>
+                  ) : undefined}
                 </div>
-
-                <RepositoryCard
-                  metadata={repoMetadata}
-                  owner={repoOwner}
-                  repo={repoName}
-                  isLoading={isCheckingOrFetching}
-                />
-
-                {/* Validation Feedback */}
-                {!isCheckingOrFetching && !repoMetadata ? (
-                  <div className='flex items-start gap-3 rounded-lg border border-warning/50 bg-warning/10 p-4 text-warning'>
-                    <AlertCircle className='size-5 shrink-0' />
-                    <div className='flex flex-col items-start gap-1'>
-                      <div className='font-semibold'>Couldn’t open this repository</div>
-                      <div className='text-sm'>
-                        {gitHubError?.message ?? "Tau couldn't find a public repository at this address."}
-                      </div>
-                      {githubConnectionAvailable === false ? undefined : (
-                        <Button
-                          variant='outline'
-                          size='sm'
-                          className='mt-2'
-                          onClick={() => {
-                            gitHubActorRef.send({ type: 'updateRepoUrl', url: '' });
-                          }}
-                        >
-                          Choose a private repository from GitHub
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ) : undefined}
-
-                {!isCheckingOrFetching && repoMetadata?.isPrivate ? (
-                  <div className='border-info/50 bg-info/10 text-info flex items-start gap-3 rounded-lg border p-4'>
-                    <AlertCircle className='size-5 shrink-0' />
-                    <div className='flex flex-col gap-1'>
-                      <div className='font-semibold'>Private Repository</div>
-                      <div className='text-sm'>
-                        This is a private repository. Make sure you have access permissions to import it.
-                      </div>
-                    </div>
-                  </div>
-                ) : undefined}
-
-                {/* Branch & Main File Selectors - Show grid when we have data or errors */}
-                {repoMetadata &&
-                !isCheckingOrFetching &&
-                (branches.length > 0 ||
-                  repoFiles.length > 0 ||
-                  isLoadingFiles ||
-                  fetchErrors.branches !== undefined ||
-                  fetchErrors.files !== undefined) ? (
-                  <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-                    {/* Branch Selector or Error */}
-                    {branches.length > 0 ? (
-                      <div className='space-y-2 rounded-lg border bg-sidebar p-6'>
-                        <span id={branchLabelId} className='text-sm font-medium'>
-                          Branch
-                        </span>
+                {repoMetadata && !isCheckingOrFetching ? (
+                  <>
+                    <span id={branchLabelId} className='text-sm font-medium'>
+                      Branch
+                    </span>
+                    <div className='max-w-sm'>
+                      {branches.length > 0 ? (
                         <BranchSelector
                           labelId={branchLabelId}
                           branches={branches}
@@ -756,319 +734,321 @@ export default function ImportRoute(): React.JSX.Element {
                               : undefined
                           }
                         />
-                      </div>
-                    ) : fetchErrors.branches ? (
-                      <div className='flex items-start gap-3 rounded-lg border border-warning/50 bg-warning/10 p-4 text-warning'>
-                        <AlertCircle className='size-5 shrink-0' />
-                        <div className='flex flex-col gap-1'>
-                          <div className='text-sm font-medium'>Could not fetch branches</div>
-                          <div className='text-xs opacity-80'>
-                            Import will use the <span className='font-semibold'>{selectedBranch}</span> branch.
-                          </div>
-                        </div>
-                      </div>
-                    ) : undefined}
-
-                    {/* Main File Selector or Error */}
-                    {repoFiles.length > 0 || isLoadingFiles ? (
-                      <div
-                        role='group'
-                        aria-labelledby={mainFileLabelId}
-                        className='space-y-2 rounded-lg border bg-sidebar p-6'
-                      >
-                        <span id={mainFileLabelId} className='text-sm font-medium'>
-                          Main File
-                        </span>
+                      ) : fetchErrors.branches ? (
+                        <p role='status' className='text-sm'>
+                          Could not fetch branches. Import will use the{' '}
+                          <span className='font-mono'>{selectedBranch}</span> branch.
+                        </p>
+                      ) : (
+                        <p className='font-mono text-sm'>{selectedBranch}</p>
+                      )}
+                    </div>
+                    <span id={mainFileLabelId} className='text-sm font-medium'>
+                      Main file
+                    </span>
+                    <div role='group' aria-labelledby={mainFileLabelId} className='max-w-sm space-y-2'>
+                      {repoFiles.length > 0 || isLoadingFiles ? (
                         <FileSelector
                           dataSource={repoFilesDataSource}
                           selectedFile={gitHubSelectedMainFile}
                           isLoading={isLoadingFiles}
-                          popoverProperties={{
-                            side: 'top',
-                          }}
+                          placeholder='Select main file…'
+                          title='Select main file'
+                          description='Choose the main entry path for your project'
+                          emptyMessage='No files found'
                           onSelect={(file) => {
                             gitHubActorRef.send({ type: 'selectMainFile', file });
                           }}
                         />
-                      </div>
-                    ) : fetchErrors.files ? (
-                      <div className='flex items-start gap-3 rounded-lg border border-warning/50 bg-warning/10 p-4 text-warning'>
-                        <AlertCircle className='size-5 shrink-0' />
-                        <div className='flex flex-col gap-1'>
-                          <div className='text-sm font-medium'>Could not list files</div>
-                          <div className='text-xs opacity-80'>You can still proceed with the import.</div>
-                        </div>
-                      </div>
-                    ) : undefined}
-                  </div>
+                      ) : (
+                        <p className='text-sm text-muted-foreground'>
+                          {fetchErrors.files
+                            ? 'Could not list files. You can choose a main file after download.'
+                            : 'You can choose a main file after download.'}
+                        </p>
+                      )}
+                      {gitHubSelectedMainFile ? (
+                        <p className='font-mono text-xs break-all text-muted-foreground'>{gitHubSelectedMainFile}</p>
+                      ) : undefined}
+                    </div>
+                  </>
                 ) : undefined}
-
-                {/* Start Import Button and Short Link */}
-                <div className='flex gap-2'>
+                <span aria-hidden className='max-md:hidden' />
+                <div className='flex flex-wrap items-center gap-2'>
                   <Button
-                    className='flex-1'
-                    size='lg'
                     disabled={isCheckingOrFetching || isFetchingFiles || !repoMetadata}
                     onClick={() => {
                       setActiveMode('github');
                       gitHubActorRef.send({ type: 'startImport' });
                     }}
                   >
-                    Start Import
+                    Start import
                   </Button>
                   <CopyButton
                     size='icon'
-                    className='size-11'
                     variant='outline'
                     tooltip='Copy short link'
                     readyToCopyText=''
                     copiedText=''
                     getText={() => {
-                      // Build short URL with /i instead of /import
-                      // Use repoUrl from machine context (not browser URL) to avoid https:/ normalization
                       const parameters = new URLSearchParams();
-
                       if (selectedBranch && selectedBranch !== 'main') {
                         parameters.set('ref', selectedBranch);
                       }
-
                       const queryString = parameters.size > 0 ? `?${parameters.toString()}` : '';
-
-                      /* Not `location.origin`: on desktop that is `app://tau`,
-                         which nobody can open and which does not even route
-                         `/i/*` (desktop-share-links blueprint, L3). */
                       return `${shareOrigin()}/i/${repoUrl}${queryString}`;
                     }}
                   />
+                  <Button variant='ghost' onClick={cancelRepositoryReview}>
+                    Cancel
+                  </Button>
                 </div>
               </div>
-            ) : (
-              <>
-                <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-                  {/* GitHub Import Card */}
-                  <div className='space-y-2 rounded-lg border bg-sidebar p-6'>
-                    <div className='mb-4 flex items-center gap-3'>
-                      <div className='flex size-10 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10'>
-                        <SvgIcon id='github' className='size-5 text-primary' />
-                      </div>
-                      <div>
-                        <h2 className='font-medium'>Import from GitHub</h2>
-                        <p className='text-xs text-muted-foreground'>
-                          {githubConnectionAvailable === false
-                            ? 'Enter a public repository URL'
-                            : 'Link a repository you can access, or copy a public one'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <GithubRepositoryPicker actionLabel='Review import' onSelect={reviewLinkedRepository} />
-
-                    <div className='flex items-center gap-3 py-2 text-xs text-muted-foreground' aria-hidden>
-                      <span className='h-px flex-1 bg-border' />
-                      <span>or import a public copy — no Git history or sync</span>
-                      <span className='h-px flex-1 bg-border' />
-                    </div>
-
-                    <div className='group relative'>
-                      <label htmlFor='repo-url' className='sr-only'>
-                        Public GitHub repository URL
-                      </label>
+            </section>
+          ) : linkedSelection === undefined ? (
+            <>
+              <div className='grid gap-8 border-t pt-6 md:grid-cols-2'>
+                <section className='min-w-0 space-y-5'>
+                  <div className='space-y-1'>
+                    <h2 className='text-base font-medium'>GitHub repository</h2>
+                    <p className='text-sm text-muted-foreground'>
+                      {githubConnectionAvailable === false
+                        ? 'Import a copy of a public repository.'
+                        : 'Link a repository or import a public copy.'}
+                    </p>
+                  </div>
+                  <GithubRepositoryPicker actionLabel='Review import' onSelect={reviewLinkedRepository} />
+                  <form
+                    className='space-y-2 pt-1'
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      reviewPublicRepository();
+                    }}
+                  >
+                    <label htmlFor='repo-url' className='block text-sm font-medium'>
+                      Public repository URL
+                    </label>
+                    <div className='relative'>
                       <Input
+                        ref={repoUrlInput}
                         id='repo-url'
-                        type='url'
+                        type='text'
+                        inputMode='url'
+                        autoComplete='off'
+                        spellCheck={false}
                         placeholder='https://github.com/owner/repo'
-                        value={repoUrl}
+                        value={publicRepoUrl}
+                        aria-describedby={repoUrlHintId}
                         className='pr-8 font-mono text-sm'
                         onChange={(event) => {
-                          setActiveMode('github');
-                          gitHubActorRef.send({ type: 'updateRepoUrl', url: event.target.value });
+                          setRepoUrlDraft(event.target.value);
                         }}
                       />
-                      {repoUrl.length > 0 ? (
+                      {publicRepoUrl.length > 0 ? (
                         <Button
-                          variant='secondary'
-                          size='icon'
-                          className='absolute top-1/2 right-1.5 size-5 -translate-y-1/2 bg-neutral/10 p-0 text-muted-foreground hover:text-foreground'
+                          variant='ghost'
+                          size='icon-xs'
+                          className='absolute top-1/2 right-1 -translate-y-1/2'
                           type='button'
                           aria-label='Clear URL'
                           onClick={() => {
+                            setRepoUrlDraft('');
                             gitHubActorRef.send({ type: 'updateRepoUrl', url: '' });
+                            repoUrlInput.current?.focus();
                           }}
                         >
                           <X className='size-3.5' />
                         </Button>
                       ) : undefined}
                     </div>
-                  </div>
-
-                  {/* Disk Upload Card */}
-                  <UploadCard
-                    onDataTransfer={handleDataTransfer}
-                    onDirectoryHandleSelected={handleDirectoryHandleSelected}
-                    onFilesSelected={handleFilesSelected}
-                    onFolderSelected={handleFolderSelected}
-                    onZipSelected={handleZipSelected}
-                  />
-                </div>
-
-                {linkedSelection === undefined ? undefined : (
-                  <section
-                    aria-labelledby='linked-import-review'
-                    className='space-y-4 rounded-lg border bg-sidebar p-6'
-                  >
-                    <div>
-                      <h2 id='linked-import-review' className='font-medium'>
-                        Review linked import
-                      </h2>
-                      <p className='text-sm text-muted-foreground'>
-                        {linkedSelection.repository.fullName} at {linkedSelection.branch.name} ·{' '}
-                        {linkedSelection.repository.access === 'write' ? 'future revisions can push' : 'read-only'}
-                      </p>
-                    </div>
-                    <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-                      <div role='group' aria-labelledby={linkedMainFileLabelId} className='space-y-2'>
-                        <label
-                          id={linkedMainFileLabelId}
-                          htmlFor={linkedSelection.files.length === 0 ? 'linked-main-file' : undefined}
-                          className='text-sm font-medium'
-                        >
-                          Main file
-                        </label>
-                        {linkedSelection.files.length === 0 ? (
-                          <Input
-                            id='linked-main-file'
-                            value={linkedMainFile}
-                            onChange={(event) => {
-                              setLinkedMainFile(event.target.value);
-                            }}
-                          />
-                        ) : (
-                          <FileSelector
-                            dataSource={linkedFilesDataSource}
-                            selectedFile={linkedMainFile}
-                            onSelect={setLinkedMainFile}
-                          />
-                        )}
-                      </div>
-                      <div className='space-y-2'>
-                        <label htmlFor='linked-target-branch' className='text-sm font-medium'>
-                          Local and sync branch
-                        </label>
-                        <Input
-                          id='linked-target-branch'
-                          value={linkedTargetBranch}
-                          onChange={(event) => {
-                            setLinkedTargetBranch(event.target.value);
-                          }}
-                        />
-                      </div>
-                    </div>
-                    <p className='text-xs text-muted-foreground'>
-                      Tau will preserve the selected branch’s commits, tracked files, executable modes, and Git remote.
-                      {linkedSelection.repository.access === 'write'
-                        ? ' Future revisions sync automatically.'
-                        : ' This repository is linked read-only; local revisions remain available.'}
+                    <p id={repoUrlHintId} className='text-xs text-muted-foreground'>
+                      Copies files without Git history or sync.
                     </p>
-                    <div className='rounded-md border p-3 text-xs text-muted-foreground'>
-                      <p>
-                        {linkedNeedsSetup ? (
-                          <>
-                            Setup change: add or update <span className='font-mono'>tau.json</span>
-                            {linkedSelection.files.length === 0 ? ` and create ${linkedMainFile}` : ''}, with Tau’s{' '}
-                            <span className='font-mono'>.gitignore</span> and{' '}
-                            <span className='font-mono'>.gitattributes</span> entries.
-                          </>
-                        ) : (
-                          <>
-                            Setup change: Tau’s <span className='font-mono'>.gitignore</span> and{' '}
-                            <span className='font-mono'>.gitattributes</span> entries, only when missing.
-                          </>
-                        )}
-                      </p>
-                      <p>Commit author: {linkedSelection.connection.login} using GitHub’s no-reply address.</p>
-                      <p>Repository visibility: {linkedSelection.repository.visibility}.</p>
-                    </div>
-                    <label className='flex items-center gap-2 text-sm'>
-                      <input
-                        type='checkbox'
-                        checked={linkedSyncChats}
-                        onChange={(event) => {
-                          setLinkedSyncChats(event.target.checked);
-                        }}
-                      />
-                      Sync project chats with this repository
-                    </label>
-                    {linkedMainFileSupported ? undefined : (
-                      <p role='alert' className='text-sm text-destructive'>
-                        Choose a supported CAD source file as the project’s main file.
-                      </p>
-                    )}
-                    {linkedExisting.status === 'resolved' && linkedManifestId !== undefined ? (
-                      <div role='alert' className='flex flex-wrap items-center gap-3 rounded-md border p-3 text-sm'>
-                        <span className='flex-1'>This repository is already a project on this device.</span>
-                        <Button asChild size='sm' variant='outline'>
-                          <Link to={projectUrl(linkedExisting.value)}>Open project</Link>
-                        </Button>
-                      </div>
-                    ) : undefined}
-                    {linkedError === undefined ? undefined : (
-                      <p role='alert' className='text-sm text-destructive'>
-                        {linkedError}
-                      </p>
-                    )}
-                    <div className='flex gap-2'>
-                      <Button
-                        disabled={
-                          linkedBusy ||
-                          linkedReviewBlocked ||
-                          linkedExistingBlocks ||
-                          !linkedMainFileSupported ||
-                          linkedMainFile === '' ||
-                          linkedTargetBranch === ''
-                        }
-                        onClick={importLinkedRepository}
-                      >
-                        {linkedBusy ? 'Importing and linking…' : 'Import and link'}
-                      </Button>
-                      <Button
-                        variant='ghost'
-                        disabled={linkedBusy}
-                        onClick={() => {
-                          setLinkedSelection(undefined);
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </section>
-                )}
-
-                <SuggestedClones
-                  onSelect={(repository) => {
-                    setActiveMode('github');
-                    // Use github.com without protocol to avoid browser normalizing // to /
-                    const repoUrlValue = `github.com/${repository.owner}/${repository.repo}`;
-                    const parameters = new URLSearchParams();
-
-                    if (repository.ref !== 'main') {
-                      parameters.set('ref', repository.ref);
-                    }
-
-                    if (repository.mainFile) {
-                      parameters.set('main', repository.mainFile);
-                    }
-
-                    const queryString = parameters.size > 0 ? `?${parameters.toString()}` : '';
-                    const targetUrl = `/import/${repoUrlValue}${queryString}`;
-
-                    // Use React Router navigate for proper history management
-                    void navigate(targetUrl);
-                  }}
+                    <Button type='submit' variant='outline' disabled={!canReviewRepository}>
+                      Review repository
+                      <ArrowRight />
+                    </Button>
+                  </form>
+                </section>
+                <UploadCard
+                  onDataTransfer={handleDataTransfer}
+                  onDirectoryHandleSelected={handleDirectoryHandleSelected}
+                  onFilesSelected={handleFilesSelected}
+                  onFolderSelected={handleFolderSelected}
+                  onZipSelected={handleZipSelected}
                 />
-              </>
-            )}
-          </div>
-        </div>
+              </div>
+              <SuggestedClones
+                onSelect={(repository) => {
+                  setActiveMode('github');
+                  const repoUrlValue = `github.com/${repository.owner}/${repository.repo}`;
+                  const parameters = new URLSearchParams();
+                  if (repository.ref !== 'main') {
+                    parameters.set('ref', repository.ref);
+                  }
+                  if (repository.mainFile) {
+                    parameters.set('main', repository.mainFile);
+                  }
+                  const queryString = parameters.size > 0 ? `?${parameters.toString()}` : '';
+                  void navigate(`/import/${repoUrlValue}${queryString}`);
+                }}
+              />
+            </>
+          ) : (
+            <section aria-labelledby='linked-import-review' className='space-y-6 border-t pt-6'>
+              <div className='space-y-1'>
+                <h2 id='linked-import-review' className='text-base font-medium'>
+                  Review linked import
+                </h2>
+                <p className='text-sm break-all text-muted-foreground'>
+                  {linkedSelection.repository.fullName} at {linkedSelection.branch.name} ·{' '}
+                  {linkedSelection.repository.access === 'write' ? 'future revisions can push' : 'read-only'}
+                </p>
+              </div>
+              {linkedError === undefined ? undefined : (
+                <PageNotice
+                  title={linkedReviewBlocked ? 'Repository needs attention' : 'Import interrupted'}
+                  message={
+                    linkedReviewBlocked
+                      ? linkedManifest?.success === false
+                        ? 'Fix or remove the invalid tau.json, then choose the repository again.'
+                        : 'Track large files with Git LFS, then choose the repository again.'
+                      : 'Import and link did not finish. Review the details, then try Import and link again.'
+                  }
+                  detail={linkedError}
+                />
+              )}
+              <div className='grid gap-x-8 gap-y-5 md:grid-cols-[12rem_minmax(0,1fr)]'>
+                <label
+                  id={linkedMainFileLabelId}
+                  htmlFor={linkedSelection.files.length === 0 ? 'linked-main-file' : undefined}
+                  className='text-sm font-medium'
+                >
+                  Main file
+                </label>
+                <div role='group' aria-labelledby={linkedMainFileLabelId} className='max-w-sm space-y-2'>
+                  {linkedSelection.files.length === 0 ? (
+                    <Input
+                      id='linked-main-file'
+                      value={linkedMainFile}
+                      className='font-mono text-sm'
+                      disabled={linkedBusy}
+                      onChange={(event) => {
+                        setLinkedMainFile(event.target.value);
+                      }}
+                    />
+                  ) : (
+                    <FileSelector
+                      dataSource={linkedFilesDataSource}
+                      isDisabled={linkedBusy}
+                      selectedFile={linkedMainFile}
+                      onSelect={setLinkedMainFile}
+                    />
+                  )}
+                  {linkedMainFileSupported ? undefined : (
+                    <p role='alert' className='text-sm'>
+                      Choose a supported CAD source file as the project’s main file.
+                    </p>
+                  )}
+                </div>
+                <label htmlFor='linked-target-branch' className='text-sm font-medium'>
+                  Local and sync branch
+                </label>
+                <div className='max-w-sm space-y-2'>
+                  <Input
+                    id='linked-target-branch'
+                    value={linkedTargetBranch}
+                    className='font-mono text-sm'
+                    disabled={linkedBusy}
+                    onChange={(event) => {
+                      setLinkedTargetBranch(event.target.value);
+                    }}
+                  />
+                  <p className='text-xs text-muted-foreground'>
+                    Tau preserves the selected branch’s commits, tracked files, executable modes and Git remote.
+                    {linkedSelection.repository.access === 'write'
+                      ? ' Future revisions sync automatically.'
+                      : ' This repository is linked read-only; local revisions remain available.'}
+                  </p>
+                </div>
+                <span className='text-sm font-medium'>Chats</span>
+                <div className='flex items-center gap-2'>
+                  <Checkbox
+                    id='linked-sync-chats'
+                    checked={linkedSyncChats}
+                    disabled={linkedBusy}
+                    onCheckedChange={(checked) => {
+                      setLinkedSyncChats(checked === true);
+                    }}
+                  />
+                  <Label htmlFor='linked-sync-chats' className='text-sm leading-none font-normal'>
+                    Sync project chats with this repository
+                  </Label>
+                </div>
+                <span className='text-sm font-medium'>Setup change</span>
+                <dl className='grid max-w-xl gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-[auto_minmax(0,1fr)]'>
+                  <dt>Writes</dt>
+                  <dd>
+                    {linkedNeedsSetup ? (
+                      <>
+                        Add or update <span className='font-mono'>tau.json</span>
+                        {linkedSelection.files.length === 0 ? ` and create ${linkedMainFile}` : ''}, with Tau’s{' '}
+                        <span className='font-mono'>.gitignore</span> and{' '}
+                        <span className='font-mono'>.gitattributes</span> entries.
+                      </>
+                    ) : (
+                      <>
+                        Tau’s <span className='font-mono'>.gitignore</span> and{' '}
+                        <span className='font-mono'>.gitattributes</span> entries, only when missing.
+                      </>
+                    )}
+                  </dd>
+                  <dt>Commit author</dt>
+                  <dd>{linkedSelection.connection.login} using GitHub’s no-reply address.</dd>
+                  <dt>Visibility</dt>
+                  <dd>{linkedSelection.repository.visibility}</dd>
+                </dl>
+                {linkedExisting.status === 'resolved' && linkedManifestId !== undefined ? (
+                  <>
+                    <span aria-hidden className='max-md:hidden' />
+                    <div role='alert' className='flex flex-wrap items-center gap-3 text-sm'>
+                      <span>This repository is already a project on this device.</span>
+                      <Button asChild size='sm' variant='outline'>
+                        <Link to={projectUrl(linkedExisting.value)}>Open project</Link>
+                      </Button>
+                    </div>
+                  </>
+                ) : undefined}
+                <span aria-hidden className='max-md:hidden' />
+                <div className='flex flex-wrap items-center gap-2'>
+                  <Button
+                    disabled={
+                      linkedBusy ||
+                      linkedReviewBlocked ||
+                      linkedExistingBlocks ||
+                      !linkedMainFileSupported ||
+                      linkedMainFile === '' ||
+                      linkedTargetBranch.trim() === ''
+                    }
+                    onClick={importLinkedRepository}
+                  >
+                    {linkedBusy ? 'Importing and linking…' : 'Import and link'}
+                  </Button>
+                  <Button
+                    variant='ghost'
+                    disabled={linkedBusy}
+                    onClick={() => {
+                      setLinkedSelection(undefined);
+                      requestAnimationFrame(() => repoUrlInput.current?.focus());
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </section>
+          )}
+        </PageContent>
       );
     }
 
@@ -1081,12 +1061,11 @@ export default function ImportRoute(): React.JSX.Element {
 
       return (
         <ImportMainFileView
-          title='Review Import'
+          title='Review import'
           subtitle={`${owner}/${repo}${ref === 'main' ? '' : ` @ ${ref}`}`}
           requestedMainFileWarning={requestedFileWarning}
           files={gitHubFiles}
           selectedMainFile={gitHubSelectedMainFile}
-          variant='github'
           owner={owner}
           repo={repo}
           onSelectMainFile={(file) => {
@@ -1117,122 +1096,27 @@ export default function ImportRoute(): React.JSX.Element {
 
     default: {
       return (
-        <div className='flex min-h-full flex-col items-center justify-start px-4 pt-6 pb-16 md:justify-center md:pt-8'>
-          <div className='w-full max-w-2xl space-y-6'>
-            <div className='flex flex-col items-center gap-4'>
-              <div className='flex size-16 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10'>
-                <SvgIcon id='github' className='size-8 text-primary' />
-              </div>
-
-              <div className='text-center'>
-                <h1 className='text-2xl font-semibold'>Importing Repository</h1>
-                <p className='text-sm text-muted-foreground'>
-                  {repoOwner}/{repoName}
-                  {selectedBranch && selectedBranch !== 'main' ? ` @ ${selectedBranch}` : ''}
-                </p>
-              </div>
-            </div>
-
-            {/* Repository Preview Card (read-only) */}
-            {repoMetadata ? (
-              <RepositoryCard metadata={repoMetadata} owner={repoOwner} repo={repoName} isLoading={false} />
-            ) : undefined}
-
-            <div className='space-y-4'>
-              {/* Downloading */}
-              <div className='space-y-2'>
-                <div className='flex items-center justify-between text-sm'>
-                  <span className='flex items-center gap-2 font-medium'>
-                    {gitHubState.matches('downloading') ? (
-                      <>
-                        <Loader />
-                        <span>Downloading...</span>
-                      </>
-                    ) : (
-                      '✓ Downloaded'
-                    )}
-                  </span>
-                  {downloadProgress.loaded > 0 ? (
-                    <span className='text-muted-foreground'>
-                      {downloadProgress.total > 0
-                        ? `${formatFileSize(downloadProgress.loaded)} / ${formatFileSize(downloadProgress.total)}`
-                        : formatFileSize(downloadProgress.loaded)}
-                    </span>
-                  ) : undefined}
-                </div>
-                <Progress
-                  value={
-                    downloadProgress.total > 0 && downloadProgress.loaded > 0
-                      ? (downloadProgress.loaded / downloadProgress.total) * 100
-                      : downloadProgress.loaded > 0
-                        ? undefined
-                        : 0
-                  }
-                  className='h-2'
-                />
-              </div>
-
-              {/* Extracting */}
-              {(gitHubState.matches('downloading') || gitHubState.matches('creating')) &&
-              downloadProgress.loaded > 0 ? (
-                <div className='space-y-2'>
-                  <div className='flex items-center justify-between text-sm'>
-                    <span className='flex items-center gap-2 font-medium'>
-                      {gitHubState.matches('creating') ? (
-                        '✓ Extracted'
-                      ) : (
-                        <>
-                          <Loader />
-                          <span>Extracting files...</span>
-                        </>
-                      )}
-                    </span>
-                    {gitHubExtractProgress.total > 0 ? (
-                      <span className='text-muted-foreground'>
-                        {gitHubExtractProgress.processed} / {gitHubExtractProgress.total} files
-                      </span>
-                    ) : undefined}
-                  </div>
-                  <Progress
-                    value={
-                      gitHubExtractProgress.total > 0
-                        ? (gitHubExtractProgress.processed / gitHubExtractProgress.total) * 100
-                        : 0
-                    }
-                    className='h-2'
-                  />
-                </div>
-              ) : undefined}
-
-              {/* Creating */}
-              {gitHubState.matches('creating') ? (
-                <div className='space-y-2'>
-                  <div className='flex items-center justify-between text-sm'>
-                    <span className='flex items-center gap-2 font-medium'>
-                      <Loader />
-                      <span>Creating project...</span>
-                    </span>
-                  </div>
-                  <Progress value={100} className='h-2' />
-                </div>
-              ) : undefined}
-
-              {/* Cancel Button - show during download/extract only */}
-              {gitHubState.matches('downloading') ? (
-                <Button
-                  variant='outline'
-                  className='w-full'
-                  onClick={() => {
-                    gitHubActorRef.send({ type: 'cancelDownload' });
-                  }}
-                >
-                  <XCircle className='mr-2 size-4' />
-                  Cancel Import
-                </Button>
-              ) : undefined}
-            </div>
-          </div>
-        </div>
+        <ImportProcessingView
+          title={`${repoOwner}/${repoName}${selectedBranch && selectedBranch !== 'main' ? ` @ ${selectedBranch}` : ''}`}
+          source='github'
+          phase={
+            gitHubState.matches('creating') || gitHubState.matches('success')
+              ? 'create'
+              : gitHubExtractProgress.total > 0
+                ? 'extract'
+                : 'download'
+          }
+          isComplete={gitHubState.matches('success')}
+          downloadProgress={downloadProgress}
+          progress={gitHubExtractProgress}
+          onCancel={
+            gitHubState.matches('downloading')
+              ? () => {
+                  gitHubActorRef.send({ type: 'cancelDownload' });
+                }
+              : undefined
+          }
+        />
       );
     }
   }

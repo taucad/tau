@@ -35,7 +35,7 @@ export function ModelSettings(): React.JSX.Element {
         onChange={(event) => {
           setSearch(event.target.value);
         }}
-        placeholder='Search models...'
+        placeholder='Search models…'
       />
 
       <div className='flex flex-col gap-2'>

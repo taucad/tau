@@ -35,7 +35,7 @@ async function openSeededProject(): Promise<void> {
     const searchButton = selectors.getByRole('button', { name: /Search/u });
     await target.expectVisible(searchButton);
     await target.click(searchButton);
-    const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions...');
+    const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
     await target.expectVisible(commandSearch);
     await target.fill(commandSearch, 'Open files');
     await target.click(selectors.getByText('Open files', { exact: true }));
@@ -401,7 +401,7 @@ test.describe('project file tree', () => {
     await expandPath('public/models');
     await target.expectVisible(treeItem('public/models/honeycomb.js'));
 
-    const searchInput = filesPane().getByPlaceholder('Filter files...');
+    const searchInput = filesPane().getByPlaceholder('Filter files…');
     await target.fill(searchInput, 'strainer');
     await target.press(searchInput, 'Enter');
     await expandPath('public/models/nested');

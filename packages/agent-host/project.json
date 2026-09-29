@@ -5,11 +5,23 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:package"],
   "targets": {
+    "formal": {},
+    "formal:lean": {},
+    "formal:logs": {},
+    "formal:nightly": {
+      "options": {
+        "command": "vitest run --root packages/agent-host src/log/chat-ledger.differential.test.ts && node tools/formal/src/cli.ts nightly packages/agent-host && vitest run --root packages/agent-host src/host/chat-run.conformance.test.ts src/launchers/leadership/leadership.machine.conformance.test.ts",
+        "env": {
+          "FORMAL_FRESH_TRACES": "20000",
+          "FORMAL_SIMULATED": "out/test-results/formal/packages/agent-host/simulated"
+        }
+      }
+    },
     "build": {
       "executor": "nx:run-commands",
       "dependsOn": ["^build"],
       "options": {
-        "command": "tsdown --config-loader=tsx",
+        "command": "tsdown",
         "cwd": "{projectRoot}"
       }
     },
@@ -20,7 +32,7 @@
       },
       "cache": false
     },
-    "test:browser": {
+    "test:e2e": {
       "command": "vitest run --config vitest.browser.config.ts",
       "options": {
         "cwd": "{projectRoot}"

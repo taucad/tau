@@ -269,6 +269,7 @@ function mockProjectForExplorer({
     mainEntryPath,
     editorRef,
     viewGraphics,
+    viewRecords: new Map(Object.entries(viewSettings)),
     geometryUnits: new Map(geometryUnitFiles.map((entryPath) => [entryPath, createStaticActor({})])),
   });
 }
@@ -302,12 +303,29 @@ beforeEach(() => {
 });
 
 describe('ChatExplorerTree', () => {
+  it('keeps a restored hidden viewer file in the model list before its CAD unit starts', () => {
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: {
+        mainView: { entryPath: 'src/main.ts' },
+        hiddenView: { entryPath: 'src/hidden.ts' },
+      },
+      viewGraphics: new Map(),
+    });
+
+    renderExplorerTree();
+
+    expect(screen.getByRole('button', { name: 'src/hidden.ts' })).toBeInTheDocument();
+    expect(screen.getByTestId('model-pane-src/hidden.ts')).toBeInTheDocument();
+  });
+
   it('should render the empty project state through PanelEmptyState', () => {
     mocks.useProject.mockReturnValue(null);
 
     renderExplorerTree();
 
-    expect(screen.getByRole('searchbox', { name: 'Filter parts' })).toHaveAttribute('placeholder', 'Filter parts...');
+    expect(screen.getByRole('searchbox', { name: 'Filter parts' })).toHaveAttribute('placeholder', 'Filter parts…');
     expect(screen.getByText('No model components available').closest('[data-slot="panel-empty-state"]')).toBeTruthy();
   });
 

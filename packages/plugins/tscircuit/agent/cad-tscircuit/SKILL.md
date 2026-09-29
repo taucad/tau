@@ -20,20 +20,20 @@ description: Guides tscircuit TSX electronics authoring in main.tsx. Use when cr
 
 ```tsx
 export default () => (
-  <board width="30mm" height="20mm">
+  <board width='30mm' height='20mm'>
     <chip
-      name="U1"
-      footprint="soic8"
+      name='U1'
+      footprint='soic8'
       pcbX={0}
       pcbY={0}
       pinLabels={{ pin1: 'VCC', pin4: 'GND', pin8: 'OUT' }}
       connections={{ VCC: 'net.VCC', GND: 'net.GND' }}
     />
-    <resistor name="R1" resistance="10k" footprint="0402" pcbX={-8} pcbY={4} />
-    <led name="LED1" color="red" footprint="0603" pcbX={8} pcbY={4} />
-    <trace from=".U1 > .OUT" to=".R1 > .pin1" />
-    <trace from=".R1 > .pin2" to=".LED1 > .anode" />
-    <trace from=".LED1 > .cathode" to="net.GND" />
+    <resistor name='R1' resistance='10k' footprint='0402' pcbX={-8} pcbY={4} />
+    <led name='LED1' color='red' footprint='0603' pcbX={8} pcbY={4} />
+    <trace from='.U1 > .OUT' to='.R1 > .pin1' />
+    <trace from='.R1 > .pin2' to='.LED1 > .anode' />
+    <trace from='.LED1 > .cathode' to='net.GND' />
   </board>
 );
 ```

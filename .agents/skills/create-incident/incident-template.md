@@ -10,18 +10,18 @@ sections in this order and do not add or rename them.
 ---
 title: 'API returns 503 after deploy'
 description: 'Every production API request failed for 14 minutes after a deploy shipped an incompatible tariff.'
-state: open                 # open | mitigated | resolved | closed
-severity: SEV2              # SEV1 | SEV2 | SEV3 | drill
+state: open # open | mitigated | resolved | closed
+severity: SEV2 # SEV1 | SEV2 | SEV3 | drill
 created: '2026-10-03'
 updated: '2026-10-03'
 environments: [prod-us]
-started_at: '2026-10-03T21:04Z'    # when impact began, best known
+started_at: '2026-10-03T21:04Z' # when impact began, best known
 detected_at: '2026-10-03T21:09Z'
-mitigated_at: ''                   # impact stopped
-resolved_at: ''                    # cause fixed
-services:                          # handbook service pages involved; [] when none exists yet
+mitigated_at: '' # impact stopped
+resolved_at: '' # cause fixed
+services: # handbook service pages involved; [] when none exists yet
   - docs/handbooks/cloud/system/services/api.md
-playbooks:                         # playbooks actually used; [] when none exists yet
+playbooks: # playbooks actually used; [] when none exists yet
   - docs/handbooks/cloud/playbooks/tariff-incompatible.md
 ---
 
@@ -64,9 +64,9 @@ playbooks:                         # playbooks actually used; [] when none exist
 
 ## Follow-ups
 
-| Action | Owner | Destination | State |
-| --- | --- | --- | --- |
-|  |  | handbook page / go-live checklist row / issue / research document | open |
+| Action | Owner | Destination                                                       | State |
+| ------ | ----- | ----------------------------------------------------------------- | ----- |
+|        |       | handbook page / go-live checklist row / issue / research document | open  |
 
 ## Handbook changes made
 
@@ -86,15 +86,15 @@ everything else goes in the **Incidents** table. The two tables have different c
 | [2026-10-03-api-503-after-deploy](2026-10-03-api-503-after-deploy/incident.md) | SEV2 | resolved | 2026-10-03T21:04Z | 14m | All production API requests failed | 2 open |
 ```
 
-| Column | Content |
-| --- | --- |
-| Incident | Relative link to the record, titled with the directory name |
-| Severity | `SEV1` · `SEV2` · `SEV3` |
-| State | `open` · `mitigated` · `resolved` · `closed` |
-| Started (UTC) | `started_at`, best known |
-| To mitigate | `mitigated_at` minus `started_at`, or `—` while open |
-| Customer impact | One line, no more |
-| Open follow-ups | Count of Follow-ups rows not in state `done`, or `none` |
+| Column          | Content                                                     |
+| --------------- | ----------------------------------------------------------- |
+| Incident        | Relative link to the record, titled with the directory name |
+| Severity        | `SEV1` · `SEV2` · `SEV3`                                    |
+| State           | `open` · `mitigated` · `resolved` · `closed`                |
+| Started (UTC)   | `started_at`, best known                                    |
+| To mitigate     | `mitigated_at` minus `started_at`, or `—` while open        |
+| Customer impact | One line, no more                                           |
+| Open follow-ups | Count of Follow-ups rows not in state `done`, or `none`     |
 
 ### Drills table — six columns
 
@@ -102,11 +102,11 @@ everything else goes in the **Incidents** table. The two tables have different c
 | [2026-10-05-drill-redis-loss](2026-10-05-drill-redis-loss/incident.md) | Tabletop: production Redis lost to a supplier maintenance window | closed | 2026-10-05T02:10Z | Yes, unaided — triage routed to the playbook in one read and the remedy was reached | 13 open |
 ```
 
-| Column | Content |
-| --- | --- |
-| Drill | Relative link to the record, titled with the directory name |
-| Scenario | The scenario as it was given, one line. No severity column: every row here is `severity: drill` |
-| State | `open` · `mitigated` · `resolved` · `closed`, as the record's `state` |
-| Run (UTC) | When the drill was run — its `started_at` |
-| Reached the right remedy | `Yes` · `Yes, partly` · `No`, then the one thing that helped or blocked |
-| Open follow-ups | Count of Follow-ups rows not in state `done`, or `none` |
+| Column                   | Content                                                                                         |
+| ------------------------ | ----------------------------------------------------------------------------------------------- |
+| Drill                    | Relative link to the record, titled with the directory name                                     |
+| Scenario                 | The scenario as it was given, one line. No severity column: every row here is `severity: drill` |
+| State                    | `open` · `mitigated` · `resolved` · `closed`, as the record's `state`                           |
+| Run (UTC)                | When the drill was run — its `started_at`                                                       |
+| Reached the right remedy | `Yes` · `Yes, partly` · `No`, then the one thing that helped or blocked                         |
+| Open follow-ups          | Count of Follow-ups rows not in state `done`, or `none`                                         |

@@ -10,6 +10,7 @@ import { tierMeets } from '#billing-tier.js';
 export const kernelTierRequirements = {
   build123d: 'free',
   picogk: 'free',
+  picovoxel: 'free',
   openscad: 'free',
   replicad: 'free',
   manifold: 'free',

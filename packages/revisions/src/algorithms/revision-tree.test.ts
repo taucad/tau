@@ -9,8 +9,8 @@
  * legs pass through — so it fails closed here.
  */
 
-import { describe, expect, it } from 'vitest';
-import { ImmutableRevisionTree } from '#algorithms/revision-tree.js';
+import { describe, expect, it, vi } from 'vitest';
+import { ImmutableRevisionTree, adoptRevisionTree, revisionTreeFiles } from '#algorithms/revision-tree.js';
 
 describe('ImmutableRevisionTree', () => {
   it('refuses a file whose path is also a directory prefix', () => {
@@ -74,5 +74,39 @@ describe('ImmutableRevisionTree', () => {
       typeof ImmutableRevisionTree
     >[0];
     expect(() => new ImmutableRevisionTree(untrusted)).toThrow(/Unsupported revision file mode/u);
+  });
+
+  it('should share an unchanged record with a tree derived from it, byte for byte and by identity', () => {
+    const base = new ImmutableRevisionTree([
+      ['kept.ts', 'kept\n'],
+      ['edited.ts', 'before\n'],
+    ]);
+    const files = new Map(revisionTreeFiles(base));
+    files.set('edited.ts', { content: new TextEncoder().encode('after\n'), mode: '100644' });
+
+    const derived = adoptRevisionTree(files);
+
+    expect(revisionTreeFiles(derived).get('kept.ts')).toBe(revisionTreeFiles(base).get('kept.ts'));
+    expect(new TextDecoder().decode(derived.get('edited.ts'))).toBe('after\n');
+    expect(new TextDecoder().decode(base.get('edited.ts'))).toBe('before\n');
+    expect(derived.byteLength).toBe('kept\n'.length + 'after\n'.length);
+  });
+
+  it('should refuse a derived tree that a file and a directory share a path in', () => {
+    const files = new Map(revisionTreeFiles(new ImmutableRevisionTree([['a', 'file\n']])));
+    files.set('a/b.txt', { content: new TextEncoder().encode('nested\n'), mode: '100644' });
+
+    expect(() => adoptRevisionTree(files)).toThrow(/collides/iu);
+  });
+
+  it('should read a tree another copy of this module built, by copying it', async () => {
+    vi.resetModules();
+    const other = await import('#algorithms/revision-tree.js');
+    const foreign = new other.ImmutableRevisionTree([['part.ts', 'export const part = 1;\n']]);
+
+    const files = revisionTreeFiles(foreign);
+
+    expect(new TextDecoder().decode(files.get('part.ts')?.content)).toBe('export const part = 1;\n');
+    expect(adoptRevisionTree(new Map(files)).size).toBe(1);
   });
 });

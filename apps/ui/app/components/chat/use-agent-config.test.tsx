@@ -36,8 +36,17 @@ const session = (
   ...overrides,
 });
 
-const renderConfig = (initial: { sessionData: AcpSessionData | undefined; status: string }) =>
-  renderHook(({ sessionData, status }) => useAgentConfig(sessionData, status), { initialProps: initial });
+const renderConfig = (initial: {
+  sessionData: AcpSessionData | undefined;
+  status: string;
+  discoveredThoughtLevel?: AcpSessionData['configOptions'][number];
+}) =>
+  renderHook(
+    ({ sessionData, status, discoveredThoughtLevel }) => useAgentConfig(sessionData, status, discoveredThoughtLevel),
+    {
+      initialProps: initial,
+    },
+  );
 
 const thoughtValue = (config: ReturnType<typeof useAgentConfig>): string | boolean | undefined => {
   const option = configOptionOf(config, 'thought_level');
@@ -72,6 +81,36 @@ describe('useAgentConfig', () => {
       config: Object.fromEntries([['thought_level', 'high']]),
     });
     expect(thoughtValue(result.current)).toBe('high');
+  });
+
+  it('offers the discovered reasoning before a session, then reads the live session', () => {
+    const discoveredThoughtLevel = thinking('medium');
+    const view = renderConfig({ sessionData: undefined, status: 'ready', discoveredThoughtLevel });
+    expect(thoughtValue(view.result.current)).toBe('medium');
+    act(() => {
+      view.result.current.select('thought_level', 'high');
+    });
+    expect(setActiveExecution).toHaveBeenLastCalledWith({
+      kind: 'acp',
+      hostId: 'origin',
+      agentId: 'codex',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP option IDs retain the provider's wire spelling.
+      config: { thought_level: 'high' },
+    });
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP option IDs retain the provider's wire spelling.
+    execution.current = { kind: 'acp', hostId: 'origin', agentId: 'codex', config: { thought_level: 'high' } };
+    view.rerender({ sessionData: undefined, status: 'ready', discoveredThoughtLevel });
+    expect(thoughtValue(view.result.current)).toBe('high');
+    view.rerender({
+      sessionData: session([thinking('medium', ['medium', 'high', 'max'])]),
+      status: 'ready',
+      discoveredThoughtLevel,
+    });
+    expect(view.result.current.options).toEqual([thinking('medium', ['medium', 'high', 'max'])]);
+    expect(thoughtValue(view.result.current)).toBe('high');
+    view.rerender({ sessionData: session([thinking('medium')]), status: 'submitted', discoveredThoughtLevel });
+    view.rerender({ sessionData: session([thinking('medium')]), status: 'ready', discoveredThoughtLevel });
+    expect(thoughtValue(view.result.current)).toBe('medium');
   });
 
   it('shows the agent-confirmed value instead of a stale requested one', () => {

@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { searchSettings, settingsSections } from '#components/settings/settings-registry.js';
 import { featureFlagNames } from '#flags/flag.constants.js';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe('searchSettings', () => {
   it('should return no results for an empty query', () => {
@@ -61,6 +65,33 @@ describe('searchSettings', () => {
 
     expect(featureFlagIds).toEqual(featureFlagNames.map((flag) => `flag-${flag}`));
     expect(new Set(entries.map(({ id }) => id)).size).toBe(entries.length);
+  });
+
+  it('should find Machines by the parts and print options its machine details show on desktop', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    vi.resetModules();
+    const desktop = await import('#components/settings/settings-registry.js');
+
+    for (const query of [
+      'firmware',
+      'nozzle',
+      'build volume',
+      'demo speed',
+      'enclosure',
+      'kinematics',
+      'bed plate',
+      'chamber fan',
+      'ams filament',
+      'camera',
+      'lan mode',
+      'speed profile',
+      'slicing',
+      'bed leveling',
+      'flow calibration',
+      'timelapse',
+    ]) {
+      expect(desktop.searchSettings(query).flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('machines');
+    }
   });
 
   it('should keep API keys out of navigation and search', () => {

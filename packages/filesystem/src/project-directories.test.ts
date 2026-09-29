@@ -155,43 +155,126 @@ describe('WorkspaceFileService', () => {
         expect(decoder.decode(await provider.readFile('identified/tau.json'))).toBe(JSON.stringify(identified));
       });
 
-      it('refuses a manifest whose damage is not confined to its id', async () => {
+      it('adopts the salvaged declaration when other fields are damaged too', async () => {
         const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
-        const broken = { ...adoptable, id: 'copied-folder', assets: { main: { entryPath: '../escape.ts' } } };
-        await writeRaw(provider, 'broken', broken);
-        const locator = await locatorFor('broken');
+        await writeRaw(provider, 'broken', {
+          ...adoptable,
+          id: 'copied-folder',
+          assets: { main: { entryPath: '../escape.ts' } },
+          extra: true,
+        });
 
-        await expect(service.adoptProjectDirectory(locator)).rejects.toThrow(TypeError);
-        expect(decoder.decode(await provider.readFile('broken/tau.json'))).toBe(JSON.stringify(broken));
+        const adopted = await service.adoptProjectDirectory(await locatorFor('broken'));
+
+        expect(adopted).toEqual({ ...adoptable, id: adopted.id, assets: { main: { entryPath: 'main.ts' } } });
+        expect(await provider.readFile('broken/tau.json')).toEqual(serializeProjectManifest(adopted));
+      });
+
+      it('restores the identity the directory route remembers', async () => {
+        const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+        const remembered = 'proj_mmmmmmmmmmmmmmmmmmmmm';
+        await writeRaw(provider, 'dropped', adoptable);
+
+        const adopted = await service.adoptProjectDirectory(await locatorFor('dropped'), { id: remembered });
+
+        expect(adopted).toEqual({ ...adoptable, id: remembered });
+        expect(await service.listProjectManifests()).toMatchObject({
+          entries: [{ status: 'valid', manifest: { id: remembered } }],
+        });
+      });
+
+      it('refuses a malformed restored identity or a foreign schema without writing', async () => {
+        const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+        await writeRaw(provider, 'dropped', adoptable);
+        const locator = await locatorFor('dropped');
+        await expect(service.adoptProjectDirectory(locator, { id: 'not-an-id' })).rejects.toThrow(TypeError);
+
+        const foreign = { ...adoptable, $schema: 'https://tau.new/schemas/tau-schema-v2.json' };
+        await writeRaw(provider, 'foreign', foreign);
+        await expect(service.adoptProjectDirectory(await locatorFor('foreign'))).rejects.toThrow(TypeError);
+        expect(decoder.decode(await provider.readFile('foreign/tau.json'))).toBe(JSON.stringify(foreign));
+        expect(decoder.decode(await provider.readFile('dropped/tau.json'))).toBe(JSON.stringify(adoptable));
+      });
+
+      // A directory that has held Tau state never vanishes because its manifest did (blueprint F10).
+      it('surfaces a directory that lost tau.json but holds Tau state, and adopts it', async () => {
+        const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+        await provider.mkdir('lost/.tau/chats', { recursive: true });
+        await provider.writeFile('lost/main.scad', encoder.encode('cube(10);'));
+        await provider.mkdir('plain-folder');
+        await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+
+        const { entries } = await service.listProjectManifests();
+        expect(entries).toEqual([
+          {
+            status: 'adoption-required',
+            /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest types asymmetric matchers as `any`. */
+            locator: expect.objectContaining({ relativeDirectory: 'lost' }),
+            issue: { code: 'manifest-missing' },
+            manifest: {
+              $schema: projectManifestSchemaUrl,
+              name: 'lost',
+              description: '',
+              tags: [],
+              assets: { main: { entryPath: 'main.scad' } },
+            },
+          },
+        ]);
+
+        const adopted = await service.adoptProjectDirectory(entries[0]!.locator);
+        expect(adopted).toMatchObject({ name: 'lost', assets: { main: { entryPath: 'main.scad' } } });
+        expect(await provider.readFile('lost/tau.json')).toEqual(serializeProjectManifest(adopted));
       });
     });
 
-    it('strictly quarantines unsafe structural and presentation data', async () => {
+    /* Identity routes; the declaration only degrades (blueprint F1, F3). The
+     * unsafe path is never used — the view falls back — and no byte changes. */
+    it('degrades a defective declaration instead of quarantining an identified project', async () => {
       const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
-      const unsafe = {
-        ...projectToManifest(manifestProject('proj_ccccccccccccccccccccc')),
+      const write = async (directory: string, value: unknown): Promise<string> => {
+        const text = JSON.stringify(value);
+        await provider.mkdir(directory);
+        await provider.writeFile(`${directory}/tau.json`, encoder.encode(text));
+        return text;
+      };
+      const unsafe = await write('unsafe', {
+        ...manifestProject('proj_ccccccccccccccccccccc'),
         assets: { main: { entryPath: '../escape.ts' } },
-      };
-      await provider.mkdir('unsafe');
-      await provider.writeFile('unsafe/tau.json', encoder.encode(JSON.stringify(unsafe)));
-      const salvaged = {
-        ...projectToManifest(manifestProject('proj_ddddddddddddddddddddd')),
-        name: 42,
-      };
-      await provider.mkdir('salvaged');
-      await provider.writeFile('salvaged/tau.json', encoder.encode(JSON.stringify(salvaged)));
-      await service.configureProjectRoots({
-        projects: [],
-        roots: [{ backend: 'indexeddb' }],
       });
+      await write('salvaged', { ...manifestProject('proj_ddddddddddddddddddddd'), name: 42 });
+      await write('second-asset', {
+        ...manifestProject('proj_fffffffffffffffffffff'),
+        assets: { main: { entryPath: 'main.ts' }, second: { entryPath: 'second.cs' } },
+      });
+      await write('foreign', {
+        ...manifestProject('proj_ggggggggggggggggggggg'),
+        $schema: 'https://tau.new/schemas/tau-schema-v2.json',
+      });
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
 
       const { entries } = await service.listProjectManifests();
-      expect(entries.find((entry) => entry.locator.relativeDirectory === 'unsafe')).toMatchObject({
-        status: 'invalid',
+      const byDirectory = (directory: string) => entries.find((entry) => entry.locator.relativeDirectory === directory);
+      expect(byDirectory('unsafe')).toMatchObject({
+        status: 'valid',
+        manifest: { id: 'proj_ccccccccccccccccccccc', assets: { main: { entryPath: 'main.ts' } } },
+        issue: { code: 'manifest-invalid' },
       });
-      expect(entries.find((entry) => entry.locator.relativeDirectory === 'salvaged')).toMatchObject({
-        status: 'invalid',
+      expect(byDirectory('salvaged')).toMatchObject({
+        status: 'valid',
+        manifest: { id: 'proj_ddddddddddddddddddddd', name: '' },
+        issue: { code: 'manifest-invalid' },
       });
+      expect(byDirectory('second-asset')).toMatchObject({
+        status: 'valid',
+        manifest: { id: 'proj_fffffffffffffffffffff', assets: { main: { entryPath: 'main.ts' } } },
+        issue: { code: 'manifest-invalid', issues: [{ code: 'unrecognized_keys', keys: ['second'] }] },
+      });
+      // An older reader never reinterprets a newer contract.
+      expect(byDirectory('foreign')).toMatchObject({
+        status: 'invalid',
+        issue: { code: 'manifest-unknown-schema' },
+      });
+      expect(decoder.decode(await provider.readFile('unsafe/tau.json'))).toBe(unsafe);
     });
 
     it('reports one unreadable child directory without discarding the rest of the root', async () => {
@@ -431,6 +514,18 @@ describe('WorkspaceFileService', () => {
       ).resolves.toEqual({ status: 'identity-mismatch', actualProjectId });
 
       expect(await rootProvider.exists(`${directory}/main.ts`)).toBe(true);
+    });
+
+    it('deletes a degraded project whose manifest still carries its identity', async () => {
+      await writePhysicalProject();
+      const manifest = await rootProvider.readFile(`${directory}/tau.json`);
+      const degraded = JSON.parse(decoder.decode(manifest)) as Record<string, unknown>;
+      await rootProvider.writeFile(`${directory}/tau.json`, encoder.encode(JSON.stringify({ ...degraded, extra: 1 })));
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
+      ).resolves.toEqual({ status: 'deleted' });
+      expect(await rootProvider.exists(directory)).toBe(false);
     });
 
     it('preserves a non-empty directory that has no identifiable manifest', async () => {
@@ -721,6 +816,15 @@ describe('WorkspaceFileService', () => {
       await commitProvider.writeFile(`${directory}/tau.json`, encoder.encode('{invalid'));
       await expect(commit()).resolves.toEqual({ status: 'unidentifiable-manifest' });
       expect(decoder.decode(await commitProvider.readFile(`${directory}/keep.txt`))).toBe('keep');
+    });
+
+    it('treats a degraded same-project manifest as committed without rewriting it', async () => {
+      await expect(commit()).resolves.toEqual({ status: 'committed' });
+      const degraded = `${decoder.decode(manifest).trimEnd().slice(0, -1)}, "extra": true }`;
+      await commitProvider.writeFile(`${directory}/tau.json`, encoder.encode(degraded));
+
+      await expect(commit()).resolves.toEqual({ status: 'already-committed' });
+      expect(decoder.decode(await commitProvider.readFile(`${directory}/tau.json`))).toBe(degraded);
     });
 
     it('validates every path before mutating residue', async () => {

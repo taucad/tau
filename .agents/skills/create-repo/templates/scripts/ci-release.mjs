@@ -12,9 +12,17 @@ const platformManifests = existsSync(npmDirectory)
       .filter((entry) => entry.isDirectory() && existsSync(new URL(`./${entry.name}/package.json`, npmDirectory)))
       .map((entry) => `npm/${entry.name}/package.json`)
   : [];
-const RELEASE_FILES = new Set(['CHANGELOG.md', ...platformManifests, 'package.json', 'pnpm-lock.yaml']);
+/** Files every fixed-group release rewrites: the changelog and each package manifest. */
+const RELEASE_FILES = new Set(['CHANGELOG.md', ...platformManifests, 'package.json']);
+/**
+ * A version bump leaves `pnpm-lock.yaml` byte-identical unless a dependency
+ * specifier moved, because the lockfile records no importer version. It is
+ * therefore permitted in a release commit but never required.
+ */
+const ALLOWED_FILES = new Set([...RELEASE_FILES, 'pnpm-lock.yaml']);
 
 export const releaseFiles = [...RELEASE_FILES];
+export const allowedReleaseFiles = [...ALLOWED_FILES];
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -29,7 +37,7 @@ const validateRelease = ({ changedFiles, changelog, packageVersion, subject }) =
   assert(SEMVER.test(packageVersion), `release version is not stable SemVer: ${packageVersion}`);
   for (const file of RELEASE_FILES) assert(changedFiles.includes(file), `release commit must change ${file}`);
   assert(changedFiles.some(isVersionPlan), 'release commit must consume a Version Plan');
-  const unexpected = changedFiles.filter((file) => !RELEASE_FILES.has(file) && !isVersionPlan(file));
+  const unexpected = changedFiles.filter((file) => !ALLOWED_FILES.has(file) && !isVersionPlan(file));
   assert(unexpected.length === 0, `release commit has unexpected files: ${unexpected.join(', ')}`);
   assert(
     changelog
@@ -39,6 +47,13 @@ const validateRelease = ({ changedFiles, changelog, packageVersion, subject }) =
   );
 };
 
+/**
+ * Classify one CI run: what evidence it owes, and whether it may publish.
+ *
+ * Publication has exactly one source: a `push` of an exact release commit to
+ * `refs/heads/main`. A `workflow_dispatch` from any ref is evidence only and
+ * never derives `release`, not even for a release commit on main.
+ */
 export const deriveRelease = ({ event, ref, sha, packageVersion, subject = '', changedFiles = [], changelog = '' }) => {
   assert(SHA.test(sha), 'sha must be 40 lowercase hexadecimal characters');
   assert(SEMVER.test(packageVersion), `package version is not stable SemVer: ${packageVersion}`);
@@ -49,7 +64,9 @@ export const deriveRelease = ({ event, ref, sha, packageVersion, subject = '', c
     return { kind: release ? 'release-pull-request' : 'pull-request', npmPublish: false, version: packageVersion };
   }
 
-  assert(event === 'push' || event === 'workflow_dispatch', `unsupported event: ${event}`);
+  if (event === 'workflow_dispatch') return { kind: 'dispatch', npmPublish: false, version: packageVersion };
+
+  assert(event === 'push', `unsupported event: ${event}`);
   assert(ref === 'refs/heads/main', `publication source must be protected main: ${ref}`);
   if (!release) {
     assert(!subject.startsWith('chore(release): @@CREATE_REPO_slug@@ v'), `malformed release subject: ${subject}`);

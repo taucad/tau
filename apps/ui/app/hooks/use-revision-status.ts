@@ -11,18 +11,18 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { Topic } from '@taucad/events';
-import { sessionEpoch } from '#services/sessions-store.js';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import type {
   GitRemoteCredential,
   PublishDraft,
   RevisionDiffEntry,
+  RevisionDivergence,
   RevisionLogRequest,
   RevisionRow,
   RevisionStatusProjection,
   RevisionTag,
 } from '@taucad/revisions';
-import { branchRegistryMilliseconds } from '@taucad/revisions/branch-machine';
+import type { EditorConflictInput, EditorConflictOutcome } from '@taucad/revisions/revision-effects';
 import type {
   RevisionToast,
   RevisionFileComparison,
@@ -32,12 +32,16 @@ import type {
   WorkerRevisionResponse,
   WorkerRevisionResult,
   BranchCreated,
-  WorkerTurnPlacement,
 } from '#machines/file-manager.worker.revisions.js';
 import { isGithubRemoteUrl, tauRemoteUrl } from '@taucad/revisions';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
 import { useParams } from 'react-router';
-import { revisionUserActor, useAnonymousRevisions, useRevisionSessionUser } from '#lib/revision-actor.js';
+import {
+  revisionUserActor,
+  useAnonymousRevisions,
+  useRevisionSalt,
+  useRevisionSessionUser,
+} from '#lib/revision-actor.js';
 import { deviceId } from '#lib/device-id.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
@@ -61,6 +65,12 @@ export type RevisionClient = Readonly<{
    * credential. Memory only, on both sides (I8).
    */
   remoteCredential: (credential: GitRemoteCredential) => void;
+  /**
+   * Say whether this project is the page's focused one (RV-W5b F12): only the
+   * focused project holds the `revision` long poll. A port frame, kept across
+   * reconnects. Absent on a host-served client, whose polls have no socket cap.
+   */
+  focus?: (focused: boolean) => void;
   subscribe: (listener: () => void) => () => void;
   /** Every settled revision signal this project's root published. */
   subscribeEvents: (listener: (event: WorkerRevisionEvent) => void) => () => void;
@@ -68,6 +78,8 @@ export type RevisionClient = Readonly<{
   subscribeToasts: (listener: (toast: RevisionToast) => void) => () => void;
   /** One branch's history, newest first, each row carrying its `Rev N` (I3). */
   log: (request?: RevisionLogRequest) => Promise<readonly RevisionRow[]>;
+  /** How far `head` and `base` have gone apart, counted by the port without listing either history. */
+  divergence: (head: string, base: string) => Promise<RevisionDivergence>;
   /** Which paths one revision changed, against `from` or its own first parent. */
   diff: (revisionId: string, from?: string) => Promise<readonly RevisionDiffEntry[]>;
   /** Name one revision, or re-point an existing name (S31). */
@@ -86,13 +98,6 @@ export type RevisionClient = Readonly<{
     path: string,
     options?: Readonly<{ from?: string; against?: 'checkout' }>,
   ) => Promise<RevisionFileComparison>;
-  /** Place a turn and wait for its lease. Rejects when it cannot be placed. */
-  admitTurn: (input: {
-    readonly turnId: string;
-    readonly chatId: string;
-    readonly runId: string;
-    readonly checkoutId?: string;
-  }) => Promise<WorkerTurnPlacement>;
   send: (command: WorkerRevisionCommand) => void;
   /**
    * Record what is on disk and wait for the answer (C16, contract §6).
@@ -112,6 +117,15 @@ export type RevisionClient = Readonly<{
    * new branch has to refuse the turn rather than silently run it elsewhere.
    */
   createBranch: (name: string, from?: string) => Promise<BranchCreated>;
+  /**
+   * Record an editor's overlapping edit as a conflicted revision (charter D14).
+   *
+   * Resolves once it is in the graph, so the editor can let go of its text: the
+   * *Needs your decision* card is then the one surface, and it survives a
+   * reload. `unchanged` means the file is back on the bytes the edit was made
+   * from, and the editor saves as usual.
+   */
+  recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
   /**
    * Connect, or do nothing when the connection is already open.
    *
@@ -158,60 +172,22 @@ type ClientState = {
 const clients = new Map<string, ClientState>();
 
 /**
- * Wait for the `branch` child's settlement of one *New branch* (P4).
+ * Read the host's answer to one *New branch* (P4): the checkout the registry made for it.
  *
- * Name-matched on the toast channel, because that is the only correlation the
- * host leg publishes: the child runs one verb at a time and the name is what
- * the person typed. The refusal is matched the same way, and the whole wait is
- * bounded, because the child takes `create` in `idle` only: a dropped one used
- * to leave the chat's send path waiting for a settlement nothing would send,
- * and an unrelated verb's refusal used to settle it instead (finding 1).
- *
- * @param toasts - The client's own toast topic.
+ * @param answer - What the host's `createBranch` answered.
  * @param name - The branch being made.
- * @param ask - Sends the verb, once the listeners are attached.
- * @returns The checkout the registry made for it.
+ * @returns The branch and its checkout.
  */
-const awaitBranchCreated = async (
-  toasts: Topic<RevisionToast>,
-  name: string,
-  ask: () => void,
-): Promise<BranchCreated> => {
-  const created = Promise.withResolvers<BranchCreated>();
-  const unsubscribe = toasts.subscribe((toast) => {
-    if (toast.type === 'branch' && toast.operation === 'create' && toast.branch === name) {
-      if (toast.checkoutId === undefined || toast.checkoutRoot === undefined) {
-        /* A branch with no checkout named is no placement: `''` used to reach
-         * `Chat.checkoutId` and leave the chat nothing to run on (finding 5). */
-        created.reject(
-          Object.assign(new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', name).description), {
-            code: 'BRANCH_UNPLACED',
-          }),
-        );
-        return;
-      }
-      created.resolve({ branch: name, checkoutId: toast.checkoutId, checkoutRoot: toast.checkoutRoot });
-      return;
-    }
-    /* A host that names neither verb nor branch on its refusal is uncorrelated,
-     * and the bound is what protects this wait from it: reading the absent
-     * fields as this create's own settled it in another verb's words. */
-    if (toast.type === 'error' && toast.subject === 'branch' && toast.operation === 'create' && toast.branch === name) {
-      created.reject(
-        Object.assign(new Error(toast.message), ...(toast.code === undefined ? [] : [{ code: toast.code }])),
-      );
-    }
-  });
-  const bound = globalThis.setTimeout(() => {
-    created.reject(Object.assign(new Error('This project did not answer in time.'), { code: 'BRANCH_UNANSWERED' }));
-  }, branchRegistryMilliseconds * 2);
-  try {
-    ask();
-    return await created.promise;
-  } finally {
-    globalThis.clearTimeout(bound);
-    unsubscribe();
+const branchCreatedOf = (answer: unknown, name: string): BranchCreated => {
+  const { checkoutId, checkoutRoot } = (answer ?? {}) as { checkoutId?: unknown; checkoutRoot?: unknown };
+  if (typeof checkoutId !== 'string' || typeof checkoutRoot !== 'string') {
+    /* A branch with no checkout named is no placement: `''` used to reach
+     * `Chat.checkoutId` and leave the chat nothing to run on (finding 5). */
+    throw Object.assign(new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', { branch: name }).description), {
+      code: 'BRANCH_UNPLACED',
+    });
   }
+  return { branch: name, checkoutId, checkoutRoot };
 };
 
 /** Build the renderer half of a host-owned native revision root. */
@@ -275,24 +251,15 @@ export const createHostRevisionClient = (input: {
         throw staleConnection();
       }
       channel = next;
-      const initial = await next.execute({
-        type: 'revision',
-        request: { command: 'status' },
-      });
+      const initial = await next.revision({ command: 'status' });
       if (generation !== connectionGeneration) {
         throw staleConnection();
-      }
-      if (initial.type !== 'revision') {
-        throw new Error('The host answered a revision request with an agent response.');
       }
       applyStatus(initial.status);
       /* The desktop host keeps this project's root alive across renderer
        * reloads. Reattaching is therefore the open signal that makes the
        * retained scheduler fetch again before the client reads remote work. */
-      await next.execute({
-        type: 'revision',
-        request: { command: 'open' },
-      });
+      await next.revision({ command: 'open' });
       const abort = new AbortController();
       streamAbort = abort;
       // async-iife: bootstrap -- the stream lives for the connection and reports through Topics.
@@ -331,6 +298,11 @@ export const createHostRevisionClient = (input: {
     opening = pending;
     try {
       return await pending;
+    } catch (error) {
+      if (generation !== connectionGeneration) {
+        throw staleConnection();
+      }
+      throw error;
     } finally {
       if (opening === pending) {
         opening = undefined;
@@ -338,20 +310,23 @@ export const createHostRevisionClient = (input: {
     }
   };
   const ask = async (request: JsonValue): Promise<JsonValue> => {
-    const connected = await opened();
-    const response = await connected.execute({ type: 'revision', request });
-    if (response.type !== 'revision') {
-      throw new Error('The host answered a revision request with an agent response.');
+    const generation = connectionGeneration;
+    try {
+      const connected = await opened();
+      const response = await connected.revision(request);
+      if (generation !== connectionGeneration) {
+        throw staleConnection();
+      }
+      applyStatus(response.status);
+      return response.result;
+    } catch (error) {
+      if (generation !== connectionGeneration) {
+        throw staleConnection();
+      }
+      throw error;
     }
-    applyStatus(response.status);
-    return response.result;
   };
   const send = (request: WorkerRevisionCommand): void => {
-    // Only a browser-owned replica adopts host settlements. This client already
-    // reads that host's authoritative revision stream; never echo its heads back.
-    if (request.command === 'adoptHostFinalized') {
-      return;
-    }
     // async-iife: bootstrap -- a machine verb reports its settled state on the revision stream.
     void (async (): Promise<void> => {
       try {
@@ -388,6 +363,9 @@ export const createHostRevisionClient = (input: {
         try {
           await ask({ command: 'remoteCredential', ...credential });
         } catch (error) {
+          if (isStaleConnection(error)) {
+            return;
+          }
           toasts.emit({
             type: 'error',
             subject: 'save',
@@ -413,13 +391,15 @@ export const createHostRevisionClient = (input: {
       return unsubscribe;
     },
     subscribeToasts: (listener) => toasts.subscribe(listener),
-    admitTurn: async () => ({ checkoutId: '', root: '', baseRevisionId: '' }),
     log: async (request) =>
       (await ask({
         command: 'log',
         ...(request?.branch === undefined ? {} : { branch: request.branch }),
         ...(request?.limit === undefined ? {} : { limit: request.limit }),
+        ...(request?.from === undefined ? {} : { from: request.from }),
       })) as unknown as readonly RevisionRow[],
+    divergence: async (head, base) =>
+      (await ask({ command: 'divergence', head, base })) as unknown as RevisionDivergence,
     diff: async (revisionId, from) =>
       (await ask({
         command: 'diff',
@@ -442,12 +422,11 @@ export const createHostRevisionClient = (input: {
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
     },
-    /* The host answers this verb with its projection, not with the checkout, so
-     * the settlement is taken off the same toast stream the pane reads (P4). */
+    recordEditorConflict: async (conflict) =>
+      (await ask({ command: 'recordEditorConflict', ...conflict })) as unknown as EditorConflictOutcome,
+    /* The host answers the verb with the checkout the registry made, or its refusal (B7: an answer, never a bound). */
     createBranch: async (name, from) =>
-      awaitBranchCreated(toasts, name, () => {
-        send({ command: 'createBranch', name, ...(from === undefined ? {} : { from }) });
-      }),
+      branchCreatedOf(await ask({ command: 'createBranch', name, ...(from === undefined ? {} : { from }) }), name),
     open: () => {
       // async-iife: bootstrap -- project lifecycle owns this connection and errors surface as toasts.
       void (async (): Promise<void> => {
@@ -739,6 +718,8 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
    * lifecycle calls once the GitHub credential is minted and queued first. */
   let admitted = false;
   const queued: WorkerRevisionRequest[] = [];
+  /* The page's last word on focus, re-said on every new port: a reopened root starts unfocused. */
+  let focused: boolean | undefined;
   const receive = (generation: number, { data }: MessageEvent<WorkerRevisionResponse>): void => {
     if (generation !== connectionGeneration) {
       return;
@@ -780,16 +761,13 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       receive(generation, event);
     });
     opened.port2.start();
-    /* W19/R5: the frame carries who serves this project's revisions and which
-     * client session is asking (P31, W3c-R4). Both fields had no sender, so
-     * the worker's gate and its per-project authority epoch were inert. */
+    /* W19/R5: the frame carries who serves this project's revisions (P31). */
     input.worker.postMessage(
       {
         type: 'revisionsConnect',
         projectId: input.projectId,
         port: opened.port1,
         hostServesRevisions: isDesktopTarget,
-        sessionEpoch,
       },
       [opened.port1],
     );
@@ -837,6 +815,13 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     remoteCredential: (credential) => {
       post({ command: 'remoteCredential', ...credential });
     },
+    focus: (next) => {
+      focused = next;
+      /* Not queued: `open` says it once on every new port, including the first. */
+      if (admitted) {
+        open().postMessage({ command: 'focus', focused: next } satisfies WorkerRevisionRequest);
+      }
+    },
     subscribe: (listener) => listeners.subscribe(listener),
     subscribeEvents: (listener) => {
       const unsubscribe = events.subscribe(listener);
@@ -854,27 +839,23 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       return unsubscribe;
     },
     subscribeToasts: (listener) => toasts.subscribe(listener),
-    admitTurn: async (placement) => {
-      const result = await ask({ command: 'admitTurn', ...placement });
-      if (result.kind !== 'placement') {
-        /* An empty root used to be manufactured here, and a binding rooted at
-         * `''` ran the turn on the workspace's files instead of the
-         * checkout's (P2). A turn with no placement is refused — in the words
-         * the authority refuses an unrooted one with, because this is the same
-         * refusal one layer down (finding 8). */
-        throw Object.assign(new Error(describeRevisionFailure('turn', 'PLACEMENT_UNROOTED').description), {
-          code: 'PLACEMENT_UNROOTED',
-        });
-      }
-      return result.placement;
-    },
     log: async (request) => {
       const result = await ask({
         command: 'log',
         ...(request?.branch === undefined ? {} : { branch: request.branch }),
         ...(request?.limit === undefined ? {} : { limit: request.limit }),
+        ...(request?.from === undefined ? {} : { from: request.from }),
       });
       return result.kind === 'log' ? result.rows : [];
+    },
+    divergence: async (head, base) => {
+      const result = await ask({ command: 'divergence', head, base });
+      if (result.kind !== 'divergence') {
+        throw Object.assign(new Error('The revision root answered a divergence with something else.'), {
+          code: 'INVALID_REVISION_RESPONSE',
+        });
+      }
+      return result.divergence;
     },
     diff: async (revisionId, from) => {
       const result = await ask({
@@ -915,11 +896,21 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       const { kind: _kind, ...created } = result;
       return created;
     },
+    recordEditorConflict: async (conflict) => {
+      const result = await ask({ command: 'recordEditorConflict', ...conflict });
+      if (result.kind !== 'editorConflict') {
+        throw new Error('The revision root answered an editor conflict with something else.');
+      }
+      return result.outcome;
+    },
     open: () => {
       admitted = true;
       const port = open();
       for (const request of queued.splice(0)) {
         port.postMessage(request);
+      }
+      if (focused !== undefined) {
+        port.postMessage({ command: 'focus', focused } satisfies WorkerRevisionRequest);
       }
     },
     close: () => {
@@ -1110,12 +1101,17 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
    * identity.
    */
   const anonymous = useAnonymousRevisions(workspace ?? '');
+  /* EQ10 (a): the pseudonym derives from the account's salt for this
+   * workspace, served by the API and never written to the tree; fetched on
+   * sign-in whatever the preference, so it is ready before anonymity is. */
+  const salt = useRevisionSalt({ workspace: workspace ?? '', userId: sessionUser?.id });
   /*
    * Which device this document is (W13, W17).
    *
    * Sent from the page because the id lives in `localStorage`, which the worker
-   * cannot read. It names a chat log segment, so a worker that was never told
-   * writes no chat refs rather than guessing an id two profiles could share.
+   * cannot read. Records name a random record device instead; this id decides
+   * whether chat refs are recorded at all — a worker never told writes none —
+   * and counts as own for a segment written before record devices existed.
    */
   useEffect(() => {
     if (client === undefined) {
@@ -1199,6 +1195,7 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
           workspace: workspace ?? '',
           user: sessionUser,
           anonymous,
+          salt,
           commitIdentity: githubProjectBinding.get(projectId)?.author,
         }),
       });
@@ -1206,7 +1203,7 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
     send();
     /* Linking or unlinking GitHub changes who the next revision is authored as (D33). */
     return githubProjectBinding.subscribe(send);
-  }, [client, projectId, workspace, sessionUser, anonymous]);
+  }, [client, projectId, workspace, sessionUser, anonymous, salt]);
   return client;
 };
 
@@ -1238,8 +1235,10 @@ export const useRevisionStatus = (): RevisionStatusProjection | undefined =>
 /** The verbs the page sends to its revision root. @public */
 export type RevisionCommands = Readonly<{
   restore: (revisionId: string) => void;
-  returnToLatest: () => void;
+  /** *Undo restore* (D2). */
   undo: () => void;
+  /** *Undo*: reverse this device's newest operation on the line (D15). */
+  undoOperation: () => void;
   confirm: () => void;
   cancel: () => void;
   switchTo: (branch: string) => void;
@@ -1315,8 +1314,9 @@ export type RevisionCommands = Readonly<{
    * The API origin goes with it for the same reason it goes with `connectRemote`:
    * publishing pushes to this project's Tau Cloud repository and records the
    * publication there, and only the page knows which API it is signed in to.
+   * `revisionId` opens it on an older revision (a History row's *Publish*).
    */
-  publishProject: (tag?: string) => void;
+  publishProject: (tag?: string, revisionId?: string) => void;
   /** Publish the chosen name, with everything only a person decides. */
   confirmPublish: (draft: PublishDraft) => void;
   cancelPublish: () => void;
@@ -1339,8 +1339,8 @@ export const useRevisionCommands = (): RevisionCommands => {
   return useMemo(
     () => ({
       restore: (revisionId: string) => client?.send({ command: 'restore', revisionId }),
-      returnToLatest: () => client?.send({ command: 'returnToLatest' }),
       undo: () => client?.send({ command: 'undo' }),
+      undoOperation: () => client?.send({ command: 'undoOperation' }),
       confirm: () => client?.send({ command: 'confirm' }),
       cancel: () => client?.send({ command: 'cancel' }),
       switchTo: (branch: string) => client?.send({ command: 'switch', branch }),
@@ -1492,7 +1492,7 @@ export const useRevisionCommands = (): RevisionCommands => {
       saveRevision: async (trigger?: 'save' | 'hidden' | 'close') => client?.saveRevision(trigger),
       tag: async (input) => client?.tag(input),
       deleteTag: async (name) => client?.deleteTag(name),
-      publishProject: (tag?: string) => {
+      publishProject: (tag?: string, revisionId?: string) => {
         /* The origin rides the command itself: it is how the worker names this
          * project's Tau Cloud repository and reaches the publications route
          * (I8 — no credential travels, the session is a cookie the worker's own
@@ -1503,6 +1503,7 @@ export const useRevisionCommands = (): RevisionCommands => {
           command: 'publishProject',
           apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
           ...(tag === undefined ? {} : { tag }),
+          ...(revisionId === undefined ? {} : { revisionId }),
         });
       },
       confirmPublish: (draft) => client?.send({ command: 'confirmPublish', draft }),

@@ -5,26 +5,31 @@ import {
   GoneException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { and, desc, eq, isNull, lt } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, lt } from 'drizzle-orm';
 import type { WebSocket } from 'ws';
 import { z } from 'zod';
 
 import type { Environment } from '#config/environment.config.js';
 import { DatabaseService } from '#database/database.service.js';
-import { agentRun, hostDevice } from '#database/schema.js';
+import { agentRun, hostDevice, project, user } from '#database/schema.js';
 import { RedisService } from '#redis/redis.service.js';
 import { relayHostFramesThroughRedis } from '#api/hosts/host-frame-relay.js';
+import type { DistributedRelayHandle } from '#api/hosts/host-frame-relay.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import {
   cloudHostProvisionerToken,
   cloudHostRefusalReason,
   createConfiguredCloudHostProvisioner,
 } from '#api/hosts/cloud-host.provisioner.js';
 import type { CloudHostProvisioner } from '#api/hosts/cloud-host.provisioner.js';
+import { hashHostGitCredential, mintHostGitCredential } from '#api/hosts/host-git-credential.js';
 import { hostCapabilitiesSchema, hostControlMessageSchema } from '#api/hosts/hosts.dto.js';
 import type { HostCapabilities, HostControlMessage } from '#api/hosts/hosts.dto.js';
 
@@ -118,10 +123,10 @@ type OnlineDevice = {
 };
 
 /**
- * A device row as its owner sees it: the credential hash never leaves this
+ * A device row as its owner sees it: the credential hashes never leave this
  * service, and everything a live control connection advertises is merged in.
  */
-type HostDeviceListing = Omit<typeof hostDevice.$inferSelect, 'credentialHash'> & {
+type HostDeviceListing = Omit<typeof hostDevice.$inferSelect, 'credentialHash' | 'gitCredentialHash'> & {
   readonly online: boolean;
   readonly runtimeVersion: string | undefined;
   readonly capacity: number | undefined;
@@ -195,8 +200,11 @@ const randomUserCode = (): string => {
 @Injectable()
 export class HostsService implements OnModuleDestroy {
   private readonly onlineDevices = new Map<string, OnlineDevice>();
-  private readonly relayHandles = new Map<WebSocket, { close(): void }>();
+  private readonly relayHandles = new Map<WebSocket, DistributedRelayHandle>();
   private readonly sessionSockets = new Map<string, SessionRelay>();
+  /** Devices whose control socket this process closed when it began to stop. */
+  private readonly departedAtStop = new Set<string>();
+  readonly #logger = new Logger(HostsService.name);
 
   public constructor(
     private readonly databaseService: DatabaseService,
@@ -207,23 +215,21 @@ export class HostsService implements OnModuleDestroy {
      * production rather than a second concept to keep in sync. */
     @Inject(cloudHostProvisionerToken)
     private readonly cloudHostProvisioner: CloudHostProvisioner = createConfiguredCloudHostProvisioner(),
-  ) {}
+    // oxlint-disable-next-line new-cap -- NestJS decorator
+    @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
+  ) {
+    this.shutdown.signal.addEventListener(
+      'abort',
+      () => {
+        this.departAll();
+      },
+      { once: true },
+    );
+  }
 
+  /** The backstop for a close that skipped the stop signal (tests, dev). */
   public onModuleDestroy(): void {
-    for (const device of this.onlineDevices.values()) {
-      clearInterval(device.presenceTimer);
-      device.subscriber.disconnect();
-      device.socket.close(1001, 'service stopping');
-    }
-    for (const relay of this.sessionSockets.values()) {
-      clearInterval(relay.timer);
-      for (const socket of relay.sockets) {
-        socket.close(1001, 'service stopping');
-      }
-    }
-    for (const relay of this.relayHandles.values()) {
-      relay.close();
-    }
+    this.departAll();
     this.onlineDevices.clear();
     this.relayHandles.clear();
     this.sessionSockets.clear();
@@ -298,7 +304,9 @@ export class HostsService implements OnModuleDestroy {
     }
   }
 
-  public async exchangePairing(deviceCode: string): Promise<{ deviceId: string; credential: string } | undefined> {
+  public async exchangePairing(
+    deviceCode: string,
+  ): Promise<{ deviceId: string; credential: string; accountId: string } | undefined> {
     const deviceCodeHash = hashSecret(deviceCode);
     const raw = await this.redisService.client.get(pairingKey(deviceCodeHash));
     if (!raw) {
@@ -334,7 +342,8 @@ export class HostsService implements OnModuleDestroy {
       label: approved.deviceLabel,
       credentialHash: hashSecret(credential),
     });
-    return { deviceId, credential };
+    /* The account the device acts for: the daemon names it as its funded principal (GI-Q6, W6 RH-S6). */
+    return { deviceId, credential, accountId: approved.approvedUserId };
   }
 
   /**
@@ -346,12 +355,21 @@ export class HostsService implements OnModuleDestroy {
    * downstream — the control connection, the offer, the agent channel, the
    * files-first log — is the code a laptop daemon already runs.
    *
-   * The credential is handed to the provisioner and to nobody else. It is not in
-   * the return value and cannot be recovered from the row, which stores only its
-   * hash; a lost cloud host is revoked and provisioned again.
+   * The credentials are handed to the provisioner and to nobody else. They are
+   * not in the return value and cannot be recovered from the row, which stores
+   * only their hashes; a lost cloud host is revoked and provisioned again.
+   *
+   * Two credentials, because a cloud host runs model-authored code (I10): the
+   * device credential opens the control socket and the model gateway, and the
+   * push credential minted beside it opens this project's git routes and
+   * nothing else (D21). Revoking the row kills both.
    *
    * @param options - The owner and the project whose host this is.
    * @returns The device the caller can now place turns on.
+   * @throws `ConflictException({ code: 'PROJECT_NOT_ON_TAU_CLOUD', message })` when
+   * the caller owns no project of this id on Tau Cloud: the host clones the
+   * project's Hosted Remote at start, and its push credential cannot register
+   * one, so a container provisioned first would only restart on a `404`.
    * @throws `ServiceUnavailableException({ code: 'CLOUD_HOST_UNAVAILABLE', message })`
    * when the provisioner refuses or is unreachable; the half-created device is
    * revoked first.
@@ -361,11 +379,32 @@ export class HostsService implements OnModuleDestroy {
     readonly label: string;
     readonly state: 'existing' | 'provisioned';
   }> {
+    /* Registration *is* this row (P51, D1): a registered project clones — empty
+     * until its first push — and anything else is a `404` the host can only
+     * restart on. Owner only: a cloud host is a device of the owner (EQ5). */
+    const [registered] = await this.databaseService.database
+      .select({ id: project.id, ownerName: user.name })
+      .from(project)
+      .innerJoin(user, eq(user.id, project.ownerId))
+      .where(and(eq(project.id, options.projectId), eq(project.ownerId, options.userId)))
+      .limit(1);
+    if (registered === undefined) {
+      throw new ConflictException({
+        code: 'PROJECT_NOT_ON_TAU_CLOUD',
+        message: 'Back this project up to Tau Cloud before running its agent there.',
+      });
+    }
     const existing = await this.findCloudHost(options.userId, options.projectId);
-    if (existing) {
+    if (existing?.gitCredentialHash === null) {
+      /* Provisioned before the push credential existed (RV-W10 F5): its
+       * container can never clone or push, so answering `existing` would pin
+       * the owner to a host that restart-loops. Retire it and start over. */
+      await this.revokeDevice(existing.id, options.userId);
+    } else if (existing) {
       return { deviceId: existing.id, label: existing.label, state: 'existing' };
     }
     const credential = randomBytes(32).toString('base64url');
+    const gitCredential = mintHostGitCredential();
     const deviceId = newDeviceId();
     try {
       await this.databaseService.database.insert(hostDevice).values({
@@ -373,6 +412,7 @@ export class HostsService implements OnModuleDestroy {
         ownerId: options.userId,
         label: cloudHostLabel,
         credentialHash: hashSecret(credential),
+        gitCredentialHash: hashHostGitCredential(gitCredential),
         cloudProjectId: options.projectId,
       });
     } catch (error) {
@@ -389,7 +429,9 @@ export class HostsService implements OnModuleDestroy {
       await this.cloudHostProvisioner.start({
         deviceId,
         credential,
+        gitCredential,
         ownerId: options.userId,
+        ownerName: registered.ownerName,
         projectId: options.projectId,
         apiUrl: this.configService.get('TAU_API_URL', { infer: true }),
       });
@@ -578,7 +620,7 @@ export class HostsService implements OnModuleDestroy {
       .where(and(eq(hostDevice.ownerId, userId), isNull(hostDevice.revokedAt)))
       .orderBy(desc(hostDevice.createdAt));
     return Promise.all(
-      devices.map(async ({ credentialHash: _credentialHash, ...device }) => {
+      devices.map(async ({ credentialHash: _credentialHash, gitCredentialHash: _gitCredentialHash, ...device }) => {
         const raw = await this.redisService.client.get(onlineDeviceKey(device.id));
         const parsed = raw ? onlineDeviceStateSchema.safeParse(JSON.parse(raw)) : undefined;
         const online = parsed?.success ? parsed.data : undefined;
@@ -606,6 +648,37 @@ export class HostsService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Stop and revoke every cloud host an account owns, ahead of the account's
+   * deletion (W10 a4). A container holds a clone of the owner's project, so it
+   * must not outlive the account; the rows themselves go with the cascade.
+   *
+   * Each host goes through {@link revokeDevice}, the same path as the owner's
+   * own *Remove*. A host that cannot be stopped is logged and skipped rather
+   * than thrown: a stuck container must never block an account deletion, and
+   * `revokedAt` is written before the stop, so its credentials are dead
+   * whatever happens to the container (the orphan sweep is a go-live item).
+   *
+   * @param ownerId - The account being deleted.
+   */
+  public async retireCloudHosts(ownerId: string): Promise<void> {
+    const hosts = await this.databaseService.database
+      .select({ id: hostDevice.id })
+      .from(hostDevice)
+      .where(and(eq(hostDevice.ownerId, ownerId), isNotNull(hostDevice.cloudProjectId), isNull(hostDevice.revokedAt)));
+    for (const host of hosts) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one account's cloud hosts, one per project; sequential keeps the Docker daemon calm.
+        await this.revokeDevice(host.id, ownerId);
+      } catch (error) {
+        this.#logger.warn(
+          { err: error, deviceId: host.id },
+          'A cloud host could not be stopped during account deletion',
+        );
+      }
+    }
+  }
+
   public async revokeDevice(deviceId: string, userId: string): Promise<void> {
     const updated = await this.databaseService.database
       .update(hostDevice)
@@ -617,7 +690,9 @@ export class HostsService implements OnModuleDestroy {
     }
     /* A cloud host *is* its container: revoking the credential without stopping
      * it would leave a machine running with nothing to talk to. A paired laptop
-     * has no container and is left alone. */
+     * has no container and is left alone. `revokedAt` is also what kills the
+     * push credential (D21): its next git request resolves to nobody, so a
+     * container that outlives this stop still cannot push. */
     if (updated[0]?.cloudProjectId) {
       await this.cloudHostProvisioner.stop(deviceId);
     }
@@ -738,7 +813,7 @@ export class HostsService implements OnModuleDestroy {
       kind: 'message',
       payload: offer,
     });
-    const outcome = delivered > 0 ? await this.waitForSessionOutcome(sessionId) : undefined;
+    const outcome = delivered > 0 ? await this.waitForSessionOutcome(sessionId, options.deviceId) : undefined;
     if (!outcome?.accepted) {
       await this.deleteSession(sessionId, state);
       throw new ConflictException({ code: outcome?.code ?? 'CHILD_UNAVAILABLE' });
@@ -806,7 +881,7 @@ export class HostsService implements OnModuleDestroy {
 
   private async findCloudHost(userId: string, projectId: string) {
     const rows = await this.databaseService.database
-      .select({ id: hostDevice.id, label: hostDevice.label })
+      .select({ id: hostDevice.id, label: hostDevice.label, gitCredentialHash: hostDevice.gitCredentialHash })
       .from(hostDevice)
       .where(
         and(eq(hostDevice.ownerId, userId), eq(hostDevice.cloudProjectId, projectId), isNull(hostDevice.revokedAt)),
@@ -1002,6 +1077,43 @@ export class HostsService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Tells every socket on this process that it is going, while Redis is still
+   * up: control and relay sockets close with 1012 (Service Restart), so daemons
+   * and browsers reconnect to a Machine that is staying; presence is deleted so
+   * no offer is routed to a connection that is closing; and each relay
+   * publishes its departure, so the peer half on another Machine closes and
+   * frees its session slot rather than waiting on a socket that is gone. The
+   * Redis writes are tracked, not awaited: this runs inside the stop, which must
+   * not wait on I/O before the listener closes. Runs once; later calls find
+   * nothing left to depart.
+   */
+  private departAll(): void {
+    for (const [deviceId, device] of this.onlineDevices) {
+      if (device.socket.readyState !== device.socket.OPEN) {
+        continue;
+      }
+      clearInterval(device.presenceTimer);
+      device.subscriber.disconnect();
+      device.socket.close(1012, 'service restart');
+      this.departedAtStop.add(deviceId);
+      this.shutdown.track(this.deleteControlPresence(deviceId, device.connectionId));
+    }
+    for (const relay of this.sessionSockets.values()) {
+      clearInterval(relay.timer);
+      for (const socket of relay.sockets) {
+        socket.close(1012, 'service restart');
+      }
+    }
+    for (const relay of this.relayHandles.values()) {
+      /* Departure first: `close()` alone marks the relay closed, and the
+         socket's own close event would then find nothing left to publish. Once
+         the publish has started, `close()` only stops the inbound reader. */
+      this.shutdown.track(relay.depart(1012, 'service restart'));
+      relay.close();
+    }
+  }
+
   private async deleteControlPresence(deviceId: string, connectionId: string): Promise<void> {
     await this.redisService.client.eval(
       `local raw = redis.call('GET', KEYS[1])
@@ -1025,9 +1137,13 @@ export class HostsService implements OnModuleDestroy {
    * 5.3 ms, because the answer landed just after a tick.
    *
    * @param sessionId - The offer being waited on.
-   * @returns The outcome, or `undefined` when the offer timed out.
+   * @param deviceId - The daemon the offer went to.
+   * @returns The outcome, or `undefined` when the offer timed out or cannot be answered.
    */
-  private async waitForSessionOutcome(sessionId: string): Promise<z.infer<typeof sessionOutcomeSchema> | undefined> {
+  private async waitForSessionOutcome(
+    sessionId: string,
+    deviceId: string,
+  ): Promise<z.infer<typeof sessionOutcomeSchema> | undefined> {
     const announced = Promise.withResolvers<z.infer<typeof sessionOutcomeSchema>>();
     const subscriber = this.redisService.createDuplicateClient();
     try {
@@ -1042,7 +1158,7 @@ export class HostsService implements OnModuleDestroy {
         await subscriber.connect();
       }
       await subscriber.subscribe(sessionOutcomeChannel(sessionId));
-      return await this.pollSessionOutcome(sessionId, announced.promise);
+      return await this.pollSessionOutcome(sessionId, deviceId, announced.promise);
     } finally {
       subscriber.disconnect();
     }
@@ -1050,10 +1166,16 @@ export class HostsService implements OnModuleDestroy {
 
   private async pollSessionOutcome(
     sessionId: string,
+    deviceId: string,
     announced: Promise<z.infer<typeof sessionOutcomeSchema>>,
   ): Promise<z.infer<typeof sessionOutcomeSchema> | undefined> {
     const deadline = Date.now() + sessionOfferTimeout;
-    while (Date.now() < deadline) {
+    /* A daemon whose control socket this process closed at stop never sees the
+       offer: it went out on that socket's subscription. Give up within a tick
+       rather than hold the drain for the full timeout; the caller's retry lands
+       on the Machine the daemon has reconnected to. A daemon connected
+       elsewhere still answers through Redis, so its offer keeps waiting. */
+    while (Date.now() < deadline && !this.departedAtStop.has(deviceId)) {
       // oxlint-disable-next-line no-await-in-loop -- broker polling is bounded by the offer timeout.
       const raw = await this.redisService.client.getdel(sessionOutcomeKey(sessionId));
       if (raw) {

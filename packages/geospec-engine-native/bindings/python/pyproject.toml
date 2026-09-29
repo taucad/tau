@@ -1,0 +1,55 @@
+[build-system]
+requires = ["maturin==1.15.0"]
+build-backend = "maturin"
+
+[project]
+name = "geospec-engine-native"
+version = "0.0.0"
+requires-python = ">=3.13,<3.15"
+license-files = ["licenses/**/*"]
+
+[project.entry-points.pytest11]
+geospec = "geospec.pytest_plugin"
+
+[tool.maturin]
+bindings = "pyo3"
+python-source = "python"
+python-packages = ["geospec", "geospec_engine_native"]
+exclude = [
+  { path = "python/**/__pycache__/**", format = [
+    "wheel",
+    "sdist",
+  ] },
+  { path = "python/**/*.pyc", format = [
+    "wheel",
+    "sdist",
+  ] },
+  { path = "python/**/*.pyo", format = [
+    "wheel",
+    "sdist",
+  ] },
+  { path = "python/**/.pytest_cache/**", format = [
+    "wheel",
+    "sdist",
+  ] },
+  { path = "tests/**/__pycache__/**", format = [
+    "wheel",
+    "sdist",
+  ] },
+  { path = "tests/**/*.pyc", format = [
+    "wheel",
+    "sdist",
+  ] },
+  { path = "tests/**/*.pyo", format = [
+    "wheel",
+    "sdist",
+  ] },
+  { path = "tests/**/.pytest_cache/**", format = [
+    "wheel",
+    "sdist",
+  ] },
+  { path = ".pytest_cache/**", format = [
+    "wheel",
+    "sdist",
+  ] },
+]

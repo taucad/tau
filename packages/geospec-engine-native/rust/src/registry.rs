@@ -1,0 +1,260 @@
+//! Original24 matcher and ancillary4 registry; implementations are reported separately.
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum Capability {
+    ToHaveBoundingBox,
+    ToHaveConnectedComponents,
+    ToBeWatertight,
+    ToHaveNoComponentInterference,
+    ToHaveAssemblyOccurrences,
+    ToHaveSpatialRelationships,
+    ToHaveMeshIntegrity,
+    ToHaveNoDiagnostics,
+    ToHaveSurfaceArea,
+    ToHaveVolume,
+    ToHaveMass,
+    ToHaveCenterOfMass,
+    ToBeValidBrep,
+    ToHaveTopologyCounts,
+    ToHaveStepUnits,
+    ToHaveProductStructure,
+    ToHavePlanarFace,
+    ToHaveCylindricalFace,
+    ToHaveCircularHole,
+    ToHaveCircularHolePattern,
+    ToHaveChamferFeature,
+    ToHaveFilletFeature,
+    ToHaveMinimumWallThickness,
+    ToHaveVoidContinuity,
+    AnalyzeBrep,
+    AnalyzeMesh,
+    InspectGeometry,
+    AnalyzeMeshOverlap,
+    ToSatisfyRationalPlate,
+    ToSatisfyParallelPlaneDistance,
+    QueryPmi,
+    MinimumDistance,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExpectedShape {
+    First,
+    FirstOrEmpty,
+    Bounds,
+    True,
+}
+
+pub const CAPABILITIES: [&str; 32] = [
+    "toHaveBoundingBox",
+    "toHaveConnectedComponents",
+    "toBeWatertight",
+    "toHaveNoComponentInterference",
+    "toHaveAssemblyOccurrences",
+    "toHaveSpatialRelationships",
+    "toHaveMeshIntegrity",
+    "toHaveNoDiagnostics",
+    "toHaveSurfaceArea",
+    "toHaveVolume",
+    "toHaveMass",
+    "toHaveCenterOfMass",
+    "toBeValidBrep",
+    "toHaveTopologyCounts",
+    "toHaveStepUnits",
+    "toHaveProductStructure",
+    "toHavePlanarFace",
+    "toHaveCylindricalFace",
+    "toHaveCircularHole",
+    "toHaveCircularHolePattern",
+    "toHaveChamferFeature",
+    "toHaveFilletFeature",
+    "toHaveMinimumWallThickness",
+    "toHaveVoidContinuity",
+    "analyzeBrep",
+    "analyzeMesh",
+    "inspectGeometry",
+    "analyzeMeshOverlap",
+    "toSatisfyRationalPlate",
+    "toSatisfyParallelPlaneDistance",
+    "queryPmi",
+    "minimumDistance",
+];
+
+impl Capability {
+    pub const ALL: [Self; 32] = [
+        Self::ToHaveBoundingBox,
+        Self::ToHaveConnectedComponents,
+        Self::ToBeWatertight,
+        Self::ToHaveNoComponentInterference,
+        Self::ToHaveAssemblyOccurrences,
+        Self::ToHaveSpatialRelationships,
+        Self::ToHaveMeshIntegrity,
+        Self::ToHaveNoDiagnostics,
+        Self::ToHaveSurfaceArea,
+        Self::ToHaveVolume,
+        Self::ToHaveMass,
+        Self::ToHaveCenterOfMass,
+        Self::ToBeValidBrep,
+        Self::ToHaveTopologyCounts,
+        Self::ToHaveStepUnits,
+        Self::ToHaveProductStructure,
+        Self::ToHavePlanarFace,
+        Self::ToHaveCylindricalFace,
+        Self::ToHaveCircularHole,
+        Self::ToHaveCircularHolePattern,
+        Self::ToHaveChamferFeature,
+        Self::ToHaveFilletFeature,
+        Self::ToHaveMinimumWallThickness,
+        Self::ToHaveVoidContinuity,
+        Self::AnalyzeBrep,
+        Self::AnalyzeMesh,
+        Self::InspectGeometry,
+        Self::AnalyzeMeshOverlap,
+        Self::ToSatisfyRationalPlate,
+        Self::ToSatisfyParallelPlaneDistance,
+        Self::QueryPmi,
+        Self::MinimumDistance,
+    ];
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|item| item.name() == name)
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::ToHaveBoundingBox => "toHaveBoundingBox",
+            Self::ToHaveConnectedComponents => "toHaveConnectedComponents",
+            Self::ToBeWatertight => "toBeWatertight",
+            Self::ToHaveNoComponentInterference => "toHaveNoComponentInterference",
+            Self::ToHaveAssemblyOccurrences => "toHaveAssemblyOccurrences",
+            Self::ToHaveSpatialRelationships => "toHaveSpatialRelationships",
+            Self::ToHaveMeshIntegrity => "toHaveMeshIntegrity",
+            Self::ToHaveNoDiagnostics => "toHaveNoDiagnostics",
+            Self::ToHaveSurfaceArea => "toHaveSurfaceArea",
+            Self::ToHaveVolume => "toHaveVolume",
+            Self::ToHaveMass => "toHaveMass",
+            Self::ToHaveCenterOfMass => "toHaveCenterOfMass",
+            Self::ToBeValidBrep => "toBeValidBrep",
+            Self::ToHaveTopologyCounts => "toHaveTopologyCounts",
+            Self::ToHaveStepUnits => "toHaveStepUnits",
+            Self::ToHaveProductStructure => "toHaveProductStructure",
+            Self::ToHavePlanarFace => "toHavePlanarFace",
+            Self::ToHaveCylindricalFace => "toHaveCylindricalFace",
+            Self::ToHaveCircularHole => "toHaveCircularHole",
+            Self::ToHaveCircularHolePattern => "toHaveCircularHolePattern",
+            Self::ToHaveChamferFeature => "toHaveChamferFeature",
+            Self::ToHaveFilletFeature => "toHaveFilletFeature",
+            Self::ToHaveMinimumWallThickness => "toHaveMinimumWallThickness",
+            Self::ToHaveVoidContinuity => "toHaveVoidContinuity",
+            Self::AnalyzeBrep => "analyzeBrep",
+            Self::AnalyzeMesh => "analyzeMesh",
+            Self::InspectGeometry => "inspectGeometry",
+            Self::AnalyzeMeshOverlap => "analyzeMeshOverlap",
+            Self::ToSatisfyRationalPlate => "toSatisfyRationalPlate",
+            Self::ToSatisfyParallelPlaneDistance => "toSatisfyParallelPlaneDistance",
+            Self::QueryPmi => "queryPmi",
+            Self::MinimumDistance => "minimumDistance",
+        }
+    }
+
+    pub const fn is_query(self) -> bool {
+        matches!(
+            self,
+            Self::AnalyzeBrep
+                | Self::AnalyzeMesh
+                | Self::InspectGeometry
+                | Self::AnalyzeMeshOverlap
+                | Self::QueryPmi
+                | Self::MinimumDistance
+        )
+    }
+
+    /// Ruling 32: whether the claim measures the admitted shape's faces or
+    /// edges, which a tessellated-only product (faces with no surface) does
+    /// not provide. Units, product structure, subject diagnostics, PMI, the
+    /// mesh query and the plate certificate read no face geometry.
+    pub const fn is_exact(self) -> bool {
+        !matches!(
+            self,
+            Self::ToHaveNoDiagnostics
+                | Self::ToHaveStepUnits
+                | Self::ToHaveProductStructure
+                | Self::AnalyzeMesh
+                | Self::QueryPmi
+                | Self::ToSatisfyRationalPlate
+        )
+    }
+
+    pub const fn kind(self) -> Option<&'static str> {
+        match self {
+            Self::ToHaveBoundingBox => Some("boundingBox"),
+            Self::ToHaveConnectedComponents => Some("connectedComponents"),
+            Self::ToBeWatertight => Some("watertight"),
+            Self::ToHaveNoComponentInterference => Some("componentInterference"),
+            Self::ToHaveAssemblyOccurrences => Some("assemblyOccurrences"),
+            Self::ToHaveSpatialRelationships => Some("spatialRelationships"),
+            Self::ToHaveMeshIntegrity => Some("meshIntegrity"),
+            Self::ToHaveNoDiagnostics => Some("noDiagnostics"),
+            Self::ToHaveSurfaceArea => Some("surfaceArea"),
+            Self::ToHaveVolume => Some("volume"),
+            Self::ToHaveMass => Some("mass"),
+            Self::ToHaveCenterOfMass => Some("centerOfMass"),
+            Self::ToBeValidBrep => Some("validBrep"),
+            Self::ToHaveTopologyCounts => Some("topologyCounts"),
+            Self::ToHaveStepUnits => Some("stepUnits"),
+            Self::ToHaveProductStructure => Some("productStructure"),
+            Self::ToHavePlanarFace => Some("planarFace"),
+            Self::ToHaveCylindricalFace => Some("cylindricalFace"),
+            Self::ToHaveCircularHole => Some("circularHole"),
+            Self::ToHaveCircularHolePattern => Some("circularHolePattern"),
+            Self::ToHaveChamferFeature => Some("chamferFeature"),
+            Self::ToHaveFilletFeature => Some("filletFeature"),
+            Self::ToHaveMinimumWallThickness => Some("minimumWallThickness"),
+            Self::ToHaveVoidContinuity => Some("voidContinuity"),
+            Self::AnalyzeBrep => None,
+            Self::AnalyzeMesh => None,
+            Self::InspectGeometry => None,
+            Self::AnalyzeMeshOverlap => None,
+            Self::ToSatisfyRationalPlate => None,
+            Self::ToSatisfyParallelPlaneDistance => None,
+            Self::QueryPmi => None,
+            Self::MinimumDistance => None,
+        }
+    }
+
+    pub const fn expected_shape(self) -> ExpectedShape {
+        match self {
+            Self::ToHaveBoundingBox => ExpectedShape::Bounds,
+            Self::ToHaveConnectedComponents => ExpectedShape::First,
+            Self::ToBeWatertight => ExpectedShape::True,
+            Self::ToHaveNoComponentInterference => ExpectedShape::FirstOrEmpty,
+            Self::ToHaveAssemblyOccurrences => ExpectedShape::First,
+            Self::ToHaveSpatialRelationships => ExpectedShape::First,
+            Self::ToHaveMeshIntegrity => ExpectedShape::First,
+            Self::ToHaveNoDiagnostics => ExpectedShape::FirstOrEmpty,
+            Self::ToHaveSurfaceArea => ExpectedShape::First,
+            Self::ToHaveVolume => ExpectedShape::First,
+            Self::ToHaveMass => ExpectedShape::First,
+            Self::ToHaveCenterOfMass => ExpectedShape::First,
+            Self::ToBeValidBrep => ExpectedShape::FirstOrEmpty,
+            Self::ToHaveTopologyCounts => ExpectedShape::First,
+            Self::ToHaveStepUnits => ExpectedShape::First,
+            Self::ToHaveProductStructure => ExpectedShape::First,
+            Self::ToHavePlanarFace => ExpectedShape::First,
+            Self::ToHaveCylindricalFace => ExpectedShape::First,
+            Self::ToHaveCircularHole => ExpectedShape::First,
+            Self::ToHaveCircularHolePattern => ExpectedShape::First,
+            Self::ToHaveChamferFeature => ExpectedShape::First,
+            Self::ToHaveFilletFeature => ExpectedShape::First,
+            Self::ToHaveMinimumWallThickness => ExpectedShape::First,
+            Self::ToHaveVoidContinuity => ExpectedShape::First,
+            Self::AnalyzeBrep => ExpectedShape::First,
+            Self::AnalyzeMesh => ExpectedShape::First,
+            Self::InspectGeometry => ExpectedShape::First,
+            Self::AnalyzeMeshOverlap => ExpectedShape::First,
+            Self::ToSatisfyRationalPlate => ExpectedShape::First,
+            Self::ToSatisfyParallelPlaneDistance => ExpectedShape::First,
+            Self::QueryPmi => ExpectedShape::First,
+            Self::MinimumDistance => ExpectedShape::First,
+        }
+    }
+}

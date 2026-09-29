@@ -255,7 +255,7 @@ export const cancelRun = async (page: Page, settled?: () => boolean): Promise<vo
  * The engine version never crosses the runtime wire — and since one engine
  * release ships both payloads under one version, it would not distinguish them
  * anyway. The witness is the `kernel.engine` line the utility appends to the
- * shell's rotating log at startup (main names the directory through
+ * shell's rotating log when OpenRSCAD initializes (main names the directory through
  * `TAU_DESKTOP_LOG_DIR`), produced inside the process that loaded the engine,
  * with `native` derived from the engine's own `backend` export. A packaged app
  * whose platform package went missing renders through WebAssembly and fails
@@ -293,7 +293,7 @@ export const ensureFilesPane = async (page: Page): Promise<void> => {
       .getByRole('button', { name: /Search/u })
       .first()
       .click();
-    await page.getByPlaceholder('Search projects, chats, and actions...').fill('Open files');
+    await page.getByPlaceholder('Search projects, chats, and actions…').fill('Open files');
     await page.getByText('Open files', { exact: true }).first().click();
   }
   await expectVisible(filesPaneOf(page), 30_000);
@@ -645,7 +645,7 @@ export const expectKernelReparsed = async (page: Page, parameterLabel: string): 
     .getByRole('button', { name: /Search/u })
     .first()
     .click();
-  await page.getByPlaceholder('Search projects, chats, and actions...').fill('Open parameters');
+  await page.getByPlaceholder('Search projects, chats, and actions…').fill('Open parameters');
   await page.getByText('Open parameters', { exact: true }).first().click();
   /* 60 s, not the usual 180: a watched re-parse either lands within a few
    * seconds or the write never reached the kernel at all. */

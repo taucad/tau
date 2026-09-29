@@ -16,7 +16,20 @@ const build = (await import(pathToFileURL(resolve(buildRoot, 'server/index.js'))
 >[0]['build'];
 const app = express();
 app.disable('x-powered-by');
-app.use(coiMiddleware());
+if (process.env['TAU_E2E_DISABLE_COI'] === 'true') {
+  // The non-isolated mode serves like a host without COOP/COEP, so kernels must degrade to their
+  // single-threaded builds. `entry.server.tsx` sets both on every document, hence stripped here.
+  app.use((_request, response, next) => {
+    const setHeader = response.setHeader.bind(response);
+    response.setHeader = ((name: string, value: number | string | readonly string[]) =>
+      /^cross-origin-(?:opener|embedder)-policy$/iu.test(name)
+        ? response
+        : setHeader(name, value)) as typeof response.setHeader;
+    next();
+  });
+} else {
+  app.use(coiMiddleware());
+}
 app.use('/assets', express.static(resolve(buildRoot, 'client/assets'), { immutable: true, maxAge: '1y' }));
 app.use(express.static(resolve(buildRoot, 'client'), { maxAge: '1h' }));
 app.all('*splat', createRequestHandler({ build }));

@@ -10,14 +10,29 @@ import type {
   RpcParameterClient,
   RpcRuntimeClient,
 } from '@taucad/chat/rpc';
+import { toRpcError } from '@taucad/chat/rpc';
 import type { JsonValue } from '@taucad/agent-host';
+import { toolDescriptions } from '@taucad/chat/constants';
+import { ResourceQueue } from '@taucad/filesystem';
+import { MemoryProvider } from '@taucad/filesystem/backend';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 
+import { createProviderRpcFileSystem } from '#registry/provider-file-system.js';
 import { createChatToolRegistry } from '#registry/tool-registry.js';
 import type { ChatToolRegistryOptions } from '#registry/tool-registry.js';
+import { createRuntimeAgentClients } from '#runtime/runtime-agent-clients.js';
+import type { RuntimeAgentClient } from '#runtime/runtime-agent-clients.js';
 
 const emptyFileSystem = (): RpcFileSystem => ({
   readFile: async () => 'export const main = 1;\n',
   writeFile: async () => undefined,
+  writeFileChecked: async () => {
+    throw new Error('No checked authority in this fixture.');
+  },
+  deleteFileChecked: async () => {
+    throw new Error('No checked authority in this fixture.');
+  },
   writeBinaryFile: async () => undefined,
   deleteFile: async () => undefined,
   readdir: async () => [],
@@ -67,9 +82,41 @@ const invoke = async (
     signal: call.signal ?? new AbortController().signal,
   });
 
-const fileTools = ['read_file', 'edit_file', 'list_directory', 'create_file', 'delete_file', 'grep', 'glob_search'];
+const fileTools = [
+  'read_file',
+  'edit_file',
+  'list_directory',
+  'create_file',
+  'delete_file',
+  'grep',
+  'glob_search',
+  'update_todos',
+];
 
 describe('createChatToolRegistry listing', () => {
+  it('offers arrange_workbench with only a filesystem', () => {
+    expect(listOf()).toContain('arrange_workbench');
+  });
+  it.each([undefined, 'legacy', 'native'] as const)(
+    'should advertise the selected %s authoring API before any tool invocation',
+    (geospecAuthoringMode) => {
+      const runTests = vi.fn();
+      const definitions = build({ geospec: { runTests }, geospecAuthoringMode }).list();
+      const description = definitions.find((tool) => tool.name === 'test_model')?.description;
+      const native = geospecAuthoringMode === 'native';
+      expect(description).toContain(native ? 'Selected GeoSpec API: native' : 'Selected GeoSpec API: legacy');
+      expect(description).toContain(native ? 'expectNativeGeo' : 'expectGeo');
+      expect(description).toContain(native ? 'loadNativeModel' : 'loadModel');
+      expect(description).toContain(native ? "'geospec/runner/native'" : "'geospec/model'");
+      expect(description).not.toContain(native ? 'expectGeo' : 'expectNativeGeo');
+      expect(description).not.toContain(native ? 'loadModel' : 'loadNativeModel');
+      for (const definition of definitions.filter((tool) => tool.name !== 'test_model')) {
+        expect(definition.description).toBe(toolDescriptions[definition.name as keyof typeof toolDescriptions]);
+      }
+      expect(runTests).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     {
       label: 'filesystem only',
@@ -137,6 +184,7 @@ describe('createChatToolRegistry listing', () => {
     });
     expect(names.toSorted()).toStrictEqual(
       [
+        'arrange_workbench',
         'create_file',
         'delete_file',
         'edit_file',
@@ -148,9 +196,26 @@ describe('createChatToolRegistry listing', () => {
         'read_file',
         'screenshot',
         'test_model',
+        'update_todos',
         'use_skill',
       ].toSorted(),
     );
+  });
+
+  /* EQ6 (W7 RA-S9): a call that writes more than one path, or outside the
+   * workspace, runs its batch in call order; every other tool stays parallel. */
+  it('should declare sequential execution only where one call spans more than one path', () => {
+    const registry = build({
+      graphics: { exportGeometry: vi.fn() },
+      parameters: { getParameters: vi.fn(), applyParameterOperation: vi.fn() },
+    });
+
+    const sequential = registry
+      .list()
+      .filter((tool) => tool.executionMode === 'sequential')
+      .map((tool) => tool.name);
+
+    expect(sequential.toSorted()).toStrictEqual(['apply_parameter_operation', 'export_geometry']);
   });
 
   /* Review a1 R15: the read-only history tool is listed exactly where a client
@@ -204,6 +269,232 @@ describe('createChatToolRegistry listing', () => {
   });
 });
 
+describe('arrange_workbench routing', () => {
+  it('accepts basedOn for the exact bytes of a BOM-prefixed layout and checks the edit', async () => {
+    const provider = new MemoryProvider();
+    const layoutPath = '.tau/workbench/layout.json';
+    const original = JSON.stringify({
+      version: 1,
+      lanes: { chat: true, workbench: true },
+      viewer: { kind: 'group', tabs: [] },
+      workbench: { kind: 'group', tabs: [] },
+    });
+    const originalBytes = new TextEncoder().encode(`\uFEFF${original}`);
+    await provider.writeFile(layoutPath, originalBytes);
+    const view = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
+    const mutations = new ResourceQueue();
+    const fileSystemFor = (signal?: AbortSignal) => createProviderRpcFileSystem({ provider: view, mutations, signal });
+    const registry = build({ fileSystemFor, workbenchFileSystemFor: fileSystemFor });
+    const before = `sha256:${createHash('sha256').update(originalBytes).digest('hex')}`;
+
+    const result = await invoke(registry, 'arrange_workbench', {
+      input: { basedOn: before, lanes: { chat: false } },
+    });
+
+    expect(result).toMatchObject({
+      isError: false,
+      content: { success: true, status: 'written', revisions: [{ path: layoutPath, previousDigest: before }] },
+    });
+    expect(await provider.readFile(layoutPath)).not.toEqual(originalBytes);
+    provider.dispose();
+  });
+
+  it('selects the live-root filesystem during a candidate invocation', async () => {
+    const candidate = vi.fn(() => emptyFileSystem());
+    const live = vi.fn(() => emptyFileSystem());
+    const registry = build({ fileSystemFor: candidate, workbenchFileSystemFor: live });
+    await invoke(registry, 'arrange_workbench', { input: { lanes: { chat: true } } });
+    expect(live).toHaveBeenCalledOnce();
+    expect(candidate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: 'two-number look direction',
+      input: { views: [{ id: 'front', entryPath: 'main.ts', camera: { kind: 'look', direction: [0, -1] } }] },
+      field: 'views[0].camera.direction',
+      exact: 'views[0].camera.direction: expected 3 numbers, received 2. Nothing was written.',
+    },
+    {
+      label: 'third split level',
+      input: {
+        viewer: {
+          kind: 'split',
+          direction: 'row',
+          children: [
+            { kind: 'group', tabs: [] },
+            {
+              kind: 'split',
+              direction: 'column',
+              children: [
+                { kind: 'group', tabs: [] },
+                {
+                  kind: 'split',
+                  direction: 'row',
+                  children: [
+                    { kind: 'group', tabs: [] },
+                    { kind: 'group', tabs: [] },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
+      field: 'viewer.children[1].children[1]',
+    },
+    { label: 'unknown pane', input: { open: [{ kind: 'pane', pane: 'settings' }] }, field: 'open[0].pane' },
+    {
+      label: 'unknown preset',
+      input: { views: [{ id: 'front', entryPath: 'main.ts', camera: { kind: 'preset', preset: 'iso' } }] },
+      field: 'views[0].camera.preset',
+    },
+    {
+      label: 'view tab in workbench lane',
+      input: { workbench: { kind: 'group', tabs: [{ kind: 'view', view: 'front' }] } },
+      field: 'workbench.tabs[0].kind',
+    },
+    {
+      label: 'pane tab in viewer lane',
+      input: { viewer: { kind: 'group', tabs: [{ kind: 'pane', pane: 'model' }] } },
+      field: 'viewer.tabs[0]',
+    },
+    {
+      label: 'duplicate view',
+      input: {
+        views: [
+          { id: 'front', entryPath: 'main.ts' },
+          { id: 'front', entryPath: 'main.ts' },
+        ],
+      },
+      field: 'views[1].id',
+    },
+    {
+      label: 'duplicate entry',
+      input: {
+        entries: [
+          { path: 'main.ts', renderTimeout: 100 },
+          { path: 'main.ts', renderTimeout: 200 },
+        ],
+      },
+      field: 'entries[1].path',
+    },
+    {
+      label: 'duplicate viewer tab',
+      input: {
+        viewer: {
+          kind: 'group',
+          tabs: [
+            { kind: 'view', view: 'front' },
+            { kind: 'view', view: 'front' },
+          ],
+        },
+      },
+      field: 'viewer',
+    },
+    {
+      label: 'duplicate workbench tab',
+      input: {
+        workbench: {
+          kind: 'group',
+          tabs: [
+            { kind: 'pane', pane: 'model' },
+            { kind: 'pane', pane: 'model' },
+          ],
+        },
+      },
+      field: 'workbench',
+    },
+    { label: 'basedOn alone', input: { basedOn: 'missing' }, field: 'input' },
+    { label: 'new view without entry', input: { views: [{ id: 'front' }] }, field: 'views[0].entryPath' },
+    {
+      label: 'zero look',
+      input: { views: [{ id: 'front', entryPath: 'main.ts', camera: { kind: 'look', direction: [0, 0, 0] } }] },
+      field: 'direction',
+    },
+    {
+      label: 'hidden opened lane',
+      input: { open: [{ kind: 'pane', pane: 'model' }], lanes: { workbench: false } },
+      field: 'lanes.workbench',
+    },
+    { label: 'forbidden mode', input: { mode: 'replace', lanes: { chat: false } }, field: 'input' },
+    { label: 'device lane width', input: { lanes: { chat: true, chatWidth: 320 } }, field: 'lanes' },
+    {
+      label: 'stored camera pose',
+      input: {
+        views: [
+          {
+            id: 'front',
+            camera: {
+              kind: 'pose',
+              frameId: 'tau:root',
+              target: [0, 0, 0],
+              direction: [0, -1, 0],
+              up: [0, 0, 1],
+              verticalSpan: 1,
+              perspectiveZoom: 1,
+            },
+          },
+        ],
+      },
+      field: 'views[0].camera.kind',
+    },
+    {
+      label: 'components on view',
+      input: { views: [{ id: 'front', components: { hidden: ['lid'] } }] },
+      field: 'views[0]',
+    },
+    {
+      label: 'kinematics on view',
+      input: { views: [{ id: 'front', kinematics: { coordinates: { hinge: 30 } } }] },
+      field: 'views[0]',
+    },
+    { label: 'null view entry', input: { views: [{ id: 'front', entryPath: null }] }, field: 'views[0].entryPath' },
+    {
+      label: 'derived measurement distance',
+      input: {
+        views: [
+          { id: 'front', measurements: [{ id: 'm1', startPoint: [0, 0, 0], endPoint: [0.02, 0, 0], distance: 0.02 }] },
+        ],
+      },
+      field: 'views[0].measurements[0]',
+    },
+  ])('refuses $label at the actual registry boundary without writing', async ({ label, input, field, exact }) => {
+    const viewPath = '.tau/workbench/views/front.json';
+    const fileSystem = {
+      ...emptyFileSystem(),
+      exists: vi.fn(
+        async (path: string) => path === 'main.ts' || (label === 'duplicate viewer tab' && path === viewPath),
+      ),
+      readFile: vi.fn(async (path: string) =>
+        path === viewPath ? JSON.stringify({ version: 1, entryPath: 'main.ts' }) : 'export const main = 1;\n',
+      ),
+      writeFile: vi.fn(async () => undefined),
+      writeFileChecked: vi.fn(async () => {
+        throw new Error('unexpected checked write');
+      }),
+      deleteFileChecked: vi.fn(async () => {
+        throw new Error('unexpected checked delete');
+      }),
+    };
+    const registry = build({
+      fileSystemFor: () => fileSystem,
+      workbenchFileSystemFor: () => fileSystem,
+      workbench: { isModelFile: async () => true },
+    });
+    const result = await invoke(registry, 'arrange_workbench', { input });
+    expect(result).toMatchObject({ isError: true, content: { success: false, errorCode: 'VALIDATION_ERROR' } });
+    expect(result.content).toHaveProperty('message', expect.stringContaining(field));
+    expect(result.content).toHaveProperty('message', expect.stringContaining('Nothing was written.'));
+    if (exact !== undefined) {
+      expect(result.content).toEqual({ success: false, errorCode: 'VALIDATION_ERROR', message: exact });
+    }
+    expect(fileSystem.writeFile).not.toHaveBeenCalled();
+    expect(fileSystem.writeFileChecked).not.toHaveBeenCalled();
+    expect(fileSystem.deleteFileChecked).not.toHaveBeenCalled();
+  });
+});
+
 describe('createChatToolRegistry invocation', () => {
   it('refuses a tool it does not list rather than dispatching it', async () => {
     const registry = build();
@@ -225,6 +516,7 @@ describe('createChatToolRegistry invocation', () => {
       isError: true,
       content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' },
     });
+    expect(result.content).not.toHaveProperty('success');
   });
 
   it('dispatches a validated call to the RPC handler', async () => {
@@ -263,6 +555,33 @@ describe('createChatToolRegistry invocation', () => {
     });
   });
 
+  it('should drop the exportOptions a model adds to export_geometry before the runtime export', async () => {
+    const exportModel = vi.fn<RuntimeAgentClient['export']>(async () => ({
+      success: true,
+      data: [{ name: 'model.stl', mimeType: 'model/stl', bytes: new Uint8Array([1]) }],
+      issues: [],
+    }));
+    const { graphics } = createRuntimeAgentClients({
+      runtime: { evaluate: vi.fn<RuntimeAgentClient['evaluate']>(), export: exportModel },
+      exportImage: vi.fn(),
+      mapRuntimeError: (error) => toRpcError(error),
+    });
+
+    const result = await invoke(build({ graphics }), 'export_geometry', {
+      input: {
+        targetFile: 'main.ts',
+        format: 'stl',
+        exportOptions: { engine: 'service', service: { url: 'https://slicer.example.com', token: 'stolen-token' } },
+      },
+    });
+
+    expect(result).toMatchObject({ isError: false, content: { success: true } });
+    expect(exportModel).toHaveBeenCalledExactlyOnceWith('stl', {
+      source: { path: 'main.ts' },
+      signal: expect.any(AbortSignal) as AbortSignal,
+    });
+  });
+
   it('persists export artifacts through the invocation record filesystem only', async () => {
     const agentWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => {
       throw Object.assign(new Error('Agent records are read-only.'), { code: 'EROFS' });
@@ -288,6 +607,125 @@ describe('createChatToolRegistry invocation', () => {
       new Uint8Array([1]),
     );
     expect(agentWrite).not.toHaveBeenCalled();
+  });
+
+  /* The chat task list (design-to-print workbench D8): one tool, one file,
+   * offered by every host because it needs nothing but the filesystem. */
+  describe('update_todos', () => {
+    const items = [
+      { id: 'model-pyramid', title: 'Model the pyramid', status: 'done' },
+      { id: 'slice-pyramid', title: 'Slice the pyramid', status: 'in_progress', note: '0.2 mm layers' },
+      { id: 'request-print', title: 'Request the print', status: 'pending' },
+    ];
+
+    it('writes exactly the expected YAML bytes to the chat directory and reports counts', async () => {
+      const writeFile = vi.fn<RpcFileSystem['writeFile']>(async () => undefined);
+      const registry = build({ fileSystemFor: () => ({ ...emptyFileSystem(), writeFile }) });
+
+      const result = await invoke(registry, 'update_todos', { input: { chatId: 'chat_01', items } });
+
+      expect(result).toStrictEqual({
+        isError: false,
+        content: {
+          success: true,
+          path: '.tau/chats/chat_01/todo.yaml',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- keys are the status wire values
+          counts: { pending: 1, in_progress: 1, done: 1 },
+        },
+      });
+      expect(writeFile).toHaveBeenCalledExactlyOnceWith(
+        '.tau/chats/chat_01/todo.yaml',
+        [
+          'version: 1',
+          'items:',
+          '  - id: model-pyramid',
+          '    title: Model the pyramid',
+          '    status: done',
+          '  - id: slice-pyramid',
+          '    title: Slice the pyramid',
+          '    status: in_progress',
+          '    note: 0.2 mm layers',
+          '  - id: request-print',
+          '    title: Request the print',
+          '    status: pending',
+          '',
+        ].join('\n'),
+      );
+    });
+
+    /* Composed exactly as both hosts compose it (`packages/host/src/agent-tools.ts`,
+     * `apps/ui/app/workers/agent-host.impl.ts`): the agent's view and the record
+     * view over one checkout, under Tau's own path policy, which keeps
+     * `.tau/chats` read-only to the agent. */
+    it('should write the list through the record view that the agent view refuses', async () => {
+      const checkout = new MemoryProvider();
+      await checkout.writeFile('.tau/chats/chat_01/events.jsonl', '{"type":"run.lifecycle"}\n');
+      const agentView = composeView({ filesystem: checkout }, { consumer: 'agent', policy: tauPathPolicy });
+      const recordView = composeView({ filesystem: checkout }, { consumer: 'user', policy: tauPathPolicy });
+      const mutations = new ResourceQueue();
+      const fileSystemFor = (signal: AbortSignal) =>
+        createProviderRpcFileSystem({ provider: agentView, mutations, signal });
+      const recordFileSystemFor = (signal: AbortSignal) =>
+        createProviderRpcFileSystem({ provider: recordView, mutations, signal });
+      const input = { chatId: 'chat_01', items };
+
+      await expect(invoke(build({ fileSystemFor }), 'update_todos', { input })).resolves.toStrictEqual({
+        isError: true,
+        content: {
+          success: false,
+          errorCode: 'PERMISSION_DENIED',
+          message: 'EROFS: this agent may read but not write .tau/chats/chat_01/todo.yaml; Tau records that itself.',
+        },
+      });
+      expect(await checkout.exists('.tau/chats/chat_01/todo.yaml')).toBe(false);
+
+      const result = await invoke(build({ fileSystemFor, recordFileSystemFor }), 'update_todos', { input });
+
+      expect(result).toStrictEqual({
+        isError: false,
+        content: {
+          success: true,
+          path: '.tau/chats/chat_01/todo.yaml',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- keys are the status wire values
+          counts: { pending: 1, in_progress: 1, done: 1 },
+        },
+      });
+      expect(await checkout.readFile('.tau/chats/chat_01/todo.yaml', 'utf8')).toBe(
+        [
+          'version: 1',
+          'items:',
+          '  - id: model-pyramid',
+          '    title: Model the pyramid',
+          '    status: done',
+          '  - id: slice-pyramid',
+          '    title: Slice the pyramid',
+          '    status: in_progress',
+          '    note: 0.2 mm layers',
+          '  - id: request-print',
+          '    title: Request the print',
+          '    status: pending',
+          '',
+        ].join('\n'),
+      );
+      /* The record route writes the list and nothing else of the chat's. */
+      expect(await checkout.readFile('.tau/chats/chat_01/events.jsonl', 'utf8')).toBe('{"type":"run.lifecycle"}\n');
+    });
+
+    it.each([
+      ['duplicate ids', { chatId: 'chat_01', items: [items[0], { ...items[1], id: 'model-pyramid' }] }, 'unique'],
+      ['a chat id with a path separator', { chatId: '../other', items }, 'chatId'],
+      ['an unknown status', { chatId: 'chat_01', items: [{ ...items[0], status: 'doing' }] }, 'status'],
+      ['a missing list', { chatId: 'chat_01' }, 'items'],
+    ])('refuses %s without writing', async (_label, input, expectedMessage) => {
+      const writeFile = vi.fn<RpcFileSystem['writeFile']>(async () => undefined);
+      const registry = build({ fileSystemFor: () => ({ ...emptyFileSystem(), writeFile }) });
+
+      const result = await invoke(registry, 'update_todos', { input });
+
+      expect(result).toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+      expect(JSON.stringify(result.content)).toContain(expectedMessage);
+      expect(writeFile).not.toHaveBeenCalled();
+    });
   });
 
   it('throws the abort reason when the signal is already aborted', async () => {

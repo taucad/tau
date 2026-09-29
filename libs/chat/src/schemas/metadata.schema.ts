@@ -1,5 +1,14 @@
 // oxlint-disable-next-line eslint-plugin-import/no-named-as-default -- standard zod default import
 import z from 'zod';
+import {
+  cameraPresets,
+  paneIdSchema,
+  projectPathSchema,
+  workbenchIdSchema,
+  workbenchLanesSchema,
+  workbenchTabSchema,
+} from '@taucad/workbench';
+import { fileDigestSchema, refusalReasons } from '#schemas/tools/arrange-workbench.tool.schema.js';
 import { messageStatuses } from '#constants/message.constants.js';
 import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
 
@@ -17,6 +26,7 @@ const fileTreeEntrySchema = z.union([
   baseFileTreeEntrySchema.extend({ type: z.literal('dir') }).strict(),
   baseFileTreeEntrySchema.extend({ type: z.literal('file'), ...textFileContentMetadataSchema.shape }).strict(),
   baseFileTreeEntrySchema.extend({ type: z.literal('file'), ...binaryFileContentMetadataSchema.shape }).strict(),
+  baseFileTreeEntrySchema.extend({ type: z.literal('file') }).strict(),
 ]);
 
 const baseFileReferenceSchema = z
@@ -58,6 +68,34 @@ export const snapshotSchema = z.object({
     .optional(),
   /** The files currently open in editor tabs */
   openFiles: z.array(fileReferenceSchema).optional(),
+  workbench: z
+    .strictObject({
+      layoutDigest: fileDigestSchema,
+      lanes: workbenchLanesSchema,
+      visible: z.array(workbenchTabSchema).max(32),
+      views: z
+        .array(
+          z.strictObject({
+            id: workbenchIdSchema,
+            name: z.string().max(40),
+            entryPath: projectPathSchema.nullable(),
+            camera: z.union([z.enum(cameraPresets), z.enum(['look', 'pose'])]),
+          }),
+        )
+        .max(16),
+      entries: z
+        .array(
+          z.strictObject({
+            path: projectPathSchema,
+            renderTimeout: z.number().int().optional(),
+            hidden: z.number().int(),
+          }),
+        )
+        .max(16),
+      unavailable: z.array(paneIdSchema).max(16),
+      refused: z.array(z.strictObject({ tab: workbenchTabSchema, reason: z.enum(refusalReasons) })).max(16),
+    })
+    .optional(),
 });
 
 /**

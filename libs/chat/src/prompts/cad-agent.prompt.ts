@@ -28,6 +28,7 @@
 // EVAL(topology-hints-per-kernel): pending benchmark — new per-kernel <topology_hints> static section sourced from KernelConfig.topologyHints (slotted after <code_standards>), mapping the global geometry-fidelity principle to each kernel's actual primitive vocabulary (Replicad: drawPointsInterpolation/draw()-pen arcs; OCCT: Geom2dAPI_PointsToBSpline/GC_MakeArcOfCircle; KCL: tangentialArc/bezierCurve; Manifold/JSCAD: segment-count heuristic; OpenSCAD: $fa/$fs adaptive tessellation). Resolves the B-rep-vs-mesh kernel divide per docs/research/code-cad-topology-best-practices.md Kernel Capability Matrix.
 // EVAL(decompose-design-brief): pending benchmark — strengthens workflow step 0 from generic component enumeration to a mini design brief for multi-component / real-world / reference-based / high-fidelity / spec requests. Validates fewer dropped named features and better assembly-tree recall on Orion, gearbox, hydraulic hinge, and architectural facade fixtures.
 // EVAL(geospec-coverage-floor): pending benchmark — adds explicit GeoSpec coverage floor: whole-model bounding box plus physical properties is never sufficient for high-fidelity assemblies; tests must cover major components/named features and disclose unsupported coverage. Validates that agents no longer stop after basic geometric tests on hyper-real assembly prompts.
+// EVAL(task-tracking): pending benchmark — new static <task_tracking> section (after <transcript_search>) asks the agent to keep the person's task list through `update_todos` on work with three or more steps (design-to-print workbench blueprint D8). Validates that multi-step turns write `.tau/chats/<chatId>/todo.yaml` before the first step and mark items done as they finish, with no scratchpad notes in titles.
 // EVAL(display-name-title-case): pending benchmark — adds <display_names> as the single CAD-prompt source of truth for agent-authored visible labels. Validates fewer PascalCase/snake_case part labels in generated model code while preserving kernel-native code identifier casing.
 
 import { toolName } from '#constants/index.js';
@@ -318,6 +319,22 @@ When you need to recall earlier context from the current conversation:
 
 Full user and assistant message text is available for keyword search.
 </transcript_search>`,
+  });
+
+  registry.register({
+    name: 'workbench',
+    cacheBreak: true,
+    compute: () => `<workbench>
+Use \`${toolName.arrangeWorkbench}\` when the person asks to arrange views, open panes or files, or change viewer settings. Read the workbench snapshot and pass its layout digest as \`basedOn\` when preserving the person's current arrangement. The tool writes project records; the window adopts them and the person can restore the previous arrangement.
+</workbench>`,
+  });
+
+  registry.register({
+    name: 'task_tracking',
+    cacheBreak: false,
+    compute: () => `<task_tracking>
+For work with three or more steps, keep the person's task list at \`.tau/chats/<chatId>/todo.yaml\` with \`${toolName.updateTodos}\`: write it first, keep one item \`in_progress\`, mark each \`done\` as it finishes. Short, outcome-shaped titles; it is watched, not a scratchpad.
+</task_tracking>`,
   });
 
   registry.register({

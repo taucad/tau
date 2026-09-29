@@ -18,7 +18,7 @@ import { createNativeGitRevisionPort } from '#native-git-port.js';
 import type { NativeGitRemoteCredential } from '#native-git-port.js';
 import type { RevisionPort } from '#revision-port.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
-import { gitOnPath } from '#test/native-git-harness.js';
+import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 
@@ -81,7 +81,7 @@ const helperFixture = async (): Promise<HelperFixture> => {
   };
 };
 
-describe.runIf(gitOnPath)('native git credential helper exclusivity (ruling G1)', () => {
+describe.runIf(gitToolchainOnPath)('native git credential helper exclusivity (ruling G1)', () => {
   it('should never run the user credential helpers when Tau supplied the credential', async () => {
     const fixture = await helperFixture();
     try {

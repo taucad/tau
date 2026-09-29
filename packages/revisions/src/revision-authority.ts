@@ -65,7 +65,14 @@ export type RevisionActor = RevisionUserActor | RevisionAgentActor;
 export type RevisionProvenance = Readonly<{
   source: 'user' | 'agent' | 'merge' | 'restore' | 'import';
   actorId: string;
+  /** The admitting run; absent for `save`, `idle` and `close` (RM-R9). */
   runId?: string;
+  /** That run's attempt (D10). */
+  attempt?: number;
+  /** Whether a turn revision is the dirty base its placement found, or its result (RM-R9). */
+  turnCut?: 'base' | 'result';
+  /** The checkout's other leases at the cut, sorted (AC9). */
+  heldRunIds?: readonly string[];
   /**
    * Stable user-message id of the turn this revision recorded, when a turn did.
    *
@@ -88,6 +95,14 @@ export type RevisionProvenance = Readonly<{
   actor?: RevisionActor;
   /** What asked for this revision (S30). Absent in a store written before S30. */
   trigger?: RevisionTrigger;
+  /**
+   * The revision a restore brought back (D1).
+   *
+   * Present only on the revision a restore minted; the cut that recorded the
+   * checkout *before* the restore carries the same `restore` trigger and no
+   * `restoredFrom`, so this — never the trigger — is what names a *Restored* row.
+   */
+  restoredFrom?: string;
   /** Milliseconds since the Unix epoch. */
   createdAt: number;
 }>;

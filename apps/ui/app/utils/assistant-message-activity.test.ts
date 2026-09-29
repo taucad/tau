@@ -4,7 +4,7 @@ import type { AgentLiveEvent } from '@taucad/agent-host';
 import { readUIMessageStream } from 'ai';
 import type { UIMessageChunk } from 'ai';
 import type { MyUIMessage } from '@taucad/chat';
-import { deriveChatTranscript } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { initialChatProjection, materializeTranscript, reduceChatProjection } from '#machines/chat-projection.logic.js';
 import { projectAgentHostEvent, projectAgentHostLiveEvent } from '#services/agent-host-event-projection.js';
 import {
   activityFamily,
@@ -31,6 +31,7 @@ const dynamic = (
     readonly state?: string;
     readonly title?: string;
     readonly toolName?: string;
+    readonly input?: Record<string, unknown>;
   } = {},
 ): Part =>
   ({
@@ -38,7 +39,7 @@ const dynamic = (
     toolCallId: 'dynamic-1',
     toolName: options.toolName ?? options.nativeName ?? 'vendor_tool',
     state: options.state ?? 'output-available',
-    input: {},
+    input: options.input ?? {},
     output: {},
     ...(options.preliminary === undefined ? {} : { preliminary: options.preliminary }),
     toolMetadata: {
@@ -106,6 +107,8 @@ describe('assistant message activity', () => {
   });
 
   it('uses the same semantic families for Tau-native and qualified ACP tools', () => {
+    expect(activityFamily(tool('tool-arrange_workbench'))).toBe('edit');
+    expect(activityFamily(dynamic({ nativeName: 'arrange_workbench' }))).toBe('edit');
     expect(activityFamily(tool('tool-get_kernel_result'))).toBe('render');
     expect(activityFamily(dynamic({ nativeName: 'get_kernel_result' }))).toBe('render');
     expect(activityFamily(dynamic({ nativeName: 'screenshot' }))).toBe('screenshot');
@@ -126,6 +129,36 @@ describe('assistant message activity', () => {
     expect(describeActivity([dynamic({ nativeName: 'get_kernel_result', preliminary: true })])).toBe(
       'Rendering models',
     );
+  });
+
+  it('counts a shell command that only explored under what it explored, not as a command', () => {
+    const skills = '/Tau/acp-skills/6948/.agents/skills';
+    const skillReads = dynamic({
+      kind: 'execute',
+      input: {
+        command: `sed -n '1,240p' ${skills}/cad-openscad/SKILL.md && sed -n '1,280p' ${skills}/geospec-authoring/SKILL.md`,
+      },
+    });
+    expect(describeActivity([skillReads])).toBe('Loaded tools');
+    expect(describeActivity([dynamic({ kind: 'execute', input: { command: 'rg -n foo src | head' } })])).toBe(
+      'Searched files',
+    );
+    expect(describeActivity([dynamic({ kind: 'execute', input: { command: 'git status' } })])).toBe('Ran commands');
+    expect(
+      describeActivity([dynamic({ kind: 'execute', input: { command: "sed -n '1,9p' a.ts && git status" } })]),
+    ).toBe('Read files');
+    expect(describeActivity([dynamic({ kind: 'execute', input: { command: 'git push' } })])).toBe('Ran commands');
+    // A web call is not a file search, and an agent action reads as the card does.
+    expect(describeActivity([dynamic({ kind: 'search', title: 'Open page: https://pdas.com/a' })])).toBe(
+      'Read web pages',
+    );
+    expect(describeActivity([dynamic({ kind: 'search', title: 'Web search: gears' })])).toBe('Searched the web');
+    expect(describeActivity([dynamic({ kind: 'other', title: 'Interact with subagent airframe' })])).toBe(
+      'Messaged subagent airframe',
+    );
+    expect(
+      describeActivity([dynamic({ kind: 'other', title: 'Start subagent gimbal', state: 'input-available' })]),
+    ).toBe('Starting subagent gimbal');
   });
 
   it('keeps approvals, mixed failures, and denials truthful', () => {
@@ -152,17 +185,27 @@ describe('assistant message activity', () => {
 
     expect(groups.map((group) => group.category)).toEqual(['research', 'write', 'research']);
   });
+
+  it('keeps direct and qualified MCP arrangements standalone without promoting a foreign lookalike', () => {
+    const groups = groupAssistantParts([
+      tool('tool-edit_file'),
+      tool('tool-arrange_workbench'),
+      dynamic({ nativeName: 'arrange_workbench' }),
+      dynamic({ toolName: 'arrange_workbench', kind: 'edit' }),
+      tool('tool-read_file'),
+    ]);
+
+    expect(groups.map((group) => group.category)).toEqual(['research', 'write', 'write', 'research']);
+    expect(groups[3]).toMatchObject({ kind: 'aggregated', partIndices: [3, 4] });
+  });
 });
 
 /*
  * The durable log of the desktop in-project run whose transcript rendered a
  * bare "File edits failed" over four `create_file`/`get_kernel_result` rounds
  * that every log row reports as `isError: false` (W11-diag, W11-fix section 7).
- * The chat is replayed the way `chat-file-storage.ts:169` loads one — through
- * `deriveChatTranscript` — and then finalized the way the store's
- * `applyFinishedRequest` finalizes a stream that ended cleanly
- * (`chat-session-store.ts:1659-1661`), which is the only site on this path that
- * can stamp `output-error` over a tool the host never failed.
+ * The chat is replayed through the same projection materializer the store
+ * reads, then its interrupted tool parts are finalized.
  */
 describe('desktop in-project turn replay', () => {
   const replayed = async (): Promise<readonly MyUIMessage[]> => {
@@ -170,7 +213,17 @@ describe('desktop in-project turn replay', () => {
       .split('\n')
       .filter((line) => line.trim() !== '')
       .map((line) => parseLogEvent(JSON.parse(line)));
-    const derived = await deriveChatTranscript(events);
+    const projected = reduceChatProjection(initialChatProjection, {
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        cursor: 0,
+        nextCursor: events.length,
+        endCursor: events.length,
+        events,
+      },
+    }).state;
+    const derived = await materializeTranscript(projected);
     return finalizeInterruptedToolParts([...derived], 'chat_31RN18nUqDU3WBOn8v3Bn', 'success');
   };
 

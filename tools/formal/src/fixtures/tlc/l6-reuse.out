@@ -1,0 +1,30 @@
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-25 10:43:09.
+Error: Invariant NoReuseOfClosingLauncher is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ launcher = 0
+/\ msgs = <<>>
+/\ replied = FALSE
+/\ nextL = 1
+/\ lEp = 0
+/\ lstate = <<"unused", "unused", "unused">>
+/\ gen = 0
+/\ epoch = 0
+/\ connected = {}
+/\ holders = {}
+/\ boundEp = <<0, 0, 0>>
+/\ bad = "none"
+/\ lGen = 0
+/\ upc = "idle"
+/\ uRel = [g |-> 0, ep |-> 0, L |-> 0]
+/\ rel = [active |-> FALSE, g |-> 0, ep |-> 0]
+
+State 2: <Retain("a") line 36, col 14 to line 41, col 86 of module AttachGeneration>
+/\ launcher = 0
+/\ msgs = <<>>
+/\ replied = FALSE
+/\ nextL = 1
+/\ lEp = 0
+/\ lstate = <<"unused", "unused", "unused">>
+/\ gen = 1

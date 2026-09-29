@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChatDetailsUsage } from '#routes/w.$workspace.$project/chat-details-usage.js';
 
 const mocks = vi.hoisted(() => ({
   projectSend: vi.fn(),
@@ -80,8 +81,12 @@ vi.mock('#components/files/file-selector.js', () => ({
   ),
 }));
 
+const chatUsage = vi.hoisted(() => vi.fn());
 vi.mock('#routes/w.$workspace.$project/chat-details-usage.js', () => ({
-  ChatDetailsUsage: () => <section aria-label='Chat usage' />,
+  ChatDetailsUsage: (props: React.ComponentProps<typeof ChatDetailsUsage>) => {
+    chatUsage(props);
+    return <section aria-label='Chat usage' />;
+  },
 }));
 
 const { DetailsPanelBody } = await import('#routes/w.$workspace.$project/chat-details.js');
@@ -89,6 +94,11 @@ const { DetailsPanelBody } = await import('#routes/w.$workspace.$project/chat-de
 describe('DetailsPanelBody', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('passes hidden-panel visibility to transcript usage', () => {
+    render(<DetailsPanelBody enableHistory={false} />);
+    expect(chatUsage).toHaveBeenCalledWith({ enabled: false });
   });
 
   it('groups project, storage, and usage information into named sections', () => {

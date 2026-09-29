@@ -108,7 +108,7 @@ export const frame = ({
  * `DATUM`/`DATUM_FEATURE` family); the old name is a homonym that conflates
  * the two concepts. Behaviour is identical.
  */
-export const datum = frame;
+export const datum: typeof frame = frame;
 
 /**
  * Declare a named group of face and axis annotations.
@@ -128,7 +128,7 @@ export const group = (members: Array<FaceDeclaration | AxisDeclaration>): GroupD
  * @public
  */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Ported public annotation API uses this constant name.
-export const INTERFACE_NAME_REGEX = /^[A-Za-z][\dA-Za-z]*(\[[1-9]\d*])?(\.[A-Za-z][\dA-Za-z]*(\[[1-9]\d*])?)*$/;
+export const INTERFACE_NAME_REGEX: RegExp = /^[A-Za-z][\dA-Za-z]*(\[[1-9]\d*])?(\.[A-Za-z][\dA-Za-z]*(\[[1-9]\d*])?)*$/; // oxlint-disable-line typescript/no-inferrable-types -- Required by isolated declarations.
 
 /**
  * Return whether a candidate interface path is valid for STEP export.

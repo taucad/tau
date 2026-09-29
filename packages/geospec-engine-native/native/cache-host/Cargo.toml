@@ -1,0 +1,18 @@
+[package]
+name = "geospec-engine-native-cache-host"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.88"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+geospec-engine-native-core = { path = "../../rust" }
+getrandom = "=0.2.17"
+hmac = "=0.13.0"
+serde = { version = "=1.0.219", features = ["derive"] }
+serde_json = { version = "=1.0.143", features = ["float_roundtrip"] }
+sha2 = { version = "=0.11.0", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.189"

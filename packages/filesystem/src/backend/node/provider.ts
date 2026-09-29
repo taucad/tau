@@ -20,7 +20,7 @@ import type { FSWatcher, Stats } from 'node:fs';
 import { realpathSync, statSync, watch as watchDirectory } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type { CheckedFileWrite, CheckedFileWriteResult } from '@taucad/types';
+import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
@@ -30,6 +30,7 @@ import type {
   FileMode,
   FileReadStreamOptions,
   FileStat,
+  HeadFileStat,
   PathPolicy,
   ProviderCapabilities,
   WatchRequest,
@@ -54,6 +55,11 @@ type AuthorityCheckedWrite = (
 ) => Promise<CheckedFileWriteResult>;
 
 const authorityCheckedWrites = new WeakMap<NodeFsProvider, AuthorityCheckedWrite>();
+type AuthorityCheckedDelete = (
+  input: { path: string; preconditions: readonly FileWritePrecondition[] },
+  assertCurrent: () => Promise<void>,
+) => Promise<CheckedFileWriteResult>;
+const authorityCheckedDeletes = new WeakMap<NodeFsProvider, AuthorityCheckedDelete>();
 
 /**
  * Normalize an `fs.watch` filename. Node types it as non-nullable, but the OS
@@ -86,6 +92,10 @@ const joinRooted = (base: string, child: string): string => (base === '' ? child
  * @public
  */
 export class NodeFsProvider extends AbstractFileSystemProvider {
+  /** @returns `true` for the supported head listing mode. */
+  public get supportsHeadListing(): true {
+    return true;
+  }
   public readonly capabilities: ProviderCapabilities = {
     persistent: true,
     writable: true,
@@ -113,6 +123,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     this._base = path.resolve(basePath);
     this._policy = options?.policy;
     authorityCheckedWrites.set(this, async (input, assertCurrent) => this.#writeFileChecked(input, assertCurrent));
+    authorityCheckedDeletes.set(this, async (input, assertCurrent) => this.#deleteFileChecked(input, assertCurrent));
   }
 
   /**
@@ -161,6 +172,17 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     });
   }
 
+  /** Direct providers do not own the cross-client authority needed for checked deletion. */
+  public async deleteFileChecked(_input: {
+    path: string;
+    preconditions: readonly FileWritePrecondition[];
+  }): Promise<CheckedFileWriteResult> {
+    throw Object.assign(new Error('Checked deletes require a node filesystem authority owner.'), {
+      code: 'CHECKED_WRITE_UNSUPPORTED',
+      applicationState: 'known-not-applied',
+    });
+  }
+
   public async readdir(path_: string): Promise<string[]> {
     this._assertRootedPath(path_);
     const canonical = assertRootedPath(path_);
@@ -197,11 +219,21 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
    * @param path_ - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
    */
-  public async readdirWithStats(path_: string): Promise<Array<{ name: string } & FileStat>> {
+  public readdirWithStats(path_: string): Promise<Array<{ name: string } & FileStat>>;
+  public readdirWithStats(
+    path_: string,
+    options: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & HeadFileStat>>;
+  public async readdirWithStats(
+    path_: string,
+    options?: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
     const names = await this.readdir(path_);
     return mapConcurrent(names, statConcurrency, async (name) => ({
       name,
-      ...(await this.stat(joinRooted(path_, name))),
+      ...(options?.content === 'head'
+        ? await this._headStat(joinRooted(path_, name))
+        : await this.stat(joinRooted(path_, name))),
     }));
   }
 
@@ -601,6 +633,35 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     }
   }
 
+  private async _headStat(path_: string): Promise<HeadFileStat> {
+    this._assertRootedPath(path_);
+    const target = await this._resolve(path_);
+    const stats = await fs.stat(target);
+    if (stats.isDirectory()) {
+      return { type: 'dir', size: stats.size, mtimeMs: stats.mtimeMs };
+    }
+    return {
+      type: 'file',
+      size: stats.size,
+      mtimeMs: stats.mtimeMs,
+      contentKind: await this._headContentKind(target, stats.size),
+    };
+  }
+
+  private async _headContentKind(absolute: string, size: number): Promise<'text' | 'binary'> {
+    if (size === 0) {
+      return 'text';
+    }
+    const handle = await fs.open(absolute, 'r');
+    try {
+      const head = new Uint8Array(Math.min(size, headSniffByteLength));
+      const { bytesRead } = await handle.read(head, 0, head.byteLength, 0);
+      return seemsBinary(head.subarray(0, bytesRead)) ? 'binary' : 'text';
+    } finally {
+      await handle.close();
+    }
+  }
+
   /** Nearest existing ancestor, so containment can be checked by `realpath`. */
   private async _nearestExistingPath(target: string): Promise<string> {
     let candidate = target;
@@ -823,6 +884,66 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       });
     }
   };
+
+  readonly #deleteFileChecked: AuthorityCheckedDelete = async (input, assertCurrent) => {
+    let unlinkStarted = false;
+    try {
+      this._assertRootedPath(input.path);
+      // oxlint-disable-next-line typescript/no-restricted-types -- absence is the checked-write sentinel.
+      const expectedByPath = new Map<string, Uint8Array<ArrayBuffer> | null>();
+      for (const precondition of input.preconditions) {
+        this._assertRootedPath(precondition.path);
+        const expected =
+          precondition.expected === null
+            ? null
+            : typeof precondition.expected === 'string'
+              ? new TextEncoder().encode(precondition.expected)
+              : new Uint8Array(precondition.expected);
+        const previous = expectedByPath.get(precondition.path);
+        if (
+          expectedByPath.has(precondition.path) &&
+          (previous === null ? expected !== null : expected === null || !bytesEqual(previous!, expected))
+        ) {
+          throw new TypeError(`Checked delete aliases disagree for '${precondition.path}'.`);
+        }
+        expectedByPath.set(precondition.path, expected);
+      }
+      if (!expectedByPath.has(input.path)) {
+        throw new TypeError('Checked deletes require a destination precondition.');
+      }
+      await assertCurrent();
+      const actualByPath = await Promise.all(
+        [...expectedByPath].map(async ([candidatePath, expected]) => {
+          const actual = await this._readFileOrAbsent(candidatePath);
+          return actual === null
+            ? expected === null
+              ? undefined
+              : { path: candidatePath, actual }
+            : expected !== null && bytesEqual(actual, expected)
+              ? undefined
+              : { path: candidatePath, actual };
+        }),
+      );
+      const conflicts = actualByPath.filter((conflict) => conflict !== undefined);
+      if (conflicts.length > 0) {
+        return { status: 'conflict', conflicts };
+      }
+      if (expectedByPath.get(input.path) === null) {
+        return { status: 'unchanged', content: new Uint8Array() };
+      }
+      await assertCurrent();
+      unlinkStarted = true;
+      await this.unlink(input.path);
+      return { status: 'applied', content: new Uint8Array() };
+    } catch (error) {
+      if ((error as { applicationState?: unknown }).applicationState !== undefined) {
+        throw error;
+      }
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
+        applicationState: unlinkStarted ? 'potentially-applied' : 'known-not-applied',
+      });
+    }
+  };
 }
 
 /** Execute checked replacement through the package-private Node authority integration. @internal */
@@ -839,4 +960,20 @@ export const writeNodeFileCheckedWithAuthority = async (
     });
   }
   return writeChecked(input, async () => writer.assertCurrent());
+};
+
+/** Execute checked deletion through the package-private Node authority integration. @internal */
+export const deleteNodeFileCheckedWithAuthority = async (
+  provider: NodeFsProvider,
+  input: { path: string; preconditions: readonly FileWritePrecondition[] },
+  writer: NodeAuthorityWriter,
+): Promise<CheckedFileWriteResult> => {
+  const deleteChecked = authorityCheckedDeletes.get(provider);
+  if (deleteChecked === undefined) {
+    throw Object.assign(new Error('Node filesystem provider has no checked-delete implementation.'), {
+      code: 'CHECKED_WRITE_UNSUPPORTED',
+      applicationState: 'known-not-applied',
+    });
+  }
+  return deleteChecked(input, async () => writer.assertCurrent());
 };

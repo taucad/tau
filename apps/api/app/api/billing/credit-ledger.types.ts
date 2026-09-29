@@ -92,6 +92,8 @@ export type QualifiedAdmissionInput = {
 export type AdmissionDenial =
   | 'account_closed'
   | 'account_restricted'
+  /** A lookup voided this attempt key before it was admitted (GI-R3); the gateway answers 409 `ATTEMPT_VOIDED`. */
+  | 'attempt_voided'
   | 'debt'
   | 'insufficient_credit'
   | 'budget_unavailable'
@@ -143,7 +145,8 @@ export type TerminalHistoryEvidence = {
      * `executionStatus` alone cannot separate a client abort from an expired
      * deadline, so a terminal without a provider-reported reason carries its
      * own: `client_abort`, `deadline`, `malformed_response`,
-     * `authorized_exhausted`, `recovery_expired` or `recovery_unresolvable`.
+     * `authorized_exhausted`, `recovery_expired`, `recovery_unresolvable` or
+     * `service_restart` (the process cut the stream because it was stopping).
      */
     terminalReason?: string;
     fields: Record<string, string>;

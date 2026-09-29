@@ -1,0 +1,3 @@
+# The git + git-lfs payload is prepared by scripts/prepare-git.mts, never committed.
+*
+!.gitignore

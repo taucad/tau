@@ -7,7 +7,10 @@ import type { Server } from 'node:http';
 import { release } from 'node:os';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { gunzipSync } from 'node:zlib';
 import type { BrowserCommand, BrowserCommandContext } from 'vitest/node';
+import { captureChatLogs, chatLogDestination, writeChatLogs } from '@taucad/formal/capture';
+import type { CapturedChatLog } from '@taucad/formal/capture';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
 import type {
   AgentHostGatewayFixtureOptions,
@@ -34,6 +37,7 @@ import type { GatewayScriptTurn, GatewayScriptWalk, GatewayTurnCount } from './a
 
 type ProviderContext = BrowserCommandContext['context'];
 type TargetPage = Awaited<ReturnType<ProviderContext['newPage']>>;
+type CdpSession = Awaited<ReturnType<ProviderContext['newCDPSession']>>;
 
 /** Refusal the agent-host gateway fixture answers with while it is armed. */
 type AgentHostGatewayFailure = {
@@ -42,7 +46,7 @@ type AgentHostGatewayFailure = {
   /**
    * The wire error type, which is what decides the run's coded failure.
    *
-   * Tau's own gateway refuses with one of `gatewayModelErrorCodes` here, and
+   * Tau's own gateway refuses with one of `gatewayErrorCodes` here, and
    * `gatewayErrorCode` maps anything else — an upstream provider's own
    * `api_error`, for one — to `UNKNOWN_GATEWAY_ERROR`, which
    * `isResumableRunFailure` rejects. So the default refusal is one the turn
@@ -79,7 +83,11 @@ type Session = {
     readonly type: string;
   }>;
   readonly context: ProviderContext;
+  /** The DevTools session of each page whose CPU profile `uiCpuProfile` is recording. */
+  readonly cpuProfiles: Map<TargetSurface, CdpSession>;
   readonly pageErrors: string[];
+  readonly posthogEvents: Array<{ readonly event: string; readonly decoded: string }>;
+  readonly posthogRequests: string[];
   readonly primary: TargetPage;
   readonly workerIds: WeakMap<object, string>;
   nextWorkerId: number;
@@ -280,7 +288,12 @@ export const uiAuthenticateTauTestUser: BrowserCommand<[account: TargetTauTestAc
     headers,
   });
   if (!signUp.ok()) {
-    throw new Error(`Tau test-account sign-up failed with HTTP ${signUp.status()}.`);
+    /* `INVALID_ORIGIN` is the usual one: the API at TAU_E2E_API_URL trusts only
+     * its own TAU_FRONTEND_URL, which must be this run's origin. */
+    const body = await signUp.text();
+    throw new Error(
+      `Tau test-account sign-up failed with HTTP ${signUp.status()} from ${tauApiUrl} for origin ${testBaseURL}: ${body.slice(0, 200)}`,
+    );
   }
 
   await executeTauDatabase(`UPDATE "user" SET email_verified = true WHERE email = '${account.email}';`);
@@ -339,7 +352,10 @@ export const uiOpenTarget: BrowserCommand = async (commandContext) => {
     agentHostGatewayRequests: [],
     consoleMessages: [],
     context,
+    cpuProfiles: new Map(),
     pageErrors: [],
+    posthogEvents: [],
+    posthogRequests: [],
     primary,
     workerIds: new WeakMap(),
     nextWorkerId: 0,
@@ -351,16 +367,61 @@ export const uiOpenTarget: BrowserCommand = async (commandContext) => {
   sessions.set(commandContext.sessionId, session);
 };
 
+/**
+ * Every `.tau/chats/<chatId>/events.jsonl` in the page's OPFS, the same walk
+ * `readHomeGlobText` does. A closed or navigated-away page yields nothing: capture
+ * is evidence for `formal:logs`, never a reason to fail teardown.
+ */
+const readOpfsChatLogs = async (page: TargetPage): Promise<CapturedChatLog[]> => {
+  try {
+    return await page.evaluate(async () => {
+      const found: Array<{ chatId: string; text: string }> = [];
+      const walk = async (directory: FileSystemDirectoryHandle, depth: number): Promise<void> => {
+        for await (const handle of directory.values()) {
+          if (handle.kind !== 'directory') {
+            continue;
+          }
+          if (handle.name === '.tau') {
+            const chats = await handle.getDirectoryHandle('chats').catch(() => undefined);
+            for await (const chat of chats?.values() ?? []) {
+              const file =
+                chat.kind === 'directory' ? await chat.getFileHandle('events.jsonl').catch(() => undefined) : undefined;
+              if (file) {
+                const blob = await file.getFile();
+                found.push({ chatId: chat.name, text: await blob.text() });
+              }
+            }
+          } else if (depth > 0) {
+            await walk(handle, depth - 1);
+          }
+        }
+      };
+      await walk(await navigator.storage.getDirectory(), 3);
+      return found;
+    });
+  } catch {
+    return [];
+  }
+};
+
 export const uiCloseTarget: BrowserCommand = async (commandContext) => {
   const session = sessions.get(commandContext.sessionId);
   if (!session) {
     return;
   }
   sessions.delete(commandContext.sessionId);
+  /* Field trace validation (formal-verification policy): keep every chat log this
+   * session wrote, from OPFS and from the daemon's workspace, before disposal
+   * removes them. `formal:logs` validates the copies against ChatLog.tla. */
+  const logs = chatLogDestination('ui-e2e', commandContext.testPath);
+  await writeChatLogs(logs, await readOpfsChatLogs(session.primary));
+  const daemon = tauServeFixtures.get(commandContext.sessionId);
+  if (daemon) {
+    await captureChatLogs(daemon.workspace, logs);
+  }
   await disposeSession(session);
   /* A spec that fails mid-vertical must not leak a daemon, its two stub
    * servers and a temp workspace onto the machine. */
-  const daemon = tauServeFixtures.get(commandContext.sessionId);
   if (daemon) {
     tauServeFixtures.delete(commandContext.sessionId);
     await daemon.dispose();
@@ -752,6 +813,94 @@ export const uiReadAgentHostApiRequests: BrowserCommand<[], string[]> = (command
   ...sessionFor(commandContext).agentHostApiRequests,
 ];
 
+/** Local SDK transport: no analytics request can leave the browser context. */
+export const uiInstallPostHogFixture: BrowserCommand<[apiKey: string]> = async (commandContext, apiKey) => {
+  const session = sessionFor(commandContext);
+  const recorder = await readFile(
+    resolve(import.meta.dirname, '../../../../node_modules/posthog-js/dist/lazy-recorder.js'),
+  );
+  const deadClicks = await readFile(
+    resolve(import.meta.dirname, '../../../../node_modules/posthog-js/dist/dead-clicks-autocapture.js'),
+  );
+  await session.context.addInitScript(
+    ({ key }) => {
+      Object.defineProperty(navigator, 'webdriver', { configurable: true, value: false });
+      Object.defineProperty(navigator, 'userAgent', {
+        configurable: true,
+        value: navigator.userAgent.replace('HeadlessChrome', 'Chrome'),
+      });
+      (globalThis as typeof globalThis & { ENV?: Record<string, unknown> }).ENV = {
+        ...(globalThis as typeof globalThis & { ENV?: Record<string, unknown> }).ENV,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- client environment wire name
+        POSTHOG_CLIENT_KEY: key,
+      };
+      (globalThis as typeof globalThis & { _POSTHOG_REMOTE_CONFIG?: Record<string, unknown> })._POSTHOG_REMOTE_CONFIG =
+        {
+          [key]: { config: { sessionRecording: { sampleRate: 1, minimumDurationMilliseconds: 0 } } },
+        };
+    },
+    { key: apiKey },
+  );
+  await session.context.route(/\/api\/ph\//u, async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    session.posthogRequests.push(`${request.method()} ${url.pathname}`);
+    if (url.pathname.endsWith('/lazy-recorder.js')) {
+      await route.fulfill({ status: 200, contentType: 'application/javascript', body: recorder });
+      return;
+    }
+    if (url.pathname.endsWith('/dead-clicks-autocapture.js')) {
+      await route.fulfill({ status: 200, contentType: 'application/javascript', body: deadClicks });
+      return;
+    }
+    const body = request.postDataBuffer();
+    if (body && (url.pathname.includes('/e/') || url.pathname.includes('/s/'))) {
+      const decoded = body[0] === 31 && body[1] === 139 ? gunzipSync(body).toString('utf8') : body.toString('utf8');
+      const payload: unknown = JSON.parse(decoded);
+      const events: unknown[] = Array.isArray(payload) ? (payload as unknown[]) : [payload];
+      for (const event of events) {
+        if (event !== null && typeof event === 'object' && 'event' in event && typeof event.event === 'string') {
+          const compressed: string[] = [];
+          const visit = (value: unknown): void => {
+            if (typeof value === 'string' && value.codePointAt(0) === 31 && value.codePointAt(1) === 139) {
+              compressed.push(gunzipSync(Buffer.from(value, 'latin1')).toString('utf8'));
+            } else if (Array.isArray(value)) {
+              for (const item of value) {
+                visit(item);
+              }
+            } else if (value !== null && typeof value === 'object') {
+              for (const item of Object.values(value)) {
+                visit(item);
+              }
+            }
+          };
+          visit(event);
+          session.posthogEvents.push({
+            event: event.event,
+            decoded: `${JSON.stringify(event)}\n${compressed.join('\n')}`,
+          });
+        }
+      }
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"flags":{}}' });
+  });
+};
+
+export const uiReadPostHogSummary: BrowserCommand<
+  [sentinels: readonly string[]],
+  { readonly events: string[]; readonly requests: string[]; readonly present: Record<string, boolean> }
+> = (commandContext, sentinels) => {
+  const session = sessionFor(commandContext);
+  const events = session.posthogEvents;
+  return {
+    events: events.map(({ event }) => event),
+    requests: [...session.posthogRequests],
+    present: Object.fromEntries(
+      sentinels.map((sentinel) => [sentinel, events.some(({ decoded }) => decoded.includes(sentinel))]),
+    ),
+  };
+};
+
 /** Release a response parked mid-stream; omit `turn` for the newest one. */
 export const uiReleaseAgentHostGatewayFixture: BrowserCommand<[turn?: string]> = (commandContext, turn) => {
   releaseGate(
@@ -925,6 +1074,10 @@ export const uiStartTauServeFixture: BrowserCommand<[options?: TauServeFixtureOp
 export const uiReleaseTauServeGateway: BrowserCommand = (commandContext) => {
   tauServeFor(commandContext).release();
 };
+
+/** Whether the daemon's second provider request is parked before its final answer. */
+export const uiIsTauServeGatewayHeld: BrowserCommand<[], boolean> = (commandContext) =>
+  tauServeFor(commandContext).secondRequestHeld();
 
 export const uiReadTauServeFile: BrowserCommand<[relativePath: string], string | undefined> = async (
   commandContext,
@@ -1558,6 +1711,48 @@ export const uiSampleCameraDuringClick: BrowserCommand<[selector: string, frameC
   return samples;
 };
 
+/**
+ * Records a CPU profile of one target page through the DevTools protocol.
+ *
+ * `start` begins sampling at 100 µs; `stop` ends it and writes the profile as `artifactName`
+ * (a `.cpuprofile` that DevTools and speedscope open) beside the other test output. The page's
+ * own `performance` entries cannot say which function held the main thread; this can.
+ *
+ * @param commandContext - The Vitest browser command context.
+ * @param action - Whether to begin or end the recording.
+ * @param artifactName - File name for the profile; required by `stop`.
+ * @param surface - Which target page to profile.
+ * @returns The profile's absolute path after `stop`; nothing after `start`.
+ */
+export const uiCpuProfile: BrowserCommand<
+  [action: 'start' | 'stop', artifactName?: string, surface?: TargetSurface],
+  string | undefined
+> = async (commandContext, action, artifactName, surface = 'primary') => {
+  const session = sessionFor(commandContext);
+  if (action === 'start') {
+    if (session.cpuProfiles.has(surface)) {
+      throw new Error(`A CPU profile of the ${surface} page is already recording.`);
+    }
+    const cdp = await session.context.newCDPSession(pageFor(session, surface));
+    await cdp.send('Profiler.enable');
+    await cdp.send('Profiler.setSamplingInterval', { interval: 100 });
+    await cdp.send('Profiler.start');
+    session.cpuProfiles.set(surface, cdp);
+    return undefined;
+  }
+  const cdp = session.cpuProfiles.get(surface);
+  if (!cdp || !artifactName) {
+    throw new Error(`Stopping a CPU profile needs a recording of the ${surface} page and an artifact name.`);
+  }
+  session.cpuProfiles.delete(surface);
+  const { profile } = await cdp.send('Profiler.stop');
+  await cdp.detach();
+  const path = resolve(outputRoot, commandContext.sessionId, artifactName.replaceAll(/[^a-zA-Z0-9._-]+/gu, '-'));
+  await mkdir(resolve(path, '..'), { recursive: true });
+  await writeFile(path, JSON.stringify(profile));
+  return path;
+};
+
 export const uiOpenSecondaryTarget: BrowserCommand<[path: string]> = async (commandContext, path) => {
   const session = sessionFor(commandContext);
   if (session.secondary) {
@@ -1693,6 +1888,7 @@ export const uiBrowserCommands = {
   uiCloseSecondaryTarget,
   uiCloseTarget,
   uiCookies,
+  uiCpuProfile,
   uiDragTarget,
   uiDownloadTarget,
   uiEmulateColorScheme,
@@ -1707,7 +1903,9 @@ export const uiBrowserCommands = {
   uiHoverTarget,
   uiHoldNextAgentHostGatewayRequest,
   uiInstallAgentHostGatewayFixture,
+  uiInstallPostHogFixture,
   uiReadAgentHostApiRequests,
+  uiReadPostHogSummary,
   uiReadAgentHostGatewayState,
   uiReleaseAgentHostGatewayRequest,
   uiWaitForAgentHostGatewayGate,
@@ -1738,6 +1936,7 @@ export const uiBrowserCommands = {
   uiTargetWorkers,
   uiStopTauServeFixture,
   uiReleaseTauServeGateway,
+  uiIsTauServeGatewayHeld,
   uiReadTauServeFile,
   uiListTauServeChats,
   uiTypeTarget,

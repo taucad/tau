@@ -1,0 +1,2298 @@
+[
+  {
+    "id": "m3-toHaveBoundingBox-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveBoundingBox",
+    "arguments": [
+      {
+        "center": [
+          0,
+          0,
+          14.999999999999996
+        ],
+        "max": [
+          35.004949762557565,
+          35.004949762557565,
+          31.080942214060517
+        ],
+        "min": [
+          -35.004949762557565,
+          -35.004949762557565,
+          -1.0809422140605254
+        ],
+        "size": [
+          70.00989952511513,
+          70.00989952511513,
+          32.16188442812104
+        ],
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHaveBoundingBox",
+      "claimId": "family.toHaveBoundingBox.positive",
+      "payload": {
+        "expected": {
+          "center": [
+            0,
+            0,
+            14.999999999999996
+          ],
+          "max": [
+            35.004949762557565,
+            35.004949762557565,
+            31.080942214060517
+          ],
+          "min": [
+            -35.004949762557565,
+            -35.004949762557565,
+            -1.0809422140605254
+          ],
+          "size": [
+            70.00989952511513,
+            70.00989952511513,
+            32.16188442812104
+          ],
+          "tolerance": 0
+        },
+        "kind": "boundingBox"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveBoundingBox/positive",
+      "jsonPointer": "/rows/0",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveBoundingBox-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveBoundingBox",
+    "arguments": [
+      {
+        "center": [
+          0,
+          0,
+          14.999999999999996
+        ],
+        "max": [
+          35.004949762557565,
+          35.004949762557565,
+          31.080942214060517
+        ],
+        "min": [
+          -35.004949762557565,
+          -35.004949762557565,
+          -1.0809422140605254
+        ],
+        "size": [
+          70.00989952511513,
+          70.00989952511513,
+          32.16188442812104
+        ],
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHaveBoundingBox",
+      "claimId": "family.toHaveBoundingBox.negative",
+      "payload": {
+        "expected": {
+          "center": [
+            0,
+            0,
+            14.999999999999996
+          ],
+          "max": [
+            35.004949762557565,
+            35.004949762557565,
+            31.080942214060517
+          ],
+          "min": [
+            -35.004949762557565,
+            -35.004949762557565,
+            -1.0809422140605254
+          ],
+          "size": [
+            70.00989952511513,
+            70.00989952511513,
+            32.16188442812104
+          ],
+          "tolerance": 0
+        },
+        "kind": "boundingBox"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveBoundingBox/negative",
+      "jsonPointer": "/rows/1",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveConnectedComponents-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveConnectedComponents",
+    "arguments": [
+      {
+        "count": 1,
+        "toleranceMm": 0.001
+      }
+    ],
+    "claim": {
+      "capability": "toHaveConnectedComponents",
+      "claimId": "family.toHaveConnectedComponents.positive",
+      "payload": {
+        "expected": {
+          "count": 1,
+          "toleranceMm": 0.001
+        },
+        "kind": "connectedComponents"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveConnectedComponents/positive",
+      "jsonPointer": "/rows/2",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveConnectedComponents-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveConnectedComponents",
+    "arguments": [
+      {
+        "count": 1,
+        "toleranceMm": 0.001
+      }
+    ],
+    "claim": {
+      "capability": "toHaveConnectedComponents",
+      "claimId": "family.toHaveConnectedComponents.negative",
+      "payload": {
+        "expected": {
+          "count": 1,
+          "toleranceMm": 0.001
+        },
+        "kind": "connectedComponents"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveConnectedComponents/negative",
+      "jsonPointer": "/rows/3",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toBeWatertight-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toBeWatertight",
+    "arguments": [],
+    "claim": {
+      "capability": "toBeWatertight",
+      "claimId": "family.toBeWatertight.positive",
+      "payload": {
+        "expected": true,
+        "kind": "watertight"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toBeWatertight/positive",
+      "jsonPointer": "/rows/4",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "exact-nullary-contract"
+    }
+  },
+  {
+    "id": "m3-toBeWatertight-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toBeWatertight",
+    "arguments": [],
+    "claim": {
+      "capability": "toBeWatertight",
+      "claimId": "family.toBeWatertight.negative",
+      "payload": {
+        "expected": true,
+        "kind": "watertight"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toBeWatertight/negative",
+      "jsonPointer": "/rows/5",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "exact-nullary-contract"
+    }
+  },
+  {
+    "id": "m3-toHaveNoComponentInterference-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveNoComponentInterference",
+    "arguments": [
+      {
+        "allowances": [
+          {
+            "left": "housing",
+            "maxVolume": 381,
+            "reason": "source-observation allowance",
+            "right": "shaft"
+          }
+        ],
+        "tolerance": 0.001
+      }
+    ],
+    "claim": {
+      "capability": "toHaveNoComponentInterference",
+      "claimId": "family.toHaveNoComponentInterference.positive",
+      "payload": {
+        "expected": {
+          "allowances": [
+            {
+              "left": "housing",
+              "maxVolume": 381,
+              "reason": "source-observation allowance",
+              "right": "shaft"
+            }
+          ],
+          "tolerance": 0.001
+        },
+        "kind": "componentInterference"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveNoComponentInterference/positive",
+      "jsonPointer": "/rows/0",
+      "inputSha256": "9dae28d3609f57bbf288556de4a15bbbdcfb1a905d239222fa41e994e103974f",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveNoComponentInterference-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveNoComponentInterference",
+    "arguments": [
+      {
+        "allowances": [
+          {
+            "left": "housing",
+            "maxVolume": 381,
+            "reason": "source-observation allowance",
+            "right": "shaft"
+          }
+        ],
+        "tolerance": 0.001
+      }
+    ],
+    "claim": {
+      "capability": "toHaveNoComponentInterference",
+      "claimId": "family.toHaveNoComponentInterference.negative",
+      "payload": {
+        "expected": {
+          "allowances": [
+            {
+              "left": "housing",
+              "maxVolume": 381,
+              "reason": "source-observation allowance",
+              "right": "shaft"
+            }
+          ],
+          "tolerance": 0.001
+        },
+        "kind": "componentInterference"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveNoComponentInterference/negative",
+      "jsonPointer": "/rows/0",
+      "inputSha256": "d927f4915632ea245289d886140d3ce773ad44d18c578d41dbcba84dd8312401",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveAssemblyOccurrences-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveAssemblyOccurrences",
+    "arguments": [
+      {
+        "occurrences": [
+          {
+            "count": 1,
+            "name": "housing"
+          },
+          {
+            "count": 1,
+            "name": "shaft"
+          }
+        ],
+        "uniqueNames": true
+      }
+    ],
+    "claim": {
+      "capability": "toHaveAssemblyOccurrences",
+      "claimId": "family.toHaveAssemblyOccurrences.positive",
+      "payload": {
+        "expected": {
+          "occurrences": [
+            {
+              "count": 1,
+              "name": "housing"
+            },
+            {
+              "count": 1,
+              "name": "shaft"
+            }
+          ],
+          "uniqueNames": true
+        },
+        "kind": "assemblyOccurrences"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveAssemblyOccurrences/positive",
+      "jsonPointer": "/rows/6",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveAssemblyOccurrences-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveAssemblyOccurrences",
+    "arguments": [
+      {
+        "occurrences": [
+          {
+            "count": 1,
+            "name": "housing"
+          },
+          {
+            "count": 1,
+            "name": "shaft"
+          }
+        ],
+        "uniqueNames": true
+      }
+    ],
+    "claim": {
+      "capability": "toHaveAssemblyOccurrences",
+      "claimId": "family.toHaveAssemblyOccurrences.negative",
+      "payload": {
+        "expected": {
+          "occurrences": [
+            {
+              "count": 1,
+              "name": "housing"
+            },
+            {
+              "count": 1,
+              "name": "shaft"
+            }
+          ],
+          "uniqueNames": true
+        },
+        "kind": "assemblyOccurrences"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveAssemblyOccurrences/negative",
+      "jsonPointer": "/rows/7",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveMeshIntegrity-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveMeshIntegrity",
+    "arguments": [
+      {
+        "degenerateTriangles": {
+          "maxCount": 0
+        },
+        "duplicateFaces": {
+          "maxCount": 0
+        },
+        "finitePositions": true,
+        "triangleCount": 1276,
+        "watertight": true
+      }
+    ],
+    "claim": {
+      "capability": "toHaveMeshIntegrity",
+      "claimId": "family.toHaveMeshIntegrity.positive",
+      "payload": {
+        "expected": {
+          "degenerateTriangles": {
+            "maxCount": 0
+          },
+          "duplicateFaces": {
+            "maxCount": 0
+          },
+          "finitePositions": true,
+          "triangleCount": 1276,
+          "watertight": true
+        },
+        "kind": "meshIntegrity"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "refused",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveMeshIntegrity/positive",
+      "jsonPointer": "/rows/8",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveMeshIntegrity-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveMeshIntegrity",
+    "arguments": [
+      {
+        "degenerateTriangles": {
+          "maxCount": 0
+        },
+        "duplicateFaces": {
+          "maxCount": 0
+        },
+        "finitePositions": true,
+        "triangleCount": 1276,
+        "watertight": true
+      }
+    ],
+    "claim": {
+      "capability": "toHaveMeshIntegrity",
+      "claimId": "family.toHaveMeshIntegrity.negative",
+      "payload": {
+        "expected": {
+          "degenerateTriangles": {
+            "maxCount": 0
+          },
+          "duplicateFaces": {
+            "maxCount": 0
+          },
+          "finitePositions": true,
+          "triangleCount": 1276,
+          "watertight": true
+        },
+        "kind": "meshIntegrity"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "refused",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveMeshIntegrity/negative",
+      "jsonPointer": "/rows/9",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveNoDiagnostics-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveNoDiagnostics",
+    "arguments": [
+      {
+        "severities": [
+          "error",
+          "warning"
+        ]
+      }
+    ],
+    "claim": {
+      "capability": "toHaveNoDiagnostics",
+      "claimId": "family.toHaveNoDiagnostics.positive",
+      "payload": {
+        "expected": {
+          "severities": [
+            "error",
+            "warning"
+          ]
+        },
+        "kind": "noDiagnostics"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveNoDiagnostics/positive",
+      "jsonPointer": "/rows/10",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveNoDiagnostics-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveNoDiagnostics",
+    "arguments": [
+      {
+        "severities": [
+          "error",
+          "warning"
+        ]
+      }
+    ],
+    "claim": {
+      "capability": "toHaveNoDiagnostics",
+      "claimId": "family.toHaveNoDiagnostics.negative",
+      "payload": {
+        "expected": {
+          "severities": [
+            "error",
+            "warning"
+          ]
+        },
+        "kind": "noDiagnostics"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveNoDiagnostics/negative",
+      "jsonPointer": "/rows/11",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveSurfaceArea-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveSurfaceArea",
+    "arguments": [
+      {
+        "tolerance": 0,
+        "value": 27619.741359427768
+      }
+    ],
+    "claim": {
+      "capability": "toHaveSurfaceArea",
+      "claimId": "family.toHaveSurfaceArea.positive",
+      "payload": {
+        "expected": {
+          "tolerance": 0,
+          "value": 27619.741359427768
+        },
+        "kind": "surfaceArea"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveSurfaceArea/positive",
+      "jsonPointer": "/rows/12",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveSurfaceArea-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveSurfaceArea",
+    "arguments": [
+      {
+        "tolerance": 0,
+        "value": 27619.741359427768
+      }
+    ],
+    "claim": {
+      "capability": "toHaveSurfaceArea",
+      "claimId": "family.toHaveSurfaceArea.negative",
+      "payload": {
+        "expected": {
+          "tolerance": 0,
+          "value": 27619.741359427768
+        },
+        "kind": "surfaceArea"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveSurfaceArea/negative",
+      "jsonPointer": "/rows/13",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveVolume-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveVolume",
+    "arguments": [
+      {
+        "tolerance": 0,
+        "value": 146811.3536443372
+      }
+    ],
+    "claim": {
+      "capability": "toHaveVolume",
+      "claimId": "family.toHaveVolume.positive",
+      "payload": {
+        "expected": {
+          "tolerance": 0,
+          "value": 146811.3536443372
+        },
+        "kind": "volume"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveVolume/positive",
+      "jsonPointer": "/rows/14",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveVolume-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveVolume",
+    "arguments": [
+      {
+        "tolerance": 0,
+        "value": 146811.3536443372
+      }
+    ],
+    "claim": {
+      "capability": "toHaveVolume",
+      "claimId": "family.toHaveVolume.negative",
+      "payload": {
+        "expected": {
+          "tolerance": 0,
+          "value": 146811.3536443372
+        },
+        "kind": "volume"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveVolume/negative",
+      "jsonPointer": "/rows/15",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveMass-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveMass",
+    "arguments": [
+      {
+        "density": 1,
+        "tolerance": 0,
+        "value": 146811.3536443372
+      }
+    ],
+    "claim": {
+      "capability": "toHaveMass",
+      "claimId": "family.toHaveMass.positive",
+      "payload": {
+        "expected": {
+          "density": 1,
+          "tolerance": 0,
+          "value": 146811.3536443372
+        },
+        "kind": "mass"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveMass/positive",
+      "jsonPointer": "/rows/16",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveMass-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveMass",
+    "arguments": [
+      {
+        "density": 1,
+        "tolerance": 0,
+        "value": 146811.3536443372
+      }
+    ],
+    "claim": {
+      "capability": "toHaveMass",
+      "claimId": "family.toHaveMass.negative",
+      "payload": {
+        "expected": {
+          "density": 1,
+          "tolerance": 0,
+          "value": 146811.3536443372
+        },
+        "kind": "mass"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveMass/negative",
+      "jsonPointer": "/rows/17",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveCenterOfMass-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveCenterOfMass",
+    "arguments": [
+      {
+        "point": [
+          -2.0071763937842757e-15,
+          -6.312693658228941e-15,
+          15.000000000000002
+        ],
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHaveCenterOfMass",
+      "claimId": "family.toHaveCenterOfMass.positive",
+      "payload": {
+        "expected": {
+          "point": [
+            -2.0071763937842757e-15,
+            -6.312693658228941e-15,
+            15.000000000000002
+          ],
+          "tolerance": 0
+        },
+        "kind": "centerOfMass"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveCenterOfMass/positive",
+      "jsonPointer": "/rows/18",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveCenterOfMass-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveCenterOfMass",
+    "arguments": [
+      {
+        "point": [
+          -2.0071763937842757e-15,
+          -6.312693658228941e-15,
+          15.000000000000002
+        ],
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHaveCenterOfMass",
+      "claimId": "family.toHaveCenterOfMass.negative",
+      "payload": {
+        "expected": {
+          "point": [
+            -2.0071763937842757e-15,
+            -6.312693658228941e-15,
+            15.000000000000002
+          ],
+          "tolerance": 0
+        },
+        "kind": "centerOfMass"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveCenterOfMass/negative",
+      "jsonPointer": "/rows/19",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toBeValidBrep-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toBeValidBrep",
+    "arguments": [
+      {}
+    ],
+    "claim": {
+      "capability": "toBeValidBrep",
+      "claimId": "family.toBeValidBrep.positive",
+      "payload": {
+        "expected": {},
+        "kind": "validBrep"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toBeValidBrep/positive",
+      "jsonPointer": "/rows/20",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toBeValidBrep-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toBeValidBrep",
+    "arguments": [
+      {}
+    ],
+    "claim": {
+      "capability": "toBeValidBrep",
+      "claimId": "family.toBeValidBrep.negative",
+      "payload": {
+        "expected": {},
+        "kind": "validBrep"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toBeValidBrep/negative",
+      "jsonPointer": "/rows/21",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveTopologyCounts-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveTopologyCounts",
+    "arguments": [
+      {
+        "compounds": 1,
+        "edges": 36,
+        "faces": 10,
+        "shells": 2,
+        "solids": 2,
+        "tolerance": 0,
+        "vertices": 72,
+        "wires": 12
+      }
+    ],
+    "claim": {
+      "capability": "toHaveTopologyCounts",
+      "claimId": "family.toHaveTopologyCounts.positive",
+      "payload": {
+        "expected": {
+          "compounds": 1,
+          "edges": 36,
+          "faces": 10,
+          "shells": 2,
+          "solids": 2,
+          "tolerance": 0,
+          "vertices": 72,
+          "wires": 12
+        },
+        "kind": "topologyCounts"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveTopologyCounts/positive",
+      "jsonPointer": "/rows/22",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveTopologyCounts-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveTopologyCounts",
+    "arguments": [
+      {
+        "compounds": 1,
+        "edges": 36,
+        "faces": 10,
+        "shells": 2,
+        "solids": 2,
+        "tolerance": 0,
+        "vertices": 72,
+        "wires": 12
+      }
+    ],
+    "claim": {
+      "capability": "toHaveTopologyCounts",
+      "claimId": "family.toHaveTopologyCounts.negative",
+      "payload": {
+        "expected": {
+          "compounds": 1,
+          "edges": 36,
+          "faces": 10,
+          "shells": 2,
+          "solids": 2,
+          "tolerance": 0,
+          "vertices": 72,
+          "wires": 12
+        },
+        "kind": "topologyCounts"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveTopologyCounts/negative",
+      "jsonPointer": "/rows/23",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveStepUnits-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveStepUnits",
+    "arguments": [
+      {
+        "unit": "mm"
+      }
+    ],
+    "claim": {
+      "capability": "toHaveStepUnits",
+      "claimId": "family.toHaveStepUnits.positive",
+      "payload": {
+        "expected": {
+          "unit": "mm"
+        },
+        "kind": "stepUnits"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveStepUnits/positive",
+      "jsonPointer": "/rows/24",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveStepUnits-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveStepUnits",
+    "arguments": [
+      {
+        "unit": "mm"
+      }
+    ],
+    "claim": {
+      "capability": "toHaveStepUnits",
+      "claimId": "family.toHaveStepUnits.negative",
+      "payload": {
+        "expected": {
+          "unit": "mm"
+        },
+        "kind": "stepUnits"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveStepUnits/negative",
+      "jsonPointer": "/rows/25",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveProductStructure-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveProductStructure",
+    "arguments": [
+      {
+        "count": 2,
+        "names": [
+          "housing",
+          "shaft"
+        ]
+      }
+    ],
+    "claim": {
+      "capability": "toHaveProductStructure",
+      "claimId": "family.toHaveProductStructure.positive",
+      "payload": {
+        "expected": {
+          "count": 2,
+          "names": [
+            "housing",
+            "shaft"
+          ]
+        },
+        "kind": "productStructure"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveProductStructure/positive",
+      "jsonPointer": "/rows/26",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveProductStructure-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveProductStructure",
+    "arguments": [
+      {
+        "count": 2,
+        "names": [
+          "housing",
+          "shaft"
+        ]
+      }
+    ],
+    "claim": {
+      "capability": "toHaveProductStructure",
+      "claimId": "family.toHaveProductStructure.negative",
+      "payload": {
+        "expected": {
+          "count": 2,
+          "names": [
+            "housing",
+            "shaft"
+          ]
+        },
+        "kind": "productStructure"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveProductStructure/negative",
+      "jsonPointer": "/rows/27",
+      "inputSha256": "066ada3162648bc2b3d5d7f21f68b25160ee4d044b93f733b68c00d4406b9263",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHavePlanarFace-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHavePlanarFace",
+    "arguments": [
+      {
+        "area": 2100,
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "offset": 35,
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHavePlanarFace",
+      "claimId": "family.toHavePlanarFace.positive",
+      "payload": {
+        "expected": {
+          "area": 2100,
+          "normal": [
+            0,
+            1,
+            0
+          ],
+          "offset": 35,
+          "tolerance": 0
+        },
+        "kind": "planarFace"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHavePlanarFace/positive",
+      "jsonPointer": "/rows/1",
+      "inputSha256": "9dae28d3609f57bbf288556de4a15bbbdcfb1a905d239222fa41e994e103974f",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHavePlanarFace-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHavePlanarFace",
+    "arguments": [
+      {
+        "area": 2100,
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "offset": 35,
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHavePlanarFace",
+      "claimId": "family.toHavePlanarFace.negative",
+      "payload": {
+        "expected": {
+          "area": 2100,
+          "normal": [
+            0,
+            1,
+            0
+          ],
+          "offset": 35,
+          "tolerance": 0
+        },
+        "kind": "planarFace"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHavePlanarFace/negative",
+      "jsonPointer": "/rows/1",
+      "inputSha256": "d927f4915632ea245289d886140d3ce773ad44d18c578d41dbcba84dd8312401",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveCylindricalFace-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveCylindricalFace",
+    "arguments": [
+      {
+        "axis": "z",
+        "radius": 25.04,
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHaveCylindricalFace",
+      "claimId": "family.toHaveCylindricalFace.positive",
+      "payload": {
+        "expected": {
+          "axis": "z",
+          "radius": 25.04,
+          "tolerance": 0
+        },
+        "kind": "cylindricalFace"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveCylindricalFace/positive",
+      "jsonPointer": "/rows/2",
+      "inputSha256": "9dae28d3609f57bbf288556de4a15bbbdcfb1a905d239222fa41e994e103974f",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveCylindricalFace-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveCylindricalFace",
+    "arguments": [
+      {
+        "axis": "z",
+        "radius": 25.04,
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHaveCylindricalFace",
+      "claimId": "family.toHaveCylindricalFace.negative",
+      "payload": {
+        "expected": {
+          "axis": "z",
+          "radius": 25.04,
+          "tolerance": 0
+        },
+        "kind": "cylindricalFace"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveCylindricalFace/negative",
+      "jsonPointer": "/rows/2",
+      "inputSha256": "d927f4915632ea245289d886140d3ce773ad44d18c578d41dbcba84dd8312401",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveCircularHole-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveCircularHole",
+    "arguments": [
+      {
+        "axis": "z",
+        "center": [
+          1.6413537196058316e-12,
+          -3.655889033930342e-17,
+          15.000000000000002
+        ],
+        "diameter": 50.08,
+        "through": false,
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHaveCircularHole",
+      "claimId": "family.toHaveCircularHole.positive",
+      "payload": {
+        "expected": {
+          "axis": "z",
+          "center": [
+            1.6413537196058316e-12,
+            -3.655889033930342e-17,
+            15.000000000000002
+          ],
+          "diameter": 50.08,
+          "through": false,
+          "tolerance": 0
+        },
+        "kind": "circularHole"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveCircularHole/positive",
+      "jsonPointer": "/rows/3",
+      "inputSha256": "d927f4915632ea245289d886140d3ce773ad44d18c578d41dbcba84dd8312401",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveCircularHole-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveCircularHole",
+    "arguments": [
+      {
+        "axis": "z",
+        "center": [
+          1.6413537196058316e-12,
+          -3.655889033930342e-17,
+          15.000000000000002
+        ],
+        "diameter": 50.08,
+        "through": false,
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHaveCircularHole",
+      "claimId": "family.toHaveCircularHole.negative",
+      "payload": {
+        "expected": {
+          "axis": "z",
+          "center": [
+            1.6413537196058316e-12,
+            -3.655889033930342e-17,
+            15.000000000000002
+          ],
+          "diameter": 50.08,
+          "through": false,
+          "tolerance": 0
+        },
+        "kind": "circularHole"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveCircularHole/negative",
+      "jsonPointer": "/rows/3",
+      "inputSha256": "9dae28d3609f57bbf288556de4a15bbbdcfb1a905d239222fa41e994e103974f",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveCircularHolePattern-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveCircularHolePattern",
+    "arguments": [
+      {
+        "count": 1,
+        "holeDiameter": 1,
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHaveCircularHolePattern",
+      "claimId": "family.toHaveCircularHolePattern.positive",
+      "payload": {
+        "expected": {
+          "count": 1,
+          "holeDiameter": 1,
+          "tolerance": 0
+        },
+        "kind": "circularHolePattern"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveCircularHolePattern/positive",
+      "jsonPointer": "/rows/4",
+      "inputSha256": "d927f4915632ea245289d886140d3ce773ad44d18c578d41dbcba84dd8312401",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveCircularHolePattern-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveCircularHolePattern",
+    "arguments": [
+      {
+        "count": 1,
+        "holeDiameter": 1,
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHaveCircularHolePattern",
+      "claimId": "family.toHaveCircularHolePattern.negative",
+      "payload": {
+        "expected": {
+          "count": 1,
+          "holeDiameter": 1,
+          "tolerance": 0
+        },
+        "kind": "circularHolePattern"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveCircularHolePattern/negative",
+      "jsonPointer": "/rows/4",
+      "inputSha256": "9dae28d3609f57bbf288556de4a15bbbdcfb1a905d239222fa41e994e103974f",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveChamferFeature-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveChamferFeature",
+    "arguments": [
+      {
+        "distance": 2.5950010497090057,
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHaveChamferFeature",
+      "claimId": "family.toHaveChamferFeature.positive",
+      "payload": {
+        "expected": {
+          "distance": 2.5950010497090057,
+          "tolerance": 0
+        },
+        "kind": "chamferFeature"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveChamferFeature/positive",
+      "jsonPointer": "/rows/5",
+      "inputSha256": "d927f4915632ea245289d886140d3ce773ad44d18c578d41dbcba84dd8312401",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveChamferFeature-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveChamferFeature",
+    "arguments": [
+      {
+        "distance": 2.5950010497090057,
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHaveChamferFeature",
+      "claimId": "family.toHaveChamferFeature.negative",
+      "payload": {
+        "expected": {
+          "distance": 2.5950010497090057,
+          "tolerance": 0
+        },
+        "kind": "chamferFeature"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveChamferFeature/negative",
+      "jsonPointer": "/rows/5",
+      "inputSha256": "9dae28d3609f57bbf288556de4a15bbbdcfb1a905d239222fa41e994e103974f",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveFilletFeature-positive",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveFilletFeature",
+    "arguments": [
+      {
+        "radius": 1,
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHaveFilletFeature",
+      "claimId": "family.toHaveFilletFeature.positive",
+      "payload": {
+        "expected": {
+          "radius": 1,
+          "tolerance": 0
+        },
+        "kind": "filletFeature"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveFilletFeature/positive",
+      "jsonPointer": "/rows/6",
+      "inputSha256": "d927f4915632ea245289d886140d3ce773ad44d18c578d41dbcba84dd8312401",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveFilletFeature-negative",
+    "fixtureId": "m3-control-step",
+    "matcher": "toHaveFilletFeature",
+    "arguments": [
+      {
+        "radius": 1,
+        "tolerance": 0
+      }
+    ],
+    "claim": {
+      "capability": "toHaveFilletFeature",
+      "claimId": "family.toHaveFilletFeature.negative",
+      "payload": {
+        "expected": {
+          "radius": 1,
+          "tolerance": 0
+        },
+        "kind": "filletFeature"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "family/toHaveFilletFeature/negative",
+      "jsonPointer": "/rows/6",
+      "inputSha256": "9dae28d3609f57bbf288556de4a15bbbdcfb1a905d239222fa41e994e103974f",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveSpatialRelationships-positive",
+    "fixtureId": "m3-clearance-step",
+    "matcher": "toHaveSpatialRelationships",
+    "arguments": [
+      {
+        "relationships": [
+          {
+            "kind": "clearance",
+            "max": 0.3,
+            "min": 0.1,
+            "subject": "bolt.shank",
+            "target": "plate.hole",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    ],
+    "claim": {
+      "capability": "toHaveSpatialRelationships",
+      "claimId": "packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#relationships[0]:positive",
+      "payload": {
+        "expected": {
+          "relationships": [
+            {
+              "kind": "clearance",
+              "max": 0.3,
+              "min": 0.1,
+              "subject": "bolt.shank",
+              "target": "plate.hole",
+              "tolerance": 0.001
+            }
+          ]
+        },
+        "kind": "spatialRelationships"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "relationship/packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#relationships[0]/positive",
+      "jsonPointer": "/rows/8",
+      "inputSha256": "9dae28d3609f57bbf288556de4a15bbbdcfb1a905d239222fa41e994e103974f",
+      "subjectSha256": "cb7e827571bb7ca65e5aa48f8467b850bc4ea66ef07eb5b389ebd20005339de4",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveSpatialRelationships-negative",
+    "fixtureId": "m3-clearance-step",
+    "matcher": "toHaveSpatialRelationships",
+    "arguments": [
+      {
+        "relationships": [
+          {
+            "kind": "clearance",
+            "max": 0.3,
+            "min": 0.1,
+            "subject": "bolt.shank",
+            "target": "plate.hole",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    ],
+    "claim": {
+      "capability": "toHaveSpatialRelationships",
+      "claimId": "packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#relationships[0]:negative",
+      "payload": {
+        "expected": {
+          "relationships": [
+            {
+              "kind": "clearance",
+              "max": 0.3,
+              "min": 0.1,
+              "subject": "bolt.shank",
+              "target": "plate.hole",
+              "tolerance": 0.001
+            }
+          ]
+        },
+        "kind": "spatialRelationships"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "relationship/packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/manifest.json#relationships[0]/negative",
+      "jsonPointer": "/rows/8",
+      "inputSha256": "d927f4915632ea245289d886140d3ce773ad44d18c578d41dbcba84dd8312401",
+      "subjectSha256": "cb7e827571bb7ca65e5aa48f8467b850bc4ea66ef07eb5b389ebd20005339de4",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveVoidContinuity-positive",
+    "fixtureId": "bore-guide-step",
+    "matcher": "toHaveVoidContinuity",
+    "arguments": [
+      {
+        "material": [
+          "guide"
+        ],
+        "minCrossSection": 1,
+        "path": [
+          [
+            0,
+            0,
+            3
+          ],
+          [
+            0,
+            0,
+            42
+          ]
+        ]
+      }
+    ],
+    "claim": {
+      "capability": "toHaveVoidContinuity",
+      "claimId": "W5-VOID-CONTINUOUS-01:minCrossSection:positive",
+      "payload": {
+        "expected": {
+          "material": [
+            "guide"
+          ],
+          "minCrossSection": 1,
+          "path": [
+            [
+              0,
+              0,
+              3
+            ],
+            [
+              0,
+              0,
+              42
+            ]
+          ]
+        },
+        "kind": "voidContinuity"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "amendment/W5-VOID-CONTINUOUS-01/minCrossSection/positive",
+      "jsonPointer": "/rows/73",
+      "inputSha256": "9dae28d3609f57bbf288556de4a15bbbdcfb1a905d239222fa41e994e103974f",
+      "subjectSha256": "55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveVoidContinuity-negative",
+    "fixtureId": "bore-guide-step",
+    "matcher": "toHaveVoidContinuity",
+    "arguments": [
+      {
+        "material": [
+          "guide"
+        ],
+        "minCrossSection": 1,
+        "path": [
+          [
+            0,
+            0,
+            3
+          ],
+          [
+            0,
+            0,
+            42
+          ]
+        ]
+      }
+    ],
+    "claim": {
+      "capability": "toHaveVoidContinuity",
+      "claimId": "W5-VOID-CONTINUOUS-01:minCrossSection:negative",
+      "payload": {
+        "expected": {
+          "material": [
+            "guide"
+          ],
+          "minCrossSection": 1,
+          "path": [
+            [
+              0,
+              0,
+              3
+            ],
+            [
+              0,
+              0,
+              42
+            ]
+          ]
+        },
+        "kind": "voidContinuity"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "amendment/W5-VOID-CONTINUOUS-01/minCrossSection/negative",
+      "jsonPointer": "/rows/64",
+      "inputSha256": "d927f4915632ea245289d886140d3ce773ad44d18c578d41dbcba84dd8312401",
+      "subjectSha256": "55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveMinimumWallThickness-positive",
+    "fixtureId": "box-step",
+    "matcher": "toHaveMinimumWallThickness",
+    "arguments": [
+      {
+        "tolerance": 0,
+        "value": {
+          "greaterThanOrEqual": 5
+        }
+      }
+    ],
+    "claim": {
+      "capability": "toHaveMinimumWallThickness",
+      "claimId": "nominal-box-min5-positive",
+      "payload": {
+        "expected": {
+          "tolerance": 0,
+          "value": {
+            "greaterThanOrEqual": 5
+          }
+        },
+        "kind": "minimumWallThickness"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "continuous02/nominal-box/min5/positive",
+      "jsonPointer": "/rows/95",
+      "inputSha256": "9dae28d3609f57bbf288556de4a15bbbdcfb1a905d239222fa41e994e103974f",
+      "subjectSha256": "9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toHaveMinimumWallThickness-negative",
+    "fixtureId": "box-step",
+    "matcher": "toHaveMinimumWallThickness",
+    "arguments": [
+      {
+        "tolerance": 0,
+        "value": {
+          "greaterThanOrEqual": 5
+        }
+      }
+    ],
+    "claim": {
+      "capability": "toHaveMinimumWallThickness",
+      "claimId": "nominal-box-min5-negative",
+      "payload": {
+        "expected": {
+          "tolerance": 0,
+          "value": {
+            "greaterThanOrEqual": 5
+          }
+        },
+        "kind": "minimumWallThickness"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "failed",
+    "baseline": "supported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "continuous02/nominal-box/min5/negative",
+      "jsonPointer": "/rows/86",
+      "inputSha256": "d927f4915632ea245289d886140d3ce773ad44d18c578d41dbcba84dd8312401",
+      "subjectSha256": "9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf",
+      "derivation": "source-declared-descriptor-reversal"
+    }
+  },
+  {
+    "id": "m3-toSatisfyRationalPlate-positive",
+    "fixtureId": "rational-plate",
+    "matcher": "toSatisfyRationalPlate",
+    "arguments": [],
+    "claim": {
+      "capability": "toSatisfyRationalPlate",
+      "claimId": "f1-target-positive",
+      "payload": {
+        "contract": "geospec.plate-two-windows/v1"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "part"
+      ],
+      "workUnitBudget": 10000
+    },
+    "expectedStatus": "passed",
+    "baseline": "unsupported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "f1-target-positive",
+      "jsonPointer": "/rows/102",
+      "inputSha256": "9dae28d3609f57bbf288556de4a15bbbdcfb1a905d239222fa41e994e103974f",
+      "subjectSha256": "e8f81bc96be92adb804d4805d95226654813c819d5e2e5689b4076072c115e29",
+      "derivation": "exact-nullary-contract"
+    }
+  },
+  {
+    "id": "m3-toSatisfyRationalPlate-negative",
+    "fixtureId": "rational-plate",
+    "matcher": "toSatisfyRationalPlate",
+    "arguments": [],
+    "claim": {
+      "capability": "toSatisfyRationalPlate",
+      "claimId": "f1-target-negative",
+      "payload": {
+        "contract": "geospec.plate-two-windows/v1"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "part"
+      ],
+      "workUnitBudget": 10000
+    },
+    "expectedStatus": "failed",
+    "baseline": "unsupported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "f1-target-negative",
+      "jsonPointer": "/rows/93",
+      "inputSha256": "d927f4915632ea245289d886140d3ce773ad44d18c578d41dbcba84dd8312401",
+      "subjectSha256": "e8f81bc96be92adb804d4805d95226654813c819d5e2e5689b4076072c115e29",
+      "derivation": "exact-nullary-contract"
+    }
+  },
+  {
+    "id": "m3-toSatisfyParallelPlaneDistance-positive",
+    "fixtureId": "m3-pmi-step",
+    "matcher": "toSatisfyParallelPlaneDistance",
+    "arguments": [],
+    "claim": {
+      "capability": "toSatisfyParallelPlaneDistance",
+      "claimId": "f2-two-occurrences-positive",
+      "payload": {
+        "contract": "geospec.pmi.parallel-plane-distance/v1"
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "part"
+      ],
+      "workUnitBudget": 31107
+    },
+    "expectedStatus": "passed",
+    "baseline": "unsupported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "f2-two-occurrences-positive",
+      "jsonPointer": "/rows/108",
+      "inputSha256": "9dae28d3609f57bbf288556de4a15bbbdcfb1a905d239222fa41e994e103974f",
+      "subjectSha256": "15d6e6a8ed9d2cebc43a095469651e66395586f32537d45761f002e28243f5ad",
+      "derivation": "exact-nullary-contract"
+    }
+  },
+  {
+    "id": "m3-toSatisfyParallelPlaneDistance-negative",
+    "fixtureId": "m3-pmi-step",
+    "matcher": "toSatisfyParallelPlaneDistance",
+    "arguments": [],
+    "claim": {
+      "capability": "toSatisfyParallelPlaneDistance",
+      "claimId": "f2-two-occurrences-negative",
+      "payload": {
+        "contract": "geospec.pmi.parallel-plane-distance/v1"
+      },
+      "polarity": "negative",
+      "subjectSlots": [
+        "part"
+      ],
+      "workUnitBudget": 31107
+    },
+    "expectedStatus": "failed",
+    "baseline": "unsupported",
+    "authority": {
+      "corpus": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+      "corpusSha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "rowId": "f2-two-occurrences-negative",
+      "jsonPointer": "/rows/99",
+      "inputSha256": "d927f4915632ea245289d886140d3ce773ad44d18c578d41dbcba84dd8312401",
+      "subjectSha256": "15d6e6a8ed9d2cebc43a095469651e66395586f32537d45761f002e28243f5ad",
+      "derivation": "exact-nullary-contract"
+    }
+  }
+]

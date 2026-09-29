@@ -27,8 +27,6 @@ allowBuilds:
   unrs-resolver: true
   '@nestjs/core': true
   nestjs-pino: true
-  # Install hook only prints upgrade warnings; Tau does not need it to run.
-  '@hatchet-dev/typescript-sdk': false
   '@google/genai': false
   # Downloads the platform vale binary at install time; required for prose linting.
   '@vvago/vale': true
@@ -77,11 +75,9 @@ catalog:
   '@nestjs/common': ^11.1.27
   '@nestjs/core': ^11.1.27
   '@nestjs/platform-fastify': ^11.1.27
-  '@nestjs/platform-socket.io': ^11.1.27
   '@nestjs/platform-ws': ^11.1.27
   '@nestjs/terminus': ^11.1.1
   '@nestjs/testing': ^11.1.27
-  '@nestjs/websockets': ^11.1.27
   '@nx/devkit': 22.7.1
   '@nx/eslint': 22.7.1
   '@nx/eslint-plugin': 22.7.1
@@ -98,7 +94,6 @@ catalog:
   '@opentelemetry/exporter-prometheus': ^0.213.0
   '@opentelemetry/exporter-trace-otlp-http': ^0.213.0
   '@opentelemetry/instrumentation-pino': ^0.59.0
-  '@opentelemetry/instrumentation-socket.io': ^0.60.0
   '@opentelemetry/resources': ^2.8.0
   '@opentelemetry/sdk-logs': ^0.213.0
   '@opentelemetry/sdk-metrics': ^2.8.0
@@ -112,7 +107,6 @@ catalog:
   '@react-router/fs-routes': 7.14.2
   '@react-router/node': 7.14.2
   '@size-limit/file': ^12.1.0
-  '@socket.io/redis-streams-adapter': ^0.3.1
   '@tanstack/react-pacer': ^0.22.1
   '@tanstack/react-query': ^5.101.0
   # tscircuit EDA kernel (@taucad/tscircuit): exact pins by charter D1 — every package is
@@ -279,7 +273,6 @@ catalog:
   rolldown: 1.2.3
   semver: ^7.8.5
   size-limit: ^12.1.0
-  socket.io-prometheus-metrics: ^1.0.6
   sonner: ^2.0.7
   source-map-explorer: ^2.5.3
   source-map-js: ^1.2.1
@@ -312,10 +305,11 @@ catalog:
   isomorphic-git: 1.38.5
   xstate: 6.0.0-alpha.59
   zod: ^4.4.3
-  nanoraster: ^0.5.4
+  nanoraster: ^0.5.5
+  # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
+  picovoxel: 0.1.0
   n8ao: 1.10.2
   postprocessing: 6.39.1
-  '@hatchet-dev/typescript-sdk': 1.29.2
   '@cfworker/json-schema': 4.1.1
   '@standard-schema/spec': 1.1.0
   ai: 6.0.208
@@ -324,12 +318,18 @@ catalog:
   '@anthropic-ai/sandbox-runtime': 0.0.75
   '@lhncbc/ucum-lhc': 7.1.9
   '@json-structure/sdk': 0.7.0
+  mqtt: 5.15.2
+  basic-ftp: 6.2.1
+  fflate: 0.8.3
   portless: 0.15.6
   streamdown: ^2.6.0
   '@streamdown/code': ^1.1.1
   '@streamdown/math': ^1.0.2
   '@streamdown/cjk': ^1.0.3
   '@streamdown/mermaid': ^1.0.2
+  '@fastify/multipart': ^10.0.0
+  '@typescript/vfs': ^1.6.4
+  '@napi-rs/cli': 3.8.6
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0
@@ -356,6 +356,7 @@ minimumReleaseAgeExclude:
   - '@taucad/*'
   - '@taulabs/*'
   - geospec
+  - picovoxel
   - nanoraster
   - nanoraster-darwin-arm64
   - nanoraster-darwin-x64
@@ -406,7 +407,6 @@ minimumReleaseAgeExclude:
   - '@rolldown/binding-win32-arm64-msvc@1.2.3'
   - '@rolldown/binding-win32-x64-msvc@1.2.3'
   - rolldown@1.2.3
-  - '@hatchet-dev/typescript-sdk@1.29.2'
   - electron@43.5.1
   - '@agentclientprotocol/sdk@1.4.0'
   - '@agentclientprotocol/claude-agent-acp@0.70.0'

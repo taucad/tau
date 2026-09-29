@@ -6,6 +6,7 @@ export type EventLogErrorCode =
   | 'EVENT_MUTATED'
   | 'HISTORY_INVALID'
   | 'LOG_CLOSED'
+  | 'LOG_FENCED'
   | 'LOG_POISONED'
   | 'STORAGE_NOT_WRITABLE'
   | 'STORAGE_SHORT_READ'

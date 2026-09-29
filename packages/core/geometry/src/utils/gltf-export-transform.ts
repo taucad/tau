@@ -2,14 +2,64 @@ import { NodeIO } from '@gltf-transform/core';
 import type { JSONDocument } from '@gltf-transform/core';
 
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
-import { createCoordinateTransform, createScalingTransform } from '#gltf.transforms.js';
+import { admitMechanism, transformMechanism } from '@taucad/kinematics';
+import { createCoordinateTransform, createScalingTransform, gltfCoordinateTransformMatrix } from '#gltf.transforms.js';
 import { registerTauGltfExtensions } from '#extensions/registry.js';
+import type { TauCadTopologyRoot } from '#extensions/tau-cad-topology.js';
+import { isJsonObject } from '#extensions/json.js';
 import { embedGltfResources } from '#utils/gltf-embed.js';
 import { kittyCadBoundaryRepresentationExtension, tauCadTopologyExtension } from '@taucad/runtime/types';
+import type { JSONObject } from '@taucad/runtime/types';
 import type { GeometryOutputTransformOptions } from '#geometry-transform.utils.js';
 
 type GltfExportTransformOptions = GeometryOutputTransformOptions & {
   format: 'glb' | 'gltf';
+  /** Retain mesh-only Tau component ownership and re-express its mechanism in the export frame. */
+  preserveMeshTopology?: boolean;
+};
+
+const preserveTransformedMeshTopology = (
+  document: Awaited<ReturnType<NodeIO['readBinary']>>,
+  options: GltfExportTransformOptions,
+): boolean => {
+  const root = document.getRoot();
+  const topology = root.getExtension<TauCadTopologyRoot>(tauCadTopologyExtension);
+  if (!topology) {
+    return false;
+  }
+  const payload = topology.getPayload();
+  const { components } = payload;
+  if (
+    !Array.isArray(components) ||
+    !components.every(
+      (component) =>
+        isJsonObject(component) &&
+        isJsonObject(component['capabilities']) &&
+        component['capabilities']['hasPreciseTopology'] === false,
+    )
+  ) {
+    return false;
+  }
+  if (payload['mechanism'] !== undefined) {
+    const admitted = admitMechanism(payload['mechanism']);
+    if (admitted.status === 'invalid') {
+      throw new Error(`Cannot preserve mesh mechanism: ${admitted.issues[0]?.message}`);
+    }
+    const outcome = transformMechanism({
+      mechanism: admitted.mechanism,
+      units: { length: options.unit?.length === 'millimeter' ? 'mm' : 'm', angle: admitted.mechanism.units.angle },
+      ...(options.coordinateSystem === 'z-up' ? { matrix: gltfCoordinateTransformMatrix } : {}),
+    });
+    if (outcome.status === 'invalid') {
+      throw new Error(`Cannot transform mesh mechanism: ${outcome.issues[0]?.message}`);
+    }
+    topology.setPayload({ ...payload, mechanism: structuredClone(outcome.mechanism) as unknown as JSONObject });
+  }
+  root.setExtension(kittyCadBoundaryRepresentationExtension, null);
+  for (const node of root.listNodes()) {
+    node.setExtension(kittyCadBoundaryRepresentationExtension, null);
+  }
+  return true;
 };
 
 const stripTopologyMetadataForTransformedExport = (document: Awaited<ReturnType<NodeIO['readBinary']>>): void => {
@@ -50,6 +100,9 @@ const stripTopologyMetadataForTransformedExport = (document: Awaited<ReturnType<
  *
  * This is for kernels whose upstream exporter does not expose unit/axis knobs.
  * Kernels with native writer controls should apply those controls directly.
+ * @param bytes - Source GLB or glTF bytes.
+ * @param options - Output units, frame, format, and optional mesh topology preservation.
+ * @returns Transformed bytes in the requested format.
  * @public
  */
 export async function transformGltfExportBytes(
@@ -72,7 +125,9 @@ export async function transformGltfExportBytes(
         });
 
   await document.transform(createCoordinateTransform(shouldRotate), createScalingTransform(shouldScale));
-  stripTopologyMetadataForTransformedExport(document);
+  if (!options.preserveMeshTopology || !preserveTransformedMeshTopology(document, options)) {
+    stripTopologyMetadataForTransformedExport(document);
+  }
 
   if (options.format === 'glb') {
     return io.writeBinary(document);

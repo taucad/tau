@@ -6,7 +6,7 @@ import type {
 } from '@earendil-works/pi-agent-core';
 import type { ImageContent, TextContent } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
-import type { HostToolInvocation, HostToolResult, ToolRegistry } from '#waist/ports.js';
+import type { HostToolApproval, HostToolInvocation, HostToolResult, ToolRegistry } from '#waist/ports.js';
 import type { JsonValue } from '#log/event-types.js';
 
 const bracketArrayAlias = /^(files|include|exclude)\[(0|[1-9][0-9]*)\]$/u;
@@ -18,6 +18,7 @@ const pathFields = new Map<string, string>([
   ['get_kernel_result', 'targetFile'],
   ['export_geometry', 'targetFile'],
   ['screenshot', 'targetFile'],
+  ['request_print', 'targetFile'],
   ['list_directory', 'path'],
   ['grep', 'path'],
   ['glob_search', 'path'],
@@ -47,6 +48,7 @@ export const tauToolKinds = new Map<string, string>([
   ['web_browser', 'fetch'],
   ['create_file', 'edit'],
   ['edit_file', 'edit'],
+  ['arrange_workbench', 'edit'],
   ['delete_file', 'delete'],
   ['get_kernel_result', 'execute'],
   ['get_parameters', 'read'],
@@ -56,6 +58,13 @@ export const tauToolKinds = new Map<string, string>([
   ['screenshot', 'other'],
   ['revisions', 'read'],
   ['use_skill', 'other'],
+  ['update_todos', 'edit'],
+  ['get_machine', 'read'],
+  ['request_print', 'other'],
+  ['get_print_request', 'read'],
+  ['get_print_profiles', 'read'],
+  ['list_print_requests', 'read'],
+  ['cancel_print', 'other'],
 ]);
 
 const normalizeBracketArrays = (input: Record<string, unknown>): Record<string, unknown> => {
@@ -185,10 +194,12 @@ const screenshotContent = (value: JsonValue): Array<TextContent | ImageContent> 
   if (images.length === 0) {
     return undefined;
   }
+  // What the images leave out of the viewer, such as a section cut they cannot draw.
+  const message = typeof value['message'] === 'string' ? ` ${value['message']}` : '';
   return [
     {
       type: 'text',
-      text: `Captured ${images.length} screenshot(s). You are now a quality inspector, not the designer. Examine every surface for defects, discontinuities, artifacts, or geometry that does not match design intent.`,
+      text: `Captured ${images.length} screenshot(s).${message} You are now a quality inspector, not the designer. Examine every surface for defects, discontinuities, artifacts, or geometry that does not match design intent.`,
     },
     ...images,
   ];
@@ -232,6 +243,8 @@ type CreateAgentToolsOptions = {
   readonly substitute?: ToolResultSubstituter | undefined;
   /** The run every dispatch from these tools belongs to (V19). */
   readonly runId: string;
+  /** The run's durable approval, when its host has one; forwarded on every invocation. */
+  readonly approve?: HostToolApproval | undefined;
 };
 
 /** Wrap the waist tool registry as pi `AgentTool`s, including T4 result substitution. @public */
@@ -241,6 +254,7 @@ export const createAgentTools = (options: CreateAgentToolsOptions): HostAgentToo
     label: definition.name,
     description: definition.description,
     parameters: definition.inputSchema,
+    ...(definition.executionMode === undefined ? {} : { executionMode: definition.executionMode }),
     prepareArguments: (input) => normalizeToolInput(definition.name, input),
     // eslint-disable-next-line max-params -- Pi's AgentTool contract supplies these four invocation values.
     execute: async (toolCallId, input, signal, onUpdate): Promise<AgentToolResult<HostToolExecutionDetails>> => {
@@ -250,6 +264,7 @@ export const createAgentTools = (options: CreateAgentToolsOptions): HostAgentToo
         input: input as JsonValue,
         signal: signal ?? new AbortController().signal,
         runId: options.runId,
+        ...(options.approve === undefined ? {} : { approve: options.approve }),
         ...(onUpdate === undefined
           ? {}
           : {
@@ -261,8 +276,17 @@ export const createAgentTools = (options: CreateAgentToolsOptions): HostAgentToo
               },
             }),
       };
-      const substituted = await options.substitute?.(invocation);
-      const result = substituted ?? (await options.registry.invoke(invocation));
+      let substituted: HostToolResult | undefined;
+      let result: HostToolResult;
+      try {
+        substituted = await options.substitute?.(invocation);
+        result = substituted ?? (await options.registry.invoke(invocation));
+      } catch (error) {
+        if (!invocation.signal.aborted) {
+          throw error;
+        }
+        result = { content: { errorCode: 'USER_INTERRUPTED', message: 'Interrupted by user.' }, isError: true };
+      }
       return {
         content: toPiToolContent(result.content),
         details: { ...result, substituted: substituted !== undefined },

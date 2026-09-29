@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
-import { Link } from 'react-router';
-import { Download, Link2 } from 'lucide-react';
+import { Link, useParams } from 'react-router';
+import { Download, LayoutGrid, Link2 } from 'lucide-react';
 import { TauWordmark } from '#components/icons/tau-wordmark.js';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -21,6 +21,8 @@ type PublicationTopbarProps = {
   readonly sourceLabel?: string;
   readonly managementActions?: React.ReactNode;
 };
+
+const builtinSlugPrefix = 'builtin~';
 
 /** Slim top bar for the canonical shared-project workbench. */
 export function PublicationTopbar({
@@ -55,12 +57,18 @@ export function PublicationTopbar({
       toast.error('Could not copy link');
     }
   }, [shareUrl]);
+  /* A builtin example leads back to its card in the gallery; other shares have no gallery. */
+  const { slug } = useParams();
+  const examplesHref = slug?.startsWith(builtinSlugPrefix)
+    ? `/community#${slug.slice(builtinSlugPrefix.length)}`
+    : undefined;
 
   return (
     <header
       data-slot='publication-topbar'
       className={cn(
-        'flex h-12 shrink-0 items-center justify-between gap-2 border-b px-2 sm:gap-4 sm:px-4',
+        // Below sm the title takes its own row: with every action present the bar has no room left for it.
+        'flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b px-2 py-2 sm:h-12 sm:flex-nowrap sm:gap-4 sm:px-4 sm:py-0',
         // This bar is the top of a window that has no application shell, so it
         // overlaps the desktop drag band (see `Page`). Its controls subtract
         // themselves; the gaps between them stay draggable.
@@ -68,20 +76,32 @@ export function PublicationTopbar({
         className,
       )}
     >
-      <Tooltip>
-        <TooltipTrigger asChild className='flex items-center gap-2 font-medium'>
-          <Link to='/' aria-label='Go home'>
-            <TauWordmark className='h-6 text-primary' />
-          </Link>
-        </TooltipTrigger>
-        <TooltipContent side='right'>Go home</TooltipContent>
-      </Tooltip>
-      <div className='hidden min-w-0 flex-1 text-center sm:block'>
+      <div className='flex items-center gap-1 sm:gap-2'>
+        <Tooltip>
+          <TooltipTrigger asChild className='flex items-center gap-2 font-medium'>
+            <Link to='/' aria-label='Go home'>
+              <TauWordmark className='h-6 text-primary' />
+            </Link>
+          </TooltipTrigger>
+          <TooltipContent side='right'>Go home</TooltipContent>
+        </Tooltip>
+        {examplesHref ? (
+          <Button asChild size='sm' variant='ghost' className='max-md:size-8 max-md:px-0'>
+            <Link to={examplesHref} aria-label='Examples'>
+              <LayoutGrid className='size-3.5 md:mr-1.5' aria-hidden />
+              <span className='hidden md:inline'>Examples</span>
+            </Link>
+          </Button>
+        ) : null}
+      </div>
+      <div className='order-last w-full min-w-0 text-center sm:order-none sm:w-auto sm:flex-1'>
         <p className='truncate text-sm font-medium'>{publication.title}</p>
-        <p className='truncate text-[11px] text-muted-foreground'>
+        <p className='hidden truncate text-xs text-muted-foreground sm:block'>
           {sourceLabel ?? (publication.visibility === 'private' ? 'Private Tau share' : 'Public Tau share')}
         </p>
       </div>
+      {/* Every action here (Remix and Manage too) shows its label from md: below it the shared page's phone layout
+          adds its Workbench trigger, and with every action present the labelled bar overflowed at 640-667 px. */}
       <div className='flex items-center gap-1 sm:gap-2'>
         {shareUrl ? (
           <Button
@@ -89,13 +109,13 @@ export function PublicationTopbar({
             size='sm'
             variant='ghost'
             aria-label='Copy link'
-            className='max-sm:size-8 max-sm:px-0'
+            className='max-md:size-8 max-md:px-0'
             onClick={() => {
               void copyShareUrl();
             }}
           >
-            <Link2 className='size-3.5 sm:mr-1.5' aria-hidden />
-            <span className='hidden sm:inline'>Copy link</span>
+            <Link2 className='size-3.5 md:mr-1.5' aria-hidden />
+            <span className='hidden md:inline'>Copy link</span>
           </Button>
         ) : null}
         {managementActions}
@@ -105,16 +125,16 @@ export function PublicationTopbar({
             size='sm'
             variant='ghost'
             aria-label='Download source'
-            className='max-sm:size-8 max-sm:px-0'
+            className='max-md:size-8 max-md:px-0'
             onClick={downloadArchive}
           >
-            <Download className='size-3.5 sm:mr-1.5' aria-hidden />
-            <span className='hidden sm:inline'>Download source</span>
+            <Download className='size-3.5 md:mr-1.5' aria-hidden />
+            <span className='hidden md:inline'>Download source</span>
           </Button>
         ) : null}
         <ProjectExportAction
-          className='h-8 px-2.5 text-xs max-sm:size-8 max-sm:px-0'
-          labelClassName='hidden sm:inline'
+          className='h-8 px-2.5 text-xs max-md:size-8 max-md:px-0'
+          labelClassName='hidden md:inline'
         />
         <ForkAction publication={publication} files={files} parameters={parameters} />
       </div>

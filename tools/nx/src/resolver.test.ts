@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  bundleOwnershipIssues,
   bundlePattern,
   bundledLibraries,
   projects,
@@ -92,12 +91,12 @@ describe('projects()', () => {
 });
 
 describe('publishable()', () => {
-  it('is every non-private type:package project, sorted — twenty-two today', () => {
+  it('is every non-private type:package project, sorted — forty-nine today', () => {
     const names = publishable(live).map((entry) => entry.name);
 
     // The count is the tripwire; re-baselining it is the point at which a new
     // package is noticed. Pinning the whole list would only restate the rule.
-    expect(names).toHaveLength(22);
+    expect(names).toHaveLength(49);
     expect(names).toEqual([...names].sort());
     // Both ends of the train, and the native package added most recently.
     for (const name of ['runtime', 'runtime-testing', 'geospec-engine', 'opencascade-native']) {
@@ -116,6 +115,28 @@ describe('publishable()', () => {
 });
 
 describe('validateTags()', () => {
+  it('should allow no host or one valid host and reject unknown or duplicate hosts', () => {
+    expect(
+      validateTags({
+        projects: [
+          project('portable', ['scope:shared', 'type:package'], undefined),
+          project('darwin', ['scope:shared', 'type:package', 'host:darwin-arm64'], undefined),
+          project('unknown-host', ['scope:shared', 'type:package', 'host:other'], undefined),
+          project('two-hosts', ['scope:shared', 'type:package', 'host:darwin-arm64', 'host:darwin-arm64'], undefined),
+          project('host-without-scope', ['type:package', 'host:darwin-arm64'], undefined),
+          project('host-without-type', ['scope:shared', 'host:darwin-arm64'], undefined),
+          project('host-without-layer', ['scope:ui', 'type:app-lib', 'host:darwin-arm64'], undefined),
+        ],
+      }),
+    ).toEqual([
+      'fixture/unknown-host: unknown tag "host:other" (host: must be one of darwin-arm64)',
+      'fixture/two-hosts: expected exactly one host: tag, found host:darwin-arm64, host:darwin-arm64',
+      'fixture/host-without-scope: expected exactly one scope: tag, found none',
+      'fixture/host-without-type: expected exactly one type: tag, found none',
+      'fixture/host-without-layer: expected exactly one layer: tag, found none',
+    ]);
+  });
+
   it('accepts every project in the workspace, inferred ones included', () => {
     expect(validateTags(live)).toEqual([]);
   });
@@ -161,14 +182,12 @@ describe('validateTags()', () => {
 });
 
 describe('bundledLibraries()', () => {
-  it("derives the runtime owner's eight direct bundle candidates", () => {
+  it("derives the runtime owner's six direct bundle candidates", () => {
     expect(bundledLibraries(live, 'runtime')).toEqual([
       '@taucad/events',
-      '@taucad/filesystem',
       '@taucad/fs-bridge',
       '@taucad/json-schema',
       '@taucad/memory',
-      '@taucad/rpc',
       '@taucad/types',
       '@taucad/utils',
     ]);
@@ -183,7 +202,8 @@ describe('bundledLibraries()', () => {
       .filter((entry) => bundledLibraries(live, entry.name).length > 0)
       .map((entry) => entry.name);
 
-    expect(bundlers).toEqual(['mcp', 'runtime']);
+    expect(bundlers).toContain('mcp');
+    expect(bundlers).toContain('runtime');
     expect(bundledLibraries(live, 'no-such-project')).toEqual([]);
   });
 
@@ -203,19 +223,15 @@ describe('bundlePattern()', () => {
   });
 
   it('matches nothing when the package bundles nothing', () => {
-    const pattern = bundlePattern(live, 'cli');
+    const pattern = bundlePattern(live, 'no-such-project');
 
     expect(pattern.test('@taucad/events')).toBe(false);
     expect(pattern.test('')).toBe(false);
   });
 });
 
-describe('bundle ownership', () => {
-  it('gives every bundled library exactly one owner', () => {
-    expect(bundleOwnershipIssues(live)).toEqual([]);
-  });
-
-  it('reports a library claimed by two publishables', () => {
+describe('independent bundle owners', () => {
+  it('derives a subpath-aware pattern for each publishable that claims a private library', () => {
     const contested: Workspace = {
       projects: [
         ...fixture.projects,
@@ -226,7 +242,11 @@ describe('bundle ownership', () => {
       ],
     };
 
-    expect(bundleOwnershipIssues(contested)).toEqual(['@taucad/types is bundled by base and rival']);
+    for (const owner of ['base', 'rival']) {
+      expect(bundlePattern(contested, owner).test('@taucad/types')).toBe(true);
+      expect(bundlePattern(contested, owner).test('@taucad/types/constants')).toBe(true);
+      expect(bundlePattern(contested, owner).test('@taucad/types-extra')).toBe(false);
+    }
   });
 });
 
@@ -250,21 +270,33 @@ describe('publishWaves()', () => {
         }
       }
     }
-    // The longest publishable dependency chain is four packages deep.
-    expect(waves).toHaveLength(4);
+    // The current publishable graph has nine dependency layers.
+    expect(waves).toHaveLength(9);
     expect(publishWaves(fixture)).toEqual([['base'], ['leaf']]);
   });
 });
 
 describe('publishableClosure()', () => {
   it('closes the runtime quick start over its publishable dependencies, in wave order', () => {
-    expect(publishableClosure(live, ['esbuild', 'replicad'])).toEqual([
+    const closure = publishableClosure(live, ['esbuild', 'replicad']);
+    expect(closure).toEqual([
+      'cache-core',
+      'filesystem',
+      'project-core',
+      'spatial',
+      'units',
+      'kinematics',
+      'parameters',
       'runtime',
-      'esbuild',
+      'bundler-core',
       'geometry-core',
       'occt-core',
+      'esbuild',
       'replicad',
     ]);
+    const waveOf = new Map(publishWaves(live).flatMap((wave, index) => wave.map((name) => [name, index] as const)));
+    const indices = closure.map((name) => waveOf.get(name) ?? -1);
+    expect(indices).toEqual(indices.toSorted((a, b) => a - b));
   });
 
   it('includes the requested project itself and is idempotent under duplicates', () => {

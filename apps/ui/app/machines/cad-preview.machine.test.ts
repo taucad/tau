@@ -90,6 +90,48 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     previewRef.stop();
   });
 
+  it('should forward the preview stage on the first render', async () => {
+    const mockClient = createMockAppRuntimeClient();
+    const cadRef = createActor(
+      cadMachine.provide({
+        actors: {
+          connectKernelActor: fromSafeAsync(async () => ({
+            type: 'kernelConnected',
+            client: mockClient,
+            cleanups: [] as Array<() => void>,
+          })),
+        },
+      }),
+      {
+        input: {
+          shouldInitializeKernelOnStart: false,
+          fileSystemRoot: '/previews/test',
+          kernelOptionsFactory: createKernelOptionsFactory(),
+        },
+      },
+    );
+    const stage = { 'main.ts': new Uint8Array([1, 2, 3]) };
+    const previewRef = createActor(
+      cadPreviewMachine.provide({ actors: { prepareFiles: fromSafeAsync(async () => undefined) } }),
+      { input: { cadRef, projectId: 'proj_test', mainFile: 'main.ts', stage } },
+    );
+
+    cadRef.start();
+    previewRef.start();
+    previewRef.send({ type: 'start' });
+
+    await vi.waitFor(() => {
+      expect(mockClient.render).toHaveBeenCalledWith({
+        source: { path: 'main.ts' },
+        content: { includeEdges: true },
+        stage,
+      });
+    });
+
+    cadRef.stop();
+    previewRef.stop();
+  });
+
   it('should send initializeModel after a Strict Mode re-mount', async () => {
     const mockClient = createMockAppRuntimeClient();
     let connectDelay = 50;

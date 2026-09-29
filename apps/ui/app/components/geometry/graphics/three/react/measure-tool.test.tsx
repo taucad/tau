@@ -6,12 +6,22 @@ import * as THREE from 'three';
 import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
 import type { Mechanism } from '@taucad/kinematics';
-import { MeasureTool } from '#components/geometry/graphics/three/react/measure-tool.js';
-import { detectSnapPoints } from '#components/geometry/graphics/three/utils/snap-detection.utils.js';
+import { MeasureTool, describeMeasurementTarget } from '#components/geometry/graphics/three/react/measure-tool.js';
+import * as measurementFeatures from '#components/geometry/graphics/three/utils/measurement-features.js';
+import { getMeshMeasurementFeatures } from '#components/geometry/graphics/three/utils/measurement-features.js';
+import type { EdgeFeature, MeasurementTarget } from '#components/geometry/graphics/three/utils/measurement-features.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
 
 const mocks = vi.hoisted(() => ({
+  send: vi.fn<
+    (event: { type: string; candidates?: Array<{ id: string; label: string }>; hasMore?: boolean }) => void
+  >(),
   kinematics: undefined as Actor<typeof kinematicsMachine> | undefined,
+  renderFrame: {
+    anchorFrameId: 'tau:root',
+    originMeters: [0, 0, 0] as [number, number, number],
+    metersPerRenderUnit: 1,
+  },
   graphicsSnapshot: {
     context: {
       gltfPresentation: { presentedKey: 'geometry' },
@@ -20,6 +30,20 @@ const mocks = vi.hoisted(() => ({
       measurements: [],
       currentMeasurementStart: undefined,
       measureSnapDistance: 12,
+      measureMode: 'auto',
+      measureFilter: 'auto',
+      measureOperation: 'point-distance',
+      measureFrame: 'tau:root',
+      measureSnapEnabled: true,
+      measureCandidates: [],
+      measureActiveCandidateId: undefined,
+      measureChosenCandidateId: undefined,
+      measureLockedTargetId: undefined,
+      measureCommitRequest: 0,
+      measureCatalogRequest: 0,
+      measureCatalogAppend: false,
+      measureMessage: undefined as string | undefined,
+      committedSectionCuts: [],
       displayUnits: { length: { metersPerUnit: 1, symbol: 'm' } },
       hoveredMeasurementId: undefined,
       isMeasureActive: true,
@@ -28,23 +52,24 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+const graphicsActorMock = {
+  send: mocks.send,
+  getSnapshot: () => mocks.graphicsSnapshot,
+  subscribe: () => ({ unsubscribe: vi.fn() }),
+};
+
 vi.mock('#hooks/use-graphics.js', () => ({
-  useGraphics: () => ({ send: vi.fn(), getSnapshot: () => mocks.graphicsSnapshot }),
+  useGraphics: () => graphicsActorMock,
   useGraphicsSelector: <T,>(selector: (snapshot: typeof mocks.graphicsSnapshot) => T): T =>
     selector(mocks.graphicsSnapshot),
   useModelInteractionSelector: <T,>(selector: (snapshot: { context: { displayRevision: number } }) => T): T =>
     selector({ context: { displayRevision: 0 } }),
-  useRenderFrame: () => ({ anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 }),
+  useRenderFrame: () => mocks.renderFrame,
   useKinematicsRef: () => mocks.kinematics,
 }));
 
 vi.mock('#components/geometry/graphics/three/use-section-view.js', () => ({
   resolveSectionViewRaycastClip: () => undefined,
-}));
-
-vi.mock('#components/geometry/graphics/three/utils/snap-detection.utils.js', () => ({
-  detectSnapPoints: vi.fn(() => []),
-  findClosestSnapPoint: vi.fn(() => undefined),
 }));
 
 const mechanism: Mechanism = {
@@ -73,6 +98,18 @@ function createStubWebGlRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer
 describe('MeasureTool', () => {
   let canvas: HTMLCanvasElement;
   let root: ReconcilerRoot<HTMLCanvasElement>;
+  let mesh: THREE.Mesh;
+  let secondaryMesh: THREE.Mesh | undefined;
+  let camera: THREE.PerspectiveCamera;
+  const renderTool = (): void => {
+    root.render(
+      <>
+        <primitive object={mesh} />
+        {secondaryMesh ? <primitive object={secondaryMesh} /> : null}
+        <MeasureTool />
+      </>,
+    );
+  };
 
   /** A primary press over the centre of the viewport, where the box sits. */
   const pressCentre = (): void => {
@@ -82,20 +119,26 @@ describe('MeasureTool', () => {
   };
 
   beforeAll(() => {
-    extend({ Group: THREE.Group });
+    extend(THREE as unknown as Parameters<typeof extend>[0]);
   });
 
   beforeEach(async () => {
     mocks.kinematics = createActor(kinematicsMachine, { input: {} }).start();
-    vi.mocked(detectSnapPoints).mockClear();
+    mocks.send.mockClear();
+    mocks.graphicsSnapshot.context.gltfPresentation.presentedKey = 'geometry';
+    mocks.graphicsSnapshot.context.measureCatalogRequest = 0;
+    mocks.graphicsSnapshot.context.measureCatalogAppend = false;
+    mocks.graphicsSnapshot.context.measureMessage = undefined;
     canvas = document.createElement('canvas');
     canvas.getBoundingClientRect = () => DOMRect.fromRect({ x: 0, y: 0, width: 800, height: 600 });
     document.body.append(canvas);
-    const camera = new THREE.PerspectiveCamera(75, 800 / 600, 0.1, 1000);
+    camera = new THREE.PerspectiveCamera(75, 800 / 600, 0.1, 1000);
     camera.position.set(0, 0, 10);
     camera.lookAt(0, 0, 0);
     camera.updateMatrixWorld();
     root = createRoot(canvas);
+    mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
+    secondaryMesh = undefined;
     await act(async () => {
       await root.configure({
         camera,
@@ -104,34 +147,207 @@ describe('MeasureTool', () => {
         gl: createStubWebGlRenderer(canvas),
         size: { height: 600, left: 0, top: 0, width: 800 },
       });
-      root.render(
-        <>
-          <primitive object={new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial())} />
-          <MeasureTool />
-        </>,
-      );
+      renderTool();
     });
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     act(() => {
       root.unmount();
     });
     mocks.kinematics?.stop();
     canvas.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
-  it('should reuse snap points for the same face until a kinematic pose moves the model', () => {
+  it('cancels a pending selection when the model pose changes', () => {
     pressCentre();
-    pressCentre();
-    expect(detectSnapPoints).toHaveBeenCalledTimes(1);
-
-    // A pose moves meshes without a new geometry key; snap points cached in world space are stale.
     act(() => {
       mocks.kinematics!.send({ type: 'loadMechanism', unitId: 'file:main.ts', mechanism });
     });
-    pressCentre();
+    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'measurementPoseChanged' }));
+    expect(mocks.send).toHaveBeenCalledWith({ type: 'cancelCurrentMeasurement' });
+  });
 
-    expect(detectSnapPoints).toHaveBeenCalledTimes(2);
+  it('names same-edge endpoints and distinct edges without exposing feature IDs', () => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2));
+    mesh.name = 'Frame';
+    const graph = getMeshMeasurementFeatures(mesh);
+    const edges = graph.features.filter(
+      (feature): feature is EdgeFeature => feature.kind === 'edge' && !feature.closed,
+    );
+    expect(edges.length).toBeGreaterThan(1);
+    const target = (feature: (typeof edges)[number], suffix: 'start' | 'end'): MeasurementTarget => ({
+      id: `${mesh.uuid}:${graph.revision}:${feature.id}:endpoint:${suffix}`,
+      featureId: feature.id,
+      kind: 'endpoint',
+      position: feature.points[0]!.clone(),
+      localPosition: feature.points[0]!.clone(),
+      evidence: feature.evidence,
+      distancePx: 0,
+      label: 'Edge endpoint',
+      feature,
+      sourceMesh: mesh,
+      revision: graph.revision,
+    });
+    const start = describeMeasurementTarget(target(edges[0]!, 'start'), mesh);
+    const end = describeMeasurementTarget(target(edges[0]!, 'end'), mesh);
+    const nextEdge = describeMeasurementTarget(target(edges[1]!, 'start'), mesh);
+    expect(start).toMatch(/^Frame: Edge endpoint \d+ · start$/);
+    expect(end).toMatch(/^Frame: Edge endpoint \d+ · end$/);
+    expect(new Set([start, end, nextEdge]).size).toBe(3);
+    expect(start).not.toContain('edge:');
+  });
+
+  it('should expose a late keyboard target through bounded catalog pages', async () => {
+    const first = measurementFeatures.listMeasurementTargets(getMeshMeasurementFeatures(mesh), {
+      mesh,
+      camera,
+      canvas,
+    })[0]!;
+    vi.spyOn(measurementFeatures, 'listMeasurementTargets').mockReturnValue(
+      Array.from({ length: 201 }, (_, index) => ({
+        ...first,
+        id: `late:${index}`,
+        kind: 'endpoint',
+        position: new THREE.Vector3(0, 0, 1),
+        sourceMesh: mesh,
+      })),
+    );
+    act(() => {
+      mocks.graphicsSnapshot.context.measureCatalogRequest++;
+      renderTool();
+    });
+    const published = () => {
+      const event = mocks.send.mock.calls.findLast(
+        ([sent]) => sent.type === 'setMeasureCandidates' && (sent.candidates?.length ?? 0) > 0,
+      )?.[0];
+      return event && { candidates: event.candidates, hasMore: event.hasMore };
+    };
+    await vi.waitFor(() => {
+      expect(published()?.candidates).toHaveLength(100);
+    });
+    expect(published()).toMatchObject({ hasMore: true });
+    act(() => {
+      mocks.graphicsSnapshot.context.measureCatalogAppend = true;
+      mocks.graphicsSnapshot.context.measureCatalogRequest++;
+      renderTool();
+    });
+    await vi.waitFor(() => {
+      expect(published()?.candidates).toHaveLength(200);
+    });
+    act(() => {
+      mocks.graphicsSnapshot.context.measureCatalogRequest++;
+      renderTool();
+    });
+    await vi.waitFor(() => {
+      expect(published()?.candidates).toHaveLength(201);
+    });
+    expect(published()?.candidates?.at(-1)?.id).toBe(`${mesh.uuid}:late:200`);
+    expect(published()?.hasMore).toBe(false);
+  });
+
+  it('continues at the first feature of a smaller next mesh after the worker resolves', async () => {
+    const firstGraph = getMeshMeasurementFeatures(mesh);
+    firstGraph.features = Array.from({ length: 300 }, (_, index) => ({
+      ...firstGraph.features[0]!,
+      id: `synthetic:${index}`,
+    }));
+    secondaryMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
+    secondaryMesh.position.x = 3;
+    const secondGraph = getMeshMeasurementFeatures(secondaryMesh);
+    const seed = measurementFeatures.listMeasurementTargets(secondGraph, {
+      mesh: secondaryMesh,
+      camera,
+      canvas,
+    })[0]!;
+    vi.spyOn(measurementFeatures, 'listMeasurementTargets').mockImplementation((graph, options) =>
+      graph.features.length === 0
+        ? []
+        : [
+            {
+              ...seed,
+              id: `from:${options.mesh === secondaryMesh ? 'second' : 'first'}:${graph.features[0]!.id}`,
+              sourceMesh: options.mesh,
+              feature: graph.features[0]!,
+              featureId: graph.features[0]!.id,
+              position: options.mesh === secondaryMesh ? new THREE.Vector3(3, 0, 1) : new THREE.Vector3(0, 0, 1),
+            },
+          ],
+    );
+    act(() => {
+      renderTool();
+      mocks.graphicsSnapshot.context.measureCatalogRequest++;
+      renderTool();
+    });
+    await vi.waitFor(() => {
+      const published = mocks.send.mock.calls.findLast(
+        ([sent]) => sent.type === 'setMeasureCandidates' && (sent.candidates?.length ?? 0) > 0,
+      )?.[0];
+      expect(published?.candidates?.some(({ id }) => id.includes('from:second'))).toBe(true);
+    });
+  });
+
+  it.each(['camera', 'geometry'] as const)('should cancel a pending catalog when %s changes', async (change) => {
+    act(() => {
+      mocks.graphicsSnapshot.context.measureCatalogRequest++;
+      renderTool();
+    });
+    act(() => {
+      if (change === 'camera') {
+        camera.position.x = 1;
+        camera.updateMatrixWorld();
+      } else {
+        mocks.graphicsSnapshot.context.gltfPresentation.presentedKey = 'replacement';
+      }
+      renderTool();
+    });
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    });
+    expect(
+      mocks.send.mock.calls.some(
+        ([event]) => event.type === 'setMeasureCandidates' && (event.candidates?.length ?? 0) > 0,
+      ),
+    ).toBe(false);
+  });
+
+  it('clears a preparing catalog status when geometry replacement invalidates its worker request', async () => {
+    act(() => {
+      mocks.graphicsSnapshot.context.measureCatalogRequest++;
+      renderTool();
+    });
+    await vi.waitFor(() => {
+      expect(mocks.send).toHaveBeenCalledWith({
+        type: 'setMeasureMessage',
+        message: 'Preparing measurement features…',
+      });
+    });
+    mocks.graphicsSnapshot.context.measureMessage = 'Preparing measurement features…';
+    act(() => {
+      mocks.graphicsSnapshot.context.gltfPresentation.presentedKey = 'replacement';
+      renderTool();
+    });
+    await vi.waitFor(() => {
+      expect(mocks.send).toHaveBeenCalledWith({ type: 'setMeasureMessage' });
+    });
+  });
+
+  it('reports a cold pointer worker failure without synchronously building the graph', async () => {
+    vi.stubGlobal('Worker', function unavailableWorker() {
+      throw new Error('Worker unavailable');
+    });
+    pressCentre();
+    await vi.waitFor(() => {
+      expect(mocks.send).toHaveBeenCalledWith({
+        type: 'setMeasureMessage',
+        message: 'Measurement features could not be prepared. Move the pointer to retry.',
+      });
+    });
+    expect(measurementFeatures.getCachedMeshMeasurementFeatures(mesh)).toBeUndefined();
   });
 });

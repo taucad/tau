@@ -35,9 +35,11 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
     import('@taucad/openrscad'),
     import('@taucad/jscad'),
     import('@taucad/manifold'),
+    import('@taucad/picovoxel'),
     import('@taucad/gltf'),
     import('@taucad/brep'),
     import('@taucad/rhino'),
+    import('@taucad/slicer'),
     import('@taucad/tscircuit'),
   ]);
   const [{ assimp }, { image }, picogkModule] = await Promise.all([

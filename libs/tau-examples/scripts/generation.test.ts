@@ -14,6 +14,7 @@ type ManifestEntry = {
   readonly name: string;
   readonly mainFile?: string;
   readonly files: readonly string[];
+  readonly featured?: true;
 };
 
 const rootDirectory = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,7 +27,6 @@ describe('generated example artifacts', () => {
   it('enables one unit-inference middleware after parameter declarations resolve', () => {
     expect(exampleRuntime.middleware.map(({ id }) => id)).toEqual([
       'parameterFileResolver',
-      'parameterCache',
       'parameterUnits',
       'gltfEdgeDetection',
     ]);
@@ -78,12 +78,13 @@ describe('generated example artifacts', () => {
     expect(manifest.find((entry) => entry.kernel === 'picogk')?.mainFile).toBe('main.cs');
     expect(manifest.find((entry) => entry.name === 'v8-engine-rev2')?.mainFile).toBeUndefined();
 
-    expect(manifest.filter((entry) => entry.kind === 'test-fixture')).toHaveLength(9);
+    // PicoVoxel adds three test fixtures, the helix-heat-x heavy reference and six implicit references (D36).
+    expect(manifest.filter((entry) => entry.kind === 'test-fixture')).toHaveLength(12);
     expect(manifest.filter((entry) => entry.kind === 'spec-fixture')).toHaveLength(1);
-    expect(manifest.filter((entry) => entry.kind === 'reference')).toHaveLength(2);
+    expect(manifest.filter((entry) => entry.kind === 'reference')).toHaveLength(9);
 
     for (const entry of manifest) {
-      expect(entry.files.some((path) => path === 'thumbnail.webp')).toBe(false);
+      expect(entry.files.some((path) => path === 'thumbnail.webp' || path === 'thumbnail-featured.webp')).toBe(false);
       expect(
         entry.files.some((path) => path.split('/').some((part) => part.startsWith('.') || part === '__pycache__')),
       ).toBe(false);
@@ -93,7 +94,7 @@ describe('generated example artifacts', () => {
     }
   });
 
-  it('has a valid 768×576 WebP for every entry supported by the generator runtime', async () => {
+  it('has a valid 1536×1152 WebP for every entry supported by the generator runtime', async () => {
     const supportedKernels: ReadonlySet<string> = exampleKernelIds;
     const renderable = manifest.filter(
       (entry) => entry.mainFile && supportedKernels.has(entry.kernel === 'openscad' ? 'openrscad' : entry.kernel),
@@ -105,14 +106,19 @@ describe('generated example artifacts', () => {
     expect(renderable.length).toBeGreaterThan(0);
     await Promise.all(
       renderable.map(async (entry) => {
-        const path = join(sourceDirectory, 'kernels', entry.kernel, entry.name, 'thumbnail.webp');
-        expect(existsSync(path), `${entry.kernel}/${entry.name}`).toBe(true);
-        const bytes = readFileSync(path);
-        expect(bytes.subarray(0, 4).toString('ascii')).toBe('RIFF');
-        expect(bytes.subarray(8, 12).toString('ascii')).toBe('WEBP');
-        const metadata = await sharp(bytes).metadata();
-        expect(metadata.width, `${entry.kernel}/${entry.name}`).toBe(768);
-        expect(metadata.height, `${entry.kernel}/${entry.name}`).toBe(576);
+        const files = entry.featured ? ['thumbnail.webp', 'thumbnail-featured.webp'] : ['thumbnail.webp'];
+        for (const file of files) {
+          const label = `${entry.kernel}/${entry.name}/${file}`;
+          const path = join(sourceDirectory, 'kernels', entry.kernel, entry.name, file);
+          expect(existsSync(path), label).toBe(true);
+          const bytes = readFileSync(path);
+          expect(bytes.subarray(0, 4).toString('ascii')).toBe('RIFF');
+          expect(bytes.subarray(8, 12).toString('ascii')).toBe('WEBP');
+          // oxlint-disable-next-line eslint/no-await-in-loop -- At most two files per entry.
+          const metadata = await sharp(bytes).metadata();
+          expect(metadata.width, label).toBe(1536);
+          expect(metadata.height, label).toBe(1152);
+        }
       }),
     );
   });

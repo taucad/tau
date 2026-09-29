@@ -44,6 +44,39 @@ const setup = (geometry: HashedGeometryResult, exportImage?: RuntimeAgentImageEx
 };
 
 describe('createRuntimeAgentClients', () => {
+  it('should preserve an authentication issue through runtime, export, and capture results', async () => {
+    const issue = {
+      code: 'AUTHENTICATION_ERROR',
+      message: 'Authentication timeout',
+      type: 'connection',
+      severity: 'error',
+    } as const;
+    const clients = createRuntimeAgentClients({
+      runtime: {
+        evaluate: vi.fn(async (): Promise<HashedGeometryResult> => ({ success: false, issues: [issue] })),
+        export: vi.fn<RuntimeAgentClient['export']>(async () => ({ success: false, issues: [issue] })),
+      },
+      exportImage: vi.fn<RuntimeAgentImageExporter>(),
+      mapRuntimeError: (error) => ({ success: false, errorCode: 'UNKNOWN', message: String(error) }),
+    });
+
+    await expect(clients.kernelClient.getKernelResult('main.kcl')).resolves.toMatchObject({
+      success: true,
+      status: 'error',
+      kernelIssues: [issue],
+    });
+    await expect(clients.graphics.exportGeometry({ targetFile: 'main.kcl', format: 'stl' })).resolves.toMatchObject({
+      success: false,
+      errorCode: 'AUTHENTICATION_ERROR',
+      message: 'Authentication timeout',
+    });
+    await expect(clients.images.captureImages({ targetFile: 'main.kcl', mode: 'single' })).resolves.toMatchObject({
+      success: false,
+      errorCode: 'AUTHENTICATION_ERROR',
+      message: 'Authentication timeout',
+    });
+  });
+
   it('should keep concurrent captures and exports source-scoped without cross-publishing', async () => {
     const evaluated: string[] = [];
     const previewEntered = Promise.withResolvers<void>();

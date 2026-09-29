@@ -1,17 +1,11 @@
 /**
  * Chat Session Hooks (useChatSession / useChatSessionSnapshot)
  *
- * React surface for the vanilla `ChatSessionStore`. Components that need a
- * live `Chat` instance + persistence/draft actors call `useChatSession(chatId)`
- * — the store is acquired during render so the returned record is non-null
- * on the very first render, refcounted on every consumer, and released in
- * the effect cleanup so any subtree unmount/remount cycle (panel resize,
- * focus change, route navigation) leaves the underlying actors intact as
- * long as another consumer or the store still holds it.
- *
- * The store is the source of truth for lifetime; React components are
- * subscribers, not owners. This eliminates the class of "headless
- * ChatInstance reuse" races that plagued the prior design.
+ * React surface for the vanilla `ChatSessionStore`. `useChatSession(chatId,
+ * projectId)` acquires the chat in an effect and reads it through the store's
+ * membership, so a render React throws away (StrictMode, Suspense) holds no
+ * view reference (PV-S4). The store is the source of truth for lifetime;
+ * React components are subscribers, not owners.
  *
  * `useChatSessionSnapshot` is a thin wrapper around `useSyncExternalStore`
  * that re-renders only when the per-chatId callback fires (messages /
@@ -20,60 +14,32 @@
  * live session without manual memoisation gymnastics.
  */
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
+import type { ChatSession } from '#services/chat-session-store.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 
-type Acquisition = {
-  readonly store: ChatSessionStore;
-  readonly chatId: string;
-  readonly projectId: string | undefined;
-  readonly session: ChatSession;
-};
-
 /**
- * Acquire a chat session for the lifetime of the calling component. The
- * session is retained until the last consumer unmounts; intermediate
- * unmount/remount of any single consumer never drops the underlying actors.
+ * Hold a view of one chat for the lifetime of the calling component.
  *
- * Lifecycle:
- * - **First render**: lazy `useState` initializer acquires the session
- *   synchronously so the returned record is immediately usable.
- * - **Subsequent renders**: the cached acquisition is reused unchanged.
- * - **Store/chatId change**: a new acquisition is taken during render and
- *   the prior one is released in the effect cleanup the next time the
- *   effect commits — this guarantees the new session is live before the
- *   old one is dropped, so consumers never observe a torn state.
- * - **Unmount**: the active acquisition releases its view reference; the
- *   store disposes the underlying actors only when no other view or active
- *   run holds the chat.
+ * @param chatId - The chat to hold.
+ * @param projectId - The chat's own project; focus never names it (PV-S4, L3 D9).
+ * @returns The live session, or `undefined` until the acquiring effect has committed.
  */
-export function useChatSession(chatId: string, projectId?: string): ChatSession {
+export function useChatSession(chatId: string, projectId: string): ChatSession | undefined {
   const store = useChatSessionStore();
 
-  const [acquisition, setAcquisition] = useState<Acquisition>(() => ({
-    store,
-    chatId,
-    projectId,
-    session: store.acquire(chatId, projectId),
-  }));
-
-  let active: Acquisition = acquisition;
-  if (acquisition.store !== store || acquisition.chatId !== chatId || acquisition.projectId !== projectId) {
-    // Acquire eagerly so the same render returns the right session.
-    // The previous acquisition is released by the effect cleanup below
-    // when its `acquisition` dep changes on the next commit.
-    active = { store, chatId, projectId, session: store.acquire(chatId, projectId) };
-    setAcquisition(active);
-  }
-
   useEffect(() => {
+    store.acquire(chatId, projectId);
     return () => {
-      acquisition.store.release(acquisition.chatId);
+      store.release(chatId);
     };
-  }, [acquisition]);
+  }, [store, chatId, projectId]);
 
-  return active.session;
+  return useSyncExternalStore(
+    (listener) => store.subscribeMembership(listener),
+    () => store.get(chatId),
+    () => undefined,
+  );
 }
 
 /**

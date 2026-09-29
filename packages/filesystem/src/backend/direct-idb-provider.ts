@@ -8,10 +8,10 @@
  */
 
 import type { FileContentMetadata } from '@taucad/types';
-import type { DirectoryEntry, FileStat, ProviderCapabilities } from '#types.js';
+import type { DirectoryEntry, FileStat, HeadFileStat, ProviderCapabilities } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { indexDirectoryEntries } from '#backend/directory-entries.js';
-import { getFileContentMetadata } from '#content-metadata.js';
+import { getFileContentMetadata, headFileStatFromStat } from '#content-metadata.js';
 
 const storeName = 'files';
 const dbVersion = 1;
@@ -35,6 +35,10 @@ function parentDirectory(path: string): string {
  * @public
  */
 export class DirectIdbProvider extends AbstractFileSystemProvider {
+  /** @returns `true` for the supported head listing mode. */
+  public get supportsHeadListing(): true {
+    return true;
+  }
   /* eslint-disable @typescript-eslint/member-ordering -- `_renameDirectory` and the IDB flush helpers are intentionally co-located with the public methods that call them so the IDB-transaction lifecycle stays readable; relocating them would split a tightly-coupled triple. */
   /**
    * Backend identifier; always `'indexeddb'`.
@@ -181,11 +185,21 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
 
   /**
    * Batched readdir + stat — eliminates the N+1 stat round-trips per directory listing.
+   * Head mode drops line counts from warm metadata. A cold legacy IDB value is
+   * still cloned whole because this store persists a raw Uint8Array.
    *
    * @param path - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
    */
-  public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
+  public readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
+  public readdirWithStats(
+    path: string,
+    options: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & HeadFileStat>>;
+  public async readdirWithStats(
+    path: string,
+    options?: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
     this._assertRootedPath(path);
     const names = await this.readdir(path);
     const prefix = path === '' ? '' : `${path}/`;
@@ -269,7 +283,10 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       });
     }
 
-    return result.filter((_, index) => !missingIndexes.has(index));
+    const present = result.filter((_, index) => !missingIndexes.has(index));
+    return options?.content === 'head'
+      ? present.map(({ name, ...stat }) => ({ name, ...headFileStatFromStat(stat) }))
+      : present;
   }
 
   /**

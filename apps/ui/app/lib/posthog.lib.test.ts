@@ -11,11 +11,13 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+const consent = vi.hoisted(() => ({ status: 'accepted' }));
+
 vi.mock('#environment.config.js', () => ({
   /* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
   ENV: { POSTHOG_UI_HOST: 'https://us.posthog.com', POSTHOG_CLIENT_KEY: 'phc_test' },
 }));
-vi.mock('#lib/cookie-consent.lib.js', () => ({ readConsentStatus: () => 'accepted' }));
+vi.mock('#lib/cookie-consent.lib.js', () => ({ readConsentStatus: () => consent.status }));
 
 const { posthogConfig, redactEventProperties, redactInvitationTokens } = await import('#lib/posthog.lib.js');
 
@@ -78,9 +80,40 @@ describe('redactEventProperties', () => {
     const bare: TestEvent = { event: '$pageview' };
     expect(redactEventProperties(bare)).toStrictEqual({ event: '$pageview' });
   });
+
+  it('redacts invitation URLs inside replay metadata and DOM attributes', () => {
+    const event: TestEvent = {
+      event: '$snapshot',
+      properties: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- PostHog replay wire property
+        $snapshot_data: [
+          { data: { node: { attributes: { href: '/invitations/AbC-123_xyz' } } } },
+          { data: { href: '/projects', textContent: 'Public heading' } },
+        ],
+      },
+    };
+    const redacted = redactEventProperties(event);
+    expect(JSON.stringify(redacted)).not.toContain('AbC-123_xyz');
+    expect(JSON.stringify(redacted)).toContain('/invitations/[redacted]');
+    expect(JSON.stringify(redacted)).toContain('Public heading');
+  });
+
+  it('preserves non-plain event property values', () => {
+    const when = new Date('2026-09-29T00:00:00.000Z');
+    const event: TestEvent = { event: 'dated', properties: { when } };
+    expect(redactEventProperties(event).properties?.['when']).toBe(when);
+  });
 });
 
 describe('posthogConfig.before_send', () => {
+  it.each(['unknown', 'declined'])('drops events when consent is %s', (status) => {
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions, typescript/no-restricted-types -- This configuration installs one SDK hook.
+    const send = posthogConfig.options.before_send as (event: TestEvent) => TestEvent | null;
+    consent.status = status;
+    expect(send({ event: 'product_event', properties: { location: '/projects' } })).toBeNull();
+    consent.status = 'accepted';
+  });
+
   it('redacts the event it lets through, so nothing reaches the wire unredacted', () => {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions, typescript/no-restricted-types -- posthog-js allows an array of hooks and this build configures exactly one, and its own signature returns `null` to drop an event.
     const send = posthogConfig.options.before_send as (event: TestEvent) => TestEvent | null;
@@ -95,4 +128,16 @@ describe('posthogConfig.before_send', () => {
       $pathname: '/invitations/[redacted]',
     });
   });
+});
+
+it('redacts recorder Meta and network URLs before replay compression', () => {
+  const mask = posthogConfig.options.session_recording?.maskCapturedNetworkRequestFn;
+  expect(mask).toBeDefined();
+  const redacted = mask?.({
+    name: 'https://tau.new/auth?redirectTo=%2Finvitations%2FAbC-123_xyz',
+    entryType: 'resource',
+    duration: 0,
+    startTime: 0,
+  });
+  expect(redacted?.name).toBe('https://tau.new/auth?redirectTo=%2Finvitations%2F[redacted]');
 });

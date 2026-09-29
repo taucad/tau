@@ -1,11 +1,66 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ChatSnapshot } from '@taucad/chat';
-import type { FileEntry, FileTreeEntry } from '@taucad/types';
+import type { WorkbenchEntries, WorkbenchNode, WorkbenchTab, WorkbenchView } from '@taucad/workbench';
+import type { FileEntry } from '@taucad/types';
 import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import type { WorkbenchLayoutSnapshot } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
+import { viewName } from '#workbench-records/projection.js';
+import { useFeature } from '#flags/use-feature.js';
+
+const emptyLayoutSnapshot = (): undefined => undefined;
+const emptyLayoutSubscribe = (): (() => void) => () => undefined;
+
+const activeTabs = (node: WorkbenchNode): WorkbenchTab[] =>
+  node.kind === 'group'
+    ? node.tabs.length === 0
+      ? []
+      : [node.tabs[node.active ?? node.tabs.length - 1]!]
+    : node.children.flatMap(activeTabs);
+
+/** Portable, bounded facts from the page's applied record state. */
+export const projectWorkbenchSnapshot = ({
+  current,
+  viewRecords,
+  entriesRecord,
+  isTauDebugEnabled,
+}: Readonly<{
+  current: WorkbenchLayoutSnapshot | undefined;
+  viewRecords: ReadonlyMap<string, WorkbenchView> | undefined;
+  entriesRecord: WorkbenchEntries | undefined;
+  isTauDebugEnabled: boolean;
+}>): ChatSnapshot['workbench'] => {
+  if (!current) {
+    return undefined;
+  }
+  const { layout, refused, layoutDigest } = current;
+  const views = [...(viewRecords ?? new Map<string, WorkbenchView>())].slice(0, 16).map(([id, view]) => ({
+    id,
+    name: viewName(view),
+    entryPath: view.entryPath,
+    camera: view.camera.kind === 'preset' ? view.camera.preset : view.camera.kind,
+  }));
+  const entries = Object.entries(entriesRecord?.entries ?? {})
+    .slice(0, 16)
+    .map(([path, settings]) => ({
+      path,
+      ...(settings.renderTimeout === undefined ? {} : { renderTimeout: settings.renderTimeout }),
+      hidden: settings.components?.hidden.length ?? 0,
+    }));
+  const visible = [...activeTabs(layout.viewer), ...(layout.lanes.workbench ? activeTabs(layout.workbench) : [])].slice(
+    0,
+    32,
+  );
+  const boundedRefused = refused.slice(0, 16);
+  const unavailable: NonNullable<ChatSnapshot['workbench']>['unavailable'] = isTauDebugEnabled
+    ? []
+    : ['kernel', 'console'];
+  return { layoutDigest, lanes: layout.lanes, visible, views, entries, unavailable, refused: boundedRefused };
+};
 
 /**
  * Hook to get the current chat snapshot for message context.
@@ -22,10 +77,18 @@ import { cookieName } from '#constants/cookie.constants.js';
  */
 export function useChatSnapshot(): ChatSnapshot | undefined {
   const projectContext = useProject({ enableNoContext: true });
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- chat can mount without the project workspace provider.
+  const layoutController = useProjectWorkspace({ enableNoContext: true })?.layoutController;
+  const layoutSnapshot = useSyncExternalStore(
+    layoutController?.subscribe ?? emptyLayoutSubscribe,
+    layoutController?.snapshot ?? emptyLayoutSnapshot,
+    emptyLayoutSnapshot,
+  );
+  const isTauDebugEnabled = useFeature('tauDebug');
   const editorRef = projectContext?.editorRef;
   const { treeService } = useFileManager();
 
-  const [fileTree, setFileTree] = useState<FileTreeEntry[] | undefined>();
+  const [fileTree, setFileTree] = useState<NonNullable<ChatSnapshot['fileTree']> | undefined>();
 
   useEffect(() => {
     if (!treeService) {
@@ -42,17 +105,19 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
           entry.type === 'file' && (entry.provenance === undefined || entry.provenance.source === 'project'),
       );
       setFileTree(
-        items.map((item): FileTreeEntry => {
+        items.map((item): NonNullable<ChatSnapshot['fileTree']>[number] => {
           const name = item.path.split('/').pop() ?? item.path;
           return item.contentKind === 'text'
-            ? {
-                path: item.path,
-                name,
-                type: 'file',
-                size: item.size,
-                contentKind: 'text',
-                lineCount: item.lineCount,
-              }
+            ? item.lineCount === undefined
+              ? { path: item.path, name, type: 'file', size: item.size }
+              : {
+                  path: item.path,
+                  name,
+                  type: 'file',
+                  size: item.size,
+                  contentKind: 'text',
+                  lineCount: item.lineCount,
+                }
             : {
                 path: item.path,
                 name,
@@ -95,10 +160,15 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
 
   return useMemo((): ChatSnapshot | undefined => {
     const snapshot: ChatSnapshot = {};
-    const fileByPath = new Map((fileTree ?? []).map((entry): [string, FileTreeEntry] => [entry.path, entry]));
+    const fileByPath = new Map(
+      (fileTree ?? []).map((entry): [string, NonNullable<ChatSnapshot['fileTree']>[number]] => [entry.path, entry]),
+    );
     const enrichFileReference = (path: string, fallbackName: string): NonNullable<ChatSnapshot['activeFile']> => {
       const entry = fileByPath.get(path);
       if (entry?.type !== 'file') {
+        return { path, name: fallbackName };
+      }
+      if (!('contentKind' in entry)) {
         return { path, name: fallbackName };
       }
       return entry.contentKind === 'text'
@@ -132,6 +202,16 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
       snapshot.openFiles = editorState.openFiles.map((file) => enrichFileReference(file.path, file.name));
     }
 
+    const workbench = projectWorkbenchSnapshot({
+      current: layoutSnapshot,
+      viewRecords: projectContext?.viewRecords,
+      entriesRecord: projectContext?.entriesRecord,
+      isTauDebugEnabled,
+    });
+    if (workbench) {
+      snapshot.workbench = workbench;
+    }
+
     if (Object.keys(snapshot).length === 0) {
       return undefined;
     }
@@ -144,5 +224,9 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
     editorState.activeFilePath,
     includeOpenFiles,
     editorState.openFiles,
+    layoutSnapshot,
+    projectContext?.viewRecords,
+    projectContext?.entriesRecord,
+    isTauDebugEnabled,
   ]);
 }

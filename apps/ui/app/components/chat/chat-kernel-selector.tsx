@@ -73,10 +73,10 @@ export const ChatKernelSelector = memo(function ({
   return (
     <ComboBoxResponsive
       {...properties}
-      className="data-[slot='popover-content']:w-[300px]"
+      className="data-[slot='popover-content']:w-75"
       popoverProperties={properties.popoverProperties}
       emptyListMessage='No kernels found.'
-      searchPlaceHolder='Search kernels...'
+      searchPlaceHolder='Search kernels…'
       title='Select a kernel'
       description='Select the kernel to use for the chat. This will be used to generate a response.'
       groupedItems={[

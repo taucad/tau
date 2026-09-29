@@ -13,6 +13,7 @@ import { z as zod } from 'zod';
 import { rpcName } from '#constants/rpc.constants.js';
 import { readFileInputSchema, readFileOutputSchema } from '#schemas/tools/read-file.tool.schema.js';
 import { createFileInputSchema, createFileOutputSchema } from '#schemas/tools/create-file.tool.schema.js';
+import { updateTodosInputSchema, updateTodosOutputSchema } from '#schemas/tools/update-todos.tool.schema.js';
 import { deleteFileInputSchema, deleteFileOutputSchema } from '#schemas/tools/delete-file.tool.schema.js';
 import {
   directoryEntrySchema,
@@ -32,6 +33,10 @@ import {
 import { geoSpecRunFilterInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
 import { exportGeometryInputSchema, exportGeometryOutputSchema } from '#schemas/tools/export-geometry.tool.schema.js';
 import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/screenshot.tool.schema.js';
+import {
+  arrangeWorkbenchInputSchema,
+  arrangeWorkbenchOutputSchema,
+} from '#schemas/tools/arrange-workbench.tool.schema.js';
 import { editFileInputSchema, editFileOutputSchema } from '#schemas/tools/edit-file.tool.schema.js';
 import { useSkillInputSchema, useSkillOutputSchema } from '#schemas/tools/use-skill.tool.schema.js';
 import { revisionsInputSchema, revisionsOutputSchema } from '#schemas/tools/revisions.tool.schema.js';
@@ -78,6 +83,7 @@ export const rpcClientErrorCodeSchema = zod.enum([
   'PERMISSION_DENIED',
   'IO_ERROR',
   'PARSE_ERROR',
+  'AUTHENTICATION_ERROR',
   'RENDER_TIMEOUT',
   'RESULT_TOO_LARGE',
   'SKILL_NOT_FOUND',
@@ -90,6 +96,8 @@ export const rpcClientErrorCodeSchema = zod.enum([
   'UNSUPPORTED_TEXT_ENCODING',
   'INVALID_TEXT_ENCODING',
   'WRITE_VERIFICATION_FAILED',
+  'RECORD_CONFLICT',
+  'INVALID_RECORD',
 ]);
 
 /**
@@ -163,6 +171,13 @@ const createFileRpc = defineRpc({
   success: createFileOutputSchema,
 });
 
+const arrangeWorkbenchRpc = defineRpc({ input: arrangeWorkbenchInputSchema, success: arrangeWorkbenchOutputSchema });
+
+const writeTodosRpc = defineRpc({
+  input: updateTodosInputSchema,
+  success: updateTodosOutputSchema,
+});
+
 const deleteFileRpc = defineRpc({
   input: deleteFileInputSchema,
   success: deleteFileOutputSchema,
@@ -215,6 +230,13 @@ const runGeoSpecTestsRpc = defineRpc({
 const exportGeometryRpc = defineRpc({
   input: exportGeometryInputSchema.extend({
     toolCallId: zod.string(),
+    /**
+     * Transcoder options the host chose, such as the slicer settings of a
+     * print request; the runtime validates them against the export route's
+     * schema. The model-facing tool schema has no such field, so model input
+     * never reaches this one.
+     */
+    exportOptions: zod.record(zod.string(), zod.unknown()).optional(),
   }),
   success: exportGeometryOutputSchema,
 });
@@ -308,6 +330,8 @@ export type RpcSchemasRegistry = {
   [rpcName.readRevisions]: RpcSchemaEntry<ReadRevisionsRpcInput, ReadRevisionsRpcResult>;
   [rpcName.getParameters]: RpcSchemaEntry<GetParametersRpcInput, GetParametersRpcResult>;
   [rpcName.applyParameterOperation]: RpcSchemaEntry<ApplyParameterOperationRpcInput, ApplyParameterOperationRpcResult>;
+  [rpcName.writeTodos]: RpcSchemaEntry<WriteTodosRpcInput, WriteTodosRpcResult>;
+  [rpcName.arrangeWorkbench]: typeof arrangeWorkbenchRpc;
 };
 
 /**
@@ -380,6 +404,11 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
     inputSchema: applyParameterOperationRpc.inputSchema,
     resultSchema: applyParameterOperationRpc.resultSchema,
   },
+  [rpcName.writeTodos]: {
+    inputSchema: writeTodosRpc.inputSchema,
+    resultSchema: writeTodosRpc.resultSchema,
+  },
+  [rpcName.arrangeWorkbench]: arrangeWorkbenchRpc,
 };
 
 // =============================================================================
@@ -444,6 +473,7 @@ export const rpcClientErrorCode = {
   permissionDenied: 'PERMISSION_DENIED',
   ioError: 'IO_ERROR',
   parseError: 'PARSE_ERROR',
+  authenticationError: 'AUTHENTICATION_ERROR',
   renderTimeout: 'RENDER_TIMEOUT',
   resultTooLarge: 'RESULT_TOO_LARGE',
   skillNotFound: 'SKILL_NOT_FOUND',
@@ -456,6 +486,8 @@ export const rpcClientErrorCode = {
   unsupportedTextEncoding: 'UNSUPPORTED_TEXT_ENCODING',
   invalidTextEncoding: 'INVALID_TEXT_ENCODING',
   writeVerificationFailed: 'WRITE_VERIFICATION_FAILED',
+  recordConflict: 'RECORD_CONFLICT',
+  invalidRecord: 'INVALID_RECORD',
 } as const satisfies Record<string, RpcClientErrorCode>;
 
 /** @public */
@@ -464,6 +496,13 @@ export type ReadFileRpcInput = z.infer<typeof readFileRpc.inputSchema>;
 export type ReadFileRpcSuccess = z.infer<typeof readFileRpc.successSchema>;
 /** @public */
 export type ReadFileRpcResult = z.infer<typeof readFileRpc.resultSchema>;
+
+/** @public */
+export type WriteTodosRpcInput = z.infer<typeof writeTodosRpc.inputSchema>;
+/** @public */
+export type WriteTodosRpcSuccess = z.infer<typeof writeTodosRpc.successSchema>;
+/** @public */
+export type WriteTodosRpcResult = z.infer<typeof writeTodosRpc.resultSchema>;
 
 /** @public */
 export type CreateFileRpcInput = z.infer<typeof createFileRpc.inputSchema>;

@@ -2,6 +2,7 @@ import type { AgentMessage, StreamFn } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import type { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
+import { canonicalJson } from '#log/canonical-json.js';
 
 /** Stable safeguard pattern identifiers shared with the transitional agent. @public */
 export const anomalyPattern = {
@@ -82,31 +83,6 @@ export const defaultSafeguardThresholds: SafeguardThresholds = {
   sameErrorDifferentArgsCount: 5,
   sameErrorDifferentArgsWindow: 8,
   sameErrorDifferentArgsDistinctArgs: 2,
-};
-
-/** Stable recursive JSON used by every safeguard signature. @public */
-export const canonicalJson = (value: unknown): string => {
-  const seen = new WeakSet<Record<string, unknown> | unknown[]>();
-  const visit = (input: unknown): unknown => {
-    if (input === null || typeof input !== 'object') {
-      return input;
-    }
-    const container = input as Record<string, unknown> | unknown[];
-    if (seen.has(container)) {
-      return '[Circular]';
-    }
-    seen.add(container);
-    if (Array.isArray(input)) {
-      return input.map((item) => visit(item));
-    }
-    return Object.fromEntries(
-      Object.keys(input)
-        .sort()
-        .map((key) => [key, visit((input as Record<string, unknown>)[key])]),
-    );
-  };
-  const visited = visit(value);
-  return visited === undefined ? 'null' : JSON.stringify(visited);
 };
 
 const browserHash = async (input: string): Promise<string> => {

@@ -24,6 +24,8 @@ const sectionMaxBytes = new Map([
   ['geometry_fidelity', 3000],
   ['research_capabilities', 800],
   ['transcript_search', 1600],
+  ['task_tracking', 800],
+  ['workbench', 800],
   ['plan_mode', 1800],
   ['kernel_skill', 500],
   ['transcript_path', 500],
@@ -65,6 +67,8 @@ const expectedSectionNames = (options: { mode: 'agent' | 'plan'; supportsImageIn
   'geometry_fidelity',
   'research_capabilities',
   'transcript_search',
+  'workbench',
+  'task_tracking',
   ...(options.mode === 'plan' ? ['plan_mode'] : []),
   'kernel_skill',
   'transcript_path',
@@ -134,6 +138,21 @@ describe('getCadSystemPrompt progressive-disclosure contract', () => {
     },
   );
 
+  it.each(promptBranches)(
+    'should keep the task list contract in the cached block for $mode/testing=$testingEnabled/images=$supportsImageInput',
+    ({ mode, testingEnabled, supportsImageInput }) => {
+      const prompt = getCadSystemPrompt('replicad', mode, testingEnabled, { supportsImageInput });
+      const section = /<task_tracking>\n([\s\S]*?)\n<\/task_tracking>/u.exec(prompt.static)?.[1];
+
+      expect(section).toBeDefined();
+      expect(section).toContain('`update_todos`');
+      expect(section).toContain('`.tau/chats/<chatId>/todo.yaml`');
+      expect(section).toContain('one item `in_progress`');
+      expect(section?.split('\n').length).toBeLessThanOrEqual(8);
+      expect(prompt.dynamic).not.toContain('<task_tracking>');
+    },
+  );
+
   it('should omit content migrated to kernel and GeoSpec skills from Block 1', () => {
     const sections: ResolvedSection[] = [];
     getCadSystemPrompt('replicad', 'agent', true, {
@@ -154,4 +173,12 @@ describe('getCadSystemPrompt progressive-disclosure contract', () => {
       expect(prompt.dynamic.length).toBeGreaterThan(0);
     },
   );
+});
+
+describe('workbench prompt', () => {
+  it('teaches the tool and digest without exceeding its section budget', () => {
+    const prompt = renderDefaultPrompt('openscad');
+    expect(prompt.dynamic).toContain('arrange_workbench');
+    expect(prompt.dynamic).toContain('basedOn');
+  });
 });

@@ -145,7 +145,7 @@ const bundledTypescriptCorpus =
       throw new Error(`missing ${packageName} declaration bundle in ${relativePath}`);
     }
 
-    const directory = mkdtempSync(join(tmpdir(), `tau-${packageName}-api-`));
+    const directory = mkdtempSync(join(tmpdir(), `tau-${packageName.replaceAll(/[^\dA-Za-z-]/gu, '-')}-api-`));
     try {
       const files = { 'index.d.ts': bundled.content, ...bundled.files };
       for (const [file, content] of Object.entries(files)) {
@@ -208,6 +208,14 @@ export type BundleOwner = {
   readonly groupBy?: (entry: ApiEntry) => string;
   /** Named groups materialize eagerly; every other group becomes cold. */
   readonly eagerGroups?: () => readonly string[];
+  /** Source files beside doctrine to copy into the on-demand bundle tier. */
+  readonly authoredReferences?: readonly string[];
+  /** A namespaced API index for another public authoring subpath in the same package. */
+  readonly supplementalApi?: {
+    readonly corpus: () => ApiCorpus;
+    readonly prefix: string;
+    readonly groupBy: (entry: ApiEntry) => string;
+  };
 };
 
 /**
@@ -222,10 +230,17 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'Replicad authoring',
     title: 'Replicad authoring',
     description:
-      'Guides precise Replicad BRep authoring in main.ts. Use when creating or editing TypeScript geometry imported from replicad.',
-    whenToUse: 'Use when creating or editing TypeScript geometry imported from replicad.',
+      'Guides Replicad BRep, Tau physical materials, textures, named interfaces and kinematics. Use for Replicad models and appearance or moving-part requests.',
+    whenToUse:
+      'Use for Replicad models, including physical materials, textures, STEP interfaces and moving assemblies.',
     corpus: typescriptCorpus('replicad', 'dist/replicad.d.ts'),
     groupBy: byKind,
+    supplementalApi: {
+      corpus: bundledTypescriptCorpus('replicad/model.bundled.json', '@taucad/replicad', 'packages/plugins/replicad'),
+      prefix: 'tau',
+      groupBy: byKind,
+    },
+    authoredReferences: ['tau-authoring-reference.md', 'kinematics-reference.md'],
   },
   {
     slug: 'cad-jscad',
@@ -293,6 +308,17 @@ export const bundleOwners: readonly BundleOwner[] = [
     groupBy: (entry) => entry.path ?? 'other',
   },
   {
+    slug: 'cad-picovoxel',
+    packageDirectory: 'packages/plugins/picovoxel',
+    name: 'PicoVoxel authoring',
+    title: 'PicoVoxel authoring',
+    description:
+      'Guides PicoVoxel voxel, SDF and lattice CAD in main.ts. Use when creating or editing TypeScript models that import picovoxel.',
+    whenToUse: 'Use when creating or editing TypeScript models that import picovoxel.',
+    corpus: bundledTypescriptCorpus('picovoxel/picovoxel.bundled.json', 'picovoxel', 'packages/plugins/picovoxel'),
+    groupBy: byKind,
+  },
+  {
     slug: 'cad-openscad',
     packageDirectory: 'packages/plugins/openrscad',
     name: 'OpenSCAD authoring',
@@ -335,6 +361,16 @@ export const bundleOwners: readonly BundleOwner[] = [
     corpus: bundledTypescriptCorpus('geospec/geospec.bundled.json', 'geospec', 'packages/geospec'),
     groupBy: byKind,
   },
+  {
+    slug: 'workbench',
+    packageDirectory: 'packages/workbench',
+    name: 'Workbench',
+    title: 'Workbench',
+    description:
+      "Arranges the Tau workbench for a person — opens viewer views from named viewpoints or any direction, sets a view's camera, section cuts, display, grid unit and measurements, hides components and sets render timeouts per file, opens files and utility panes in workbench tabs, closes tabs — by writing the .tau/workbench records through the arrange_workbench tool. Use when a task ends with something to show, when asked to open, arrange, compare, cut open or review views or panes, or when authoring a report the person should see.",
+    whenToUse:
+      'Use when asked to show, open, arrange, compare, cut open or review views or panes, or when a task ends with something to show.',
+  },
 ];
 
 /** What one owner's regeneration produced. @public */
@@ -371,9 +407,17 @@ export const generateBundles = async (
       description: owner.description,
       version: versionOf(join(workspaceRoot, owner.packageDirectory)),
       whenToUse: owner.whenToUse,
-      // oxlint-disable-next-line no-await-in-loop -- Sequential by design: one owner compiles 12 MB of declarations, so overlapping the nine would multiply peak memory for no wall-clock gain.
+      // oxlint-disable-next-line no-await-in-loop -- Sequential by design: one owner compiles 12 MB of declarations, so overlapping owners would multiply peak memory for no wall-clock gain.
       doctrine: await readDoctrine(join(sourceAgent, doctrineFile)),
     };
+    const authoredFiles = Object.fromEntries(
+      // oxlint-disable-next-line no-await-in-loop -- Owners are generated sequentially to bound declaration memory.
+      await Promise.all(
+        (owner.authoredReferences ?? []).map(
+          async (file): Promise<readonly [string, string]> => [file, await readFile(join(sourceAgent, file), 'utf8')],
+        ),
+      ),
+    );
 
     const bundle =
       owner.corpus === undefined || owner.groupBy === undefined
@@ -383,7 +427,16 @@ export const generateBundles = async (
           await writeCorpusBundle(owner.corpus(), join(outputAgent, owner.slug), {
             ...shared,
             groupBy: owner.groupBy,
+            authoredFiles,
             ...(owner.eagerGroups === undefined ? {} : { eagerGroups: owner.eagerGroups() }),
+            ...(owner.supplementalApi === undefined
+              ? {}
+              : {
+                  supplementalApi: {
+                    ...owner.supplementalApi,
+                    corpus: owner.supplementalApi.corpus(),
+                  },
+                }),
           });
 
     const manifest: TauSkillsManifest = { bundles: [bundle.declaration] };

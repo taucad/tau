@@ -14,6 +14,7 @@ import * as sectionTopology from '#components/geometry/graphics/three/utils/sect
 const mocks = vi.hoisted(() => {
   const sceneBounds = { min: [-20, -10, -5], max: [20, 10, 5] };
   return {
+    noHoveredComponentIds: [] as readonly string[],
     camera: { name: 'perspective' },
     cameraRig: {
       actorRef: {
@@ -36,6 +37,7 @@ const mocks = vi.hoisted(() => {
     gl: Object.create(null) as { compileAsync?: ReturnType<typeof vi.fn>; coordinateSystem?: number },
     frameCallback: undefined as (() => void) | undefined,
     invalidate: vi.fn(),
+    rootScene: { name: 'viewport-lighting-scene' },
     modelUnit: {
       focusedComponentId: undefined as string | undefined,
       hiddenComponentIds: [],
@@ -50,7 +52,7 @@ const mocks = vi.hoisted(() => {
       originMeters: [0, 0, 0] as [number, number, number],
       metersPerRenderUnit: 1,
     },
-    sectionView: { enableMesh: false, isActive: false, plane: undefined },
+    sectionView: { isActive: false },
   };
 });
 
@@ -58,13 +60,17 @@ vi.mock('@react-three/fiber', () => ({
   useFrame: (callback: () => void) => {
     mocks.frameCallback = callback;
   },
-  useThree: () => ({
-    camera: mocks.camera,
-    controls: undefined,
-    gl: mocks.gl,
-    invalidate: mocks.invalidate,
-    size: { height: 768, width: 1024 },
-  }),
+  useThree: (selector?: (state: Record<string, unknown>) => unknown) => {
+    const state = {
+      camera: mocks.camera,
+      controls: undefined,
+      gl: mocks.gl,
+      invalidate: mocks.invalidate,
+      scene: mocks.rootScene,
+      size: { height: 768, width: 1024 },
+    };
+    return selector ? selector(state) : state;
+  },
 }));
 
 vi.mock('#hooks/use-theme.js', () => ({
@@ -90,6 +96,8 @@ vi.mock('#hooks/use-graphics.js', () => ({
   useModelInteractionRef: () => mocks.graphicsActor,
   useModelInteractionSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) =>
     selector({ context: {} }),
+  // No kinematics unit hovers a component; one stable list keeps the model's visual state unchanged.
+  useKinematicsSelector: () => mocks.noHoveredComponentIds,
 }));
 
 vi.mock('#machines/model-interaction.machine.js', () => ({
@@ -166,7 +174,7 @@ describe('GltfMesh in-place updates', () => {
     mocks.cameraRig.actorRef.send.mockClear();
     mocks.invalidate.mockClear();
     mocks.frameCallback = undefined;
-    mocks.sectionView = { enableMesh: false, isActive: false, plane: undefined };
+    mocks.sectionView = { isActive: false };
   });
 
   it('should present a same-topology result without reparsing it', async () => {
@@ -227,7 +235,7 @@ describe('GltfMesh in-place updates', () => {
       expect(committedRevisions()).toEqual([1]);
     });
 
-    mocks.sectionView = { enableMesh: true, isActive: true, plane: undefined };
+    mocks.sectionView = { isActive: true };
     view.rerender(
       <GltfMesh gltfFile={buildGlb({ lift: 5 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
     );

@@ -18,14 +18,22 @@ describe('@taucad/skills', () => {
   it('should resolve a bundle for every declared owner', async () => {
     const bundles = await resolveSkillBundles();
 
-    /* Nine owners, nine bundles. A missing row means an owner stopped declaring
-     * `tau.skills`, which is exactly the silent drop this package exists to
-     * make loud: adoption would ship eight kernels and nobody would notice. */
+    /* A missing row means an owner stopped declaring `tau.skills`, which is
+     * exactly the silent drop this package exists to make loud. */
     expect(bundles.map((bundle) => bundle.owner).sort()).toEqual([...skillOwners].sort());
     for (const bundle of bundles) {
       expect(bundle.slug).toMatch(/^[\da-z-]+$/);
       expect(bundle.files.length).toBeGreaterThan(0);
     }
+  });
+
+  it('should install the approved workbench skill from its owner', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'taucad-workbench-skill-'));
+    scratchDirectories.push(directory);
+    expect(await installSkills(directory, ['@taucad/workbench'])).toEqual(['workbench']);
+    const body = await readFile(join(directory, 'workbench', 'SKILL.md'), 'utf8');
+    expect(body).toContain('Read before you rearrange');
+    expect(body).toContain('arrange_workbench');
   });
 
   it('should address every bundle file by bare specifier through its owner', async () => {
@@ -62,7 +70,15 @@ describe('@taucad/skills', () => {
 
     expect(await installSkills(directory, ['@taucad/replicad'])).toEqual(['cad-replicad']);
     expect(await readFile(join(directory, 'cad-replicad', 'SKILL.md'), 'utf8')).toContain('name: cad-replicad');
+    expect(await readFile(join(directory, 'cad-replicad', 'SKILL.md'), 'utf8')).toContain('tau-authoring-reference.md');
     expect(await readFile(join(directory, 'cad-replicad', 'api-index.md'), 'utf8')).toContain('replicad API index');
+    expect(await readFile(join(directory, 'cad-replicad', 'tau-api-index.md'), 'utf8')).toContain('ShapeConfig');
+    expect(await readFile(join(directory, 'cad-replicad', 'tau-authoring-reference.md'), 'utf8')).toContain(
+      'KHR_materials_volume',
+    );
+    expect(await readFile(join(directory, 'cad-replicad', 'kinematics-reference.md'), 'utf8')).toContain(
+      '## Joints and degree-of-freedom IDs',
+    );
   });
 
   it('should reject manifest paths that can escape their bundle', () => {

@@ -3,13 +3,18 @@ import type { ModelCostRates, StopReason, Usage } from '@earendil-works/pi-ai';
 import type {
   JsonObject,
   JsonValue,
+  LogEventBase,
   ModelReasoningConfig,
   ModelProviderKind,
   ModelSystemPromptBlock,
   ProviderMessage,
-  RunTrigger,
   RunLifecycleState,
+  TurnConflictedLogEvent,
+  TurnFailedLogEvent,
+  TurnFinalizedLogEvent,
+  TurnPlacement,
 } from '#log/event-types.js';
+import type { InvocationResolution } from '#wire/gateway.js';
 
 /** W1: ordered, durable event-log port owned by the active host. @public */
 export type DurableEventLog = EventLogAppender;
@@ -22,6 +27,11 @@ export type HostToolDefinition = {
   readonly description: string;
   /** JSON Schema object for tool input. */
   readonly inputSchema: JsonObject;
+  /**
+   * `sequential` when one call's effect spans more than one path or state outside the workspace: pi then runs the whole
+   * batch in call order (EQ6). Parallel when absent.
+   */
+  readonly executionMode?: 'sequential' | 'parallel' | undefined;
 };
 
 /** One normalized streaming event from the model transport. @public */
@@ -187,20 +197,53 @@ export type MaterializedDocument = {
   readonly filename?: string | undefined;
 };
 
+/** Input for one invocation resolution. The signal cancels the lookup, not the attempt. @public */
+export type InvocationResolutionRequest = {
+  /** The prepared attempt's id, the gateway's attempt key. */
+  readonly attemptId: string;
+  /** Cancels the lookup; a `TimeoutError` reason answers `unavailable`, any other reason rethrows. */
+  readonly signal: AbortSignal;
+};
+
+/**
+ * Whether this transport's calls are funded by Tau's gateway ledger (library-API §11: one facet, not optional methods).
+ * A self-host transport is `unfunded`; the host refuses a chat whose attempts were funded elsewhere
+ * (`MODEL_ATTEMPT_OTHER_ACCOUNT`) and never resolves them.
+ *
+ * @public
+ */
+export type InvocationFunding =
+  | { readonly type: 'unfunded' }
+  | {
+      readonly type: 'funded';
+      /** Whether this provider/model selection uses Tau's funded gateway. */
+      usesBillingAttempt(providerKind: ModelProviderKind | undefined): boolean;
+      /**
+       * Two-way lookup: the gateway voids an unknown key before answering `voided` (GI-R3). A sign-in failure throws
+       * `UNAUTHENTICATED` as `stream` does; an answer this build cannot read throws `MALFORMED_RESPONSE`.
+       */
+      resolveInvocation(request: InvocationResolutionRequest): Promise<InvocationResolution>;
+      /**
+       * The signed-in account the gateway charges (W7 RA-S11, `MODEL_ATTEMPT_OTHER_ACCOUNT`); `undefined` means
+       * unknown, so the host cannot check the attempt's account.
+       */
+      principal(): Promise<string | undefined>;
+    };
+
 /** W3: bearer/local model boundary with normalized streaming and usage. @public */
 export type ModelTransport = {
-  /** Whether this provider/model selection uses Tau's funded gateway. */
-  usesBillingAttempt?: ((providerKind: ModelProviderKind | undefined) => boolean) | undefined;
-  /** Resolve an ambiguous prepared attempt without dispatching it again. */
-  lookupAttempt?: ((attemptId: string, signal: AbortSignal) => Promise<ModelInvocationBinding | undefined>) | undefined;
+  /** Whether Tau's gateway ledger funds this transport's calls, and how an attempt is resolved (GI-S4, RA-S11). */
+  readonly funding: InvocationFunding;
   /** Start one provider stream. */
   stream(request: ModelStreamRequest): AsyncIterable<ModelStreamEvent>;
 };
 
-/** Opaque API-owned operation binding exposed to portable hosts. @public */
+/**
+ * The API-owned operation a funded call was bound to, read off the accepted response. Bind is its only producer, so
+ * it carries no status: the bound row writes `pending` for older readers (GI-R6, gi-surface-trim). @public
+ */
 export type ModelInvocationBinding = {
   readonly operationId: string;
-  readonly status: 'pending' | 'terminal' | 'unavailable';
 };
 
 /** Input for one direct in-host tool dispatch. @public */
@@ -225,7 +268,57 @@ export type HostToolInvocation = {
    * adapter, which is served at the workspace root.
    */
   readonly runId?: string | undefined;
+  /**
+   * Ask the person for a durable approval, or read the one they already gave (D5).
+   *
+   * Optional, unlike the rest of the invocation: one registry serves runs under
+   * hosts that cannot pause a run — an API-coordinated run, an MCP call from an
+   * external adapter — and a tool that needs consent under such a host hands
+   * its record back `awaiting-approval` for the person to answer in Tau's own
+   * surface, rather than failing or, worse, proceeding.
+   */
+  readonly approve?: HostToolApproval | undefined;
 };
+
+/**
+ * One durable approval a tool asks of the person before an effect it must not
+ * take alone — a physical print, a paid job (D5).
+ *
+ * Under a Tau host the request is the run's native durable interrupt: asking
+ * records `interrupt.recorded` and pauses the run, which ends this attempt (D10,
+ * TS-R10), so the call never returns an answer; it rejects as the attempt is
+ * aborted. The person's decision resolves the interrupt and reaches the
+ * registry's `answerApproval` at once; the run continues as its next attempt,
+ * which is told the answer, and a call asking again under the same key reads it
+ * through `recall`. A denial ends the paused run (`resolved`, `cancelled`).
+ *
+ * The whole resolution, not just its outcome: a request that offered options is
+ * answered by one of them, and re-deriving the choice from `approved` would
+ * substitute the host's guess for the human's decision.
+ *
+ * @public
+ */
+export type HostToolApproval = ((request: {
+  /** Names what is being approved across attempts: the next attempt recalls it by this key. */
+  readonly key?: string | undefined;
+  readonly prompt: string;
+  readonly payload?: JsonObject | undefined;
+}) => Promise<InterruptResolution>) & {
+  /**
+   * The person's answer to this run's request under `key`, until a call recalls it: the recalling call spends it.
+   *
+   * @param key - The key the request was asked under.
+   * @returns The payload that was asked and its resolution, or `undefined` when none is waiting to be used.
+   */
+  readonly recall?: ((key: string) => Promise<HostToolApprovalRecord | undefined>) | undefined;
+};
+
+/** A resolved approval a tool asked for, as its next attempt recalls it. @public */
+export type HostToolApprovalRecord = Readonly<{
+  /** The payload the request carried. */
+  payload: JsonObject;
+  resolution: InterruptResolution;
+}>;
 
 /** Normalized result of one tool dispatch. @public */
 export type HostToolResult = {
@@ -233,10 +326,37 @@ export type HostToolResult = {
   readonly content: JsonValue;
   /** Whether the tool completed with a model-visible failure. */
   readonly isError: boolean;
+  /**
+   * The recalled approval this call used (D5). The host sets it and records it on the call's output row, so one
+   * answer is spent by the call that recalled it and by no other.
+   */
+  readonly approval?: Readonly<{ interruptId: string }> | undefined;
 };
+
+/**
+ * A person's answer to an approval a registry's tool asked for (D5), as the host hands it back to that registry.
+ *
+ * @public
+ */
+export type HostToolApprovalAnswer = Readonly<{
+  /** The tool that asked. */
+  toolName: string;
+  /** The payload its request carried. */
+  payload: JsonObject;
+  /** The answer: `approved`, `denied`, or `cancelled` with the run. */
+  resolution: InterruptResolution;
+}>;
 
 /** W4: canonical schemas plus direct environment-owned tool dispatch. @public */
 export type ToolRegistry = {
+  /**
+   * Act on the person's answer to an approval one of these tools asked for (D5).
+   *
+   * The host calls it when the answer is recorded (`resolve-interrupt`, or `cancel` of the paused run), so what the
+   * tool guards (a print request) follows the chat's answer whether or not the run continues. It must be idempotent:
+   * the answer may also reach the tool through `recall` when the run continues.
+   */
+  readonly answerApproval?: ((answer: HostToolApprovalAnswer) => Promise<void>) | undefined;
   /** Return every tool currently visible to the run. */
   list(): readonly HostToolDefinition[];
   /** Validate and dispatch one tool invocation. */
@@ -275,16 +395,6 @@ export type InterruptResolution = {
   readonly payload?: JsonValue | undefined;
 };
 
-/** W5: durable pause, presentation, and resume boundary. @public */
-export type InterruptApprovalPort = {
-  /** Persist and pause until a matching resolution is resumed. */
-  pause(request: InterruptRequest): Promise<InterruptResolution>;
-  /** List unresolved requests for presentation. */
-  pending(input: { readonly runId: string }): Promise<readonly InterruptRequest[]>;
-  /** Resolve a durable request and wake its paused run. */
-  resume(resolution: InterruptResolution): Promise<void>;
-};
-
 /** Immutable identity and current state of one admitted run. @public */
 export type HostRun = {
   /** Conversation identity whose workspace log owns the run. */
@@ -321,28 +431,107 @@ export type HostRunSnapshot = HostRun & {
   readonly failure?: HostRunFailure | undefined;
 };
 
-/** W6: run admission, steering, cancellation, resume, and snapshot commands. @public */
-export type RunLifecycleCommands = {
-  /** Admit a new execution identity and initial user turn. */
-  admit(
-    input: {
-      readonly chatId: string;
-      readonly runId: string;
-      readonly message: Extract<ProviderMessage, { readonly role: 'user' }>;
-    } & (
-      | { readonly trigger: 'submit'; readonly retainedMessageIds?: never }
-      | {
-          readonly trigger: Exclude<RunTrigger, 'submit'>;
-          readonly retainedMessageIds: readonly string[];
-        }
-    ),
-  ): Promise<HostRun>;
-  /** Add operator steering to an active run. */
-  steer(input: { readonly runId: string; readonly message: string }): Promise<void>;
-  /** Cancel an active or paused run. */
-  cancel(input: { readonly runId: string; readonly reason?: string | undefined }): Promise<void>;
-  /** Resume an interrupted run from its durable state. */
-  resume(input: { readonly runId: string }): Promise<HostRun>;
-  /** Read a projection rebuilt from durable host state. */
-  snapshot(input: { readonly runId: string }): Promise<HostRunSnapshot>;
-};
+/** One attempt of one agent run against one checkout (I9, D15). `turnId` is the user message id. @public */
+export type TurnAttemptKey = Readonly<{ chatId: string; turnId: string; runId: string; attempt: number }>;
+
+/** What every verb that addresses one attempt takes: the request id every answer echoes (D14), and the key. @public */
+export type TurnAttemptInput = Readonly<{ requestId: string; key: TurnAttemptKey }>;
+
+/** `admit`: lease the attempt, pre-mint a dirty base, and hand out its tools. @public */
+export type TurnAdmitInput = TurnAttemptInput &
+  Readonly<{
+    /** The person's placement choice (TS-R12). Absent: the chat record's checkout, then the live one. */
+    checkoutId?: string | undefined;
+  }>;
+
+/** `complete`: settle the attempt. `cut` is true for every attempt that executed, whatever its outcome (TS-R11). @public */
+export type TurnCompleteInput = TurnAttemptInput & Readonly<{ cut: boolean }>;
+
+/** `reconcile`: list the lease records of the project, or of one chat. @public */
+export type TurnReconcileInput = Readonly<{ requestId: string; chatId?: string | undefined }>;
+
+/** `settlements`: a listen that replays every unacknowledged fact on subscribe. @public */
+export type TurnSettlementsInput = Readonly<{ signal: AbortSignal }>;
+
+/**
+ * Where an attempt runs (TS-S0's `TurnPlacement`, renamed so it does not collide with the log's placement record,
+ * which this package already exports as `TurnPlacement`). The record part is what attempt 1's `running` row stores.
+ *
+ * @public
+ */
+export type TurnPlacementGrant = TurnPlacement &
+  Readonly<{
+    /** Where the attempt's files are rooted in this host's namespace (an external agent's cwd). */
+    root: string;
+    /** The attempt's tools over that root. `complete`, `abandon` and the session fence revoke them. */
+    tools: ToolRegistry;
+  }>;
+
+/** One settlement row as the port publishes it: a `turn.*` body keyed by run and attempt. @public */
+export type TurnSettlementRow = Readonly<{ runId: string; attempt: number }> &
+  (
+    | Omit<TurnFinalizedLogEvent, keyof LogEventBase>
+    | Omit<TurnConflictedLogEvent, keyof LogEventBase>
+    | (Omit<TurnFailedLogEvent, keyof LogEventBase> & Readonly<{ code?: string | undefined }>)
+  );
+
+/** An answer to one port request. A refusal is data; a dead session rejects instead. @public */
+export type TurnPlacementAnswer<Result extends Record<string, unknown>, Code extends string> =
+  | (Readonly<{ requestId: string; status: 'applied' | 'replayed' }> & Result)
+  | Readonly<{
+      requestId: string;
+      status: 'refused';
+      code: Code;
+      /** Names the recovery. */
+      message: string;
+      details?: Readonly<Record<string, unknown>> | undefined;
+    }>;
+
+/** What the root publishes. Delivery is at least once; M1's append is idempotent per key (TS-R18). @public */
+export type TurnPlacementFact =
+  | Readonly<{ kind: 'settled'; key: TurnAttemptKey; row: TurnSettlementRow }>
+  /** A lease this session did not admit refused one of its operations (TS-R16, TS-R17). */
+  | Readonly<{ kind: 'leaseHeld'; key: TurnAttemptKey; checkoutId: string }>;
+
+type NoResult = Readonly<Record<never, never>>;
+
+/**
+ * The host's placement and settlement port (D9, TS-S0 consumer-port). One instance per project (I23). M1 drives its
+ * order: `admit` after the intent row, `complete` after the ending row, `abandon` at the stop bound and on fencing,
+ * `acknowledge` after the `turn.*` row. Function-typed properties, so an adapter's drifted input is caught.
+ *
+ * @public
+ */
+export type TurnPlacementPort = Readonly<{
+  admit: (
+    input: TurnAdmitInput,
+  ) => Promise<
+    TurnPlacementAnswer<
+      Readonly<{ placement: TurnPlacementGrant }>,
+      | 'CHECKOUT_UNKNOWN'
+      | 'CHECKOUT_CONFLICT'
+      | 'BASE_CUT_FAILED'
+      | 'TURN_ALREADY_LEASED'
+      | 'REVISIONS_UNAVAILABLE'
+      | 'SESSION_FENCED'
+    >
+  >;
+  complete: (
+    input: TurnCompleteInput,
+  ) => Promise<
+    TurnPlacementAnswer<NoResult, 'TURN_UNKNOWN' | 'CUT_FAILED' | 'LEASE_HELD_ELSEWHERE' | 'SESSION_FENCED'>
+  >;
+  abandon: (input: TurnAttemptInput) => Promise<TurnPlacementAnswer<NoResult, 'TURN_UNKNOWN' | 'SESSION_FENCED'>>;
+  reconcile: (
+    input: TurnReconcileInput,
+  ) => Promise<
+    TurnPlacementAnswer<
+      Readonly<{ held: ReadonlyArray<Readonly<{ key: TurnAttemptKey; checkoutId: string }>> }>,
+      'REVISIONS_UNAVAILABLE' | 'SESSION_FENCED'
+    >
+  >;
+  settlements: (input: TurnSettlementsInput) => AsyncIterable<TurnPlacementFact>;
+  acknowledge: (
+    input: TurnAttemptInput,
+  ) => Promise<TurnPlacementAnswer<NoResult, 'LEASE_HELD_ELSEWHERE' | 'REVISIONS_BUSY' | 'SESSION_FENCED'>>;
+}>;

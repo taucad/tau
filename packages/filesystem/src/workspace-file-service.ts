@@ -2,6 +2,7 @@ import { projectIdSchema } from '@taucad/types';
 import type {
   CheckedFileWrite,
   CheckedFileWriteResult,
+  FileWritePrecondition,
   FileStat,
   FileStatEntry,
   FileSystemBackend,
@@ -186,7 +187,11 @@ export class WorkspaceFileService {
     this._registry = options.providerRegistry;
     this._resourceQueue = options.resourceQueue;
     this._eventBus = options.eventBus;
-    this._watchRegistry = new WatchRegistry(options.eventBus, { coalescingWindow: kernelCoalescingWindow });
+    // Kernels deduplicate by content hash, so a lone edit is delivered at once and only the burst behind it waits.
+    this._watchRegistry = new WatchRegistry(options.eventBus, {
+      coalescingWindow: kernelCoalescingWindow,
+      leadingEdge: true,
+    });
     this._crossTabCoordinator = options.crossTabCoordinator ?? new CrossTabCoordinator();
     this._filePool = options.filePool;
     this._mountTable = options.mountTable;
@@ -426,6 +431,22 @@ export class WorkspaceFileService {
       signal: input.signal,
       context,
     });
+  }
+
+  /** Check current bytes and delete one file inside the canonical mutation fence. */
+  public async deleteFileChecked(
+    input: { path: string; preconditions: readonly FileWritePrecondition[]; signal?: AbortSignal },
+    context?: WorkspaceMutationContext,
+  ): Promise<CheckedFileWriteResult> {
+    const path = resolveAuthorityPath(input.path);
+    this._assertGenericMutationPath(path);
+    const resolution = this._resolveProvider(path);
+    const preconditions = input.preconditions.map((precondition) => {
+      const preconditionPath = resolveAuthorityPath(precondition.path);
+      this._assertGenericMutationPath(preconditionPath);
+      return { ...precondition, path: preconditionPath, resolution: this._resolveProvider(preconditionPath) };
+    });
+    return this._pipeline.deleteFileCheckedResolved({ path, resolution, preconditions, signal: input.signal, context });
   }
 
   /**
@@ -1044,16 +1065,19 @@ export class WorkspaceFileService {
   }
 
   /**
-   * Give an `adoption-required` project directory a fresh Tau identity in
-   * place.
+   * Give an `adoption-required` project directory a Tau identity in place.
    *
    * @param locator - Discovery locator of the directory to adopt.
+   * @param options - `id` restores the identity this directory's route was bound to.
    * @returns The manifest now on disk, identity included.
    */
   /* The return type is the lifecycle's own: this class no longer names the
    * product's manifest (boundary rule `project-manifest`). */
-  public async adoptProjectDirectory(locator: ProjectLocator): ReturnType<ProjectDirectories['adoptProjectDirectory']> {
-    return this._projectDirectories.adoptProjectDirectory(locator);
+  public async adoptProjectDirectory(
+    locator: ProjectLocator,
+    options?: { readonly id?: string },
+  ): ReturnType<ProjectDirectories['adoptProjectDirectory']> {
+    return this._projectDirectories.adoptProjectDirectory(locator, options);
   }
 
   /**

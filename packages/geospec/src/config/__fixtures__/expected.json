@@ -1,0 +1,97 @@
+{
+  "configured": {
+    "include": ["cases/**/*.geospec.ts"],
+    "exclude": ["**/skip.geospec.ts"],
+    "testNamePattern": "ordinary",
+    "testTimeout": 1200,
+    "matcherWallBackstop": 2400,
+    "bail": true,
+    "forensic": true,
+    "cache": true,
+    "cacheDirectory": ".tau/config-cache",
+    "subjects": {
+      "part": {
+        "kind": "tau-project",
+        "manifestPath": "tau.json",
+        "manifest": {
+          "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+          "id": "proj_aaaaaaaaaaaaaaaaaaaaa",
+          "name": "C1 ordinary fixture",
+          "description": "Config data import control",
+          "tags": [],
+          "assets": {
+            "main": {
+              "entryPath": "main.ts"
+            }
+          }
+        },
+        "format": "step",
+        "parameters": {
+          "width": 4
+        }
+      }
+    }
+  },
+  "overrides": {
+    "include": [],
+    "exclude": [],
+    "testTimeout": 600,
+    "bail": false,
+    "forensic": false,
+    "cache": false,
+    "cacheDirectory": ".tau/overridden",
+    "subjects": {
+      "alternate": {
+        "kind": "tau-project",
+        "manifestPath": "tau.json",
+        "manifest": {
+          "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+          "id": "proj_aaaaaaaaaaaaaaaaaaaaa",
+          "name": "C1 ordinary fixture",
+          "description": "Config data import control",
+          "tags": [],
+          "assets": {
+            "main": {
+              "entryPath": "main.ts"
+            }
+          }
+        },
+        "format": "glb"
+      }
+    }
+  },
+  "resolved": {
+    "include": [],
+    "exclude": [],
+    "testNamePattern": "ordinary",
+    "testTimeout": 600,
+    "matcherWallBackstop": 2400,
+    "bail": false,
+    "forensic": false,
+    "cache": false,
+    "cacheDirectory": ".tau/overridden",
+    "subjects": {
+      "alternate": {
+        "kind": "tau-project",
+        "manifestPath": "tau.json",
+        "manifest": {
+          "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+          "id": "proj_aaaaaaaaaaaaaaaaaaaaa",
+          "name": "C1 ordinary fixture",
+          "description": "Config data import control",
+          "tags": [],
+          "assets": {
+            "main": {
+              "entryPath": "main.ts"
+            }
+          }
+        },
+        "format": "glb"
+      }
+    }
+  },
+  "noConfig": {},
+  "discoveryConfigured": ["cases/keep.geospec.ts"],
+  "discoveryEmptyIncludeUsesExistingDefaults": ["cases/keep.geospec.ts", "cases/skip.geospec.ts", "other.geospec.js"],
+  "discoveryExcludeAll": []
+}

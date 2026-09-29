@@ -20,5 +20,7 @@
  */
 
 export { webSocketTransport } from '#transport/web-socket-transport.js';
+export { prepareMachineWebSocket } from '#transport/machine-web-socket.js';
+export type { PreparedMachineWebSocket, PrepareMachineWebSocketInput } from '#transport/machine-web-socket.js';
 export { webSocketClient, webSocketClientDescribe } from '#transport/web-socket-client.js';
 export type { WebSocketTransportOptions } from '#transport/web-socket-transport.schemas.js';

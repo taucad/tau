@@ -20,7 +20,7 @@ export const menuItemVariants = cva(
     variants: {
       variant: {
         default: '',
-        destructive: 'hover:bg-menu-highlight-destructive focus:bg-menu-highlight-destructive',
+        destructive: '',
       },
       inset: {
         true: 'pl-8', // For items with left indicator (checkbox/radio)
@@ -38,6 +38,13 @@ export const menuItemVariants = cva(
       inset: false,
       highlight: 'focus',
     },
+    compoundVariants: [
+      {
+        variant: 'destructive',
+        className:
+          'hover:bg-menu-highlight-destructive hover:text-menu-destructive-foreground hover:[&_svg]:text-menu-destructive-foreground! focus:bg-menu-highlight-destructive focus:text-menu-destructive-foreground focus:[&_svg]:text-menu-destructive-foreground! data-[highlighted]:bg-menu-highlight-destructive data-[highlighted]:text-menu-destructive-foreground data-[highlighted]:[&_svg]:text-menu-destructive-foreground! data-[selected=true]:bg-menu-highlight-destructive data-[selected=true]:text-menu-destructive-foreground data-[selected=true]:[&_svg]:text-menu-destructive-foreground!',
+      },
+    ],
   },
 );
 

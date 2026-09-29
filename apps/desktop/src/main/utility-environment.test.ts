@@ -1,10 +1,11 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment names are SCREAMING_SNAKE */
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import {
+  bundledGitEnvironment,
   compileCacheEnvironment,
   loginShellEnvironment,
   packagedEsbuildEnvironment,
@@ -36,6 +37,16 @@ describe('utilityEnvironment', () => {
       TAU_DESKTOP_TOKEN: 'session-token',
     });
     expect(environment).toEqual({ PATH: '/usr/bin' });
+  });
+
+  it('should pass the Bambu Studio location to the utilities that slice and plan with it', () => {
+    expect(utilityEnvironment({ TAU_BAMBU_STUDIO_PATH: '/opt/BambuStudio.app' })).toEqual({
+      TAU_BAMBU_STUDIO_PATH: '/opt/BambuStudio.app',
+    });
+  });
+
+  it('should pass the secret vault choice to the utility that keeps printer access codes', () => {
+    expect(utilityEnvironment({ TAU_SECRET_VAULT: 'file' })).toEqual({ TAU_SECRET_VAULT: 'file' });
   });
 
   it('merges caller-named additions last', () => {
@@ -103,6 +114,40 @@ describe('packagedEsbuildEnvironment', () => {
 
   it('should preserve normal resolution on packaged targets without a qualified staged executable', () => {
     expect(packagedEsbuildEnvironment(true, '/unused', { architecture: 'x64', platform: 'win32' })).toEqual({});
+  });
+});
+
+describe('bundledGitEnvironment', () => {
+  const roots: string[] = [];
+  afterAll(async () => {
+    await Promise.all(roots.map(async (root) => rm(root, { recursive: true, force: true })));
+  });
+  /** A packaged app's `Contents/Resources`, carrying the payload `package-macos.mts` copies in. */
+  const resourcesWithGit = async (target: string, name: string): Promise<string> => {
+    const resources = await mkdtemp(join(tmpdir(), 'tau-resources-'));
+    roots.push(resources);
+    await mkdir(join(resources, 'git', target, 'bin'), { recursive: true });
+    await writeFile(join(resources, 'git', target, 'bin', name), '#!/bin/sh\n');
+    return resources;
+  };
+
+  it('should point the services utility at the git a packaged app carries under its resources', async () => {
+    const resources = await resourcesWithGit('darwin-arm64', 'git');
+    expect(bundledGitEnvironment(resources, { architecture: 'arm64', platform: 'darwin' })).toEqual({
+      TAU_GIT_EXECUTABLE: join(resources, 'git/darwin-arm64/bin/git'),
+    });
+  });
+
+  it('should name the Windows executable on Windows', async () => {
+    const resources = await resourcesWithGit('win32-x64', 'git.exe');
+    expect(bundledGitEnvironment(resources, { architecture: 'x64', platform: 'win32' })).toEqual({
+      TAU_GIT_EXECUTABLE: join(resources, 'git/win32-x64/bin/git.exe'),
+    });
+  });
+
+  it('should leave git to PATH when the build carries no payload for this target', async () => {
+    const resources = await resourcesWithGit('darwin-arm64', 'git');
+    expect(bundledGitEnvironment(resources, { architecture: 'x64', platform: 'linux' })).toEqual({});
   });
 });
 

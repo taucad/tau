@@ -103,6 +103,16 @@
       "inputs": ["{projectRoot}/src/extract-opencascade-types.ts", "{workspaceRoot}/pnpm-lock.yaml", "sharedGlobals"],
       "outputs": ["{projectRoot}/src/generated/opencascade"]
     },
+    "extract-picovoxel": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-picovoxel-types.ts",
+        "cwd": "libs/api-extractor"
+      },
+      "cache": true,
+      "inputs": ["{projectRoot}/src/extract-picovoxel-types.ts", "{workspaceRoot}/pnpm-lock.yaml", "sharedGlobals"],
+      "outputs": ["{projectRoot}/src/generated/picovoxel"]
+    },
     "generate-bundles": {
       "executor": "nx:run-commands",
       "options": {
@@ -116,7 +126,7 @@
         "{projectRoot}/src/model/**/*.ts",
         "{projectRoot}/src/render/**/*.ts",
         "{projectRoot}/src/generated/**/*",
-        "{workspaceRoot}/packages/plugins/*/agent/doctrine.md",
+        "{workspaceRoot}/packages/plugins/*/agent/*.md",
         "{workspaceRoot}/packages/geospec/agent/doctrine.md",
         "{workspaceRoot}/pnpm-lock.yaml",
         "sharedGlobals"
@@ -128,6 +138,7 @@
         "{workspaceRoot}/packages/plugins/opencascade/agent/cad-opencascadejs",
         "{workspaceRoot}/packages/plugins/openrscad/agent/cad-openscad",
         "{workspaceRoot}/packages/plugins/picogk/agent/cad-picogk",
+        "{workspaceRoot}/packages/plugins/picovoxel/agent/cad-picovoxel",
         "{workspaceRoot}/packages/plugins/replicad/agent/cad-replicad",
         "{workspaceRoot}/packages/plugins/zoo/agent/cad-zoo",
         "{workspaceRoot}/packages/plugins/tscircuit/agent/cad-tscircuit",

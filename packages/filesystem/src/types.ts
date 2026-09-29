@@ -12,6 +12,7 @@
 import type {
   CheckedFileWrite,
   CheckedFileWriteResult,
+  FileWritePrecondition,
   FileContentMetadata,
   FileProvenance,
   FileStat,
@@ -62,6 +63,21 @@ export type PathPolicy = {
  * @public
  */
 export type FileMode = '100644' | '100755';
+
+/** Metadata from a head-only directory listing. Text line counts are unknown. @public */
+export type HeadFileStat =
+  | Extract<FileStat, { type: 'dir' }>
+  | {
+      readonly type: 'file';
+      readonly size: number;
+      readonly mtimeMs: number;
+      readonly contentKind: 'text' | 'binary';
+      readonly lineCount?: never;
+      readonly provenance?: FileProvenance;
+    };
+
+/** One directory row with exact or head-only metadata. @public */
+export type DirectoryStatRow<Stat extends FileStat | HeadFileStat = FileStat> = { readonly name: string } & Stat;
 
 /**
  * Capability flags describing what a storage provider supports.
@@ -130,12 +146,24 @@ export type ExternalChangeFact =
 export type FileSystemProvider = {
   readonly id: string;
   readonly capabilities: ProviderCapabilities;
+  /** Explicit opt-in to head-only listing; absent on exact-only legacy providers. */
+  readonly supportsHeadListing?: true;
+  /** Optional batched listing. Omission returns exact metadata; `head` omits unknown line counts. */
+  readdirWithStats?: {
+    (path: string): Promise<DirectoryStatRow[]>;
+    (path: string, options: { readonly content: 'head' }): Promise<Array<DirectoryStatRow<FileStat | HeadFileStat>>>;
+  };
   readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   readFile(path: string, encoding: 'utf8'): Promise<string>;
   /** Persist a file, creating any missing parent directories. */
   writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
   /** Atomically check current bytes and replace one file when this provider owns a real authority fence. */
   writeFileChecked?(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+  /** Atomically check current bytes and delete one file under the same authority fence. */
+  deleteFileChecked?(input: {
+    path: string;
+    preconditions: readonly FileWritePrecondition[];
+  }): Promise<CheckedFileWriteResult>;
   /** Append bytes in enqueue order, creating the file and missing parent directories when absent. */
   appendFile?(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
   readdir(path: string): Promise<string[]>;
@@ -153,8 +181,6 @@ export type FileSystemProvider = {
   dispose(): void;
   /** Optional streaming read. When present, service routes through this instead of buffered readFile. */
   readFileStream?(path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>>;
-  /** Optional batched readdir+stat. When present, eliminates N+1 stat calls per directory listing. */
-  readdirWithStats?(path: string): Promise<Array<{ name: string } & FileStat>>;
   /** Optional readdir carrying entry kinds. When present, tree walks skip the stat-per-child. */
   readdirEntries?(path: string): Promise<DirectoryEntry[]>;
   /**
@@ -235,7 +261,7 @@ export type FileTreeNode =
       children?: never;
       /** What a composed view says about this entry; absent on a raw authority listing. */
       provenance?: FileProvenance;
-    } & FileContentMetadata);
+    } & ({ contentKind: 'text'; lineCount?: number } | { contentKind: 'binary'; lineCount?: never }));
 
 /**
  * Directory listing row with stat metadata (worker readDirectory aggregation).

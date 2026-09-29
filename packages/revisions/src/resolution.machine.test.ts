@@ -1,10 +1,16 @@
 import { createActor } from 'xstate';
+import type { AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#resolution.machine.js';
 import { resolutionMachine, selectResolutionFacet } from '#resolution.machine.js';
-import { createFakeParent, createFakePromiseActors, recordEmitted } from '#test/fake-actors.js';
-import type { FakePromiseActors } from '#test/fake-actors.js';
+import type { ResolutionMachineEvent } from '#resolution.machine.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { createFakeParent, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
+import type { FakePromiseActors } from '@taucad/xstate-testing/fakes';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 /*
  * Path table — `resolution.machine` (S47, W21).
@@ -20,7 +26,8 @@ import type { FakePromiseActors } from '#test/fake-actors.js';
  *     every earlier choice kept
  *  9  `finish` with a path still unanswered is refused by the guard
  * 10  `finish` with every path answered mints, emits and sends `conflictResolved`
- * 11  `finishMerge` failure → `resolving.failed` → `toast.error` → `idle`, with
+ * 11  `finishMerge` failure → `resolving.failed` → `toast.error` (and the
+ *     parent's `childToast`, L2-F8) → `idle`, with
  *     every choice kept
  * 12  `askChat` → `seeding` → `turnRequested { revisionId, checkoutId, paths }`
  * 13  `seedTurn` failure → `resolving.failed` → `toast.error`
@@ -30,6 +37,56 @@ import type { FakePromiseActors } from '#test/fake-actors.js';
  * --  start and stop without a leaked child, serializable snapshot with no
  *     function and no bytes in context, one exported machine value
  */
+
+/**
+ * Known defects (MC-S5): public events a reachable state neither takes nor
+ * declares ignored. W5 answers each one or moves it to an exported
+ * `resolutionIgnoredEvents` (D13, MC-R17), and deletes the row as it lands.
+ */
+const knownDefects: IgnoredEvents = {
+  resolution: [
+    // W5: `finish` with a path still unanswered is refused without an answer.
+    ['resolving.idle', 'finish'],
+    ['open.loading', 'keepMine'],
+    ['open.loading', 'keepTheirs'],
+    ['open.loading', 'openInEditor'],
+    ['open.loading', 'resolvedInEditor'],
+    ['open.loading', 'askChat'],
+    ['open.loading', 'finish'],
+    ['open.loading', 'reload'],
+    ['open.failed', 'keepMine'],
+    ['open.failed', 'keepTheirs'],
+    ['open.failed', 'openInEditor'],
+    ['open.failed', 'resolvedInEditor'],
+    ['open.failed', 'askChat'],
+    ['open.failed', 'finish'],
+    ['resolving.applying', 'keepMine'],
+    ['resolving.applying', 'keepTheirs'],
+    ['resolving.applying', 'openInEditor'],
+    ['resolving.applying', 'resolvedInEditor'],
+    ['resolving.applying', 'askChat'],
+    ['resolving.applying', 'finish'],
+    ['resolving.materializing', 'keepMine'],
+    ['resolving.materializing', 'keepTheirs'],
+    ['resolving.materializing', 'openInEditor'],
+    ['resolving.materializing', 'resolvedInEditor'],
+    ['resolving.materializing', 'askChat'],
+    ['resolving.materializing', 'finish'],
+    ['resolving.seeding', 'keepMine'],
+    ['resolving.seeding', 'keepTheirs'],
+    ['resolving.seeding', 'openInEditor'],
+    ['resolving.seeding', 'resolvedInEditor'],
+    ['resolving.seeding', 'askChat'],
+    ['resolving.seeding', 'finish'],
+    ['finishing', 'keepMine'],
+    ['finishing', 'keepTheirs'],
+    ['finishing', 'openInEditor'],
+    ['finishing', 'resolvedInEditor'],
+    ['finishing', 'askChat'],
+    ['finishing', 'finish'],
+    ['finishing', 'reload'],
+  ],
+};
 
 /** Let every queued microtask and the actor's promise handlers run. */
 const flush = async (): Promise<void> => {
@@ -56,6 +113,7 @@ const conflict = {
 };
 
 const start = (): Harness => {
+  const guard = guardActors({ ignore: knownDefects });
   const promises = createFakePromiseActors();
   const parent = createFakeParent();
   const actor = createActor(
@@ -68,7 +126,11 @@ const start = (): Harness => {
         seedTurn: promises.actor('seedTurn'),
       },
     }),
-    { input: { projectId: 'project-1', revisionId: 'rev-conflict', parentRef: parent.ref } },
+    {
+      input: { projectId: 'project-1', revisionId: 'rev-conflict', parentRef: parent.ref },
+      clock: new StepClock(),
+      inspect: guard.inspect,
+    },
   );
   const emitted = recordEmitted(actor);
   actor.start();
@@ -310,7 +372,7 @@ describe('resolutionMachine', () => {
   });
 
   it('returns to the rows when the resolving revision cannot be minted', async () => {
-    const { actor, promises, emitted, parent } = await loaded();
+    const { actor, promises, parent, emitted } = await loaded();
 
     for (const path of ['enclosure.ts', 'params/wall.json']) {
       actor.send({ type: 'keepTheirs', path });
@@ -332,13 +394,15 @@ describe('resolutionMachine', () => {
       type: 'toast.error',
       message: 'that branch moved while the merge was running',
     });
-    /* D56: and the parent hears it too, because a host holds only the root and
-       never saw this child's own toast. */
-    expect(parent.events.find((event) => event.type === 'resolutionFailed')).toEqual({
-      type: 'resolutionFailed',
-      revisionId: 'rev-conflict',
-      reason: 'that branch moved while the merge was running',
-    });
+    /* L2-F8: and through the root, which is the only actor a host holds. */
+    expect(parent.events.filter((event) => event.type === 'childToast')).toEqual([
+      {
+        type: 'childToast',
+        subject: 'resolution',
+        tone: 'error',
+        message: 'that branch moved while the merge was running',
+      },
+    ]);
 
     actor.stop();
   });
@@ -419,5 +483,44 @@ describe('resolutionMachine', () => {
 
     actor.stop();
     expect(actor.getSnapshot().status).toBe('stopped');
+  });
+
+  it('should answer every public event in every reachable state', () => {
+    const outputs: Readonly<Record<string, unknown>> = {
+      loadConflict: { ...conflict, paths: [conflict.paths[0]] },
+      materialize: { path: 'enclosure.ts', text: '<<<<<<< main', ours: 'mine', theirs: 'theirs' },
+      applyResolution: undefined,
+      finishMerge: { revisionId: 'rev-resolved', branch: 'enclosure-v2' },
+      seedTurn: { checkoutId: 'checkout-enclosure', paths: ['enclosure.ts'] },
+    };
+    /* Effect outcomes reach the states behind each invoke; they are not public. */
+    const outcomes = Object.values(resolutionMachine.root.states)
+      .flatMap((node) => [node, ...Object.values(node.states)])
+      .flatMap((node) => node.invoke)
+      .flatMap((invoke) => [
+        { type: `xstate.done.actor.${invoke.id}`, output: outputs[typeof invoke.src === 'string' ? invoke.src : ''] },
+        { type: `xstate.error.actor.${invoke.id}`, error: new Error('failed') },
+      ]);
+    const publicEvents: readonly ResolutionMachineEvent[] = [
+      { type: 'keepMine', path: 'enclosure.ts' },
+      { type: 'keepTheirs', path: 'enclosure.ts' },
+      { type: 'openInEditor', path: 'enclosure.ts' },
+      { type: 'resolvedInEditor', path: 'enclosure.ts', content: 'resolved' },
+      { type: 'askChat' },
+      { type: 'finish' },
+      { type: 'abandon' },
+      { type: 'reload' },
+    ];
+    const options = {
+      input: { projectId: 'project-1', revisionId: 'rev-conflict', parentRef: undefined },
+      events: [...publicEvents, ...outcomes],
+      limit: 5000,
+      /* `finish` is guarded on every path being chosen, so the projection keeps the chosen paths. */
+      serializeState: (snapshot: AnyMachineSnapshot) =>
+        JSON.stringify([snapshot.value, Object.keys(snapshot.context.chosen as Record<string, unknown>).toSorted()]),
+    };
+
+    expect(unansweredEvents(resolutionMachine, { ...options, ignore: knownDefects['resolution'] })).toEqual([]);
+    expect(unreachedStates(resolutionMachine, options)).toEqual([]);
   });
 });

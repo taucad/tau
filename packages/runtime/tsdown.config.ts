@@ -34,6 +34,7 @@ const baseConfig: UserConfig = {
     'src/jobs/index.ts',
     'src/machines/index.ts',
     'src/host/index.ts',
+    'src/host/node.ts',
     'src/types/index.ts',
     'src/plugins/plugin-entry.ts',
     'src/plugins/kernel-plugin-entry.ts',

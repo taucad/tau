@@ -1,0 +1,5 @@
+Error: Evaluating assumption line 6, col 8 to line 6, col 32 of module ProbeTrace failed.
+Attempted to apply the operator overridden by the Java method
+public static tlc2.value.IValue tlc2.overrides.Json.ndDeserialize(tlc2.value.impl.StringValue) throws java.io.IOException,
+but it produced the following error:
+Cannot convert value: unsupported JSON value null

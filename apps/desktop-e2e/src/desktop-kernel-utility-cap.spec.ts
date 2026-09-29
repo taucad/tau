@@ -82,7 +82,7 @@ const runCommand = async (page: Page, label: string): Promise<void> => {
     .getByRole('button', { name: /Search/u })
     .first()
     .click();
-  await page.getByPlaceholder('Search projects, chats, and actions...').fill(label);
+  await page.getByPlaceholder('Search projects, chats, and actions…').fill(label);
   await page.getByText(label, { exact: true }).first().click();
 };
 

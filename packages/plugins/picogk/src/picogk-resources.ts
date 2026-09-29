@@ -3,6 +3,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 
 import { z } from 'zod';
 
+import { picogkProtocolVersion } from '#picogk.protocol.js';
 import { picogkOptionsSchema } from '#picogk.schemas.js';
 
 const sha256 = z.string().regex(/^[\da-f]{64}$/u);
@@ -24,7 +25,7 @@ export const picogkRuntimeManifestSchema = z
     picoGkArchiveSha256: sha256,
     picoGkHostedPatchSha256: sha256,
     hostApiVersion: z.literal(1),
-    protocolVersion: z.literal(3),
+    protocolVersion: z.literal(picogkProtocolVersion),
     sceneArtifactVersion: z.literal(3),
     topologySchemaVersion: z.literal(1),
     sourceFilesSha256: sha256,
@@ -53,9 +54,18 @@ export const loadPicogkKernelOptions = (options: {
 }): PicogkKernelOptions => {
   const target = options.target ?? `${process.platform}-${process.arch}`;
   const targetRoot = resolve(options.resourceRoot, target);
-  const manifest = picogkRuntimeManifestSchema.parse(
-    JSON.parse(readFileSync(join(targetRoot, 'tau-runtime-manifest.json'), 'utf8')),
-  );
+  const manifestPath = join(targetRoot, 'tau-runtime-manifest.json');
+  const json: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  // A worker built for another protocol loads, then fails its handshake; refuse it here with the fix.
+  const { protocolVersion } = z.object({ protocolVersion: z.unknown() }).parse(json);
+  if (protocolVersion !== picogkProtocolVersion) {
+    throw new Error(
+      `PicoGK resources at ${targetRoot} were prepared for worker protocol ${String(protocolVersion)}, ` +
+        `but this build speaks protocol ${picogkProtocolVersion}. ` +
+        'Re-prepare them with `pnpm nx run desktop:prepare-picogk-dotnet`.',
+    );
+  }
+  const manifest = picogkRuntimeManifestSchema.parse(json);
   if (manifest.target !== target) {
     throw new Error(`PicoGK resource target mismatch: ${manifest.target}`);
   }

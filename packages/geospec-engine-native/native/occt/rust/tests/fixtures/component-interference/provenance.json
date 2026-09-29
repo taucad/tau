@@ -1,0 +1,74 @@
+{
+  "schema": "component-interference-test-fixtures-v1",
+  "attribution": "Tau GeoSpec original clearance corpus and independently authored OCCT control fixtures.",
+  "runtimeDependency": "All runtime inputs are files in this directory. Provenance locators are historical attribution only and are never read by the test.",
+  "originalSource": "packages/geospec-engine/fixtures/clearance/aabb-gap-false-positive/model.step",
+  "originalGenerator": "packages/geospec-engine/fixtures/scripts/clearance/shaft-bore/main.ts",
+  "controls": "Obstruction/extra-solid reuse accepted bore controls; extra-height/missing-cap use the accepted component control export; broken-shell preserves the separately recorded missing-cap CLOSED_SHELL mutation.",
+  "bytePolicy": "Byte-locked assets: do not reformat, regenerate, or alter expectations.",
+  "files": [
+    {
+      "file": "original.step",
+      "sha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "bytes": 29458,
+      "description": "Original AP242 housing and tilted shaft, unchanged canonical clearance fixture.",
+      "provenance": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/component-overlap-implementation-a1/inputs/0.step"
+    },
+    {
+      "file": "original.ingest.json",
+      "sha256": "83c1296bb4cda6d7272d0702b79af89454301beffbd85bbb94b66a88ddcd745c",
+      "bytes": 349,
+      "description": "Original report-v2 admission transport, shared by both polarities.",
+      "provenance": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/component-overlap-implementation-a1/inputs/0.ingest.json"
+    },
+    {
+      "file": "0.request.json",
+      "sha256": "e5d366fe4f66dafe9a00d15b0601bfe5220c4bceb20f018bc9b0c2f9fe34415c",
+      "bytes": 614,
+      "description": "Original positive 381 mm3 / 0.001 mm allowance request.",
+      "provenance": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/component-overlap-implementation-a1/inputs/0.request.json"
+    },
+    {
+      "file": "1.request.json",
+      "sha256": "daaf8fc728aae3b1f064e9355eee7915a74d6e48d4c4b1f6b20d45ac609bb302",
+      "bytes": 614,
+      "description": "Original negative polarity of the same allowance.",
+      "provenance": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/component-overlap-implementation-a1/inputs/1.request.json"
+    },
+    {
+      "file": "obstructed.step",
+      "sha256": "3a3b71d2e00b1944c13c9a3b103b0dbed5b42c720c2b71799374f93dc71e14ad",
+      "bytes": 73342,
+      "description": "Independently authored material refusal control; copied without regeneration.",
+      "provenance": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/component-overlap-implementation-a1/inputs/obstructed.step"
+    },
+    {
+      "file": "extra-solid.step",
+      "sha256": "50c4cbc2dcf4da527f33b302fc13c033924aecc43feba23ff576526222ed7237",
+      "bytes": 34699,
+      "description": "Independently authored material refusal control; copied without regeneration.",
+      "provenance": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/component-overlap-implementation-a1/inputs/extra-solid.step"
+    },
+    {
+      "file": "extra-height.step",
+      "sha256": "97b8a548c275f4978103ba808aaad05bd74fb99b900c32668a419b17f678a6a8",
+      "bytes": 34999,
+      "description": "Independently authored material refusal control; copied without regeneration.",
+      "provenance": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/component-overlap-implementation-a1/inputs/extra-height.step"
+    },
+    {
+      "file": "missing-cap.step",
+      "sha256": "141d386cf90a0731df3b41ff49f231634f9b86d6db1904178bc18223a87247fe",
+      "bytes": 5894,
+      "description": "Independently authored material refusal control; copied without regeneration.",
+      "provenance": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/component-overlap-implementation-a1/inputs/missing-cap.step"
+    },
+    {
+      "file": "broken-shell.step",
+      "sha256": "c74cdbcbc3192c8ace83a175d17c6941f4b3a5fc16edf0b90f72383eae1fc977",
+      "bytes": 7211,
+      "description": "Independently authored material refusal control; copied without regeneration.",
+      "provenance": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/component-overlap-implementation-a1/inputs/broken-shell.step"
+    }
+  ]
+}

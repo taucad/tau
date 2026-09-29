@@ -1,14 +1,24 @@
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
 import type * as WorkerThreads from 'node:worker_threads';
 
+import type * as Host from '@taucad/host';
+import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { computeControlChannels, quitChannels, servicesPortRelayTag } from '#shared/desktop-bootstrap.js';
+import {
+  computeControlChannels,
+  machinesChannels,
+  quitChannels,
+  servicesPortRelayTag,
+  slicersChannels,
+} from '#shared/desktop-bootstrap.js';
 
 const originalTitle = process.title;
+const originalResourcesPath = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
 const originalUncaught = new Set(process.listeners('uncaughtException'));
 const originalUnhandled = new Set(process.listeners('unhandledRejection'));
 
@@ -17,6 +27,10 @@ const state = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   /* Held open by the deep-link cases so a link can arrive before `ready`. */
   ready: undefined as Promise<void> | undefined,
+  shellApplied: undefined as Promise<void> | undefined,
+  authRestored: undefined as Promise<void> | undefined,
+  authToken: undefined as string | undefined,
+  headerOptions: undefined as TauHeaderInjectionOptions | undefined,
   authHandleCallback: vi.fn(async () => undefined),
   protocolClient: [] as unknown[][],
   resolveFork: undefined as
@@ -36,6 +50,14 @@ const state = vi.hoisted(() => ({
   /* The quit hold's two halves, in the order main runs them (R9, D31). */
   shutdownOrder: [] as string[],
   servicesConnect: vi.fn(() => ({ id: 'services-port' })),
+  geometryMeasurementConnect: vi.fn(() => ({ id: 'geometry-measurement-port' })),
+  geometryPerformanceConnect: vi.fn(() => ({ id: 'geometry-performance-port' })),
+  geometryDispose: vi.fn(async () => undefined),
+  geometrySampleResidentBytes: undefined as undefined | ((utility: { pid: number | undefined }) => number | undefined),
+  servicesCompleteBinding: vi.fn(async (_input: Readonly<Record<string, string>>, _boundMilliseconds: number) => ({
+    status: 'bound',
+    machineId: 'workshop-x1c',
+  })),
   runtimePrewarm: vi.fn(),
   runtimeMaxUtilities: undefined as number | undefined,
   servicesQuiesce: vi.fn(
@@ -51,6 +73,7 @@ const state = vi.hoisted(() => ({
   autoQuiesce: true,
   /* Lets a case hold ACP discovery open while the window boots (D17). */
   acpDiscovery: undefined as Promise<{ agents: never[]; refused: never[] }> | undefined,
+  bambuStudioStatus: vi.fn(async () => ({ available: false, reason: 'not installed' })),
   log: vi.fn(),
 }));
 
@@ -78,6 +101,7 @@ const app = {
   }),
   getPath: vi.fn((name: string) => (name === 'userData' ? state.userData : join(state.userData, name))),
   getVersion: vi.fn(() => 'test'),
+  getAppMetrics: vi.fn((): Array<{ pid: number; memory: { workingSetSize: number } }> => []),
   on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
     const listeners = state.appListeners.get(event) ?? [];
     listeners.push(listener);
@@ -155,6 +179,11 @@ vi.mock('electron', () => ({
   net: { fetch: vi.fn() },
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
   safeStorage: { isEncryptionAvailable: vi.fn(() => false), encryptString: vi.fn(), decryptString: vi.fn() },
+  screen: {
+    getAllDisplays: vi.fn(() => [{ workArea: { x: 0, y: 0, width: 1440, height: 900 } }]),
+    getCursorScreenPoint: vi.fn(() => ({ x: 0, y: 0 })),
+    getDisplayNearestPoint: vi.fn(() => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } })),
+  },
   session: {
     defaultSession: {
       setPermissionRequestHandler: vi.fn(),
@@ -177,11 +206,17 @@ vi.mock('@taucad/runtime/electron/main', () => ({
     },
   ),
 }));
-vi.mock('@taucad/host', () => ({
-  defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
-  discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
-  externalAgentDescriptors: vi.fn(() => []),
-}));
+vi.mock('@taucad/host', async (importOriginal) => {
+  /* The host's real bounds, so the quit waits main derives from them are the shipped ones (rule 9). */
+  const { projectCloseMilliseconds, projectReleaseMilliseconds } = await importOriginal<typeof Host>();
+  return {
+    defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
+    discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
+    externalAgentDescriptors: vi.fn(() => []),
+    projectCloseMilliseconds,
+    projectReleaseMilliseconds,
+  };
+});
 vi.mock('#main/app-protocol.js', () => ({
   appOrigin: 'app://tau',
   appSchemePrivileges: [],
@@ -189,8 +224,10 @@ vi.mock('#main/app-protocol.js', () => ({
 }));
 vi.mock('#main/auth-service.js', () => ({
   createAuthService: vi.fn(() => ({
-    restore: vi.fn(async () => undefined),
-    token: vi.fn(() => undefined),
+    restore: vi.fn(async () => state.authRestored),
+    token: vi.fn(() => state.authToken),
+    principal: vi.fn(() => undefined),
+    refresh: vi.fn(async () => undefined),
     onChange: vi.fn(),
     dispose: vi.fn(),
     handleCallback: state.authHandleCallback,
@@ -214,7 +251,12 @@ vi.mock('#main/environment.js', () => ({
     TAU_FRONTEND_URL: 'http://127.0.0.1:1',
   })),
 }));
-vi.mock('#main/header-injection.js', () => ({ installTauHeaderInjection: vi.fn(), originOf: vi.fn(() => undefined) }));
+vi.mock('#main/header-injection.js', () => ({
+  installTauHeaderInjection: vi.fn((_request: unknown, options: TauHeaderInjectionOptions) => {
+    state.headerOptions = options;
+  }),
+  originOf: vi.fn((url: string | undefined) => (url ? new URL(url).origin : undefined)),
+}));
 vi.mock('#main/navigation-policy.js', () => ({
   contentSecurityPolicy: vi.fn(() => ''),
   isPermissionGranted: vi.fn(() => false),
@@ -223,12 +265,14 @@ vi.mock('#main/navigation-policy.js', () => ({
   rendererOrigins: vi.fn(() => []),
 }));
 vi.mock('#main/services-broker.js', () => ({
-  rendererServicesConcerns: ['nodeFs', 'agentHost'],
+  rendererServicesConcerns: ['nodeFs', 'agentHost', 'geospecPerformance', 'exactMeasurement', 'machines'],
+  ServicesQuiescingError: class ServicesQuiescingError extends Error {},
   createServicesBroker: vi.fn((options: { utilityEntry: string }) => {
     state.servicesUtilityEntry = options.utilityEntry;
     return {
       post: vi.fn(),
       connect: state.servicesConnect,
+      completeMachineBinding: state.servicesCompleteBinding,
       quiesce: state.servicesQuiesce,
       dispose: state.servicesDispose,
       computeProjectRoot: (root: string) =>
@@ -236,9 +280,22 @@ vi.mock('#main/services-broker.js', () => ({
     };
   }),
 }));
+vi.mock('#main/geometry-broker.js', () => ({
+  createGeometryBroker: vi.fn((options: { sampleResidentBytes: typeof state.geometrySampleResidentBytes }) => {
+    state.geometrySampleResidentBytes = options.sampleResidentBytes;
+    return {
+      connectMeasurement: state.geometryMeasurementConnect,
+      connectPerformance: state.geometryPerformanceConnect,
+      connectSuite: vi.fn(),
+      revokeUnauthorized: vi.fn(),
+      dispose: state.geometryDispose,
+    };
+  }),
+}));
 vi.mock('#main/utility-environment.js', () => ({
-  loginShellEnvironment: vi.fn(async () => undefined),
-  packagedEsbuildEnvironment: vi.fn(() => ({})),
+  loginShellEnvironment: vi.fn(async () => state.shellApplied),
+  packagedEsbuildEnvironment: vi.fn(() => ({ ESBUILD_BINARY_PATH: '/staged/esbuild' })),
+  bundledGitEnvironment: vi.fn(() => ({})),
   compileCacheEnvironment: vi.fn((userDataPath: string) => ({
     TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
   })),
@@ -250,6 +307,14 @@ vi.mock('#main/utility-environment.js', () => ({
 vi.mock('#main/quick-look.js', () => ({
   createQuickLookController: vi.fn(() => ({ dispose: vi.fn() })),
   removeStaleQuickLookSessions: vi.fn(),
+}));
+vi.mock('#main/bambu-studio-service.js', () => ({
+  createBambuStudioService: vi.fn(() => ({
+    status: state.bambuStudioStatus,
+    catalog: vi.fn(),
+    resolveSelection: vi.fn(),
+    settings: vi.fn(),
+  })),
 }));
 vi.mock('#main/open-files.js', () => ({
   createOpenFileQueue: vi.fn(() => ({
@@ -274,10 +339,20 @@ afterEach(async () => {
   state.autoQuiesce = true;
   state.acpDiscovery = undefined;
   state.ready = undefined;
+  state.shellApplied = undefined;
+  state.authRestored = undefined;
+  state.authToken = undefined;
+  state.headerOptions = undefined;
+  app.isPackaged = false;
   state.protocolClient.length = 0;
   state.authHandleCallback.mockClear();
   state.resolveFork = undefined;
   state.servicesConnect.mockClear();
+  state.geometryMeasurementConnect.mockClear();
+  state.geometryPerformanceConnect.mockClear();
+  state.geometrySampleResidentBytes = undefined;
+  app.getAppMetrics.mockReset();
+  app.getAppMetrics.mockReturnValue([]);
   state.runtimePrewarm.mockClear();
   state.utilityEnvironmentAdditions.length = 0;
   // Each case bootstraps main afresh; the cached module would otherwise register nothing.
@@ -294,6 +369,11 @@ afterEach(async () => {
     }
   }
   process.title = originalTitle;
+  if (originalResourcesPath) {
+    Object.defineProperty(process, 'resourcesPath', originalResourcesPath);
+  } else {
+    Reflect.deleteProperty(process, 'resourcesPath');
+  }
   vi.clearAllMocks();
 });
 
@@ -476,6 +556,35 @@ describe('desktop main compute owner', () => {
   );
 
   it(
+    'should answer a concern refused while quitting as quiescing rather than a connection failure',
+    async () => {
+      await bootstrap();
+      const { ServicesQuiescingError } = await import('#main/services-broker.js');
+      state.servicesConnect.mockImplementationOnce(() => {
+        throw new ServicesQuiescingError();
+      });
+      const postMessage = vi.fn();
+
+      for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+        listener(
+          { senderFrame: { url: 'app://tau/index.html', postMessage } },
+          { requestId: 'req-quit', concern: 'nodeFs' },
+        );
+      }
+
+      /* Every `services.connect-failed` in the desktop log so far was this
+       * shutdown refusal; the requester and the audit must be able to tell. */
+      expect(postMessage).toHaveBeenCalledExactlyOnceWith(servicesPortRelayTag, {
+        requestId: 'req-quit',
+        error: 'services.quiescing',
+      });
+      expect(state.log).toHaveBeenCalledWith('info', 'services.connect-refused-quiescing', { concern: 'nodeFs' });
+      expect(state.log).not.toHaveBeenCalledWith('error', 'services.connect-failed', expect.anything());
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'holds quit for the renderer and the utility, in that order (R9, D31)',
     async () => {
       await bootstrap();
@@ -557,6 +666,128 @@ describe('desktop main compute owner', () => {
   );
 });
 
+describe('desktop main admission gates', () => {
+  const bootMilliseconds = 30_000;
+
+  const boot = async (): Promise<void> => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-admission-'));
+    if (app.isPackaged) {
+      Object.defineProperty(process, 'resourcesPath', { configurable: true, value: state.userData });
+    }
+    await import('#main/main.js');
+  };
+
+  it(
+    'waits for a packaged login shell before capturing the environment and loading the first page',
+    async () => {
+      const shell = Promise.withResolvers<void>();
+      app.isPackaged = true;
+      state.shellApplied = shell.promise;
+
+      await boot();
+      await vi.waitFor(() => {
+        expect(app.whenReady).toHaveBeenCalled();
+      });
+      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+
+      shell.resolve();
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+      });
+      expect(fakeWindow.show).toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'restores the credential before the first page can request an authenticated origin',
+    async () => {
+      const restore = Promise.withResolvers<void>();
+      state.authRestored = restore.promise;
+      const { injectTauHeaders } = await vi.importActual<{
+        injectTauHeaders: (
+          url: string,
+          headers: Record<string, string>,
+          options: TauHeaderInjectionOptions,
+        ) => Record<string, string>;
+      }>('#main/header-injection.js');
+      let firstRequestHeaders: Record<string, string> | undefined;
+      fakeWindow.loadURL.mockImplementationOnce(async () => {
+        firstRequestHeaders = injectTauHeaders('http://127.0.0.1:1/v1/projects', {}, state.headerOptions!);
+      });
+
+      await boot();
+      await vi.waitFor(() => {
+        expect(state.headerOptions).toBeDefined();
+      });
+      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+      expect(state.headerOptions?.token()).toBeUndefined();
+
+      state.authToken = 'restored-token';
+      restore.resolve();
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+      });
+      expect(firstRequestHeaders).toEqual({ authorization: 'Bearer restored-token', 'tau-client': 'tau-desktop/test' });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'keeps a deep link queued while credential restore is pending',
+    async () => {
+      const restore = Promise.withResolvers<void>();
+      state.authRestored = restore.promise;
+      await boot();
+      const openUrl = state.appListeners.get('open-url')?.at(-1);
+      expect(openUrl).toBeDefined();
+      openUrl?.({ preventDefault: vi.fn() }, 'tau://invitations/queued-token');
+      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+
+      restore.resolve();
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/invitations/queued-token');
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'reports a failed credential restore without loading an unauthenticated page',
+    async () => {
+      const restore = Promise.withResolvers<void>();
+      state.authRestored = restore.promise;
+      await boot();
+      await vi.waitFor(() => {
+        expect(state.headerOptions).toBeDefined();
+      });
+      restore.reject(new Error('credential store failed'));
+
+      await vi.waitFor(() => {
+        expect(app.exit).toHaveBeenCalledWith(1);
+      });
+      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+});
+
+describe('desktop quit bounds', () => {
+  it('nests each quit wait strictly outside the host close it awaits (rule 9, RV-W2b #1)', async () => {
+    const host = await vi.importActual<typeof Host>('@taucad/host');
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-quit-'));
+    const { quitQuiesceMilliseconds, quitRendererMilliseconds } = await import('#main/main.js');
+
+    /* The utility's launchers drain their runs before they release. */
+    expect(host.projectCloseMilliseconds).toBeGreaterThan(host.projectReleaseMilliseconds);
+    expect(quitQuiesceMilliseconds).toBeGreaterThan(host.projectCloseMilliseconds);
+    /* The page cancels runs and flushes producers (10 s each) before the host's close. */
+    expect(quitRendererMilliseconds).toBeGreaterThan(2 * 10_000 + host.projectReleaseMilliseconds);
+  }, 60_000);
+});
+
 /*
  * `tau://` deep links (R4).
  *
@@ -636,6 +867,34 @@ describe('desktop main deep links', () => {
   );
 
   it(
+    'keeps an E2E window hidden when a deep link arrives',
+    async () => {
+      const previous = process.env['TAU_E2E_HIDE_WINDOW'];
+      process.env['TAU_E2E_HIDE_WINDOW'] = '1';
+      try {
+        await bootAndWait();
+        const { BrowserWindow } = await import('electron');
+        const options = vi.mocked(BrowserWindow).mock.calls[0]?.[0];
+        expect(options?.webPreferences?.focusOnNavigation).toBe(false);
+        expect(fakeWindow.show).not.toHaveBeenCalled();
+        listener('open-url')({ preventDefault: vi.fn() }, 'tau://i/github.com/taucad/tau-examples');
+        await vi.waitFor(() => {
+          expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/import/github.com/taucad/tau-examples');
+        });
+        expect(fakeWindow.show).not.toHaveBeenCalled();
+        expect(fakeWindow.focus).not.toHaveBeenCalled();
+      } finally {
+        if (previous === undefined) {
+          delete process.env['TAU_E2E_HIDE_WINDOW'];
+        } else {
+          process.env['TAU_E2E_HIDE_WINDOW'] = previous;
+        }
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'should load an import link delivered by open-url',
     async () => {
       await bootAndWait();
@@ -682,6 +941,225 @@ describe('desktop main deep links', () => {
         });
       });
       expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+});
+
+describe('desktop main Bambu Studio channels', () => {
+  const bootMilliseconds = 30_000;
+
+  it(
+    'should answer Bambu Studio calls only for the trusted renderer',
+    async () => {
+      vi.stubGlobal('tauCloudBuildEnabled', false);
+      state.userData = await mkdtemp(join(tmpdir(), 'tau-main-bambu-'));
+      await import('#main/main.js');
+      await vi.waitFor(() => {
+        expect(state.handlers.has(slicersChannels.bambuStudio.status)).toBe(true);
+      });
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      const status = state.handlers.get(slicersChannels.bambuStudio.status)!;
+
+      await expect(status({ senderFrame: {} })).resolves.toEqual({ available: false, reason: 'not installed' });
+      vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+      await expect(status({ senderFrame: { url: 'https://evil.example/' } })).rejects.toThrow(
+        'Desktop shell refused Bambu Studio request.',
+      );
+      expect(state.bambuStudioStatus).toHaveBeenCalledOnce();
+      for (const channel of Object.values(slicersChannels.bambuStudio)) {
+        expect(state.handlers.has(channel)).toBe(true);
+      }
+    },
+    bootMilliseconds,
+  );
+});
+
+describe('desktop main machine binding channel', () => {
+  const bootMilliseconds = 30_000;
+
+  it(
+    'should forward an access code only when one was typed, and refuse one over 256 characters',
+    async () => {
+      vi.stubGlobal('tauCloudBuildEnabled', false);
+      state.userData = await mkdtemp(join(tmpdir(), 'tau-main-machines-'));
+      await import('#main/main.js');
+      await vi.waitFor(() => {
+        expect(state.handlers.has(machinesChannels.completeBinding)).toBe(true);
+      });
+      const complete = state.handlers.get(machinesChannels.completeBinding)!;
+
+      /* No code: the utility reuses the printer's saved one. */
+      await expect(complete({ senderFrame: {} }, { ceremonyId: 'ceremony-1' })).resolves.toEqual({
+        status: 'bound',
+        machineId: 'workshop-x1c',
+      });
+      await complete({ senderFrame: {} }, { ceremonyId: 'ceremony-2', address: '10.0.0.5', accessCode: '12345678' });
+      await expect(
+        complete({ senderFrame: {} }, { ceremonyId: 'ceremony-3', accessCode: 'x'.repeat(257) }),
+      ).rejects.toThrow('Desktop shell refused invalid machine binding completion.');
+
+      expect(state.servicesCompleteBinding.mock.calls.map(([input]) => input)).toEqual([
+        { ceremonyId: 'ceremony-1' },
+        { ceremonyId: 'ceremony-2', address: '10.0.0.5', accessCode: '12345678' },
+      ]);
+      expect(JSON.stringify(state.log.mock.calls)).not.toContain('12345678');
+    },
+    bootMilliseconds,
+  );
+});
+
+describe('desktop main machine store', () => {
+  const bootMilliseconds = 30_000;
+
+  /**
+   * Boot main over fresh user data, after `before` lays out what an earlier build left there.
+   *
+   * @returns The environment main adds for the services utility.
+   */
+  const boot = async (before?: (userData: string) => Promise<void>): Promise<NodeJS.ProcessEnv> => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-store-'));
+    await before?.(state.userData);
+    await import('#main/main.js');
+    await vi.waitFor(() => {
+      expect(state.ipcListeners.has(servicesPortRelayTag)).toBe(true);
+    });
+    return state.utilityEnvironmentAdditions.find((additions) => 'TAU_DESKTOP_MACHINES_DIR' in additions)!;
+  };
+
+  const relay = (senderFrame: Record<string, unknown>, requestId: string): void => {
+    for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+      listener({ senderFrame }, { requestId, concern: 'machines' });
+    }
+  };
+
+  it(
+    'routes exact measurement and debug performance to geometry, never the services singleton',
+    async () => {
+      const { desktopEnvironment } = await import('#main/environment.js');
+      vi.mocked(desktopEnvironment).mockReturnValueOnce({
+        TAU_API_URL: 'http://127.0.0.1:1',
+        TAU_WEBSOCKET_URL: 'ws://127.0.0.1:1',
+        TAU_FRONTEND_URL: 'http://127.0.0.1:1',
+        TAU_DEBUG: 'true',
+      } as ReturnType<typeof desktopEnvironment>);
+      await boot();
+      const postMessage = vi.fn();
+      for (const [requestId, concern] of [
+        ['measure', 'exactMeasurement'],
+        ['diagnostic', 'geospecPerformance'],
+      ] as const) {
+        for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+          listener({ senderFrame: { url: 'app://tau/index.html', postMessage } }, { requestId, concern });
+        }
+      }
+      expect(state.geometryMeasurementConnect).toHaveBeenCalledOnce();
+      expect(state.geometryPerformanceConnect).toHaveBeenCalledOnce();
+      expect(state.servicesConnect).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, { requestId: 'measure' }, [
+        { id: 'geometry-measurement-port' },
+      ]);
+      expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, { requestId: 'diagnostic' }, [
+        { id: 'geometry-performance-port' },
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'passes the staged esbuild binary to the geometry utility that bundles GeoSpec files',
+    async () => {
+      await boot();
+      const geometryEnvironment = state.utilityEnvironmentAdditions.find(
+        (additions) =>
+          'TAU_DESKTOP_LOG_DIR' in additions &&
+          !('TAU_DESKTOP_MACHINES_DIR' in additions) &&
+          !('TAU_BUILD123D_RESOURCE_ROOT' in additions),
+      );
+      expect(geometryEnvironment?.['ESBUILD_BINARY_PATH']).toBe('/staged/esbuild');
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'refuses the diagnostic geometry port when TAU_DEBUG is absent',
+    async () => {
+      await boot();
+      const postMessage = vi.fn();
+      for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+        listener(
+          { senderFrame: { url: 'app://tau/index.html', postMessage } },
+          { requestId: 'diagnostic', concern: 'geospecPerformance' },
+        );
+      }
+      expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, {
+        requestId: 'diagnostic',
+        error: 'GeoSpec performance tools require TAU_DEBUG.',
+      });
+      expect(state.geometryPerformanceConnect).not.toHaveBeenCalled();
+      expect(state.servicesConnect).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'samples only the exact geometry utility pid and converts Electron KiB to bytes',
+    async () => {
+      await boot();
+      app.getAppMetrics.mockReturnValue([
+        { pid: 41, memory: { workingSetSize: 999 } },
+        { pid: 42, memory: { workingSetSize: 512 } },
+      ]);
+      expect(state.geometrySampleResidentBytes?.({ pid: 42 })).toBe(512 * 1024);
+      expect(state.geometrySampleResidentBytes?.({ pid: 43 })).toBeUndefined();
+      expect(state.geometrySampleResidentBytes?.({ pid: undefined })).toBeUndefined();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should keep the machine store under the config directory and connect a machines port that names no root, for a trusted frame only',
+    async () => {
+      /* A real directory an earlier build kept its printers in: imported from once. */
+      const additions = await boot(async (userData) => {
+        await mkdir(join(userData, 'machines'));
+      });
+      const store = join(state.userData, 'config', 'machines');
+      expect(additions['TAU_DESKTOP_MACHINES_DIR']).toBe(store);
+      const { mode } = await stat(store);
+      // oxlint-disable-next-line eslint/no-bitwise -- the POSIX mode is a bit field
+      expect(mode & 0o777).toBe(0o700);
+      expect(additions['TAU_DESKTOP_LEGACY_MACHINES_DIR']).toBe(join(state.userData, 'machines'));
+
+      const postMessage = vi.fn();
+      relay({ url: 'app://tau/index.html', postMessage }, 'req-machines');
+      expect(state.servicesConnect).toHaveBeenCalledExactlyOnceWith('machines', {});
+      expect(postMessage).toHaveBeenCalledExactlyOnceWith(servicesPortRelayTag, { requestId: 'req-machines' }, [
+        { id: 'services-port' },
+      ]);
+
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+      const foreign = vi.fn();
+      relay({ url: 'https://evil.example/', postMessage: foreign }, 'req-foreign');
+      expect(foreign).not.toHaveBeenCalled();
+      expect(state.servicesConnect).toHaveBeenCalledOnce();
+      expect(state.log).toHaveBeenCalledWith('error', 'ipc.untrusted-sender', { url: 'https://evil.example/' });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should not name the old machine directory when it is the store itself',
+    async () => {
+      /* How `…/Tau/machines` and `…/tau/machines` meet on a case-insensitive volume. */
+      const additions = await boot(async (userData) => {
+        await mkdir(join(userData, 'config', 'machines'), { recursive: true });
+        await symlink(join(userData, 'config', 'machines'), join(userData, 'machines'));
+      });
+      expect(additions['TAU_DESKTOP_MACHINES_DIR']).toBe(join(state.userData, 'config', 'machines'));
+      expect(additions).not.toHaveProperty('TAU_DESKTOP_LEGACY_MACHINES_DIR');
     },
     bootMilliseconds,
   );

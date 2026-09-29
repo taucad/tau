@@ -39,7 +39,7 @@ export function LazyHeroViewer(): React.JSX.Element {
   }, []);
 
   return (
-    <div ref={sentinelRef} className='min-h-[200px]'>
+    <div ref={sentinelRef} className='min-h-50'>
       {isVisible ? (
         <Suspense fallback={<HeroViewerSkeleton />}>
           <HeroViewerLazy />

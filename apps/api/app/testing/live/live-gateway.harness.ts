@@ -372,7 +372,7 @@ export const createLiveSession = async (
     ...opened,
     prompt: async (message, onAdmitted) => {
       assertMarkerVocabulary(message);
-      await opened.prompt(message, onAdmitted);
+      return opened.prompt(message, onAdmitted);
     },
   };
 };

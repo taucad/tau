@@ -39,6 +39,8 @@ export type RuntimeAgentClient = Readonly<{
     format: string,
     options: {
       readonly source: { readonly path: string };
+      /** Transcoder options; the runtime validates them against the export route's schema. */
+      readonly exportOptions?: Readonly<Record<string, unknown>>;
       readonly signal?: AbortSignal;
     },
   ): Promise<
@@ -274,6 +276,11 @@ export function createRuntimeParameterAgentClient(input: CreateRuntimeParameterA
 const issueMessage = (issues: ReadonlyArray<{ readonly message: string }>, fallback: string): string =>
   issues.map((issue) => issue.message).join('; ') || fallback;
 
+const issueErrorCode = (issues: readonly KernelIssue[]) =>
+  issues.some((issue) => issue.code === 'AUTHENTICATION_ERROR')
+    ? rpcClientErrorCode.authenticationError
+    : rpcClientErrorCode.unknown;
+
 const requireImageFiles = (
   files: readonly ExportFile[] | undefined,
   options: Readonly<{
@@ -352,20 +359,21 @@ export const createRuntimeAgentClients = (
   };
 
   const graphics: RpcGraphicsClient = {
-    async exportGeometry({ targetFile, format }, context): Promise<RpcGraphicsExportGeometryResult> {
+    async exportGeometry({ targetFile, format, exportOptions }, context): Promise<RpcGraphicsExportGeometryResult> {
       try {
         context?.signal?.throwIfAborted();
         const rooted = assertRootedPath(targetFile);
         const result = await input.runtime.export(format, {
           source: { path: rooted },
+          ...(exportOptions === undefined ? {} : { exportOptions }),
           signal: context?.signal,
         });
         context?.signal?.throwIfAborted();
         return result.success
-          ? { success: true, files: [...result.data] }
+          ? { success: true, files: [...result.data], issues: [...result.issues] }
           : {
               success: false,
-              errorCode: rpcClientErrorCode.unknown,
+              errorCode: issueErrorCode(result.issues),
               message: issueMessage(result.issues, 'Geometry export failed'),
             };
       } catch (error) {
@@ -383,7 +391,7 @@ export const createRuntimeAgentClients = (
         if (!result.success) {
           return {
             success: false,
-            errorCode: rpcClientErrorCode.unknown,
+            errorCode: issueErrorCode(result.issues),
             message: issueMessage(result.issues, 'Render failed'),
           };
         }

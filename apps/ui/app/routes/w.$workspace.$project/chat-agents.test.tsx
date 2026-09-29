@@ -81,6 +81,22 @@ describe('AgentList', () => {
     expect(row.querySelector('time')?.getAttribute('dateTime')).toBe(new Date(1000).toISOString());
   });
 
+  /* I6: a chat no turn has placed names no line, never a guessed `main` or the word "undefined". */
+  it('renders no branch for a chat no turn has placed on a line', () => {
+    render(
+      <MemoryRouter>
+        <AgentList
+          agents={[projection({ branch: undefined })]}
+          projectSlugs={{ workspaceSlug: 'tau', projectSlug: 'engine' }}
+        />
+      </MemoryRouter>,
+    );
+
+    const row = screen.getByRole('link', { name: 'Bracket exploration, running' });
+    expect(row.querySelector('[title^="Branch:"]')).toBeNull();
+    expect(row.textContent).not.toMatch(/undefined|\bmain\b/u);
+  });
+
   it('exposes focused, running, waiting, error, and idle without collapsing them into one status', () => {
     render(
       <MemoryRouter>
@@ -105,6 +121,15 @@ describe('AgentList', () => {
 });
 
 describe('AgentsPanelBody', () => {
+  it('delays the full transcript query for a hidden Agents panel', () => {
+    render(
+      <MemoryRouter>
+        <AgentsPanelBody enableHistory={false} />
+      </MemoryRouter>,
+    );
+    expect(useAgentProjections).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+  });
+
   it('summarises concurrent and attention-needing agents from the projection hook', () => {
     vi.mocked(useAgentProjections).mockReturnValue({
       agents: [

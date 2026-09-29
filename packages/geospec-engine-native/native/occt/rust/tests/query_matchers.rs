@@ -1,0 +1,269 @@
+use geospec_engine_native_occt::{
+    BrepEntity, BrepSubject, Document, PointState, SurfaceFacts, TessellationProfile,
+};
+use std::path::PathBuf;
+
+fn fixture(name: &str) -> Vec<u8> {
+    std::fs::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(name),
+    )
+    .expect("retained fixture must be readable")
+}
+
+fn workspace_fixture(relative: &str) -> Vec<u8> {
+    let workspace = std::env::var_os("GEOSPEC_ADAPTER_WORKSPACE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(5)
+                .expect("OCCT crate must remain below the workspace root")
+                .to_path_buf()
+        });
+    std::fs::read(workspace.join(relative)).expect("workspace fixture must be readable")
+}
+
+fn close(actual: f64, expected: f64, tolerance: f64) {
+    assert!(
+        (actual - expected).abs() <= tolerance,
+        "expected {expected} ± {tolerance}, got {actual}"
+    );
+}
+
+#[test]
+fn retained_box_exercises_whole_faces_trim_validity_and_mesh_transfer() {
+    let document = Document::from_step(&fixture("ap242-box.step")).unwrap();
+    let admission = document.admission_facts().unwrap();
+    let faces = BrepSubject::faces(&document).unwrap();
+
+    assert_eq!(admission.source_length_unit, "millimetre");
+    assert_eq!(
+        admission.source_unit_to_millimeters.to_bits(),
+        1.0_f64.to_bits()
+    );
+    assert_eq!(faces.len(), 6);
+    assert_eq!(
+        faces
+            .iter()
+            .map(|face| (face.facts.index, face.facts.area.to_bits()))
+            .collect::<Vec<_>>(),
+        vec![
+            (0, 0x4082_c000_0000_0000),
+            (1, 0x4082_c000_0000_0000),
+            (2, 0x4072_c000_0000_0000),
+            (3, 0x4072_c000_0000_0000),
+            (4, 0x4068_ffff_ffff_ffff),
+            (5, 0x4068_ffff_ffff_ffff),
+        ]
+    );
+    // Whole faces measure their AddOptimal boxes only when read.
+    assert!(faces.iter().all(|face| {
+        let bounds = document.face_optimal_bounds(face.facts.index).unwrap();
+        bounds
+            .min
+            .iter()
+            .chain(&bounds.max)
+            .all(|value| value.is_finite())
+    }));
+
+    let first = &faces[0];
+    let SurfaceFacts::Plane { normal, .. } = first.facts.surface else {
+        panic!("box face must be planar")
+    };
+    let center = first.facts.center_of_mass;
+    let off_surface = [
+        center[0] + normal[0] * 0.01,
+        center[1] + normal[1] * 0.01,
+        center[2] + normal[2] * 0.01,
+    ];
+    assert_eq!(
+        document
+            .classify_face_points(first.entity, &[center, off_surface], 1e-6)
+            .unwrap(),
+        vec![PointState::In, PointState::Out]
+    );
+
+    let validity = document.validity().unwrap();
+    assert!(validity.valid);
+    assert_eq!(validity.solid_count, Some(1));
+    assert_eq!(validity.invalid_solid_count, Some(0));
+    assert_eq!(validity.open_edge_count, Some(0));
+    assert_eq!(validity.closed_solids, Some(true));
+
+    let profile = TessellationProfile {
+        linear_deflection_mm: 0.1,
+        angular_deflection_rad: 0.5,
+    };
+    let mesh = BrepSubject::tessellate(&document, BrepEntity::Whole, profile).unwrap();
+    assert_eq!(mesh.positions.len(), 8);
+    assert_eq!(mesh.triangles.len(), 12);
+
+    let face_mesh = BrepSubject::tessellate(&document, first.entity, profile).unwrap();
+    assert_ne!(mesh.triangles.len(), face_mesh.triangles.len());
+}
+
+#[test]
+fn retained_assembly_exercises_paths_transforms_topology_and_exact_queries() {
+    let document = Document::from_step(&fixture("two-cube-assembly.step")).unwrap();
+    let occurrences = document.source_occurrence_structure().unwrap();
+
+    assert_eq!(occurrences.len(), 2);
+    assert!(occurrences.iter().all(|occurrence| {
+        !occurrence.path.is_empty()
+            && occurrence.parent.is_none()
+            && !occurrence.product_name.is_empty()
+            && occurrence.ordinal_path.len() == 1
+    }));
+    assert_eq!(occurrences[0].placement[3].to_bits(), 0.0_f64.to_bits());
+    assert_eq!(occurrences[1].placement[3].to_bits(), 30.0_f64.to_bits());
+
+    let faces = &document.reported_faces(true).unwrap().occurrence_faces[0];
+    assert_eq!(faces.len(), 6);
+    // A corner of the axis-aligned face's box lies on its boundary.
+    assert_eq!(
+        document
+            .classify_face_points(faces[0].entity, &[faces[0].bounds.min], 1e-6)
+            .unwrap(),
+        vec![PointState::On]
+    );
+
+    let profile = TessellationProfile {
+        linear_deflection_mm: 0.1,
+        angular_deflection_rad: 0.5,
+    };
+    let mesh = BrepSubject::tessellate(&document, BrepEntity::Occurrence(0), profile).unwrap();
+    assert_eq!(mesh.triangles.len(), 12);
+}
+
+#[test]
+fn retained_inch_fixture_preserves_source_units() {
+    let document = Document::from_step(&fixture("inch-cube.step")).unwrap();
+    let admission = document.admission_facts().unwrap();
+    assert_eq!(admission.source_length_unit, "INCH");
+    assert_eq!(
+        admission.source_unit_to_millimeters.to_bits(),
+        25.4_f64.to_bits()
+    );
+    // The source box: the fold of the whole-face AddOptimal boxes (F6).
+    let boxes: Vec<_> = (0..BrepSubject::faces(&document).unwrap().len() as u32)
+        .map(|face| document.face_optimal_bounds(face).unwrap())
+        .collect();
+    let min: [f64; 3] = std::array::from_fn(|axis| {
+        boxes
+            .iter()
+            .map(|b| b.min[axis])
+            .fold(f64::INFINITY, f64::min)
+    });
+    let max: [f64; 3] = std::array::from_fn(|axis| {
+        boxes
+            .iter()
+            .map(|b| b.max[axis])
+            .fold(f64::NEG_INFINITY, f64::max)
+    });
+    assert_eq!(min.map(f64::to_bits), [0, 0, 0]);
+    assert_eq!(max.map(f64::to_bits), [25.4_f64.to_bits(); 3]);
+}
+
+#[test]
+fn retained_ap242_fixture_preserves_analytic_and_semantic_facts() {
+    let document = Document::from_step(&fixture("nist-pmi-bspline.step")).unwrap();
+    let faces = BrepSubject::faces(&document).unwrap();
+    let facts = document.document_rows().unwrap();
+
+    assert_eq!(faces.len(), 156);
+    assert_eq!(
+        faces
+            .iter()
+            .filter(|face| matches!(face.facts.surface, SurfaceFacts::Bspline { .. }))
+            .count(),
+        4
+    );
+    let mut datum_labels = facts
+        .semantic_datums
+        .iter()
+        .map(|datum| datum.label.as_str())
+        .collect::<Vec<_>>();
+    datum_labels.sort_unstable();
+    datum_labels.dedup();
+    assert_eq!(datum_labels, vec!["A", "B", "C", "D"]);
+    assert!(
+        facts
+            .semantic_datums
+            .iter()
+            .any(|datum| datum.label == "A" && !datum.face_indices.is_empty()),
+        "semantic rows: {:#?}",
+        facts.semantic_datums
+    );
+    assert!(facts.datum_placements.is_empty());
+}
+
+#[test]
+fn retained_tessellation_profiles_are_independent_of_request_order() {
+    let coarse = TessellationProfile {
+        linear_deflection_mm: 1.0,
+        angular_deflection_rad: 1.0,
+    };
+    let fine = TessellationProfile {
+        linear_deflection_mm: 0.05,
+        angular_deflection_rad: 0.1,
+    };
+
+    let coarse_first = Document::from_step(&fixture("nist-pmi-bspline.step")).unwrap();
+    let coarse_a = BrepSubject::tessellate(&coarse_first, BrepEntity::Whole, coarse).unwrap();
+    let fine_a = BrepSubject::tessellate(&coarse_first, BrepEntity::Whole, fine).unwrap();
+
+    let fine_first = Document::from_step(&fixture("nist-pmi-bspline.step")).unwrap();
+    let fine_b = BrepSubject::tessellate(&fine_first, BrepEntity::Whole, fine).unwrap();
+    let coarse_b = BrepSubject::tessellate(&fine_first, BrepEntity::Whole, coarse).unwrap();
+
+    assert_eq!(coarse_a.as_ref(), coarse_b.as_ref());
+    assert_eq!(fine_a.as_ref(), fine_b.as_ref());
+    assert!(fine_a.triangles.len() > coarse_a.triangles.len());
+}
+
+#[test]
+fn retained_transformed_ap242_occurrence_locates_named_face_and_datum() {
+    let document = Document::from_step(&workspace_fixture(
+        "packages/geospec-engine/fixtures/selector/second-producer-transformed/model.step",
+    ))
+    .unwrap();
+    let facts = document.document_rows().unwrap();
+
+    let datum = facts
+        .datum_placements
+        .iter()
+        .find(|datum| datum.occurrence_path == "cubeB" && datum.name == "frame")
+        .expect("independently declared cubeB.frame datum must be retained");
+    assert_eq!(datum.origin.map(f64::to_bits), [30.0_f64.to_bits(), 0, 0]);
+    assert_eq!(datum.x_axis.map(f64::to_bits), [0, 1.0_f64.to_bits(), 0]);
+    assert_eq!(datum.z_axis.map(f64::to_bits), [0, 0, 1.0_f64.to_bits()]);
+
+    let subshape = facts
+        .subshapes
+        .iter()
+        .find(|shape| shape.occurrence_path == "cubeB" && shape.name == "face.b")
+        .expect("independently declared cubeB.face.b subshape must be retained");
+    let occurrence = subshape
+        .occurrence
+        .expect("cubeB face must retain its occurrence association");
+    let face_index = subshape
+        .face_index
+        .expect("cubeB face must retain its zero-based public face ordinal");
+    let face = document.reported_faces(true).unwrap().occurrence_faces[occurrence as usize]
+        .iter()
+        .find(|face| face.facts.index == face_index)
+        .cloned()
+        .expect("named face index must resolve in the located occurrence");
+    let SurfaceFacts::Plane { origin, normal } = face.facts.surface else {
+        panic!("cubeB.face.b must retain planar support")
+    };
+    let offset = origin[0] * normal[0] + origin[1] * normal[1] + origin[2] * normal[2];
+    assert_eq!(normal.map(f64::to_bits), [0, 1.0_f64.to_bits(), 0]);
+    close(offset, 5.0, 1e-6);
+    close(face.facts.area, 100.0, 1e-6);
+    for (actual, expected) in face.facts.center_of_mass.into_iter().zip([30.0, 5.0, 0.0]) {
+        close(actual, expected, 1e-6);
+    }
+}

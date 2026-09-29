@@ -161,10 +161,15 @@ export function AuthConfigLink({
   href,
   to: _to,
   onClick,
+  children,
   ...rest
 }: React.ComponentProps<'a'> & { readonly href: string; readonly to?: string }): React.JSX.Element {
   if (desktopAuthAction(href) === undefined) {
-    return <Link {...rest} to={href} />;
+    return (
+      <Link {...rest} to={href}>
+        {children}
+      </Link>
+    );
   }
 
   return (
@@ -177,7 +182,9 @@ export function AuthConfigLink({
         onClick?.(event);
         runDesktopAuthAction(href);
       }}
-    />
+    >
+      {children}
+    </a>
   );
 }
 

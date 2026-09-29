@@ -8,12 +8,158 @@
  * Exit codes: n/a (library module).
  */
 
-import { execFile } from 'node:child_process';
-import { cp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, resolve } from 'node:path';
+import { execFile, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { cp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Stage the published native root and Darwin arm64 platform from the explicit
+ * assemble-package.sh output. Extract the tarballs, preserving their generated
+ * manifests, loader layout and licenses; never substitute workspace build files.
+ * The caller selects the qualified assembly; this does not qualify its source.
+ * @param assemblyRoot - ASSEMBLY_ROOT printed by the native assembly driver.
+ * @param modulesRoot - Fresh packaged app node_modules directory.
+ * @returns Exact root/platform dependencies for the staged app manifest.
+ */
+export const copyGeoSpecNativeAssembly = async (
+  assemblyRoot: string,
+  modulesRoot: string,
+): Promise<Readonly<Record<string, string>>> => {
+  const name = '@taucad/geospec-engine-native';
+  const platformName = `${name}-darwin-arm64`;
+  const root = resolve(modulesRoot, name);
+  const platform = resolve(modulesRoot, platformName);
+  await mkdir(dirname(root), { recursive: true });
+  await Promise.all([mkdir(root), mkdir(platform)]);
+  execFileSync('tar', ['-xzf', resolve(assemblyRoot, 'tarballs/root.tgz'), '-C', root, '--strip-components=1']);
+  execFileSync('tar', [
+    '-xzf',
+    resolve(assemblyRoot, 'tarballs/darwin-arm64.tgz'),
+    '-C',
+    platform,
+    '--strip-components=1',
+  ]);
+  const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as {
+    readonly name: string;
+    readonly version: string;
+    readonly optionalDependencies?: Readonly<Record<string, string>>;
+    readonly exports?: { readonly './node'?: { readonly node?: string } };
+    readonly imports?: { readonly '#native-binding'?: { readonly node?: string }; readonly '#wasm-binding'?: unknown };
+  };
+  const platformManifest = JSON.parse(await readFile(resolve(platform, 'package.json'), 'utf8')) as {
+    readonly name: string;
+    readonly version: string;
+    readonly main: string;
+    readonly os?: readonly string[];
+    readonly cpu?: readonly string[];
+  };
+  if (
+    manifest.name !== name ||
+    !manifest.version ||
+    platformManifest.name !== platformName ||
+    platformManifest.version !== manifest.version ||
+    manifest.optionalDependencies?.[platformName] !== manifest.version ||
+    platformManifest.os?.join(',') !== 'darwin' ||
+    platformManifest.cpu?.join(',') !== 'arm64' ||
+    manifest.exports?.['./node']?.node !== './dist/node.mjs' ||
+    manifest.imports?.['#native-binding']?.node !== './dist/native/index.js' ||
+    manifest.imports['#wasm-binding'] !== undefined
+  ) {
+    throw new Error(
+      'GeoSpec native assembly must contain matching published root/Darwin arm64 manifests and current Node loader mappings.',
+    );
+  }
+  if (basename(platformManifest.main) !== platformManifest.main || !platformManifest.main.endsWith('.node')) {
+    throw new Error('GeoSpec native platform main must name its adjacent .node addon.');
+  }
+  const licenseEntries = await readdir(resolve(root, 'licenses'), { recursive: true, withFileTypes: true });
+  const licenses = licenseEntries
+    .filter((entry) => entry.isFile())
+    .map((entry) => relative(root, resolve(entry.parentPath, entry.name)));
+  if (licenses.length === 0) {
+    throw new Error('GeoSpec native assembly has no dependency licenses.');
+  }
+  await Promise.all([
+    ...[
+      resolve(root, 'dist/node.mjs'),
+      resolve(root, 'dist/native/index.js'),
+      resolve(platform, platformManifest.main),
+    ].map(async (path) => {
+      const info = await stat(path);
+      if (!info.isFile() || info.size === 0) {
+        throw new Error(`GeoSpec native assembly is missing a nonempty file: ${path}`);
+      }
+    }),
+    ...['LICENSE', 'NOTICE', ...licenses].map(async (path) => {
+      const [rootBytes, platformBytes] = await Promise.all([
+        readFile(resolve(root, path)),
+        readFile(resolve(platform, path)),
+      ]);
+      if (rootBytes.length === 0 || !rootBytes.equals(platformBytes)) {
+        throw new Error(`GeoSpec native root/platform license closure differs at ${path}.`);
+      }
+    }),
+  ]);
+  return { [name]: manifest.version, [platformName]: platformManifest.version };
+};
+
+/**
+ * Co-deliver the source/relink archive described by the staged native root's receipt.
+ * The receipt is captured before Electron Packager removes the staging directory.
+ * @param assemblyRoot - The selected native assembly.
+ * @param stagedReceipt - `licenses/SOURCE-RELINK.json` text from its staged root package.
+ * @param resourcesRoot - Packaged app's `Contents/Resources` directory.
+ */
+export const copyGeoSpecSourceRelink = async (
+  assemblyRoot: string,
+  stagedReceipt: string,
+  resourcesRoot: string,
+): Promise<void> => {
+  const name = 'geospec-engine-native-source-relink.tar.gz';
+  const receipt = JSON.parse(stagedReceipt) as {
+    readonly schema?: string;
+    readonly artifact?: { readonly fileName?: string; readonly bytes?: number; readonly sha256?: string };
+  };
+  if (
+    receipt.schema !== 'geospec-native-source-relink-asset-v2' ||
+    receipt.artifact?.fileName !== name ||
+    typeof receipt.artifact.bytes !== 'number' ||
+    !Number.isSafeInteger(receipt.artifact.bytes) ||
+    receipt.artifact.bytes <= 0 ||
+    !/^[0-9a-f]{64}$/u.test(receipt.artifact.sha256 ?? '')
+  ) {
+    throw new Error('GeoSpec SOURCE-RELINK receipt has no valid source archive identity.');
+  }
+  const expected = receipt.artifact;
+  const digest = async (path: string): Promise<string> => {
+    const hash = createHash('sha256');
+    for await (const chunk of createReadStream(path) as AsyncIterable<Uint8Array<ArrayBuffer>>) {
+      hash.update(chunk);
+    }
+    return hash.digest('hex');
+  };
+  const source = resolve(assemblyRoot, 'tarballs', name);
+  const sourceInfo = await stat(source);
+  if (!sourceInfo.isFile() || sourceInfo.size !== expected.bytes || (await digest(source)) !== expected.sha256) {
+    throw new Error('GeoSpec source/relink archive differs from the staged native receipt.');
+  }
+  const destination = resolve(resourcesRoot, 'SOURCES', name);
+  await mkdir(dirname(destination), { recursive: true });
+  await cp(source, destination, { dereference: true });
+  const destinationInfo = await stat(destination);
+  if (
+    !destinationInfo.isFile() ||
+    destinationInfo.size !== expected.bytes ||
+    (await digest(destination)) !== expected.sha256
+  ) {
+    throw new Error('Copied GeoSpec source/relink archive differs from the staged native receipt.');
+  }
+};
 
 /** Remove each path under `target` whose counterpart under `source` fails `keep`. */
 const prune = async (target: string, source: string, keep: (path: string) => boolean): Promise<void> => {
@@ -108,8 +254,12 @@ const runtimeDependencies = async (directory: string): Promise<readonly string[]
  */
 const resolveFromTree = async (from: string, name: string, stopAt: string): Promise<string | undefined> => {
   for (let directory = from; directory.startsWith(stopAt); directory = dirname(directory)) {
+    const candidate =
+      basename(directory) === 'node_modules'
+        ? resolve(directory, name, 'package.json')
+        : resolve(directory, 'node_modules', name, 'package.json');
     // oxlint-disable-next-line no-await-in-loop -- Node's own resolution is a serial walk up the tree.
-    const found = await realpath(resolve(directory, 'node_modules', name, 'package.json')).catch(() => undefined);
+    const found = await realpath(candidate).catch(() => undefined);
     if (found) {
       return dirname(found);
     }

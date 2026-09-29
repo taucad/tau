@@ -21,6 +21,7 @@ import type { InputCountCapability } from '#api/billing/billable-model-input-cou
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import type { TerminalEvidence } from '#api/billing/credit-ledger.types.js';
 import type { MetricsService } from '#telemetry/metrics.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
 
 const qualification = (): QualifiedBillableInvocation => ({
   surface: 'gateway',
@@ -142,6 +143,7 @@ describe('BillableModelInvocationService', () => {
         ['anthropic-claude-opus-5.5', 'claude-opus-5-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-opus-5', 'claude-opus-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-opus-4.8', 'claude-opus-4-8', 'anthropic', 'max_tokens'],
+        ['anthropic-claude-sonnet-5.5', 'claude-sonnet-5-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-sonnet-5', 'claude-sonnet-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-sonnet-4.6', 'claude-sonnet-4-6', 'anthropic', 'max_tokens'],
         ['anthropic-claude-haiku-4.5', 'claude-haiku-4-5-20251001', 'anthropic', 'max_tokens'],
@@ -664,7 +666,7 @@ describe('BillableModelInvocationService', () => {
       markDispatchIntent: vi.fn(async () => true),
       markDispatchAccepted: vi.fn(async () => true),
       getDispatchTimeRemaining: vi.fn(async () => 30_000),
-      recordInvocationEvidence: vi.fn(),
+      recordInvocationEvidence: vi.fn<(input: { readonly evidence: TerminalEvidence }) => Promise<void>>(),
       recordCancellation: vi.fn(),
       terminalizeOperation: vi.fn(),
     };
@@ -691,18 +693,115 @@ describe('BillableModelInvocationService', () => {
     await reader.cancel();
     await result.completion;
 
-    expect(ledger.recordInvocationEvidence).toHaveBeenCalledWith(
-      expect.objectContaining({
-        operationId: 'operation',
-        evidence: expect.objectContaining({
-          kind: 'final_usage',
-          meterItems: expect.arrayContaining([expect.objectContaining({ dimension: 'output', quantity: 1n })]),
-        }),
-      }),
+    const recorded = ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0];
+    expect(recorded).toMatchObject({ operationId: 'operation', evidence: { kind: 'final_usage' } });
+    expect(recorded?.evidence).toHaveProperty(
+      'meterItems',
+      expect.arrayContaining([expect.objectContaining({ dimension: 'output', quantity: 1n })]),
     );
     expect(ledger.terminalizeOperation).toHaveBeenCalledOnce();
     // A turn the supplier finished has settled; the late cancel neither absorbs nor flags it.
     expect(ledger.recordCancellation).not.toHaveBeenCalled();
+  });
+
+  describe('a stream cut while the process stops', () => {
+    /** One admitted step whose supplier has started streaming and has not finished. */
+    const midStream = (shutdown: ShutdownService) => {
+      const qualified = { ...qualification(), maximumResponseBytes: 64 * 1024 };
+      qualified.adapter.createEvidenceCollector = () =>
+        createBillableModelEvidenceCollector('openai-responses', new Set(['uncached_input']), 'openai');
+      const encoder = new TextEncoder();
+      qualified.adapter.executeOnce = vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array<ArrayBuffer>>({
+              start(controller) {
+                controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"partial"}\n\n'));
+              },
+            }),
+          ),
+      );
+      const row = {
+        ...qualified,
+        id: 'operation',
+        accountId: 'account',
+        environment: 'development',
+        activity: 'agent',
+        requestDigest: '',
+        customerState: 'pending',
+        dueAt: new Date(Date.now() + 30_000),
+      };
+      const ledger = {
+        getOperationForAttempt: vi
+          .fn()
+          .mockResolvedValueOnce(undefined)
+          .mockImplementation(async () => row),
+        issueCurrentPromotion: vi.fn(),
+        admitOperation: vi.fn(async () => ({ status: 'admitted', operationId: 'operation', generation: 0n })),
+        markDispatchIntent: vi.fn(async () => true),
+        markDispatchAccepted: vi.fn(async () => true),
+        getDispatchTimeRemaining: vi.fn(async () => 30_000),
+        recordInvocationEvidence: vi.fn<(input: { readonly evidence: TerminalEvidence }) => Promise<void>>(),
+        recordCancellation: vi.fn(),
+        terminalizeOperation: vi.fn(),
+      };
+      const service = new BillableModelInvocationService(
+        ledger as unknown as CreditLedgerService,
+        { resolve: () => qualified },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+        new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+        undefined,
+        undefined,
+        shutdown,
+      );
+      row.requestDigest = (
+        service as unknown as {
+          requestDigest(value: ReturnType<typeof intent>, pins: QualifiedBillableInvocation): string;
+        }
+      ).requestDigest(intent(), qualified);
+      return { ledger, service };
+    };
+
+    const cut = async (service: BillableModelInvocationService): Promise<void> => {
+      const result = await service.invoke(intent());
+      if (result.state !== 'streaming') {
+        throw new Error('Invocation did not stream');
+      }
+      const reader = result.response.body!.getReader();
+      await reader.read();
+      // The drain's cut closes the connection, which cancels the relayed body.
+      await reader.cancel();
+      await result.completion;
+    };
+
+    it('should settle the step at once as absorbed, labelled service_restart, and release its spend hold', async () => {
+      const shutdown = new ShutdownService();
+      const { ledger, service } = midStream(shutdown);
+      shutdown.stop();
+
+      await cut(service);
+
+      const recorded = ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0];
+      expect(recorded?.evidence).toMatchObject({
+        kind: 'absorbed_unknown',
+        executionStatus: 'cancelled',
+        normalizationEvidence: { terminalReason: 'service_restart' },
+      });
+      expect(ledger.terminalizeOperation).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ evidence: recorded?.evidence, expireSpendHold: true }),
+      );
+    });
+
+    it('should leave a step the client left while the process runs to recovery, as before', async () => {
+      const { ledger, service } = midStream(new ShutdownService());
+
+      await cut(service);
+
+      expect(ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0].evidence).toMatchObject({
+        kind: 'absorbed_unknown',
+      });
+      expect(ledger.terminalizeOperation).not.toHaveBeenCalled();
+    });
   });
 
   it('admits at the byte bound when the input counter fails instead of refusing the call', async () => {
@@ -958,6 +1057,32 @@ describe('BillableModelInvocationService', () => {
     });
     expect(ledger.recoverDueLlmOperationsForOwner).not.toHaveBeenCalled();
     expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
+  });
+
+  it('should answer a voided attempt key with 409 ATTEMPT_VOIDED and never dispatch it', async () => {
+    const qualified = qualification();
+    const metrics = { billingVoidedAdmissions: { add: vi.fn() } };
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => ({ status: 'denied', reason: 'attempt_voided' })),
+      recoverDueLlmOperationsForOwner: vi.fn(),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+      metrics as unknown as MetricsService,
+    );
+
+    await expect(service.invoke(intent())).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof LlmGatewayError && error.getStatus() === 409 && gatewayErrorType(error) === 'ATTEMPT_VOIDED',
+    );
+    expect(ledger.recoverDueLlmOperationsForOwner).not.toHaveBeenCalled();
+    expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
+    expect(metrics.billingVoidedAdmissions.add).toHaveBeenCalledWith(1, { 'deployment.environment': 'development' });
   });
 
   it('returns recovery-unavailable while another claimant owns an expired operation', async () => {

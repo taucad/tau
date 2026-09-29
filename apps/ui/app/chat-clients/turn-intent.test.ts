@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MyUIMessage } from '@taucad/chat';
-import { turnIntentOf } from '#chat-clients/turn-intent.js';
+import { commandOf, turnIntentOf } from '#chat-clients/turn-intent.js';
 
 const message = (id: string, role: 'user' | 'assistant'): MyUIMessage =>
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a transcript row is `id` and `role` as far as the rewind point is concerned.
@@ -91,5 +91,68 @@ describe('turnIntentOf', () => {
    * this is a button a person can press. There is no turn to continue: say so. */
   it('should refuse a continuation of a transcript with no user message', () => {
     expect(() => turnIntentOf([], { kind: 'continue' })).toThrow(/nothing to continue/u);
+  });
+});
+
+describe('commandOf', () => {
+  const context = {
+    chatId: 'chat-1',
+    commandId: 'req-1',
+    config: { systemPrompt: 'Build CAD.', toolChoice: 'auto' },
+    checkoutId: 'checkout-1',
+  } as const;
+
+  it('sends one keyed start from a fresh user message', () => {
+    expect(commandOf({ kind: 'send', messageId: 'u1' }, [message('u1', 'user')], context)).toEqual({
+      type: 'start',
+      commandId: 'req-1',
+      payload: {
+        chatId: 'chat-1',
+        runId: 'req-1',
+        message: { id: 'u1', role: 'user', content: 'u1' },
+        trigger: 'submit',
+        config: context.config,
+        checkoutId: 'checkout-1',
+      },
+    });
+  });
+
+  it('uses the edited transcript and preserves the rewind prefix', () => {
+    expect(commandOf({ kind: 'edit', messageId: 'u2' }, refusedSecondTurn, context)).toMatchObject({
+      type: 'start',
+      commandId: 'req-1',
+      payload: {
+        runId: 'req-1',
+        message: { id: 'u2', content: 'u2' },
+        trigger: 'edit',
+        retainedMessageIds: ['u1', 'a1'],
+      },
+    });
+  });
+
+  it('replays a completed turn under a new command id, without changing its user message', () => {
+    const transcript = [message('u1', 'user'), message('a1', 'assistant')];
+    const first = commandOf({ kind: 'regenerate' }, transcript, context);
+    const resent = commandOf({ kind: 'regenerate' }, transcript, context);
+    expect(resent).toEqual(first);
+    expect(first).toMatchObject({
+      type: 'start',
+      commandId: 'req-1',
+      payload: { runId: 'req-1', trigger: 'regenerate', retainedMessageIds: [], message: { id: 'u1' } },
+    });
+  });
+
+  it('resumes only the named run with the current model selection', () => {
+    const selection = { id: 'openai-gpt-5.5', providerKind: 'openai', contextWindow: 200_000 } as const;
+    expect(commandOf({ kind: 'continue' }, refusedSecondTurn, { ...context, runId: 'run-old', selection })).toEqual({
+      type: 'resume',
+      commandId: 'req-1',
+      payload: { chatId: 'chat-1', runId: 'run-old', selection },
+    });
+  });
+
+  it('refuses a command whose user message or resumable run no longer exists', () => {
+    expect(() => commandOf({ kind: 'send', messageId: 'missing' }, [], context)).toThrow(/no longer in this chat/u);
+    expect(() => commandOf({ kind: 'continue' }, refusedSecondTurn, context)).toThrow(/no run to resume/u);
   });
 });

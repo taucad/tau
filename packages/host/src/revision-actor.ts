@@ -16,6 +16,11 @@
  * What this is *not*: a Tau account, and not an address it invented. A machine
  * with no configured mailbox records none, and `revision-headers` then writes
  * the commit under `<id>@users.noreply.tau.new`.
+ *
+ * The exception is a cloud host (D21): it runs as the container's user but acts
+ * for the project's owner, so the provisioner hands it `TAU_HOST_OWNER_ID` and
+ * `TAU_HOST_OWNER_NAME` and it records that person exactly as the browser does
+ * — the account id and name, never the account email (rule 15).
  */
 
 import { userInfo } from 'node:os';
@@ -39,6 +44,11 @@ const environment = (name: string): string | undefined => {
  * @returns The person this host records for.
  */
 const account = (): RevisionUserActor => {
+  const ownerId = environment('TAU_HOST_OWNER_ID');
+  if (ownerId !== undefined) {
+    const ownerName = environment('TAU_HOST_OWNER_NAME');
+    return Object.freeze({ kind: 'user', id: ownerId, ...(ownerName === undefined ? {} : { name: ownerName }) });
+  }
   let username = 'tau-host';
   try {
     username = userInfo().username;
@@ -78,5 +88,8 @@ export const hostRevisionActor = (): ((
   /* Resolved once, at the call that wires the project: the identity of the
    * process does not change under it, and a mint must not pay for it. */
   const person = account();
-  return () => person;
+  /* A cut a run holds is the agent's, in the browser's shape: `git log`'s
+   * author stays the person through `onBehalfOf`, while `Tau-Actor` names the
+   * run (rule 15). */
+  return ({ runId }) => (runId === undefined ? person : { kind: 'agent', id: 'agent', runId, onBehalfOf: person });
 };

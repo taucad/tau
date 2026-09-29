@@ -1,5 +1,16 @@
+/* oxlint-disable typescript/no-restricted-types -- Workbench record entry paths are nullable by schema. */
+/* oxlint-disable eslint/no-await-in-loop -- Producer flushes must finish in owner order before project close. */
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom, InputFrom } from 'xstate';
@@ -7,14 +18,17 @@ import type { Remote } from 'comlink';
 import { useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import {
+  describeProjectManifestIssue,
   parameterEntryPath,
-  parseProjectManifestBytes,
   projectToManifest,
+  readProjectManifestBytes,
   serializeProjectManifest,
 } from '@taucad/types';
-import type { ProjectManifest } from '@taucad/types';
+import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import type { ParameterManifest, ParameterSetOutcome } from '@taucad/parameters';
+import type { WorkbenchEntries, WorkbenchView } from '@taucad/workbench';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
+import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -27,7 +41,6 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { logMachine } from '#machines/logs.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
-import { serializeModelComponentDisplayState } from '#machines/model-interaction.machine.js';
 import { inspect } from '#machines/inspector.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -38,7 +51,9 @@ import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import { createParameterSetService } from '#services/parameter-set-service.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
+import { isNotFound } from '#db/attachment-store.js';
 import { toast } from 'sonner';
+import type { EntryPathChange } from '#workbench-records/entries-store.js';
 
 type ProjectContextType = {
   projectId: string;
@@ -46,6 +61,20 @@ type ProjectContextType = {
   editorRef: ActorRefFrom<typeof editorMachine>;
   /** Per-viewer-panel graphics machines, keyed by Dockview panel ID */
   viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
+  viewRecords: ReadonlyMap<string, WorkbenchView>;
+  appliedWorkbenchRevisions: ReadonlyMap<string, `sha256:${string}`>;
+  setAppliedWorkbenchRevision: (path: string, digest: `sha256:${string}` | undefined) => void;
+  appliedEntryRevisions: ReadonlyMap<string, `sha256:${string}`>;
+  setAppliedEntryRevision: (path: string, digest: `sha256:${string}` | undefined) => void;
+  setViewRecord: (viewId: string, record: WorkbenchView | undefined) => void;
+  viewEntryPaths: ReadonlyMap<string, string | null>;
+  setViewEntryPath: (viewId: string, path: string | null | undefined) => void;
+  entriesRecord: WorkbenchEntries | undefined;
+  setEntriesRecord: (record: WorkbenchEntries | undefined) => void;
+  registerEntryPathChange: (change: (operation: EntryPathChange) => Promise<boolean>) => () => void;
+  changeEntryPaths: (operation: EntryPathChange) => Promise<boolean>;
+  registerWorkbenchRecordProducer: (flush: () => Promise<boolean>) => () => void;
+  flushWorkbenchRecordProducers: () => Promise<void>;
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
@@ -103,7 +132,7 @@ export const parameterStageForSettlement = ({
     ? { [parameterEntryPath(entryPath)]: bytes }
     : undefined;
 
-type FocusedChatWorker = Pick<ChatStorage, 'getChatsForResource' | 'createNavigationRepairChat'>;
+type FocusedChatWorker = Pick<ChatStorage, 'getChatRecordsForResource' | 'createNavigationRepairChat'>;
 
 export async function ensureFocusedChatForProject({
   projectId,
@@ -118,7 +147,7 @@ export async function ensureFocusedChatForProject({
   readonly worker: FocusedChatWorker;
   readonly onCreatedChat?: () => void;
 }): Promise<{ type: 'focusedChatEnsured'; focusedChatId: string }> {
-  const chats = await worker.getChatsForResource(projectId);
+  const chats = await worker.getChatRecordsForResource(projectId);
 
   for (const candidateChatId of [requestedChatId, persistedChatId]) {
     const match = chats.find((chat) => chat.id === candidateChatId);
@@ -144,8 +173,9 @@ export async function ensureFocusedChatForProject({
 
 /**
  * Whether `chatId` is a chat the client already holds — freshly created here, or
- * present in a cached `['chats', projectId, …]` list. Such a chat needs no async
- * ensure round trip, so the editor can focus it synchronously.
+ * present in a current non-deleted chat list. Such a chat needs no async
+ * ensure round trip, so the editor can focus it synchronously. Deleted-inclusive
+ * and invalidated lists cannot authorize a stale route.
  *
  * @returns True when the chat is already known.
  */
@@ -163,41 +193,100 @@ export function isKnownChatId({
   if (chatId === createdChatId) {
     return true;
   }
-  return queryClient
-    .getQueriesData<Chat[]>({ queryKey: ['chats', projectId] })
-    .some(([, chats]) => chats?.some((chat) => chat.id === chatId));
+  const visibleChatKeys = [
+    ['chats', projectId, { includeDeleted: false }],
+    ['chats', projectId, 'records', { includeDeleted: false }],
+  ];
+  return visibleChatKeys.some((queryKey) => {
+    const state = queryClient.getQueryState<Array<Pick<Chat, 'id'>>>(queryKey);
+    return state !== undefined && !state.isInvalidated && state.data?.some((chat) => chat.id === chatId) === true;
+  });
 }
 
+/** What the workspace holds: the manifest it renders and why the bytes on disk are not that manifest. */
+type ObservedManifestState = {
+  readonly project: ProjectManifest | undefined;
+  readonly issue: ProjectManifestParseIssue | undefined;
+};
+
+const manifestStateKey = ({ project, issue }: ObservedManifestState): string =>
+  [
+    project === undefined ? '' : new TextDecoder().decode(serializeProjectManifest(projectToManifest(project))),
+    ...(issue === undefined ? [] : describeProjectManifestIssue(issue)),
+  ].join('\n');
+
+/** A present id that names another project: this route's bytes no longer describe it. */
+const idMismatchIssue = (expected: string, found: string): ProjectManifestParseIssue => ({
+  code: 'manifest-invalid',
+  issues: [{ code: 'custom', path: ['id'], message: `Expected ${expected}, the project open here; found ${found}` }],
+});
+
+/**
+ * Follow `tau.json` while its project is open, never silently (blueprint R5).
+ *
+ * Bytes that still identify this project (strict or degraded) reload when they
+ * differ from what the workspace holds, so a degraded write shows its issue at
+ * once. Bytes that no longer identify it — missing, unreadable, oversize, a
+ * foreign `$schema` or another project's id — are reported instead: the
+ * workspace keeps its last good manifest open so the person can fix the file.
+ */
 export const createProjectManifestChangeObserver = ({
+  projectId,
   readManifest,
-  getCurrentProject,
+  getCurrent,
   reload,
+  report,
 }: {
+  readonly projectId: string;
   readonly readManifest: () => Promise<Uint8Array<ArrayBuffer>>;
-  readonly getCurrentProject: () => ProjectManifest | undefined;
+  readonly getCurrent: () => ObservedManifestState;
   readonly reload: () => void;
+  readonly report: (issue: ProjectManifestParseIssue) => void;
 }): { readonly check: () => Promise<void>; readonly dispose: () => void } => {
   let disposed = false;
-  let lastObserved = '';
+  let lastObserved: string | undefined;
+
+  const reportIssue = (issue: ProjectManifestParseIssue): void => {
+    // A later return to the same bytes must reload to clear the report.
+    lastObserved = undefined;
+    report(issue);
+  };
 
   return {
     check: async () => {
+      let bytes: Uint8Array<ArrayBuffer>;
       try {
-        const parsed = parseProjectManifestBytes(await readManifest());
-        if (!parsed.success || disposed) {
-          return;
+        bytes = await readManifest();
+      } catch (error) {
+        if (!disposed) {
+          reportIssue(
+            error instanceof FileNotFoundError || isNotFound(error)
+              ? { code: 'manifest-missing' }
+              : { code: 'manifest-unreadable', message: errorMessage(error) },
+          );
         }
-        const serialized = new TextDecoder().decode(serializeProjectManifest(parsed.data));
-        if (serialized === lastObserved) {
-          return;
-        }
-        lastObserved = serialized;
-        const current = getCurrentProject();
-        if (!current || new TextDecoder().decode(serializeProjectManifest(projectToManifest(current))) !== serialized) {
-          reload();
-        }
-      } catch {
-        // Invalid/inaccessible external manifests remain visible through discovery conflicts.
+        return;
+      }
+      if (disposed) {
+        return;
+      }
+      const read = readProjectManifestBytes(bytes, { id: projectId });
+      if (!read.success) {
+        reportIssue(read.issue);
+        return;
+      }
+      if (read.data.id !== projectId) {
+        reportIssue(idMismatchIssue(projectId, read.data.id));
+        return;
+      }
+      const observed = manifestStateKey({ project: read.data, issue: read.issue });
+      if (observed === lastObserved) {
+        return;
+      }
+      lastObserved = observed;
+      const current = getCurrent();
+      if (current.project === undefined || manifestStateKey(current) !== observed) {
+        reload();
       }
     },
     dispose: () => {
@@ -206,26 +295,30 @@ export const createProjectManifestChangeObserver = ({
   };
 };
 
+/**
+ * Read the open route's manifest: strict, or degraded with its issue. The
+ * route's id stands in only when the bytes lost theirs (blueprint R3).
+ */
 export async function resolveScopedProjectManifest({
   contentService,
   projectId,
 }: {
   readonly contentService: FileContentService;
   readonly projectId: string;
-}): Promise<ProjectManifest> {
+}): Promise<{ readonly project: ProjectManifest; readonly issue?: ProjectManifestParseIssue }> {
   const outcome = await contentService.resolve('tau.json', { forceText: true });
   if (outcome.kind !== 'text') {
     throw new Error(`Cannot read tau.json for ${projectId}: ${outcome.kind}`);
   }
 
-  const parsed = parseProjectManifestBytes(outcome.content);
-  if (!parsed.success) {
-    throw new Error(`Invalid tau.json for ${projectId}: ${parsed.issue.code}`);
+  const read = readProjectManifestBytes(outcome.content, { id: projectId });
+  if (!read.success) {
+    throw new Error(`Invalid tau.json for ${projectId}: ${describeProjectManifestIssue(read.issue).join(' ')}`);
   }
-  if (parsed.data.id !== projectId) {
-    throw new Error(`Scoped tau.json project ID mismatch: expected ${projectId}, received ${parsed.data.id}`);
+  if (read.data.id !== projectId) {
+    throw new Error(`Scoped tau.json project ID mismatch: expected ${projectId}, received ${read.data.id}`);
   }
-  return parsed.data;
+  return read.issue === undefined ? { project: read.data } : { project: read.data, issue: read.issue };
 }
 
 export function ProjectProvider({
@@ -253,9 +346,9 @@ export function ProjectProvider({
   readonly kernelOptionsFactory?: LazyKernelOptionsFactory;
   readonly profile?: 'editor' | 'shared';
 }): React.JSX.Element {
-  // The shared-project workbench passes no factory, so this default is a real
-  // product path: it reads the same preference the focused workbench does
-  // instead of silently opting into durable reuse (charter D3).
+  // A caller without a factory (the converter route) gets the local kernel, which
+  // reads the same preference the focused workbench does instead of silently
+  // opting into durable reuse (charter D3).
   const computeMode = useComputeReuseMode();
   const resolvedKernelOptionsFactory = kernelOptionsFactory ?? localKernelOptions(projectId, undefined, computeMode);
   const queryClient = useQueryClient();
@@ -275,6 +368,20 @@ export function ProjectProvider({
       }),
     [fileManager.parameterFiles, fileManager.contentService, fileSystemRoot],
   );
+  const workbenchRecordProducers = useRef(new Set<() => Promise<boolean>>());
+  const registerWorkbenchRecordProducer = useCallback((flush: () => Promise<boolean>) => {
+    workbenchRecordProducers.current.add(flush);
+    return () => {
+      workbenchRecordProducers.current.delete(flush);
+    };
+  }, []);
+  const flushWorkbenchRecordProducers = useCallback(async (): Promise<void> => {
+    for (const flush of workbenchRecordProducers.current) {
+      if (!(await flush())) {
+        throw new Error('Workbench records could not be saved.');
+      }
+    }
+  }, []);
   /* A re-memoed service replaces the previous one; close the one it replaced. Never close on unmount:
    * the project session owns the final close and Strict Mode would close a live service. */
   const previousParameterService = useRef(parameterService);
@@ -302,19 +409,31 @@ export function ProjectProvider({
       if (!contentService) {
         throw new Error(`Project content service is unavailable for ${input.projectId}`);
       }
-      const project = await resolveScopedProjectManifest({
+      const { project, issue } = await resolveScopedProjectManifest({
         contentService,
         projectId: input.projectId,
       });
       return {
         type: 'projectRetrieved',
         project,
+        ...(issue === undefined ? {} : { issue }),
       };
     }),
     writeProjectActor: fromSafeAsync(async ({ input }) => {
       const { contentService } = fileManager.fileManagerRef.getSnapshot().context;
       if (!contentService) {
         throw new Error('File manager content service is not ready');
+      }
+      if (!input.repair) {
+        // Re-read: the bytes may have degraded since this workspace loaded them,
+        // and an implicit write must never replace a degraded manifest (R4).
+        const current = await contentService.resolve('tau.json', { forceText: true });
+        if (current.kind === 'text') {
+          const read = readProjectManifestBytes(current.content, { id: projectId });
+          if (!read.success || read.issue !== undefined || read.data.id !== projectId) {
+            throw new Error('tau.json needs repair before Tau can change it. Repair it, or fix it in the editor.');
+          }
+        }
       }
       await contentService.write('tau.json', serializeProjectManifest(projectToManifest(input.project)), 'machine');
     }),
@@ -424,6 +543,84 @@ export function ProjectProvider({
 
   // Select state from the machine
   const viewGraphics = useSelector(actorRef, (state) => state.context.viewGraphics);
+  const [viewRecords, setViewRecords] = useState<ReadonlyMap<string, WorkbenchView>>(() => new Map());
+  const [appliedWorkbenchRevisions, setAppliedWorkbenchRevisions] = useState<ReadonlyMap<string, `sha256:${string}`>>(
+    () => new Map(),
+  );
+  const [appliedEntryRevisions, setAppliedEntryRevisions] = useState<ReadonlyMap<string, `sha256:${string}`>>(
+    () => new Map(),
+  );
+  const setAppliedWorkbenchRevision = useCallback((path: string, digest: `sha256:${string}` | undefined) => {
+    setAppliedWorkbenchRevisions((current) => {
+      if (current.get(path) === digest) {
+        return current;
+      }
+      const next = new Map(current);
+      if (digest === undefined) {
+        next.delete(path);
+      } else {
+        next.set(path, digest);
+      }
+      return next;
+    });
+  }, []);
+  const setAppliedEntryRevision = useCallback((path: string, digest: `sha256:${string}` | undefined) => {
+    setAppliedEntryRevisions((current) => {
+      if (current.get(path) === digest) {
+        return current;
+      }
+      const next = new Map(current);
+      if (digest === undefined) {
+        next.delete(path);
+      } else {
+        next.set(path, digest);
+      }
+      return next;
+    });
+  }, []);
+  const [viewEntryPaths, setViewEntryPaths] = useState<ReadonlyMap<string, string | null>>(() => new Map());
+  const setViewEntryPath = useCallback((viewId: string, path: string | null | undefined) => {
+    setViewEntryPaths((current) => {
+      if (current.get(viewId) === path) {
+        return current;
+      }
+      const next = new Map(current);
+      if (path === undefined) {
+        next.delete(viewId);
+      } else {
+        next.set(viewId, path);
+      }
+      return next;
+    });
+  }, []);
+  const [entriesRecord, setEntriesRecord] = useState<WorkbenchEntries>();
+  const entryPathChangeRef = useRef<((operation: EntryPathChange) => Promise<boolean>) | undefined>(undefined);
+  const registerEntryPathChange = useCallback((change: (operation: EntryPathChange) => Promise<boolean>) => {
+    entryPathChangeRef.current = change;
+    return () => {
+      if (entryPathChangeRef.current === change) {
+        entryPathChangeRef.current = undefined;
+      }
+    };
+  }, []);
+  const changeEntryPaths = useCallback(
+    async (operation: EntryPathChange) => (entryPathChangeRef.current ? entryPathChangeRef.current(operation) : false),
+    [],
+  );
+  const setViewRecord = useCallback((viewId: string, record: WorkbenchView | undefined) => {
+    setViewRecords((current) => {
+      if (current.get(viewId) === record) {
+        return current;
+      }
+      const next = new Map(current);
+      if (record) {
+        next.set(viewId, record);
+      } else {
+        next.delete(viewId);
+      }
+      return next;
+    });
+  }, []);
   const modelInteractionRef = useSelector(actorRef, (state) => state.context.modelInteractionRef);
   const geometryUnits = useSelector(actorRef, (state) => state.context.geometryUnits);
   const mainEntryPath = useSelector(
@@ -445,6 +642,7 @@ export function ProjectProvider({
       }
       existing?.unsubscribe();
       const subscription = actor.on('settled', ({ outcome }) => {
+        performance.mark('tau:parameter-settled', { detail: { entryPath } });
         const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
         const current = parameterService.snapshot(entryPath);
         if (cadRef === undefined || current === undefined) {
@@ -455,6 +653,7 @@ export function ProjectProvider({
           /* Only the bytes the authority just persisted travel: the runtime resolves the values from
            * them and observes that revision itself, so the sidecar's own watch event has nothing left
            * to re-render, and this machine keeps no second copy of the stored values. */
+          performance.mark('tau:parameter-dispatch', { detail: { entryPath } });
           cadRef.send({ type: 'commitParameters', stage });
         }
       });
@@ -494,53 +693,9 @@ export function ProjectProvider({
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const resolvedRequestedChatId = useSelector(editorRef, (state) => state.context.requestedChatId);
   const focusedChatResolved = useSelector(editorRef, (state) => state.matches({ ready: { operation: 'idle' } }));
-  const modelComponentDisplay = useSelector(editorRef, (state) => state.context.modelComponentDisplay);
-  const needsModelComponentDisplayMigration = useSelector(
-    editorRef,
-    (state) => state.context.needsModelComponentDisplayMigration,
-  );
-  const modelDisplayRevision = useSelector(modelInteractionRef, (state) => state.context.displayRevision);
-  const restoredModelInteractionRef = useRef<ActorRefFrom<typeof modelInteractionMachine> | undefined>(undefined);
-
   useEffect(() => {
     editorRef.send({ type: 'load' });
   }, [editorRef]);
-
-  useEffect(() => {
-    if (!focusedChatResolved || restoredModelInteractionRef.current === modelInteractionRef) {
-      return;
-    }
-    modelInteractionRef.send({
-      type: 'restoreComponentDisplay',
-      componentDisplay: modelComponentDisplay,
-    });
-    restoredModelInteractionRef.current = modelInteractionRef;
-  }, [focusedChatResolved, modelComponentDisplay, modelInteractionRef]);
-
-  useEffect(() => {
-    if (!focusedChatResolved || restoredModelInteractionRef.current !== modelInteractionRef) {
-      return;
-    }
-    const snapshot = modelInteractionRef.getSnapshot();
-    if (snapshot.context.displayRevision !== modelDisplayRevision) {
-      return;
-    }
-    const componentDisplay = serializeModelComponentDisplayState(snapshot.context);
-    if (
-      !needsModelComponentDisplayMigration &&
-      JSON.stringify(componentDisplay) === JSON.stringify(modelComponentDisplay)
-    ) {
-      return;
-    }
-    editorRef.send({ type: 'setModelComponentDisplay', componentDisplay });
-  }, [
-    editorRef,
-    focusedChatResolved,
-    modelComponentDisplay,
-    modelDisplayRevision,
-    modelInteractionRef,
-    needsModelComponentDisplayMigration,
-  ]);
 
   useEffect(() => {
     if (focusedChatResolved && focusedChatId !== undefined && resolvedRequestedChatId === requestedChatId) {
@@ -574,27 +729,40 @@ export function ProjectProvider({
     };
   }, [actorRef, profile, projectId, projectManager, queryClient]);
 
+  const projectIsReady = useSelector(actorRef, (state) => state.matches('ready'));
   useEffect(() => {
+    if (!projectIsReady) {
+      return;
+    }
     const { contentService } = fileManager;
     if (!contentService) {
       return;
     }
 
     const observer = createProjectManifestChangeObserver({
+      projectId,
       readManifest: async () => fileManager.readFile('tau.json'),
-      getCurrentProject: () => actorRef.getSnapshot().context.project,
+      getCurrent: () => {
+        const { project, manifestIssue } = actorRef.getSnapshot().context;
+        return { project, issue: manifestIssue };
+      },
       reload: () => {
         actorRef.send({ type: 'reloadProject' });
+      },
+      report: (issue) => {
+        actorRef.send({ type: 'manifestIssueObserved', issue });
       },
     });
     const unsubscribe = contentService.subscribe('tau.json', () => {
       void observer.check();
     });
+    // Close the gap between loading the project and attaching this listener.
+    void observer.check();
     return () => {
       observer.dispose();
       unsubscribe();
     };
-  }, [actorRef, fileManager]);
+  }, [actorRef, fileManager, projectId, projectIsReady]);
 
   const reportParameterOperation = useCallback((operation: Promise<unknown>): void => {
     const report = async (): Promise<void> => {
@@ -730,6 +898,20 @@ export function ProjectProvider({
       projectRef: actorRef,
       editorRef,
       viewGraphics,
+      viewRecords,
+      appliedWorkbenchRevisions,
+      setAppliedWorkbenchRevision,
+      appliedEntryRevisions,
+      setAppliedEntryRevision,
+      setViewRecord,
+      viewEntryPaths,
+      setViewEntryPath,
+      entriesRecord,
+      setEntriesRecord,
+      registerEntryPathChange,
+      changeEntryPaths,
+      registerWorkbenchRecordProducer,
+      flushWorkbenchRecordProducers,
       modelInteractionRef,
       geometryUnits,
       mainEntryPath,
@@ -752,6 +934,20 @@ export function ProjectProvider({
     actorRef,
     editorRef,
     viewGraphics,
+    viewRecords,
+    appliedWorkbenchRevisions,
+    setAppliedWorkbenchRevision,
+    appliedEntryRevisions,
+    setAppliedEntryRevision,
+    setViewRecord,
+    viewEntryPaths,
+    setViewEntryPath,
+    entriesRecord,
+    setEntriesRecord,
+    registerEntryPathChange,
+    changeEntryPaths,
+    registerWorkbenchRecordProducer,
+    flushWorkbenchRecordProducers,
     modelInteractionRef,
     geometryUnits,
     mainEntryPath,
@@ -785,14 +981,11 @@ export function useMainGraphics(): ActorRefFrom<typeof graphicsMachine> | undefi
     throw new Error('useMainGraphics must be used within a ProjectProvider');
   }
 
-  const { viewGraphics, editorRef, mainEntryPath } = context;
-
-  const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
+  const { viewGraphics, viewRecords, mainEntryPath } = context;
 
   // Find a viewer panel showing mainEntryPath
   for (const [viewId, graphicsRef] of viewGraphics) {
-    const settings = viewSettings[viewId];
-    if (settings?.entryPath === mainEntryPath) {
+    if (viewRecords.get(viewId)?.entryPath === mainEntryPath) {
       return graphicsRef;
     }
   }

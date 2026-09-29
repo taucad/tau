@@ -12,3 +12,31 @@ export const sortGeometryUnitEntries = <T>(entries: Array<[string, T]>, mainEntr
     }
     return a.localeCompare(b);
   });
+
+// oxlint-disable-next-line typescript/no-restricted-types -- Workbench records use null for no selected entry.
+type GeometryEntryView = { readonly entryPath?: string | null };
+
+/** Restored viewer paths remain discoverable before their CAD units are admitted. */
+export const listGeometryEntryPaths = (
+  units: ReadonlyMap<string, unknown>,
+  views: ReadonlyMap<string, GeometryEntryView> | Readonly<Record<string, GeometryEntryView>>,
+  mainEntryPath: string,
+): string[] => {
+  const paths = new Set(units.keys());
+  if (mainEntryPath) {
+    paths.add(mainEntryPath);
+  }
+  const records: Iterable<GeometryEntryView> =
+    views instanceof Map
+      ? (views as ReadonlyMap<string, GeometryEntryView>).values()
+      : Object.values(views as Readonly<Record<string, GeometryEntryView>>);
+  for (const view of records) {
+    if (view.entryPath) {
+      paths.add(view.entryPath);
+    }
+  }
+  return sortGeometryUnitEntries(
+    [...paths].map((path): [string, string] => [path, path]),
+    mainEntryPath,
+  ).map(([path]) => path);
+};

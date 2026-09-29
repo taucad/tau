@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { ChevronRight, Copy, Forward, EllipsisVertical, Pencil, SquarePen, Trash2, X } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import type { ProjectListItem } from '#types/project.types.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useAppUiPreferences } from '#hooks/use-app-ui-preferences.js';
@@ -43,6 +43,8 @@ import {
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { CloseProjectDialog } from '#components/nav/project-close-dialogs.js';
 import { useLiveProjectIds } from '#hooks/use-sessions.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import type { ProjectClosePlan } from '#services/chat-session-store.js';
 import {
   pluralize,
   selectProjectFacts,
@@ -67,7 +69,6 @@ export function ProjectNavigation(): React.JSX.Element {
   const [editingProjectId, setEditingProjectId] = useState<string | undefined>();
   const [visibleCount, setVisibleCount] = useState(projectsPerPage);
   const liveProjectIds = useLiveProjectIds();
-  const { closeProject } = useSidebarCommands();
   /* A29's temporal hiding: what is live now sits above what is not, and the
    * rest keeps its recency order. */
   const sortedProjects = useMemo(() => {
@@ -184,9 +185,17 @@ export function ProjectNavigation(): React.JSX.Element {
                     void navigate(`${projectUrl(project.slugs)}?${parameters.toString()}`);
                   }}
                   onDelete={async () => {
-                    closeProject(project.id);
-                    await deleteProject(project.id);
-                    toast.success(`Deleted ${project.name}`);
+                    try {
+                      const trashed = await deleteProject(project.id);
+                      if (trashed) {
+                        toast.success(`Moved ${project.name} to Trash`);
+                      } else {
+                        toast.error(`Could not move ${project.name} to Trash`);
+                      }
+                    } catch (error) {
+                      toast.error(`Could not move ${project.name} to Trash`);
+                      console.error('Error trashing project:', error);
+                    }
                   }}
                 />
               </Fragment>
@@ -255,8 +264,31 @@ function ProjectNavigationItem({
    * chevron, so the control always shows what it does when it is reached. */
   const hasMark = facts.mark !== 'none';
   const { closeProject } = useSidebarCommands();
+  const chatSessions = useChatSessionStore();
   const [askingToClose, setAskingToClose] = useState(false);
   const [askingToDelete, setAskingToDelete] = useState(false);
+  const [closePlan, setClosePlan] = useState<ProjectClosePlan | undefined>();
+  const askToClose = async (deleting: boolean): Promise<void> => {
+    try {
+      const plan = await chatSessions.getProjectClosePlan(project.id);
+      setClosePlan(plan);
+      if (deleting) {
+        if (plan.continuingRuns.length > 0) {
+          toast.error(`Can’t delete ${project.name} while work continues in another window or build.`);
+          return;
+        }
+        if (plan.liveChatIds.length === 0) {
+          await onDelete();
+          return;
+        }
+        setAskingToDelete(true);
+      } else {
+        setAskingToClose(true);
+      }
+    } catch {
+      toast.error(`Couldn’t check running work in ${project.name}. Try closing it again.`);
+    }
+  };
 
   const menuItems: SidebarRowMenuItems = ({ Item, Separator }) => (
     <>
@@ -290,7 +322,7 @@ function ProjectNavigationItem({
           aria-label={`Close ${project.name}`}
           onSelect={() => {
             if (row.runs > 0) {
-              setAskingToClose(true);
+              void askToClose(false);
               return;
             }
             closeProject(project.id);
@@ -304,15 +336,11 @@ function ProjectNavigationItem({
       <Item
         variant='destructive'
         onSelect={() => {
-          if (row.runs > 0) {
-            setAskingToDelete(true);
-          } else {
-            void onDelete();
-          }
+          void askToClose(true);
         }}
       >
         <Trash2 aria-hidden />
-        Delete
+        Move to Trash
       </Item>
     </>
   );
@@ -411,17 +439,25 @@ function ProjectNavigationItem({
           )}
         </div>
       </SidebarRowContextMenu>
-      <CloseProjectDialog row={row} name={project.name} isOpen={askingToClose} onOpenChange={setAskingToClose} />
       <CloseProjectDialog
         row={row}
         name={project.name}
+        closePlan={closePlan}
+        isOpen={askingToClose}
+        onOpenChange={setAskingToClose}
+      />
+      <CloseProjectDialog
+        row={row}
+        name={project.name}
+        closePlan={closePlan}
+        beforeDelete
         isOpen={askingToDelete}
         onOpenChange={setAskingToDelete}
         onConfirm={() => {
-          void onDelete();
+          closeProject(project.id);
         }}
       />
-      {isExpanded ? <ProjectChatList project={project} isProjectActive={isActive} /> : null}
+      <ProjectChatList project={project} isProjectActive={isActive} isExpanded={isExpanded} />
     </SidebarMenuItem>
   );
 }
@@ -445,7 +481,7 @@ function ProjectsLabel(): React.JSX.Element {
         {projects > 0 ? <span className='ml-1.5 font-normal tabular-nums'>{`${String(projects)} live`}</span> : null}
       </SidebarGroupLabel>
       {idleProjectIds.length > 0 ? (
-        <span className='hidden group-focus-within/label:flex group-hover/label:flex pointer-coarse:flex'>
+        <span className='hidden group-focus-within/label:flex group-hover/label:flex has-[[aria-haspopup=menu][data-state=open]]:flex pointer-coarse:flex'>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button

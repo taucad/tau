@@ -6,6 +6,7 @@ export type GeoSpecRunnerWorkerInitializeRequest = {
   requestId: string;
   sessionId: string;
   runtimeConfig: UiRuntimeConfigInput;
+  geoSpecEngine?: 'legacy' | 'native' | undefined;
   fileSystemPort: MessagePort;
 };
 

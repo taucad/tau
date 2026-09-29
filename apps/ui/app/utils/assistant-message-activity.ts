@@ -9,6 +9,7 @@
 import type { MyMessagePart } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
+import { summarizeExternalCall } from '#utils/external-call-summary.js';
 
 export type ActivityCategory = 'text' | 'reasoning' | 'research' | 'write' | 'data' | 'skip';
 
@@ -60,12 +61,14 @@ const staticFamilies = new Map<string, ActivityFamily>([
   ['tool-create_file', 'edit'],
   ['tool-delete_file', 'edit'],
   ['tool-apply_parameter_operation', 'edit'],
+  ['tool-arrange_workbench', 'edit'],
   ['tool-get_kernel_result', 'render'],
   ['tool-screenshot', 'screenshot'],
   ['tool-test_model', 'test'],
 ]);
 
 const nativeFamilies = new Map<string, ActivityFamily>([
+  ['arrange_workbench', 'edit'],
   ['use_skill', 'skill'],
   ['read_file', 'read'],
   ['list_directory', 'read'],
@@ -184,6 +187,25 @@ export const externalToolKind = (part: MyMessagePart): string | undefined => {
   return typeof kind === 'string' ? kind : undefined;
 };
 
+/** The title and located paths an external call reported. */
+const externalCallFacts = (part: MyMessagePart): { title: string | undefined; locations: string[] } => {
+  const facts = tauFacts(part);
+  const title = facts?.['title'];
+  const locations = Array.isArray(facts?.['locations']) ? facts['locations'] : [];
+  return {
+    title: typeof title === 'string' ? title : undefined,
+    locations: locations.flatMap((location: unknown) =>
+      isRecord(location) && typeof location['path'] === 'string' ? [location['path']] : [],
+    ),
+  };
+};
+
+/** The summary an external call renders under, when Tau can name it. */
+const externalSummary = (part: MyMessagePart) =>
+  part.type === 'dynamic-tool'
+    ? summarizeExternalCall({ ...externalCallFacts(part), kind: externalToolKind(part), input: part.input })
+    : undefined;
+
 const tauMcpToolName = (part: MyMessagePart): string | undefined => {
   const tau = tauFacts(part);
   const nativeName = tau?.['nativeName'];
@@ -200,7 +222,8 @@ export const activityFamily = (part: MyMessagePart): ActivityFamily => {
   if (nativeName) {
     return nativeFamilies.get(nativeName) ?? 'other';
   }
-  return externalFamilies.get(externalToolKind(part) ?? '') ?? 'other';
+  const kind = externalToolKind(part);
+  return externalSummary(part)?.family ?? externalFamilies.get(kind ?? '') ?? 'other';
 };
 
 /** Classify one message part without reordering it. */
@@ -215,9 +238,10 @@ export const classifyActivityPart = (part: MyMessagePart): ActivityCategory => {
     if (part.toolName === agentApprovalToolName) {
       return 'skip';
     }
-    return tauMcpToolName(part) === 'export_geometry' ? 'write' : 'research';
+    const nativeName = tauMcpToolName(part);
+    return nativeName === 'export_geometry' || nativeName === 'arrange_workbench' ? 'write' : 'research';
   }
-  if (part.type === 'tool-export_geometry') {
+  if (part.type === 'tool-export_geometry' || part.type === 'tool-arrange_workbench') {
     return 'write';
   }
   if (staticFamilies.has(part.type)) {
@@ -262,9 +286,14 @@ const partState = (part: MyMessagePart): ActivityState => {
  */
 export const isActivityPartActive = (part: MyMessagePart): boolean => partState(part) === 'active';
 
-const displayTitle = (part: MyMessagePart): string => {
+const displayTitle = (part: MyMessagePart, isActive: boolean): string => {
   if (part.type !== 'dynamic-tool') {
     return 'Tool call';
+  }
+  /* The card's own phrase, so "Interact with subagent x" reads "Messaged subagent x" in both. */
+  const summary = externalSummary(part);
+  if (summary !== undefined) {
+    return `${isActive ? summary.activeVerb : summary.verb} ${isActive ? summary.activeDetail : summary.detail}`.trim();
   }
   const title = tauFacts(part)?.['title'];
   return typeof title === 'string' && title.trim() !== '' ? title.trim() : part.toolName;
@@ -311,9 +340,11 @@ export const describeActivity = (parts: readonly MyMessagePart[]): string => {
       const { state, suffix } = familyState(familyParts);
       const phrase =
         family === 'other'
-          ? `${displayTitle(familyParts.at(-1)!)}${
+          ? `${displayTitle(familyParts.at(-1)!, state === 'active')}${
               state === 'active'
-                ? ' — running'
+                ? externalSummary(familyParts.at(-1)!) === undefined
+                  ? ' — running'
+                  : ''
                 : state === 'approval'
                   ? ' — awaiting approval'
                   : state === 'error'

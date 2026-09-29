@@ -27,6 +27,7 @@
 import type {
   CheckedFileWrite,
   CheckedFileWriteResult,
+  FileWritePrecondition,
   FileContentMetadata,
   FileProvenance,
   FileProvenanceSource,
@@ -34,16 +35,19 @@ import type {
   FileStatEntry,
 } from '@taucad/types';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
+import { getErrno } from '@taucad/utils/error';
 import type {
   DirectoryEntry,
   FileReadStreamOptions,
   FileSystemProvider,
+  HeadFileStat,
   PathClassification,
   PathPolicy,
   WatchEvent,
   WatchRequest,
 } from '#types.js';
 import { bufferToStream } from '#backend/stream-utils.js';
+import { headFileStatFromStat } from '#content-metadata.js';
 import type { TreeSearchOptions } from '#tree-index.js';
 import type { RootedPorcelain } from '#rooted-views.js';
 import type { WorkspaceMutationError } from '#workspace-errors.js';
@@ -164,6 +168,10 @@ export type ComposedView = Omit<FileSystemProvider, 'rmdir'> &
     provenance(path: string): Promise<FileProvenance>;
     /** One directory's immediate children with stat metadata and provenance. */
     readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
+    readdirWithStats(
+      path: string,
+      options: { readonly content: 'head' },
+    ): Promise<Array<{ name: string } & HeadFileStat>>;
   };
 
 /** One refusal code for every path the registry hides, on ACP `fs/*` and on Tau's own tools alike. @public */
@@ -475,27 +483,59 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
   };
 
   /** Every row the checkout holds in a directory, hidden ones included, batched when the base offers it. */
-  const baseEntries = async (path: string): Promise<Array<{ name: string } & FileStat>> => {
-    const batched = await base.readdirWithStats?.(path);
+  function baseEntries(path: string): Promise<Array<{ name: string } & FileStat>>;
+  function baseEntries(
+    path: string,
+    options: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & HeadFileStat>>;
+  async function baseEntries(
+    path: string,
+    options?: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
+    if (options !== undefined && base.supportsHeadListing !== true) {
+      fileSystemError('ENOTSUP', `Head-only directory metadata is unavailable for ${path}.`);
+    }
+    const batched =
+      options === undefined ? await base.readdirWithStats?.(path) : await base.readdirWithStats?.(path, options);
     if (batched !== undefined) {
-      return batched;
+      return options === undefined
+        ? batched
+        : batched.map(({ name, ...stat }) => ({ name, ...headFileStatFromStat(stat) }));
+    }
+    if (options !== undefined) {
+      fileSystemError('ENOTSUP', `Head-only directory metadata is unavailable for ${path}.`);
     }
     const names = await base.readdir(path);
-    return Promise.all(names.map(async (name) => ({ name, ...(await base.stat(joinRelativePath(path, name))) })));
-  };
+    return Promise.all(
+      names.map(async (name) => {
+        const stat = await base.stat(joinRelativePath(path, name));
+        return { name, ...stat };
+      }),
+    );
+  }
 
   /** The checkout's own rows of a directory, control-plane rows dropped for every consumer. */
-  const upperEntries = async (path: string, tolerateMissing: boolean): Promise<Array<{ name: string } & FileStat>> => {
+  function upperEntries(path: string, tolerateMissing: boolean): Promise<Array<{ name: string } & FileStat>>;
+  function upperEntries(
+    path: string,
+    tolerateMissing: boolean,
+    options: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & HeadFileStat>>;
+  async function upperEntries(
+    path: string,
+    tolerateMissing: boolean,
+    options?: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
     try {
-      const rows = await baseEntries(path);
+      const rows = options === undefined ? await baseEntries(path) : await baseEntries(path, options);
       return rows.filter(({ name }) => !hidden(joinRelativePath(path, name)));
     } catch (error) {
-      if (tolerateMissing) {
+      if (tolerateMissing && (getErrno(error) === 'ENOENT' || getErrno(error) === 'ENOTDIR')) {
         return [];
       }
       throw error;
     }
-  };
+  }
 
   /**
    * The first path inside a subtree that this view hides, if there is one.
@@ -577,23 +617,36 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     return encoding === 'utf8' ? new TextDecoder('utf-8', { fatal: true }).decode(bytes) : bytes;
   }
 
-  const readdirWithStats = async (path: string): Promise<Array<{ name: string } & FileStat>> => {
+  function readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
+  function readdirWithStats(
+    path: string,
+    options: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & HeadFileStat>>;
+  async function readdirWithStats(
+    path: string,
+    options?: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
     const target = readablePath(canonical(path));
     const route = await routeFor(target);
-    const rows: Array<{ name: string } & FileStat> =
+    const rows: Array<{ name: string } & (FileStat | HeadFileStat)> =
       route.kind === 'overlay'
         ? overlayNames(route.overlay, target).map((name) => ({
             name,
-            ...overlayStat(overlayNode(route.overlay, joinRelativePath(target, name))),
+            ...(options === undefined
+              ? overlayStat(overlayNode(route.overlay, joinRelativePath(target, name)))
+              : headFileStatFromStat(overlayStat(overlayNode(route.overlay, joinRelativePath(target, name))))),
           }))
-        : await upperEntries(target, route.kind === 'merge');
+        : options === undefined
+          ? await upperEntries(target, route.kind === 'merge')
+          : await upperEntries(target, route.kind === 'merge', options);
     if (route.kind === 'merge') {
       const seen = new Set(rows.map(({ name }) => name));
       for (const overlay of route.overlays) {
         for (const name of overlayNames(overlay, target)) {
           if (!seen.has(name)) {
             seen.add(name);
-            rows.push({ name, ...overlayStat(overlayNode(overlay, joinRelativePath(target, name))) });
+            const stat = overlayStat(overlayNode(overlay, joinRelativePath(target, name)));
+            rows.push({ name, ...(options === undefined ? stat : headFileStatFromStat(stat)) });
           }
         }
       }
@@ -611,7 +664,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
         return { ...row, provenance: provenanceForRoute(childPath, await routeFor(childPath)) };
       }),
     );
-  };
+  }
 
   const mutate = async <T>(path: string, apply: (target: string) => Promise<T>): Promise<T> => {
     const [target] = await writableTargets([path]);
@@ -828,6 +881,24 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
           writeFileChecked: async (input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult> => {
             const [target] = await writableTargets([input.path]);
             return base.writeFileChecked!({
+              ...input,
+              path: target!,
+              preconditions: input.preconditions.map(({ path, expected }) => ({
+                path: readablePath(canonical(path)),
+                expected,
+              })),
+            });
+          },
+        }),
+    ...(base.deleteFileChecked === undefined
+      ? {}
+      : {
+          deleteFileChecked: async (input: {
+            path: string;
+            preconditions: readonly FileWritePrecondition[];
+          }): Promise<CheckedFileWriteResult> => {
+            const [target] = await writableTargets([input.path]);
+            return base.deleteFileChecked!({
               ...input,
               path: target!,
               preconditions: input.preconditions.map(({ path, expected }) => ({

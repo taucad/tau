@@ -223,6 +223,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
             "kernel": {
               "enum": [
                 "picogk",
+                "picovoxel",
                 "build123d",
                 "openscad",
                 "replicad",
@@ -515,6 +516,363 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                   },
                   "type": "array",
                 },
+                "workbench": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "entries": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "hidden": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer",
+                          },
+                          "path": {
+                            "maxLength": 1024,
+                            "minLength": 1,
+                            "type": "string",
+                          },
+                          "renderTimeout": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer",
+                          },
+                        },
+                        "required": [
+                          "path",
+                          "hidden",
+                        ],
+                        "type": "object",
+                      },
+                      "maxItems": 16,
+                      "type": "array",
+                    },
+                    "lanes": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "chat": {
+                          "type": "boolean",
+                        },
+                        "workbench": {
+                          "type": "boolean",
+                        },
+                      },
+                      "required": [
+                        "chat",
+                        "workbench",
+                      ],
+                      "type": "object",
+                    },
+                    "layoutDigest": {
+                      "anyOf": [
+                        {
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "type": "string",
+                        },
+                        {
+                          "enum": [
+                            "missing",
+                          ],
+                          "type": "string",
+                        },
+                      ],
+                    },
+                    "refused": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "reason": {
+                            "enum": [
+                              "debug-only",
+                            ],
+                            "type": "string",
+                          },
+                          "tab": {
+                            "oneOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "kind": {
+                                    "enum": [
+                                      "view",
+                                    ],
+                                    "type": "string",
+                                  },
+                                  "view": {
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                                    "type": "string",
+                                  },
+                                },
+                                "required": [
+                                  "kind",
+                                  "view",
+                                ],
+                                "type": "object",
+                              },
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "kind": {
+                                    "enum": [
+                                      "pane",
+                                    ],
+                                    "type": "string",
+                                  },
+                                  "pane": {
+                                    "enum": [
+                                      "parameters",
+                                      "model",
+                                      "print",
+                                      "kinematics",
+                                      "revisions",
+                                      "agents",
+                                      "jobs",
+                                      "export",
+                                      "share",
+                                      "details",
+                                      "kernel",
+                                      "console",
+                                    ],
+                                    "type": "string",
+                                  },
+                                },
+                                "required": [
+                                  "kind",
+                                  "pane",
+                                ],
+                                "type": "object",
+                              },
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "filesOpen": {
+                                    "type": "boolean",
+                                  },
+                                  "kind": {
+                                    "enum": [
+                                      "file",
+                                    ],
+                                    "type": "string",
+                                  },
+                                  "path": {
+                                    "maxLength": 1024,
+                                    "minLength": 1,
+                                    "type": "string",
+                                  },
+                                  "presentation": {
+                                    "enum": [
+                                      "preview",
+                                      "source",
+                                    ],
+                                    "type": "string",
+                                  },
+                                },
+                                "required": [
+                                  "kind",
+                                  "path",
+                                ],
+                                "type": "object",
+                              },
+                            ],
+                          },
+                        },
+                        "required": [
+                          "tab",
+                          "reason",
+                        ],
+                        "type": "object",
+                      },
+                      "maxItems": 16,
+                      "type": "array",
+                    },
+                    "unavailable": {
+                      "items": {
+                        "enum": [
+                          "parameters",
+                          "model",
+                          "print",
+                          "kinematics",
+                          "revisions",
+                          "agents",
+                          "jobs",
+                          "export",
+                          "share",
+                          "details",
+                          "kernel",
+                          "console",
+                        ],
+                        "type": "string",
+                      },
+                      "maxItems": 16,
+                      "type": "array",
+                    },
+                    "views": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "camera": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "isometric",
+                                  "front",
+                                  "back",
+                                  "right",
+                                  "left",
+                                  "top",
+                                  "bottom",
+                                ],
+                                "type": "string",
+                              },
+                              {
+                                "enum": [
+                                  "look",
+                                  "pose",
+                                ],
+                                "type": "string",
+                              },
+                            ],
+                          },
+                          "entryPath": {
+                            "anyOf": [
+                              {
+                                "maxLength": 1024,
+                                "minLength": 1,
+                                "type": "string",
+                              },
+                              {
+                                "type": "null",
+                              },
+                            ],
+                          },
+                          "id": {
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                            "type": "string",
+                          },
+                          "name": {
+                            "maxLength": 40,
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "entryPath",
+                          "camera",
+                        ],
+                        "type": "object",
+                      },
+                      "maxItems": 16,
+                      "type": "array",
+                    },
+                    "visible": {
+                      "items": {
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "enum": [
+                                  "view",
+                                ],
+                                "type": "string",
+                              },
+                              "view": {
+                                "maxLength": 64,
+                                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                                "type": "string",
+                              },
+                            },
+                            "required": [
+                              "kind",
+                              "view",
+                            ],
+                            "type": "object",
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "enum": [
+                                  "pane",
+                                ],
+                                "type": "string",
+                              },
+                              "pane": {
+                                "enum": [
+                                  "parameters",
+                                  "model",
+                                  "print",
+                                  "kinematics",
+                                  "revisions",
+                                  "agents",
+                                  "jobs",
+                                  "export",
+                                  "share",
+                                  "details",
+                                  "kernel",
+                                  "console",
+                                ],
+                                "type": "string",
+                              },
+                            },
+                            "required": [
+                              "kind",
+                              "pane",
+                            ],
+                            "type": "object",
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "filesOpen": {
+                                "type": "boolean",
+                              },
+                              "kind": {
+                                "enum": [
+                                  "file",
+                                ],
+                                "type": "string",
+                              },
+                              "path": {
+                                "maxLength": 1024,
+                                "minLength": 1,
+                                "type": "string",
+                              },
+                              "presentation": {
+                                "enum": [
+                                  "preview",
+                                  "source",
+                                ],
+                                "type": "string",
+                              },
+                            },
+                            "required": [
+                              "kind",
+                              "path",
+                            ],
+                            "type": "object",
+                          },
+                        ],
+                      },
+                      "maxItems": 32,
+                      "type": "array",
+                    },
+                  },
+                  "required": [
+                    "layoutDigest",
+                    "lanes",
+                    "visible",
+                    "views",
+                    "entries",
+                    "unavailable",
+                    "refused",
+                  ],
+                  "type": "object",
+                },
               },
               "type": "object",
             },
@@ -541,6 +899,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                       "use_skill",
                       "read_file",
                       "edit_file",
+                      "arrange_workbench",
                       "list_directory",
                       "create_file",
                       "delete_file",
@@ -552,6 +911,13 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                       "apply_parameter_operation",
                       "screenshot",
                       "revisions",
+                      "update_todos",
+                      "get_machine",
+                      "get_print_profiles",
+                      "request_print",
+                      "get_print_request",
+                      "list_print_requests",
+                      "cancel_print",
                     ],
                     "type": "string",
                   },

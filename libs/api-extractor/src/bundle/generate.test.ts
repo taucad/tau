@@ -9,7 +9,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { TauSkillsManifest } from '#bundle/bundle.types.js';
 import { skillsManifestFile } from '#bundle/bundle.types.js';
 import { bundleOwners, generateBundles } from '#bundle/generate.js';
-import { maxSkillBodyTokens, maxSkillDescriptionChars } from '#render/render-skill.js';
+import {
+  maxSkillBodyTokens,
+  maxSkillDescriptionChars,
+  workbenchSkillBodyTokens,
+  workbenchSkillDescriptionChars,
+} from '#render/render-skill.js';
 import { addressableEntries, estimateTokens, planShards, shardIndexById } from '#render/shard-plan.js';
 
 const workspaceRoot = join(import.meta.dirname, '../../../..');
@@ -59,14 +64,26 @@ describe('generateBundles', () => {
     await generateBundles({ outputRoot: scratch });
   }, 300_000);
 
+  it('ships the committed GeoSpec workbench skill', () => {
+    const shipped = readFileSync(join(workspaceRoot, 'packages/workbench/agent/workbench/SKILL.md'), 'utf8');
+    // SHA-256 of the GeoSpec branch's authored workbench skill.
+    expect(digest(Buffer.from(shipped))).toBe('e2475599326840f9e87825fb3ff7bad555576cc20cbf71a7a9b69296382834ae');
+  });
+
   it.each(bundleOwners.map((owner) => [owner.slug, owner.packageDirectory] as const))(
     '%s is committed exactly as it regenerates',
     (_slug, packageDirectory) => {
       const committed = join(workspaceRoot, packageDirectory, 'agent');
       const regenerated = join(scratch, packageDirectory, 'agent');
 
-      // `doctrine.md` is authored, so it is read from the workspace and never written.
-      const expected = filesUnder(committed).filter((file) => file !== 'doctrine.md');
+      // Authored files are read from the workspace, not regenerated in the agent root.
+      const expected = filesUnder(committed).filter(
+        (file) =>
+          file !== 'doctrine.md' &&
+          !bundleOwners.some(
+            (owner) => owner.packageDirectory === packageDirectory && owner.authoredReferences?.includes(file),
+          ),
+      );
       expect(filesUnder(regenerated)).toStrictEqual(expected);
 
       for (const file of expected) {
@@ -143,9 +160,12 @@ describe('every committed bundle', () => {
       const markdown = readFileSync(join(bundleDirectory, 'SKILL.md'), 'utf8');
       const body = markdown.replace(/^---\n[\S\s]*?\n---\n/u, '').trim();
 
-      expect(estimateTokens(body)).toBeLessThanOrEqual(maxSkillBodyTokens);
+      const bodyLimit = entry.owner.slug === 'workbench' ? workbenchSkillBodyTokens : maxSkillBodyTokens;
+      const descriptionLimit =
+        entry.owner.slug === 'workbench' ? workbenchSkillDescriptionChars : maxSkillDescriptionChars;
+      expect(estimateTokens(body)).toBeLessThanOrEqual(bodyLimit);
       expect(markdown.split('\n').length).toBeLessThanOrEqual(500);
-      expect(entry.declaration?.description.length ?? 0).toBeLessThanOrEqual(maxSkillDescriptionChars);
+      expect(entry.declaration?.description.length ?? 0).toBeLessThanOrEqual(descriptionLimit);
       expect(entry.declaration?.body).toBe(markdown);
       for (const file of entry.declaration?.files ?? []) {
         expect(file).not.toMatch(/[/\\]/u);
@@ -176,6 +196,15 @@ describe('every committed bundle', () => {
           .map(({ id }) => id)
           .sort(),
       );
+      if (owner.supplementalApi !== undefined) {
+        const { corpus: loadCorpus, groupBy } = owner.supplementalApi;
+        const supplemental = loadCorpus();
+        expect([...shardIndexById(planShards(supplemental, { groupBy })).keys()].sort()).toEqual(
+          addressableEntries(supplemental)
+            .map(({ id }) => id)
+            .sort(),
+        );
+      }
     },
     120_000,
   );
@@ -213,6 +242,7 @@ describe('skill declarations', () => {
       .filter((entry) => entry.isDirectory())
       .map((entry) => `packages/plugins/${entry.name}`),
     'packages/geospec',
+    'packages/workbench',
   ];
 
   it('requires every plugin and skill-bearing package to declare tau.skills or a reasoned null', () => {

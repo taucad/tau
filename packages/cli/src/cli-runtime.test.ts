@@ -19,6 +19,7 @@ const builtInKernelIds = [
   'openrscad',
   'jscad',
   'manifold',
+  'picovoxel',
   'gltf',
   'brep',
   'rhino',
@@ -81,6 +82,8 @@ describe('createCliRuntime', () => {
         name.startsWith('@taucad/') &&
         ![
           '@taucad/agent-host',
+          // Machine providers, loaded by `tau serve --machines`, not runtime plugins.
+          '@taucad/bambu',
           '@taucad/host',
           '@taucad/jobs-solvers',
           '@taucad/parameters',
@@ -93,13 +96,19 @@ describe('createCliRuntime', () => {
     expect(actual.toSorted()).toEqual(expected.toSorted());
   });
 
+  it('keeps the built-in PicoVoxel kernel on its default wasm selection', async () => {
+    const runtime = await composeCli();
+
+    expect(runtime.kernels.find(({ id }) => id === 'picovoxel')).not.toHaveProperty('options.wasm');
+  });
+
   it('composes every built-in plugin in declared order', async () => {
     const runtime = await composeCli();
 
     expect(runtime.kernels.map(({ id }) => id)).toEqual(builtInKernelIds);
     expect(runtime.bundlers.map(({ id }) => id)).toEqual(['esbuild']);
     expect(runtime.middleware.length).toBeGreaterThan(0);
-    expect(runtime.transcoders.map(({ id }) => id)).toEqual(['gltf', 'assimp', 'image', 'svg-image']);
+    expect(runtime.transcoders.map(({ id }) => id)).toEqual(['gltf', 'slicer', 'assimp', 'image', 'svg-image']);
   });
 
   it('registers the assimp import kernel through the pinned "all" preset', async () => {

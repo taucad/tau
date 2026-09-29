@@ -40,11 +40,18 @@
     // its `#mesh/*` modules moved out in the engine extraction (117b66d66), so it no
     // longer resolves or runs. Kept as the artifact its research cites, not linted.
     "packages/geospec-engine/experiments/matcher-performance/**",
+    // Pinned external CAD model sources are fixture bytes, not GeoSpec library code.
+    "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/**",
     "**/*.jscad.js",
     // Same class: the design-story splash imports these JSCAD model sources with `?raw`
     // and checks them against a baked evidence digest, so any byte change makes the
     // splash throw "Design story evidence is stale". They are model data, not app code.
     "apps/ui/app/components/geometry/splash/planetary/**",
+    // Same class: PicoVoxel example sources are byte-pinned upstream ports (`provenance.json`
+    // hashes, `picovoxel-provenance.test.ts`). Only Tau's `main.ts` adapters and GeoSpec suites are linted.
+    "libs/tau-examples/src/kernels/picovoxel/*/*.ts",
+    "!libs/tau-examples/src/kernels/picovoxel/*/main.ts",
+    "!libs/tau-examples/src/kernels/picovoxel/*/*.geospec.ts",
     "**/fixtures/scripts/**"
   ],
   "plugins": [
@@ -129,6 +136,8 @@
     "tau-lint/plugin-capability-filename": "error",
     "tau-lint/no-authored-pointer-cursor": "error",
     "tau-lint/no-inline-actor-selector": "error",
+    // Agent substrate contract (docs/policy/xstate-policy.md, MC-R1–MC-R30). No options, so no override can replace them.
+    "tau-lint/xstate-contract": "error",
     "unicorn/no-accessor-recursion": "error",
     "unicorn/no-anonymous-default-export": "error",
     "unicorn/no-array-callback-reference": "error",
@@ -476,7 +485,20 @@
     "no-restricted-imports": [
       "error",
       {
-        "paths": ["error", "domain", "freelist", "smalloc", "punycode", "sys", "querystring", "colors"],
+        "paths": [
+          "error",
+          "domain",
+          "freelist",
+          "smalloc",
+          "punycode",
+          "sys",
+          "querystring",
+          "colors",
+          {
+            "name": "@nx/vite/plugins/nx-tsconfig-paths.plugin",
+            "message": "nxViteTsPaths applies tsconfig paths to every importer before Vite's resolver. Resolve # through package.json#imports, or add a scoped resolve.alias. See docs/research/scoped-hash-import-resolution.md."
+          }
+        ],
         "patterns": [
           {
             "regex": "^\\.",
@@ -1663,6 +1685,38 @@
       }
     },
     {
+      // Page Composition Policy gates (docs/policy/page-composition-policy.md, Enforcement).
+      // Product page components only: tests and `[__e2e]` fixture routes author no product copy.
+      // Autofixable rules are errors; judgment rules warn for one release, then become errors.
+      "files": ["apps/ui/app/**/*.tsx", "packages/ui/src/**/*.tsx"],
+      "excludeFiles": ["**/*.{test,spec}.tsx", "apps/ui/app/routes/?__e2e?.*/**"],
+      "rules": {
+        "tau-lint/no-ascii-ellipsis": "error",
+        "tau-lint/require-accessible-name": "warn",
+        "tau-lint/no-label-replacing-loader": "warn",
+        "tau-lint/no-arbitrary-pixel-size": "error",
+        "tau-lint/no-accent-hover": "warn",
+        "tau-lint/no-button-size-override": "warn",
+        "tau-lint/no-raw-page-heading": "warn",
+        // The jsx-a11y subset that fits Tau's patterns (Page Composition Policy Rules 7 and 13).
+        // Left off: prefer-tag-over-role (codified role="status"), anchor-is-valid (Link `to`),
+        // no-autofocus (UX Policy inline editors), control-has-associated-label and
+        // label-has-associated-control (cannot see Button/SearchInput; require-accessible-name covers them).
+        "jsx-a11y/tabindex-no-positive": "error",
+        "jsx-a11y/no-noninteractive-tabindex": "error",
+        "jsx-a11y/aria-props": "error",
+        "jsx-a11y/aria-proptypes": "error",
+        "jsx-a11y/aria-role": "error",
+        "jsx-a11y/role-has-required-aria-props": "error",
+        "jsx-a11y/role-supports-aria-props": "error",
+        "jsx-a11y/alt-text": "error",
+        "jsx-a11y/heading-has-content": "error",
+        "jsx-a11y/anchor-has-content": "error",
+        "jsx-a11y/iframe-has-title": "error",
+        "jsx-a11y/no-access-key": "error"
+      }
+    },
+    {
       // Static `new URL(literal, import.meta.url)` invariant for the runtime.
       // Computed first arguments silently opt out of
       // bundler asset emission and break downstream consumers.
@@ -1671,9 +1725,89 @@
       "rules": {
         "tau-lint/static-import-meta-url": "error"
       }
+    },
+    {
+      // Agent substrate owner machines in published packages (docs/policy/xstate-policy.md, MC-R1–MC-R30).
+      // `portable`: MC-R2 import boundary. `spec`: the owner has a TLA+ spec, so MC-R27 (`transitionMeta`) applies.
+      "files": [
+        "packages/revisions/src/*.machine.ts",
+        "packages/agent-host/src/**/*.machine.ts",
+        "packages/agent-host/src/**/*.logic.ts",
+        "packages/host/src/**/*.machine.ts"
+      ],
+      "rules": {
+        "tau-lint/xstate-owner-machine": ["error", { "portable": true, "spec": true }]
+      }
+    },
+    {
+      // Agent substrate owner machines in the UI (MC-Q5: owner mode, not portable; no spec yet, so no MC-R27).
+      "files": [
+        "apps/ui/app/machines/{chat-session,project-session,sessions,composer-record}.machine.ts",
+        "apps/ui/app/machines/*.logic.ts",
+        "apps/ui/app/hooks/{chat-persistence,draft}.machine.ts"
+      ],
+      "rules": {
+        "tau-lint/xstate-owner-machine": "error"
+      }
+    },
+    /*
+     * Ratchet (MC-S6). Each entry lists exactly the message ids its files violate today; overrides replace
+     * options, so each restates the full options. The owning change deletes its entry. Keep these after the
+     * owner globs above: the last matching override wins.
+     */
+    {
+      // Ratchet, W5 (revisions machines).
+      "files": ["packages/revisions/src/*.machine.ts"],
+      "rules": {
+        "tau-lint/xstate-owner-machine": [
+          "error",
+          { "portable": true, "spec": true, "pending": ["rootOnError", "version", "transitionMeta"] }
+        ]
+      }
+    },
+    {
+      // Ratchet, W5.
+      "files": ["packages/revisions/src/sync.machine.ts"],
+      "rules": {
+        "tau-lint/xstate-owner-machine": [
+          "error",
+          { "portable": true, "spec": true, "pending": ["impure", "rootOnError", "version", "transitionMeta"] }
+        ]
+      }
+    },
+    {
+      // Ratchet, W5.
+      "files": ["packages/revisions/src/project-revisions.machine.ts"],
+      "rules": {
+        "tau-lint/xstate-owner-machine": [
+          "error",
+          {
+            "portable": true,
+            "spec": true,
+            "pending": ["rootOnError", "snapshotRead", "spawnByKey", "version", "transitionMeta"]
+          }
+        ]
+      }
+    },
+    {
+      // Ratchet, W9: `admitTurn` and `settleTurn` are deleted in PV-S13.
+      "files": ["apps/ui/app/machines/chat-session.machine.ts"],
+      "rules": {
+        "tau-lint/xstate-owner-machine": ["error", { "pending": ["fromSafeAsync"] }]
+      }
     }
   ],
   "settings": {
+    // Let jsx-a11y see the design-system primitives as the elements they render.
+    "jsx-a11y": {
+      "components": {
+        "Button": "button",
+        "Input": "input",
+        "SearchInput": "input",
+        "Link": "a",
+        "NavLink": "a"
+      }
+    },
     "jsdoc": {
       "definedTags": ["vitest-environment", "remarks", "internal"]
     }

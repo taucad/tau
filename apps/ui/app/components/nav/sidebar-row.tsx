@@ -33,7 +33,7 @@ import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import { cn } from '@taucad/ui/utils/cn';
-import { warmMonaco } from '#lib/monaco-warmup.js';
+import { warmProjectWorkspace } from '#lib/project-workspace-warmup.js';
 
 /*
  * `--fade-scrim-into` follows the row's own background, so the actions' scrim
@@ -194,6 +194,7 @@ export function SidebarRowLink({
   isActive,
   isPending,
   onClick,
+  state,
 }: {
   readonly to: string;
   readonly name: string;
@@ -202,18 +203,20 @@ export function SidebarRowLink({
   readonly isActive: boolean;
   readonly isPending: boolean;
   readonly onClick?: () => void;
+  readonly state?: { readonly openChat: true };
 }): React.JSX.Element {
   const link = (
     <Link
       to={to}
+      state={state}
       aria-current={isActive ? 'page' : undefined}
       aria-busy={isPending}
       aria-describedby={sentence === undefined ? undefined : descriptionId}
       className='flex h-full min-w-0 flex-1 items-center rounded-sm outline-hidden focus-visible:focus-outline'
       /* Every row opens a project route, whose editors need Monaco: start it on intent. */
-      onPointerEnter={warmMonaco}
-      onPointerDown={warmMonaco}
-      onFocus={warmMonaco}
+      onPointerEnter={warmProjectWorkspace}
+      onPointerDown={warmProjectWorkspace}
+      onFocus={warmProjectWorkspace}
       onClick={onClick}
     >
       <span className='fade-label flex-1'>{name}</span>

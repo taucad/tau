@@ -320,10 +320,9 @@ export const useAgentHostPlacements = (): {
  * each individual field.
  *
  * This is the **single source of truth** for "what does the CAD agent need to
- * run this turn" on the UI side. Every UI submit site (chat textarea, quick
- * starts, Fix-with-AI, homepage, regenerate-on-edit) composes through a
- * chat-client that wraps this hook — not by re-reading the producer hooks
- * directly. Adding a new field on the CAD agent is a single edit here, plus
+ * run this turn" on the UI side. The focused chat's `ChatTurnHost` mounts it
+ * once; UI submit sites use the chat client without re-reading these producer
+ * hooks. Adding a new field on the CAD agent is a single edit here, plus
  * the matching addition on `cadAgentConfigSchema`.
  *
  * Returns the **input** shape (`z.input<typeof cadAgentConfigSchema>`):

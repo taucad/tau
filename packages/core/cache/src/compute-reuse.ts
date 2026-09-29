@@ -287,7 +287,6 @@ const runEvaluation = async <T>(input: {
   readonly actionKey: ActionDigest;
   readonly contentStore: ContentStore;
   readonly actionStore: ActionStore;
-  readonly promote: ComputeDurablePromotion | undefined;
   readonly signal: AbortSignal;
 }): Promise<ComputeEvaluationResult<T>> => {
   const lookup = await lookupWithPolicy(input);
@@ -297,17 +296,6 @@ const runEvaluation = async <T>(input: {
       value: lookup.value,
       actionDigest: input.actionKey,
       contentDigest: lookup.contentDigest,
-      ...(input.evaluation.policy === 'required'
-        ? {
-            retention: await promoteRequired({
-              retention: input.evaluation.retention,
-              actionKey: input.actionKey,
-              contentDigest: lookup.contentDigest,
-              promote: input.promote,
-              signal: input.signal,
-            }),
-          }
-        : {}),
     };
   }
   throwIfAborted(input.signal);
@@ -320,24 +308,15 @@ const runEvaluation = async <T>(input: {
   if (published.publication.status !== 'stored') {
     throw requiredFailure('Required publication did not store its content.', new Error(published.publication.reason));
   }
-  return {
-    ...published,
-    publication: {
-      ...published.publication,
-      retention: await promoteRequired({
-        retention: input.evaluation.retention,
-        actionKey: input.actionKey,
-        contentDigest: published.publication.contentDigest,
-        promote: input.promote,
-        signal: input.signal,
-      }),
-    },
-  };
+  return published;
 };
 
 const waitFor = async <T>(input: {
   readonly pending: PendingEvaluation;
   readonly signal: AbortSignal;
+  readonly evaluation: ComputeEvaluationInput<T>;
+  readonly promote: ComputeDurablePromotion | undefined;
+  readonly onEmpty: () => void;
 }): Promise<ComputeEvaluationResult<T>> => {
   const { pending, signal } = input;
   pending.waiters += 1;
@@ -351,12 +330,13 @@ const waitFor = async <T>(input: {
         return;
       }
       signal.addEventListener('abort', onAbort, { once: true });
-      void forwardPending({ pending, signal, onAbort, resolve, reject });
+      void forwardPending({ ...input, onAbort, resolve, reject });
     });
   } finally {
     pending.waiters -= 1;
     if (pending.waiters === 0) {
       pending.controller.abort();
+      input.onEmpty();
     }
   }
 };
@@ -364,17 +344,43 @@ const waitFor = async <T>(input: {
 const forwardPending = async <T>(input: {
   readonly pending: PendingEvaluation;
   readonly signal: AbortSignal;
+  readonly evaluation: ComputeEvaluationInput<T>;
+  readonly promote: ComputeDurablePromotion | undefined;
   readonly onAbort: () => void;
   readonly resolve: (result: ComputeEvaluationResult<T>) => void;
   readonly reject: (error: Error) => void;
 }): Promise<void> => {
   try {
-    const result = await input.pending.promise;
-    input.signal.removeEventListener('abort', input.onAbort);
-    input.resolve(result as ComputeEvaluationResult<T>);
+    const result = (await input.pending.promise) as ComputeEvaluationResult<T>;
+    throwIfAborted(input.signal);
+    if (input.evaluation.policy === 'required') {
+      let outputDigest: ContentDigest;
+      if (result.source === 'cache') {
+        outputDigest = result.contentDigest;
+      } else if (result.publication.status === 'stored') {
+        outputDigest = result.publication.contentDigest;
+      } else {
+        throw requiredFailure('Required publication did not store its content.', new Error(result.publication.reason));
+      }
+      const retention = await promoteRequired({
+        retention: input.evaluation.retention,
+        actionKey: result.actionDigest,
+        contentDigest: outputDigest,
+        promote: input.promote,
+        signal: input.signal,
+      });
+      input.resolve(
+        result.source === 'cache'
+          ? { ...result, retention }
+          : { ...result, publication: { status: 'stored', contentDigest: outputDigest, retention } },
+      );
+      return;
+    }
+    input.resolve(result);
   } catch (error) {
-    input.signal.removeEventListener('abort', input.onAbort);
     input.reject(error instanceof Error ? error : new Error(String(error)));
+  } finally {
+    input.signal.removeEventListener('abort', input.onAbort);
   }
 };
 
@@ -413,7 +419,6 @@ export const createComputeReuseService = (options: ComputeReuseServiceOptions): 
               actionKey,
               contentStore: options.contentStore,
               actionStore: options.actionStore,
-              promote: options.promote,
               signal: controller.signal,
             });
           } finally {
@@ -425,7 +430,18 @@ export const createComputeReuseService = (options: ComputeReuseServiceOptions): 
         pending = { controller, promise, waiters: 0 };
         pendingEvaluations.set(flightKey, pending);
       }
-      return waitFor<T>({ pending, signal: callerSignal });
+      const activePending = pending;
+      return waitFor<T>({
+        pending: activePending,
+        signal: callerSignal,
+        evaluation,
+        promote: options.promote,
+        onEmpty: () => {
+          if (pendingEvaluations.get(flightKey) === activePending) {
+            pendingEvaluations.delete(flightKey);
+          }
+        },
+      });
     },
   };
 };

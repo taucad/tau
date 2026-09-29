@@ -1,16 +1,25 @@
 // @vitest-environment node
 import { esbuildBundler } from '@taucad/esbuild';
-import { createTestGeometry, createTestRuntimeClient, getTestParameters } from '@taucad/runtime-testing';
+import {
+  createMockKernelRuntime,
+  createTestGeometry,
+  createTestRuntimeClient,
+  expectKernelProjectionOrder,
+  getTestParameters,
+} from '@taucad/runtime-testing';
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { loadNativeBackend, OpencascadeNativeUnavailableError } from '#opencascade-native-backend.js';
+import type { NativeBinding, NativeSolid } from '#opencascade-native-backend.js';
 import {
   normalizeSolids,
   opencascadeNativeDetectPattern,
   opencascadeNativeKernel,
   toModelApi,
 } from '#opencascade-native.kernel.js';
+import { opencascadeNativeRenderSchema } from '#opencascade-native.schemas.js';
 
 const model = (body: string) => ({ 'model.ts': `import oc from '@taucad/opencascade-native';\n${body}` });
 const runtime = defineRuntime({ kernels: [opencascadeNativeKernel()], bundlers: [esbuildBundler()] });
@@ -102,6 +111,58 @@ describe('native OpenCascade backend', () => {
 });
 
 describe('OpenCascadeNativeKernel', () => {
+  it('renders each option from a pristine captured BRep', async () => {
+    const definition = await resolveRuntimePluginDefinition('kernel', opencascadeNativeKernel());
+    const runtime = createMockKernelRuntime();
+    const brep = new Uint8Array([7]);
+    const dummy: unknown = {};
+    const handle = [dummy as NativeSolid];
+    const fakeBinding = {
+      readBrep: vi.fn(() => {
+        const solids = [{ meshQuality: 0 }];
+        return solids as unknown as NativeSolid[];
+      }),
+      toGlb: vi.fn((solids: NativeSolid[], tessellation: { deflectionLinear: number }) => {
+        const solid = solids[0] as NativeSolid & { meshQuality: number };
+        const previous = solid.meshQuality;
+        solid.meshQuality = tessellation.deflectionLinear;
+        return new Uint8Array([previous, solid.meshQuality * 100]);
+      }),
+      writeStep: vi.fn(
+        (solids: NativeSolid[]) => new Uint8Array([(solids[0] as NativeSolid & { meshQuality: number }).meshQuality]),
+      ),
+    };
+    const binding: NativeBinding = fakeBinding as unknown as NativeBinding;
+    const fakeContext = {
+      binding,
+      version: { backend: 'native', occt: '8.0.1', package: 'test' },
+      brepByHandle: new WeakMap([[handle, brep]]),
+    };
+    const context: Parameters<NonNullable<typeof definition.render>>[2] = fakeContext;
+    const fine = opencascadeNativeRenderSchema.parse({ tessellation: { linearTolerance: 0.02 } });
+    const coarse = opencascadeNativeRenderSchema.parse({ tessellation: { linearTolerance: 0.5 } });
+    const project = async (options: typeof fine) => {
+      const rendered = await definition.render!({ handle, view: 'model', options }, runtime, context);
+      return rendered.content;
+    };
+    const write = async () => {
+      const exported = await definition.write!({ exportId: 'step', handle, options: {} }, runtime, context);
+      return exported.files[0].bytes;
+    };
+    await expectKernelProjectionOrder({
+      renderA: async () => project(fine),
+      renderB: async () => project(coarse),
+      freshB: () =>
+        binding.toGlb(binding.readBrep(brep), {
+          deflectionLinear: coarse.tessellation.linearTolerance,
+          deflectionAngular: coarse.tessellation.angularTolerance * (Math.PI / 180),
+          relativeLinear: false,
+        }),
+      write,
+    });
+    expect(binding.readBrep).toHaveBeenCalledTimes(6);
+  });
+
   it('detects the facade import', () => {
     expect(opencascadeNativeDetectPattern.test("import oc from '@taucad/opencascade-native';")).toBe(true);
     expect(opencascadeNativeDetectPattern.test("import { draw } from 'replicad';")).toBe(false);

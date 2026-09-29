@@ -110,6 +110,22 @@ const tessellationOf = (options: {
   relativeLinear: false,
 });
 
+const pristineBrep = (
+  handle: NativeSolid[],
+  context: { binding: NativeBinding; brepByHandle: WeakMap<NativeSolid[], Uint8Array<ArrayBuffer>> },
+): Uint8Array<ArrayBuffer> => {
+  const brep = context.brepByHandle.get(handle);
+  if (!brep) {
+    throw new Error('Native OpenCascade handle has no captured BRep; re-evaluate the source.');
+  }
+  return brep;
+};
+
+const pristineSolids = (
+  handle: NativeSolid[],
+  context: { binding: NativeBinding; brepByHandle: WeakMap<NativeSolid[], Uint8Array<ArrayBuffer>> },
+): NativeSolid[] => context.binding.readBrep(asBuffer(pristineBrep(handle, context)));
+
 class OpencascadeNativeBuildError extends Error {
   public readonly issues: KernelIssue[];
   public constructor(issues: KernelIssue[]) {
@@ -136,7 +152,7 @@ export const opencascadeNativeKernel = defineKernel({
   detectImport: opencascadeNativeDetectPattern,
   builtinModuleNames: [opencascadeNativeModuleName],
   name: 'OpenCascadeNativeKernel',
-  version: '0.1.0',
+  version: '0.1.1',
   optionsSchema: opencascadeNativeOptionsSchema,
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary', optionsSchema: opencascadeNativeRenderSchema } },
   exports: {
@@ -167,7 +183,7 @@ export const opencascadeNativeKernel = defineKernel({
       globalName: 'opencascadeNative',
     });
     runtime.logger.debug(`Initialized native OpenCascade kernel (OCCT ${version.occt})`);
-    return { binding, version };
+    return { binding, version, brepByHandle: new WeakMap<NativeSolid[], Uint8Array<ArrayBuffer>>() };
   },
 
   async resolve({ entryPath }, runtime) {
@@ -218,9 +234,11 @@ export const opencascadeNativeKernel = defineKernel({
     try {
       // Tessellation is deferred to `meshGeometry`: a STEP-only export must
       // never pay for a display mesh.
-      return {
-        handle: normalizeSolids(await main(toModelApi(context.binding), parameters)),
-      };
+      const handle = normalizeSolids(await main(toModelApi(context.binding), parameters));
+      if (handle.length > 0) {
+        context.brepByHandle.set(handle, new Uint8Array(context.binding.writeBrep(handle)));
+      }
+      return { handle };
     } catch (error) {
       throw new OpencascadeNativeBuildError(runtimeIssue(error, fileName));
     }
@@ -231,7 +249,7 @@ export const opencascadeNativeKernel = defineKernel({
       return { content: asBuffer(createEmptyGlb()) };
     }
     // One crossing: tessellate and encode the whole batch inside the addon.
-    const content = context.binding.toGlb(handle, tessellationOf(options));
+    const content = context.binding.toGlb(pristineSolids(handle, context), tessellationOf(options));
     return { content: new Uint8Array(content) };
   },
 
@@ -243,7 +261,7 @@ export const opencascadeNativeKernel = defineKernel({
         const glb =
           handle.length === 0
             ? createEmptyGlb()
-            : new Uint8Array(context.binding.toGlb(handle, tessellationOf(options)));
+            : new Uint8Array(context.binding.toGlb(pristineSolids(handle, context), tessellationOf(options)));
         return { files: [createExportFile('glb', 'model.glb', asBuffer(glb))] };
       }
 
@@ -252,7 +270,7 @@ export const opencascadeNativeKernel = defineKernel({
           throw new Error('No geometry available for STEP export');
         }
         // BRep formats never tessellate.
-        const step = context.binding.writeStep(handle);
+        const step = context.binding.writeStep(pristineSolids(handle, context));
         return { files: [createExportFile('step', 'assembly', asBuffer(new Uint8Array(step)))] };
       }
 
@@ -271,11 +289,16 @@ export const opencascadeNativeKernel = defineKernel({
     // An empty render still has to serialize: `writeBrep` needs at least one
     // solid, so the empty case is an empty payload, not a kernel error.
     return {
-      brep: handle.length === 0 ? new Uint8Array() : new Uint8Array(context.binding.writeBrep(handle)),
+      brep: handle.length === 0 ? new Uint8Array() : new Uint8Array(pristineBrep(handle, context)),
     };
   },
 
   deserializeHandle({ serialized }, _runtime, context) {
-    return serialized.brep.byteLength === 0 ? [] : context.binding.readBrep(asBuffer(serialized.brep));
+    if (serialized.brep.byteLength === 0) {
+      return [];
+    }
+    const handle = context.binding.readBrep(asBuffer(serialized.brep));
+    context.brepByHandle.set(handle, new Uint8Array(serialized.brep));
+    return handle;
   },
 });

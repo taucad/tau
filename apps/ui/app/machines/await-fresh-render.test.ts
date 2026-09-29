@@ -196,7 +196,7 @@ describe('awaitFreshRender', () => {
     }
   });
 
-  it('should expose code === "RENDER_TIMEOUT" on AwaitFreshRenderTimeoutError (never depends on XState message)', async () => {
+  it('should expose code === "OPERATION_TIMEOUT" on AwaitFreshRenderTimeoutError (never depends on XState message)', async () => {
     const actor = createActor(fakeCadMachine).start();
     actor.send({ type: 'request' });
     actor.send({ type: 'startRender' });
@@ -211,7 +211,7 @@ describe('awaitFreshRender', () => {
       // Discriminator must come from our owned timeout race, not from any
       // substring scan of the inner XState error wording. Future XState
       // releases that change the timeout message must not break this contract.
-      expect((error as AwaitFreshRenderTimeoutError).code).toBe('RENDER_TIMEOUT');
+      expect((error as AwaitFreshRenderTimeoutError).code).toBe('OPERATION_TIMEOUT');
     } finally {
       actor.stop();
     }

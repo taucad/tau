@@ -337,7 +337,7 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
  * render generation.
  */
 /** Subset of {@link RpcClientErrorCode} emitted by `ensureGeometryUnit` only. */
-export type EnsureGeometryUnitErrorCode = Extract<RpcClientErrorCode, 'UNKNOWN' | 'RENDER_TIMEOUT'>;
+export type EnsureGeometryUnitErrorCode = Extract<RpcClientErrorCode, 'UNKNOWN' | 'OPERATION_TIMEOUT'>;
 
 export type EnsureGeometryUnitResult =
   | {
@@ -391,7 +391,7 @@ async function ensureGeometryUnit(
     if (error instanceof AwaitFreshRenderTimeoutError) {
       return {
         ok: false,
-        errorCode: rpcClientErrorCode.renderTimeout,
+        errorCode: rpcClientErrorCode.operationTimeout,
         message: `Render for ${targetFile} did not settle in time. Inspect recent model changes, kernel diagnostics, and parameter values; fix the render blocker or increase render timeout for legitimately long operations.`,
       };
     }

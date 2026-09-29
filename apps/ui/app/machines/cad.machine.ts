@@ -855,7 +855,7 @@ export const cadMachine = setup({
             onError: ({ context, event }) => {
               const entryPath = context.entryPath ?? '__render__';
               const errorCode = isRenderTimeoutError(event.error)
-                ? 'RENDER_TIMEOUT'
+                ? 'OPERATION_TIMEOUT'
                 : event.error &&
                     typeof event.error === 'object' &&
                     'code' in event.error &&

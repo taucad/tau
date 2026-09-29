@@ -324,6 +324,7 @@ const createImageSchema = <const SharedShape extends z.ZodRawShape, const ViewSh
   const imageViewSchema = z
     .object({
       id: z.string().regex(renderImageViewIdPattern, 'Expected 1–64 letters, digits, underscores, or hyphens'),
+      visiblePrimitives: visiblePrimitivesSchema.optional().describe('Exact source primitive instances for this view'),
       label: imageLabelSchema.optional(),
       camera: imageCameraSchema.default(defaultImageCamera),
       width: imageDimensionSchema.optional().describe('Output width override for this view, pixels'),
@@ -383,13 +384,30 @@ const createImageSchema = <const SharedShape extends z.ZodRawShape, const ViewSh
         readonly height: number;
         readonly axes: boolean;
         readonly scaleBar: boolean;
+        readonly sections?: unknown;
         readonly views: ReadonlyArray<{
+          readonly visiblePrimitives?: readonly unknown[];
+          readonly camera: { readonly framing: string };
           readonly label?: string;
           readonly width?: number;
           readonly height?: number;
         }>;
       };
       for (const [index, view] of options.views.entries()) {
+        if (view.visiblePrimitives !== undefined && options.sections !== undefined) {
+          context.addIssue({
+            code: 'custom',
+            path: ['views', index, 'visiblePrimitives'],
+            message: 'Per-view primitive selection with sections is unsupported',
+          });
+        }
+        if (view.visiblePrimitives?.length === 0 && view.camera.framing !== 'fixed') {
+          context.addIssue({
+            code: 'custom',
+            path: ['views', index, 'visiblePrimitives'],
+            message: 'Empty primitive selection has no bounds for a fitted camera',
+          });
+        }
         validateAnnotatedDimensions(
           {
             width: view.width ?? options.width,

@@ -817,6 +817,13 @@ function linkInstalledPackage(from: string, nodeModules: string, dependency: str
   return true;
 }
 
+function copyAgentAssets(source: string, destination: string, files: unknown): void {
+  const agent = join(source, 'agent');
+  if (Array.isArray(files) && files.includes('agent') && existsSync(agent)) {
+    cpSync(agent, join(destination, 'agent'), { recursive: true });
+  }
+}
+
 /**
  * Install one workspace package into a throwaway consumer the way npm would:
  * its `publishConfig`-applied manifest plus its built `dist`, never its source
@@ -848,6 +855,7 @@ function stagePublishedPackage(projectDirectory: string, nodeModules: string, st
   } else {
     failures.push(`${name}: dist/ is missing; build it before running pkgcheck`);
   }
+  copyAgentAssets(projectDirectory, destination, manifest.files);
 
   for (const [dependency] of [
     ...Object.entries(manifest.dependencies ?? {}),
@@ -920,7 +928,13 @@ void [
  * check every shipped `.d.mts` under both resolution modes.
  */
 function consumerProbeSource(specifiers: readonly string[]): string {
-  const imports = specifiers.map((specifier, index) => `import * as probe${String(index)} from '${specifier}';`);
+  const { exports } = applyPublishConfig(packageJson);
+  const imports = specifiers.map((specifier, index) => {
+    const subpath = `.${specifier.slice(packageName.length)}`;
+    const target = isRecord(exports) ? exports[subpath] : undefined;
+    const attribute = typeof target === 'string' && target.endsWith('.json') ? ' with { type: "json" }' : '';
+    return `import * as probe${String(index)} from '${specifier}'${attribute};`;
+  });
   const bindings = specifiers.map((_, index) => `probe${String(index)}`);
   const prologue = packageName === '@taucad/runtime' ? runtimeConsumerProbe : '';
   return `${prologue}${imports.join('\n')}\nvoid [${bindings.join(', ')}];\n`;
@@ -1015,6 +1029,7 @@ async function runAttw(): Promise<CheckResult> {
     if (existsSync(distributionSource)) {
       cpSync(distributionSource, join(stagingDirectory, 'dist'), { recursive: true });
     }
+    copyAgentAssets(absoluteRoot, stagingDirectory, packageJson.files);
 
     const readmeSource = join(absoluteRoot, 'README.md');
     if (existsSync(readmeSource)) {

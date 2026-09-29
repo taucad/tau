@@ -196,6 +196,7 @@ export function MeasureOptions(): React.JSX.Element {
   const operation = useGraphicsSelector((state) => state.context.measureOperation);
   const frame = useGraphicsSelector((state) => state.context.measureFrame);
   const candidates = useGraphicsSelector((state) => state.context.measureCandidates);
+  const catalogHasMore = useGraphicsSelector((state) => state.context.measureCatalogHasMore);
   const activeCandidateId = useGraphicsSelector((state) => state.context.measureActiveCandidateId);
   const lockedTargetId = useGraphicsSelector((state) => state.context.measureLockedTargetId);
   const message = useGraphicsSelector((state) => state.context.measureMessage);
@@ -348,6 +349,17 @@ export function MeasureOptions(): React.JSX.Element {
                 ))}
               </select>
             </label>
+            {catalogHasMore && (
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => {
+                  graphicsRef.send({ type: 'requestMeasureCatalog', append: true });
+                }}
+              >
+                Load more targets
+              </Button>
+            )}
             <Button
               variant='outline'
               size='sm'

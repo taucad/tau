@@ -66,10 +66,13 @@ describe('MeasureOptions', () => {
         { id: 'circle:b', label: 'Pawn base' },
       ],
       activeId: 'edge:a',
+      hasMore: true,
     });
     const user = userEvent.setup();
     renderRow(actor);
     await user.click(screen.getByRole('button', { name: /^Targets:/ }));
+    await user.click(screen.getByRole('button', { name: 'Load more targets' }));
+    expect(actor.getSnapshot().context).toMatchObject({ measureCatalogRequest: 1, measureCatalogAppend: true });
     await user.selectOptions(screen.getByRole('combobox', { name: 'Measurement mode' }), 'point');
     expect(actor.getSnapshot().context.measureMode).toBe('point');
     await user.selectOptions(screen.getByRole('combobox', { name: 'Measurement mode' }), 'auto');

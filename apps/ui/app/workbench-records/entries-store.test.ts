@@ -64,6 +64,51 @@ const store = (m: ReturnType<typeof memory>) =>
   });
 
 describe('workbench entries checked store', () => {
+  it('marks only exact in-flight entry patch fields on a matching watch read', async () => {
+    const data = memory();
+    const committed = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const onChange = vi.fn();
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: {
+        ...data.files,
+        writeFileChecked: async (input) => {
+          const result = await data.files.writeFileChecked(input);
+          committed.resolve();
+          await release.promise;
+          return result;
+        },
+      },
+      onChange,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    await entries.read();
+    const edited = entries.edit('a.ts', { renderTimeout: 240_000 });
+    await committed.promise;
+    await entries.read();
+    expect(onChange.mock.lastCall?.[1]).toBe('write');
+    expect(onChange.mock.lastCall?.[2]).toEqual({ path: 'a.ts', fields: { renderTimeout: 240_000 } });
+    data.setBytes(
+      encoder.encode(
+        workbenchRecords.entries.serialize({
+          version: 1,
+          entries: {
+            'a.ts': { renderTimeout: 240_000, components: { hidden: [], isolated: ['foreign'], opacity: [] } },
+          },
+        }),
+      ),
+    );
+    await entries.read();
+    expect(onChange.mock.lastCall?.[1]).toBe('read');
+    expect(onChange.mock.lastCall?.[2]).toBeUndefined();
+    release.resolve();
+    await edited;
+    entries.dispose();
+  });
+
   it('does not report superseded reads and reannounces same bytes after an IO error', async () => {
     const data = memory();
     let stale = Promise.withResolvers<void>();

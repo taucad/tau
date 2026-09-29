@@ -298,6 +298,11 @@ export const createHostRevisionClient = (input: {
     opening = pending;
     try {
       return await pending;
+    } catch (error) {
+      if (generation !== connectionGeneration) {
+        throw staleConnection();
+      }
+      throw error;
     } finally {
       if (opening === pending) {
         opening = undefined;
@@ -305,10 +310,21 @@ export const createHostRevisionClient = (input: {
     }
   };
   const ask = async (request: JsonValue): Promise<JsonValue> => {
-    const connected = await opened();
-    const response = await connected.revision(request);
-    applyStatus(response.status);
-    return response.result;
+    const generation = connectionGeneration;
+    try {
+      const connected = await opened();
+      const response = await connected.revision(request);
+      if (generation !== connectionGeneration) {
+        throw staleConnection();
+      }
+      applyStatus(response.status);
+      return response.result;
+    } catch (error) {
+      if (generation !== connectionGeneration) {
+        throw staleConnection();
+      }
+      throw error;
+    }
   };
   const send = (request: WorkerRevisionCommand): void => {
     // async-iife: bootstrap -- a machine verb reports its settled state on the revision stream.
@@ -347,6 +363,9 @@ export const createHostRevisionClient = (input: {
         try {
           await ask({ command: 'remoteCredential', ...credential });
         } catch (error) {
+          if (isStaleConnection(error)) {
+            return;
+          }
           toasts.emit({
             type: 'error',
             subject: 'save',

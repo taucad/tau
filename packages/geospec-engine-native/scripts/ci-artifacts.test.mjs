@@ -9,10 +9,11 @@ import fs, {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import process from 'node:process';
 /* oxlint-disable no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export. */
@@ -64,12 +65,17 @@ void test('explicit delivery cache remains the exact selected path', (context) =
       process.env.GEOSPEC_DELIVERY_CACHE = previous;
     }
   });
-  const producer = context.mock.method(childProcess, 'spawnSync', (executable, _args, options) => {
-    assert.equal(executable, 'pnpm');
-    assert.equal(options.env.GEOSPEC_DELIVERY_CACHE, selected);
-    assert.equal(options.env.GEOSPEC_DELIVERY_GENERATION, undefined);
-    return { status: 1 };
-  });
+  const producer = context.mock.method(
+    childProcess,
+    'spawnSync',
+    /** @type {(executable: string, args: string[], options: {env: {GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_DELIVERY_GENERATION?: string}}) => {status: number}} */
+    (executable, _args, options) => {
+      assert.ok(isAbsolute(executable) && executable.endsWith('/pnpm'));
+      assert.equal(options.env.GEOSPEC_DELIVERY_CACHE, selected);
+      assert.equal(options.env.GEOSPEC_DELIVERY_GENERATION, undefined);
+      return { status: 1 };
+    },
+  );
   assert.throws(() => prepareArtifacts(root), /GeoSpec producer prepare-delivery:sources failed/);
   assert.equal(producer.mock.callCount(), 1);
 });
@@ -113,8 +119,14 @@ const checkTransport = (context, reusePrefixes) => {
   const toolchainPath = 'rust-toolchain.toml';
   const generatedPath = `${packagePath}/bindings/node/generated`;
   const mixedPath = `${packagePath}/bindings/emscripten/generated`;
-  const productPath = process.env.PATH;
-  const nativePrefixPath = '/inert-native-node-26.7/bin:/inert-native-tools/bin';
+  const callerBin = join(temporary, 'caller-bin');
+  mkdirSync(join(callerBin, 'pnpm'), { recursive: true });
+  const productPath = `${callerBin}:${process.env.PATH}`;
+  const nativeBin = join(temporary, 'strict-native-bin');
+  mkdirSync(nativeBin);
+  symlinkSync(process.execPath, join(nativeBin, 'node'));
+  const nativePrefixPath = `${nativeBin}:/inert-native-tools/bin`;
+  assert.equal(existsSync(join(nativeBin, 'pnpm')), false, 'strict native PATH must not supply pnpm');
   const wasmSimd = { rustFlags: ['-C', 'target-feature=+simd128'], cxxFlag: '-msimd128', linkFlag: '-msimd128' };
   const wasmEh = {
     compileFlags: ['-fwasm-exceptions', '-sWASM_LEGACY_EXCEPTIONS=1', '-sSUPPORT_LONGJMP=wasm'],
@@ -236,7 +248,8 @@ const checkTransport = (context, reusePrefixes) => {
         put(join(args[4], 'identity-source-proof.json'), JSON.stringify({ fixture: 'inert same-build proof' }));
         return { status: 0 };
       }
-      assert.equal(executable, 'pnpm');
+      assert.ok(isAbsolute(executable) && executable.endsWith('/pnpm'));
+      assert.notEqual(executable, join(callerBin, 'pnpm'), 'PATH directory is not an executable runner');
       assert.deepEqual(args.slice(0, 2), ['nx', 'run']);
       assert.equal(options.cwd, producer);
       const command = args[2];
@@ -398,6 +411,7 @@ const checkTransport = (context, reusePrefixes) => {
   const previousEnvironment = process.env;
   process.env = {
     ...process.env,
+    PATH: productPath,
     GEOSPEC_DELIVERY_CACHE: undefined,
     GEOSPEC_NATIVE_DELIVERY_CACHE: reusePrefixes ? nativeCache : undefined,
     GEOSPEC_NATIVE_PREFIX_PATH: nativePrefixPath,

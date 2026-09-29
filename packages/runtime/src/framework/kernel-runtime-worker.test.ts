@@ -1206,8 +1206,9 @@ describe('create-options projection', () => {
       });
       const second = (worker as unknown as { currentPublishedRender: MaterializedRender }).currentPublishedRender;
 
-      expect(createInputs.map(({ options }) => options)).toEqual([{ quality: 8 }, { quality: 8 }]);
+      expect(createInputs.map(({ options }) => options)).toEqual([{ quality: 8 }]);
       expect(second.identity.nativeHandleKey).toBe(first.identity.nativeHandleKey);
+      expect(second.evaluationSlot).toBe(first.evaluationSlot);
     } finally {
       await worker.cleanup();
     }
@@ -1893,6 +1894,7 @@ describe('native-handle snapshot restoration', () => {
   it('should restore a durable native handle through paired kernel hooks', async () => {
     const evaluate = vi.fn().mockResolvedValue({
       handle: { kind: 'live-handle' },
+      exports: ['gltf'],
       issues: [] as KernelIssue[],
     });
     const deserializeHandle = vi.fn().mockReturnValue({ kind: 'restored-handle' });
@@ -1901,7 +1903,10 @@ describe('native-handle snapshot restoration', () => {
       issues: [] as KernelIssue[],
     });
     const definition = createMockKernelDefinition('snapshot-kernel', {
-      exports: { gltf: { title: 'GLTF', mimeType: 'model/gltf+json', extension: 'gltf', optionsSchema: z.object({}) } },
+      exports: {
+        gltf: { title: 'GLTF', mimeType: 'model/gltf+json', extension: 'gltf', optionsSchema: z.object({}) },
+        stl: { title: 'STL', mimeType: 'model/stl', extension: 'stl', optionsSchema: z.object({}) },
+      },
       evaluate,
       write,
       serializeHandle: ({ handle }: { handle: unknown }) => ({ snapshot: handle }),
@@ -1914,7 +1919,15 @@ describe('native-handle snapshot restoration', () => {
 
     const artifact = (worker as unknown as { currentPublishedRender?: MaterializedRender }).currentPublishedRender;
     expect(artifact).toBeDefined();
+    expect(artifact?.serializedNativeHandleSlot).toBeDefined();
+    artifact!.serializedNativeHandleSlot!.serializedNativeHandle = structuredClone(
+      artifact!.serializedNativeHandleSlot!.serializedNativeHandle,
+    );
     artifact!.liveNativeHandleSlot = undefined;
+
+    const unoffered = await worker.exportGeometry('stl');
+    expect(unoffered.success).toBe(false);
+    expect(unoffered.issues[0]?.code).toBe('KERNEL_CAPABILITY_MISSING');
 
     const exportResult = await worker.exportGeometry('gltf');
 
@@ -2441,7 +2454,7 @@ describe('native-handle snapshot restoration', () => {
     }
   });
 
-  it('disposes unpublished request handles while retaining the published exact-match handle', async () => {
+  it('retains a request evaluation for reuse and disposes it with the published handle at cleanup', async () => {
     let generation = 0;
     const disposedInputs: TestReleaseInput[] = [];
     const releaseHandle = vi.fn((input: TestReleaseInput) => {
@@ -2474,15 +2487,16 @@ describe('native-handle snapshot restoration', () => {
       parameters: { revision: 2 },
     });
     expect(exportModelResult.success).toBe(true);
-    expect(releaseHandle).toHaveBeenCalledOnce();
-    expect(disposedInputs[0]).toEqual({ handle: { label: 'live-2' } });
+    expect(releaseHandle).not.toHaveBeenCalled();
 
     const publishedExport = await worker.exportGeometry('gltf');
     expect(publishedExport.success).toBe(true);
-    expect(releaseHandle).toHaveBeenCalledOnce();
+    expect(releaseHandle).not.toHaveBeenCalled();
     await worker.cleanup();
     expect(releaseHandle).toHaveBeenCalledTimes(2);
-    expect(disposedInputs[1]).toEqual({ handle: { label: 'live-1' } });
+    expect(disposedInputs).toEqual(
+      expect.arrayContaining([{ handle: { label: 'live-1' } }, { handle: { label: 'live-2' } }]),
+    );
   });
 
   it('owns restored and reheated handles and disposes each exactly once after replacement', async () => {

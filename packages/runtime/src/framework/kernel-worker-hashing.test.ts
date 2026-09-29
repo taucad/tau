@@ -17,8 +17,10 @@ import type { WrapEvaluateHook } from '#types/runtime-middleware-v2.types.js';
 // oxlint-disable-next-line no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph.
 import { MockKernelWorker, createMockFileSystem } from '../../test/support/kernel-worker.fixture.js';
 import { sha256Bytes } from '@taucad/utils/hash';
+import { z } from 'zod';
 import { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
-import type { MaterializedRender } from '#framework/render-artifact.js';
+import type { MaterializedRender, NativeBuildInput, OperationOwner } from '#framework/render-artifact.js';
+import type { EvaluateResult } from '#types/runtime-kernel-v2.types.js';
 
 class AssetTestWorker extends MockKernelWorker {
   public async verifyAssets(pluginId: string, assets: readonly RuntimeImplementationAsset[]): Promise<void> {
@@ -214,6 +216,93 @@ describe('kernel-worker hashing', () => {
       ].entries()) {
         expect(keys[index + 1], label).not.toBe(keys[0]);
       }
+    });
+
+    it('does not reuse an evaluation when middleware changes the terminal build input', async () => {
+      let token = 0;
+      const observed: unknown[] = [];
+      class EffectiveInputWorker extends MockKernelWorker {
+        public constructor(options: ConstructorParameters<typeof MockKernelWorker>[0]) {
+          super(options);
+          this.kernelCreateOptionsZodSchemaMap.set('mock-kernel', z.object({ token: z.number().default(0) }));
+        }
+
+        protected override async onEvaluateForOwner(
+          owner: OperationOwner,
+          input: NativeBuildInput,
+          runtime: KernelRuntime,
+        ): Promise<EvaluateResult> {
+          observed.push(input.options?.['token']);
+          return super.onEvaluateForOwner(owner, input, runtime);
+        }
+      }
+      const dynamic = defineMiddleware({
+        id: 'dynamic-input',
+        name: 'Dynamic Input',
+        async wrapEvaluate(input, handler) {
+          return handler({ ...input, options: { token: ++token } });
+        },
+      });
+      const worker = new EffectiveInputWorker({ middleware: [dynamic()], onLog: onLog as OnWorkerLog });
+
+      await worker.runCreateGeometry('model.mock');
+      await worker.runCreateGeometry('model.mock');
+
+      expect(observed).toEqual([1, 2]);
+      expect(worker.createGeometryCalls).toBe(2);
+      await worker.cleanup();
+    });
+
+    it('runs response middleware once for each reuse without retaining its transformed issues', async () => {
+      const decorated = defineMiddleware({
+        id: 'decorate-evaluation',
+        name: 'Decorate Evaluation',
+        async wrapEvaluate(input, handler) {
+          const result = await handler(input);
+          return result.success
+            ? {
+                ...result,
+                issues: [...result.issues, { code: 'RUNTIME', type: 'kernel', severity: 'warning', message: 'once' }],
+              }
+            : result;
+        },
+      });
+      const worker = new MockKernelWorker({ middleware: [decorated()], onLog: onLog as OnWorkerLog });
+      const first = await worker.runCreateGeometry('model.mock');
+      const second = await worker.runCreateGeometry('model.mock');
+
+      expect(first.issues.filter((issue) => issue.message === 'once')).toHaveLength(1);
+      expect(second.issues.filter((issue) => issue.message === 'once')).toHaveLength(1);
+      expect(worker.createGeometryCalls).toBe(1);
+      await worker.cleanup();
+    });
+
+    it('does not assign terminal input to a middleware short-circuit handle', async () => {
+      class CachedWorker extends MockKernelWorker {
+        public cachedEvaluation(byte: number): EvaluateResult {
+          return this.completeFixtureEvaluation(new Uint8Array([byte]));
+        }
+      }
+      let byte = 1;
+      const middleware = defineMiddleware({
+        id: 'short-circuit',
+        name: 'Short Circuit',
+        async wrapEvaluate() {
+          return worker.cachedEvaluation(byte++);
+        },
+      });
+      const worker = new CachedWorker({ middleware: [middleware()], onLog: onLog as OnWorkerLog });
+      const first = await worker.runCreateGeometry('model.mock');
+      const second = await worker.runCreateGeometry('model.mock');
+
+      expect(first).toMatchObject({ success: true, data: { content: new Uint8Array([1]) } });
+      expect(second).toMatchObject({ success: true, data: { content: new Uint8Array([2]) } });
+      expect(byte).toBe(3);
+      expect(
+        (worker as unknown as { retainedEvaluation?: { nativeBuildInput?: NativeBuildInput } }).retainedEvaluation
+          ?.nativeBuildInput,
+      ).toBeUndefined();
+      await worker.cleanup();
     });
   });
 

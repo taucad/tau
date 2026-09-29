@@ -1,6 +1,7 @@
 import type { Geometry } from '@taucad/types';
 import type { Dependency } from '#types/runtime-dependency.types.js';
-import type { KernelResult } from '#types/runtime.types.js';
+import type { KernelIssue, KernelResult } from '#types/runtime.types.js';
+import type { KernelOffers } from '#types/runtime-kernel-v2.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 
@@ -63,6 +64,8 @@ export type OperationOwner<KernelHandle = unknown> = {
  * @public
  */
 export type NativeHandleSlot = {
+  /** Stable evaluation identity; the handle payload itself need not be unique or defined. */
+  evaluationId: number;
   identityKey: string;
   kernelId: string | undefined;
   kernelVersion: string | undefined;
@@ -74,10 +77,26 @@ export type NativeHandleSlot = {
  * @public
  */
 export type SerializedNativeHandleSlot = {
+  evaluationId: number;
   identityKey: string;
   kernelId: string | undefined;
   kernelVersion: string | undefined;
   serializedNativeHandle: unknown;
+};
+
+/** One admitted evaluation, independent of any projection rendered from it. @public */
+export type EvaluationSlot = {
+  readonly id: number;
+  readonly identityKey: string;
+  readonly owner: OperationOwner;
+  /** The exact terminal input after evaluate middleware, for safe replay and reuse. */
+  nativeBuildInput?: NativeBuildInput;
+  offers?: KernelOffers;
+  issues?: KernelIssue[];
+  hasHandle: boolean;
+  handle: unknown;
+  liveNativeHandleSlot?: NativeHandleSlot;
+  serializedNativeHandleSlot?: SerializedNativeHandleSlot;
 };
 
 /**
@@ -100,6 +119,7 @@ export type MaterializedRender = {
   identity: RenderIdentity;
   owner: OperationOwner;
   result: MaterializedRenderResult;
+  evaluationSlot?: EvaluationSlot;
   liveNativeHandleSlot?: NativeHandleSlot;
   serializedNativeHandleSlot?: SerializedNativeHandleSlot;
 };
@@ -155,12 +175,14 @@ export function createRenderIdentityKey(identity: RenderIdentity): string {
  * @returns Stable key for live and serialized native-handle slots.
  * @public
  */
-export function createNativeHandleIdentityKey(identity: RenderIdentity): string {
-  return [
+export function createNativeHandleIdentityKey(
+  identity: Pick<RenderIdentity, 'file' | 'selectedKernelId' | 'selectedKernelVersion' | 'nativeHandleKey'>,
+): string {
+  return JSON.stringify([
     identity.file.path,
     identity.file.filename,
     identity.selectedKernelId ?? '<no-kernel>',
     identity.selectedKernelVersion ?? '<no-version>',
     identity.nativeHandleKey,
-  ].join('|');
+  ]);
 }

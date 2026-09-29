@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { z } from 'zod';
 import { createExportFile } from '@taucad/types/constants';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
-import type { AnyKernelDefinitionV2, ResolveInput } from '#types/runtime-kernel-v2.types.js';
+import type { AnyKernelDefinitionV2, KernelOffers, ResolveInput } from '#types/runtime-kernel-v2.types.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
 import {
@@ -27,7 +27,7 @@ import type { MiddlewarePlugin } from '#plugins/plugin-types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
-import type { NativeBuildInput } from '#framework/render-artifact.js';
+import type { NativeBuildInput, OperationOwner } from '#framework/render-artifact.js';
 
 type PhaseCounters = {
   create: number;
@@ -104,6 +104,152 @@ const modelFile = () => createGeometryFile('model.mock');
 describe('mesh/build/export phase separation', () => {
   beforeEach(async () => {
     await seedTestFileSystem({ 'model.mock': 'mock-model' });
+  });
+
+  it('reuses one evaluation across A, B, A views without compute middleware and isolates render warnings', async () => {
+    const rendered: string[] = [];
+    let evaluations = 0;
+    class SelectingWorker extends KernelRuntimeWorker {
+      public selectedView: 'a' | 'b' = 'a';
+
+      protected override selectDefaultViewForOwner(
+        _owner: OperationOwner,
+        _offers: KernelOffers,
+      ): { view: string; mimeType: 'model/gltf-binary' } {
+        return { view: this.selectedView, mimeType: 'model/gltf-binary' };
+      }
+    }
+    const definition = createDeferredKernel(
+      { create: 0, mesh: 0, export: 0 },
+      {
+        views: {
+          a: { title: 'A', mimeType: 'model/gltf-binary' },
+          b: { title: 'B', mimeType: 'model/gltf-binary' },
+        },
+        evaluate: async () => {
+          evaluations++;
+          return { handle: { build: evaluations }, views: ['a', 'b'], issues: [] };
+        },
+        render: async ({ view }) => {
+          rendered.push(view);
+          return {
+            content: new Uint8Array([view === 'a' ? 1 : 2]),
+            issues:
+              view === 'b'
+                ? ([{ code: 'RUNTIME', type: 'kernel', severity: 'warning', message: 'B only' }] as KernelIssue[])
+                : [],
+          };
+        },
+      },
+    );
+    const runtime = defineRuntime({
+      kernels: [attachRuntimePluginDefinition({ id: 'mock-brep', extensions: ['mock'] }, () => definition)],
+      middleware: [],
+      transcoders: [],
+    });
+    const worker = new SelectingWorker({ runtime });
+    await initializeWorkerForTesting(worker);
+    try {
+      const a1 = await worker.createGeometry({ file: modelFile(), parameters: {} });
+      worker.selectedView = 'b';
+      const b = await worker.createGeometry({ file: modelFile(), parameters: {} });
+      worker.selectedView = 'a';
+      const a2 = await worker.createGeometry({ file: modelFile(), parameters: {} });
+      expect([a1, b, a2].every((result) => result.success)).toBe(true);
+      expect(evaluations).toBe(1);
+      expect(rendered).toEqual(['a', 'b', 'a']);
+      expect(a1.issues).toEqual([]);
+      expect(b.issues.map((issue) => issue.message)).toContain('B only');
+      expect(a2.issues).toEqual([]);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('reapplies an offered-view narrowing middleware once around a reused terminal evaluation', async () => {
+    let evaluations = 0;
+    const rendered: string[] = [];
+    const definition = createDeferredKernel(
+      { create: 0, mesh: 0, export: 0 },
+      {
+        views: {
+          a: { title: 'A', mimeType: 'model/gltf-binary' },
+          b: { title: 'B', mimeType: 'model/gltf-binary' },
+        },
+        evaluate: async () => {
+          evaluations++;
+          return { handle: { build: evaluations }, views: ['a', 'b'], issues: [] };
+        },
+        render: async ({ view }) => {
+          rendered.push(view);
+          return { content: new Uint8Array([2]) };
+        },
+      },
+    );
+    const narrowing = defineMiddleware({
+      id: 'narrow-views',
+      name: 'Narrow Views',
+      async wrapEvaluate(input, handler) {
+        const result = await handler(input);
+        return result.success ? { ...result, data: { ...result.data, views: ['b'] } } : result;
+      },
+    });
+    const worker = await createWorker(definition, [narrowing()]);
+    try {
+      const first = await worker.createGeometry({ file: modelFile(), parameters: {} });
+      const second = await worker.createGeometry({ file: modelFile(), parameters: {} });
+      expect(first.success && second.success).toBe(true);
+      expect(evaluations).toBe(1);
+      expect(rendered).toEqual(['b', 'b']);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('exports the newer evaluation after its board render fails', async () => {
+    let evaluations = 0;
+    const released: unknown[] = [];
+    const definition = createDeferredKernel(
+      { create: 0, mesh: 0, export: 0 },
+      {
+        evaluate: async ({ parameters }) => {
+          evaluations++;
+          return { handle: { revision: parameters['revision'] }, issues: [] };
+        },
+        render: async ({ handle }) => {
+          if ((handle as { revision?: number }).revision === 2) {
+            throw new Error('board projection failed');
+          }
+          return { content: new Uint8Array([1]) };
+        },
+        write: async ({ handle }) => ({
+          files: [
+            createExportFile('step', 'model', new Uint8Array([(handle as { revision: number }).revision])),
+          ] as const,
+          issues: [],
+        }),
+        releaseHandle: ({ handle }) => {
+          released.push(handle);
+        },
+      },
+    );
+    const worker = await createWorker(definition);
+    try {
+      const first = await worker.createGeometry({ file: modelFile(), parameters: { revision: 1 } });
+      const second = await worker.createGeometry({ file: modelFile(), parameters: { revision: 2 } });
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(false);
+      expect(released).toEqual([{ revision: 1 }]);
+      const exported = await worker.exportGeometry('step');
+      expect(exported.success).toBe(true);
+      if (exported.success) {
+        expect(exported.data[0]?.bytes).toEqual(new Uint8Array([2]));
+      }
+      expect(evaluations).toBe(2);
+    } finally {
+      await worker.cleanup();
+    }
+    expect(released).toEqual([{ revision: 1 }, { revision: 2 }]);
   });
 
   it('display render uses the v2 render hook and publishes its artifact', async () => {

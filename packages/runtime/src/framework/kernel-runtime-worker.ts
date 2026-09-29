@@ -30,7 +30,6 @@ import type {
 } from '#types/runtime-kernel.types.js';
 import type {
   Artifact,
-  EvaluateOutput,
   EvaluateResult,
   KernelOffers,
   RenderResult,
@@ -44,7 +43,7 @@ import type {
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import { KernelWorker } from '#framework/kernel-worker.js';
-import type { KernelBinding, NativeBuildInput, OperationOwner } from '#framework/render-artifact.js';
+import type { EvaluationSlot, KernelBinding, NativeBuildInput, OperationOwner } from '#framework/render-artifact.js';
 import { isRenderAbortedError } from '#framework/runtime-worker-client.js';
 import { preserveMethodNames } from '#framework/named.js';
 import { isWebAssemblyException } from '#framework/wasm-exception.js';
@@ -84,8 +83,6 @@ type LoadedKernel = {
   ctx: unknown;
   initialized: boolean;
   options: Record<string, unknown>;
-  offersByHandle: Map<unknown, EvaluateOutput<unknown, KernelViewDeclarations, KernelExportDeclarations>>;
-  offersBySnapshot: Map<unknown, EvaluateOutput<unknown, KernelViewDeclarations, KernelExportDeclarations>>;
 };
 
 type RuntimeKernelBinding = KernelBinding<LoadedKernel>;
@@ -214,8 +211,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       } catch (error) {
         this.logger.warn('Kernel cleanup failed', { data: { kernelId: kernel.entry.id, error: String(error) } });
       }
-      kernel.offersByHandle.clear();
-      kernel.offersBySnapshot.clear();
     }
     this.loadedKernels.clear();
     this.activeKernelId = undefined;
@@ -293,15 +288,17 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     runtime: KernelRuntime,
   ): Promise<CreateGeometryResult> {
     const owner = await this.createRequestOperationOwner(input, 'request', runtime);
-    return this.onCreateGeometryForOwner(owner, input, runtime);
+    return this.onCreateGeometryForOwner(owner, input, runtime, this.createEvaluationSlot(owner, input.entryPath));
   }
 
+  // oxlint-disable-next-line max-params -- Implements the base owner-bound hook including its evaluation slot.
   protected override async onCreateGeometryForOwner(
     owner: OperationOwner,
     input: NativeBuildInput,
     runtime: KernelRuntime,
+    slot: EvaluationSlot,
   ): Promise<CreateGeometryResult> {
-    const result = await this.onEvaluateForOwner(owner, input, runtime);
+    const result = await this.onEvaluateForOwner(owner, input, runtime, slot);
     return result.success
       ? {
           success: true,
@@ -315,10 +312,12 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       : result;
   }
 
+  // oxlint-disable-next-line max-params -- Implements the base owner-bound hook including its evaluation slot.
   protected override async onEvaluateForOwner(
     owner: OperationOwner,
     input: NativeBuildInput,
     runtime: KernelRuntime,
+    slot: EvaluationSlot,
   ): Promise<EvaluateResult> {
     const selectionError = this.selectionErrors.get(input.entryPath);
     if (selectionError) {
@@ -349,8 +348,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         kernel.ctx,
       );
 
-      this.captureNativeHandle(output.handle, owner);
-      kernel.offersByHandle.set(output.handle, output);
+      this.captureNativeHandle(output.handle, owner, slot);
       const instances: Record<string, readonly ViewInstance[]> = {};
       for (const [id, value] of Object.entries(output.instances ?? {})) {
         const candidate: unknown = value;
@@ -364,6 +362,8 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         ...(output.exports === undefined ? {} : { exports: output.exports }),
         ...(output.instances === undefined ? {} : { instances }),
       };
+      slot.offers = offers;
+      slot.nativeBuildInput = input;
       const defaultViewId = output.views === undefined ? Object.keys(kernel.definition.views)[0] : output.views[0];
       const defaultView = defaultViewId ? kernel.definition.views[defaultViewId] : undefined;
       if (defaultView) {
@@ -392,14 +392,13 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
            * it. The liveness check is load-bearing, not defensive: this thunk outlives the handle,
            * and serialising a disposed kernel shape is a crash. */
           serializeHandleSnapshot: () => {
-            if (!this.isNativeHandleLive(handle)) {
+            if (!this.isEvaluationSlotLive(slot)) {
               return undefined;
             }
             const serialized = serializeHandle({ handle }, kernelRuntime, kernel.ctx);
             if (serialized === undefined || serialized === null) {
               throw new Error('Kernel native-handle snapshot serializer returned null or undefined.');
             }
-            kernel.offersBySnapshot.set(serialized, output);
             return serialized;
           },
         };
@@ -459,10 +458,12 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     return view && declaration ? { view, mimeType: declaration.mimeType } : undefined;
   }
 
+  // oxlint-disable-next-line max-params -- Implements the base owner-bound hook including its evaluation slot.
   protected override async onRenderForOwner(
     owner: OperationOwner,
     input: RenderRequest & { nativeHandle: unknown },
     runtime: KernelRuntime,
+    slot: EvaluationSlot,
   ): Promise<RenderResult> {
     const kernel = this.getKernelForOwner(owner);
     const render = kernel?.definition.render;
@@ -477,7 +478,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         },
       ]);
     }
-    const offeredViews = kernel.offersByHandle.get(input.nativeHandle)?.views;
+    const offeredViews = slot.offers?.views;
     if (offeredViews !== undefined && !offeredViews.includes(input.view)) {
       return createKernelError([
         {
@@ -594,10 +595,12 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     return this.writeForKernel(kernel, input, runtime);
   }
 
+  // oxlint-disable-next-line max-params -- Implements the base owner-bound hook including its evaluation slot.
   protected override async onExportGeometryForOwner(
     owner: OperationOwner,
     input: ExportGeometryInput,
     runtime: KernelRuntime,
+    slot?: EvaluationSlot,
   ): Promise<ExportGeometryResult> {
     const kernel = this.getKernelForOwner(owner);
     if (!kernel) {
@@ -614,7 +617,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       };
     }
 
-    return this.writeForKernel(kernel, input, runtime);
+    return this.writeForKernel(kernel, input, runtime, slot);
   }
 
   protected override async isNativeHandleValidForOwner(
@@ -630,10 +633,12 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     return kernel.definition.isHandleValid({ handle: nativeHandle }, this.forKernel(kernel, runtime), kernel.ctx);
   }
 
+  // oxlint-disable-next-line max-params -- Implements the base owner-bound hook including its evaluation slot.
   protected override async deserializeNativeHandleForOwner(
     owner: OperationOwner,
     serializedNativeHandle: unknown,
     runtime: KernelRuntime,
+    _slot: EvaluationSlot,
   ): Promise<unknown | undefined> {
     const kernel = this.getKernelForOwner(owner);
     if (!kernel?.definition.deserializeHandle) {
@@ -645,21 +650,18 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       this.forKernel(kernel, runtime),
       kernel.ctx,
     );
-    const offers = kernel.offersBySnapshot.get(serializedNativeHandle);
-    if (offers) {
-      kernel.offersByHandle.set(handle, offers);
-    }
     return handle;
   }
 
+  // oxlint-disable-next-line max-params -- Implements the base owner-bound hook including its evaluation slot.
   protected override disposeNativeHandleForOwner(
     owner: OperationOwner,
     nativeHandle: unknown,
     runtime: KernelRuntime,
+    _slot: EvaluationSlot,
   ): void {
     const kernel = this.getKernelForOwner(owner);
     if (kernel) {
-      kernel.offersByHandle.delete(nativeHandle);
       kernel.definition.releaseHandle?.({ handle: nativeHandle }, this.forKernel(kernel, runtime), kernel.ctx);
     }
   }
@@ -733,10 +735,12 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   }
 
   /** Map the current client's extension route to the v2 export declaration. */
+  // oxlint-disable-next-line max-params -- The optional evaluation slot guards selected offers at the write boundary.
   private async writeForKernel(
     kernel: LoadedKernel,
     input: ExportGeometryInput & { content?: RuntimeContentInput },
     runtime: KernelRuntime,
+    slot?: EvaluationSlot,
   ): Promise<ExportGeometryResult> {
     const selected = Object.entries(kernel.definition.exports).find(
       ([, declaration]) => declaration.extension === input.format,
@@ -752,7 +756,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       ]);
     }
     const [exportId, declaration] = selected;
-    const offeredExports = kernel.offersByHandle.get(input.nativeHandle)?.exports;
+    const offeredExports = slot?.offers?.exports;
     if (offeredExports !== undefined && !offeredExports.includes(exportId)) {
       return createKernelError([
         {
@@ -913,8 +917,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       ctx: undefined,
       initialized: false,
       options: validatedOptions,
-      offersByHandle: new Map(),
-      offersBySnapshot: new Map(),
     };
 
     this.loadedKernels.set(config.id, loaded);

@@ -7,7 +7,7 @@ import type { IsolationStatus } from '@taucad/runtime/cross-origin-isolation';
 import type * as KernelModule from '@taucad/runtime/kernel';
 import type { KernelIssue } from '@taucad/runtime/types';
 import { RenderAbortedError } from '@taucad/runtime';
-import { createMockKernelRuntime, glbToDocument } from '@taucad/runtime-testing';
+import { createMockKernelRuntime, expectKernelProjectionOrder, glbToDocument } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { CreatePicoOptions, CreatePicoRuntimeOptions, Mesh, Pico, PicoRuntime, Voxels } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
@@ -1322,6 +1322,52 @@ describe('picovoxel kernel', () => {
   });
 
   describe('mesh and snapshots', () => {
+    it.each(['exact', 'fast'] as const)('keeps %s handle projections stable across content requests', async (lane) => {
+      const { runtime, context, result } = await evaluate({ module: { default: helloCube }, lane });
+      const snapshot = structuredClone(definition.serializeHandle!({ handle: result.handle }, runtime, context));
+      const fresh = definition.deserializeHandle!({ serialized: snapshot }, runtime, context);
+      const project = async (handle: typeof result.handle, includeEdges: boolean) => {
+        const rendered = await definition.render!(
+          { handle, view: 'model', options: {}, content: { includeEdges } },
+          runtime,
+          context,
+        );
+        return rendered.content;
+      };
+      const write = async () => {
+        const exported = await definition.write!(
+          { exportId: 'glb', options: definition.exports.glb.optionsSchema.parse({}), handle: result.handle },
+          runtime,
+          context,
+        );
+        return exported.files[0].bytes;
+      };
+      await expectKernelProjectionOrder({
+        renderA: async () => project(result.handle, false),
+        renderB: async () => project(result.handle, true),
+        freshB: async () => project(fresh, true),
+        ...(lane === 'exact' ? { write } : {}),
+      });
+    });
+
+    it('keeps an empty snapshot projection stable', async () => {
+      const { runtime, context, result } = await evaluate({ module: { default: () => [] }, lane: 'exact' });
+      const fresh = definition.deserializeHandle!(
+        { serialized: structuredClone(definition.serializeHandle!({ handle: result.handle }, runtime, context)) },
+        runtime,
+        context,
+      );
+      const project = async (handle: typeof result.handle) => {
+        const rendered = await definition.render!({ handle, view: 'model', options: {} }, runtime, context);
+        return rendered.content;
+      };
+      await expectKernelProjectionOrder({
+        renderA: async () => project(result.handle),
+        renderB: async () => project(result.handle),
+        freshB: async () => project(fresh),
+      });
+    });
+
     it('should mesh a handle to an indexed GLB without edges', async () => {
       const { runtime, context, result } = await evaluate({ module: { default: helloCube } });
       const meshed = await definition.render!(

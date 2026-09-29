@@ -72,16 +72,15 @@ beforeEach(() => {
 });
 
 describe('PicoVoxel dual path through the runtime', () => {
-  it('should render the viewer in the fast lane and replay the model exactly for each export', async () => {
+  it('should render the viewer in the fast lane and retain one exact replay for exports', async () => {
     const client = createClient();
     try {
       await render(client);
       const exact = await exportStl(client);
       const again = await exportStl(client);
 
-      // DP4 in a bare runtime: the export's exact replay is request-local (never published), and
-      // with no geometry cache nothing retains it, so a second export replays again. Same bytes.
-      expect(sessions.lanes).toEqual(['fast', 'exact', 'exact']);
+      // The worker retains the exact evaluation for matching later exports.
+      expect(sessions.lanes).toEqual(['fast', 'exact']);
       expect(header(exact)).toBe('PicoGK UNITS=mm');
       expect(again).toEqual(exact);
     } finally {

@@ -1,113 +1,54 @@
 import { useState } from 'react';
-import type { LucideIcon } from 'lucide-react';
 import type { FileExtension } from '@taucad/types';
-import { formatConfigurations } from '@taucad/types/constants';
-import { Badge } from '@taucad/ui/components/badge';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { SearchInput } from '#components/search-input.js';
 import { formatDisplayName } from '#components/geometry/converter/converter-utils.js';
 
 type FormatsListProps = {
-  readonly icon: LucideIcon;
-  readonly title: string;
-  readonly description: string;
   readonly formats: readonly FileExtension[];
-  readonly className?: string;
+  readonly isLoading: boolean;
 };
 
-export function FormatsList({
-  icon: Icon,
-  title,
-  description,
-  formats,
-  className,
-}: FormatsListProps): React.JSX.Element {
+export function FormatsList({ formats, isLoading }: FormatsListProps): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState('');
-
   const filteredFormats = formats.filter((format) => {
     const query = searchQuery.toLowerCase();
-    const displayName = formatDisplayName(format).toLowerCase();
-    const extension = format.toLowerCase();
-
-    return displayName.includes(query) || extension.includes(query);
+    return formatDisplayName(format).toLowerCase().includes(query) || format.toLowerCase().includes(query);
   });
 
   return (
-    <div className={className}>
-      <div className='flex flex-col overflow-hidden rounded-lg border bg-card shadow-sm'>
-        {/* Header */}
-        <div className='border-b bg-muted/50 px-6 py-4'>
-          <div className='flex items-center gap-3'>
-            <div className='flex size-10 items-center justify-center rounded-lg bg-primary/10'>
-              <Icon className='size-5 text-primary' />
-            </div>
-            <div>
-              <h2 className='text-xl font-semibold'>{title}</h2>
-              <p className='text-sm text-muted-foreground'>{description}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className='overflow-auto p-6'>
-          <div className='space-y-4'>
-            {/* Count */}
-            <p className='text-sm text-muted-foreground'>{formats.length} formats supported</p>
-
-            {/* Search */}
-            <SearchInput
-              placeholder='Search formats…'
-              value={searchQuery}
-              onClear={() => {
-                setSearchQuery('');
-              }}
-              onChange={(event) => {
-                setSearchQuery(event.target.value);
-              }}
-            />
-
-            {/* Formats Grid */}
-            {filteredFormats.length > 0 ? (
-              <div className='flex flex-wrap gap-2'>
-                {filteredFormats.map((format) => (
-                  <HoverCard key={format}>
-                    <HoverCardTrigger asChild>
-                      <Badge
-                        variant='outline'
-                        className='font-mono text-xs transition-colors hover:bg-accent hover:text-accent-foreground'
-                      >
-                        {format.toUpperCase()}
-                      </Badge>
-                    </HoverCardTrigger>
-                    <HoverCardContent className='w-80'>
-                      <div className='space-y-3'>
-                        <h4 className='font-semibold'>{formatDisplayName(format)}</h4>
-                        <div className='text-sm text-muted-foreground'>
-                          <div className='flex items-center gap-2'>
-                            <span className='font-medium'>Extension:</span>
-                            <Badge variant='secondary' className='font-mono text-xs'>
-                              .{format.toLowerCase()}
-                            </Badge>
-                          </div>
-                        </div>
-                        {Boolean(formatConfigurations[format].description) && (
-                          <p className='text-sm leading-relaxed text-muted-foreground'>
-                            {formatConfigurations[format].description}
-                          </p>
-                        )}
-                      </div>
-                    </HoverCardContent>
-                  </HoverCard>
-                ))}
-              </div>
-            ) : (
-              <div className='flex h-32 items-center justify-center rounded-md border border-dashed'>
-                <p className='text-sm text-muted-foreground'>No formats found</p>
-              </div>
-            )}
-          </div>
-        </div>
+    <section className='space-y-4'>
+      <div className='flex items-baseline justify-between gap-2'>
+        <h2 className='text-sm font-medium'>Input formats</h2>
+        {isLoading ? undefined : <span className='text-xs text-muted-foreground tabular-nums'>{formats.length}</span>}
       </div>
-    </div>
+      <SearchInput
+        aria-label='Search input formats'
+        placeholder='Find a format…'
+        value={searchQuery}
+        onClear={() => {
+          setSearchQuery('');
+        }}
+        onChange={(event) => {
+          setSearchQuery(event.target.value);
+        }}
+      />
+      {isLoading ? (
+        <p role='status' className='text-sm text-muted-foreground'>
+          Loading formats…
+        </p>
+      ) : filteredFormats.length > 0 ? (
+        <ul className='grid grid-cols-3 gap-x-4 gap-y-2'>
+          {filteredFormats.map((format) => (
+            <li key={format} className='font-mono text-xs' aria-label={formatDisplayName(format)}>
+              {format.toUpperCase()}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p role='status' className='text-sm text-muted-foreground'>
+          No formats match.
+        </p>
+      )}
+    </section>
   );
 }

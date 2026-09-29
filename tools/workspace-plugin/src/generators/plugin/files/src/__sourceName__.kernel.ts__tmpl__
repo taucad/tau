@@ -1,5 +1,4 @@
 import {
-  createKernelError,
   createKernelParameterDeclaration,
   createKernelSuccess,
   defineKernel,
@@ -11,28 +10,25 @@ export const <%= alias %>Kernel = defineKernel({
   extensions: [],
   name: '<%= alias %>Kernel',
   version: '1.0.0',
-  exportFormats: {},
+  // TODO: Declare offered views/exports and implement render/write for this backend.
+  views: {},
+  exports: {},
   async initialize() {
     return {};
   },
-  async getDependencies() {
-    return { resolved: [], unresolved: [] };
+  async resolve({ entryPath }) {
+    return { resolved: [entryPath], unresolved: [] };
   },
-  async getParameters() {
-    return createKernelSuccess(
-      createKernelParameterDeclaration(
+  async describe() {
+    return createKernelSuccess({
+      parameters: createKernelParameterDeclaration(
         {},
         { type: 'object', properties: {}, additionalProperties: false },
         { id: 'urn:taucad:<%= name %>:parameters', name: '<%= alias %>Parameters' },
       ),
-    );
+    });
   },
-  async createGeometry() {
-    return { nativeHandle: undefined };
-  },
-  async exportGeometry() {
-    return createKernelError([
-      { message: 'TODO: implement <%= name %> export', code: 'RUNTIME', type: 'runtime', severity: 'error' },
-    ]);
+  async evaluate() {
+    return { handle: undefined };
   },
 });

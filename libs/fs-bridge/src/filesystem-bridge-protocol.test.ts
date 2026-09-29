@@ -25,11 +25,35 @@ describe('void call results', () => {
   });
 });
 
+describe('head-only directory metadata', () => {
+  it('accepts the explicit mode and unknown text count while exact stat still requires a count', () => {
+    const listing = fileSystemBridgeSchemas.calls.readdirWithStats;
+    const rows = [{ name: 'large.txt', type: 'file', size: 2048, mtimeMs: 1, contentKind: 'text' }];
+    expect(listing.args.safeParse(['', { content: 'head' }]).success).toBe(true);
+    expect(listing.args.safeParse(['']).success).toBe(true);
+    expect(listing.result.safeParse(rows).success).toBe(true);
+    expect(fileSystemBridgeSchemas.calls.stat.result.safeParse(rows[0]).success).toBe(false);
+  });
+});
+
 /* A literal, so a bump is a deliberate edit to this line and not a silent one:
  * every other assertion in the suite now reads the constant (G0-11). */
 describe('filesystem bridge protocol version', () => {
-  it('should be 2', () => {
-    expect(fileSystemBridgeProtocolVersion).toBe(2);
+  it('should be 4', () => {
+    expect(fileSystemBridgeProtocolVersion).toBe(4);
+  });
+
+  it('rejects a version 3 peer', () => {
+    expect(() =>
+      fileSystemBridgeSchemas.hello.parse({
+        ...createFileSystemBridgeHello({
+          state: 'ready',
+          capabilities: { persistent: false, writable: true, quotaBased: false },
+          watchable: false,
+        }),
+        v: 3,
+      }),
+    ).toThrow('protocol version mismatch');
   });
 });
 

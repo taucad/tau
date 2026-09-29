@@ -2,6 +2,7 @@ import type {
   ProviderCapabilities,
   FileSystemProvider,
   FileTreeNode,
+  HeadFileStat,
   ProjectDiscoveryEntry,
   ProjectLocator,
   ProjectRootConfig,
@@ -39,12 +40,10 @@ import { z } from 'zod';
 /**
  * Current filesystem bridge protocol version.
  *
- * Version 2 made `consumer` a required member of a rooted connect envelope
- * (blueprint W2, EQ2), so a version-1 peer is refused by version rather than
- * by a confusing `ROOT_UNAVAILABLE`.
+ * Version 4 requires both checked deletion and head-only directory metadata.
  * @public
  */
-export const fileSystemBridgeProtocolVersion = 2;
+export const fileSystemBridgeProtocolVersion = 4;
 
 const unavailableCapabilities = null;
 
@@ -270,12 +269,16 @@ export type FileSystemBridgeService = FileSystemBridgeUnrootedCalls & FileSystem
 type FileSystemBridgeCallName = keyof FileSystemBridgeService;
 type FileSystemBridgeCallArgs<Name extends FileSystemBridgeCallName> = Name extends 'readFile'
   ? [path: string, options?: 'utf8' | { readonly encoding?: 'utf8' }]
-  : Name extends 'readScopedFile'
-    ? [path: string, options: { readonly encoding?: 'utf8'; readonly scope: WorkspaceScope }]
-    : Parameters<FileSystemBridgeService[Name]>;
+  : Name extends 'readdirWithStats'
+    ? [path: string, options?: { readonly content: 'head' }]
+    : Name extends 'readScopedFile'
+      ? [path: string, options: { readonly encoding?: 'utf8'; readonly scope: WorkspaceScope }]
+      : Parameters<FileSystemBridgeService[Name]>;
 type FileSystemBridgeCallResult<Name extends FileSystemBridgeCallName> = Name extends 'readFile' | 'readScopedFile'
   ? string | Uint8Array<ArrayBuffer>
-  : Awaited<ReturnType<FileSystemBridgeService[Name]>>;
+  : Name extends 'readdirWithStats'
+    ? Array<{ name: string } & (FileStat | HeadFileStat)>
+    : Awaited<ReturnType<FileSystemBridgeService[Name]>>;
 
 type FileSystemBridgeCallSchemas = {
   readonly [Name in FileSystemBridgeCallName]: {
@@ -333,6 +336,25 @@ const fileStatSchema: z.ZodType<FileStat> = z.custom<FileStat>((value) => {
   );
 });
 
+const headFileStatSchema: z.ZodType<HeadFileStat> = z.custom<HeadFileStat>((value) => {
+  const record = plainRecordSchema.safeParse(value);
+  if (
+    !record.success ||
+    !finiteNumberSchema.safeParse(record.data['size']).success ||
+    !finiteNumberSchema.safeParse(record.data['mtimeMs']).success
+  ) {
+    return false;
+  }
+  if (record.data['type'] === 'dir') {
+    return true;
+  }
+  return (
+    record.data['type'] === 'file' &&
+    (record.data['contentKind'] === 'text' || record.data['contentKind'] === 'binary') &&
+    record.data['lineCount'] === undefined
+  );
+});
+
 const fileStatEntrySchema: z.ZodType<FileStatEntry> = z.custom<FileStatEntry>((value) => {
   const record = plainRecordSchema.safeParse(value);
   return (
@@ -355,21 +377,30 @@ const fileProvenanceSchema: z.ZodType<FileProvenance> = z.looseObject({
   overrides: z.string().optional(),
 });
 
-const composedDirectoryRowSchema: z.ZodType<{ name: string } & FileStat> = z.custom<{ name: string } & FileStat>(
-  (value) => {
-    const record = plainRecordSchema.safeParse(value);
-    return (
-      record.success &&
-      stringSchema.safeParse(record.data['name']).success &&
-      fileStatSchema.safeParse(value).success &&
-      (record.data['provenance'] === undefined || fileProvenanceSchema.safeParse(record.data['provenance']).success)
-    );
-  },
-);
+const composedDirectoryRowSchema: z.ZodType<{ name: string } & (FileStat | HeadFileStat)> = z.custom<
+  { name: string } & (FileStat | HeadFileStat)
+>((value) => {
+  const record = plainRecordSchema.safeParse(value);
+  return (
+    record.success &&
+    stringSchema.safeParse(record.data['name']).success &&
+    (fileStatSchema.safeParse(value).success || headFileStatSchema.safeParse(value).success) &&
+    (record.data['provenance'] === undefined || fileProvenanceSchema.safeParse(record.data['provenance']).success)
+  );
+});
 
-const composedDirectoryRowsSchema: z.ZodType<Array<{ name: string } & FileStat>> = z.custom<
-  Array<{ name: string } & FileStat>
+const composedDirectoryRowsSchema: z.ZodType<Array<{ name: string } & (FileStat | HeadFileStat)>> = z.custom<
+  Array<{ name: string } & (FileStat | HeadFileStat)>
 >((value) => Array.isArray(value) && value.every((row) => composedDirectoryRowSchema.safeParse(row).success));
+
+/** Exact listing postcondition for a call made without the head option. @public */
+export const exactComposedDirectoryRowsSchema: z.ZodType<Array<{ name: string } & FileStat>> = z.custom<
+  Array<{ name: string } & FileStat>
+>(
+  (value) =>
+    Array.isArray(value) &&
+    value.every((row) => composedDirectoryRowSchema.safeParse(row).success && fileStatSchema.safeParse(row).success),
+);
 
 const mutationErrorCodeValues = [
   'NAME_EXISTS',
@@ -587,7 +618,8 @@ const fileTreeNodeSchema: z.ZodType<FileTreeNode> = z.custom<FileTreeNode>((valu
   }
   return (
     (node['contentKind'] === 'binary' && node['lineCount'] === undefined) ||
-    (node['contentKind'] === 'text' && finiteNumberSchema.safeParse(node['lineCount']).success)
+    (node['contentKind'] === 'text' &&
+      (node['lineCount'] === undefined || finiteNumberSchema.safeParse(node['lineCount']).success))
   );
 });
 const fileTreeNodesSchema: z.ZodType<FileTreeNode[]> = z.custom<FileTreeNode[]>(
@@ -771,7 +803,10 @@ const callSchemas = {
     result: booleanResult,
   },
   rename: { args: twoStringArgs, result: voidResult },
-  readdirWithStats: { args: oneStringArgument, result: composedDirectoryRowsSchema },
+  readdirWithStats: {
+    args: z.tuple([z.string(), z.object({ content: z.literal('head') }).optional()]),
+    result: composedDirectoryRowsSchema,
+  },
   provenance: { args: oneStringArgument, result: fileProvenanceSchema },
   archive: { args: z.tuple([z.string(), archiveOptionsSchema.optional()]), result: z.instanceof(Blob) },
   contents: { args: z.tuple([z.string(), archiveOptionsSchema.optional()]), result: directoryContentsSchema },

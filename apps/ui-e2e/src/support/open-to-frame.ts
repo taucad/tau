@@ -49,6 +49,7 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node
 import { cpus, loadavg, tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
+import { setTimeout as wait } from 'node:timers/promises';
 import { _electron as electron, chromium } from 'playwright';
 import type { Page } from 'playwright';
 // oxlint-disable-next-line no-restricted-imports -- one owner for the measurement contract both harnesses answer to.
@@ -174,6 +175,38 @@ const launchDesktop = async (userData: string, picked: string) => {
     },
     /* eslint-enable @typescript-eslint/naming-convention -- environment scope ends here. */
   });
+};
+
+const closeDesktop = async (application: Awaited<ReturnType<typeof electron.launch>> | undefined): Promise<void> => {
+  if (application === undefined) {
+    return;
+  }
+  const child = application.process();
+  const exited =
+    child.exitCode === null && child.signalCode === null
+      ? new Promise<void>((resolve) => {
+          child.once('exit', () => {
+            resolve();
+          });
+        })
+      : Promise.resolve();
+  const closeTimeout = new AbortController();
+  try {
+    await Promise.race([
+      application
+        .evaluate(({ app }) => {
+          app.exit(0);
+        })
+        .catch(() => undefined),
+      wait(5000, undefined, { signal: closeTimeout.signal }).catch(() => undefined),
+    ]);
+  } finally {
+    closeTimeout.abort();
+  }
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill('SIGKILL');
+  }
+  await exited;
 };
 
 const hashFile = async (path: string): Promise<string> => {
@@ -568,7 +601,7 @@ const warmProfile = async (userData: string, picked: string, slug: string) => {
   } catch (error) {
     warmupError = String(error).slice(0, 500);
   } finally {
-    await application?.close().catch(() => undefined);
+    await closeDesktop(application);
   }
   return { startedAt, finishedAt: new Date().toISOString(), error: warmupError, appIsPackaged };
 };
@@ -908,7 +941,7 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
   const binaryDigestAfter =
     desktopExecutable === undefined ? undefined : await hashFile(desktopExecutable).catch(() => 'unreadable');
   const hostPid = application?.process().pid;
-  await application?.close().catch(() => undefined);
+  await closeDesktop(application);
   await browser?.close().catch(() => undefined);
   /* Each cold sample fills an OPFS `/node_modules` under its own user-data dir. */
   await rm(userData, { recursive: true, force: true }).catch(() => undefined);

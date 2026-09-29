@@ -1,5 +1,5 @@
-import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -91,7 +91,10 @@ describe('native host GeoSpec composition', () => {
 
     const root = await project('widget');
     const runner = await createHostNativeGeoSpecRunner(root, runtime);
-    expect(native.engine).toHaveBeenCalledExactlyOnceWith();
+    expect(native.engine).toHaveBeenCalledExactlyOnceWith({
+      root: join(homedir() || tmpdir(), '.cache', 'geospec', 'evidence'),
+      projectRoot: await realpath(root),
+    });
     expect(native.filesystem).toHaveBeenCalledExactlyOnceWith(root);
     const options = native.runner.mock.calls[0]?.[0];
     expect(options?.filesystem).toBe(filesystem);
@@ -189,5 +192,46 @@ describe('native host GeoSpec composition', () => {
     expect(native.engine).toHaveBeenCalledOnce();
     expect(native.runner.mock.calls[1]?.[0]?.model?.carried).toBe(native.runner.mock.calls[0]?.[0]?.model?.carried);
     await second.close();
+  });
+
+  it('should fall back to a resident engine when optional cache setup fails', async () => {
+    const createHostNativeGeoSpecRunner = await freshFactory();
+    native.filesystem.mockReturnValue(mock<GeoSpecNativeRunnerOptions['filesystem']>());
+    native.runner.mockReturnValue(mock<GeoSpecRunner>());
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const root = await project('cache-unavailable');
+    native.engine.mockImplementationOnce(function () {
+      throw new Error('Permission denied (os error 13)');
+    });
+    try {
+      const runner = await createHostNativeGeoSpecRunner(root, mock<HostGeoSpecRuntimeClient>());
+      expect(native.engine).toHaveBeenCalledTimes(2);
+      expect(native.engine.mock.calls[1]).toEqual([]);
+      expect(warning).toHaveBeenCalledOnce();
+      expect(warning.mock.calls[0]?.[0]).toContain('using a resident engine');
+      await runner.close();
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it('should propagate a native construction error when the resident engine also fails', async () => {
+    const createHostNativeGeoSpecRunner = await freshFactory();
+    const root = await project('engine-error');
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    native.engine.mockImplementationOnce(function () {
+      throw new Error('cache constructor failed');
+    });
+    native.engine.mockImplementationOnce(function () {
+      throw new Error('native engine configuration failed');
+    });
+    try {
+      await expect(createHostNativeGeoSpecRunner(root, mock<HostGeoSpecRuntimeClient>())).rejects.toThrow(
+        'native engine configuration failed',
+      );
+      expect(native.engine).toHaveBeenCalledTimes(2);
+    } finally {
+      warning.mockRestore();
+    }
   });
 });

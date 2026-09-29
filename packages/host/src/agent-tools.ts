@@ -22,6 +22,8 @@
  */
 
 import { readFile, realpath, readdir, stat } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { ResourceQueue } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -233,7 +235,19 @@ const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSess
   previous?.engine.close();
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the native package's constructor export.
   const { Engine } = await import('@taucad/geospec-engine-native/node');
-  const session = { root: canonicalRoot, engine: new Engine(), carried: new Map<string, unknown>() };
+  const cacheRoot = join(homedir() || tmpdir(), '.cache', 'geospec', 'evidence');
+  let engine: NativeGeoSpecEngine;
+  try {
+    engine = new Engine({ root: cacheRoot, projectRoot: canonicalRoot });
+  } catch (error) {
+    console.warn('GeoSpec native cache unavailable; using a resident engine:', error);
+    engine = new Engine();
+  }
+  const session = {
+    root: canonicalRoot,
+    engine,
+    carried: new Map<string, unknown>(),
+  };
   nativeSession = session;
   return session;
 };

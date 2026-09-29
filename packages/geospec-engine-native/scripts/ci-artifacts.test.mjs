@@ -142,6 +142,20 @@ void test('cache key follows source and selected toolchain without generated out
   assert.match(deliveryCacheKey(root), /^[0-9a-f]{64}$/u, 'empty wrapper disables the override');
 });
 
+void test('cached preparation target uses verified ensure-delivery on source changes', () => {
+  const project =
+    /** @type {{targets: Record<string, {cache?: boolean, inputs?: unknown[], options?: {command?: string}} >}} */ JSON.parse(
+      (readFileSync(resolve(import.meta.dirname, '../project.json'), 'utf8')),
+    );
+  const target = project.targets['prepare-geospec-ci-artifacts'];
+  assert.ok(target);
+  assert.equal(target.cache, true);
+  assert.deepEqual(target.inputs, [
+    { runtime: 'node packages/geospec-engine-native/scripts/ci-artifacts.mjs cache-key' },
+  ]);
+  assert.equal(target.options?.command, 'node packages/geospec-engine-native/scripts/ci-artifacts.mjs ensure-delivery');
+});
+
 void test('explicit delivery cache remains the exact selected path', (context) => {
   const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
   mkdirSync(scratch, { recursive: true });

@@ -194,6 +194,9 @@ export type SectionViewTestMeasureState = Readonly<{
 
 export type SectionViewTestBridgeApi = Readonly<{
   getGraphicsBackend(): 'webgl' | 'webgpu';
+  /** Identity from this viewport's renderer, never a separately created probe context. */
+  getRendererIdentity(): Readonly<{ api: 'webgl' | 'webgpu'; name: string; frame: number }>;
+  getViewportCanvas(): HTMLCanvasElement;
   /** The durable record this view persists, for revisit-equals-reload assertions (Law 4). */
   getViewSettings(): GraphicsViewSettings | undefined;
   isGeometryFramed(): boolean;
@@ -549,6 +552,20 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       getGraphicsBackend() {
         const renderer = get().gl as unknown as { readonly backend?: { readonly isWebGPUBackend?: boolean } };
         return renderer.backend?.isWebGPUBackend === true ? 'webgpu' : 'webgl';
+      },
+      getRendererIdentity() {
+        const { gl } = get();
+        const api = 'isWebGPURenderer' in gl && gl.isWebGPURenderer ? 'webgpu' : 'webgl';
+        const context = api === 'webgl' ? gl.getContext() : undefined;
+        const debug = context?.getExtension('WEBGL_debug_renderer_info');
+        return {
+          api,
+          name: debug ? String(context?.getParameter(debug.UNMASKED_RENDERER_WEBGL) ?? '') : '',
+          frame: gl.info.render.frame,
+        };
+      },
+      getViewportCanvas() {
+        return get().gl.domElement;
       },
       isGeometryFramed() {
         const { size } = get();

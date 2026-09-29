@@ -119,3 +119,63 @@ it('retries a slow history read after its observation slot times out', async () 
   expect(active).toBe(0);
   unmount();
 });
+
+it('should reread usage when a projection changes during the active materialization', async () => {
+  const store = mock<ChatSessionStore>();
+  const listeners = new Set<() => void>();
+  const first = Promise.withResolvers<Awaited<ReturnType<ChatSessionStore['getHistoricalUsage']>>>();
+  const second = Promise.withResolvers<Awaited<ReturnType<ChatSessionStore['getHistoricalUsage']>>>();
+  const oldUsage = {
+    operationIds: ['old'],
+    lastActivityAt: 1,
+    inputTokens: 2,
+    outputTokens: 3,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    parts: 1,
+  };
+  const newUsage = { ...oldUsage, operationIds: ['old', 'new'], outputTokens: 5 };
+  store.observe.mockReturnValue(() => undefined);
+  store.subscribeProjection.mockImplementation((_chatId, listener) => {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  });
+  store.getAttachmentStatus.mockReturnValue('attached');
+  store.historicalUsageReady.mockReturnValue(true);
+  store.getHistoricalUsage
+    .mockImplementationOnce(async () => first.promise)
+    .mockImplementationOnce(async () => second.promise);
+  vi.mocked(useChatSessionStore).mockReturnValue(store);
+
+  const chatIds = ['chat'];
+  const { result, unmount } = renderHook(() => useProjectChatUsage('project', chatIds));
+  await waitFor(() => {
+    expect(store.getHistoricalUsage).toHaveBeenCalledTimes(1);
+  });
+  act(() => {
+    for (let notification = 0; notification < 100; notification++) {
+      for (const listener of listeners) {
+        listener();
+      }
+    }
+  });
+  await act(async () => {
+    first.resolve(oldUsage);
+    await first.promise;
+  });
+  await waitFor(() => {
+    expect(store.getHistoricalUsage).toHaveBeenCalledTimes(2);
+  });
+  expect(result.current.has('chat')).toBe(false);
+  await act(async () => {
+    second.resolve(newUsage);
+    await second.promise;
+  });
+  await waitFor(() => {
+    expect(result.current.get('chat')?.operationIds).toEqual(['old', 'new']);
+  });
+  expect(store.getHistoricalUsage).toHaveBeenCalledTimes(2);
+  unmount();
+});

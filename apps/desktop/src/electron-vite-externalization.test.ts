@@ -21,6 +21,16 @@ import { copyGeoSpecNative, copyGeoSpecNativeAssembly, copyGeoSpecSourceRelink }
 const appRoot = join(import.meta.dirname, '..');
 
 describe('macOS GeoSpec assembly selection', () => {
+  it('should depend on the GeoSpec producer in every macOS packaging mode', () => {
+    const project = JSON.parse(readFileSync(join(appRoot, 'project.json'), 'utf8')) as {
+      readonly targets: Record<string, { readonly dependsOn: unknown[] }>;
+    };
+    const producer = { projects: ['geospec-engine-native'], target: 'prepare-geospec-ci-artifacts' };
+    for (const mode of ['package-macos', 'package-macos-release', 'package-macos-unsigned']) {
+      expect(project.targets[mode]?.dependsOn).toContainEqual(producer);
+    }
+  });
+
   it('should select and finish copying a verified snapshot for the default assembly', () => {
     const source = readFileSync(join(appRoot, 'scripts/package-macos.mts'), 'utf8');
     const mode = source.indexOf('parseMacosPackageMode(process.argv.slice(2))');
@@ -28,29 +38,36 @@ describe('macOS GeoSpec assembly selection', () => {
     const selection = source.indexOf(
       "const selectedGeoSpecAssembly = process.env['TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT'];",
     );
-    const fallback = source.indexOf("'out/artifacts/geospec-native-engine/ci/assembly'", selection);
-    const conditional = source.indexOf('if (selectedGeoSpecAssembly === undefined)', fallback);
+    const conditional = source.indexOf('if (selectedGeoSpecAssembly === undefined)', selection);
     const snapshot = source.indexOf("'snapshot-delivery'", conditional);
     const selected = source.indexOf('geospecAssemblyInput = selections[0]', snapshot);
     const realPath = source.indexOf('const geospecAssemblyRoot = await realpath(', selected);
     const stage = source.indexOf('await rm(outputRoot, { recursive: true, force: true })', realPath);
     const nativeCopy = source.indexOf('copyGeoSpecNativeAssembly(', stage);
     const sourceCopy = source.indexOf('copyGeoSpecSourceRelink(geospecAssemblyRoot', nativeCopy);
+    const earlyCleanupBranch = source.indexOf('if (selectedGeoSpecAssembly === undefined)', sourceCopy);
+    const earlyCleanup = source.indexOf(
+      'await rm(geospecAssemblyRoot, { recursive: true, force: true })',
+      earlyCleanupBranch,
+    );
     const cleanup = source.indexOf('await rm(ownedGeoSpecSnapshot, { recursive: true, force: true })', sourceCopy);
 
     expect(mode).toBeGreaterThan(-1);
     expect(unsafeOutput).toBeGreaterThan(mode);
     expect(selection).toBeGreaterThan(unsafeOutput);
-    expect(fallback).toBeGreaterThan(selection);
-    expect(conditional).toBeGreaterThan(fallback);
+    expect(conditional).toBeGreaterThan(selection);
     expect(snapshot).toBeGreaterThan(conditional);
     expect(selected).toBeGreaterThan(snapshot);
     expect(realPath).toBeGreaterThan(selected);
     expect(stage).toBeGreaterThan(realPath);
     expect(nativeCopy).toBeGreaterThan(stage);
     expect(sourceCopy).toBeGreaterThan(nativeCopy);
+    expect(earlyCleanupBranch).toBeGreaterThan(sourceCopy);
+    expect(earlyCleanup).toBeGreaterThan(earlyCleanupBranch);
     expect(cleanup).toBeGreaterThan(sourceCopy);
-    expect(source).not.toContain('await rm(geospecAssemblyRoot, { recursive: true, force: true })');
+    expect(source).not.toContain("'ensure-delivery'");
+    expect(source).not.toContain('maxBuffer: 64 * 1024 ** 2');
+    expect(source).toContain("if (selectedGeoSpecAssembly === '')");
   });
 });
 

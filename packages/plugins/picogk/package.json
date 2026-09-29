@@ -65,6 +65,7 @@
   "dependencies": {
     "@taucad/cache-core": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
     "@taucad/native-process-core": "workspace:*",
     "@taucad/parameters": "workspace:*"
   },

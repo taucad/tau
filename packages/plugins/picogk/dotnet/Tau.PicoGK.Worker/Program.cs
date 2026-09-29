@@ -8,7 +8,7 @@ namespace Tau.PicoGK.Worker;
 
 internal static class Program
 {
-    private const int ProtocolVersion = 5;
+    private const int ProtocolVersion = 6;
     private const int MaximumRequestCharacters = 1_048_576;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly object ProtocolGate = new();

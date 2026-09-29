@@ -64,7 +64,7 @@ function conjugateQuaternionBy(r: Quat, q: Quat): Quat {
 const gltfWorld = { up: '+y', forward: '+z', metersPerUnit: 1 } as const;
 const tauWorld = { up: '+z', forward: '-y', metersPerUnit: 1 } as const;
 const coordinateTransform = resolveCoordinateTransform({ source: gltfWorld, target: tauWorld });
-const gltfCoordinateTransformMatrix: mat4 = [...coordinateTransform.matrix];
+export const gltfCoordinateTransformMatrix: mat4 = [...coordinateTransform.matrix];
 const coordinateQuat: Quat = [...coordinateTransform.rotation];
 
 /**

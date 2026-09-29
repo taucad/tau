@@ -435,6 +435,9 @@ Viewer
   public Viewer(IViewerBackend xBackend, ILog xLog)
   public Viewer(string strTitle, Vector2 vecSize, ILog xLog)
 
+  // Capture an application-defined mechanism on a hosted viewer
+  public void SetMechanism(object source)
+
   // Run this function in your main thread while it returns true
   public bool bPoll()
 
@@ -446,8 +449,11 @@ Viewer
   public void LoadLightSetup(Stream oStream)
 
   // Add the object to the viewer, using the specified viewer group
+  public void Add(in Voxels vox, string name, int nGroupID = 0)
   public void Add(in Voxels vox, int nGroupID = 0)
+  public void Add(Mesh msh, string name, int nGroupID = 0)
   public void Add(Mesh msh, int nGroupID = 0)
+  public void Add(PolyLine oPoly, string name, int nGroupID = 0)
   public void Add(PolyLine oPoly, int nGroupID = 0)
 
   // Removes the object from the viewer

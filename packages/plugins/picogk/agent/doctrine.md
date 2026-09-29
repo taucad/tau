@@ -20,7 +20,9 @@ Tau captures the final scene as mesh topology, not precise BRep. Smaller voxels 
 
 ## Part names and mechanisms
 
-Current `Viewer.Add` cannot name parts; groups are for appearance/transforms. PicoGK `Animation` does not publish Tau mechanism metadata. Proposed named `Add` and `SetMechanism` calls are **not shipped**; do not emit them until listed in the pinned assembly. Then name final parts uniquely, reference exact names in `links.*.shapes`, and declare explicit mm/rad-or-deg units, links, and joints in the as-built frame. Tau resolves component IDs and converts mechanism coordinates with the GLB vertices. Inspect warning source paths when metadata is invalid.
+Use `Viewer.Add(Voxels|Mesh|PolyLine geometry, string name, int nGroupID = 0)` to name each part uniquely; include indexes in loops. A slash is label text, not an assembly. Groups control appearance/transforms. Unnamed parts get `Shape N` labels.
+
+For motion, call `Viewer.SetMechanism(object source)` inside `Library.Go`. Supply JSON-equivalent `@taucad/kinematics` source with exact lowercase `schemaVersion`, `units` (`length: "mm"`, `angle: "deg"` or `"rad"`), `root`, `links.*.shapes`, and `joints`. Reference authored names, never `Shape N`. Anonymous objects, plain public properties, dictionaries, arrays, primitives, and `JsonElement` work; custom converters and `JsonPropertyName` do not. Tau resolves build-local IDs and converts millimetre/Z-up metadata with the GLB vertices. Invalid metadata warns while geometry renders. PicoGK `Animation` does not create Tau mechanism metadata.
 
 ## Interactive parameters
 

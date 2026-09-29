@@ -1,7 +1,7 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- defineKernel intentionally erases private backend context */
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { createMockKernelRuntime, validateGlbData } from '@taucad/runtime-testing';
+import { createMockKernelRuntime, expectKernelProjectionOrder, validateGlbData } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
 import { brepKernel } from '#brep.kernel.js';
@@ -32,5 +32,32 @@ describe('brepKernel', () => {
     const result = await definition.evaluate({ entryPath: name, parameters: {}, options: {} }, runtime, context);
     const artifact = await definition.render!({ handle: result.handle, view: 'model', options: {} }, runtime, context);
     validateGlbData(artifact.content as Uint8Array<ArrayBuffer>);
+    const freshSnapshot = definition.serializeHandle!({ handle: result.handle }, runtime, context);
+    const render = async (handle: typeof result.handle) => {
+      const projected = await definition.render!({ handle, view: 'model', options: {} }, runtime, context);
+      return projected.content;
+    };
+    const write = async (
+      handle: typeof result.handle,
+      coordinateSystem: 'y-up' | 'z-up',
+      length: 'meter' | 'millimeter',
+    ) => {
+      const projected = await definition.write!(
+        { exportId: 'glb', handle, options: { coordinateSystem, unit: { length } } },
+        runtime,
+        context,
+      );
+      return projected.files[0].bytes;
+    };
+    const ordered = await expectKernelProjectionOrder({
+      renderA: async () => render(result.handle),
+      renderB: async () => write(result.handle, 'y-up', 'meter'),
+      write: async () => write(result.handle, 'z-up', 'millimeter'),
+      freshB: async () => {
+        const fresh = definition.deserializeHandle!({ serialized: freshSnapshot }, runtime, context);
+        return write(fresh, 'y-up', 'meter');
+      },
+    });
+    expect(ordered.first).toEqual(artifact.content);
   });
 });

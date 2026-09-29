@@ -9,11 +9,13 @@ import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import { appearanceLabel, statusOf, volumeLabel, weightLabel } from '#components/geometry/cad/part-quantities.js';
 import type { PartQuantity } from '#components/geometry/cad/part-quantities.js';
 import { DetailsToggle, disclosureMotion } from '#components/revisions/revision-actions.js';
+import { PartPreviewImage } from '#components/geometry/cad/part-preview-image.js';
 
 type PartPropertiesPanelProps = {
   readonly node?: GeometryComponentNode;
   readonly entryPath?: string;
   readonly quantity?: PartQuantity;
+  readonly previewBytes?: Uint8Array<ArrayBuffer>;
 };
 
 function Fact({ label, value }: { readonly label: string; readonly value: string }): React.JSX.Element {
@@ -43,7 +45,12 @@ function textureLabel(
   );
 }
 
-export function PartPropertiesPanel({ node, entryPath, quantity = {} }: PartPropertiesPanelProps): React.JSX.Element {
+export function PartPropertiesPanel({
+  node,
+  entryPath,
+  quantity = {},
+  previewBytes,
+}: PartPropertiesPanelProps): React.JSX.Element {
   if (!node) {
     return <PanelEmptyState icon={Box} title='No part selected' className='min-h-40' />;
   }
@@ -57,7 +64,13 @@ export function PartPropertiesPanel({ node, entryPath, quantity = {} }: PartProp
           className='flex size-10 shrink-0 items-center justify-center rounded-sm bg-muted ring-1 ring-border'
           aria-hidden='true'
         >
-          {materials.length > 0 ? <MaterialSwatch materials={materials} /> : <Box className='size-4' />}
+          {previewBytes ? (
+            <PartPreviewImage bytes={previewBytes} className='size-10 rounded-sm object-contain' />
+          ) : materials.length > 0 ? (
+            <MaterialSwatch materials={materials} />
+          ) : (
+            <Box className='size-4' />
+          )}
         </div>
         <div className='min-w-0'>
           <div className='truncate font-medium'>{node.name}</div>

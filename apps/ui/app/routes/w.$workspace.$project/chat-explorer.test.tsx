@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { mock } from 'vitest-mock-extended';
 import type { GeometryComponentAppearance, GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import type { ActorRefFrom } from 'xstate';
 import { createActor } from 'xstate';
+import { StrictMode } from 'react';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { createSourceModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -20,7 +21,10 @@ const mocks = vi.hoisted(() => ({
   addContextReferences: vi.fn(),
   paneApis: new Map<string, { setExpanded: ReturnType<typeof vi.fn> }>(),
   useProject: vi.fn(),
+  imageService: undefined as undefined | { export: ReturnType<typeof vi.fn> },
 }));
+const originalCreateObjectUrl = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
 const unitId = 'src/main.ts';
 const internalUnitId = createSourceModelInteractionUnitId(unitId);
 
@@ -31,6 +35,10 @@ vi.mock('#components/chat/chat-context-insertion.js', () => ({
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: mocks.useProject,
+}));
+
+vi.mock('#providers/headless-image-provider.js', () => ({
+  useOptionalHeadlessImageService: () => mocks.imageService,
 }));
 
 vi.mock('#hooks/use-keyboard.js', () => ({
@@ -246,9 +254,11 @@ function createGraphicsRefForUnit(
   {
     hiddenComponentIds = [],
     selectedComponentIds = [],
+    previewGeometry,
   }: {
     readonly hiddenComponentIds?: readonly string[];
     readonly selectedComponentIds?: readonly string[];
+    readonly previewGeometry?: { readonly hash: string; readonly content: Uint8Array<ArrayBuffer> };
   } = {},
 ): ActorRefFrom<typeof graphicsMachine> {
   const modelRef = createActor(modelInteractionMachine, { input: {} });
@@ -268,6 +278,8 @@ function createGraphicsRefForUnit(
   return createStaticActor({
     context: {
       modelInteractionRef: modelRef,
+      geometry: previewGeometry && { format: 'gltf', ...previewGeometry },
+      gltfPresentation: { presentedKey: previewGeometry?.hash },
     },
   }) as unknown as ActorRefFrom<typeof graphicsMachine>;
 }
@@ -300,15 +312,18 @@ function mockProjectForExplorer({
 function renderExplorerTree({
   isExpanded = true,
   setIsExpanded,
+  strictMode = false,
 }: {
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
+  readonly strictMode?: boolean;
 } = {}): ReturnType<typeof render> {
-  return render(
+  const tree = (
     <TooltipProvider>
       <ChatExplorerTree isExpanded={isExpanded} setIsExpanded={setIsExpanded} />
-    </TooltipProvider>,
+    </TooltipProvider>
   );
+  return render(strictMode ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 function renderComponentRow(properties: Parameters<typeof ComponentRow>[0]): ReturnType<typeof render> {
@@ -323,9 +338,112 @@ beforeEach(() => {
   mocks.addContextReferences.mockReset();
   mocks.paneApis.clear();
   mocks.useProject.mockReset();
+  mocks.imageService = undefined;
+});
+
+afterEach(() => {
+  for (const [name, original] of [
+    ['createObjectURL', originalCreateObjectUrl],
+    ['revokeObjectURL', originalRevokeObjectUrl],
+  ] as const) {
+    if (original) {
+      Object.defineProperty(URL, name, original);
+    } else {
+      Reflect.deleteProperty(URL, name);
+    }
+  }
 });
 
 describe('ChatExplorerTree', () => {
+  it('submits only the presented, visible part primitives to the shared image queue', async () => {
+    const exportImage = vi.fn().mockResolvedValue(undefined);
+    mocks.imageService = { export: exportImage };
+    const part = {
+      ...createNode(firstComponentId, 'housing'),
+      primitiveRefs: [
+        { nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 },
+        { nodeIndex: 2, meshIndex: 1, primitiveIndex: 1 },
+      ],
+    };
+    const graphicsRef = createGraphicsRefForUnit('src/main.ts', [part], {
+      previewGeometry: { hash: 'presented-glb', content: new Uint8Array([1, 2, 3]) },
+      selectedComponentIds: [firstComponentId],
+    });
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([['mainView', graphicsRef]]),
+    });
+    renderExplorerTree({ strictMode: true });
+    await waitFor(() => expect(exportImage).toHaveBeenCalled());
+    expect(exportImage.mock.calls[0]?.[0]).toMatchObject({
+      sourcePath: 'src/main.ts',
+      geometryHash: 'presented-glb',
+      exportOptions: {
+        mode: 'batch',
+        views: [{ visiblePrimitives: part.primitiveRefs }],
+      },
+    });
+  });
+
+  it('keeps the selected unit preview when another unit finishes later', async () => {
+    let nextUrl = 0;
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => `blob:part-${++nextUrl}`),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const first = Promise.withResolvers<Array<{ name: string; mimeType: string; bytes: Uint8Array<ArrayBuffer> }>>();
+    const second = Promise.withResolvers<Array<{ name: string; mimeType: string; bytes: Uint8Array<ArrayBuffer> }>>();
+    const exportImage = vi.fn((job: { sourcePath: string }) =>
+      job.sourcePath === 'src/main.ts' ? first.promise : second.promise,
+    );
+    mocks.imageService = { export: exportImage };
+    const main = {
+      ...createNode(firstComponentId, 'main_part'),
+      primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+    };
+    const helper = {
+      ...createNode(secondComponentId, 'helper_part'),
+      primitiveRefs: [{ nodeIndex: 1, meshIndex: 1, primitiveIndex: 0 }],
+    };
+    const mainRef = createGraphicsRefForUnit('src/main.ts', [main], {
+      selectedComponentIds: [firstComponentId],
+      previewGeometry: { hash: 'main-glb', content: new Uint8Array([1]) },
+    });
+    const helperRef = createGraphicsRefForUnit('src/helper.ts', [helper], {
+      selectedComponentIds: [secondComponentId],
+      previewGeometry: { hash: 'helper-glb', content: new Uint8Array([2]) },
+    });
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts', 'src/helper.ts'],
+      viewSettings: {
+        mainView: { entryPath: 'src/main.ts' },
+        helperView: { entryPath: 'src/helper.ts' },
+      },
+      viewGraphics: new Map([
+        ['mainView', mainRef],
+        ['helperView', helperRef],
+      ]),
+    });
+    renderExplorerTree();
+    await waitFor(() => expect(exportImage).toHaveBeenCalledTimes(2));
+    const properties = screen.getByTestId('model-pane-properties');
+    expect(properties).toHaveTextContent('helper_part');
+    await act(async () => {
+      second.resolve([{ name: 'render-part-0.webp', mimeType: 'image/webp', bytes: new Uint8Array([2]) }]);
+    });
+    await waitFor(() => expect(properties.querySelector('[data-slot="part-properties"] img')).toBeTruthy());
+    const selectedSrc = properties.querySelector('[data-slot="part-properties"] img')?.getAttribute('src');
+    await act(async () => {
+      first.resolve([{ name: 'render-part-0.webp', mimeType: 'image/webp', bytes: new Uint8Array([1]) }]);
+    });
+    await waitFor(() => expect(screen.getByTestId('model-pane-src/main.ts').querySelector('img')).toBeTruthy());
+    expect(properties.querySelector('[data-slot="part-properties"] img')?.getAttribute('src')).toBe(selectedSrc);
+  });
+
   it('keeps a restored hidden viewer file in the model list before its CAD unit starts', () => {
     mockProjectForExplorer({
       mainEntryPath: 'src/main.ts',

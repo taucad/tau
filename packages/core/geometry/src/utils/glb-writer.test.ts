@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
+import type { GLTF } from '@gltf-transform/core';
 import { EXTManifold } from 'manifold-3d/manifold-gltf';
 import {
   createEmptyGlb,
@@ -132,6 +133,59 @@ function readGlbJson(glb: Uint8Array<ArrayBuffer>) {
 // =============================================================================
 // Tests
 // =============================================================================
+
+describe.each([
+  ['GLB', writeGlb],
+  ['glTF', writeGltfJson],
+] as const)('%s component identity', (_format, write) => {
+  it('should preserve one component ID across its node and surface/edge references', async () => {
+    const input = createSingleTriangleInput();
+    const node = input.nodes[0]!;
+    node.extras = { tauComponentId: 'component:Part_1-2' };
+    node.primitives.push(createLinesInput().nodes[0]!.primitives[0]!);
+    for (const primitive of node.primitives) {
+      primitive.extras = { tauComponentId: 'component:Part_1-2' };
+    }
+    const bytes = write(input);
+    const document =
+      write === writeGlb
+        ? await new NodeIO().binaryToJSON(bytes)
+        : { json: JSON.parse(new TextDecoder().decode(bytes)) as GLTF.IGLTF };
+    const { json } = document;
+    expect(json.nodes?.[0]?.extras).toEqual(node.extras);
+    expect(json.meshes?.[0]?.primitives.map((primitive) => primitive.extras)).toEqual([node.extras, node.extras]);
+  });
+
+  it.each(['', 'component:two parts', 'component:gear/1', 'component:齿轮', 'component:a\n', 42, null])(
+    'should reject an invalid component ID %j on nodes or primitives',
+    (id) => {
+      for (const primitiveOnly of [false, true]) {
+        const input = createSingleTriangleInput();
+        const owner = primitiveOnly ? input.nodes[0]!.primitives[0]! : input.nodes[0]!;
+        owner.extras = { tauComponentId: id };
+        expect(() => write(input)).toThrow(TypeError);
+        expect(() => write(input)).toThrow(/tauComponentId.*node 0/);
+      }
+    },
+  );
+
+  it('should reject component IDs shared by different nodes', () => {
+    const input = createMultiNodeInput();
+    input.nodes[0]!.extras = { tauComponentId: 'component:shared' };
+    input.nodes[1]!.primitives[0]!.extras = { tauComponentId: 'component:shared' };
+    expect(() => write(input)).toThrow(TypeError);
+    expect(() => write(input)).toThrow(/Duplicate tauComponentId.*component:shared.*nodes 0 and 1/);
+  });
+
+  it('should reject an ID colliding with an emitted name without renaming authored data', () => {
+    const input = createSingleTriangleInput();
+    input.nodes[0]!.extras = { tauComponentId: 'component:reserved' };
+    input.nodes[0]!.primitives[0]!.material.name = 'component:reserved';
+    expect(() => write(input)).toThrow(TypeError);
+    expect(() => write(input)).toThrow(/tauComponentId.*component:reserved.*name/);
+    expect(input.nodes[0]!.primitives[0]!.material.name).toBe('component:reserved');
+  });
+});
 
 describe('writeGlb', () => {
   it('should produce a valid empty scene when input has no nodes', async () => {

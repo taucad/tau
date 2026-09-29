@@ -4,6 +4,7 @@ import type { WorkbenchLaneNode, WorkbenchLaneTab, WorkbenchNode, ViewerNode, Vi
 import { paneIds, workbenchIdSchema, workbenchLaneNodeSchema, viewerNodeSchema } from '@taucad/workbench';
 import { generatePrefixedId, randomUuid } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
+import { paneTitle } from '#workbench-records/pane-titles.js';
 
 type Lane = 'viewer' | 'workbench';
 type LaneNode<L extends Lane> = L extends 'viewer' ? ViewerNode : WorkbenchLaneNode;
@@ -96,7 +97,7 @@ export function toDockview<L extends Lane>(
         panels[id] = { id, contentComponent: 'viewer', title: tab.view, params: { viewId: tab.view } };
       } else if (tab.kind === 'pane') {
         id = `workbench:${tab.pane}`;
-        panels[id] = { id, contentComponent: tab.pane, title: tab.pane };
+        panels[id] = { id, contentComponent: tab.pane, title: paneTitle(tab.pane) };
       } else {
         const device = options.files?.[tab.path];
         if (!device) {

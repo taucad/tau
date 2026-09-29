@@ -48,6 +48,7 @@ import { toast } from 'sonner';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { fromDockview, toDockview } from '#workbench-records/converters.js';
+import { paneTitle } from '#workbench-records/pane-titles.js';
 import {
   languageFromExtension,
   tauFileDragMime,
@@ -366,30 +367,30 @@ const workbenchSurfaceGroups: readonly WorkbenchSurfaceGroup[] = [
     surfaces: [
       {
         id: 'parameters',
-        label: 'Parameters',
+        label: paneTitle('parameters'),
         icon: SlidersHorizontal,
         shortcut: projectWorkspaceKeyCombinations.parameters,
-        panel: { id: 'workbench:parameters', component: 'parameters', title: 'Parameters' },
+        panel: { id: 'workbench:parameters', component: 'parameters', title: paneTitle('parameters') },
       },
       {
         id: 'model',
-        label: 'Model',
+        label: paneTitle('model'),
         icon: Box,
         shortcut: projectWorkspaceKeyCombinations.model,
-        panel: { id: 'workbench:model', component: 'model', title: 'Model' },
+        panel: { id: 'workbench:model', component: 'model', title: paneTitle('model') },
       },
       {
         id: 'print',
-        label: 'Print',
+        label: paneTitle('print'),
         icon: Printer,
-        panel: { id: 'workbench:print', component: 'print', title: 'Print' },
+        panel: { id: 'workbench:print', component: 'print', title: paneTitle('print') },
       },
       {
         id: 'kinematics',
-        label: 'Kinematics',
+        label: paneTitle('kinematics'),
         icon: Rotate3d,
         shortcut: projectWorkspaceKeyCombinations.kinematics,
-        panel: { id: 'workbench:kinematics', component: 'kinematics', title: 'Kinematics' },
+        panel: { id: 'workbench:kinematics', component: 'kinematics', title: paneTitle('kinematics') },
       },
     ],
   },
@@ -399,21 +400,21 @@ const workbenchSurfaceGroups: readonly WorkbenchSurfaceGroup[] = [
     surfaces: [
       {
         id: 'revisions',
-        label: 'Revisions',
+        label: paneTitle('revisions'),
         icon: History,
-        panel: { id: 'workbench:revisions', component: 'revisions', title: 'Revisions' },
+        panel: { id: 'workbench:revisions', component: 'revisions', title: paneTitle('revisions') },
       },
       {
         id: 'agents',
-        label: 'Agents',
+        label: paneTitle('agents'),
         icon: Bot,
-        panel: { id: 'workbench:agents', component: 'agents', title: 'Agents' },
+        panel: { id: 'workbench:agents', component: 'agents', title: paneTitle('agents') },
       },
       {
         id: 'jobs',
-        label: 'Jobs',
+        label: paneTitle('jobs'),
         icon: BriefcaseBusiness,
-        panel: { id: 'workbench:jobs', component: 'jobs', title: 'Jobs' },
+        panel: { id: 'workbench:jobs', component: 'jobs', title: paneTitle('jobs') },
       },
     ],
   },
@@ -423,23 +424,23 @@ const workbenchSurfaceGroups: readonly WorkbenchSurfaceGroup[] = [
     surfaces: [
       {
         id: 'export',
-        label: 'Export',
+        label: paneTitle('export'),
         icon: Download,
         shortcut: projectWorkspaceKeyCombinations.export,
-        panel: { id: 'workbench:export', component: 'export', title: 'Export' },
+        panel: { id: 'workbench:export', component: 'export', title: paneTitle('export') },
       },
       {
         id: 'share',
-        label: 'Share',
+        label: paneTitle('share'),
         icon: Share2,
-        panel: { id: 'workbench:share', component: 'share', title: 'Share' },
+        panel: { id: 'workbench:share', component: 'share', title: paneTitle('share') },
       },
       {
         id: 'details',
-        label: 'Details',
+        label: paneTitle('details'),
         icon: Info,
         shortcut: projectWorkspaceKeyCombinations.details,
-        panel: { id: 'workbench:details', component: 'details', title: 'Details' },
+        panel: { id: 'workbench:details', component: 'details', title: paneTitle('details') },
       },
       {
         id: 'files',
@@ -455,17 +456,17 @@ const workbenchSurfaceGroups: readonly WorkbenchSurfaceGroup[] = [
     surfaces: [
       {
         id: 'kernel',
-        label: 'Telemetry',
+        label: paneTitle('kernel'),
         icon: Activity,
         debugOnly: true,
-        panel: { id: 'workbench:kernel', component: 'kernel', title: 'Telemetry' },
+        panel: { id: 'workbench:kernel', component: 'kernel', title: paneTitle('kernel') },
       },
       {
         id: 'console',
-        label: 'Console',
+        label: paneTitle('console'),
         icon: Terminal,
         debugOnly: true,
-        panel: { id: 'workbench:console', component: 'console', title: 'Console' },
+        panel: { id: 'workbench:console', component: 'console', title: paneTitle('console') },
       },
     ],
   },

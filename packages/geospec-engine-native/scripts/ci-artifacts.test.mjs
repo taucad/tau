@@ -97,7 +97,8 @@ const waitForCondition = async (condition, label) =>
   });
 
 /** @type {(context: import('node:test').TestContext, reusePrefixes: boolean) => void} */
-const checkTransport = (context, reusePrefixes) => {
+const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
+  const actualSpawnSync = childProcess.spawnSync;
   const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
   mkdirSync(scratch, { recursive: true });
   const temporary = mkdtempSync(join(scratch, 'transport-'));
@@ -116,7 +117,13 @@ const checkTransport = (context, reusePrefixes) => {
   const snapshotPath = `${packagePath}/bindings/node/types/generated/index.d.ts`;
   const bindingPath = `${packagePath}/bindings/emscripten/src/lib.rs`;
   const patchPath = `${packagePath}/native/occt/patches/fixture.patch`;
+  const sourceKitPaths = [
+    `${packagePath}/scripts/ci-artifacts.test.mjs`,
+    `${packagePath}/bindings/browser-conformance/run-browser-conformance.ts`,
+    `${packagePath}/bindings/browser-conformance/app/run.ts`,
+  ];
   const toolchainPath = 'rust-toolchain.toml';
+  const cargoLockPath = 'Cargo.lock';
   const generatedPath = `${packagePath}/bindings/node/generated`;
   const mixedPath = `${packagePath}/bindings/emscripten/generated`;
   const callerBin = join(temporary, 'caller-bin');
@@ -146,21 +153,80 @@ const checkTransport = (context, reusePrefixes) => {
   };
   /** @type {(bytes: import('node:crypto').BinaryLike) => string} */
   const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+  /** @type {(path: string) => {bytes: number, sha256: string}} */
+  const fileRecordForTest = (path) => {
+    const bytes = readFileSync(path);
+    return { bytes: bytes.length, sha256: digest(bytes) };
+  };
   /** @type {(path: string, bytes: string | Uint8Array) => void} */
   const put = (path, bytes) => {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, bytes);
   };
+  /** @type {(assembly: string) => void} */
+  const putAssembly = (assembly) => {
+    const kit = join(assembly, 'kit/geospec-engine-native-source-relink');
+    const sourcePaths = [
+      bindingPath,
+      patchPath,
+      `${packagePath}/scripts/ci-artifacts.mjs`,
+      `${packagePath}/scripts/collect-native-proof.py`,
+      `${packagePath}/scripts/test_native_proof.py`,
+      ...sourceKitPaths,
+      cargoLockPath,
+    ];
+    const entries = sourcePaths.map((path) => {
+      const bytes = readFileSync(join(producer, path));
+      put(join(kit, 'source', path), bytes);
+      return { path, bytes: bytes.length, sha256: digest(bytes) };
+    });
+    const sourceTreeSha256 = digest(
+      JSON.stringify(entries.map(({ path, bytes, sha256 }) => ({ bytes, path, sha256 }))),
+    );
+    put(
+      join(kit, 'manifest.json'),
+      JSON.stringify({
+        schema: 'geospec-native-source-relink-v2',
+        sourceTree: { files: entries.length, sha256: sourceTreeSha256, entries },
+      }),
+    );
+    const relink = join(assembly, 'tarballs/geospec-engine-native-source-relink.tar.gz');
+    mkdirSync(dirname(relink), { recursive: true });
+    assert.equal(
+      actualSpawnSync('tar', ['-czf', relink, '-C', join(assembly, 'kit'), 'geospec-engine-native-source-relink'], {
+        env: { ...process.env, COPYFILE_DISABLE: '1' },
+      }).status,
+      0,
+    );
+    const receipt = JSON.stringify({
+      artifact: { sha256: digest(readFileSync(relink)), bytes: readFileSync(relink).length },
+    });
+    for (const name of ['root.tgz', 'darwin-arm64.tgz']) {
+      const stage = join(assembly, `stage-${name}`);
+      put(join(stage, 'package/licenses/SOURCE-RELINK.json'), receipt);
+      assert.equal(
+        actualSpawnSync('tar', ['-czf', join(assembly, 'tarballs', name), '-C', stage, 'package']).status,
+        0,
+      );
+    }
+  };
   put(join(producer, snapshotPath), 'fixture declaration\n');
   put(join(producer, bindingPath), 'fixture source\n');
   put(join(producer, patchPath), 'fixture native patch\n');
   put(join(producer, toolchainPath), 'fixture toolchain\n');
-  put(join(producer, packagePath, 'scripts/ci-artifacts.mjs'), 'fixture inventory script');
+  put(join(producer, cargoLockPath), 'fixture cargo lock\n');
+  put(
+    join(producer, packagePath, 'scripts/ci-artifacts.mjs'),
+    readFileSync(new URL('ci-artifacts.mjs', import.meta.url)),
+  );
   put(join(producer, packagePath, 'scripts/collect-native-proof.py'), 'inert collector source');
   put(join(producer, packagePath, 'scripts/test_native_proof.py'), 'inert positive fixture source');
+  for (const path of sourceKitPaths) {
+    put(join(producer, path), `old source-kit input ${path}`);
+  }
   put(join(producer, packagePath, 'project.json'), JSON.stringify({ targets: { 'build-node': { fixture: true } } }));
   put(join(producer, packagePath, 'rust/target/untracked-output'), 'not source');
-  let revision = 'a'.repeat(40);
+  let revision = 'f6ee22ab908e59d4335889cbc88e5907decd7198';
   context.mock.method(
     childProcess,
     'execFileSync',
@@ -171,7 +237,7 @@ const checkTransport = (context, reusePrefixes) => {
       }
       assert.ok(args.includes('--cached'));
       assert.ok(args.includes('--others'));
-      return `${snapshotPath}\0${bindingPath}\0${patchPath}\0${toolchainPath}\0`;
+      return `${snapshotPath}\0${bindingPath}\0${patchPath}\0${toolchainPath}\0${cargoLockPath}\0${sourceKitPaths.join('\0')}\0`;
     },
   );
   /** @type {string[]} */
@@ -193,6 +259,7 @@ const checkTransport = (context, reusePrefixes) => {
   let observations = 0;
   let pythonFetches = 0;
   let attempt = 0;
+  let assemblyAttempt = 0;
   context.mock.method(
     childProcess,
     'spawnSync',
@@ -201,6 +268,9 @@ const checkTransport = (context, reusePrefixes) => {
       args,
       options,
     ) => {
+      if (executable === 'tar') {
+        return actualSpawnSync(executable, args, options);
+      }
       if (executable === 'rustup') {
         assert.equal(options.env.PATH, productPath);
         assert.deepEqual(args, [
@@ -220,6 +290,9 @@ const checkTransport = (context, reusePrefixes) => {
         return { status: 0 };
       }
       if (executable === 'python3') {
+        if (args[0] === '-I' && args[1] === '-c') {
+          return actualSpawnSync(executable, args, options);
+        }
         if (args[2] === 'generation') {
           assert.equal(args[1], join(producer, packagePath, 'scripts/prepare-delivery.py'));
           return { status: 0, stdout: `${generation}\n` };
@@ -245,7 +318,21 @@ const checkTransport = (context, reusePrefixes) => {
           invocation.addon.sha256,
           digest(readFileSync(join(producer, generatedPath, 'geospec-engine-native.darwin-arm64.node'))),
         );
-        put(join(args[4], 'identity-source-proof.json'), JSON.stringify({ fixture: 'inert same-build proof' }));
+        put(
+          join(args[4], 'identity-source-proof.json'),
+          JSON.stringify({
+            fixture: 'inert same-build proof',
+            actualPrefix: { path: join(nativeCache, 'occt-native/install') },
+            actualBuild: {
+              invocation: {
+                environment: {
+                  CARGO_HOME: join(producer, 'assembly-cargo-home'),
+                  PATH: productPath,
+                },
+              },
+            },
+          }),
+        );
         return { status: 0 };
       }
       assert.ok(isAbsolute(executable) && executable.endsWith('/pnpm'));
@@ -261,10 +348,12 @@ const checkTransport = (context, reusePrefixes) => {
         'only the explicit facade build and assembly may omit recursive task dependencies',
       );
       assert.notEqual(target, 'require-geospec-artifacts', 'producer must not recursively verify its own lock');
-      assert.equal(
-        options.env.GEOSPEC_DELIVERY_GENERATION,
-        target === 'prepare-delivery:reuse-native' ? undefined : generation,
-      );
+      if (target !== 'assemble-package' || assemblyAttempt === 0) {
+        assert.equal(
+          options.env.GEOSPEC_DELIVERY_GENERATION,
+          target === 'prepare-delivery:reuse-native' ? undefined : generation,
+        );
+      }
       assert.equal(options.stdio, target === 'build-node' || target === 'assemble-package' ? 'pipe' : 'inherit');
       targets.push(target);
       assert.equal(options.env.GEOSPEC_OCCT_PREFIX, join(nativeCache, 'occt-native/install'));
@@ -291,6 +380,9 @@ const checkTransport = (context, reusePrefixes) => {
         assert.equal(options.env.GIT_CEILING_DIRECTORIES, undefined);
       }
       if (target === 'assemble-package') {
+        if (sourceOnly && assemblyAttempt > 0) {
+          assert.throws(() => withProducerMarker(producer, () => 'second writer'), /producer interrupted/);
+        }
         // The explicit dependency-excluded build must have produced package facades first.
         verifyArtifacts(producer);
         for (const name of ['index.mjs', 'node.mjs', 'wasm.mjs']) {
@@ -300,10 +392,8 @@ const checkTransport = (context, reusePrefixes) => {
         assert.equal(pythonFetches, 1);
         assert.equal(options.env.CARGO_HOME, join(producer, 'assembly-cargo-home'));
         assert.equal(options.env.GEOSPEC_MIXED_INPUTS, join(producer, transportPath, 'mixed-inputs.json'));
-        const assembly = join(producer, 'fresh-assembly');
-        for (const name of ['root.tgz', 'darwin-arm64.tgz', 'geospec-engine-native-source-relink.tar.gz']) {
-          put(join(assembly, 'tarballs', name), `inert ${name}`);
-        }
+        const assembly = join(producer, `fresh-assembly-${++assemblyAttempt}`);
+        putAssembly(assembly);
         return { status: 0, stdout: `ASSEMBLY_ROOT=${assembly}\n` };
       }
       if (target === 'build') {
@@ -461,6 +551,90 @@ const checkTransport = (context, reusePrefixes) => {
   ]);
   assert.equal(inventory.artifacts.length, 5);
   const builtTargets = [...targets];
+  if (sourceOnly) {
+    const inventoryFile = join(producer, transportPath, 'inventory.json');
+    const legacySource = structuredClone(inventory.source);
+    const oldCoordinator = legacySource.files.find((file) => file.path === `${packagePath}/scripts/ci-artifacts.mjs`);
+    assert.ok(oldCoordinator);
+    oldCoordinator.sha256 = '0b54e638a6ebc108d3f36382de1ab24796211a6bde148e00b454c8e8b2aca87e';
+    oldCoordinator.bytes = 35_509;
+    const legacy = { ...inventory, schema: 'geospec-ci-artifacts-v2', source: legacySource };
+    delete legacy.producerSource;
+    put(inventoryFile, JSON.stringify(legacy));
+    const coordinatorFile = join(producer, packagePath, 'scripts/ci-artifacts.mjs');
+    const coordinatorBytes = readFileSync(coordinatorFile);
+    put(coordinatorFile, 'future coordinator edit');
+    assert.throws(() => verifyArtifacts(producer), /source inputs differ/);
+    put(coordinatorFile, coordinatorBytes);
+    const originalDelivery = /** @type {{archives: {path: string}[]}} */ (inventory.delivery);
+    const oldArchives = originalDelivery.archives.map((archive) => fileRecordForTest(join(producer, archive.path)));
+    revision = 'b'.repeat(40);
+    for (const path of sourceKitPaths) {
+      put(join(producer, path), `current source-kit input ${path}`);
+    }
+    assert.deepEqual(verifyArtifacts(producer).artifacts, inventory.artifacts);
+    assert.throws(() => verifyDelivery(producer), /source kit differs/);
+    const renewed = withProducerMarker(producer, () => ensureDelivery(producer), { pgid: process.pid });
+    assert.equal(renewed.schema, 'geospec-ci-artifacts-v3');
+    assert.equal(renewed.source.revision, revision, 'source kit records the current checkout revision');
+    assert.equal(
+      renewed.producerSource.revision,
+      legacySource.revision,
+      'receipt retains the original producer revision',
+    );
+    assert.deepEqual(renewed.artifacts, inventory.artifacts, 'five generated products retain exact bytes');
+    assert.deepEqual(
+      targets,
+      [...builtTargets, 'assemble-package'],
+      'source-only edit runs assembly without a compiler',
+    );
+    const renewedDelivery = /** @type {{archives: {path: string}[]}} */ (renewed.delivery);
+    assert.notDeepEqual(renewedDelivery.archives, originalDelivery.archives);
+    assert.deepEqual(ensureDelivery(producer), renewed, 'warm v3 delivery reuses its selected trio');
+    assert.deepEqual(targets, [...builtTargets, 'assemble-package']);
+    const relink = renewedDelivery.archives[2];
+    assert.ok(relink);
+    const archivedTest = actualSpawnSync('tar', [
+      '-xOzf',
+      join(producer, relink.path),
+      `geospec-engine-native-source-relink/source/${sourceKitPaths[0]}`,
+    ]);
+    assert.equal(archivedTest.status, 0);
+    assert.deepEqual(archivedTest.stdout, readFileSync(join(producer, sourceKitPaths[0])));
+    for (const [index, archive] of originalDelivery.archives.entries()) {
+      assert.deepEqual(fileRecordForTest(join(producer, archive.path)), oldArchives[index], 'old trio is immutable');
+    }
+    for (const [index, path] of sourceKitPaths.entries()) {
+      put(join(producer, path), `second source-only edit ${path}`);
+      assert.deepEqual(verifyArtifacts(producer).artifacts, inventory.artifacts);
+      assert.throws(() => verifyDelivery(producer), /source kit differs/);
+      const second = withProducerMarker(producer, () => ensureDelivery(producer), { pgid: process.pid });
+      assert.deepEqual(second.artifacts, inventory.artifacts);
+      assert.deepEqual(targets, [...builtTargets, ...Array.from({ length: index + 2 }, () => 'assemble-package')]);
+    }
+    for (const [path, value] of [
+      [bindingPath, 'different ABI'],
+      [patchPath, 'different native patch'],
+      [toolchainPath, 'different toolchain'],
+      [cargoLockPath, 'different lock'],
+      [`${packagePath}/scripts/ci-artifacts.mjs`, 'different producer script'],
+    ]) {
+      const original = readFileSync(join(producer, path));
+      put(join(producer, path), value);
+      assert.throws(() => verifyArtifacts(producer), /source inputs differ/);
+      put(join(producer, path), original);
+    }
+    const product = join(producer, mixedPath, 'geospec_engine_native.wasm');
+    const productBytes = readFileSync(product);
+    put(product, 'different product');
+    assert.throws(() => verifyArtifacts(producer), /membership\/bytes\/hashes differ/);
+    put(product, productBytes);
+    put(join(producer, cargoLockPath), 'different lock');
+    failNode = true;
+    assert.throws(() => ensureDelivery(producer), /build-node failed/);
+    assert.equal(targets.at(-1), 'build-node', 'changed lock must return to producer, not source-kit assembly');
+    return;
+  }
   assert.deepEqual(ensureDelivery(producer), inventory);
   assert.deepEqual(targets, builtTargets, 'an unchanged delivery must not invoke a producer');
   const snapshot = snapshotDelivery(producer);
@@ -569,7 +743,7 @@ const checkTransport = (context, reusePrefixes) => {
     );
   }
   assert.deepEqual(targets, builtTargets, 'an unrelated HEAD change must not start a producer');
-  revision = 'a'.repeat(40);
+  revision = 'f6ee22ab908e59d4335889cbc88e5907decd7198';
   const inventoryFile = join(consumer, transportPath, 'inventory.json');
   for (const name of ['mixed-inputs.json', 'mixed-commands.json']) {
     const path = join(consumer, transportPath, name);
@@ -731,6 +905,10 @@ await test('default cold preparation transports complete artifacts without loadi
 
 await test('independent retained prefixes transport complete artifacts without loading a product', (context) => {
   checkTransport(context, true);
+});
+
+await test('source-only edits reassemble a fresh trio without changing verified products', (context) => {
+  checkTransport(context, false, true);
 });
 
 await test('a producer marker blocks a second waiter and clears only its unchanged successful owner', (context) => {

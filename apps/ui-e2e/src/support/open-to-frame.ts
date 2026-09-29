@@ -59,6 +59,8 @@ import { mergeRuntimeTrace } from '../../../runtime-e2e/src/benchmarks/runtime-t
 import type { RuntimeTraceSummary } from '../../../runtime-e2e/src/benchmarks/runtime-trace.ts';
 // oxlint-disable-next-line no-restricted-imports -- executable driver: no package alias before install.
 import { classifyWebGpuAdapter } from './webgpu-profile.ts';
+// oxlint-disable-next-line no-restricted-imports -- executable driver runs directly in Node without the test aliases.
+import { epochForRelativeMarks, observedKernelSelection } from './open-to-frame-observation.ts';
 
 type Host = 'browser' | 'desktop';
 type Scenario = 'cold' | 'home' | 'restart-warm';
@@ -384,10 +386,10 @@ const coefficientOfVariation = (values: readonly number[]): number | undefined =
 };
 
 /**
- * The kernel that actually ran, from the host's own `kernel.engine` line. The
- * requested kernel is a *request*: L10 finding F-L10-10 showed every sample
- * forking `openrscad` regardless, and a harness with no check published that as
- * a per-kernel row.
+ * The selected kernel from its render trace, with a backend only when the
+ * host's engine record independently names the same kernel. A desktop fork
+ * logs its resident OpenRSCAD engine even when it later renders JSCAD; that
+ * record cannot qualify JSCAD's variant or process identity.
  */
 const observedEngine = async (
   traceFile: string | undefined,
@@ -396,9 +398,7 @@ const observedEngine = async (
   if (traceFile === undefined) {
     return undefined;
   }
-  const body = await readFile(traceFile, 'utf8').catch(() => '');
-  const selection = body.split('\n').findLast((line) => line.includes('"kernel.select"'));
-  const kernel = /"kernelId":"(?<kernel>[^"]+)"/u.exec(selection ?? '')?.groups?.['kernel'];
+  const kernel = await observedKernelSelection(traceFile);
   if (kernel === undefined) {
     return undefined;
   }
@@ -581,6 +581,7 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
   const warmupLog =
     warmup === undefined ? undefined : await readFile(join(userData, 'logs/desktop.log'), 'utf8').catch(() => '');
   const warmupEngine = await observedEngine(warmupTrace?.file, warmupLog?.split('\n'));
+  const warmupSelection = await observedKernelSelection(warmupTrace?.file);
   if (warmup !== undefined) {
     await rm(join(userData, 'logs/traces'), { recursive: true, force: true });
   }
@@ -593,7 +594,7 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
   const marks: Record<string, number> = {};
   const startedAt = new Date().toISOString();
   const start = performance.now();
-  const marksEpochMilliseconds = Date.now() - start;
+  const marksEpochMilliseconds = epochForRelativeMarks(start, Date.now(), performance.now());
   const contention = readContention({
     loadAverage1m: loadavg()[0] ?? 0,
     cpuCount: cpus().length,
@@ -856,8 +857,8 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
     warmup?.error ??
     (warmup !== undefined && warmup.appIsPackaged !== true
       ? 'warmup did not run a packaged Electron app'
-      : warmup !== undefined && (!warmupEngine?.startsWith(`${kernelId}:`) || warmupEngine.includes('unobserved'))
-        ? 'warmup kernel engine was not observed for the seeded project'
+      : warmup !== undefined && warmupSelection !== kernelId
+        ? 'warmup selected kernel was not observed for the seeded project'
         : invalidReason);
   if (reason !== undefined) {
     await page
@@ -911,6 +912,7 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
     warmup,
     warmupTrace: warmupTrace?.file,
     warmupEngine,
+    warmupSelection,
     marks,
     wallAttribution: { fraction: 0, unknownIntervals },
     page: timeline,

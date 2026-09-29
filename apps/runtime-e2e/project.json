@@ -15,8 +15,26 @@
         },
         {
           "env": "TAU_GEOSPEC_CACHE"
+        },
+        {
+          "env": "TAU_PICOGK_RESOURCE_ROOT"
+        },
+        {
+          "env": "GEOSPEC_TURBOFAN_NATIVE"
         }
       ]
+    },
+    "native-turbofan": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": [
+        { "projects": ["desktop"], "target": "prepare-picogk-dotnet-macos" },
+        { "projects": ["geospec-engine-native"], "target": "prepare-geospec-ci-artifacts" }
+      ],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "GEOSPEC_TURBOFAN_NATIVE=1 TAU_PICOGK_RESOURCE_ROOT=\"$PWD/../../apps/desktop/resources/picogk\" vitest run src/picogk-turbofan-native.test.ts"
+      }
     },
     "example-health": {
       "command": "vitest run src/tau-examples-health.test.ts",

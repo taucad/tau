@@ -16,7 +16,10 @@ import {
   nearestProjectedSegment,
 } from '#components/geometry/graphics/three/utils/measurement-features.js';
 import type { SnapPoint } from '#components/geometry/graphics/three/utils/snap-detection.utils.js';
-import type { MeasurementTarget } from '#components/geometry/graphics/three/utils/measurement-features.js';
+import type {
+  MeasurementTarget,
+  MeshFeatureGraph,
+} from '#components/geometry/graphics/three/utils/measurement-features.js';
 
 const intersection = (mesh: THREE.Mesh): THREE.Intersection<THREE.Mesh> => ({
   distance: 0,
@@ -361,6 +364,47 @@ describe('mesh measurement features', () => {
     expect(
       targets.some((target) => target.occurrenceId === 'part-a' && target.featureId === 'topology:part-a:edge:9:0'),
     ).toBe(true);
+  });
+
+  it('accepts a face when visible and kept supports are different triangles', () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0, 20, 0, 0, 21, 0, 0, 20, 1, 0], 3),
+    );
+    const mesh = new THREE.Mesh(geometry);
+    const id = 'topology:face';
+    const graph: MeshFeatureGraph = {
+      geometry,
+      revision: 'test',
+      features: [
+        {
+          id,
+          kind: 'face',
+          evidence: 'mesh',
+          normal: new THREE.Vector3(0, 0, 1),
+          planar: true,
+          centroid: new THREE.Vector3(),
+          centroidOnSurface: false,
+          area: 1,
+          triangleIndices: [0, 1],
+          loopIds: [],
+        },
+      ],
+      triangleRegion: [0, 0],
+      triangleBody: [0, 0],
+      triangleFeatureId: [id, id],
+    };
+    const targets = findMeasurementTargets(graph, {
+      mesh,
+      camera: camera(),
+      canvas,
+      mousePos: new THREE.Vector2(),
+      snapDistancePx: 100,
+      filter: 'face',
+      isKept: (point) => point.x > 10,
+    });
+    expect(targets.some((target) => target.featureId === id && target.kind === 'centroid')).toBe(true);
   });
 
   it('should measure a bounded edge distance and world-space angle', () => {

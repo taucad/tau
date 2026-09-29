@@ -11,8 +11,8 @@ import {
 } from '#components/geometry/graphics/three/geometries/label-geometry.js';
 import {
   findMeasurementTargets,
+  getCachedMeshMeasurementFeatures,
   getLineMeasurementFeatures,
-  getMeshMeasurementFeatures,
   listMeasurementTargets,
   measureFeature,
   measureTargetPair,
@@ -22,6 +22,8 @@ import type {
   MeshFeature,
   MeshFeatureGraph,
 } from '#components/geometry/graphics/three/utils/measurement-features.js';
+import { createMeasurementFeatureWorkerClient } from '#components/geometry/graphics/three/utils/measurement-features-worker-client.js';
+import type { MeasurementFeatureWorkerClient } from '#components/geometry/graphics/three/utils/measurement-features-worker-client.js';
 import type { MeasurementAnchor, MeasurementRecord } from '#constants/measurement.types.js';
 import { computeAxisRotationForCamera } from '#components/geometry/graphics/three/utils/rotation.utils.js';
 import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
@@ -69,7 +71,18 @@ export function describeMeasurementTarget(
     [metadata?.componentId ? manifest?.nodesById[metadata.componentId]?.name : undefined, mesh.name].find(Boolean) ??
     'Model';
   const graph =
-    metadata?.kind === 'line' ? getLineMeasurementFeatures(mesh) : getMeshMeasurementFeatures(mesh as THREE.Mesh);
+    metadata?.kind === 'line' ? getLineMeasurementFeatures(mesh) : getCachedMeshMeasurementFeatures(mesh as THREE.Mesh);
+  const endpoint =
+    target.kind === 'endpoint'
+      ? target.id.endsWith(':start')
+        ? ' · start'
+        : target.id.endsWith(':end')
+          ? ' · end'
+          : ''
+      : '';
+  if (!graph) {
+    return `${owner}: ${target.label} 1${endpoint}`;
+  }
   let ordinals = featureOrdinals.get(graph);
   if (!ordinals) {
     ordinals = new Map<string, number>();
@@ -82,14 +95,6 @@ export function describeMeasurementTarget(
     featureOrdinals.set(graph, ordinals);
   }
   const ordinal = ordinals.get(target.featureId) ?? 1;
-  const endpoint =
-    target.kind === 'endpoint'
-      ? target.id.endsWith(':start')
-        ? ' · start'
-        : target.id.endsWith(':end')
-          ? ' · end'
-          : ''
-      : '';
   return `${owner}: ${target.label} ${ordinal}${endpoint}`;
 }
 
@@ -109,10 +114,11 @@ function featureSupports(
 ): THREE.Vector3[] {
   if (feature.kind === 'body' || feature.kind === 'circle') {
     const stride = Math.max(1, Math.floor(feature.points.length / 16));
-    return feature.points
-      .filter((_, index) => index % stride === 0)
-      .slice(0, 16)
-      .map((point) => point.clone().applyMatrix4(object.matrixWorld));
+    const supports: THREE.Vector3[] = [];
+    for (let index = 0; index < feature.points.length && supports.length < 16; index += stride) {
+      supports.push(feature.points[index]!.clone().applyMatrix4(object.matrixWorld));
+    }
+    return supports;
   }
   if (feature.kind === 'face' && !feature.centroidOnSurface) {
     const firstTriangle = feature.triangleIndices[0];
@@ -289,6 +295,19 @@ export function MeasureTool(): React.JSX.Element {
   const committedCutsRef = useRef(graphicsActor.getSnapshot().context.committedSectionCuts);
   const handledCommitRequestRef = useRef(0);
   const handledCatalogRequestRef = useRef(measureCatalogRequest);
+  const catalogVersionRef = useRef(0);
+  const catalogScanRef = useRef<
+    | {
+        meshes: Array<THREE.Object3D & { geometry: THREE.BufferGeometry }>;
+        meshIndex: number;
+        graph?: MeshFeatureGraph;
+        featureIndex: number;
+        targets: MeasurementTarget[];
+        targetIndex: number;
+        catalog: Map<string, { target: MeasurementTarget; mesh: THREE.Object3D & { geometry: THREE.BufferGeometry } }>;
+      }
+    | undefined
+  >(undefined);
   const [cameraRevision, setCameraRevision] = useState(0);
   const [poseRevision, setPoseRevision] = useState(0);
   const cameraMatrixRef = useRef('');
@@ -307,6 +326,20 @@ export function MeasureTool(): React.JSX.Element {
   const mouseRef = useRef(new THREE.Vector2());
   const measureInputActor = useMemo(() => createActor(measureInputMachine), []);
   const pointerMoveCoalescerRef = useRef<RafCoalescer<MeasurePointerCoordinates> | undefined>(undefined);
+  const graphClientRef = useRef<MeasurementFeatureWorkerClient | undefined>(undefined);
+  const pointerGraphPendingRef = useRef(new WeakSet<THREE.Mesh>());
+  const graphClient = useCallback(() => {
+    graphClientRef.current ??= createMeasurementFeatureWorkerClient();
+    return graphClientRef.current;
+  }, []);
+  useEffect(
+    () => () => {
+      graphClientRef.current?.dispose();
+      graphClientRef.current = undefined;
+      pointerGraphPendingRef.current = new WeakSet();
+    },
+    [geometryKey, isMeasureActive, modelDisplayRevision, pickableMeshesVersion],
+  );
   // Where the pointer last moved, so a cut change can raycast its snaps again from there.
   const lastPointerRef = useRef<MeasurePointerCoordinates | undefined>(undefined);
   const wasCameraMovingRef = useRef(cameraMoving);
@@ -381,6 +414,42 @@ export function MeasureTool(): React.JSX.Element {
     getCachedMeshes();
     return cachedLinesRef.current;
   }, [getCachedMeshes]);
+  const requestPointerGraph = useCallback(
+    async (surface: THREE.Mesh, presentedKey: string | undefined): Promise<void> => {
+      if (pointerGraphPendingRef.current.has(surface)) {
+        return;
+      }
+      pointerGraphPendingRef.current.add(surface);
+      try {
+        const ready = await graphClient().prepare(surface);
+        if (
+          ready &&
+          graphicsActor.getSnapshot().context.measureMessage ===
+            'Measurement features could not be prepared. Move the pointer to retry.'
+        ) {
+          graphicsActor.send({ type: 'setMeasureMessage' });
+        }
+        if (ready && presentedKey === geometryKeyRef.current && lastPointerRef.current) {
+          pointerMoveCoalescerRef.current?.schedule(lastPointerRef.current);
+        }
+      } catch {
+        const { context } = graphicsActor.getSnapshot();
+        if (
+          presentedKey === geometryKeyRef.current &&
+          context.isMeasureActive &&
+          context.measureMessage !== 'Measurement features could not be prepared. Move the pointer to retry.'
+        ) {
+          graphicsActor.send({
+            type: 'setMeasureMessage',
+            message: 'Measurement features could not be prepared. Move the pointer to retry.',
+          });
+        }
+      } finally {
+        pointerGraphPendingRef.current.delete(surface);
+      }
+    },
+    [graphClient, graphicsActor],
+  );
 
   useEffect(() => {
     measureInputActor.start();
@@ -451,7 +520,12 @@ export function MeasureTool(): React.JSX.Element {
         const graph =
           mesh.userData['measurementFeatures']?.kind === 'line'
             ? getLineMeasurementFeatures(mesh)
-            : getMeshMeasurementFeatures(mesh as THREE.Mesh);
+            : getCachedMeshMeasurementFeatures(mesh as THREE.Mesh);
+        if (!graph) {
+          // async-iife: bootstrap -- Pointer snapshots cannot await an off-thread graph.
+          void requestPointerGraph(mesh as THREE.Mesh, geometryKeyRef.current);
+          continue;
+        }
         const targets = findMeasurementTargets(graph, {
           mesh,
           camera,
@@ -545,6 +619,7 @@ export function MeasureTool(): React.JSX.Element {
       describeTarget,
       getCachedLines,
       getCachedMeshes,
+      requestPointerGraph,
       gl.domElement,
       graphicsActor,
       invalidate,
@@ -756,8 +831,8 @@ export function MeasureTool(): React.JSX.Element {
               count++;
             }
           });
-          const graph = getMeshMeasurementFeatures(selected.mesh as THREE.Mesh);
-          return count === 1 && graph.features.filter((feature) => feature.kind === 'body').length === 1;
+          const graph = getCachedMeshMeasurementFeatures(selected.mesh as THREE.Mesh);
+          return count === 1 && graph?.features.filter((feature) => feature.kind === 'body').length === 1;
         };
         const asBuilt = modelInteractionUnitId
           ? Object.values(
@@ -956,6 +1031,8 @@ export function MeasureTool(): React.JSX.Element {
       graphicsActor.send({ type: 'measurementPoseChanged', revision });
       graphicsActor.send({ type: 'cancelCurrentMeasurement' });
       selectedTargetRef.current = undefined;
+      catalogVersionRef.current++;
+      catalogScanRef.current = undefined;
       if (lastPointerRef.current) {
         pointerMoveCoalescerRef.current?.schedule(lastPointerRef.current);
       }
@@ -966,6 +1043,8 @@ export function MeasureTool(): React.JSX.Element {
   }, [graphicsActor, kinematicsRef]);
 
   useEffect(() => {
+    catalogVersionRef.current++;
+    catalogScanRef.current = undefined;
     if (!isMeasureActive) {
       return;
     }
@@ -982,6 +1061,8 @@ export function MeasureTool(): React.JSX.Element {
     graphicsActor,
     isMeasureActive,
     modelDisplayRevision,
+    measureFilter,
+    measureMode,
     pickableMeshesVersion,
     poseRevision,
   ]);
@@ -991,58 +1072,153 @@ export function MeasureTool(): React.JSX.Element {
       return;
     }
     handledCatalogRequestRef.current = measureCatalogRequest;
+    const append = graphicsActor.getSnapshot().context.measureCatalogAppend;
+    if (!append || !catalogScanRef.current) {
+      catalogScanRef.current = {
+        meshes: [...getCachedMeshes(), ...getCachedLines()],
+        meshIndex: 0,
+        featureIndex: 0,
+        targets: [],
+        targetIndex: 0,
+        catalog: new Map(),
+      };
+    }
+    const scan = catalogScanRef.current;
+    const version = catalogVersionRef.current;
     const clipping = resolveSectionViewRaycastClip(graphicsActor.getSnapshot().context, renderFrame);
     const isKept = createRaycastClipTest(clipping);
     const catalogRaycaster = new THREE.Raycaster();
-    const catalog = new Map<
-      string,
-      { target: MeasurementTarget; mesh: THREE.Object3D & { geometry: THREE.BufferGeometry } }
-    >();
-    for (const mesh of [...getCachedMeshes(), ...getCachedLines()]) {
-      const graph =
-        mesh.userData['measurementFeatures']?.kind === 'line'
-          ? getLineMeasurementFeatures(mesh)
-          : getMeshMeasurementFeatures(mesh as THREE.Mesh);
-      for (const target of listMeasurementTargets(graph, {
-        mesh,
-        camera,
-        canvas: gl.domElement,
-        filter: measureMode === 'point' ? 'point' : measureFilter,
-        isKept: isKept ?? undefined,
-        isVisible: (world, feature, kind) => {
-          const supportPoints =
-            kind === 'center' || kind === 'centroid' || kind === 'body'
-              ? featureSupports(feature, world, mesh)
-              : [world];
-          return supportPoints.some((support) => {
-            if (isKept && !isKept(support)) {
-              return false;
-            }
-            const projected = support.clone().project(camera);
-            if (projected.z < -1 || projected.z > 1) {
-              return false;
-            }
-            setRaycasterFromCamera(catalogRaycaster, new THREE.Vector2(projected.x, projected.y), camera);
-            const hit = raycastFirstVisibleMeshHit({
-              raycaster: catalogRaycaster,
-              meshes: getCachedMeshes(),
-              clipping,
-            });
-            return isSupportVisible(hit, catalogRaycaster.ray, support);
+    const cameraKey = `${camera.matrixWorld.elements.join(',')}:${camera.projectionMatrix.elements.join(',')}`;
+    const pageEnd = scan.catalog.size + 100;
+    const featureBatchSize = 32;
+    const preparingMessage = 'Preparing measurement features…';
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const publish = (hasMore: boolean): void => {
+      catalogReferences.current = new Map(scan.catalog);
+      candidateReferences.current = new Map(scan.catalog);
+      const candidates = [...scan.catalog.values()].map(({ target, mesh }) => ({
+        id: target.id,
+        label: describeTarget(target, mesh),
+      }));
+      graphicsActor.send({ type: 'setMeasureCandidates', candidates, activeId: candidates[0]?.id, hasMore });
+    };
+    const requestCatalogGraph = async (surface: THREE.Mesh, presentedKey: string | undefined): Promise<void> => {
+      graphicsActor.send({ type: 'setMeasureMessage', message: preparingMessage });
+      try {
+        const ready = await graphClient().prepare(surface);
+        if (cancelled || version !== catalogVersionRef.current || presentedKey !== geometryKeyRef.current) {
+          return;
+        }
+        if (ready) {
+          scan.graph = ready;
+          if (graphicsActor.getSnapshot().context.measureMessage === preparingMessage) {
+            graphicsActor.send({ type: 'setMeasureMessage' });
+          }
+          timer = setTimeout(step, 0);
+        } else {
+          if (graphicsActor.getSnapshot().context.measureMessage === preparingMessage) {
+            graphicsActor.send({ type: 'setMeasureMessage' });
+          }
+          publish(false);
+        }
+      } catch {
+        if (!cancelled && version === catalogVersionRef.current) {
+          graphicsActor.send({
+            type: 'setMeasureMessage',
+            message: 'Measurement features could not be prepared. Reopen the target list to retry.',
           });
-        },
-      })) {
-        const id = `${mesh.uuid}:${target.id}`;
-        catalog.set(id, { target: { ...target, id }, mesh });
+          publish(false);
+        }
       }
-    }
-    catalogReferences.current = catalog;
-    candidateReferences.current = new Map(catalog);
-    const candidates = [...catalog.values()].map(({ target, mesh }) => ({
-      id: target.id,
-      label: describeTarget(target, mesh),
-    }));
-    graphicsActor.send({ type: 'setMeasureCandidates', candidates, activeId: candidates[0]?.id });
+    };
+    const step = (): void => {
+      if (cancelled || version !== catalogVersionRef.current) {
+        return;
+      }
+      if (cameraKey !== `${camera.matrixWorld.elements.join(',')}:${camera.projectionMatrix.elements.join(',')}`) {
+        catalogScanRef.current = undefined;
+        return;
+      }
+      const start = performance.now();
+      let checked = 0;
+      while (scan.catalog.size < pageEnd && checked < 16 && performance.now() - start < 8) {
+        if (scan.targetIndex >= scan.targets.length) {
+          if (!scan.graph || scan.featureIndex >= scan.graph.features.length) {
+            if (scan.meshIndex >= scan.meshes.length) {
+              publish(false);
+              return;
+            }
+            const mesh = scan.meshes[scan.meshIndex++]!;
+            scan.featureIndex = 0;
+            scan.graph =
+              mesh.userData['measurementFeatures']?.kind === 'line'
+                ? getLineMeasurementFeatures(mesh)
+                : getCachedMeshMeasurementFeatures(mesh as THREE.Mesh);
+            if (!scan.graph) {
+              // async-iife: bootstrap -- The catalog's timer yields while this worker request is pending.
+              void requestCatalogGraph(mesh as THREE.Mesh, geometryKeyRef.current);
+              return;
+            }
+          }
+          const { graph } = scan;
+          const mesh = scan.meshes[scan.meshIndex - 1]!;
+          scan.targets = listMeasurementTargets(
+            { ...graph, features: graph.features.slice(scan.featureIndex, scan.featureIndex + featureBatchSize) },
+            {
+              mesh,
+              camera,
+              canvas: gl.domElement,
+              filter: measureMode === 'point' ? 'point' : measureFilter,
+              isKept: isKept ?? undefined,
+            },
+          );
+          scan.featureIndex += featureBatchSize;
+          scan.targetIndex = 0;
+          continue;
+        }
+        const target = scan.targets[scan.targetIndex++]!;
+        const mesh = target.sourceMesh as THREE.Object3D & { geometry: THREE.BufferGeometry };
+        checked++;
+        const supportPoints =
+          target.kind === 'center' || target.kind === 'centroid' || target.kind === 'body'
+            ? featureSupports(target.feature, target.position, mesh)
+            : [target.position];
+        const visible = supportPoints.some((support) => {
+          if (isKept && !isKept(support)) {
+            return false;
+          }
+          const projected = support.clone().project(camera);
+          if (projected.z < -1 || projected.z > 1) {
+            return false;
+          }
+          setRaycasterFromCamera(catalogRaycaster, new THREE.Vector2(projected.x, projected.y), camera);
+          const hit = raycastFirstVisibleMeshHit({ raycaster: catalogRaycaster, meshes: getCachedMeshes(), clipping });
+          return isSupportVisible(hit, catalogRaycaster.ray, support);
+        });
+        if (visible) {
+          const id = `${mesh.uuid}:${target.id}`;
+          scan.catalog.set(id, { target: { ...target, id }, mesh });
+        }
+      }
+      if (scan.catalog.size >= pageEnd) {
+        publish(
+          scan.targetIndex < scan.targets.length ||
+            (scan.graph !== undefined && scan.featureIndex < scan.graph.features.length) ||
+            scan.meshIndex < scan.meshes.length,
+        );
+      } else {
+        timer = setTimeout(step, 0);
+      }
+    };
+    timer = setTimeout(step, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      if (graphicsActor.getSnapshot().context.measureMessage === preparingMessage) {
+        graphicsActor.send({ type: 'setMeasureMessage' });
+      }
+    };
   }, [
     camera,
     cameraRevision,
@@ -1050,6 +1226,7 @@ export function MeasureTool(): React.JSX.Element {
     geometryKey,
     getCachedLines,
     getCachedMeshes,
+    graphClient,
     gl.domElement,
     graphicsActor,
     isMeasureActive,
@@ -1116,8 +1293,12 @@ export function MeasureTool(): React.JSX.Element {
         graphicsActor.send({ type: 'cancelCurrentMeasurement' });
       }
       selectedTargetRef.current = undefined;
+      const hadCatalog = catalogReferences.current.size > 0 || catalogScanRef.current !== undefined;
       catalogReferences.current.clear();
-      if (context.measureLockedTargetId ?? context.measureChosenCandidateId) {
+      candidateReferences.current.clear();
+      catalogVersionRef.current++;
+      catalogScanRef.current = undefined;
+      if (hadCatalog || Boolean(context.measureLockedTargetId) || Boolean(context.measureChosenCandidateId)) {
         graphicsActor.send({ type: 'setMeasureCandidates', candidates: [] });
       }
       if (lastPointerRef.current) {
@@ -1369,12 +1550,12 @@ function FeatureHighlight({
     const graph =
       mesh.userData['measurementFeatures']?.kind === 'line'
         ? getLineMeasurementFeatures(mesh)
-        : getMeshMeasurementFeatures(mesh as THREE.Mesh);
+        : getCachedMeshMeasurementFeatures(mesh as THREE.Mesh);
     const paths =
       target.feature.kind === 'edge' || target.feature.kind === 'circle'
         ? [target.feature]
         : target.feature.kind === 'face'
-          ? graph.features.filter(
+          ? (graph?.features ?? []).filter(
               (feature) =>
                 target.feature.kind === 'face' &&
                 target.feature.loopIds.includes(feature.id) &&

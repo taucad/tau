@@ -1,5 +1,20 @@
 import { expectTypeOf, it, describe } from 'vitest';
-import type { FileStat, FileStatEntry, FileTreeContentMetadata, FileTreeEntry } from '#types/file.types.js';
+import type { ExportFile, FileStat, FileStatEntry, FileTreeContentMetadata, FileTreeEntry } from '#types/file.types.js';
+import type { MediaType, MimeType } from '#types/mime-types.types.js';
+
+describe('open export media types', () => {
+  it('retains known MIME literals while admitting new media types', () => {
+    expectTypeOf<MimeType>().toExtend<MediaType>();
+    expectTypeOf<'model/gltf-binary'>().toExtend<MediaType>();
+    expectTypeOf<'application/vnd.example.cad'>().toExtend<MediaType>();
+    const file: ExportFile = {
+      name: 'part.cad',
+      bytes: new Uint8Array(),
+      mimeType: 'application/vnd.example.cad',
+    };
+    expectTypeOf(file.mimeType).toEqualTypeOf<MediaType>();
+  });
+});
 
 describe('FileStat', () => {
   it('is a readonly object type for stat results', () => {

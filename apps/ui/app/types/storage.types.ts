@@ -40,6 +40,7 @@ export type StorageProvider = {
   getProjectLibraryState(projectId: string): Promise<ProjectLibraryState | undefined>;
   getProjectLibraryStates(projectIds?: readonly string[]): Promise<ProjectLibraryState[]>;
   touchProjectActivity(projectId: string, activityAt?: number): Promise<ProjectLibraryState | undefined>;
+  setGeoSpecCandidateConsent(projectId: string, enabled: boolean): Promise<ProjectLibraryState | undefined>;
   trashProject(projectId: string, deletedAt?: number): Promise<ProjectLibraryState | undefined>;
   restoreProject(projectId: string): Promise<ProjectLibraryState | undefined>;
   deleteProjectLibraryState(projectId: string): Promise<void>;

@@ -7,6 +7,8 @@ export type ProjectLibraryState = {
   readonly projectId: string;
   readonly lastActivityAt: number;
   readonly deletedAt?: number;
+  /** Device-local permission to share GeoSpec candidate facts; absent means off. */
+  readonly syncGeoSpecCandidates?: boolean;
 };
 
 /**

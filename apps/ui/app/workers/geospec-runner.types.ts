@@ -15,6 +15,10 @@ export type GeoSpecRunnerWorkerRunRequest = {
   requestId: string;
   sessionId: string;
   args: RunGeoSpecTestsRpcInput;
+  /** Foreign candidate bytes remain untrusted until this run recomputes matching facts. */
+  candidates?: ReadonlyArray<Uint8Array<ArrayBuffer>>;
+  /** A successful device-local consent check in this run, before dispatch. */
+  candidateSharingEnabled?: boolean;
 };
 
 export type GeoSpecRunnerWorkerAbortRequest = {
@@ -47,6 +51,8 @@ export type GeoSpecRunnerWorkerResultResponse = {
   type: 'result';
   requestId: string;
   result: RunGeoSpecTestsRpcResult;
+  /** Facts established by this same run, outside the authored test result. */
+  candidates?: ReadonlyArray<Uint8Array<ArrayBuffer>>;
 };
 
 export type GeoSpecRunnerWorkerErrorResponse = {

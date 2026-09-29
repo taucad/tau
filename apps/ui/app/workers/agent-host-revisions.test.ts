@@ -23,6 +23,40 @@ const row = (revisionNumber: number, revisionId: string): RevisionRow => ({
 });
 
 describe('createPortRevisionsClient', () => {
+  it('keeps candidate fetch and publication on correlated private revision frames', async () => {
+    const { port1, port2 } = new MessageChannel();
+    const seen: WorkerRevisionRequest[] = [];
+    const candidate = new TextEncoder().encode('{"schema":"test"}');
+    port2.addEventListener('message', ({ data }: MessageEvent<WorkerRevisionRequest>) => {
+      seen.push(data);
+      if (data.id === undefined) {
+        return;
+      }
+      if (data.command === 'fetchGeoSpecCandidates') {
+        port2.postMessage({
+          type: 'result',
+          id: data.id,
+          result: { kind: 'geoSpecCandidates', candidates: [candidate] },
+        } satisfies WorkerRevisionResponse);
+      } else if (data.command === 'publishGeoSpecCandidate') {
+        port2.postMessage({
+          type: 'result',
+          id: data.id,
+          result: { kind: 'geoSpecCandidatePublication', status: 'updated' },
+        } satisfies WorkerRevisionResponse);
+      }
+    });
+    port2.start();
+    const client = createPortRevisionsClient(port1);
+    await expect(client.fetchGeoSpecCandidates()).resolves.toEqual([candidate]);
+    await expect(client.publishGeoSpecCandidate(candidate)).resolves.toBe('updated');
+    expect(seen[0]).toMatchObject({ command: 'fetchGeoSpecCandidates' });
+    expect(seen[1]).toMatchObject({ command: 'publishGeoSpecCandidate', candidate });
+    client.close();
+    port1.close();
+    port2.close();
+  });
+
   it('should read log, diff and the place line over a revision port', async () => {
     const { port1, port2 } = new MessageChannel();
     const seen: WorkerRevisionRequest[] = [];

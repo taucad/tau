@@ -8,6 +8,7 @@ import type {
   MiddlewarePlugin,
   RenderContentFor,
   RenderOptionsFor,
+  TranscoderEdgeType,
   TranscoderPlugin,
 } from '#plugins/plugin-types.js';
 import type { ExportRoute } from '#types/runtime.types.js';
@@ -39,6 +40,7 @@ type LiteralPhantomKey =
   | '__exportContent'
   | '__middlewareRenderContent'
   | '__middlewareExportContent'
+  | '__middlewareViewContent'
   | '__transcodeEdges'
   | '__transcodeFrom'
   | '__transcoderId'
@@ -46,7 +48,7 @@ type LiteralPhantomKey =
   | '__transcodePinnedSourceOptions';
 
 describe('plugin phantom opacity', () => {
-  it('keeps all twelve compile-time carriers out of consumer-nameable structure', () => {
+  it('keeps compile-time carriers out of consumer-nameable structure', () => {
     type ConsumerNameablePhantoms = Extract<LiteralPhantomKey, keyof Kernel | keyof Middleware | keyof Transcoder>;
     expectTypeOf<ConsumerNameablePhantoms>().toEqualTypeOf<never>();
   });
@@ -67,6 +69,20 @@ describe('plugin phantom opacity', () => {
     expectTypeOf<RenderOptionsFor<Kernels, 'kernel-a'>>().toEqualTypeOf<{ tolerance?: number }>();
     expectTypeOf<ExportOptionsFor<Kernels, Transcoders, 'stl'>>().toEqualTypeOf<
       { unit?: string } & { binary?: boolean }
+    >();
+  });
+
+  it('keeps source ownership when source and edge declare the same key', () => {
+    type Source = KernelPlugin<{ csv: { owner: string; pinned: string } }, {}, 'source'>;
+    type Edge = TranscoderPlugin<
+      { pdf: TranscoderEdgeType<'csv', { owner: number; layout: boolean }> },
+      'csv',
+      'pdf',
+      {},
+      { pdf: 'pinned' }
+    >;
+    expectTypeOf<ExportOptionsFor<readonly [Source], readonly [Edge], 'pdf'>>().toEqualTypeOf<
+      { owner: string } & { layout: boolean }
     >();
   });
 });

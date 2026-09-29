@@ -7,7 +7,7 @@
 import { assertType, describe, expectTypeOf, it } from 'vitest';
 import type { GeometryResponse } from '@taucad/types';
 import { z } from 'zod';
-import type { RuntimeClientOptions } from '#client/runtime-client-core.js';
+import type { RuntimeClientOptions } from '#client/runtime-document-client-core.js';
 import type { AnyRuntimeDefinition, RuntimeDefinition, RuntimeDefinitionOptions } from '#index.js';
 import type { ExportRoute } from '#types/runtime.types.js';
 import { createRuntimeClient } from '#client/runtime-client.js';

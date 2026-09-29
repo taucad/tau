@@ -6,7 +6,7 @@
  *
  * Carries only the cross-environment author API: the
  * {@link defineRuntimeTransport} factory, the
- * {@link runtimeProtocolSchemas} wire validators, and shared types.
+ * {@link runtimeDocumentProtocolSchemas} wire validators, and shared types.
  * Every concrete transport ships behind its own topology-tagged
  * subpath so consumers signal their target topology at import time:
  *
@@ -44,7 +44,7 @@
 export { defineRuntimeTransport, definePassthroughTransport } from '#transport/define-runtime-transport.js';
 
 /**
- * Wire-protocol Zod validators for every {@link RuntimeProtocol} call and
+ * Wire-protocol Zod validators for every {@link RuntimeDocumentProtocol} call and
  * notify. The bundled transports (`inProcessTransport`,
  * `webWorkerTransport`, `nodeWorkerTransport`) wire these in by
  * default; external transports (e.g. `electronUtilityTransport`)
@@ -53,7 +53,7 @@ export { defineRuntimeTransport, definePassthroughTransport } from '#transport/d
  *
  * @public
  */
-export { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
+export { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
 
 export type {
   TransportPlugin,

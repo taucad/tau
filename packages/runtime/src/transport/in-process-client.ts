@@ -11,14 +11,15 @@
 import type { z } from 'zod';
 import { createChannelClient, wrapMessagePort } from '@taucad/rpc';
 import type { Channel, ChannelServerHandle } from '@taucad/rpc';
-import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
+import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import type { Geometry } from '@taucad/types';
 import type { inProcessClientOptionsSchema } from '#transport/in-process-transport.schemas.js';
 import type {
+  BinaryContentDelivery,
   GeometryTransport,
   RuntimeExportResultTransport,
   RuntimeInitializeResult,
-  RuntimeProtocol,
 } from '#types/runtime-protocol.types.js';
 import type {
   EncodedBinary,
@@ -35,7 +36,7 @@ import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { resolveRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
-import { materialiseExportResult } from '#transport/_internal/export-materialiser.js';
+import { materialiseBinaryContent, materialiseExportResult } from '#transport/_internal/export-materialiser.js';
 import { allocatePools } from '#transport/_internal/sab-pools.js';
 import type { AllocatedPools } from '#transport/_internal/sab-pools.js';
 import { reservePreview } from '#transport/_internal/abort-channel.js';
@@ -92,7 +93,7 @@ export const inProcessClientDescribe = (
  */
 export const inProcessClient = (
   options: InProcessClientSchemaOptions,
-): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, typeof inProcessId> => {
+): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<never, never>>, typeof inProcessId> => {
   const { fileSystem, runtime } = options as InProcessClientSchemaOptions & { readonly runtime?: AnyRuntimeDefinition };
   if (fileSystem !== undefined && !isRuntimeFileSystem(fileSystem)) {
     throw new TypeError('inProcessTransport: `fileSystem` must be produced by a `fromX` factory');
@@ -105,11 +106,11 @@ export const inProcessClient = (
   let channelPair: MessageChannel | undefined;
   let wrappedClientPort: ReturnType<typeof wrapMessagePort<unknown>> | undefined;
   let wrappedHostPort: ReturnType<typeof wrapMessagePort<unknown>> | undefined;
-  let openPromise: Promise<TransportClientReady> | undefined;
-  let channel: Channel<RuntimeProtocol> | undefined;
+  let openPromise: Promise<TransportClientReady<RuntimeDocumentProtocol>> | undefined;
+  let channel: Channel<RuntimeDocumentProtocol> | undefined;
   let isClosed = false;
   let worker: KernelRuntimeWorker | undefined;
-  let dispatcher: ChannelServerHandle<RuntimeProtocol> | undefined;
+  let dispatcher: ChannelServerHandle<RuntimeDocumentProtocol> | undefined;
   let closePromise: Promise<void> | undefined;
 
   let resolveClosed: ((result: RuntimeTransportCloseResult) => void) | undefined;
@@ -160,7 +161,7 @@ export const inProcessClient = (
     };
   };
 
-  const open = async (): Promise<TransportClientReady> => {
+  const open = async (): Promise<TransportClientReady<RuntimeDocumentProtocol>> => {
     if (openPromise) {
       return openPromise;
     }
@@ -171,9 +172,9 @@ export const inProcessClient = (
 
       const { hostPort } = ensurePoolsAndPorts();
 
-      const [kernelWorkerModule, { createWorkerDispatcher }] = await Promise.all([
+      const [kernelWorkerModule, { createDocumentWorkerDispatcher }] = await Promise.all([
         import('#framework/kernel-runtime-worker.js'),
-        import('#transport/_internal/runtime-worker-dispatcher.js'),
+        import('#transport/_internal/runtime-document-dispatcher.js'),
       ]);
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- close() can run while the imports are pending.
       if (isClosed) {
@@ -183,16 +184,16 @@ export const inProcessClient = (
         throw new Error('inProcessTransport: `runtime` is required so the in-process host can own executable modules');
       }
       worker = new kernelWorkerModule.KernelRuntimeWorker({ runtime });
-      dispatcher = createWorkerDispatcher(worker, hostPort, {
+      dispatcher = createDocumentWorkerDispatcher(worker, hostPort, {
         inlineFileSystem,
         encodeGeometry,
         encodeBinary,
         acknowledgeBinary: (key) => ensurePoolsAndPorts().geometryPool?.acknowledge(key),
       });
-      channel = createChannelClient<RuntimeProtocol>({
+      channel = createChannelClient<RuntimeDocumentProtocol>({
         port: ensurePoolsAndPorts().clientPort,
         sessionKey: runtimeChannelSessionKey,
-        protocolSchemas: runtimeProtocolSchemas,
+        protocolSchemas: runtimeDocumentProtocolSchemas,
       });
       await channel.ready;
       return { channel };
@@ -248,6 +249,11 @@ export const inProcessClient = (
     },
     async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {
       return materialiseGeometry(transport, pooled?.geometryPool, (key) => {
+        channel?.notify('binaryMaterialised', { key });
+      });
+    },
+    async resolveBinary(transport: BinaryContentDelivery): Promise<Uint8Array<ArrayBuffer>> {
+      return materialiseBinaryContent(transport, pooled?.geometryPool, (key) => {
         channel?.notify('binaryMaterialised', { key });
       });
     },

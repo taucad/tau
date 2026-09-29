@@ -1,44 +1,8 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- public API re-export */
-// Client
-export { createRuntimeClient } from '#client/runtime-client.js';
-export {
-  RenderTimeoutError,
-  isRenderTimeoutError,
-  RenderAbortedError,
-  isRenderAbortedError,
-} from '#framework/runtime-worker-client.js';
-export { SharedPoolEntryNotFoundError, isSharedPoolEntryNotFoundError } from '#transport/shared-pool-errors.js';
-export {
-  NoRenderOutcomeError,
-  isNoRenderOutcomeError,
-  RuntimeNotConnectedError,
-  isRuntimeNotConnectedError,
-  RuntimeConnectionError,
-  isRuntimeConnectionError,
-  RuntimeTerminatedError,
-  isRuntimeTerminatedError,
-} from '#client/runtime-client.js';
-export type {
-  RuntimeClient,
-  RuntimeClientOptions,
-  FilesystemRuntimeSource,
-  InlineRuntimeSource,
-  RuntimeExportOptions,
-  RuntimeRenderInput,
-  RuntimeEvaluateInput,
-  RuntimeSource,
-  RuntimeSourceContent,
-  RuntimeSourceFiles,
-  RuntimeSourceSnapshotAdditionalPath,
-  RuntimeSourceSnapshotInput,
-  ExportResult,
-  RenderOutcome,
-  RenderStatus,
-  RuntimeLifecycleState,
-  RuntimeConnectionCause,
-  RuntimeTerminatedCause,
-  RuntimeTerminatedDetail,
-} from '#client/runtime-client.js';
+// Document client
+export * from '#client/runtime-client.js';
+export { asKnownArtifact } from '#types/runtime-artifact.js';
+export type { KnownArtifact } from '#types/runtime-artifact.js';
 
 // Plugin types
 export type {

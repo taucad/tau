@@ -23,7 +23,7 @@ import type { NativeStats } from '@taucad/types';
 import { fromFileSystemBridge, fromFsLike } from '#filesystem/runtime-filesystem.js';
 import { fromNodeFs } from '#filesystem/from-node-fs.js';
 import type { FsLike, RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
-import { createRuntimeClient } from '#client/runtime-client-core.js';
+import { createRuntimeClient } from '#client/runtime-document-client-core.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { _fromMemoryFsHandle } from '#transport/_internal/from-memory-fs-handle.js';
 import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';

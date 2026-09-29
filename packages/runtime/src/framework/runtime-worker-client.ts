@@ -23,7 +23,7 @@
  * - Geometry materialisation → `transport.resolveGeometry(payload)`.
  */
 
-import type { FileExtension, LogEntry } from '@taucad/types';
+import type { LogEntry } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
 import type { Channel } from '@taucad/rpc';
 import { Topic } from '@taucad/events';
@@ -92,6 +92,64 @@ export class RenderAbortedError extends Error {
     return 'RUNTIME_RENDER_ABORTED';
   }
 }
+
+/** A document, view or export operation was explicitly cancelled. @public */
+export class OperationAbortedError extends Error {
+  public readonly phase: string | undefined;
+
+  public constructor(phase?: string, message = 'Runtime operation aborted.') {
+    super(message);
+    this.name = 'OperationAbortedError';
+    this.phase = phase;
+  }
+
+  /** Stable public discriminator. */
+  public get code(): 'RUNTIME_OPERATION_ABORTED' {
+    return 'RUNTIME_OPERATION_ABORTED';
+  }
+}
+
+/** Realm-safe operation-abort guard. @public */
+export const isOperationAbortedError = (error: unknown): error is OperationAbortedError =>
+  typeof error === 'object' &&
+  error !== null &&
+  'name' in error &&
+  error.name === 'OperationAbortedError' &&
+  'code' in error &&
+  error.code === 'RUNTIME_OPERATION_ABORTED' &&
+  'message' in error &&
+  typeof error.message === 'string' &&
+  'phase' in error &&
+  typeof error.phase === 'string';
+
+/** A document, view or export operation exceeded its deadline. @public */
+export class OperationTimeoutError extends Error {
+  public readonly phase: string;
+
+  public constructor(phase: string, message: string) {
+    super(message);
+    this.name = 'OperationTimeoutError';
+    this.phase = phase;
+  }
+
+  /** Stable public discriminator. */
+  public get code(): 'RUNTIME_OPERATION_TIMEOUT' {
+    return 'RUNTIME_OPERATION_TIMEOUT';
+  }
+}
+
+/** Realm-safe operation-timeout guard. @public */
+export const isOperationTimeoutError = (error: unknown): error is OperationTimeoutError =>
+  typeof error === 'object' &&
+  error !== null &&
+  'name' in error &&
+  error.name === 'OperationTimeoutError' &&
+  'code' in error &&
+  error.code === 'RUNTIME_OPERATION_TIMEOUT' &&
+  'message' in error &&
+  typeof error.message === 'string' &&
+  'phase' in error &&
+  typeof error.phase === 'string';
 
 /**
  * Realm-safe type guard -- checks `error.name` instead of prototype chain.
@@ -169,7 +227,7 @@ export type RuntimeWorkerClientOptions = {
    * resolution. The worker client never inspects the transport's
    * descriptor or wire fields directly.
    */
-  transport: RuntimeTransportClient;
+  transport: RuntimeTransportClient<RuntimeProtocol>;
 };
 
 /** Initialization options for {@link RuntimeWorkerClient}. @public */
@@ -250,7 +308,7 @@ export const assertValidTranscodeTimeout = (transcodeTimeout: number): void => {
  * @public
  */
 export class RuntimeWorkerClient {
-  private readonly transport: RuntimeTransportClient;
+  private readonly transport: RuntimeTransportClient<RuntimeProtocol>;
   private channel: Channel<RuntimeProtocol> | undefined;
   private readonly pendingSubscriptions = new Topic<Channel<RuntimeProtocol>>({
     name: 'runtime-worker-client.pending-subscriptions',
@@ -438,7 +496,7 @@ export class RuntimeWorkerClient {
    */
   // oxlint-disable-next-line max-params -- mirrors the fixed `export` protocol call shape (format, options, content, signal).
   public async exportGeometry(
-    format: FileExtension,
+    format: string,
     options?: Record<string, unknown>,
     content?: RuntimeContentInput,
     signal?: AbortSignal,

@@ -4599,7 +4599,7 @@ describe('transcoder loading', () => {
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
-          message: expect.stringContaining('Transcoder edge option validation failed') as string,
+          message: expect.stringContaining('Transcoder edge glb → usdz option quality') as string,
         }),
       ]),
     );

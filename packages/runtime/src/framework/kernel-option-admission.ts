@@ -251,7 +251,7 @@ export const admitKernelOptions = (
   schema: z.ZodType | undefined,
   input: Record<string, unknown>,
   label: string,
-  code: 'EVALUATE_OPTIONS_INVALID' | 'VIEW_OPTIONS_INVALID' | 'EXPORT_OPTIONS_INVALID',
+  code: 'EVALUATE_OPTIONS_INVALID' | 'VIEW_OPTIONS_INVALID' | 'EXPORT_OPTIONS_INVALID' | 'TRANSCODER_OPTIONS_INVALID',
 ): { success: true; options: Record<string, unknown> } | { success: false; issues: KernelIssue[] } => {
   const messages: string[] = [];
   const selections: UnionSelections = new WeakMap();
@@ -276,7 +276,7 @@ export const admitKernelOptions = (
       issues: messages.map((message) => ({
         message: `${label} option ${message}`,
         code,
-        type: 'kernel',
+        type: code === 'TRANSCODER_OPTIONS_INVALID' ? 'runtime' : 'kernel',
         severity: 'error',
       })),
     };

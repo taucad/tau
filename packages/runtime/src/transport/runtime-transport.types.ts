@@ -35,8 +35,8 @@ import type {
   InitializeMemoryHandle,
   RuntimeInitializeArgs,
   RuntimeInitializeResult,
-  RuntimeProtocol,
 } from '#types/runtime-protocol.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 
 /**
  * Opaque transport reservation captured synchronously for one preview.
@@ -149,7 +149,7 @@ export class RuntimeAlreadyInitializedError extends Error {
 
 /** Phantom: literal id of the transport (e.g. `'web-worker'`). */
 declare const __transportId: unique symbol;
-/** Phantom: protocol carried by the transport (default `RuntimeProtocol`). */
+/** Phantom: protocol carried by the transport (default document protocol). */
 declare const __transportProtocol: unique symbol;
 /** Phantom: bindings extra carried by the transport host bindings. */
 declare const __transportBindingsExtra: unique symbol;
@@ -276,7 +276,7 @@ export type HostInitializeBindings<
  *
  * @public
  */
-export type TransportClientReady<Protocol extends RpcProtocol = RuntimeProtocol> = {
+export type TransportClientReady<Protocol extends RpcProtocol = RuntimeDocumentProtocol> = {
   readonly channel: Channel<Protocol>;
 };
 
@@ -286,7 +286,7 @@ export type TransportClientReady<Protocol extends RpcProtocol = RuntimeProtocol>
  *
  * @public
  */
-export type TransportHostReady<Protocol extends RpcProtocol = RuntimeProtocol> = {
+export type TransportHostReady<Protocol extends RpcProtocol = RuntimeDocumentProtocol> = {
   readonly channel: ChannelServerHandle<Protocol>;
   readonly peerHello: TransportHelloPayload;
 };
@@ -313,7 +313,7 @@ export type RuntimeTransportFacet<Value> =
  * @public
  */
 export type RuntimeTransportClient<
-  Protocol extends RpcProtocol = RuntimeProtocol,
+  Protocol extends RpcProtocol = RuntimeDocumentProtocol,
   BindingsExtra extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
   Id extends string = string,
 > = {
@@ -380,6 +380,9 @@ export type RuntimeTransportClient<
    */
   resolveGeometry(transport: GeometryTransport): Promise<Geometry>;
 
+  /** Copy one inline or pooled binary payload, acknowledging pooled ownership. */
+  resolveBinary(transport: BinaryContentDelivery): Promise<Uint8Array<ArrayBuffer>>;
+
   /** Materialise pooled/inline export files into owned consumer bytes. */
   resolveExport?(transport: RuntimeExportResultTransport): Promise<ExportGeometryResult>;
 
@@ -401,7 +404,7 @@ export type RuntimeTransportClient<
  * @public
  */
 export type RuntimeTransportHost<
-  Protocol extends RpcProtocol = RuntimeProtocol,
+  Protocol extends RpcProtocol = RuntimeDocumentProtocol,
   BindingsExtra extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
   Id extends string = string,
 > = {
@@ -453,7 +456,7 @@ export type RuntimeTransportHost<
  * @public
  */
 export type TransportPlugin<
-  Protocol extends RpcProtocol = RuntimeProtocol,
+  Protocol extends RpcProtocol = RuntimeDocumentProtocol,
   BindingsExtra extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
   Id extends string = string,
   Runtime extends AnyRuntimeDefinition | undefined = undefined,

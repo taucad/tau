@@ -9,7 +9,7 @@
  */
 
 import type { z } from 'zod';
-import type { ExportFidelity, ExportFile, FileExtension } from '@taucad/types';
+import type { ExportFidelity, ExportFile } from '@taucad/types';
 import type { KernelResult } from '#types/runtime.types.js';
 import type { RuntimeImplementationAsset, RuntimeLogger } from '#types/runtime-kernel.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
@@ -40,8 +40,8 @@ import { validateRuntimeContentDeclarations } from '#types/runtime-content.types
  * @public
  */
 export type TranscoderEdge<
-  From extends FileExtension = FileExtension,
-  To extends FileExtension = FileExtension,
+  From extends string = string,
+  To extends string = string,
   Schema extends z.ZodType | undefined = z.ZodType | undefined,
 > = {
   from: From;

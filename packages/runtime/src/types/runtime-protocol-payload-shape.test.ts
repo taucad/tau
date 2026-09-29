@@ -142,6 +142,27 @@ describe('runtime-protocol payload-shape coverage (C18)', () => {
       expect(runtimeProtocolSchemas.calls.initialize.result.parse({ capabilities })).toEqual({ capabilities });
     });
 
+    it('round-trips declared formats outside the editor extension catalog', () => {
+      const custom = {
+        ...capabilities,
+        routes: [{ ...capabilities.routes[0], sourceFormat: 'x-cad-source', targetFormat: 'x-cad-export' }],
+      };
+      expect(runtimeProtocolSchemas.calls.initialize.result.parse({ capabilities: custom })).toEqual({
+        capabilities: custom,
+      });
+      expect(runtimeProtocolSchemas.notifies.capabilitiesUpdated.parse({ capabilities: custom })).toEqual({
+        capabilities: custom,
+      });
+      expect(
+        runtimeProtocolSchemas.calls.transcode.args.parse({
+          from: 'x-cad-source',
+          to: 'x-cad-export',
+          files: [{ name: 'input.xcad', mimeType: 'application/x-cad', bytes: new Uint8Array([1]) }],
+          options: {},
+        }),
+      ).toMatchObject({ from: 'x-cad-source', to: 'x-cad-export' });
+    });
+
     it('tolerates registrations from a newer capability kind', () => {
       const next = {
         ...capabilities,

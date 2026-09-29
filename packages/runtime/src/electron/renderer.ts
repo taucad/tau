@@ -7,7 +7,7 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- public Electron renderer subpath */
 
 import { randomUuid } from '@taucad/utils/id';
-import type { RuntimeClientOptionsWithTransport } from '#client/runtime-client-core.js';
+import type { RuntimeClientOptionsWithTransport } from '#client/runtime-document-client-core.js';
 import { electronUtilityTransport } from '#electron/electron-utility-transport.js';
 import type { ElectronUtilityTransportOptions } from '#electron/electron-utility-transport.schemas.js';
 import type { AnyRuntimeDefinition, RuntimeConfigInput, RuntimeConfigProvider } from '#worker/runtime-definition.js';

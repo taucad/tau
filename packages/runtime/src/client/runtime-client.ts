@@ -1,50 +1,43 @@
-/**
- * Runtime client entry.
- *
- * The implementation lives in `runtime-client-core.ts` so browser/framework
- * entries and the package root share the same explicit-transport behavior.
- */
-
-/* oxlint-disable no-barrel-files/no-barrel-files -- public root client facade over browser-safe core */
-
-export {
-  createRuntimeClient,
-  NoRenderOutcomeError,
-  isNoRenderOutcomeError,
-  RuntimeNotConnectedError,
-  isRuntimeNotConnectedError,
-  RuntimeConnectionError,
-  isRuntimeConnectionError,
-  RuntimeTerminatedError,
-  isRuntimeTerminatedError,
-} from '#client/runtime-client-core.js';
-export { TranscodeTimeoutError, isTranscodeTimeoutError } from '#framework/runtime-worker-client.js';
+/** Browser-safe document runtime client entry shared with the package root. */
+/* oxlint-disable no-barrel-files/no-barrel-files -- public root client facade */
+export { createRuntimeClient } from '#client/runtime-document-client-core.js';
+export { RuntimeTerminatedError, isRuntimeTerminatedError } from '#client/runtime-terminated-error.js';
 export type {
-  RuntimeConfigInput,
-  RuntimeConfigOutput,
-  RuntimeConfigProvider,
   RuntimeClient,
   RuntimeClientOptions,
-  FilesystemRuntimeSource,
-  InlineRuntimeSource,
-  RuntimeExportOptions,
-  RuntimeEvaluateInput,
-  RuntimeRenderInput,
-  RuntimeSource,
-  RuntimeSourceContent,
-  RuntimeSourceFiles,
-  RuntimeSourceSnapshotAdditionalPath,
-  RuntimeSourceSnapshotData,
-  RuntimeSourceSnapshotFile,
-  RuntimeSourceSnapshotFileRole,
-  RuntimeSourceSnapshotInput,
-  RuntimeSourceSnapshotResult,
-  ExportResult,
-  RenderOutcome,
-  RenderStatus,
-  RuntimeLifecycleState,
   RuntimeClientOptionsWithTransport,
-  RuntimeConnectionCause,
-  RuntimeTerminatedCause,
-  RuntimeTerminatedDetail,
-} from '#client/runtime-client-core.js';
+  RuntimeLifecycleState,
+} from '#client/runtime-document-client-core.js';
+export type {
+  RuntimeSource,
+  RuntimeSourceFiles,
+  RuntimeSourceContent,
+  InlineRuntimeSource,
+  FilesystemRuntimeSource,
+} from '#client/runtime-document-source.js';
+export type {
+  RuntimeDocument,
+  OpenInput,
+  DocumentViewRequest,
+  DocumentExportRequest,
+  DocumentUpdate,
+  Evaluation,
+  Rendering,
+  Description,
+  ExportResult,
+  UpdateOutcome,
+  ViewUpdateOutcome,
+  ViewSubscription,
+  ViewOffer,
+  ExportOffer,
+  DocumentStatus,
+  ViewStatus,
+  WideViewRequest,
+  WideExportRequest,
+} from '#client/runtime-document.types.js';
+export {
+  OperationAbortedError,
+  isOperationAbortedError,
+  OperationTimeoutError,
+  isOperationTimeoutError,
+} from '#framework/runtime-worker-client.js';

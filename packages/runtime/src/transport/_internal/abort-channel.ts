@@ -11,6 +11,7 @@
 import type { Channel } from '@taucad/rpc';
 import { signalSlot, abortReason } from '#types/runtime-protocol.types.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import type {
   RuntimeTransportPreviewReservation,
   RuntimeTransportRenderTarget,
@@ -48,4 +49,22 @@ export const triggerRenderTimeout = (
     }
   }
   channel.notify('abort', { renderId: target.renderId, reason: abortReason.timeout });
+};
+
+/** Signal a local document-operation timeout to the current worker. */
+export const triggerDocumentTimeout = (
+  channel: Channel<RuntimeDocumentProtocol>,
+  signalBuffer: SharedArrayBuffer | undefined,
+  target: RuntimeTransportRenderTarget,
+): void => {
+  if (signalBuffer) {
+    const view = new Int32Array(signalBuffer);
+    const currentGeneration = Atomics.load(view, signalSlot.abortGeneration) >>> 0;
+    if (target.abortGeneration === currentGeneration) {
+      Atomics.store(view, signalSlot.abortReason, abortReason.timeout);
+      Atomics.add(view, signalSlot.abortGeneration, 1);
+      Atomics.notify(view, signalSlot.abortGeneration);
+    }
+  }
+  channel.notify('abort', { operationId: target.renderId, reason: abortReason.timeout });
 };

@@ -23,12 +23,13 @@ import type { Geometry } from '@taucad/types';
 import type { MachineChannelClient } from '#machines/machine-channel.js';
 import type { MachineClient } from '#machines/machine-client.js';
 
-import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
+import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import type {
+  BinaryContentDelivery,
   GeometryTransport,
   RuntimeExportResultTransport,
   RuntimeInitializeResult,
-  RuntimeProtocol,
 } from '#types/runtime-protocol.types.js';
 import type {
   RuntimeInitializeMemoryHandle,
@@ -41,8 +42,8 @@ import type {
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
-import { materialiseExportResult } from '#transport/_internal/export-materialiser.js';
-import { triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
+import { materialiseBinaryContent, materialiseExportResult } from '#transport/_internal/export-materialiser.js';
+import { triggerDocumentTimeout } from '#transport/_internal/abort-channel.js';
 import { runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
 import {
   buildSocketUrl,
@@ -110,9 +111,9 @@ export const webSocketClientDescribe = (options: WebSocketTransportOptions): Tra
  */
 export const webSocketClient = (
   options: WebSocketTransportOptions,
-): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, WebSocketId> => {
-  let openPromise: Promise<TransportClientReady> | undefined;
-  let channel: Channel<RuntimeProtocol> | undefined;
+): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<never, never>>, WebSocketId> => {
+  let openPromise: Promise<TransportClientReady<RuntimeDocumentProtocol>> | undefined;
+  let channel: Channel<RuntimeDocumentProtocol> | undefined;
   let runtimePort: Port<unknown> | undefined;
   let fileSystemPort: Port<unknown> | undefined;
   let fileSystemBridge: ReturnType<typeof buildFileSystemBridge>;
@@ -244,7 +245,7 @@ export const webSocketClient = (
     });
   };
 
-  const open = async (): Promise<TransportClientReady> => {
+  const open = async (): Promise<TransportClientReady<RuntimeDocumentProtocol>> => {
     if (openPromise) {
       return openPromise;
     }
@@ -318,10 +319,10 @@ export const webSocketClient = (
         };
       }
 
-      channel = createChannelClient<RuntimeProtocol>({
+      channel = createChannelClient<RuntimeDocumentProtocol>({
         port: runtimePort,
         sessionKey: runtimeChannelSessionKey,
-        protocolSchemas: runtimeProtocolSchemas,
+        protocolSchemas: runtimeDocumentProtocolSchemas,
       });
       /* `open()` hands the channel back before hello lands, so readiness is
        * observed separately; a host that never became ready died in boot. */
@@ -352,7 +353,7 @@ export const webSocketClient = (
           return;
         }
         /* No SAB across a socket — wire notify only. */
-        triggerRenderTimeout(channel, undefined, target);
+        triggerDocumentTimeout(channel, undefined, target);
       },
       async terminate(): Promise<void> {
         await finish({ cause: 'render-timeout' });
@@ -378,6 +379,9 @@ export const webSocketClient = (
     },
     async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {
       return materialiseGeometry(transport, undefined);
+    },
+    async resolveBinary(transport: BinaryContentDelivery): Promise<Uint8Array<ArrayBuffer>> {
+      return materialiseBinaryContent(transport, undefined);
     },
     async resolveExport(transport: RuntimeExportResultTransport) {
       return materialiseExportResult(transport, undefined);

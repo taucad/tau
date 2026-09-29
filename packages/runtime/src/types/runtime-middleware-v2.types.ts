@@ -135,6 +135,12 @@ export type ExportContentMap<Content> = Content extends {
 }
   ? { readonly [Extension in keyof Exports]: ContentKeysOf<Exports[Extension]> }
   : Record<never, never>;
+/** MIME-keyed view content carried by the public middleware registration. @public */
+export type ViewContentMap<Content> = Content extends {
+  views: infer Views extends Readonly<Record<string, RuntimeContentDeclaration>>;
+}
+  ? { readonly [Media in keyof Views]: ContentKeysOf<Views[Media]> }
+  : Record<never, never>;
 
 /** Middleware lifecycle hooks and declaration maps for the v2 runtime. @public */
 export type KernelMiddlewareV2<

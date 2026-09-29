@@ -9,7 +9,7 @@
  */
 
 import type { MessagePortLike, WithTransferables } from '@taucad/rpc';
-import type { ExportFile, FileExtension, GeometrySvg, GeometryWebRtc, LogEntry } from '@taucad/types';
+import type { ExportFile, GeometrySvg, GeometryWebRtc, LogEntry } from '@taucad/types';
 import type {
   GetParametersResult,
   ExportGeometryResult,
@@ -310,7 +310,7 @@ type RuntimeCapabilitiesUpdatedArgsWire = { readonly capabilities: unknown };
  * @public
  */
 export type RuntimeExportArgs = {
-  readonly format: FileExtension;
+  readonly format: string;
   readonly options?: Record<string, unknown>;
   readonly content?: RuntimeContentInput;
 };
@@ -326,8 +326,8 @@ export type RuntimeExportArgs = {
  * @public
  */
 export type RuntimeTranscodeArgs = {
-  readonly from: FileExtension;
-  readonly to: FileExtension;
+  readonly from: string;
+  readonly to: string;
   readonly files: ExportFile[];
   readonly options: Record<string, unknown>;
 };
@@ -347,7 +347,7 @@ export type RuntimeExportModelArgs = {
   /** Caller overrides. A unit-bound numeric field accepts its declared-unit number or unit-bearing text. */
   readonly parameters: Record<string, unknown>;
   readonly options?: Record<string, unknown>;
-  readonly format: FileExtension;
+  readonly format: string;
   readonly exportOptions?: Record<string, unknown>;
   readonly content?: RuntimeContentInput;
 };

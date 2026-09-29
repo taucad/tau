@@ -43,8 +43,8 @@ type PublicKernelPlugin<Plugin> = Plugin extends AnyKernelPlugin
   : never;
 
 type PublicMiddlewarePlugin<Plugin> =
-  Plugin extends MiddlewarePlugin<infer Id, infer RenderContent, infer ExportContent>
-    ? MiddlewarePlugin<Id, RenderContent, ExportContent>
+  Plugin extends MiddlewarePlugin<infer Id, infer RenderContent, infer ExportContent, infer ViewContent>
+    ? MiddlewarePlugin<Id, RenderContent, ExportContent, ViewContent>
     : never;
 
 type PublicBundlerPlugin<Plugin> = Plugin extends BundlerPlugin<infer Id> ? BundlerPlugin<Id> : never;

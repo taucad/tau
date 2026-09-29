@@ -1,7 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import { defineKernelV2, nonemptyExportFiles } from '#types/runtime-kernel-v2.types.js';
-import type { ExportFile, ViewDeclaration } from '#types/runtime-kernel-v2.types.js';
+import type { ExportDeclaration, ExportFile, ViewDeclaration } from '#types/runtime-kernel-v2.types.js';
 import { definePlugin } from '#plugins/plugin.js';
 import type { KernelRenderContentFor } from '#plugins/plugin-types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
@@ -90,6 +90,23 @@ const definition = defineKernelV2({
 });
 
 describe('v2 kernel authoring', () => {
+  it('requires object input and output for declared options', () => {
+    const scalarView = {
+      title: 'Scalar',
+      mimeType: 'text/plain',
+      // @ts-expect-error -- a view option schema must accept and return an object.
+      optionsSchema: z.string(),
+    } satisfies ViewDeclaration;
+    const scalarExport = {
+      title: 'Scalar',
+      mimeType: 'text/plain',
+      extension: 'txt',
+      // @ts-expect-error -- an export option schema must accept and return an object.
+      optionsSchema: z.object({ value: z.string() }).transform(({ value }) => value),
+    } satisfies ExportDeclaration;
+    void scalarView;
+    void scalarExport;
+  });
   it('preserves the real factory through selected plugin presets and runtime registries', () => {
     const toolkit = definePlugin({
       meta: { name: '@test/v2-kernel' },

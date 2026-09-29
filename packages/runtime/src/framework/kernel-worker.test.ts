@@ -2726,7 +2726,7 @@ describe('KernelWorker lifecycle', () => {
         reason: abortReason.timeout,
       });
 
-      expect(errors).toEqual([{ code: 'RENDER_TIMEOUT', renderId: buffered.renderId }]);
+      expect(errors).toEqual([{ code: 'OPERATION_TIMEOUT', renderId: buffered.renderId }]);
       expect(states.at(-1)).toMatchObject({ state: 'error', renderId: buffered.renderId });
       expect(worker.createGeometryCalls).toBe(1);
       await worker.cleanup();
@@ -4226,7 +4226,7 @@ describe('abort reason propagation', () => {
     expect(onError.mock.calls[0]?.[0].renderId).toBe(renderId);
     expect(onError.mock.calls[0]?.[0].issues).toContainEqual({
       message: 'Render timed out.',
-      code: 'RENDER_TIMEOUT',
+      code: 'OPERATION_TIMEOUT',
       type: 'runtime',
       severity: 'error',
     });
@@ -5503,7 +5503,7 @@ describe('native-handle materialization', () => {
 
     const result = await worker.runExportGeometry('gltf');
     expect(result.success).toBe(false);
-    expect(result.issues.map((issue) => issue.code)).toContain('RUNTIME_EXPORT_NATIVE_HANDLE_MISSING');
+    expect(result.issues.map((issue) => issue.code)).toContain('HANDLE_MISSING');
     expect(replay.mock.calls[0]?.[1]).toEqual(artifact?.identity.nativeBuildInput);
   });
 });
@@ -5600,7 +5600,10 @@ describe('export schema hard-fail', () => {
     expect(result).toMatchObject({
       success: false,
       issues: [
-        expect.objectContaining({ code: 'RUNTIME', message: expect.stringContaining('futurePluginOption') as string }),
+        expect.objectContaining({
+          code: 'EXPORT_OPTIONS_INVALID',
+          message: expect.stringContaining('futurePluginOption') as string,
+        }),
       ],
     });
   });

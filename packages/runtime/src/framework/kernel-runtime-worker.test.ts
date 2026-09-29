@@ -1308,8 +1308,8 @@ describe('create-options projection', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.issues[0]).toMatchObject({ code: 'RUNTIME', severity: 'error' });
-      expect(result.issues[0]?.message).toContain('Create option validation failed');
+      expect(result.issues[0]).toMatchObject({ code: 'EVALUATE_OPTIONS_INVALID', severity: 'error' });
+      expect(result.issues[0]?.message).toContain('evaluate option');
       expect(wrapEvaluate).not.toHaveBeenCalled();
       expect(evaluate).not.toHaveBeenCalled();
     } finally {
@@ -1927,7 +1927,7 @@ describe('native-handle snapshot restoration', () => {
 
     const unoffered = await worker.exportGeometry('stl');
     expect(unoffered.success).toBe(false);
-    expect(unoffered.issues[0]?.code).toBe('KERNEL_CAPABILITY_MISSING');
+    expect(unoffered.issues[0]?.code).toBe('EXPORT_UNKNOWN');
 
     const exportResult = await worker.exportGeometry('gltf');
 

@@ -646,8 +646,11 @@ IViewerBackend
   void ZoomToFit()
 
   void Add(Voxels vox, int nGroupID)
+  void Add(Voxels vox, string name, int nGroupID)
   void Add(Mesh msh, int nGroupID)
+  void Add(Mesh msh, string name, int nGroupID)
   void Add(PolyLine poly, int nGroupID)
+  void Add(PolyLine poly, string name, int nGroupID)
 
   void Remove(Voxels vox)
   void Remove(Mesh msh)
@@ -658,6 +661,8 @@ IViewerBackend
   void SetObjectMatrix(PolyLine poly, Matrix4x4 mat)
 
   void RemoveAllObjects()
+
+  void SetMechanism(object source)
 
   void RequestScreenShot(string strScreenShotPath)
 

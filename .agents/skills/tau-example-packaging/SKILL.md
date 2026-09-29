@@ -64,13 +64,13 @@ Thumbnails are independent of class: every row with a main file whose kernel is 
    Every runnable test must pass; spec-first rows mark unmet requirements `it.skip`, never red.
 
 4. **Regenerate the manifest**: `pnpm nx generate-manifest tau-examples`. Never hand-edit `src/{manifest.json,manifest.ts,builtin.ts,test-fixtures.ts,thumbnail.assets.ts}`.
-5. **Render thumbnails.** A new row needs the full run, which also rewrites `src/thumbnail.assets.ts`:
+5. **Render thumbnails.** A selected run renders only the named rows and rewrites the complete `src/thumbnail.assets.ts` from manifest rows with an existing thumbnail, independently of which runtimes are composed for this run:
 
    ```bash
-   pnpm nx generate-thumbnails tau-examples
+   pnpm exec tsx libs/tau-examples/scripts/generate-thumbnails.mts --only=<kernel>/<example>
    ```
 
-   To re-render existing rows only, `pnpm exec tsx libs/tau-examples/scripts/generate-thumbnails.mts --only=<kernel>/<example>,…` (it does not rewrite the asset map, so it cannot add a row). The camera is fixed (bounds framing, direction `[0.612, −0.612, 0.5]`, +Z up, 45° perspective, AO, edges on), each row renders in a fresh process, 2D rows rasterise their SVG, PicoVoxel renders on its exact lane, and rows whose kernel is not composed are skipped with a logged reason. Then add `"thumbnail": "thumbnail.webp"` to `tau.json` and run `generate-manifest` again.
+   Use `pnpm nx generate-thumbnails tau-examples` when every composed row must be re-rendered. The camera is fixed (bounds framing, direction `[0.612, −0.612, 0.5]`, +Z up, 45° perspective, AO, edges on), each row renders in a fresh process, 2D rows rasterise their SVG, and PicoVoxel renders on its exact lane. Set `TAU_PICOGK_RESOURCE_ROOT` for PicoGK rows. Then add `"thumbnail": "thumbnail.webp"` to `tau.json` and run `generate-manifest` again. Check selected image and map drift with the same command plus `--check`.
 
 6. **Gate health** for `model` rows (300 s per model, 1,500 s for the suite; 3D rows must be watertight):
 

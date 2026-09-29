@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const picogkProtocolVersion = 5;
+export const picogkProtocolVersion = 6;
 
 export const picogkIssueSchema = z.object({
   message: z.string(),
@@ -70,7 +70,7 @@ export const picogkAnalysisSchema = z.object({
 
 const picogkComponentBase = {
   id: z.string().regex(/^component:picogk-[1-9]\d*$/u),
-  name: z.string().min(1),
+  name: z.string().min(1).optional(),
   color: z.tuple([
     z.number().min(0).max(1),
     z.number().min(0).max(1),
@@ -104,6 +104,8 @@ export const picogkBuildSchema = z.object({
   byteLength: z.number().int().nonnegative(),
   sha256: z.string().regex(/^[\da-f]{64}$/iu),
   components: z.array(picogkComponentSchema),
+  mechanism: z.unknown().optional(),
+  warnings: z.array(picogkIssueSchema).optional(),
   recycleAfterResponse: z.boolean(),
   timings: picogkWorkerTimingsSchema,
   metrics: picogkWorkerMetricsSchema,

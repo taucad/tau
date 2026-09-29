@@ -46,11 +46,13 @@ using PicoGK;
 Library.Go(0.5f, () =>
 {
     Library.oViewer().SetGroupMaterial(0, "4f7dd9", 0f, 0.7f);
-    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 20f), 0);
+    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 20f), "Rotor / Hub");
 });
 ```
 
 The packaged desktop host compiles the selected entry as a standard C# console program and JIT-runs its entry point in the trusted native worker. Each render settles exactly once with the authoritative final GLB. Helper `.cs` files and project assets participate in the existing filesystem live-update loop. Relative asset paths resolve from the project root.
+
+`Viewer.Add(geometry, string name, int nGroupID = 0)` names displayed voxels, meshes, and polylines. Full authored names must be unique in the final scene; `"Rotor / Blade 17"` is one label, and group IDs remain appearance controls. Existing unnamed `Add` calls receive `Shape N` labels. The optional `Viewer.SetMechanism(object source)` inside `Library.Go` accepts JSON-equivalent `@taucad/kinematics` source whose `links.*.shapes` reference those exact authored names. Use millimetres and the as-built Z-up frame in source; Tau resolves build-local component IDs, converts the mechanism with the vertices, and writes it into the GLB topology. Invalid mechanism metadata warns while the geometry renders.
 
 ### Several models in one project
 

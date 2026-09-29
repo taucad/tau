@@ -203,15 +203,17 @@ for (const entry of isolated ? renderable : []) {
   // fixture's bytes depend on the 47 fixtures rendered before it. A clean
   // instance is bit-reproducible. See
   // docs/research/tau-examples-thumbnail-nondeterminism.md (costs ~1s/fixture).
+  // PicoGK's sandbox mirrors files beside the entry; C# File.ReadAllText uses that root.
+  const picogkRoot = entry.kernel === 'picogk' ? join(kernelsDirectory, entry.kernel, entry.name) : undefined;
   // oxlint-disable-next-line eslint/no-await-in-loop -- Serial by design; see above.
-  const client = await createExampleRuntimeClient(kernelsDirectory);
+  const client = await createExampleRuntimeClient(picogkRoot ?? kernelsDirectory);
   client.on('log', (logEntry) => {
     if (logEntry.level === 'error' || logEntry.level === 'warn') {
       console.warn(`[runtime:${logEntry.level}] ${logEntry.message}`);
     }
   });
   try {
-    const sourcePath = `${entry.kernel}/${entry.name}/${entry.mainFile}`;
+    const sourcePath = picogkRoot ? entry.mainFile : `${entry.kernel}/${entry.name}/${entry.mainFile}`;
     console.log(`Rendering ${entry.kernel}/${entry.name}`);
     // oxlint-disable-next-line eslint/no-await-in-loop -- One shared runtime/GPU queue renders fixtures serially.
     const outcome = await client.render({
@@ -270,7 +272,18 @@ for (const entry of isolated ? renderable : []) {
   }
 }
 
-const assetMap = only.size === 0 ? generateAssetMap(allRenderable) : undefined;
+// The asset map follows manifest rows with an actual thumbnail, independent of
+// which native runtimes are composed for this invocation. A selected run can
+// therefore add a new fixture without re-rendering unrelated kernels.
+const assetMap = isolated
+  ? undefined
+  : generateAssetMap(
+      entries.filter(
+        (entry) =>
+          entry.mainFile !== undefined &&
+          existsSync(join(kernelsDirectory, entry.kernel, entry.name, 'thumbnail.webp')),
+      ),
+    );
 if (check) {
   const drift: string[] = [];
   for (const thumbnail of thumbnails) {

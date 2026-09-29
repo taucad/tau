@@ -370,6 +370,22 @@
   {
     "kind": "model",
     "geometry": "3d",
+    "kernel": "picogk",
+    "name": "turbofan",
+    "mainFile": "main.cs",
+    "files": [
+      "README.md",
+      "assembly.json",
+      "main.cs",
+      "main.geospec.ts",
+      "tau.json",
+      "turbofan.sysml",
+      "verify.py"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "picovoxel",
     "name": "base-box",
     "mainFile": "main.ts",

@@ -107,7 +107,7 @@ describe('useThumbnailGenerator integration', () => {
     getProjectFileSystemConfig.mockResolvedValue(locator);
     exportImage.mockResolvedValue(webpFile(1));
     writeFile.mockResolvedValue(undefined);
-    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 768, height: 576, close: vi.fn() }));
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 1536, height: 1152, close: vi.fn() }));
   });
 
   afterEach(() => {
@@ -217,7 +217,7 @@ describe('useThumbnailGenerator integration', () => {
         sourceFormat: 'svg',
         format: 'webp',
         content: '<svg xmlns="http://www.w3.org/2000/svg"/>',
-        exportOptions: { width: 768, height: 576, quality: 0.9 },
+        exportOptions: { width: 1536, height: 1152, quality: 0.9 },
       }),
     );
     expect(writeFile).toHaveBeenCalledWith('thumbnail.webp', webpBytes(1), { source: 'machine' });

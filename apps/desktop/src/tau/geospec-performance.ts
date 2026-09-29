@@ -1,4 +1,4 @@
-/** Byte-only, debug-only GeoSpec evaluation in the existing services utility. */
+/** Byte-only, debug-only GeoSpec evaluation in the isolated geometry utility. */
 import { toNodeFsPort } from '@taucad/filesystem/backend/node';
 import { z } from 'zod';
 import type { UtilityPort } from '#tau/services-host.impl.js';
@@ -27,26 +27,7 @@ export const serveGeoSpecPerformance = (port: UtilityPort): (() => Promise<void>
   let active: Promise<void> | undefined;
   const run = async (id: number, value: unknown): Promise<void> => {
     try {
-      const input = await parsePerformanceLabRunInput(value);
-      if (input.engine !== 'native-desktop') {
-        throw new TypeError('The desktop native concern only runs native-desktop requests.');
-      }
-      const result = await runPerformanceLabCell(
-        { ...input, cache: 'host-module-cache' },
-        {
-          native: async () => {
-            const module = await import('@taucad/geospec-engine-native/node');
-            // The lab passes a WASM execution choice to Engine; native uses its own cache options.
-            class NativeLabEngine extends module.Engine {
-              public constructor() {
-                super();
-              }
-            }
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the injected engine module contract.
-            return { ...module, Engine: NativeLabEngine };
-          },
-        },
-      );
+      const result = await runGeoSpecPerformanceInput(value);
       channel.postMessage({ id, type: 'result', result });
     } catch (error) {
       channel.postMessage({
@@ -83,4 +64,28 @@ export const serveGeoSpecPerformance = (port: UtilityPort): (() => Promise<void>
     await active;
     channel.close?.();
   };
+};
+
+/** Run one pre-bounded diagnostic inside the supervised geometry process. */
+export const runGeoSpecPerformanceInput = async (value: unknown): Promise<unknown> => {
+  const input = await parsePerformanceLabRunInput(value);
+  if (input.engine !== 'native-desktop') {
+    throw new TypeError('The desktop native concern only runs native-desktop requests.');
+  }
+  return runPerformanceLabCell(
+    { ...input, cache: 'host-module-cache' },
+    {
+      native: async () => {
+        const module = await import('@taucad/geospec-engine-native/node');
+        // The lab passes a WASM execution choice to Engine; native uses its own cache options.
+        class NativeLabEngine extends module.Engine {
+          public constructor() {
+            super();
+          }
+        }
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the injected engine module contract.
+        return { ...module, Engine: NativeLabEngine };
+      },
+    },
+  );
 };

@@ -13,6 +13,7 @@
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepExtrema_DistanceSS.hxx>
+#include <BRepExtrema_ExtCF.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -487,6 +488,33 @@ double source_length_unit_to_millimeters(STEPControl_Reader& reader) {
     }
   }
   return 0.0;
+}
+
+bool all_source_length_contexts_are_millimeters(STEPControl_Reader& reader) {
+  const occ::handle<Interface_InterfaceModel> model = reader.WS()->Model();
+  if (model.IsNull()) return false;
+  bool found = false;
+  for (int index = 1; index <= model->NbEntities(); ++index) {
+    const occ::handle<Standard_Transient> entity = model->Value(index);
+    occ::handle<StepRepr_GlobalUnitAssignedContext> context;
+    if (entity->IsKind(STANDARD_TYPE(
+            StepGeom_GeometricRepresentationContextAndGlobalUnitAssignedContext))) {
+      context = occ::down_cast<
+          StepGeom_GeometricRepresentationContextAndGlobalUnitAssignedContext>(entity)
+                    ->GlobalUnitAssignedContext();
+    } else if (entity->IsKind(STANDARD_TYPE(
+                   StepGeom_GeomRepContextAndGlobUnitAssCtxAndGlobUncertaintyAssCtx))) {
+      context = occ::down_cast<
+          StepGeom_GeomRepContextAndGlobUnitAssCtxAndGlobUncertaintyAssCtx>(entity)
+                    ->GlobalUnitAssignedContext();
+    }
+    if (context.IsNull()) continue;
+    STEPConstruct_UnitContext units;
+    units.ComputeFactors(context);
+    if (!units.LengthDone() || units.LengthFactor() != 1.0) return false;
+    found = true;
+  }
+  return found;
 }
 
 void point(double output[3], const gp_Pnt& value) {
@@ -1758,6 +1786,7 @@ struct geospec_occt_document {
   // products that the OnNoBRep read profile keeps; exact claims refuse them.
   size_t surfaceless_face_count = 0;
   std::string source_length_unit;
+  bool all_source_length_contexts_mm = false;
   double source_unit_to_millimeters = 1.0;
   std::vector<ProductFacts> products;
   std::vector<OccurrenceFacts> occurrences;
@@ -6213,6 +6242,8 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     NCollection_Sequence<TCollection_AsciiString> angles;
     NCollection_Sequence<TCollection_AsciiString> solid_angles;
     reader.ChangeReader().FileUnits(lengths, angles, solid_angles);
+    result->all_source_length_contexts_mm =
+        all_source_length_contexts_are_millimeters(reader.ChangeReader());
     if (!lengths.IsEmpty()) {
       result->source_length_unit = lengths.First().ToCString();
       result->source_unit_to_millimeters =
@@ -6417,16 +6448,19 @@ int geospec_occt_selected_continuous_domain(
 int geospec_occt_admission_facts(
     const geospec_occt_document* document,
     double* unit_to_millimeters, size_t* occurrence_count,
-    size_t* surfaceless_face_count, geospec_occt_string* source_unit,
+    size_t* surfaceless_face_count, int* all_source_length_contexts_mm,
+    geospec_occt_string* source_unit,
     geospec_occt_string* error) noexcept {
   if (document == nullptr || unit_to_millimeters == nullptr ||
-      occurrence_count == nullptr || surfaceless_face_count == nullptr) {
+      occurrence_count == nullptr || surfaceless_face_count == nullptr ||
+      all_source_length_contexts_mm == nullptr) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Document/admission output is null.", error);
   }
   *unit_to_millimeters = document->source_unit_to_millimeters;
   *occurrence_count = document->occurrences.size();
   *surfaceless_face_count = document->surfaceless_face_count;
+  *all_source_length_contexts_mm = document->all_source_length_contexts_mm ? 1 : 0;
   return write_string(document->source_length_unit, source_unit);
 }
 
@@ -7598,14 +7632,38 @@ int geospec_occt_component_faces_within(
       open[event.side].push_back(event.piece);
     }
     std::sort(pairs.begin(), pairs.end());
+    // The vectors and their entries live for this call only. Piece indices are
+    // immutable here; separate sides prevent equal indices from sharing state.
+    std::vector<std::unique_ptr<BRepExtrema_PreparedFaceCF>> left_prepared;
+    std::vector<std::unique_ptr<BRepExtrema_PreparedFaceCF>> right_prepared;
     for (const auto& [gap, lindex, rindex] : pairs) {
       const ComponentPiece& lpiece = lpieces[lindex];
       const ComponentPiece& rpiece = rpieces[rindex];
       if (charge(context, component_pair_units(lpiece, rpiece)) != 0) {
         return GEOSPEC_OCCT_STOPPED;
       }
+      BRepExtrema_PreparedFaceCF* prepared = nullptr;
+      if (lpiece.shape.ShapeType() == TopAbs_FACE &&
+          rpiece.shape.ShapeType() == TopAbs_EDGE) {
+        if (left_prepared.empty()) left_prepared.resize(lpieces.size());
+        auto& slot = left_prepared[lindex];
+        if (!slot) {
+          slot = std::make_unique<BRepExtrema_PreparedFaceCF>(
+              TopoDS::Face(lpiece.shape), tolerance);
+        }
+        prepared = slot.get();
+      } else if (lpiece.shape.ShapeType() == TopAbs_EDGE &&
+                 rpiece.shape.ShapeType() == TopAbs_FACE) {
+        if (right_prepared.empty()) right_prepared.resize(rpieces.size());
+        auto& slot = right_prepared[rindex];
+        if (!slot) {
+          slot = std::make_unique<BRepExtrema_PreparedFaceCF>(
+              TopoDS::Face(rpiece.shape), tolerance);
+        }
+        prepared = slot.get();
+      }
       BRepExtrema_DistanceSS distance(lpiece.shape, rpiece.shape, lpiece.box, rpiece.box,
-                                      reference, eps);
+                                      reference, eps, prepared, tolerance);
       if (distance.IsDone() && distance.DistValue() <= tolerance) {
         *out_within = 1;
         break;
@@ -7683,6 +7741,60 @@ int geospec_occt_component_bodies_within_dedicated(
                   "OCCT extrema computation did not converge.", error);
     }
     *out_within = distance.Value() <= tolerance ? 1 : 0;
+    return GEOSPEC_OCCT_OK;
+  });
+}
+
+int geospec_occt_occurrence_minimum_distance(
+    const geospec_occt_document* document, uint32_t a, uint32_t b,
+    geospec_occt_charge charge, void* context,
+    geospec_occt_minimum_distance* out_result,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || out_result == nullptr || charge == nullptr || a == b ||
+      a >= document->occurrences.size() ||
+      b >= document->occurrences.size()) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Minimum distance needs two distinct occurrences.", error);
+  }
+  return guarded(error, [&]() -> int {
+    // Charge the setup traversal before it reads topology. The second charge
+    // prices the synchronous extrema from the counted whole occurrences.
+    if (charge(context, 1) != 0) return GEOSPEC_OCCT_STOPPED;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> parts_a;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> parts_b;
+    TopExp::MapShapes(document->occurrences[a].shape, parts_a);
+    TopExp::MapShapes(document->occurrences[b].shape, parts_b);
+    const uint64_t units_a = static_cast<uint64_t>(parts_a.Extent());
+    const uint64_t units_b = static_cast<uint64_t>(parts_b.Extent());
+    const uint64_t units = units_a == 0 || units_b == 0
+        ? 1
+        : units_a > UINT64_MAX / units_b ? UINT64_MAX : units_a * units_b;
+    if (charge(context, units) != 0) return GEOSPEC_OCCT_STOPPED;
+    // The legacy AP242 reader publishes solution 1 from this serial OCCT
+    // operation. Parallel extrema may change the solution set/order.
+    BRepExtrema_DistShapeShape distance(
+        document->occurrences[a].shape, document->occurrences[b].shape);
+    if (!distance.IsDone() || distance.NbSolution() < 1) {
+      return fail(GEOSPEC_OCCT_NATIVE_ERROR,
+                  "OCCT extrema computation did not converge.", error);
+    }
+    const gp_Pnt first = distance.PointOnShape1(1);
+    const gp_Pnt second = distance.PointOnShape2(1);
+    const double value = distance.Value();
+    if (!std::isfinite(value) || value < 0.0 ||
+        !std::isfinite(first.X()) || !std::isfinite(first.Y()) ||
+        !std::isfinite(first.Z()) || !std::isfinite(second.X()) ||
+        !std::isfinite(second.Y()) || !std::isfinite(second.Z())) {
+      return fail(GEOSPEC_OCCT_NATIVE_ERROR,
+                  "OCCT extrema returned a non-finite witness.", error);
+    }
+    out_result->distance = value;
+    out_result->point_a[0] = first.X();
+    out_result->point_a[1] = first.Y();
+    out_result->point_a[2] = first.Z();
+    out_result->point_b[0] = second.X();
+    out_result->point_b[1] = second.Y();
+    out_result->point_b[2] = second.Z();
     return GEOSPEC_OCCT_OK;
   });
 }

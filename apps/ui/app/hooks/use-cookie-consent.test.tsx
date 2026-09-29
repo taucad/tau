@@ -30,6 +30,7 @@ afterEach(() => {
   loader.data = { consentStatus: 'unknown', globalPrivacyControl: false };
   resetRequestGlobalPrivacyControl();
   Object.defineProperty(navigator, 'globalPrivacyControl', { configurable: true, value: false });
+  Object.defineProperty(globalThis, 'cookieStore', { configurable: true, value: undefined });
 });
 
 describe('cookie consent', () => {
@@ -118,5 +119,23 @@ describe('cookie consent', () => {
     });
 
     expect(result.current[0]).toBe('unknown');
+  });
+
+  it('should notice expiry while focused through Cookie Store change events', () => {
+    const store = new EventTarget();
+    Object.defineProperty(globalThis, 'cookieStore', { configurable: true, value: store });
+    Cookies.set(consentCookieName, accepted);
+    const removeListener = vi.spyOn(store, 'removeEventListener');
+    const { result, unmount } = renderHook(() => useCookieConsent());
+    expect(result.current[0]).toBe('accepted');
+
+    act(() => {
+      Cookies.remove(consentCookieName);
+      store.dispatchEvent(Object.assign(new Event('change'), { deleted: [{ name: consentCookieName }] }));
+    });
+
+    expect(result.current[0]).toBe('unknown');
+    unmount();
+    expect(removeListener).toHaveBeenCalledWith('change', expect.any(Function));
   });
 });

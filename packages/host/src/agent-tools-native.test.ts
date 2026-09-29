@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { SourceRevision } from '@taucad/runtime/types';
 import type { GeoSpecNativeRunnerOptions } from 'geospec/runner/native';
@@ -10,7 +13,18 @@ const native = vi.hoisted(() => {
   return {
     close,
     engine: vi.fn(function () {
-      return { close };
+      return {
+        close: vi.fn(() => {
+          close();
+        }),
+        evaluateClaim: vi.fn(() => ({
+          canonicalClaim: new Uint8Array(), canonicalPlan: new Uint8Array(), canonicalResult: new Uint8Array(),
+        })),
+        processRequest: vi.fn(() => new Uint8Array()),
+        ingestSubject: vi.fn(() => new Uint8Array()),
+        subjectHandle: vi.fn(() => new Uint8Array()),
+        releaseSubject: vi.fn(() => new Uint8Array()),
+      };
     }),
     runner: vi.fn<(options: GeoSpecNativeRunnerOptions) => GeoSpecRunner>(),
     filesystem: vi.fn(),
@@ -38,7 +52,21 @@ const freshFactory = async () => {
 };
 
 describe('native host GeoSpec composition', () => {
-  beforeEach(() => vi.clearAllMocks());
+  const temporaryRoots: string[] = [];
+  const project = async (name: string): Promise<string> => {
+    const base = await mkdtemp(join(tmpdir(), 'tau-native-session-'));
+    temporaryRoots.push(base);
+    const root = join(base, name);
+    await mkdir(root);
+    return root;
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  afterEach(async () => {
+    await Promise.all(temporaryRoots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
+  });
 
   it('should borrow the project runtime and keep the shared engine open after the SDK runner', async () => {
     const createHostNativeGeoSpecRunner = await freshFactory();
@@ -61,9 +89,13 @@ describe('native host GeoSpec composition', () => {
     native.filesystem.mockReturnValue(filesystem);
     native.runner.mockReturnValue(sdkRunner);
 
-    const runner = await createHostNativeGeoSpecRunner('/projects/widget', runtime);
-    expect(native.engine).toHaveBeenCalledExactlyOnceWith();
-    expect(native.filesystem).toHaveBeenCalledExactlyOnceWith('/projects/widget');
+    const root = await project('widget');
+    const runner = await createHostNativeGeoSpecRunner(root, runtime);
+    expect(native.engine).toHaveBeenCalledExactlyOnceWith({
+      root: join(homedir() || tmpdir(), '.cache', 'geospec', 'evidence'),
+      projectRoot: await realpath(root),
+    });
+    expect(native.filesystem).toHaveBeenCalledExactlyOnceWith(root);
     const options = native.runner.mock.calls[0]?.[0];
     expect(options?.filesystem).toBe(filesystem);
     const trackedRuntime = options?.model?.runtime;
@@ -76,9 +108,9 @@ describe('native host GeoSpec composition', () => {
     expect(exported.sourceRevision).toEqual(sourceRevision);
     expect(runtime.export).toHaveBeenCalledExactlyOnceWith('glb', { source: { path: 'widget.ts' } });
     expect(runner.sourceRevisions?.()).toEqual([sourceRevision]);
-    expect(options?.model?.projectPath).toBe('/projects/widget');
+    expect(options?.model?.projectPath).toBe(root);
     // The product reads verdicts and localized failures, not complete success witnesses.
-    expect(options?.nativeAssertions).toEqual({ engine: { close: native.close }, evidenceProfile: 'bounded' });
+    expect(options?.nativeAssertions.evidenceProfile).toBe('bounded');
     expect(options?.model?.carried).toBeInstanceOf(Map);
     await expect(options?.model?.readSource?.('widget.step')).resolves.toBe(bytes);
     expect(read).toHaveBeenCalledExactlyOnceWith('widget.step');
@@ -98,8 +130,9 @@ describe('native host GeoSpec composition', () => {
     native.runner.mockImplementation(() => mock<GeoSpecRunner>());
     const runtime = mock<HostGeoSpecRuntimeClient>();
 
-    const first = await createHostNativeGeoSpecRunner('/projects/widget', runtime);
-    const pending = createHostNativeGeoSpecRunner('/projects/gadget', runtime);
+    const root = await project('widget');
+    const first = await createHostNativeGeoSpecRunner(root, runtime);
+    const pending = createHostNativeGeoSpecRunner(root, runtime);
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 10);
     });
@@ -115,5 +148,90 @@ describe('native host GeoSpec composition', () => {
     expect(secondOptions?.nativeAssertions.engine).toBe(firstOptions?.nativeAssertions.engine);
     expect(secondOptions?.model?.carried).toBe(firstOptions?.model?.carried);
     expect(native.close).not.toHaveBeenCalled();
+  });
+
+  it('should retire the prior root only after its runner closes across A to B to A', async () => {
+    const createHostNativeGeoSpecRunner = await freshFactory();
+    native.filesystem.mockReturnValue(mock<GeoSpecNativeRunnerOptions['filesystem']>());
+    native.runner.mockImplementation(() => mock<GeoSpecRunner>());
+    const runtime = mock<HostGeoSpecRuntimeClient>();
+    const rootA = await project('a');
+    const rootB = await project('b');
+
+    const first = await createHostNativeGeoSpecRunner(rootA, runtime);
+    const pendingB = createHostNativeGeoSpecRunner(rootB, runtime);
+    expect(native.engine).toHaveBeenCalledOnce();
+    expect(native.close).not.toHaveBeenCalled();
+    await first.close();
+    const second = await pendingB;
+    expect(native.engine).toHaveBeenCalledTimes(2);
+    expect(native.engine.mock.results[0]?.value.close).toHaveBeenCalledOnce();
+    expect(native.engine.mock.results[1]?.value.close).not.toHaveBeenCalled();
+    expect(native.runner.mock.calls[1]?.[0]?.model?.carried).not.toBe(native.runner.mock.calls[0]?.[0]?.model?.carried);
+
+    await second.close();
+    const third = await createHostNativeGeoSpecRunner(rootA, runtime);
+    expect(native.engine).toHaveBeenCalledTimes(3);
+    expect(native.engine.mock.results[1]?.value.close).toHaveBeenCalledOnce();
+    await third.close();
+    expect(native.engine.mock.results[2]?.value.close).not.toHaveBeenCalled();
+  });
+
+  it('should reuse one session for symlink aliases of the same root', async () => {
+    const createHostNativeGeoSpecRunner = await freshFactory();
+    native.filesystem.mockReturnValue(mock<GeoSpecNativeRunnerOptions['filesystem']>());
+    native.runner.mockImplementation(() => mock<GeoSpecRunner>());
+    const runtime = mock<HostGeoSpecRuntimeClient>();
+    const root = await project('project');
+    const alias = join(root, '..', 'alias');
+    await symlink(root, alias);
+
+    const first = await createHostNativeGeoSpecRunner(root, runtime);
+    await first.close();
+    const second = await createHostNativeGeoSpecRunner(alias, runtime);
+    expect(native.engine).toHaveBeenCalledOnce();
+    expect(native.runner.mock.calls[1]?.[0]?.model?.carried).toBe(native.runner.mock.calls[0]?.[0]?.model?.carried);
+    await second.close();
+  });
+
+  it('should fall back to a resident engine when optional cache setup fails', async () => {
+    const createHostNativeGeoSpecRunner = await freshFactory();
+    native.filesystem.mockReturnValue(mock<GeoSpecNativeRunnerOptions['filesystem']>());
+    native.runner.mockReturnValue(mock<GeoSpecRunner>());
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const root = await project('cache-unavailable');
+    native.engine.mockImplementationOnce(function () {
+      throw new Error('Permission denied (os error 13)');
+    });
+    try {
+      const runner = await createHostNativeGeoSpecRunner(root, mock<HostGeoSpecRuntimeClient>());
+      expect(native.engine).toHaveBeenCalledTimes(2);
+      expect(native.engine.mock.calls[1]).toEqual([]);
+      expect(warning).toHaveBeenCalledOnce();
+      expect(warning.mock.calls[0]?.[0]).toContain('using a resident engine');
+      await runner.close();
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it('should propagate a native construction error when the resident engine also fails', async () => {
+    const createHostNativeGeoSpecRunner = await freshFactory();
+    const root = await project('engine-error');
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    native.engine.mockImplementationOnce(function () {
+      throw new Error('cache constructor failed');
+    });
+    native.engine.mockImplementationOnce(function () {
+      throw new Error('native engine configuration failed');
+    });
+    try {
+      await expect(createHostNativeGeoSpecRunner(root, mock<HostGeoSpecRuntimeClient>())).rejects.toThrow(
+        'native engine configuration failed',
+      );
+      expect(native.engine).toHaveBeenCalledTimes(2);
+    } finally {
+      warning.mockRestore();
+    }
   });
 });

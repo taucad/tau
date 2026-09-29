@@ -15,7 +15,7 @@ import type { MessageChannelMain, MessagePortMain, UtilityProcess } from 'electr
 import type { MachineBindingOutcome } from '@taucad/runtime/machine';
 
 /** Concerns the services utility serves, one dedicated port each. */
-export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'geospecPerformance', 'machines'] as const;
+export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'machines'] as const;
 
 /**
  * A concern the renderer may ask for a port to.
@@ -29,10 +29,11 @@ export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'ge
 export type ServicesConcern = (typeof servicesConcerns)[number];
 
 /** Concerns a renderer may request directly. */
-export const rendererServicesConcerns: readonly ServicesConcern[] = [
+export const rendererServicesConcerns: ReadonlyArray<ServicesConcern | 'exactMeasurement' | 'geospecPerformance'> = [
   'nodeFs',
   'agentHost',
   'geospecPerformance',
+  'exactMeasurement',
   'machines',
 ];
 
@@ -87,6 +88,17 @@ export type ServicesBrokerOptions = {
     readonly closed: Promise<unknown>;
     dispose(): void;
   };
+  /** Open one separately supervised geometry-runner port for an admitted root. */
+  readonly connectGeometry?: (
+    input: Readonly<{
+      root: string;
+      context: Readonly<Record<string, string>>;
+      engine: 'native' | 'legacy';
+      stillAuthorized: () => boolean;
+    }>,
+  ) => MessagePortMain;
+  /** Recheck queued/active geometry suites whenever a main-owned root grant changes. */
+  readonly revokeGeometry?: () => void;
   /** Called once for each freshly forked utility, for diagnostics attachment. */
   readonly onSpawn?: (utility: UtilityProcess) => void;
   /** Diagnostics sink. */
@@ -215,6 +227,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       runtimeContexts.delete(workspaceRoot);
     }
     checkoutContexts.clear();
+    options.revokeGeometry?.();
   };
 
   /**
@@ -241,6 +254,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     if (type === 'runtime-context-release') {
       if (checkoutContexts.delete(canonicalWorkspaceRoot)) {
         runtimeContexts.delete(canonicalWorkspaceRoot);
+        options.revokeGeometry?.();
       }
       return;
     }
@@ -260,6 +274,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     }
     runtimeContexts.set(canonicalWorkspaceRoot, { ...projectContext, projectRoot: canonicalWorkspaceRoot });
     checkoutContexts.add(canonicalWorkspaceRoot);
+    options.revokeGeometry?.();
   };
 
   const handleUtilityMessage = (spawned: UtilityProcess, frame: unknown): void => {
@@ -330,6 +345,48 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       }
       runtimeLeases.get(requestId)?.dispose();
       runtimeLeases.delete(requestId);
+      return;
+    }
+    if (
+      type === 'geometry-port-request' &&
+      typeof requestId === 'string' &&
+      requestId.length > 0 &&
+      requestId.length <= 128
+    ) {
+      const { engine } = frame as Record<string, unknown>;
+      const context = typeof workspaceRoot === 'string' ? runtimeContexts.get(canonicalRoot(workspaceRoot)) : undefined;
+      if (
+        utility !== spawned ||
+        !acceptingConnections ||
+        context === undefined ||
+        typeof workspaceRoot !== 'string' ||
+        (engine !== 'native' && engine !== 'legacy') ||
+        options.connectGeometry === undefined
+      ) {
+        spawned.postMessage({
+          type: 'geometry-port-refused',
+          requestId,
+          message: 'Main refused an unadmitted GeoSpec runner root or engine.',
+        });
+        return;
+      }
+      try {
+        const rootKey = canonicalRoot(workspaceRoot);
+        const port = options.connectGeometry({
+          root: workspaceRoot,
+          context,
+          engine,
+          stillAuthorized: () =>
+            acceptingConnections && utility === spawned && runtimeContexts.get(rootKey) === context,
+        });
+        spawned.postMessage({ type: 'geometry-port', requestId }, [port]);
+      } catch (error) {
+        spawned.postMessage({
+          type: 'geometry-port-refused',
+          requestId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
       return;
     }
     if (
@@ -482,6 +539,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       }
       if (projectContext) {
         runtimeContexts.set(projectContext.key, projectContext.value);
+        options.revokeGeometry?.();
       }
       log('info', 'services.concern-connected', { concern });
       return channel.port1;
@@ -517,6 +575,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       if (spawned === undefined) {
         projectAttachments.delete(root);
         runtimeContexts.delete(root);
+        options.revokeGeometry?.();
         projectIds.delete(root);
         return;
       }
@@ -554,6 +613,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         if (attachmentGenerations.get(root) === generation) {
           projectAttachments.delete(root);
           runtimeContexts.delete(root);
+          options.revokeGeometry?.();
           projectIds.delete(root);
         }
         const releasing = (releasingRoots.get(root) ?? 1) - 1;
@@ -607,6 +667,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
     quiesce(boundMilliseconds) {
       acceptingConnections = false;
+      options.revokeGeometry?.();
       if (quiescence !== undefined) {
         return quiescence;
       }

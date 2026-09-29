@@ -132,10 +132,20 @@ if (selectedGeoSpecAssembly === undefined) {
   process.stdout.write(output);
   const selections = [...output.matchAll(/^ASSEMBLY_ROOT=(.+)$/gmu)].map((match) => match[1]?.trim());
   if (selections.length !== 1 || !selections[0]) {
-    throw new Error('GeoSpec delivery did not select one verified assembly snapshot.');
+    throw new Error('GeoSpec delivery did not select one verified immutable assembly snapshot.');
   }
   geospecAssemblyInput = selections[0];
 }
+const ownedGeoSpecSnapshot =
+  selectedGeoSpecAssembly === undefined ? resolve(workspaceRoot, geospecAssemblyInput) : undefined;
+if (
+  ownedGeoSpecSnapshot !== undefined &&
+  (dirname(ownedGeoSpecSnapshot) !== resolve(workspaceRoot, 'node_modules/.cache/geospec-engine-native') ||
+    !basename(ownedGeoSpecSnapshot).startsWith('assembly-snapshot-'))
+) {
+  throw new Error('GeoSpec delivery selected an assembly snapshot outside its owned cache.');
+}
+try {
 const geospecAssemblyRoot = await realpath(resolve(workspaceRoot, geospecAssemblyInput));
 if (
   geospecAssemblyRoot === outputRoot ||
@@ -468,9 +478,6 @@ await Promise.all([
     copyTree(resolve(extensionRoot, extension), resolve(plugins, extension), excludesBuildDiagnostics),
   ),
 ]);
-if (selectedGeoSpecAssembly === undefined) {
-  await rm(geospecAssemblyRoot, { recursive: true, force: true });
-}
 console.log(`Removed Intel slices from ${String(await thinIntelSlices(appPath))} bundled Mach-O files`);
 
 const identity = release ? developerIdentity() : '-';
@@ -584,3 +591,8 @@ if (zip) {
 await rm(stageRoot, { recursive: true, force: true });
 console.log(`${release ? 'Signed and notarized' : unsigned ? 'Unsigned' : 'Ad-hoc signed'} Tau: ${appPath}`);
 console.log(zip ? `Distribution archive: ${zipPath}` : 'No distribution archive; pass --zip to write one.');
+} finally {
+  if (ownedGeoSpecSnapshot !== undefined) {
+    await rm(ownedGeoSpecSnapshot, { recursive: true, force: true });
+  }
+}

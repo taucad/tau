@@ -12,8 +12,8 @@ use crate::{
         batch::{BatchAnalysis, ExactClusters},
         continuous::{self, GridPlan, Topology},
         mesh::{
-            analyze, analyze_indexed, ClusterReport, ConnectedComponents, MeshAnalysis,
-            MeshAnalysisRecord, Primitive,
+            analyze, analyze_indexed, exact::ChargeTrace, ClusterReport, ConnectedComponents,
+            MeshAnalysis, MeshAnalysisRecord, Primitive,
         },
         selection::{build_report_index, SelectorIndex},
     },
@@ -63,6 +63,8 @@ pub(crate) struct Subject {
     pub semantic_identity: OnceCell<SubjectIdentity>,
     pub format: SubjectFormat,
     pub source_unit: String,
+    /// Declared STEP source axis frame; non-STEP subjects stay z-up.
+    pub(crate) step_source_frame: String,
     /// Verified source metadata from successful STEP admission, not report generation.
     pub(crate) step_admission_facts: Option<BrepAdmissionFacts>,
     pub rational_plate: Option<crate::certificates::engine::RationalSubject>,
@@ -187,6 +189,7 @@ impl Subject {
             semantic_identity: OnceCell::new(),
             format,
             source_unit,
+            step_source_frame: "z-up".into(),
             step_admission_facts: None,
             rational_plate: None,
             parallel_plane: None,
@@ -808,6 +811,17 @@ impl Subject {
     /// ponytail: subject-wide; scope it to the claim's occurrences if a
     /// mixed BRep and tessellated document becomes a live case.
     pub(crate) fn tessellated_only_refusal(&self, capability: Capability) -> Option<Evaluation> {
+        if self.format == SubjectFormat::Step
+            && self.step_source_frame == "y-up"
+            && capability != Capability::MinimumDistance
+        {
+            return Some(Evaluation::Refused {
+                diagnostics: vec![Diagnostic::error(
+                    "GEOSPEC_UNSUPPORTED_EVIDENCE",
+                    "This y-up STEP subject currently supports only minimumDistance; other operations require canonicalized native geometry.",
+                )],
+            });
+        }
         let faces = self.step_admission_facts.as_ref()?.surfaceless_faces;
         if faces == 0 || !capability.is_exact() {
             return None;
@@ -1602,7 +1616,12 @@ impl<'a> EvaluationContext<'a> {
     pub(crate) fn exact_clusters(
         &self,
         tolerance_mm: f64,
-        build: impl FnOnce() -> Result<Vec<ClusterReport>, Evaluation>,
+        build: impl FnOnce(&mut ChargeTrace) -> Result<(Vec<ClusterReport>, Vec<String>), Evaluation>,
+        on_exceeded: impl Fn(
+            crate::budget::BudgetExceeded,
+            Option<(usize, usize)>,
+            &[String],
+        ) -> Evaluation,
     ) -> Result<Rc<ExactClusters>, Evaluation> {
         match self.batch {
             Some(batch) => batch.exact_clusters(
@@ -1610,8 +1629,22 @@ impl<'a> EvaluationContext<'a> {
                 tolerance_mm,
                 self.budget,
                 build,
+                on_exceeded,
             ),
-            None => build().map(|clusters| Rc::new(ExactClusters { clusters, units: 0 })),
+            None => {
+                let mut trace = ChargeTrace::disabled();
+                build(&mut trace).map(|(clusters, labels)| {
+                    Rc::new(ExactClusters {
+                        clusters,
+                        units: 0,
+                        labels,
+                        trace: trace.steps,
+                        trace_complete: trace.complete,
+                        stage_calls: trace.stage_calls,
+                        stage_units: trace.stage_units,
+                    })
+                })
+            }
         }
     }
 

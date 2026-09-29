@@ -88,6 +88,7 @@ export default defineConfig(
             index: resolve(import.meta.dirname, 'src/main/index.ts'),
             'kernel-host': resolve(import.meta.dirname, 'src/tau/kernel-host.entry.ts'),
             'services-host': resolve(import.meta.dirname, 'src/tau/services-host.entry.ts'),
+            'geometry-host': resolve(import.meta.dirname, 'src/tau/geometry-host.entry.ts'),
             'compute-store.worker': resolve(import.meta.dirname, 'src/main/compute-store.worker.ts'),
           },
         },

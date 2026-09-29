@@ -36,7 +36,7 @@ describe('macOS GeoSpec assembly selection', () => {
     const stage = source.indexOf('await rm(outputRoot, { recursive: true, force: true })', realPath);
     const nativeCopy = source.indexOf('copyGeoSpecNativeAssembly(', stage);
     const sourceCopy = source.indexOf('copyGeoSpecSourceRelink(geospecAssemblyRoot', nativeCopy);
-    const cleanup = source.indexOf('await rm(geospecAssemblyRoot, { recursive: true, force: true })', sourceCopy);
+    const cleanup = source.indexOf('await rm(ownedGeoSpecSnapshot, { recursive: true, force: true })', sourceCopy);
 
     expect(mode).toBeGreaterThan(-1);
     expect(unsafeOutput).toBeGreaterThan(mode);
@@ -50,6 +50,7 @@ describe('macOS GeoSpec assembly selection', () => {
     expect(nativeCopy).toBeGreaterThan(stage);
     expect(sourceCopy).toBeGreaterThan(nativeCopy);
     expect(cleanup).toBeGreaterThan(sourceCopy);
+    expect(source).not.toContain('await rm(geospecAssemblyRoot, { recursive: true, force: true })');
   });
 });
 

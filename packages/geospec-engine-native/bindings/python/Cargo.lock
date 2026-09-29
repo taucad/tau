@@ -155,6 +155,7 @@ dependencies = [
  "geospec-engine-native-core",
  "getrandom",
  "hmac",
+ "libc",
  "serde",
  "serde_json",
  "sha2",

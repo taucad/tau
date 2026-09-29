@@ -8,6 +8,8 @@ import { useCookieConsent } from '#hooks/use-cookie-consent.js';
 import { AnalyticsContextProvider } from '#hooks/use-analytics.js';
 import type { Analytics } from '#hooks/use-analytics.js';
 
+/* eslint-disable @typescript-eslint/naming-convention -- PostHog configuration keys are SDK wire names. */
+
 const isCapturing = (): boolean => posthog.__loaded && !posthog.has_opted_out_capturing();
 
 /**
@@ -42,6 +44,8 @@ function PostHogLifecycle({ isActive }: { readonly isActive: boolean }): undefin
     if (!isActive) {
       if (posthog.__loaded) {
         posthog.stopSessionRecording();
+        posthog.opt_out_capturing();
+        posthog.set_config({ disable_persistence: true, advanced_disable_flags: true });
         posthog.reset();
         posthog.opt_out_capturing();
       }
@@ -51,7 +55,9 @@ function PostHogLifecycle({ isActive }: { readonly isActive: boolean }): undefin
       return undefined;
     }
 
-    if (!posthog.__loaded) {
+    if (posthog.__loaded) {
+      posthog.set_config({ disable_persistence: false, advanced_disable_flags: false });
+    } else {
       posthog.init(apiKey, posthogConfig.options);
     }
     // Re-acceptance, or a persisted opt-out marker from an earlier withdrawal. The SDK's
@@ -108,3 +114,5 @@ export function WebAnalyticsProvider({ children }: { readonly children: ReactNod
     </AnalyticsContextProvider>
   );
 }
+
+/* eslint-enable @typescript-eslint/naming-convention -- restore application naming rules. */

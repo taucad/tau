@@ -19,7 +19,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Input } from '@taucad/ui/components/input';
 import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
+import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
@@ -593,41 +593,31 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
     : fieldLabel;
 
   return (
-    <Select value={selectedValue} disabled={isDisabled} onValueChange={handleChange}>
-      <SelectTrigger
-        id={id}
-        autoFocus={autofocus}
-        size='sm'
-        className='h-(--param-field-h) min-w-0 flex-1 rounded-(--param-field-radius) border-border/50 bg-muted text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)'
-        aria-label={prettyLabel ? `Select for ${prettyLabel}` : undefined}
-        onFocus={() => {
-          onFocus(id, value);
-        }}
-        onBlur={() => {
-          onBlur(id, value);
-        }}
-      >
-        <SelectValue placeholder={placeholder ?? 'Choose an option'} />
-      </SelectTrigger>
-      <SelectContent>
-        {placeholder ? (
-          <SelectItem value='' className='h-7'>
-            <span className='truncate'>{placeholder}</span>
-          </SelectItem>
-        ) : null}
-        {enumOptions.map((option) => (
-          <SelectItem
-            key={String(option.value)}
-            value={String(option.value)}
+    <ParameterSelect
+      id={id}
+      shouldAutoFocus={autofocus}
+      label={prettyLabel ? `Select for ${prettyLabel}` : 'Select option'}
+      value={selectedValue}
+      isDisabled={isDisabled}
+      placeholder={placeholder}
+      groups={[
+        {
+          options: enumOptions.map((option) => ({
+            value: String(option.value),
+            label: String(option.label),
             // oxlint-disable-next-line @typescript-eslint/no-unsafe-argument -- value is untyped in RJSF
-            disabled={enumDisabled?.includes(option.value)}
-            className='h-7'
-          >
-            <span className='truncate'>{option.label}</span>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+            disabled: enumDisabled?.includes(option.value),
+          })),
+        },
+      ]}
+      onChange={handleChange}
+      onFocus={() => {
+        onFocus(id, value);
+      }}
+      onBlur={() => {
+        onBlur(id, value);
+      }}
+    />
   );
 }
 

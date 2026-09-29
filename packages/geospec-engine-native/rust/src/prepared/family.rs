@@ -58,6 +58,7 @@ impl PreparedFamily {
             | AnalyzeMesh
             | InspectGeometry
             | QueryPmi
+            | MinimumDistance
             | AnalyzeMeshOverlap => Err(ProtocolError::new(
                 ErrorKind::InvalidClaim,
                 "Ancillary operations require query preparation rather than a matcher payload.",

@@ -25,7 +25,7 @@
  * @module
  */
 
-import type { ResourceQueue } from '@taucad/filesystem';
+import type { DirectoryStatRow, ResourceQueue } from '@taucad/filesystem';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import type { CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { applyClientTextMutation, createExactReplacementPlan } from '@taucad/chat/rpc';
@@ -245,7 +245,7 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
       await provider.writeFile(path, new Uint8Array(replacement));
       return { status: 'committed', committedBytes: await bytes(path) } as const;
     });
-  const directoryEntry = (row: Awaited<ReturnType<ComposedView['readdirWithStats']>>[number]): RpcDirectoryEntry => {
+  const directoryEntry = (row: DirectoryStatRow): RpcDirectoryEntry => {
     const { name, provenance } = row;
     const modifiedAt = row.mtimeMs > 0 ? new Date(row.mtimeMs).toISOString() : undefined;
     if (row.type === 'dir') {

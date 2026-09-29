@@ -445,14 +445,14 @@ describe('WorkspaceFileService', () => {
       const scanned = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
       const readdirWithStats = provider.readdirWithStats!.bind(provider);
-      vi.spyOn(provider, 'readdirWithStats').mockImplementation(async (path) => {
+      vi.spyOn(provider, 'readdirWithStats').mockImplementation((async (path: string) => {
         const entries = await readdirWithStats(path);
         if (path === '') {
           scanned.resolve();
           await release.promise;
         }
         return entries;
-      });
+      }) as typeof readdirWithStats);
 
       const rooted = service.createRootedFileSystem('/');
       const pending = rooted.statTree!('');
@@ -480,14 +480,14 @@ describe('WorkspaceFileService', () => {
       const scanned = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
       const readdirWithStats = oldProvider.readdirWithStats!.bind(oldProvider);
-      vi.spyOn(oldProvider, 'readdirWithStats').mockImplementation(async (path) => {
+      vi.spyOn(oldProvider, 'readdirWithStats').mockImplementation((async (path: string) => {
         const entries = await readdirWithStats(path);
         if (path === projectId) {
           scanned.resolve();
           await release.promise;
         }
         return entries;
-      });
+      }) as typeof readdirWithStats);
 
       const pending = oldRoot.statTree!('');
       await scanned.promise;
@@ -515,7 +515,7 @@ describe('WorkspaceFileService', () => {
       let inFlight = 0;
       let maxInFlight = 0;
       const listings = provider.readdirWithStats!.bind(provider);
-      vi.spyOn(provider, 'readdirWithStats').mockImplementation(async (path) => {
+      vi.spyOn(provider, 'readdirWithStats').mockImplementation((async (path: string) => {
         inFlight += 1;
         maxInFlight = Math.max(maxInFlight, inFlight);
         try {
@@ -523,7 +523,7 @@ describe('WorkspaceFileService', () => {
         } finally {
           inFlight -= 1;
         }
-      });
+      }) as typeof listings);
 
       const stats = await service.createRootedFileSystem('/').statTree!('');
 

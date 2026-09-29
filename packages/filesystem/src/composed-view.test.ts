@@ -345,6 +345,44 @@ describe('composeView provenance', () => {
     const projectRows = await agentView().readdirWithStats('');
     expect(projectRows.find(({ name }) => name === 'main.ts')?.provenance?.source).toBe('project');
   });
+
+  it('keeps overlay and project provenance while omitting head-only text counts', async () => {
+    const view = agentView();
+    const projectRows = await view.readdirWithStats('', { content: 'head' });
+    const overlayRows = await view.readdirWithStats(`${skillsRoot}/demo`, { content: 'head' });
+    const project = projectRows.find(({ name }) => name === 'main.ts');
+    const overlay = overlayRows.find(({ name }) => name === 'SKILL.md');
+    expect(project).toMatchObject({ contentKind: 'text', provenance: { source: 'project' } });
+    expect(overlay).toMatchObject({ contentKind: 'text', provenance: { source: 'system-skills' } });
+    expect(project).not.toHaveProperty('lineCount');
+    expect(overlay).not.toHaveProperty('lineCount');
+    expect(await view.stat('main.ts')).toMatchObject({ lineCount: 2 });
+  });
+
+  it('refuses head mode when the provider has no bounded listing', async () => {
+    const base = new MemoryProvider();
+    await base.writeFile('large.txt', 'text\n');
+    Object.defineProperty(base, 'readdirWithStats', { value: undefined });
+    const stat = vi.spyOn(base, 'stat');
+    const view = composeView({ filesystem: base }, { consumer: 'user', policy: tauPathPolicy });
+    await expect(view.readdirWithStats('', { content: 'head' })).rejects.toMatchObject({ code: 'ENOTSUP' });
+    expect(stat).not.toHaveBeenCalled();
+  });
+
+  it('does not hide checkout rows when a legacy provider is merged with an overlay', async () => {
+    const base = new MemoryProvider();
+    await base.writeFile('main.ts', 'export {};\n');
+    Object.defineProperty(base, 'supportsHeadListing', { value: undefined });
+    const listing = vi.spyOn(base, 'readdirWithStats');
+    const view = composeView(
+      { filesystem: base },
+      { consumer: 'user', policy: tauPathPolicy, overlays: [skillOverlay()] },
+    );
+    await expect(view.readdirWithStats('', { content: 'head' })).rejects.toMatchObject({ code: 'ENOTSUP' });
+    expect(listing).not.toHaveBeenCalled();
+    const exactRows = await view.readdirWithStats('');
+    expect(exactRows.map(({ name }) => name)).toContain('main.ts');
+  });
 });
 
 describe('composeView agent mask', () => {
@@ -358,6 +396,13 @@ describe('composeView agent mask', () => {
     await provider.mkdir('.git/refs/heads', { recursive: true });
     await provider.writeFile('.git/HEAD', 'ref: refs/heads/main\n');
     await provider.writeFile('.tau/binding.json', '{}\n');
+  });
+
+  it('applies the same hidden-path mask to head-only listings', async () => {
+    const view = agentView();
+    const rows = await view.readdirWithStats('', { content: 'head' });
+    expect(rows.map(({ name }) => name)).not.toContain('.git');
+    await expect(view.readdirWithStats('.git', { content: 'head' })).rejects.toMatchObject({ reason: maskedPathCode });
   });
 
   it('writes workbench records while refusing chat-record writes', async () => {

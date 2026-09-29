@@ -52,6 +52,10 @@ const profilePath = resolve(
   repositoryRoot,
   'packages/geospec-engine-native/rust/tests/fixtures/current-profile-01/plan-corpus.json',
 );
+const successorPath = resolve(
+  repositoryRoot,
+  'packages/geospec-engine-native/rust/tests/fixtures/current-profile-v5/numeric-profile.txt',
+);
 const currentProfileDirectory = resolve(repositoryRoot, 'packages/geospec-engine-native/conformance');
 const m2ApplicationPath = resolve(m2ApplicationDirectory, 'app.ts');
 
@@ -158,10 +162,16 @@ const run = async (): Promise<void> => {
     assertionExport === undefined ? undefined : await realpath(resolve(geospecPackageDirectory, assertionExport));
   const corpusText = await readFile(corpusPath, 'utf8');
   const profileText = suite === 'early' ? await readFile(profilePath, 'utf8') : undefined;
+  const successorText = suite === 'early' ? await readFile(successorPath, 'utf8') : undefined;
   const corpus =
-    profileText === undefined
+    profileText === undefined || successorText === undefined
       ? undefined
-      : await joinCurrentCorpus(Buffer.from(corpusText), Buffer.from(profileText), 'full-backend');
+      : await joinCurrentCorpus(
+          Buffer.from(corpusText),
+          Buffer.from(profileText),
+          'full-backend',
+          Buffer.from(successorText),
+        );
   const selected = corpus === undefined ? [] : selectCorpusRecords(corpus, recordIds);
   const selectedIds = selected.map(({ id }) => id);
   const expectedAdmissions = selected.reduce((count, record) => count + record.ingest.length, 0);
@@ -241,6 +251,15 @@ const run = async (): Promise<void> => {
             response.setHeader('Content-Type', 'application/json; charset=utf-8');
             response.setHeader('Cache-Control', 'no-store');
             response.end(profileText);
+          });
+          developmentServer.middlewares.use('/successor-profile.txt', (request, response, next) => {
+            if (request.method !== 'GET' || successorText === undefined) {
+              next();
+              return;
+            }
+            response.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            response.setHeader('Cache-Control', 'no-store');
+            response.end(successorText);
           });
           developmentServer.middlewares.use('/m2-inputs.json', (request, response, next) => {
             if (suite !== 'm2' || request.method !== 'GET' || m2MetadataText === undefined) {

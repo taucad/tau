@@ -137,14 +137,19 @@ const invoke = (engine: Engine, record: CorpusRecord): ByteArray => {
 };
 
 const readCorpus = async () => {
-  const [original, profile] = await Promise.all([fetch('/early-corpus.json'), fetch('/current-profile.json')]);
-  if (!original.ok || !profile.ok) {
-    throw new Error(`Unable to read conformance authorities: ${original.status}/${profile.status}`);
+  const [original, profile, successor] = await Promise.all([
+    fetch('/early-corpus.json'),
+    fetch('/current-profile.json'),
+    fetch('/successor-profile.txt'),
+  ]);
+  if (!original.ok || !profile.ok || !successor.ok) {
+    throw new Error(`Unable to read conformance authorities: ${original.status}/${profile.status}/${successor.status}`);
   }
   return joinCurrentCorpus(
     new Uint8Array(await original.arrayBuffer()),
     new Uint8Array(await profile.arrayBuffer()),
     'full-backend',
+    new Uint8Array(await successor.arrayBuffer()),
   );
 };
 

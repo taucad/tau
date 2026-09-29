@@ -220,6 +220,7 @@ type ProjectManagerContextType = {
   /** Rewrite a degraded `tau.json` as its normalized strict manifest; refuses a JSON syntax error. */
   repairProject: (projectId: string) => Promise<ProjectManifest | undefined>;
   touchProject: (projectId: string, activityAt?: number) => Promise<ProjectLibraryState | undefined>;
+  setGeoSpecCandidateConsent: (projectId: string, enabled: boolean) => Promise<ProjectLibraryState | undefined>;
   duplicateProject: (projectId: string) => Promise<CreatedProject>;
   getProjects: (options?: { includeDeleted?: boolean }) => Promise<ProjectLibraryEntry[]>;
   getProjectListing: (options?: { includeDeleted?: boolean }) => Promise<ProjectListing>;
@@ -1712,6 +1713,15 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [ensureDiscoveryReady, getReadiedWorker],
   );
 
+  const setGeoSpecCandidateConsent = useCallback(
+    async (projectId: string, enabled: boolean): Promise<ProjectLibraryState | undefined> => {
+      await ensureDiscoveryReady();
+      const worker = await getReadiedWorker();
+      return worker.setGeoSpecCandidateConsent(projectId, enabled);
+    },
+    [ensureDiscoveryReady, getReadiedWorker],
+  );
+
   const getProjectLibraryState = useCallback(
     async (projectId: string): Promise<ProjectLibraryState | undefined> => {
       await ensureDiscoveryReady();
@@ -2463,6 +2473,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       updateProject,
       repairProject,
       touchProject,
+      setGeoSpecCandidateConsent,
       duplicateProject,
       getProjects,
       getProjectListing,
@@ -2510,6 +2521,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     updateProject,
     repairProject,
     touchProject,
+    setGeoSpecCandidateConsent,
     duplicateProject,
     getProjects,
     getProjectListing,

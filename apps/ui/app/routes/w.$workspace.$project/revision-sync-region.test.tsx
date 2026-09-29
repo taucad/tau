@@ -1217,6 +1217,26 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     await user.click(screen.getByRole('menuitem', { name: /^Sync exports/u }));
     expect(region.setSyncLargeExports).toHaveBeenCalledWith(true);
   });
+
+  it('keeps candidate consent off until a browser device explicitly opts in', async () => {
+    const user = userEvent.setup();
+    const change = vi.fn();
+    const label = /Share derived GeoSpec geometry candidates separately from project files \(this device\)/u;
+    renderRegion(connected, undefined, { isSyncGeoSpecCandidates: false, onSyncGeoSpecCandidatesChange: change });
+    await user.click(screen.getByRole('button', { name: 'Backup settings' }));
+    const item = screen.getByRole('menuitem', { name: label });
+    expect(within(item).getByRole('switch')).not.toBeChecked();
+    await user.click(item);
+    expect(change).toHaveBeenCalledWith(true);
+  });
+
+  it('explains desktop candidate sharing is unavailable rather than offering a switch', async () => {
+    const user = userEvent.setup();
+    renderRegion(connected, undefined, { isGeoSpecCandidateSharingUnavailable: true });
+    await user.click(screen.getByRole('button', { name: 'Backup settings' }));
+    expect(screen.getByText('GeoSpec candidate sharing is available in the browser only.')).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /Share derived GeoSpec/u })).not.toBeInTheDocument();
+  });
 });
 
 /**

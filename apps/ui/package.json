@@ -82,6 +82,7 @@
     "express": "catalog:",
     "geospec": "workspace:*",
     "isbot": "catalog:",
+    "isomorphic-git": "catalog:",
     "json-rpc-2.0": "^1.7.1",
     "lucide-react": "catalog:",
     "next-themes": "catalog:",

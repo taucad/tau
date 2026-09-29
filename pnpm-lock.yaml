@@ -2712,6 +2712,9 @@ importers:
       isbot:
         specifier: 'catalog:'
         version: 5.1.43
+      isomorphic-git:
+        specifier: 'catalog:'
+        version: 1.38.5
       json-rpc-2.0:
         specifier: ^1.7.1
         version: 1.7.1

@@ -31,6 +31,17 @@ import {
 const workspaceRoot = resolve(import.meta.dirname, '../..');
 const apiRoot = resolve(import.meta.dirname, '../api');
 const apiLiveUrl = new URL('/health/live', desktopE2EApiUrl);
+const apiReadyTimeout = (() => {
+  const configured = process.env['TAU_E2E_API_READY_TIMEOUT_MS'];
+  if (configured === undefined) {
+    return 180_000;
+  }
+  const milliseconds = Number(configured);
+  if (!Number.isSafeInteger(milliseconds) || milliseconds <= 0) {
+    throw new Error('TAU_E2E_API_READY_TIMEOUT_MS must be a positive integer.');
+  }
+  return milliseconds;
+})();
 
 const isApiReady = async (): Promise<boolean> => {
   try {
@@ -42,7 +53,7 @@ const isApiReady = async (): Promise<boolean> => {
 };
 
 const waitForApi = async (child: ChildProcess): Promise<void> => {
-  const deadline = Date.now() + 180_000;
+  const deadline = Date.now() + apiReadyTimeout;
   while (!(await isApiReady())) {
     if (child.exitCode !== null) {
       throw new Error(`Tau API test server exited with code ${String(child.exitCode)}`);

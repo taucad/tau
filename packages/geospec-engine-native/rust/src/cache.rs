@@ -26,3 +26,5 @@ pub trait OverlapEvidenceCache {
 }
 
 pub(crate) type SharedOverlapEvidenceCache = Rc<dyn OverlapEvidenceCache>;
+
+pub(crate) mod exact_clusters;

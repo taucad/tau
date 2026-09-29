@@ -16,6 +16,7 @@ use crate::{
         brep::{ComponentBody, DocumentRows, OccurrenceFacts, SubshapeType},
         BackendError, BackendErrorKind,
     },
+    cache::exact_clusters as completed_clusters,
     codec::Json,
     prepared::{self, AnalysisDemand, NumericExpectation, DEFAULT_LINEAR_TOLERANCE},
     protocol::{field, invalid_claim, object, optional_field, require_fields},
@@ -24,7 +25,7 @@ use crate::{
     subject::{backend_refusal, EvaluationContext, Subject, SubjectFormat},
     ProtocolError,
 };
-use std::{collections::HashMap, rc::Rc};
+use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 const AXES: [&str; 3] = ["x", "y", "z"];
 const BOUNDS_FIELDS: [&str; 4] = ["min", "max", "size", "center"];
@@ -932,9 +933,23 @@ fn step_component_clusters(
     })?;
     let subject = context.subject();
     let budget = context.budget;
-    context.exact_clusters(
+    let cache = subject.overlap_cache.as_deref().and_then(|store| {
+        completed_clusters::address(subject, tolerance_mm).map(|address| (store, address))
+    });
+    let cold_built = Cell::new(false);
+    let result = context.exact_clusters(
         tolerance_mm,
         |trace| {
+            if let Some((store, address)) = &cache {
+                if let Some(completed) = completed_clusters::load(*store, address) {
+                    completed_clusters::replay(&completed, budget, trace).map_err(
+                        |(exceeded, pair)| {
+                            component_budget_refusal(exceeded, pair, &completed.labels)
+                        },
+                    )?;
+                    return Ok((completed.clusters, completed.labels));
+                }
+            }
             let occurrences = subject
                 .source_occurrence_structure()
                 .map_err(backend_refusal)?
@@ -960,10 +975,15 @@ fn step_component_clusters(
             let clusters =
                 exact_clusters_traced(bodies.as_ref(), &labels, tolerance_mm, budget, trace)
                     .map_err(|error| refusal(error, &labels))?;
+            cold_built.set(true);
             Ok((clusters, labels))
         },
         component_budget_refusal,
-    )
+    )?;
+    if let Some((store, address)) = cache {
+        completed_clusters::publish_if_cold(store, &address, &result, cold_built.get());
+    }
+    Ok(result)
 }
 
 fn component_budget_refusal(

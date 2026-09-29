@@ -143,9 +143,11 @@ void test('cache key follows source and selected toolchain without generated out
 });
 
 void test('cached preparation target uses verified ensure-delivery on source changes', () => {
+  /** @type {unknown} */
+  const rawProject = JSON.parse(readFileSync(resolve(import.meta.dirname, '../project.json'), 'utf8'));
   const project =
-    /** @type {{targets: Record<string, {cache?: boolean, inputs?: unknown[], options?: {command?: string}} >}} */ JSON.parse(
-      readFileSync(resolve(import.meta.dirname, '../project.json'), 'utf8'),
+    /** @type {{targets: Record<string, {cache?: boolean, inputs?: unknown[], options?: {command?: string}} >}} */ (
+      rawProject
     );
   const target = project.targets['prepare-geospec-ci-artifacts'];
   assert.ok(target);

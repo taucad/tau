@@ -15,8 +15,10 @@ import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  accessSync,
   copyFileSync,
   closeSync,
+  constants,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -25,9 +27,10 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
-import { join, posix, resolve } from 'node:path';
+import { delimiter, join, posix, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import process from 'node:process';
 import { isDeepStrictEqual } from 'node:util';
@@ -66,6 +69,24 @@ const outputs = [
 ];
 /** @type {(bytes: import('node:crypto').BinaryLike) => string} */
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+/** Resolve a runner against its caller PATH before a producer receives a stricter PATH.
+ * @type {(name: string, path: string | undefined) => string | undefined}
+ */
+const executableOnPath = (name, path) =>
+  path
+    ?.split(delimiter)
+    .map((entry) => resolve(entry || '.', name))
+    .find((candidate) => {
+      try {
+        if (!statSync(candidate).isFile()) {
+          return false;
+        }
+        accessSync(candidate, constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
 const producerRecipe = digest(readFileSync(fileURLToPath(import.meta.url)));
 /** @type {(path: string) => Record<string, unknown>} */
 const readJson = (path) => {
@@ -446,6 +467,8 @@ export const verifyDelivery = (root) => {
 export const prepareArtifacts = (root) => {
   rmSync(resolve(root, inventoryPath), { force: true });
   const source = sourceIdentity(root);
+  const pnpmRunner = executableOnPath('pnpm', process.env.PATH);
+  assert.ok(pnpmRunner, 'pnpm is not executable on the caller PATH.');
   const { GEOSPEC_DELIVERY_CACHE: deliveryCache } = process.env;
   let cache = resolve(root, deliveryCache ?? 'node_modules/.cache/geospec-engine-native/delivery-wasm-eh');
   let generation;
@@ -495,7 +518,7 @@ export const prepareArtifacts = (root) => {
         ? { CARGO_TARGET_DIR: nativeTarget, RUSTC_LOG: 'rustc_codegen_ssa::back::link=info' }
         : {};
     const started = new Date().toISOString();
-    const result = childProcess.spawnSync('pnpm', argv.slice(1), {
+    const result = childProcess.spawnSync(pnpmRunner, argv.slice(1), {
       cwd: root,
       stdio: producerStdio(capture),
       encoding: 'utf8',
@@ -549,6 +572,10 @@ export const prepareArtifacts = (root) => {
   run('prepare-delivery:sources');
   run('prepare-delivery:tools');
   if (reusePrefixes) {
+    assert.ok(
+      executableOnPath('node', process.env.GEOSPEC_NATIVE_PREFIX_PATH ?? process.env.PATH),
+      'Native prefix PATH lacks executable node for nested Nx and env-node scripts.',
+    );
     run('prepare-delivery:reuse-native', {
       PATH: process.env.GEOSPEC_NATIVE_PREFIX_PATH ?? process.env.PATH,
       GEOSPEC_DELIVERY_CACHE: nativeCache,

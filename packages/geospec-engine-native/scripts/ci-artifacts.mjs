@@ -2,7 +2,7 @@
 /**
  * Prepare or verify the complete Node/mixed package payload for CI transport.
  * Uses existing Nx producers; hashes establish transport identity, not qualification.
- * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery|snapshot-delivery
+ * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery|snapshot-delivery|cache-key
  * Optional env: GEOSPEC_DELIVERY_CACHE and existing delivery tool selectors.
  * GEOSPEC_NATIVE_DELIVERY_CACHE selects independent retained native-prefix reuse;
  * GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER/RECIPE and GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES
@@ -31,7 +31,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { delimiter, join, posix, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, posix, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import process from 'node:process';
 import { isDeepStrictEqual } from 'node:util';
@@ -234,6 +234,132 @@ const sourceIdentity = (root) => {
  * @type {(root: string) => string}
  */
 const closedRecipe = (root) => digest(JSON.stringify(sourceIdentity(root).files));
+/** Nx's runtime input uses the same source closure as transport verification.
+ * The delivery generation covers the selected host tools, compilers, SDK and
+ * pinned OCCT recipe without requiring downloads or generated outputs.
+ * @type {(root: string) => string}
+ * @internal
+ */
+export const deliveryCacheKey = (root) => {
+  const generation = childProcess.spawnSync(
+    'python3',
+    ['-B', resolve(root, packagePath, 'scripts/prepare-delivery.py'), 'generation'],
+    { cwd: root, encoding: 'utf8', env: process.env },
+  );
+  assert.ok(generation.status === 0, `GeoSpec delivery generation failed: ${generation.stderr || generation.error}`);
+  const selectedGeneration = generation.stdout.trim();
+  assert.match(selectedGeneration, /^[0-9a-f]{64}$/u, 'Invalid GeoSpec delivery generation.');
+  const selectedEnvironment = Object.fromEntries(
+    [
+      'CC',
+      'CXX',
+      'CFLAGS',
+      'CXXFLAGS',
+      'LDFLAGS',
+      'RUSTFLAGS',
+      'CARGO_ENCODED_RUSTFLAGS',
+      'MACOSX_DEPLOYMENT_TARGET',
+      'SDKROOT',
+      'CARGO_HOME',
+      'GEOSPEC_DELIVERY_CACHE',
+      'GEOSPEC_NATIVE_DELIVERY_CACHE',
+      'GEOSPEC_NATIVE_PREFIX_PATH',
+      'GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER',
+      'GEOSPEC_NATIVE_OCCT_PRODUCER_RECIPE',
+      'GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES',
+      'GEOSPEC_OCCT_PRODUCER_BUILDER',
+      'GEOSPEC_OCCT_PRODUCER_RECIPE',
+      'GEOSPEC_OCCT_SUPPORT_INPUTS',
+      'GIT_CEILING_DIRECTORIES',
+    ].map((name) => [name, process.env[name] ?? null]),
+  );
+  const cargoEnvironment = Object.fromEntries(
+    Object.entries(process.env)
+      .filter(
+        ([name]) =>
+          (name.startsWith('CARGO_') &&
+            name !== 'CARGO_BUILD_JOBS' &&
+            name !== 'CARGO_TARGET_DIR' &&
+            !/(?:TOKEN|PASSWORD|CREDENTIAL|AUTH)/u.test(name)) ||
+          /^(?:RUSTC(?:_WRAPPER|_WORKSPACE_WRAPPER)?|CC(?:_.+)?|CXX(?:_.+)?|AR(?:_.+)?|CFLAGS(?:_.+)?|CXXFLAGS(?:_.+)?|CXXSTDLIB|CRATE_CC_NO_DEFAULTS|CC_SHELL_ESCAPED_FLAGS)$/u.test(
+            name,
+          ),
+      )
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
+  const cargoHome = resolve(root, process.env['CARGO_HOME'] ?? join(homedir(), '.cargo'));
+  const cargoConfigPaths = [join(cargoHome, 'config'), join(cargoHome, 'config.toml')];
+  for (let directory = resolve(root, packagePath); ; directory = dirname(directory)) {
+    cargoConfigPaths.push(join(directory, '.cargo/config'), join(directory, '.cargo/config.toml'));
+    if (dirname(directory) === directory) {
+      break;
+    }
+  }
+  const cargoConfigs = [...new Set(cargoConfigPaths)]
+    .filter((path) => existsSync(path))
+    .map((path) => {
+      const local = relative(root, path);
+      return fileRecord(root, local.startsWith('..') || isAbsolute(local) ? path : local);
+    })
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const executableOverrides = Object.fromEntries(
+    Object.entries(cargoEnvironment)
+      .filter(([name]) =>
+        /^(?:RUSTC(?:_WRAPPER|_WORKSPACE_WRAPPER)?|CARGO_TARGET_.+_LINKER|CARGO_BUILD_RUSTC(?:_WRAPPER|_WORKSPACE_WRAPPER)?)$/u.test(
+          name,
+        ),
+      )
+      .map(([name, value]) => {
+        assert.ok(typeof value === 'string', `Missing Cargo executable override: ${name}`);
+        if (value === '') {
+          return [name, null];
+        }
+        const executable = executableOnPath(value, process.env['PATH']) ?? resolve(root, value);
+        return [name, fileRecord(root, executable)];
+      }),
+  );
+  const externalInputs = Object.fromEntries(
+    [
+      'GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER',
+      'GEOSPEC_NATIVE_OCCT_PRODUCER_RECIPE',
+      'GEOSPEC_OCCT_PRODUCER_BUILDER',
+      'GEOSPEC_OCCT_PRODUCER_RECIPE',
+      'GEOSPEC_OCCT_SUPPORT_INPUTS',
+    ].map((name) => {
+      const selected = process.env[name];
+      if (selected === undefined) {
+        return [name, null];
+      }
+      const path = resolve(root, selected);
+      const files = name.endsWith('_BUILDER')
+        ? [
+            path,
+            ...readdirSync(dirname(path))
+              .filter((entry) => entry.endsWith('.patch') || entry === 'source-manifest.json')
+              .map((entry) => join(dirname(path), entry)),
+          ]
+        : [path];
+      return [name, [...new Set(files)].sort().map((file) => fileRecord(root, file))];
+    }),
+  );
+  const pnpmRunner = executableOnPath('pnpm', process.env['PATH']);
+  assert.ok(pnpmRunner, 'pnpm is not executable on the caller PATH.');
+  return digest(
+    JSON.stringify({
+      sources: sourceIdentity(root).files,
+      generation: selectedGeneration,
+      environment: selectedEnvironment,
+      cargoEnvironment,
+      cargoConfigs,
+      executableOverrides,
+      externalInputs,
+      platform: process.platform,
+      arch: process.arch,
+      node: { version: process.version, sha256: digest(readFileSync(process.execPath)) },
+      pnpm: digest(readFileSync(pnpmRunner)),
+    }),
+  );
+};
 /** @type {(root: string) => ReturnType<typeof fileRecord>[]} */
 const payload = (root) => {
   const files = outputs.map((path) => fileRecord(root, path));
@@ -442,8 +568,20 @@ export const verifyArtifacts = (root) => {
  * @internal
  */
 export const verifyDelivery = (root) => {
-  const inventory = verifyArtifacts(root);
+  const inventory = /** @type {ReturnType<typeof verifyArtifacts> & {delivery?: {run?: unknown}}} */ (
+    verifyArtifacts(root)
+  );
   const archives = archivePaths.map((path) => fileRecord(root, path));
+  const recordedRun = /** @type {Record<string, unknown> | null | undefined} */ (inventory.delivery?.run);
+  assert.ok(
+    recordedRun !== null &&
+      typeof recordedRun === 'object' &&
+      !Array.isArray(recordedRun) &&
+      (typeof recordedRun['id'] === 'string' || recordedRun['id'] === null) &&
+      (typeof recordedRun['attempt'] === 'string' || recordedRun['attempt'] === null),
+    'Delivery lacks producer workflow provenance.',
+  );
+  const run = /** @type {{id: string | null, attempt: string | null}} */ (recordedRun);
   assert.ok(
     archives.every((file) => file.bytes > 0),
     'Empty delivery archive.',
@@ -451,11 +589,11 @@ export const verifyDelivery = (root) => {
   assert.ok(
     isDeepStrictEqual(inventory.delivery, {
       platform: 'darwin-arm64',
-      run: workflowRun(),
+      run,
       archives,
       nativeProof: fileRecord(root, proofPath),
     }),
-    'Delivery archive/proof hashes or workflow run differ.',
+    'Delivery archive/proof hashes or producer provenance differ.',
   );
   return inventory;
 };
@@ -467,6 +605,7 @@ export const verifyDelivery = (root) => {
  */
 export const prepareArtifacts = (root) => {
   rmSync(resolve(root, inventoryPath), { force: true });
+  const cacheKey = deliveryCacheKey(root);
   const source = sourceIdentity(root);
   const pnpmRunner = executableOnPath('pnpm', process.env.PATH);
   assert.ok(pnpmRunner, 'pnpm is not executable on the caller PATH.');
@@ -512,6 +651,7 @@ export const prepareArtifacts = (root) => {
   mkdirSync(resolve(root, transportPath), { recursive: true });
   /** @type {(target: string, preparationEnvironment?: Record<string, string | undefined>) => string} */
   const run = (target, preparationEnvironment = {}) => {
+    console.log(`GeoSpec producer: ${target}`);
     const argv = [
       'pnpm',
       'nx',
@@ -540,6 +680,12 @@ export const prepareArtifacts = (root) => {
     if (capture) {
       writeFileSync(resolve(root, transportPath, `${target}.stdout`), result.stdout || '');
       writeFileSync(resolve(root, transportPath, `${target}.stderr`), result.stderr || String(result.error ?? ''));
+      if (result.stdout) {
+        process.stdout.write(result.stdout);
+      }
+      if (result.stderr) {
+        process.stderr.write(result.stderr);
+      }
     }
     assert.ok(result.status === 0, `GeoSpec producer ${target} failed: ${result.error?.message ?? result.status}`);
     if (target === 'build-node') {
@@ -691,6 +837,11 @@ export const prepareArtifacts = (root) => {
       nativeProof: fileRecord(root, proofPath),
     },
   };
+  assert.equal(
+    cacheKey,
+    deliveryCacheKey(root),
+    'GeoSpec source, toolchain or selected environment changed during production.',
+  );
   publishInventory(root, complete);
   return verifyDelivery(root);
 };
@@ -708,12 +859,20 @@ export const ensureDelivery = (root) => {
   return prepareArtifacts(root);
 };
 
-/** Select immutable archives while holding the same producer lock as ensure/verify.
+/** Select immutable archives while holding the same producer lock as prepare/verify.
  * @type {(root: string) => string}
  * @internal
  */
 export const snapshotDelivery = (root) => {
-  const inventory = ensureDelivery(root);
+  let inventory;
+  try {
+    inventory = verifyDelivery(root);
+  } catch (error) {
+    throw new Error(
+      `GeoSpec delivery is missing or stale; run pnpm nx run geospec-engine-native:prepare-geospec-ci-artifacts: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
   const cache = resolve(root, 'node_modules/.cache/geospec-engine-native');
   mkdirSync(cache, { recursive: true });
   const snapshot = mkdtempSync(join(cache, 'assembly-snapshot-'));
@@ -744,6 +903,10 @@ const invokedScript = process.argv.at(1);
 if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(import.meta.url)) {
   try {
     const root = resolve(import.meta.dirname, '../../..');
+    if (process.argv.length === 3 && process.argv[2] === 'cache-key') {
+      console.log(deliveryCacheKey(root));
+      process.exit(0);
+    }
     const worker = process.argv[2] === '--producer';
     assert.ok(
       process.argv.length === (worker ? 4 : 3),
@@ -758,9 +921,9 @@ if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(impo
         mode === 'snapshot-delivery',
       'Usage: ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery|snapshot-delivery',
     );
-    const produces = mode === 'prepare' || mode === 'ensure-delivery' || mode === 'snapshot-delivery';
+    const produces = mode === 'prepare' || mode === 'ensure-delivery';
     assert.ok(
-      process.platform === 'darwin' || !produces,
+      process.platform === 'darwin' || (!produces && mode !== 'snapshot-delivery'),
       'GeoSpec production and snapshot selection require Darwin; non-Darwin supports verified transport reads only.',
     );
     if (worker) {
@@ -790,9 +953,7 @@ if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(impo
         });
         assert.ok(child.status === 0, `GeoSpec producer failed: ${child.error?.message ?? child.status}`);
       } else if (mode === 'snapshot-delivery') {
-        console.log(
-          `ASSEMBLY_ROOT=${withProducerMarker(root, () => snapshotDelivery(root), { pgid: process.pid, recipeSha256: closedRecipe(root) })}`,
-        );
+        console.log(`ASSEMBLY_ROOT=${snapshotDelivery(root)}`);
       } else {
         const inventory =
           mode === 'ensure-delivery'

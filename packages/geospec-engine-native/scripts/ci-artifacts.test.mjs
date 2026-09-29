@@ -20,6 +20,7 @@ import process from 'node:process';
 /* oxlint-disable no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export. */
 import {
   darwinGroupAlive,
+  deliveryCacheKey,
   ensureDelivery,
   prepareArtifacts,
   recoverExitedProducer,
@@ -38,6 +39,108 @@ void test('malformed process listings cannot prove a producer group exited', (co
   assert.throws(() => darwinGroupAlive(123), /Malformed process listing/);
   listing.mock.mockImplementation(() => ({ status: 0, stdout: undefined }));
   assert.throws(() => darwinGroupAlive(123), /Could not prove GeoSpec producer group exit/);
+});
+
+void test('cache key follows source and selected toolchain without generated outputs', (context) => {
+  const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
+  mkdirSync(scratch, { recursive: true });
+  const root = mkdtempSync(join(scratch, 'cache-key-'));
+  context.after(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  const source = 'packages/geospec-engine-native/native/occt/patches/fixture.patch';
+  for (const name of [
+    source,
+    'packages/geospec-engine-native/scripts/ci-artifacts.mjs',
+    'packages/geospec-engine-native/scripts/collect-native-proof.py',
+    'packages/geospec-engine-native/scripts/test_native_proof.py',
+  ]) {
+    const path = join(root, name);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, name);
+  }
+  context.mock.method(
+    childProcess,
+    'execFileSync',
+    /** @type {(executable: string, args: string[]) => string} */ (_executable, args) =>
+      args[0] === 'rev-parse' ? `${'a'.repeat(40)}\n` : `${source}\0`,
+  );
+  let generation = 'a'.repeat(64);
+  context.mock.method(
+    childProcess,
+    'spawnSync',
+    /** @type {(executable: string, args: string[]) => {status: number, stdout: string}} */ (_executable, _args) => ({
+      status: 0,
+      stdout: `${generation}\n`,
+    }),
+  );
+  const original = deliveryCacheKey(root);
+  writeFileSync(join(root, source), 'changed patch');
+  const changedSource = deliveryCacheKey(root);
+  assert.notEqual(changedSource, original);
+  generation = 'b'.repeat(64);
+  assert.notEqual(deliveryCacheKey(root), changedSource);
+  const builder = join(root, 'external/build.sh');
+  mkdirSync(dirname(builder), { recursive: true });
+  writeFileSync(builder, 'builder');
+  const previousBuilder = process.env['GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER'];
+  process.env['GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER'] = builder;
+  context.after(() => {
+    if (previousBuilder === undefined) {
+      delete process.env['GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER'];
+    } else {
+      process.env['GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER'] = previousBuilder;
+    }
+  });
+  const selectedBuilder = deliveryCacheKey(root);
+  writeFileSync(join(dirname(builder), 'fix.patch'), 'patch');
+  const selectedPatch = deliveryCacheKey(root);
+  assert.notEqual(selectedPatch, selectedBuilder);
+  writeFileSync(join(dirname(builder), 'source-manifest.json'), '{}');
+  const selectedManifest = deliveryCacheKey(root);
+  assert.notEqual(selectedManifest, selectedPatch);
+  const previousProfile = process.env['CARGO_PROFILE_RELEASE_DEBUG'];
+  process.env['CARGO_PROFILE_RELEASE_DEBUG'] = '2';
+  context.after(() => {
+    if (previousProfile === undefined) {
+      delete process.env['CARGO_PROFILE_RELEASE_DEBUG'];
+    } else {
+      process.env['CARGO_PROFILE_RELEASE_DEBUG'] = previousProfile;
+    }
+  });
+  const selectedProfile = deliveryCacheKey(root);
+  assert.notEqual(selectedProfile, selectedManifest);
+  const config = join(root, '.cargo/config.toml');
+  mkdirSync(dirname(config), { recursive: true });
+  writeFileSync(config, '[profile.release]\ndebug = 0\n');
+  const selectedConfig = deliveryCacheKey(root);
+  assert.notEqual(selectedConfig, selectedProfile);
+  writeFileSync(config, '[profile.release]\ndebug = 1\n');
+  assert.notEqual(deliveryCacheKey(root), selectedConfig);
+  const secondRoot = mkdtempSync(join(scratch, 'cache-key-peer-'));
+  context.after(() => {
+    rmSync(secondRoot, { recursive: true, force: true });
+  });
+  cpSync(root, secondRoot, { recursive: true });
+  delete process.env['GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER'];
+  assert.equal(deliveryCacheKey(secondRoot), deliveryCacheKey(root), 'workspace Cargo config uses relative identity');
+  process.env['GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER'] = builder;
+  const wrapper = join(root, 'external/rustc-wrapper');
+  writeFileSync(wrapper, 'first wrapper');
+  const previousWrapper = process.env['RUSTC_WRAPPER'];
+  process.env['RUSTC_WRAPPER'] = wrapper;
+  context.after(() => {
+    if (previousWrapper === undefined) {
+      delete process.env['RUSTC_WRAPPER'];
+    } else {
+      process.env['RUSTC_WRAPPER'] = previousWrapper;
+    }
+  });
+  const selectedWrapper = deliveryCacheKey(root);
+  writeFileSync(wrapper, 'second wrapper');
+  assert.notEqual(deliveryCacheKey(root), selectedWrapper);
+  process.env['RUSTC_WRAPPER'] = '';
+  assert.match(deliveryCacheKey(root), /^[0-9a-f]{64}$/u, 'empty wrapper disables the override');
 });
 
 void test('explicit delivery cache remains the exact selected path', (context) => {
@@ -69,8 +172,11 @@ void test('explicit delivery cache remains the exact selected path', (context) =
   const producer = context.mock.method(
     childProcess,
     'spawnSync',
-    /** @type {(executable: string, args: string[], options: {env: {GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_DELIVERY_GENERATION?: string}}) => {status: number}} */
+    /** @type {(executable: string, args: string[], options: {env: {GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_DELIVERY_GENERATION?: string}}) => {status: number, stdout?: string}} */
     (executable, _args, options) => {
+      if (executable === 'python3') {
+        return { status: 0, stdout: `${'a'.repeat(64)}\n` };
+      }
       assert.ok(isAbsolute(executable) && executable.endsWith('/pnpm'));
       assert.equal(options.env.GEOSPEC_DELIVERY_CACHE, selected);
       assert.equal(options.env.GEOSPEC_DELIVERY_GENERATION, undefined);
@@ -78,7 +184,7 @@ void test('explicit delivery cache remains the exact selected path', (context) =
     },
   );
   assert.throws(() => prepareArtifacts(root), /GeoSpec producer prepare-delivery:sources failed/);
-  assert.equal(producer.mock.callCount(), 1);
+  assert.equal(producer.mock.callCount(), 2);
 });
 
 /** @type {(condition: () => boolean, label: string) => Promise<void>} */
@@ -160,6 +266,16 @@ const checkTransport = (context, reusePrefixes) => {
   put(join(producer, packagePath, 'scripts/collect-native-proof.py'), 'inert collector source');
   put(join(producer, packagePath, 'scripts/test_native_proof.py'), 'inert positive fixture source');
   put(join(producer, packagePath, 'project.json'), JSON.stringify({ targets: { 'build-node': { fixture: true } } }));
+  if (reusePrefixes) {
+    for (const name of [
+      'native-producing-builder.sh',
+      'native-producing-recipe.json',
+      'mixed-producing-builder.sh',
+      'mixed-producing-recipe.json',
+    ]) {
+      put(join(producer, name), `fixture ${name}`);
+    }
+  }
   put(join(producer, packagePath, 'rust/target/untracked-output'), 'not source');
   let revision = 'a'.repeat(40);
   context.mock.method(
@@ -465,6 +581,9 @@ const checkTransport = (context, reusePrefixes) => {
   const builtTargets = [...targets];
   assert.deepEqual(ensureDelivery(producer), inventory);
   assert.deepEqual(targets, builtTargets, 'an unchanged delivery must not invoke a producer');
+  process.env['GITHUB_RUN_ID'] = 'another-run';
+  process.env['GITHUB_RUN_ATTEMPT'] = '3';
+  assert.deepEqual(verifyDelivery(producer), inventory, 'producer provenance survives another workflow run');
   const snapshot = snapshotDelivery(producer);
   assert.deepEqual(targets, builtTargets, 'a verified snapshot must not invoke a producer');
   for (const name of ['root.tgz', 'darwin-arm64.tgz', 'geospec-engine-native-source-relink.tar.gz']) {
@@ -526,7 +645,7 @@ const checkTransport = (context, reusePrefixes) => {
     const path = join(consumer, transportPath, 'assembly/tarballs', name);
     const bytes = readFileSync(path);
     put(path, 'other assembly');
-    assert.throws(() => verifyDelivery(consumer), /archive\/proof hashes or workflow run differ/);
+    assert.throws(() => verifyDelivery(consumer), /archive\/proof hashes or producer provenance differ/);
     put(path, bytes);
   }
   for (const file of inventory.artifacts) {
@@ -700,6 +819,8 @@ const checkTransport = (context, reusePrefixes) => {
   put(join(consumer, transportPath, 'mixed-build-receipt.json'), '{}');
   assert.throws(() => verifyArtifacts(consumer), /mixedReceipt changed during transport/);
   put(join(producer, transportPath, 'assembly/tarballs/root.tgz'), 'corrupt delivery must not be reused');
+  assert.throws(() => snapshotDelivery(producer), /run pnpm nx run geospec-engine-native:prepare-geospec-ci-artifacts/);
+  assert.deepEqual(targets, builtTargets, 'a corrupt delivery snapshot must not invoke a producer');
   failNode = true;
   assert.throws(() => ensureDelivery(producer), /build-node failed/);
   assert.equal(existsSync(join(producer, transportPath, 'inventory.json')), false);

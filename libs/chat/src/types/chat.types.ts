@@ -47,4 +47,6 @@ export type Chat = {
   createdAt: number;
   updatedAt: number;
   deletedAt?: number; // Soft delete support
+  /** Irreversible product deletion; the tombstone remains for record synchronization. */
+  purgedAt?: number;
 };

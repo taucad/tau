@@ -30,6 +30,8 @@ export const searchParameterName = {
   /* Project route */
   // The focused chat within the open project.
   chat: 'chat',
+  // The project archive in place of the chat transcript.
+  archivedChats: 'archivedChats',
   // The open workbench panel, e.g. `share`.
   workbench: 'workbench',
   // The selected share provider within the share panel.

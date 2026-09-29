@@ -13,12 +13,16 @@ export type PartPrimitiveReference = Readonly<{
 export type PartThumbnailRequest = Readonly<{
   id: string;
   primitives: readonly PartPrimitiveReference[];
+  /** Canonical appearance identity; occurrence pose is omitted only when proven rigid. */
+  visualKey?: string;
 }>;
 
 export type PartThumbnailSource = Readonly<{
   sourcePath: string;
   geometryHash: string;
   content: Uint8Array<ArrayBuffer>;
+  /** Optional preview-only normalization, evaluated only when an image is missing. */
+  renderContent?: () => Uint8Array<ArrayBuffer>;
 }>;
 
 export type PartThumbnailState = Readonly<{
@@ -37,6 +41,11 @@ type Work = Readonly<{
   generation: number;
   source: PartThumbnailSource;
   parts: readonly PartThumbnailRequest[];
+  manualPartId: string | undefined;
+}>;
+type OwnerDemand = Readonly<{
+  source?: PartThumbnailSource;
+  parts: readonly PartThumbnailRequest[];
 }>;
 
 /**
@@ -48,7 +57,10 @@ export class PartThumbnailService {
   // oxlint-disable-next-line typescript/parameter-properties -- UI uses erasableSyntaxOnly.
   private readonly imageService: Pick<HeadlessImageService, 'export'>;
   private readonly states = new Map<string, PartThumbnailState>();
+  private snapshotValue: ReadonlyMap<string, PartThumbnailState> = new Map();
   private readonly identities = new Map<string, string>();
+  private readonly decodedById = new Map<string, Uint8Array<ArrayBuffer>>();
+  private readonly ownerDemands = new Map<string, OwnerDemand>();
   private readonly changes = new Topic<void>({ name: 'PartThumbnailService.changes' });
   private generation = 0;
   private submission = 0;
@@ -56,6 +68,7 @@ export class PartThumbnailService {
   private activeAbort: AbortController | undefined;
   private running = false;
   private disposed = false;
+  private presentedSourceKey: string | undefined;
 
   public constructor(imageService: Pick<HeadlessImageService, 'export'>) {
     this.imageService = imageService;
@@ -70,8 +83,164 @@ export class PartThumbnailService {
     return this.states.get(id);
   }
 
+  /** Stable between emissions for React's external-store subscription. */
+  public snapshot(): ReadonlyMap<string, PartThumbnailState> {
+    return this.snapshotValue;
+  }
+
+  /** Fence old exports as soon as the viewport announces a different source, before async preparation. */
+  public announcePresentedSource(key: string | undefined): void {
+    if (this.disposed || this.presentedSourceKey === key) {
+      return;
+    }
+    this.presentedSourceKey = key;
+    for (const [owner, demand] of this.ownerDemands) {
+      this.ownerDemands.set(owner, { parts: demand.parts });
+    }
+    this.invalidate();
+  }
+
   /** Replace the requested visible page; an active GPU export may still finish. */
-  public request(source: PartThumbnailSource, parts: readonly PartThumbnailRequest[]): void {
+  public request(
+    source: PartThumbnailSource,
+    parts: readonly PartThumbnailRequest[],
+    options?: { readonly manualPartId?: string },
+  ): void {
+    this.requestForOwner('default', source, parts, options);
+  }
+
+  /** Combine simultaneous callers for the same presented unit without replacing each other's demand. */
+  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Owner, source, requested parts, and one optional retry target are independent admission inputs.
+  public requestForOwner(
+    owner: string,
+    source: PartThumbnailSource,
+    parts: readonly PartThumbnailRequest[],
+    options?: { readonly manualPartId?: string },
+  ): void {
+    this.validateRequest(source, parts);
+    this.ownerDemands.set(owner, { source, parts: [...parts] });
+    this.replaceRequest(source, this.partsFor(source), options);
+  }
+
+  /** Drop only this caller's rows; the other caller and its last-good previews remain. */
+  public releaseOwner(owner: string): void {
+    if (!this.ownerDemands.delete(owner) || this.disposed) {
+      return;
+    }
+    const retainedDemands = [...this.ownerDemands.values()];
+    const source = retainedDemands.find((demand) => demand.source)?.source;
+    if (source) {
+      this.replaceRequest(source, this.partsFor(source));
+      return;
+    }
+    const retainedIds = new Set(retainedDemands.flatMap((demand) => demand.parts.map((part) => part.id)));
+    for (const id of this.states.keys()) {
+      if (!retainedIds.has(id)) {
+        this.states.delete(id);
+        this.identities.delete(id);
+        this.decodedById.delete(id);
+      }
+    }
+    this.generation += 1;
+    this.activeAbort?.abort(new DOMException('Part thumbnail owners closed.', 'AbortError'));
+    this.current = undefined;
+    this.emit();
+  }
+
+  public dispose(): void {
+    this.disposed = true;
+    this.generation += 1;
+    this.activeAbort?.abort(new DOMException('Part thumbnail service was disposed.', 'AbortError'));
+    this.current = undefined;
+    this.states.clear();
+    this.ownerDemands.clear();
+    this.decodedById.clear();
+    this.snapshotValue = new Map();
+    this.identities.clear();
+    this.changes.dispose();
+  }
+
+  /** Fence in-flight work while retaining bounded last-good previews during refresh. */
+  public invalidate(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.generation += 1;
+    this.activeAbort?.abort(new DOMException('Presented geometry changed.', 'AbortError'));
+    this.current = undefined;
+    for (const [id, state] of this.states) {
+      if (state.bytes) {
+        this.states.set(id, { status: 'ready', bytes: state.bytes });
+      } else {
+        this.states.delete(id);
+        this.identities.delete(id);
+        this.decodedById.delete(id);
+      }
+    }
+    this.emit();
+  }
+
+  /** Surface source preparation errors through the same per-part retry state. */
+  public failPreparation(parts: readonly PartThumbnailRequest[], error: unknown): void {
+    if (this.disposed) {
+      return;
+    }
+    this.generation += 1;
+    this.activeAbort?.abort(new DOMException('Part thumbnail preparation failed.', 'AbortError'));
+    this.current = undefined;
+    for (const part of parts) {
+      this.states.set(part.id, { status: 'failed', ...this.lastGood(part.id), error });
+    }
+    this.emit();
+  }
+
+  /** Fail one consumer's preparation without cancelling the other consumer's work. */
+  public failPreparationForOwner(owner: string, parts: readonly PartThumbnailRequest[], error: unknown): void {
+    if (this.disposed) {
+      return;
+    }
+    const lastGood = new Map(parts.map((part) => [part.id, this.lastGood(part.id)]));
+    this.releaseOwner(owner);
+    const failedParts = parts.filter(
+      (part) =>
+        ![...this.ownerDemands.values()].some((demand) => demand.parts.some((candidate) => candidate.id === part.id)),
+    );
+    this.ownerDemands.set(owner, { parts: failedParts });
+    for (const part of failedParts) {
+      this.states.set(part.id, { status: 'failed', ...lastGood.get(part.id), error });
+    }
+    this.emit();
+  }
+
+  /** Reject an encoded image that the browser cannot decode, without hiding the part name. */
+  public failDecode(id: string, bytes: Uint8Array<ArrayBuffer>): void {
+    const state = this.states.get(id);
+    if (this.disposed || state?.bytes !== bytes) {
+      return;
+    }
+    const lastGood = this.decodedById.get(id);
+    this.states.set(id, {
+      status: 'failed',
+      ...(lastGood && lastGood !== bytes ? { bytes: lastGood } : {}),
+      error: new Error(`Part preview for ${id} could not be decoded`),
+    });
+    this.emit();
+  }
+
+  /** Admit a browser-decoded preview as last-good only for the current image. */
+  public markDecoded(id: string, bytes: Uint8Array<ArrayBuffer>): void {
+    if (!this.disposed && this.states.get(id)?.bytes === bytes) {
+      this.decodedById.set(id, bytes);
+      this.limitStoredBytes();
+      this.emit();
+    }
+  }
+
+  private replaceRequest(
+    source: PartThumbnailSource,
+    parts: readonly PartThumbnailRequest[],
+    options?: { readonly manualPartId?: string },
+  ): void {
     if (this.disposed) {
       throw new Error('PartThumbnailService is disposed');
     }
@@ -92,11 +261,15 @@ export class PartThumbnailService {
         readyByIdentity.set(this.identities.get(id)!, state.bytes);
       }
     }
-    this.current = { generation, source, parts: [...parts] };
+    this.current = { generation, source, parts: [...parts], manualPartId: options?.manualPartId };
     for (const id of this.states.keys()) {
-      if (!seen.has(id)) {
+      if (
+        !seen.has(id) &&
+        ![...this.ownerDemands.values()].some((demand) => !demand.source && demand.parts.some((part) => part.id === id))
+      ) {
         this.states.delete(id);
         this.identities.delete(id);
+        this.decodedById.delete(id);
       }
     }
     for (const part of parts) {
@@ -115,33 +288,25 @@ export class PartThumbnailService {
     void this.drain();
   }
 
-  public dispose(): void {
-    this.disposed = true;
-    this.generation += 1;
-    this.activeAbort?.abort(new DOMException('Part thumbnail service was disposed.', 'AbortError'));
-    this.current = undefined;
-    this.states.clear();
-    this.identities.clear();
-    this.changes.dispose();
-  }
-
-  /** Fence in-flight work while retaining bounded last-good previews during refresh. */
-  public invalidate(): void {
-    if (this.disposed) {
-      return;
-    }
-    this.generation += 1;
-    this.activeAbort?.abort(new DOMException('Presented geometry changed.', 'AbortError'));
-    this.current = undefined;
-    for (const [id, state] of this.states) {
-      if (state.bytes) {
-        this.states.set(id, { status: 'ready', bytes: state.bytes });
-      } else {
-        this.states.delete(id);
-        this.identities.delete(id);
-      }
-    }
-    this.emit();
+  private partsFor(source: PartThumbnailSource): PartThumbnailRequest[] {
+    const compatible = [...this.ownerDemands]
+      .filter(
+        ([, demand]) =>
+          demand.source?.sourcePath === source.sourcePath && demand.source.geometryHash === source.geometryHash,
+      )
+      .sort(([left], [right]) => Number(right === 'viewer') - Number(left === 'viewer'))
+      .map(([, demand]) => demand);
+    const seen = new Set<string>();
+    return compatible
+      .flatMap((demand) => demand.parts)
+      .filter((part) => {
+        if (seen.has(part.id)) {
+          return false;
+        }
+        seen.add(part.id);
+        return true;
+      })
+      .slice(0, maxRequestedParts);
   }
 
   private lastGood(id: string): Pick<PartThumbnailState, 'bytes'> {
@@ -150,8 +315,7 @@ export class PartThumbnailService {
   }
 
   private identity(hash: string, part: PartThumbnailRequest): string {
-    // Whole-source hashing is conservative: unrelated part edits also invalidate.
-    return `${hash}:${JSON.stringify(part.primitives)}:part-webp-256-v1`;
+    return `${part.visualKey ?? hash}:${JSON.stringify(part.primitives)}:part-webp-256-v1`;
   }
 
   private validateRequest(source: PartThumbnailSource, parts: readonly PartThumbnailRequest[]): Set<string> {
@@ -179,6 +343,7 @@ export class PartThumbnailService {
   }
 
   private emit(): void {
+    this.snapshotValue = new Map(this.states);
     this.changes.emit();
   }
 
@@ -203,7 +368,8 @@ export class PartThumbnailService {
         if (missing.length === 0) {
           return;
         }
-        const chunk = missing.slice(0, batchSize);
+        const manualPart = missing.find((part) => part.id === work.manualPartId);
+        const chunk = manualPart ? [manualPart] : missing.slice(0, batchSize);
         const views = chunk.map(
           (part, index) =>
             ({
@@ -221,14 +387,18 @@ export class PartThumbnailService {
         const controller = new AbortController();
         this.activeAbort = controller;
         try {
+          const content = work.source.renderContent?.() ?? work.source.content;
+          if (content.buffer.byteLength > maxSourceBytes) {
+            throw new RangeError('Part thumbnail render source exceeds 64 MiB');
+          }
           const files = await this.imageService.export({
-            kind: 'automatic-thumbnail',
+            kind: manualPart ? 'manual-thumbnail' : 'automatic-thumbnail',
             identity: `${work.source.geometryHash}:parts:${chunk.map((part) => this.identity(work.source.geometryHash, part)).join('|')}:submission-${++this.submission}`,
             signal: controller.signal,
             sourceFormat: 'glb',
             sourcePath: work.source.sourcePath,
             geometryHash: work.source.geometryHash,
-            content: work.source.content,
+            content,
             format: 'webp',
             exportOptions: { mode: 'batch', width: 256, height: 256, quality: 0.9, views },
           });
@@ -260,7 +430,8 @@ export class PartThumbnailService {
       if (!this.disposed && pending) {
         void this.drain();
       } else {
-        // Completed owners retain only bounded encoded previews, not their source GLB.
+        // Completed work releases its queue reference; active owners retain the presented source
+        // reference so an evicted visible row can be restored when another owner closes.
         this.current = undefined;
       }
     }
@@ -304,8 +475,24 @@ export class PartThumbnailService {
   }
 
   private limitStoredBytes(): void {
-    const buffers = new Set([...this.states.values()].flatMap((state) => (state.bytes ? [state.bytes] : [])));
+    const buffers = new Set([
+      ...[...this.states.values()].flatMap((state) => (state.bytes ? [state.bytes] : [])),
+      ...this.decodedById.values(),
+    ]);
     let total = [...buffers].reduce((sum, bytes) => sum + bytes.byteLength, 0);
+    for (const [id, bytes] of this.decodedById) {
+      if (total <= maxPreviewBytes) {
+        break;
+      }
+      this.decodedById.delete(id);
+      if (
+        ![...this.states.values()].some((state) => state.bytes === bytes) &&
+        ![...this.decodedById.values()].includes(bytes)
+      ) {
+        total -= bytes.byteLength;
+        buffers.delete(bytes);
+      }
+    }
     for (const [, state] of this.states) {
       if (total <= maxPreviewBytes) {
         return;
@@ -316,6 +503,7 @@ export class PartThumbnailService {
         for (const [alias, candidate] of this.states) {
           if (candidate.bytes === state.bytes) {
             this.states.set(alias, { status: 'failed', error: new RangeError('Part preview memory budget exceeded') });
+            this.decodedById.delete(alias);
           }
         }
       }

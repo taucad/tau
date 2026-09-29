@@ -76,6 +76,7 @@ import {
   isBrowserAgentHostPlaced,
   registerAgentHostRunReset,
   requestBrowserAgentHostResume,
+  stoppedBrowserAgentHostRunId,
   subscribeHostTurnSettlements,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
@@ -1798,7 +1799,19 @@ export class ChatSessionStore {
           this.#statusTopics.get(chatId)?.emit();
           this.#reconcileUnsettledRun(session, { runId: durableRunId, isAbort, isError });
         }
-        persistenceActorRef.send({ type: 'requestFinished', messages, isAbort, isError, isDisconnect });
+        const hostRun = getBrowserAgentHostRun(chatId);
+        persistenceActorRef.send({
+          type: 'requestFinished',
+          messages,
+          isAbort,
+          isError,
+          isDisconnect,
+          retainStoppedTurn:
+            isAbort &&
+            durableRunId !== undefined &&
+            hostRun?.runId === durableRunId &&
+            hostRun.committedUserTurn === true,
+        });
         if (!isAbort && !isDisconnect && (requestWroteOutput || isError)) {
           markUnreadIfUnattended();
         }
@@ -2194,15 +2207,29 @@ export class ChatSessionStore {
       stateActorRef?.send({ type: 'toolParts', ...tools });
     }
     this.#syncRunPhase(session);
+    const stoppedRunId = stoppedBrowserAgentHostRunId(session.chatId);
+    const snapshot =
+      session.stateActorRef !== undefined && typeof session.stateActorRef.getSnapshot === 'function'
+        ? session.stateActorRef.getSnapshot()
+        : undefined;
+    if (
+      stoppedRunId !== undefined &&
+      getHostTurnSettlement(session.chatId)?.runId === stoppedRunId &&
+      snapshot !== undefined &&
+      snapshot.context.turn === undefined &&
+      (snapshot.matches({ run: 'idle' }) || snapshot.matches({ run: 'failed' }) || snapshot.matches({ run: 'done' }))
+    ) {
+      session.stateActorRef?.send({ type: 'runLifecycle', phase: 'cancelled', runId: stoppedRunId });
+    }
     if (session.durableRunState !== lastState.durable) {
       lastState.durable = session.durableRunState;
       if (session.durableRunState !== undefined) {
         stateActorRef?.send({ type: 'durableRunState', state: session.durableRunState });
       }
     }
-    const snapshot = session.persistenceActorRef.getSnapshot();
+    const persistence = session.persistenceActorRef.getSnapshot();
     const lifecycle = (['invoking', 'retrying', 'stopping'] as const).find((phaseName) =>
-      snapshot.matches({ requestLifecycle: phaseName }),
+      persistence.matches({ requestLifecycle: phaseName }),
     );
     if (lifecycle !== lastState.lifecycle) {
       lastState.lifecycle = lifecycle;

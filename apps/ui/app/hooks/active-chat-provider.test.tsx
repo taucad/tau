@@ -52,11 +52,13 @@ const harness = vi.hoisted(() => ({
   homeReadFile: vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>(),
   homeWriteFile: vi.fn<(path: string, bytes: Uint8Array<ArrayBuffer>) => Promise<void>>(),
   resumableRunId: 'run-recovery' as string | undefined,
+  stoppedRunId: undefined as string | undefined,
 }));
 
 vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', async (importOriginal) => ({
   ...(await importOriginal<typeof browserAgentHostTransport>()),
   resumableBrowserAgentHostRunId: () => harness.resumableRunId,
+  stoppedBrowserAgentHostRunId: () => harness.stoppedRunId,
 }));
 
 vi.mock('@ai-sdk/react', () => ({
@@ -335,6 +337,7 @@ beforeEach(() => {
   harness.setKernel.mockReset();
   harness.cookieKernel = 'openscad';
   harness.resumableRunId = 'run-recovery';
+  harness.stoppedRunId = undefined;
   harness.homeFiles.clear();
   harness.homeReadFile.mockReset().mockImplementation(async (path: string) => {
     const bytes = harness.homeFiles.get(path);
@@ -479,6 +482,59 @@ describe('composer recovery', () => {
       expect(result.current.composer.resume).toBeUndefined();
     },
   );
+
+  it('should continue a deliberately stopped retained run once without regenerating', async () => {
+    harness.stoppedRunId = 'run-recovery';
+    const { result, session } = await renderRecovery('UNKNOWN', [{ type: 'runLifecycle', phase: 'cancelled' }]);
+    const requestTurn = vi.spyOn(result.current.store, 'requestTurn');
+    const { resume } = result.current.composer;
+    expect(resume).toBeTypeOf('function');
+    await act(async () => {
+      resume?.();
+      resume?.();
+    });
+    expect(requestTurn).toHaveBeenCalledExactlyOnceWith('chat_recovery', { kind: 'continue' });
+    expect(session.chat.regenerate).not.toHaveBeenCalled();
+    expect(result.current.composer.resume).toBeUndefined();
+  });
+
+  it('should refuse a stale stopped callback when retained run evidence changes', async () => {
+    harness.stoppedRunId = 'run-recovery';
+    const { result } = await renderRecovery('UNKNOWN', [{ type: 'runLifecycle', phase: 'cancelled' }]);
+    const requestTurn = vi.spyOn(result.current.store, 'requestTurn');
+    const { resume } = result.current.composer;
+    act(() => {
+      harness.stoppedRunId = 'run-older';
+      harness.resumableRunId = 'run-older';
+      resume?.();
+    });
+    expect(requestTurn).not.toHaveBeenCalled();
+  });
+
+  it('should leave a typed and attached draft intact when history resumes a stopped turn', async () => {
+    harness.stoppedRunId = 'run-recovery';
+    const { result, session } = await renderRecovery('UNKNOWN', [{ type: 'runLifecycle', phase: 'cancelled' }]);
+    act(() => {
+      session.draftActorRef.send({
+        type: 'hydrateDraft',
+        draft: {
+          id: 'draft-stopped',
+          role: 'user',
+          parts: [{ type: 'file', url: `attachments/${'a'.repeat(64)}.png`, mediaType: 'image/png' }],
+        },
+      });
+      session.draftActorRef.send({ type: 'setDraftText', text: 'My next instruction' });
+    });
+    expect(session.draftActorRef.getSnapshot().context.draftAttachments).toHaveLength(1);
+    const draft = session.draftActorRef.getSnapshot().context;
+    const requestTurn = vi.spyOn(result.current.store, 'requestTurn');
+    await act(async () => {
+      result.current.composer.resume?.();
+    });
+    expect(requestTurn).toHaveBeenCalledExactlyOnceWith('chat_recovery', { kind: 'continue' });
+    expect(session.draftActorRef.getSnapshot().context.draftText).toBe(draft.draftText);
+    expect(session.draftActorRef.getSnapshot().context.draftAttachments).toEqual(draft.draftAttachments);
+  });
 
   it.each([
     'RATE_LIMITED',

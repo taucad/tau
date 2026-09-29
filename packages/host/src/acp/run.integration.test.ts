@@ -772,6 +772,8 @@ describe('the external agent run kind', () => {
     expect(Date.now() - started).toBeLessThan(10_000);
     expect(lifecycleOf(await readLog(workspaceRoot, chatId))).toContain('cancelled');
     expect(sent(frames, 'session/prompt')).toBe(0);
+    const stopped = await launcher.host.snapshot(chatId);
+    expect(stopped.failure?.code).not.toBe('USER_STOPPED');
   }, 60_000);
 
   it('fails an interrupted turn whose outcome ACP cannot prove after a daemon restart', async () => {
@@ -1049,6 +1051,124 @@ describe('the external agent run kind', () => {
     expect(prompts[1]).toContain('Continue from where you stopped.');
     expect(prompts[1]).not.toContain('fail:rate');
     await harness.launcher.execute({ type: 'cancel', chatId, runId: 'run-external-resume-retry' });
+  }, 90_000);
+
+  it('continues an intentionally stopped prompt on its remembered ACP session', async () => {
+    const harness = await startHarness();
+    const chatId = 'chat-acp-user-stop';
+    const runId = 'run-acp-user-stop';
+    await harness.launcher.execute({
+      type: 'start',
+      trigger: 'submit',
+      chatId,
+      runId,
+      message: { id: 'user-acp-user-stop', role: 'user', content: 'slow' },
+      config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+    });
+    await until(async () => sent(harness.frames, 'session/prompt') === 1, 'the first ACP prompt');
+    await harness.launcher.execute({ type: 'cancel', chatId, runId });
+    expect(await harness.launcher.host.snapshot(chatId)).toMatchObject({
+      state: 'cancelled',
+      failure: { code: 'USER_STOPPED' },
+    });
+    expect(sent(harness.frames, 'session/cancel')).toBe(1);
+
+    await harness.launcher.execute({ type: 'resume', chatId });
+    await until(async () => sent(harness.frames, 'session/prompt') === 2, 'the continuation ACP prompt');
+    const prompts = harness.frames
+      .filter(({ direction, frame }) => direction === 'client->agent' && frame.includes('"method":"session/prompt"'))
+      .map(({ frame }) => frame);
+    expect(sent(harness.frames, 'session/new')).toBe(1);
+    expect(prompts[1]).toContain('Continue from where you stopped.');
+    expect(prompts[1]).not.toContain('"text":"slow"');
+    await until(async () => {
+      const pending = await harness.launcher.pendingInterrupts(runId);
+      return pending.length > 0;
+    }, 'the resumed approval');
+    const paused = await harness.launcher.host.snapshot(chatId);
+    expect(paused.state).toBe('paused');
+    const [pending] = await harness.launcher.pendingInterrupts(runId);
+    await harness.launcher.execute({
+      type: 'resolve-interrupt',
+      chatId,
+      runId,
+      interruptId: pending?.interruptId ?? '',
+      outcome: 'approved',
+      optionId: 'allow',
+    });
+    await until(
+      async () => {
+        const snapshot = await harness.launcher.host.snapshot(chatId);
+        return snapshot.state === 'completed';
+      },
+      'the continued run to complete',
+      { dump: async () => readLog(harness.workspaceRoot, chatId) },
+    );
+    const events = await readLog(harness.workspaceRoot, chatId);
+    expect(events.filter((event) => event.type === 'run.lifecycle').map((event) => event.state)).toEqual([
+      'admitted',
+      'running',
+      'cancelled',
+      'running',
+      'paused',
+      'running',
+      'completed',
+    ]);
+  }, 90_000);
+
+  it('refuses a stopped turn when the vendor session was lost without replaying its prompt', async () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- fixture environment variable.
+    const lost: AcpAdapter = { ...fakeAgent, spawnEnv: { TAU_FAKE_AGENT_MODE: 'restore-lost' } };
+    const { launcher, workspaceRoot, frames } = await startHarness({ agents: [lost] });
+    const chatId = 'chat-acp-stopped-session-lost';
+    const runId = 'run-acp-stopped-session-lost';
+    await mkdir(join(workspaceRoot, '.tau', 'chats', chatId), { recursive: true });
+    const base = { version: 1, leaderEpoch: 'epoch-before-restart', recordedAt: new Date(0).toISOString(), runId };
+    await writeFile(
+      join(workspaceRoot, '.tau', 'chats', chatId, 'events.jsonl'),
+      [
+        {
+          ...base,
+          sequence: 0,
+          type: 'message.appended',
+          message: {
+            id: 'user-1',
+            role: 'user',
+            content: 'write the file',
+            metadata: {
+              tauInternal: {
+                kind: 'external-agent',
+                agentId: 'codex',
+                acpSessionId: 'vendor-session-now-lost',
+                acpPromptStarted: true,
+              },
+            },
+          },
+        },
+        { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
+        { ...base, sequence: 2, type: 'run.lifecycle', state: 'running' },
+        {
+          ...base,
+          sequence: 3,
+          type: 'run.lifecycle',
+          state: 'cancelled',
+          detail: { code: 'USER_STOPPED', message: 'You stopped this turn.' },
+        },
+      ]
+        .map((event) => JSON.stringify(event))
+        .join('\n'),
+      'utf8',
+    );
+
+    await launcher.execute({ type: 'resume', chatId });
+    await until(
+      async () => recoveryUnknown(await readLog(workspaceRoot, chatId)),
+      'the lost stopped session to be refused',
+      { dump: async () => readLog(workspaceRoot, chatId) },
+    );
+    expect(sent(frames, 'session/resume')).toBe(1);
+    expect(sent(frames, 'session/load')).toBe(1);
+    expect(sent(frames, 'session/prompt')).toBe(0);
   }, 90_000);
 
   /*

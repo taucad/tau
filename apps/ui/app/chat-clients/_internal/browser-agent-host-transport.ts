@@ -42,6 +42,8 @@ export type BrowserAgentHostRun = Readonly<{
   eventCount: number;
   turnId?: string;
   userMessage?: MyUIMessage;
+  /** The user turn appeared in the host log or attached snapshot, not just the pending start input. */
+  committedUserTurn?: true;
   /** The typed refusal a failed run ended on, when the host recorded one. */
   failure?: HostRunSnapshot['failure'];
 }>;
@@ -56,6 +58,8 @@ const registrations = new Map<string, BrowserAgentHostRegistration>();
 const registrationWaiters = new Map<string, (registration: BrowserAgentHostRegistration) => void>();
 const runResets = new Map<string, (rebuild: (current: readonly MyUIMessage[]) => readonly MyUIMessage[]) => void>();
 const browserRuns = new Map<string, BrowserAgentHostRun>();
+/** Project settlement can precede the host's asynchronous cancel result. */
+const pendingRetirements = new Map<string, string>();
 const boundRunIds = new Map<string, string>();
 const activeClients = new Map<string, { readonly client: AgentHostClient; readonly runId: string }>();
 const clientSettlements = new Map<string, Promise<void>>();
@@ -396,14 +400,20 @@ export const resumableBrowserAgentHostRunId = (chatId: string): string | undefin
   if (run === undefined) {
     return undefined;
   }
-  return run.state === 'failed' && isResumableRunFailure(run.failure) ? run.runId : undefined;
+  return (run.state === 'failed' && run.failure?.code !== 'USER_STOPPED' && isResumableRunFailure(run.failure)) ||
+    (run.state === 'cancelled' && run.failure?.code === 'USER_STOPPED')
+    ? run.runId
+    : undefined;
 };
 
-/** Whether the run this chat ended on stopped on a refusal a resume can continue. */
-const refusedResumably = (chatId: string): boolean => {
+/** The current deliberately stopped run, excluding unrelated cancellations. */
+export const stoppedBrowserAgentHostRunId = (chatId: string): string | undefined => {
   const run = hostRunRecord(chatId);
-  return run?.state === 'failed' && isResumableRunFailure(run.failure);
+  return run?.state === 'cancelled' && run.failure?.code === 'USER_STOPPED' ? run.runId : undefined;
 };
+
+/** Whether the current terminal run can continue from its saved log. */
+const refusedResumably = (chatId: string): boolean => resumableBrowserAgentHostRunId(chatId) !== undefined;
 
 /**
  * Let the next reattach of this chat drive the host's own resume.
@@ -421,6 +431,9 @@ export const requestBrowserAgentHostResume = (chatId: string): void => {
 };
 
 const setBrowserAgentHostRun = (chatId: string, run: BrowserAgentHostRun): void => {
+  if (pendingRetirements.get(chatId) !== run.runId) {
+    pendingRetirements.delete(chatId);
+  }
   browserRuns.set(chatId, run);
   boundRunIds.set(chatId, run.runId);
 };
@@ -446,9 +459,13 @@ export const retireBrowserAgentHostRun = (chatId: string, runId: string | undefi
   if (run !== undefined && runId !== undefined && run.runId !== runId) {
     return;
   }
-  if (run !== undefined && refusedResumably(chatId)) {
+  if (run !== undefined && (refusedResumably(chatId) || (run.committedUserTurn === true && !terminal(run.state)))) {
+    if (!terminal(run.state)) {
+      pendingRetirements.set(chatId, run.runId);
+    }
     return;
   }
+  pendingRetirements.delete(chatId);
   browserRuns.delete(chatId);
   boundRunIds.delete(chatId);
 };
@@ -824,11 +841,17 @@ const lifecycleState = (event: AgentLogEvent): BrowserRunState | undefined =>
  * nothing rather than a refusal that cannot be judged.
  */
 const lifecycleFailure = (event: AgentLogEvent | AgentLiveEvent): HostRunSnapshot['failure'] => {
-  if (!('leaderEpoch' in event) || event.type !== 'run.lifecycle' || event.state !== 'failed') {
+  if (
+    !('leaderEpoch' in event) ||
+    event.type !== 'run.lifecycle' ||
+    (event.state !== 'failed' && event.state !== 'cancelled')
+  ) {
     return undefined;
   }
   const { detail } = event;
-  return detail?.code === undefined ? undefined : { ...detail, code: detail.code };
+  return detail?.code === undefined || (event.state === 'cancelled' && detail.code !== 'USER_STOPPED')
+    ? undefined
+    : { ...detail, code: detail.code };
 };
 
 const terminal = (state: BrowserRunState): boolean =>
@@ -920,6 +943,7 @@ const createHostStream = <Message extends UIMessage>(input: {
     let state: BrowserRunState = 'admitted';
     let turnId: string | undefined;
     let durableUserMessage: MyUIMessage | undefined;
+    let committedUserTurn = false;
     let failure: HostRunSnapshot['failure'];
     let externalToolRun = input.admission !== undefined && 'agent' in input.admission;
     let projection = Promise.resolve();
@@ -971,8 +995,16 @@ const createHostStream = <Message extends UIMessage>(input: {
         eventCount,
         ...(turnId === undefined ? {} : { turnId }),
         ...(durableUserMessage === undefined ? {} : { userMessage: durableUserMessage }),
+        ...(committedUserTurn ? { committedUserTurn: true } : {}),
         ...(failure === undefined ? {} : { failure }),
       });
+      if (terminal(state) && pendingRetirements.get(input.chatId) === runId) {
+        pendingRetirements.delete(input.chatId);
+        if (!refusedResumably(input.chatId)) {
+          browserRuns.delete(input.chatId);
+          boundRunIds.delete(input.chatId);
+        }
+      }
     };
     const enqueueChunks = async (chunks: readonly UIMessageChunk[]): Promise<void> => {
       for (const chunk of chunks) {
@@ -1019,6 +1051,7 @@ const createHostStream = <Message extends UIMessage>(input: {
       if (projectedUser !== undefined) {
         turnId = projectedUser.id;
         durableUserMessage = projectedUser;
+        committedUserTurn = true;
       }
       state = lifecycleState(event) ?? state;
       /* The terminal row carries the refusal, and throwing it away left the
@@ -1026,7 +1059,8 @@ const createHostStream = <Message extends UIMessage>(input: {
        * `isResumableRunFailure(undefined)` for every run whose failure arrived
        * as an event rather than in a snapshot, so a live credit refusal was
        * judged unrecoverable and *Try again* rewound the turn. */
-      failure = lifecycleFailure(event) ?? failure;
+      failure =
+        event.type === 'run.lifecycle' && event.state === 'running' ? undefined : (lifecycleFailure(event) ?? failure);
       eventCount += 1;
       publishRun();
       /* The failure this stream is about to continue is the *previous*
@@ -1038,7 +1072,10 @@ const createHostStream = <Message extends UIMessage>(input: {
        * (I1). The person is already looking at that failure — it is the card
        * they pressed Resume on. Only the replay is silenced; the reopened
        * attempt's own failure is this request's outcome and is reported. */
-      const continued = replayingContinuedFailure && event.type === 'run.lifecycle' && event.state === 'failed';
+      const continued =
+        replayingContinuedFailure &&
+        event.type === 'run.lifecycle' &&
+        (event.state === 'failed' || event.state === 'cancelled');
       if (!continued) {
         await enqueueChunks(projectAgentHostEvent(event, streamedBlocks));
       }
@@ -1117,13 +1154,14 @@ const createHostStream = <Message extends UIMessage>(input: {
         state = snapshot.state;
       }
       turnId = snapshot.turnId;
-      failure = snapshot.failure ?? failure;
+      failure = reopens ? snapshot.failure : (snapshot.failure ?? failure);
       const snapshotUser =
         snapshot.messages.find(
           (message): message is UserProviderMessage => message.role === 'user' && message.id === snapshot.turnId,
         ) ?? snapshot.messages.findLast((message): message is UserProviderMessage => message.role === 'user');
       if (snapshotUser !== undefined) {
         durableUserMessage = projectAgentHostUserMessage(snapshotUser);
+        committedUserTurn = true;
       }
       publishRun();
       if (terminal(state)) {
@@ -1425,7 +1463,11 @@ const createHostStream = <Message extends UIMessage>(input: {
       }
     },
     cancel: async (reason) => {
-      cancel();
+      // The SDK also cancels its reader after an error chunk or cleanup. Only
+      // chat.stop() aborts this request and represents an intentional Stop.
+      if (input.abortSignal?.aborted === true) {
+        cancel();
+      }
       await reader.cancel(reason);
     },
   });

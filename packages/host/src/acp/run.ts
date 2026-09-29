@@ -41,7 +41,7 @@ import { isRecord } from '@taucad/utils/schema';
 
 import { createAcpMediaStore } from '#acp/media.js';
 import { openAcpSession } from '#acp/session.js';
-import type { AcpSession } from '#acp/session.js';
+import type { AcpPromptTurn, AcpSession } from '#acp/session.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import type { HostSystemSkillBundle } from '#agent-tools.js';
@@ -491,8 +491,8 @@ const stopRecorded = (turn: ExternalAgentTurn): boolean => {
   const previous = turn.history.filter((event) => event.runId === turn.runId && event.type === 'run.lifecycle').at(-2);
   return (
     previous?.type === 'run.lifecycle' &&
-    previous.state === 'failed' &&
-    externalAgentStopCodes.some((code) => code === previous.detail?.code)
+    ((previous.state === 'failed' && externalAgentStopCodes.some((code) => code === previous.detail?.code)) ||
+      (previous.state === 'cancelled' && previous.detail?.code === 'USER_STOPPED'))
   );
 };
 
@@ -731,6 +731,12 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       }),
       turn.signal,
     );
+    if (!turn.message && session.contextLost) {
+      await session.close();
+      throw Object.assign(new Error('The external agent no longer has the stopped turn to continue.'), {
+        code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN',
+      });
+    }
     /* Busy from the first instant: the awaits below would otherwise let a
      * concurrent chat's eviction close this session before its own first
      * prompt (review 2-review S7). `run` clears it. */
@@ -851,6 +857,11 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
         await forget(key);
         entry = undefined;
       }
+      if (!entry && !turn.message && stringField(turn.state, 'acpSessionId') === undefined) {
+        throw Object.assign(new Error('The external agent has no saved session for this turn.'), {
+          code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN',
+        });
+      }
       entry ??= await start({ key, turn, model, adapter, cwd, mode: checkout?.mode });
       entry.busy = true;
       let releaseMcp: (() => void | Promise<void>) | undefined;
@@ -900,7 +911,8 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
         const recordedTurn = {
           ...turn,
           append: async (events) => turn.append(await moveMedia(events)),
-        } satisfies ExternalAgentTurn;
+          ...(turn.message ? { onPromptDispatched: async () => turn.remember({ acpPromptStarted: true }) } : {}),
+        } satisfies ExternalAgentTurn & AcpPromptTurn;
         const outcome = await entry.session.prompt(prompt, recordedTurn, model, configuration);
         /* What the agent changed about its own session, written back to the
          * chat's record so the next turn — and the selector above it — start

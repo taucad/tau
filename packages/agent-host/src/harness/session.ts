@@ -881,7 +881,7 @@ export type AgentSession = {
   readonly agent: Agent;
   prompt(message: UserProviderMessage, onAdmitted?: () => void): Promise<void>;
   steer(message: string): void;
-  abort(): void;
+  abort(reason?: 'user'): void;
   snapshot(): Promise<HostRunSnapshot>;
   close(): Promise<void>;
 };
@@ -1440,14 +1440,19 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   let turnId = initialHistory.findLast((message) => message.role === 'user')?.id ?? options.runId;
   let terminalRecorded = state === 'completed' || state === 'failed' || state === 'cancelled';
   let abortRequested = false;
+  let stoppedByUser = false;
   const runAbortController = new AbortController();
   const wasAbortRequested = (): boolean => abortRequested;
+  const stoppedDetail = (): { readonly code: string; readonly message: string } | undefined =>
+    stoppedByUser && committedContext !== undefined
+      ? { code: 'USER_STOPPED', message: 'You stopped this turn. Resume to continue it.' }
+      : undefined;
   const cancelBeforeRun = async (): Promise<void> => {
     if (terminalRecorded) {
       return;
     }
     state = 'cancelled';
-    await record.append({ type: 'run.lifecycle', state });
+    await record.append({ type: 'run.lifecycle', state, ...(stoppedDetail() ? { detail: stoppedDetail() } : {}) });
     terminalRecorded = true;
   };
   const prepareStartOfTurn = async (): Promise<boolean> => {
@@ -1494,6 +1499,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       type: 'run.lifecycle',
       state,
       ...(detail === undefined ? {} : { detail }),
+      ...(state === 'cancelled' && stoppedDetail() ? { detail: stoppedDetail() } : {}),
     });
     terminalRecorded = true;
   });
@@ -1509,7 +1515,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       await record.append({ type: 'run.lifecycle', state });
       if (wasAbortRequested()) {
         state = 'cancelled';
-        await record.append({ type: 'run.lifecycle', state });
+        await record.append({ type: 'run.lifecycle', state, ...(stoppedDetail() ? { detail: stoppedDetail() } : {}) });
         terminalRecorded = true;
         onAdmitted?.();
         return;
@@ -1548,9 +1554,12 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         message,
         context,
       });
+      // A successful append is the admission boundary. Stop may arrive before
+      // the readback below, but the turn is already durable at that point.
+      committedContext = context;
       if (wasAbortRequested()) {
         state = 'cancelled';
-        await record.append({ type: 'run.lifecycle', state });
+        await record.append({ type: 'run.lifecycle', state, ...(stoppedDetail() ? { detail: stoppedDetail() } : {}) });
         terminalRecorded = true;
         onAdmitted?.();
         return;
@@ -1568,7 +1577,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       onAdmitted?.();
       if (wasAbortRequested()) {
         state = 'cancelled';
-        await record.append({ type: 'run.lifecycle', state });
+        await record.append({ type: 'run.lifecycle', state, ...(stoppedDetail() ? { detail: stoppedDetail() } : {}) });
         terminalRecorded = true;
         return;
       }
@@ -1583,8 +1592,9 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         timestamp: now().getTime(),
       });
     },
-    abort: () => {
+    abort: (reason) => {
       abortRequested = true;
+      stoppedByUser ||= reason === 'user';
       runAbortController.abort();
       agent.abort();
     },

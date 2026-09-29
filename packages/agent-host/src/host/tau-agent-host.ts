@@ -1266,13 +1266,21 @@ export const isResumableRunFailure = (failure: RunFailureDetail | undefined): bo
  */
 const terminalFailureOf = (events: readonly AgentLogEvent[], runId: string): HostRunFailure | undefined => {
   const last = events.findLast((event) => event.runId === runId && event.type === 'run.lifecycle');
-  const detail = last?.type === 'run.lifecycle' && last.state === 'failed' ? last.detail : undefined;
+  const detail =
+    last?.type === 'run.lifecycle' &&
+    (last.state === 'failed' || (last.state === 'cancelled' && last.detail?.code === 'USER_STOPPED'))
+      ? last.detail
+      : undefined;
   return detail?.code === undefined ? undefined : { ...detail, code: detail.code };
 };
 
 /* Whether this run's terminal record is a refusal {@link isResumableRunFailure} covers. */
-const refusedResumably = (events: readonly AgentLogEvent[], runId: string): boolean =>
-  isResumableRunFailure(terminalFailureOf(events, runId));
+const refusedResumably = (events: readonly AgentLogEvent[], runId: string): boolean => {
+  const last = events.findLast((event) => event.runId === runId && event.type === 'run.lifecycle');
+  return last?.type === 'run.lifecycle' && last.state === 'cancelled'
+    ? last.detail?.code === 'USER_STOPPED'
+    : isResumableRunFailure(terminalFailureOf(events, runId));
+};
 
 /**
  * Assemble Tau's portable run lifecycle over the pi adapter and W1-W5 ports.
@@ -1898,6 +1906,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       { type: 'run.lifecycle', state: 'running' },
     ]);
     messageId ??= externalTurnOf(await log.read())?.messageId;
+    const promptStarted = async (): Promise<boolean> => {
+      const user = reduceEventLog(await log.read()).findLast((message) => message.id === messageId);
+      return user !== undefined && externalMarker(user)?.['acpPromptStarted'] === true;
+    };
     externalByChat.set(input.chatId, { runId: input.runId, controller });
     externalChats.set(input.chatId, input.agent.kind);
     const tracked: ExternalRun = { chatId: input.chatId, controller };
@@ -2008,12 +2020,20 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           ? 'cancelled'
           : ((stopReason === undefined ? undefined : externalStopStates.get(stopReason)) ?? 'completed');
         const detail = stopReason === undefined ? undefined : externalStopDetail.get(stopReason);
+        const stopped = controller.signal.aborted && controller.signal.reason === 'user' && (await promptStarted());
+        const stopDetail = stopped
+          ? { code: 'USER_STOPPED', message: 'You stopped this turn. Resume to continue it.' }
+          : undefined;
         await appendEvents([
           {
             type: 'run.lifecycle',
             state,
             ...(stopReason === undefined ? {} : { stopReason }),
-            ...(state === 'completed' || detail === undefined ? {} : { detail: { message: detail } }),
+            ...(stopDetail
+              ? { detail: stopDetail }
+              : state === 'completed' || detail === undefined
+                ? {}
+                : { detail: { message: detail } }),
           },
         ]);
       } catch (error) {
@@ -2047,7 +2067,13 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               ] as const)
             : []),
           controller.signal.aborted
-            ? { type: 'run.lifecycle', state: 'cancelled' }
+            ? {
+                type: 'run.lifecycle',
+                state: 'cancelled',
+                ...(controller.signal.reason === 'user' && (await promptStarted())
+                  ? { detail: { code: 'USER_STOPPED', message: 'You stopped this turn. Resume to continue it.' } }
+                  : {}),
+              }
             : { type: 'run.lifecycle', state: 'failed', detail: codedFailureDetail(error) },
         ]);
       } finally {
@@ -2198,7 +2224,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
      * writes no assistant message at all. Without the fallback a surface read
      * no failure for those runs and could only rewind the turn (F1). Both
      * sources are keyed on `runId`: a chat's history outlives its runs. */
-    const failure = transportFailureOfRun({ events, messages, runId }) ?? terminalFailureOf(events, runId);
+    const terminalFailure = terminalFailureOf(events, runId);
+    const failure =
+      terminalFailure?.code === 'USER_STOPPED'
+        ? terminalFailure
+        : (transportFailureOfRun({ events, messages, runId }) ?? terminalFailure);
     return {
       chatId,
       runId,
@@ -2461,7 +2491,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
             type: 'message.appended',
             message: reminder,
           });
-        } else if (tail?.role === 'assistant') {
+        } else if (tail?.role === 'assistant' && terminalFailureOf(events, runId)?.code !== 'USER_STOPPED') {
           await append({ chatId, log, runId, events: [{ type: 'run.lifecycle', state: 'completed' }] });
           return reduceEventLog(await log.read());
         }
@@ -2591,7 +2621,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       assertOpen();
       const external = externalByRun.get(runId);
       if (external) {
-        external.controller.abort();
+        external.controller.abort('user');
         /* An outstanding approval outlives the abort: the runner's turn is
          * suspended inside `approve`, and a protocol that asked the *client* for
          * a decision cannot finish until the client gives one. Cancelling it is
@@ -2608,7 +2638,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       if (!active) {
         return;
       }
-      active.session.abort();
+      active.session.abort('user');
       /* No drain here, unlike the external branch: a Tau run is ended by
        * `interrupt` *before* its durable pause begins, and the one pending
        * interrupt an active Tau run can hold — a tool's approval — answers

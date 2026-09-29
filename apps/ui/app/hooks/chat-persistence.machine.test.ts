@@ -911,6 +911,24 @@ describe('chatPersistenceMachine', () => {
       actor.stop();
     });
 
+    it('should keep an empty assistant turn in history when the host retained its stopped run', () => {
+      const { actor, emitLog } = createTestActorWithEmits({ activeChatId: 'chat_abc' });
+      actor.start();
+      actor.send({ type: 'startRequest', request: { kind: 'send', message: sampleMessage } });
+      actor.send({ type: 'stopRequest' });
+      actor.send({
+        type: 'requestFinished',
+        messages: [sampleMessage],
+        isAbort: true,
+        isError: false,
+        isDisconnect: false,
+        retainStoppedTurn: true,
+      });
+      expect(emitLog.at(-1)).toEqual({ type: 'applyStoppedRequest', messages: [sampleMessage], cause: 'user_stop' });
+      expect(emitLog.some((event) => event.type === 'restoreCancelledDraft')).toBe(false);
+      actor.stop();
+    });
+
     it('should emit restoreCancelledDraft and strip the empty assistant placeholder when stopping mid-prefetch', () => {
       const { actor, emitLog } = createTestActorWithEmits({ activeChatId: 'chat_abc' });
       actor.start();

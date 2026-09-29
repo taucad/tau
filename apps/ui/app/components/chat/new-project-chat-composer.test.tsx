@@ -118,6 +118,7 @@ describe('NewProjectChatComposer', () => {
     ['a paired Tau Host daemon', { kind: 'tau', model: 'gpt-test', hostId: 'device-av4' }],
     [
       'an external ACP agent on a daemon',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP option IDs retain the provider's wire spelling.
       { kind: 'acp', hostId: 'device-av4', agentId: 'codex', config: { thought_level: 'high' } },
     ],
   ] as ReadonlyArray<readonly [string, CadAgentExecution]>)(

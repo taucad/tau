@@ -1,6 +1,6 @@
 # picovoxel — Classs
 
-61 top-level symbols. Signatures are verbatim typescript.
+60 top-level symbols. Signatures are verbatim typescript.
 
 PicoError: declare class PicoError extends Error
 
@@ -252,7 +252,7 @@ RegularCellArray: declare class RegularCellArray implements CellArray
 
   unitCells(): readonly UnitCell[];
 
-// A grid of just one unit cell, centred in XY and based at z = 0 (C# `RegularUnitCell`)
+// A grid of exactly one unit cell, centred in XY and based at z = 0 (C# `RegularUnitCell`)
 RegularUnitCell: declare class RegularUnitCell implements CellArray
 
   constructor
@@ -455,6 +455,9 @@ BasePipe: declare class BasePipe extends BaseShape implements MeshBaseShape, Sur
   protected phiRatioFromStep(step: number): number;
 
   protected lengthRatioFromStep(step: number): number;
+
+  // Spine point and local axes at a length ratio
+  protected axesAt(lengthRatio: number): PipeAxes;
 
   // Surface point
   surfacePoint(lengthRatio: number, phiRatio: number, radiusRatio: number): Vec3;
@@ -787,6 +790,15 @@ LineModulation: declare class LineModulation
 // Accumulates upstream-style per-triangle geometry, built through ONE bulk `createMesh` call
 MeshBuilder: declare class MeshBuilder
 
+  // Number of vertices added so far
+  vertexCount
+
+  // Adds one vertex and returns its index, for {@link MeshBuilder.addIndexedTriangle} (C# `Mesh.nAddVertex`)
+  addVertex(pt: Vec3): number;
+
+  // One triangle over vertices already added, by index (C# `Mesh.nAddTriangle(Triangle)`)
+  addIndexedTriangle(a: number, b: number, c: number): void;
+
   // Three fresh vertices + one triangle, exactly like C# `Mesh.nAddTriangle(v0, v1, v2)`
   addTriangle(a: Vec3, b: Vec3, c: Vec3): void;
 
@@ -814,13 +826,3 @@ SurfaceModulation: declare class SurfaceModulation
 
   // Scaled modulation (C# `operator *`)
   scale(factor: number): SurfaceModulation;
-
-// Cubic-feel connector between two points/frames with tangent control (C# `TangentialControlSpline`)
-TangentialControlSpline: declare class TangentialControlSpline implements Spline
-
-  constructor
-
-  // The frame-to-frame form
-  static betweenFrames(startFrame: Frame, endFrame: Frame, options?: TangentOptions): TangentialControlSpline;
-
-  points(samples?: number): Vec3[];

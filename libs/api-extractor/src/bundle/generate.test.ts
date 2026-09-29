@@ -9,7 +9,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { TauSkillsManifest } from '#bundle/bundle.types.js';
 import { skillsManifestFile } from '#bundle/bundle.types.js';
 import { bundleOwners, generateBundles } from '#bundle/generate.js';
-import { maxSkillBodyTokens, maxSkillDescriptionChars } from '#render/render-skill.js';
+import {
+  maxSkillBodyTokens,
+  maxSkillDescriptionChars,
+  workbenchSkillBodyTokens,
+  workbenchSkillDescriptionChars,
+} from '#render/render-skill.js';
 import { addressableEntries, estimateTokens, planShards, shardIndexById } from '#render/shard-plan.js';
 
 const workspaceRoot = join(import.meta.dirname, '../../../..');
@@ -58,6 +63,12 @@ describe('generateBundles', () => {
   beforeAll(async () => {
     await generateBundles({ outputRoot: scratch });
   }, 300_000);
+
+  it('ships the approved workbench text with only its DRAFT banner removed', () => {
+    const shipped = readFileSync(join(workspaceRoot, 'packages/workbench/agent/workbench/SKILL.md'), 'utf8');
+    // SHA-256 of the approved 92-line draft after its DRAFT heading is removed.
+    expect(digest(Buffer.from(shipped))).toBe('ad215da4bd2b02f736ee80ed5861860bad1f1f1c73e86815ce1259c18630cb9c');
+  });
 
   it.each(bundleOwners.map((owner) => [owner.slug, owner.packageDirectory] as const))(
     '%s is committed exactly as it regenerates',
@@ -149,9 +160,12 @@ describe('every committed bundle', () => {
       const markdown = readFileSync(join(bundleDirectory, 'SKILL.md'), 'utf8');
       const body = markdown.replace(/^---\n[\S\s]*?\n---\n/u, '').trim();
 
-      expect(estimateTokens(body)).toBeLessThanOrEqual(maxSkillBodyTokens);
+      const bodyLimit = entry.owner.slug === 'workbench' ? workbenchSkillBodyTokens : maxSkillBodyTokens;
+      const descriptionLimit =
+        entry.owner.slug === 'workbench' ? workbenchSkillDescriptionChars : maxSkillDescriptionChars;
+      expect(estimateTokens(body)).toBeLessThanOrEqual(bodyLimit);
       expect(markdown.split('\n').length).toBeLessThanOrEqual(500);
-      expect(entry.declaration?.description.length ?? 0).toBeLessThanOrEqual(maxSkillDescriptionChars);
+      expect(entry.declaration?.description.length ?? 0).toBeLessThanOrEqual(descriptionLimit);
       expect(entry.declaration?.body).toBe(markdown);
       for (const file of entry.declaration?.files ?? []) {
         expect(file).not.toMatch(/[/\\]/u);
@@ -159,7 +173,11 @@ describe('every committed bundle', () => {
     },
   );
 
-  it.each(declarations.map((entry) => [entry.owner.slug, entry.owner] as const))(
+  it.each(
+    declarations
+      .filter((entry) => entry.owner.slug !== 'workbench')
+      .map((entry) => [entry.owner.slug, entry.owner] as const),
+  )(
     '%s covers every extracted symbol exactly once',
     (_slug, owner) => {
       expect(owner.corpus).toBeDefined();
@@ -224,6 +242,7 @@ describe('skill declarations', () => {
       .filter((entry) => entry.isDirectory())
       .map((entry) => `packages/plugins/${entry.name}`),
     'packages/geospec',
+    'packages/workbench',
   ];
 
   it('requires every plugin and skill-bearing package to declare tau.skills or a reasoned null', () => {

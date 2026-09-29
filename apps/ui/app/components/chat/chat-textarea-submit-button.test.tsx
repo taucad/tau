@@ -7,6 +7,7 @@ import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-
 
 const renderButton = (properties: {
   readonly status?: string;
+  readonly canResume?: boolean;
   readonly refusal?: string;
   readonly describedBy?: string;
   readonly onSubmit?: () => void;
@@ -17,6 +18,7 @@ const renderButton = (properties: {
       <p id='reason'>Claude Test can&apos;t read images.</p>
       <ChatTextareaSubmitButton
         status={properties.status ?? 'ready'}
+        canResume={properties.canResume}
         isSubmitting={false}
         refusal={properties.refusal}
         describedBy={properties.describedBy}
@@ -28,6 +30,20 @@ const renderButton = (properties: {
   );
 
 describe('ChatTextareaSubmitButton', () => {
+  it('should visibly name the resume action and activate it with the keyboard', async () => {
+    const onSubmit = vi.fn();
+    renderButton({ status: 'error', canResume: true, onSubmit });
+
+    const resume = screen.getByRole('button', { name: 'Resume' });
+    expect(resume).toHaveTextContent('Resume');
+    expect(resume).toHaveAttribute('aria-keyshortcuts', 'Enter');
+    expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
+    await userEvent.tab();
+    expect(resume).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
   it('should be named Send and send when nothing refuses it (F1)', async () => {
     const onSubmit = vi.fn();
     renderButton({ onSubmit });
@@ -55,9 +71,10 @@ describe('ChatTextareaSubmitButton', () => {
 
   it.each(['submitted', 'streaming'])('should be named Stop, with its shortcut, while %s (F1)', async (status) => {
     const onCancel = vi.fn();
-    renderButton({ status, onCancel });
+    renderButton({ status, canResume: true, onCancel });
 
     const stop = screen.getByRole('button', { name: 'Stop' });
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
     expect(stop).toHaveAttribute('aria-keyshortcuts', 'Shift+Meta+Backspace');
     await userEvent.click(stop);
     expect(onCancel).toHaveBeenCalledOnce();

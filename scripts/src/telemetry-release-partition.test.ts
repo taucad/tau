@@ -1,4 +1,4 @@
-import { existsSync, globSync, readFileSync } from 'node:fs';
+import { existsSync, globSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { publishable, workspace } from '@taucad/nx';
@@ -32,6 +32,7 @@ describe('telemetry release partition', () => {
       exclude: ['**/dist/**', '**/node_modules/**', '**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/*.spec.tsx'],
     });
     const consumers = sourcePaths
+      .filter((path) => statSync(join(repositoryRoot, path)).isFile())
       .filter((path) => readFileSync(join(repositoryRoot, path), 'utf8').includes("'@taucad/telemetry"))
       .map((path) => relative(repositoryRoot, join(repositoryRoot, path)));
 

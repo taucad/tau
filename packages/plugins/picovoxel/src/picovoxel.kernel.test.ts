@@ -496,6 +496,36 @@ describe('picovoxel kernel', () => {
       expect(result.nativeHandle.shapes[0]!.lane).toBe('exact');
     });
 
+    it('should retain an owned buffer without widening an offset mesh view', async () => {
+      const vertices = new Float32Array(
+        new ArrayBuffer(13 * Float32Array.BYTES_PER_ELEMENT),
+        2 * Float32Array.BYTES_PER_ELEMENT,
+        9,
+      );
+      vertices.set([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+      const triangles = new Uint32Array(
+        new ArrayBuffer(5 * Uint32Array.BYTES_PER_ELEMENT),
+        Uint32Array.BYTES_PER_ELEMENT,
+        3,
+      );
+      triangles.set([0, 1, 2]);
+      const { result } = await createGeometry({
+        module: {
+          default: (pico: Pico) => ({ vertices, triangles, toVoxels: helloCube(pico).toVoxels }),
+        },
+      });
+      const shape = result.nativeHandle.shapes[0]!;
+
+      expect(shape.vertices.buffer).toBe(vertices.buffer);
+      expect(shape.vertices.byteOffset).toBe(vertices.byteOffset);
+      expect(shape.vertices.length).toBe(vertices.length);
+      expect([...shape.vertices]).toEqual([...vertices]);
+      expect(shape.triangles.buffer).toBe(triangles.buffer);
+      expect(shape.triangles.byteOffset).toBe(triangles.byteOffset);
+      expect(shape.triangles.length).toBe(triangles.length);
+      expect([...shape.triangles]).toEqual([...triangles]);
+    });
+
     it('should copy vertices that live in a shared buffer', async () => {
       const shared = new Float32Array(new SharedArrayBuffer(36));
       shared.set([0, 0, 0, 1, 0, 0, 0, 1, 0]);
@@ -509,6 +539,8 @@ describe('picovoxel kernel', () => {
 
       expect(result.nativeHandle.shapes[0]!.vertices.buffer).toBeInstanceOf(ArrayBuffer);
       expect(result.nativeHandle.shapes[0]!.triangles.buffer).toBeInstanceOf(ArrayBuffer);
+      expect(result.nativeHandle.shapes[0]!.vertices.buffer).not.toBe(shared.buffer);
+      expect(result.nativeHandle.shapes[0]!.triangles.buffer).not.toBe(indices.buffer);
     });
   });
 

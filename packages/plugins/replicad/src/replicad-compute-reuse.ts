@@ -457,6 +457,9 @@ export const createReplicadComputeReuse = <Library extends ReplicadLibraryLike>(
     async run(scope, operation) {
       activeScope = scope;
       try {
+        // Discovery imports published actions into this worker's resident tier before user code runs.
+        // An unavailable warm result leaves the tier empty and normal native computation proceeds.
+        await scope.warm({ digests: [] });
         return await operation();
       } finally {
         activeScope = undefined;

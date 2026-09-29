@@ -15,7 +15,7 @@
         "parallel": false,
         "commands": [
           "pnpm exec nx run ui:build",
-          "vitest run apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts --environment=node",
+          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts --environment=node",
           "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/project-card-preview-parity.spec.ts src/user-project-thumbnail-generation.spec.ts"
         ],
         "env": {
@@ -106,6 +106,24 @@
         "env": {
           "TAU_E2E_UI_SNAPSHOT": "true",
           "TAU_E2E_HOST_TIER": "true",
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
+        }
+      }
+    },
+    "test:e2e:workbench": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}/apps/ui-e2e",
+        "parallel": false,
+        "commands": [
+          "pnpm --dir ../.. exec nx run ui:build",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/workbench-records.spec.ts src/arrange-workbench.spec.ts"
+        ],
+        "env": {
+          "TAU_E2E_UI_SNAPSHOT": "true",
           "TAU_CLOUD_ENABLED": "false",
           "TAU_API_URL": "http://localhost:4000",
           "TAU_WEBSOCKET_URL": "ws://localhost:4001",

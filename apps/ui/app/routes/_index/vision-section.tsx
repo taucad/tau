@@ -1,5 +1,7 @@
 import { Box, Sigma, CircuitBoard, Cpu, Waves, Sparkles } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { Link } from 'react-router';
+import { Button } from '@taucad/ui/components/button';
 import { metaConfig } from '#constants/meta.constants.js';
 
 type Pillar = {
@@ -58,7 +60,12 @@ export function VisionSection(): React.JSX.Element {
           ))}
         </div>
 
-        <div className='mt-10 text-center text-sm text-muted-foreground'>
+        <div className='mt-10 flex justify-center'>
+          <Button asChild variant='outline'>
+            <Link to='/vision'>Explore the vision</Link>
+          </Button>
+        </div>
+        <div className='mt-6 text-center text-sm text-muted-foreground'>
           Building embeddable CAD components or want early access to what&apos;s next?{' '}
           <a href={`mailto:${metaConfig.salesEmail}`} className='text-primary underline-offset-4 hover:underline'>
             Get in touch

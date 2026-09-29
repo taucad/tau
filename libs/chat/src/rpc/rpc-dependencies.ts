@@ -23,7 +23,14 @@ import type {
   GetParametersRpcResult,
 } from '#schemas/rpc.schema.js';
 import type { DiffStatsWithContent } from '#schemas/tools/diff.schema.js';
-import type { ExportFile, FileContentMetadata, FileProvenance } from '@taucad/types';
+import type {
+  CheckedFileWrite,
+  CheckedFileWriteResult,
+  FileWritePrecondition,
+  ExportFile,
+  FileContentMetadata,
+  FileProvenance,
+} from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime';
 
 /** Local execution metadata that never enters an RPC payload or durable record. @public */
@@ -82,6 +89,11 @@ export type RpcFileSystem = {
    */
   readFile(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
+  writeFileChecked(input: CheckedFileWrite): Promise<CheckedFileWriteResult>;
+  deleteFileChecked(input: {
+    path: string;
+    preconditions: readonly FileWritePrecondition[];
+  }): Promise<CheckedFileWriteResult>;
   writeBinaryFile(path: string, data: Uint8Array<ArrayBuffer>): Promise<void>;
   deleteFile(path: string): Promise<void>;
   readdir(path: string): Promise<RpcDirectoryEntry[]>;
@@ -140,6 +152,11 @@ export type RpcFileStat =
  */
 export type RpcRuntimeClient = {
   getKernelResult(targetFile: string, context?: RpcInvocationContext): Promise<GetKernelResultRpcResult>;
+};
+
+/** Connected runtime's model-file predicate for workbench view entry paths. @public */
+export type RpcWorkbenchClient = {
+  isModelFile(path: string): Promise<boolean>;
 };
 
 /** Shared semantic parameter client attached by a host with checked authority. @public */
@@ -259,6 +276,7 @@ export type RpcDependencies = {
   skillResolver?: RpcSkillResolver;
   revisions?: RpcRevisionsClient;
   parameters?: RpcParameterClient;
+  workbench?: RpcWorkbenchClient;
 };
 
 /**

@@ -143,6 +143,7 @@ describe('BillableModelInvocationService', () => {
         ['anthropic-claude-opus-5.5', 'claude-opus-5-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-opus-5', 'claude-opus-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-opus-4.8', 'claude-opus-4-8', 'anthropic', 'max_tokens'],
+        ['anthropic-claude-sonnet-5.5', 'claude-sonnet-5-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-sonnet-5', 'claude-sonnet-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-sonnet-4.6', 'claude-sonnet-4-6', 'anthropic', 'max_tokens'],
         ['anthropic-claude-haiku-4.5', 'claude-haiku-4-5-20251001', 'anthropic', 'max_tokens'],

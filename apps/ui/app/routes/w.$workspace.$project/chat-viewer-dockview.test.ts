@@ -1,10 +1,12 @@
 /* oxlint-disable @typescript-eslint/consistent-type-assertions -- Dockview structural test doubles cover only exercised fields */
+/* oxlint-disable typescript/no-restricted-types -- Checked file absence is null in the filesystem contract. */
 import { describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { DockviewApi, DockviewDidDropEvent, DockviewGroupPanel } from 'dockview-react';
 import type { CapabilitiesManifest } from '@taucad/runtime';
-import type { FileEntry } from '@taucad/types';
+import type { FileEntry, CheckedFileWriteResult } from '@taucad/types';
+import { workbenchRecords } from '@taucad/workbench';
 import { tauEditorPanelDragMime, tauFileDragMime } from '@taucad/types/constants';
 import {
   createViewerNewTab,
@@ -13,10 +15,65 @@ import {
   listViewerSelectableFiles,
   replaceViewerNewTabWithFile,
   createInheritedGraphicsSettings,
-  reconcileViewerPanelPaths,
+  adoptViewerRecordNode,
   ViewerEmptyFilePicker,
 } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
+import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
+import { deleteViewFile } from '#workbench-records/view-actions.js';
+
+describe('record-driven viewer adoption', () => {
+  it('deletes an interim recreated view after a tool delete followed by layout close', async () => {
+    const viewId = 'v-1234abcd';
+    const record = workbenchRecords.view.schema.parse({ version: 1, entryPath: 'models/other.ts' });
+    let bytes: Uint8Array<ArrayBuffer> | null = new TextEncoder().encode(workbenchRecords.view.serialize(record));
+    const gate = Promise.withResolvers<void>();
+    const files = {
+      exists: async () => bytes !== null,
+      readFile: async () => bytes!,
+      writeFileChecked: vi.fn(async ({ data }: { data: string }): Promise<CheckedFileWriteResult> => {
+        await gate.promise;
+        bytes = new TextEncoder().encode(data);
+        return { status: 'applied', content: bytes };
+      }),
+      deleteFileChecked: vi.fn(async (): Promise<CheckedFileWriteResult> => {
+        bytes = null;
+        return { status: 'applied', content: new Uint8Array() };
+      }),
+    };
+    const owner = createWorkbenchViewStore({
+      root: '/root',
+      viewId,
+      files,
+      onChange: () => undefined,
+      onError: vi.fn(),
+    });
+    await owner.read();
+    bytes = null; // Tool deletes the view file before publishing its layout change.
+    await owner.read();
+    expect(files.writeFileChecked).not.toHaveBeenCalled();
+    const persisting = owner.edit({ ...owner.snapshot().record!, name: 'Interim person edit' });
+    await vi.waitFor(() => {
+      expect(files.writeFileChecked).toHaveBeenCalledOnce();
+    });
+    const api = {
+      panels: [{ id: viewId, params: { viewId, entryPath: 'models/other.ts' } }],
+      width: 800,
+      height: 600,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Dockview defines this method name.
+      fromJSON: vi.fn(),
+    } as unknown as DockviewApi;
+    const removed = adoptViewerRecordNode(api, { kind: 'group', tabs: [] });
+    expect(removed).toEqual([viewId]);
+    expect(api.fromJSON).toHaveBeenCalledWith(expect.any(Object), { reuseExistingPanels: true });
+    const closing = deleteViewFile({ root: '/root', viewId, files, onError: vi.fn() });
+    gate.resolve();
+    expect(await persisting).toBe(true);
+    expect(await closing).toBe(true);
+    expect(bytes).toBeNull();
+    owner.dispose();
+  });
+});
 
 describe('ensureViewerGroup', () => {
   it('keeps one header/action group available after the final viewer closes', () => {
@@ -33,39 +90,6 @@ describe('ensureViewerGroup', () => {
 
     expect(addGroup).toHaveBeenCalledOnce();
     expect(groups).toHaveLength(1);
-  });
-});
-
-describe('reconcileViewerPanelPaths', () => {
-  const createPanel = (id: string, params: Record<string, unknown>) => ({
-    id,
-    params,
-    api: { close: vi.fn(), setTitle: vi.fn(), updateParameters: vi.fn() },
-  });
-
-  it('retitles a renamed viewer and closes a deleted one', () => {
-    const renamed = createPanel('view-renamed', { viewId: 'view-renamed', entryPath: 'models/box-corner.js' });
-    const deleted = createPanel('view-deleted', { viewId: 'view-deleted', entryPath: 'models/gone.js' });
-    const unchanged = createPanel('view-same', { viewId: 'view-same', entryPath: 'models/same.js' });
-    const launcher = createPanel('pane:new', { mode: 'launcher' });
-    const api = { panels: [renamed, deleted, unchanged, launcher] } as unknown as DockviewApi;
-    const graphicsSettings = { ...defaultGraphicsSettings };
-
-    reconcileViewerPanelPaths(api, {
-      'view-renamed': { entryPath: 'models/box-corner2.js', graphicsSettings },
-      'view-deleted': { entryPath: undefined, graphicsSettings },
-      'view-same': { entryPath: 'models/same.js', graphicsSettings },
-    });
-
-    expect(renamed.api.updateParameters).toHaveBeenCalledExactlyOnceWith({ entryPath: 'models/box-corner2.js' });
-    expect(renamed.api.setTitle).toHaveBeenCalledExactlyOnceWith('box-corner2.js');
-    expect(deleted.api.close).toHaveBeenCalledOnce();
-    for (const panel of [renamed, unchanged, launcher]) {
-      expect(panel.api.close).not.toHaveBeenCalled();
-    }
-    for (const panel of [unchanged, launcher]) {
-      expect(panel.api.updateParameters).not.toHaveBeenCalled();
-    }
   });
 });
 

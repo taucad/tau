@@ -1,304 +1,45 @@
 ---
 name: adding-tools
-description: Add new tools to the AI chat system. Use when adding a chat tool, creating tool schemas, wiring backend tool handlers, or building tool UI components.
+description: Add or change a Tau CAD chat tool across its shared schema, host registry, RPC, chat presentation, and optional MCP or skill surfaces. Use when implementing a new agent tool or changing its wire-visible contract.
 ---
 
-# Adding New Tools to the Chat System
-
-This guide documents the complete process for adding new tools that can be used by AI agents in the chat system.
-
-## Architecture Overview
-
-Tools follow a client-server RPC pattern via Socket.IO:
-
-1. **Backend (API)**: Defines tool schema and uses `chatRpcService.sendRpcRequest()` to execute operations on the client via Socket.IO RPC
-2. **Frontend (UI)**: RPC handlers execute the actual logic (filesystem, kernel, graphics) and return results via Socket.IO
-3. **Schemas (libs/chat)**: Shared type definitions between frontend and backend
-
-`libs/chat` is a **shared Apache-2.0 capability**, not application code. Its tool schemas and
-`src/rpc/**` handlers are the CAD-loop contract a published MCP tool layer will consume, so keep them
-host-agnostic and dependency-injected: no `apps/**` import, no browser-only assumption baked into a
-schema. See `docs/research/workspace-license-boundary-migration.md` (Finding 3).
-
-## Step-by-Step Process
-
-### Step 1: Define Tool Schema (libs/chat)
-
-Create a new file at `libs/chat/src/schemas/tools/<tool-name>.tool.schema.ts`:
-
-```typescript
-import { z } from 'zod';
-
-export const myToolInputSchema = z.object({
-  param1: z.string().describe('Description for the LLM'),
-  param2: z.number().optional().describe('Optional parameter'),
-});
-
-export const myToolOutputSchema = z.object({
-  result: z.string().describe('The result of the operation'),
-  success: z.boolean().describe('Whether the operation succeeded'),
-});
-
-export type MyToolInput = z.infer<typeof myToolInputSchema>;
-export type MyToolOutput = z.infer<typeof myToolOutputSchema>;
-```
-
-### Step 2: Add Tool Name Constant
-
-Update `libs/chat/src/constants/tool.constants.ts`:
-
-```typescript
-export const toolName = {
-  // ... existing tools ...
-  myTool: 'my_tool',
-} as const satisfies Record<string, string>;
-```
-
-### Step 3: Export from Package
-
-Update `libs/chat/src/index.ts`:
-
-```typescript
-export * from '#schemas/tools/my-tool.tool.schema.js';
-```
-
-### Step 4: Add to Type Definitions
-
-Update `libs/chat/src/types/tool.types.ts`:
-
-```typescript
-import type { MyToolInput, MyToolOutput } from '#schemas/tools/my-tool.tool.schema.js';
-
-export type MyTools = InferUITools<{
-  // ... existing tools ...
-  [toolName.myTool]: AiTool<MyToolInput, MyToolOutput>;
-}>;
-```
-
-### Step 5: Register in Message Schema
-
-Update `libs/chat/src/schemas/message.schema.ts`:
-
-```typescript
-import { myToolInputSchema, myToolOutputSchema } from '#schemas/tools/my-tool.tool.schema.js';
-
-const toolPartSchemas = [
-  // ... existing tools ...
-  ...createToolSchemas(toolName.myTool, myToolInputSchema, myToolOutputSchema),
-];
-```
-
-### Step 5b: Register Strict Tool Inputs (interrupt healing)
-
-Interrupted streams can persist partial tool inputs that no longer satisfy the per-tool schema. The API preprocess reads **`libs/chat/src/schemas/tool-input.registry.ts`** — add:
-
-```typescript
-my_tool: myToolInputSchema,
-```
-
-(Use the exported Zod schema from Step 1; keep catalog keys aligned with `toolName` string literals.)
-
-### Step 6: Create Backend Tool Definition
-
-Create `apps/api/app/api/tools/tools/tool-my-tool.ts`:
-
-```typescript
-import type { ToolRuntime } from '@langchain/core/tools';
-import { tool } from '@langchain/core/tools';
-import { myToolInputSchema } from '@taucad/chat';
-import { assertRpcSuccess } from '@taucad/chat/utils';
-import type { ChatTool, MyToolInput, MyToolOutput } from '@taucad/chat';
-import { rpcName, toolName } from '@taucad/chat/constants';
-import type { ChatRpcConfigurable } from '#api/tools/tool.types.js';
-
-export const myToolDefinition = {
-  name: toolName.myTool,
-  description: `Detailed description for the LLM explaining when and how to use this tool.`,
-  schema: myToolInputSchema,
-} as const;
-
-export const myTool: ChatTool<typeof myToolInputSchema, MyToolInput, MyToolOutput, typeof toolName.myTool> = tool(
-  async (args, runtime: ToolRuntime) => {
-    const { chatRpcService, thread_id: chatId } = runtime.configurable as ChatRpcConfigurable;
-    const { toolCallId } = runtime;
-
-    const result = await chatRpcService.sendRpcRequest({
-      chatId,
-      toolCallId,
-      rpcName: rpcName.myRpc,
-      args,
-    });
-
-    assertRpcSuccess(result, {
-      toolName: toolName.myTool,
-      toolCallId,
-      clientErrorMessage: 'Failed to execute my tool',
-    });
-
-    return result;
-  },
-  myToolDefinition,
-);
-```
-
-### Step 7: Register Backend Tool
-
-Update `apps/api/app/api/tools/tool.service.ts`:
-
-```typescript
-import { myTool } from '#api/tools/tools/tool-my-tool.js';
-
-const toolCategoryToTool = {
-  // ... existing tools ...
-  [toolName.myTool]: myTool,
-} as const satisfies Partial<Record<ToolName, StructuredTool>>;
-
-const toolNameFromToolCategory = {
-  // ... existing tools ...
-  [toolName.myTool]: toolCategoryToTool[toolName.myTool].name,
-} as const satisfies Partial<Record<ToolName, string>>;
-```
-
-### Step 8: Add Tool to Agent
-
-Update **`apps/api/app/api/chat/chat.service.ts`** (`cadTools` array) so the CAD agent receives the LangChain tool:
-
-```typescript
-const cadTools = [
-  // ... existing tools ...
-  tools.my_tool,
-].filter((tool) => tool !== undefined);
-```
-
-If the tool uses `targetFile` (or similar fingerprinted inputs), add it to **`agent-safeguards.middleware.ts`** `targetFileTools` so identical repeated failures get one-shot remediation guidance.
-
-### Step 9: Implement RPC Handler (if new RPC needed)
-
-If your tool needs a new RPC (e.g., for a new client-side operation), add the RPC handler:
-
-1. Add RPC name to `libs/chat/src/constants/rpc.constants.ts`
-2. Add RPC schema to `libs/chat/src/schemas/rpc.schema.ts` using `defineRpc()`
-3. Create handler at `libs/chat/src/rpc/handlers/handle-my-rpc.ts`
-4. Register in `libs/chat/src/rpc/rpc-dispatcher.ts`
-5. If the RPC depends on `RpcGraphicsClient` / CAD snapshot types, extend **`libs/chat/src/rpc/rpc-dependencies.ts`** accordingly
-6. Add browser implementation in **`apps/ui/app/hooks/rpc-handlers.ts`**
-
-Most tools reuse existing RPCs (e.g., `readFile`, `createFile`, `getKernelResult`, `captureImages`).
-
-**Browser adapter split:** headless image capture belongs on **`RpcImageClient`** and must not depend on a mounted viewer. Geometry fetch/export belongs on **`RpcGraphicsClient`** (see `createBrowserGraphicsClient` in `rpc-handlers.ts`), while pure kernel compile/status belongs on **`RpcRuntimeClient`**. **`ensureGeometryUnit`** in `rpc-handlers.ts` is the canonical lazy-bootstrap when the LLM names a `targetFile` that may not have an open geometry unit yet.
-
-### Step 10: Create UI Component
-
-Create `apps/ui/app/routes/projects_.$id/chat-message-tool-my-tool.tsx`:
-
-```typescript
-import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
-import type { MyUIMessage } from '@taucad/chat';
-import type { MyToolOutput } from '@taucad/chat';
-
-type Props = {
-  part: Extract<MyUIMessage['parts'][number], { type: 'tool-my_tool' }>;
-};
-
-export function ChatMessageToolMyTool({ part }: Props): React.JSX.Element {
-  const { state } = part;
-  const output = part.output as MyToolOutput | undefined;
-
-  if (state === 'input-streaming' || state === 'input-available') {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" />
-        <span>Processing...</span>
-      </div>
-    );
-  }
-
-  if (state === 'output-error') {
-    return (
-      <div className="flex items-center gap-2 text-sm text-destructive">
-        <XCircle className="size-4" />
-        <span>Error: {part.errorText}</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-2 text-sm">
-      {output?.success ? (
-        <CheckCircle className="size-4 text-success" />
-      ) : (
-        <XCircle className="size-4 text-destructive" />
-      )}
-      <span>{output?.result}</span>
-    </div>
-  );
-}
-```
-
-### Step 11: Register UI Component
-
-Update `apps/ui/app/routes/projects_.$id/chat-message.tsx`:
-
-```typescript
-import { ChatMessageToolMyTool } from './chat-message-tool-my-tool.js';
-
-// In renderPart switch:
-case 'tool-my_tool': {
-  return <ChatMessageToolMyTool key={part.toolCallId} part={part} />;
-}
-```
-
-### Step 12: Update System Prompt (if needed)
-
-Update **`apps/api/app/api/chat/prompts/cad-agent.prompt.ts`** (static/dynamic CAD agent prompt builders) when the workflow or safety copy should mention the tool. Prefer terse references aligned with `<tool_usage_policy>` / `<workflow>` — duplicating full tool prose belongs in the LangChain **`description`** in Step 6.
-
-### Step 13: Serialize Tool Parts (UI copy / compaction)
-
-Extend **`apps/ui/app/utils/chat.utils.ts`** `toolSerializers` with an entry keyed by **`toolName.myTool`** so `serializePart`/`serializeMessage` stay exhaustive over `MyTools` (workspace enforces `{ [K in keyof MyTools]: ToolSerializer<K> }`).
-
-### Step 14: Activity Summaries (optional)
-
-If the tool should affect exploration-phase grouping or counts (e.g. research runs), review **`apps/ui/app/utils/assistant-message-activity.ts`** and related activity components.
-
-## Testing
-
-1. Run typecheck: `pnpm nx typecheck chat`
-2. Run typecheck: `pnpm nx typecheck api`
-3. Run typecheck: `pnpm nx typecheck ui`
-4. Test the tool in the chat interface
-
-## Common Patterns
-
-### Async Operations with State Machines
-
-For tools that need to wait for state machine transitions:
-
-```typescript
-await waitFor(machineRef, (state) => state.matches('ready') || state.matches('error'));
-```
-
-### Error Handling
-
-**API tools:** after `chatRpcService.sendRpcRequest(...)`, validate the discriminated RPC result with **`assertRpcSuccess`** from `@taucad/chat/utils` (see existing tools under `apps/api/app/api/tools/tools/`). Failures surface as AI SDK **`output-error`** tool parts automatically — do not manually push tool outputs unless you are intentionally bypassing that path.
-
-Handle transport / unexpected **`catch`** blocks by throwing or wrapping in a **`ToolRuntime`-visible** error consistent with LangChain conventions for that tool.
-
-### File Operations
-
-Use the file manager for file operations:
-
-```typescript
-const fileContent = await fileManager.readFile(path);
-await fileManager.writeFile(path, content, { source: 'external' });
-```
-
-`useFileManager().readFile` returns **`Uint8Array`** (binary-safe); pair with **`downloadBlob`** from `@taucad/utils/file` for user downloads.
-
-### Chat artifacts — `.tau/artifacts` + `writeArtifactSet`
-
-When an RPC persists an interchange export for later UI download:
-
-1. Prefer **`libs/chat/src/rpc/handlers/write-artifact.ts`** **`writeArtifactSet({ toolCallId, targetFile, format, files }, fileSystem)`** — it validates the file set and writes it under one canonical export directory.
-2. Return its **`artifactPath`**, **`mimeType`**, and **`byteLength`** metadata in the RPC success payload so the chat card can render size + type without re-reading disk.
-3. On **Download**, the UI reads **`artifactPath`** via **`fileManager.readFile`**, wraps a **`Blob`**, and calls **`downloadBlob(blob, basename)`**.
-4. Pass **`toolCallId`** into RPC args alongside LLM-visible fields to keep export directories deterministic across retries.
+# Adding Tau agent tools
+
+First trace the tool's actual callers and owners. Reuse an existing tool or RPC when it expresses the same operation. A new tool name, schema, description, outcome, or error code requires an operator-approved Section 0 API design guide through [create-api](../create-api/SKILL.md) and [create-ts-api](../create-ts-api/SKILL.md) before implementation ([library API policy](../../../docs/policy/library-api-policy.md)). Apply [context engineering](../../../docs/policy/context-engineering-policy.md) to the description and follow the root-to-path `AGENTS.md` chain and concern policies. The [`arrange_workbench` guide](../../../docs/research/artifacts/programmable-workbench-charter/api/index.md) is an example, not a reusable schema.
+
+The host-neutral route is `libs/chat` contract → `libs/agent-tools` registry → `packages/agent-host` log → host composition → `apps/ui` presentation. The API is not the CAD tool executor. File and record changes use the owning filesystem and RPC authority. Choose only the entries that the tool actually needs; keep the numbered inventory so a cross-surface tool cannot silently omit a grant or presentation step.
+
+## Registration inventory
+
+1. Add the permanent name to [`toolName`](../../../libs/chat/src/constants/tool.constants.ts); `toolNames` also feeds tool-choice validation.
+2. Add the provider-facing description to [tool descriptions](../../../libs/chat/src/constants/tool-description.constants.ts). This map is not exhaustive; test its entry.
+3. Define bounded input and output in [chat tool schemas](../../../libs/chat/src/schemas/tools/). Reuse domain schemas from their owning package.
+4. Export the schemas from [chat's barrel](../../../libs/chat/src/index.ts). Add a [package export](../../../libs/chat/package.json) only for a real subpath consumer.
+5. Register input and output in [`uiMessageTools`](../../../libs/chat/src/schemas/tool-input.registry.ts), which validates durable parts and heals interrupted input.
+6. Add the typed entry to [`MyTools`](../../../libs/chat/src/types/tool.types.ts).
+7. Add an offered CAD tool to [`cadProviderFacingToolNames`](../../../libs/chat/src/schemas/provider-tool-schemas.ts). The grant controls provider schemas and registry listing; absence makes the tool unavailable.
+8. For a new RPC, add its name and exact read/mutate partition in [RPC constants](../../../libs/chat/src/constants/rpc.constants.ts). The partition test must remain exhaustive.
+9. Define its input, success and failure schemas with `defineRpc` in [RPC schemas](../../../libs/chat/src/schemas/rpc.schema.ts); register the type and value there.
+10. Implement and test the operation in [RPC handlers](../../../libs/chat/src/rpc/handlers/). Preserve trust-boundary validation and owning filesystem semantics.
+11. Export the handler from [RPC's barrel](../../../libs/chat/src/rpc/index.ts).
+12. Dispatch it through the typed map in [`rpc-dispatcher`](../../../libs/chat/src/rpc/rpc-dispatcher.ts); add only the dependencies it needs in [`rpc-dependencies`](../../../libs/chat/src/rpc/rpc-dependencies.ts).
+13. Map tool to RPC and required client in [`rpcForTool`](../../../libs/agent-tools/src/registry/tool-registry.ts). Put record writes in `recordRpcNames` so they use the record authority; `arrange_workbench` uses its live-root workbench filesystem.
+14. Wire any new dependency at each applicable host: [browser worker](../../../apps/ui/app/workers/agent-host.impl.ts), [Node registry](../../../packages/host/src/agent-tools.ts), [desktop utility](../../../apps/desktop/src/tau/services-host.impl.ts), and [daemon](../../../packages/host/src/host-daemon.ts). Check browser, desktop, daemon and ACP availability separately.
+15. Add the kind to [`tauToolKinds`](../../../packages/agent-host/src/harness/tools.ts) so the durable top-level `call` fact classifies the tool. Add path normalization only for actual path fields.
+16. Build an observable card in [chat route components](../../../apps/ui/app/routes/w.$workspace.$project/) and select it in [`chat-message.tsx`](../../../apps/ui/app/routes/w.$workspace.$project/chat-message.tsx). Reuse the current card primitives and owning page/controller state.
+17. Add the exhaustive copy/compaction serializer in [`toolSerializers`](../../../apps/ui/app/utils/chat.utils.ts).
+18. Classify both static and qualified external names in [assistant activity](../../../apps/ui/app/utils/assistant-message-activity.ts); test the visible family.
+19. When a tool writes a person-visible record, connect the owning UI reader and live adoption surface. For workbench records see [workbench record host](../../../apps/ui/app/routes/w.$workspace.$project/workbench-record-host.tsx); do not add a second store.
+20. Teach the workflow briefly in [the CAD prompt](../../../libs/chat/src/prompts/cad-agent.prompt.ts) when model choice depends on it. Keep the full schema and description at their owners.
+21. Test the provider schema and grant, registry invocation, RPC outcome, durable call facts, card, and one real host path. [Provider compatibility tests](../../../libs/chat/src/schemas/provider-tool-schema-compat.test.ts) cover provider-safe JSON Schema. Update the deliberate `toolChoice` snapshot in [the API schema test](../../../apps/api/app/api/chat/chat.controller.json-schema.test.ts), check the [CAD prompt budget test](../../../libs/chat/src/prompts/cad-agent.prompt.test.ts), and use [the scripted chat gateway precedent](../../../apps/ui-e2e/src/chat-todo-list.spec.ts) for a visible end-to-end turn.
+22. If approved for external agents, add the exact name to [`hostMcpAllowedTools` and `hostMcpRegistryTools`](../../../packages/host/src/mcp-server.ts). The signed claim, registry listing and `invokeAllowed` dispatch must agree; no whole-registry exposure.
+23. Add canonical input/output normalization in [`tauMcpSchemas`](../../../packages/host/src/acp/session.ts). Qualified ACP calls then retain external attribution while using the native family; add the [`tau-mcp` card switch](../../../apps/ui/app/routes/w.$workspace.$project/chat-message.tsx) and test real result envelopes.
+24. Review [agent-host compaction](../../../packages/agent-host/src/harness/compaction.ts) and [safeguards](../../../packages/agent-host/src/harness/safeguards.ts) only if this tool's actual behavior requires them.
+25. If taught by a packaged skill, author `agent/skills.json` and its manifest-selected `agent/<directory>/SKILL.md` in the owning package, set `tau.skills` in its package manifest, add it to [`skillOwners`](../../../packages/skills/src/skill-bundles.ts) and [resource aggregation](../../../packages/skills/src/resources.ts), and generate `agent/resources.js` through the existing package workflow.
+26. Recheck the approved API guide and its real consumer call sites before acceptance. Verify names, schema, descriptions and failure behavior match the guide across native and MCP carriers.
+
+MCP annotations describe the effect of each tool. [`hostToolOf`](../../../packages/host/src/mcp-server.ts) derives existing defaults and applies per-tool exceptions; `arrange_workbench` is `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: false`. A signed MCP grant permits only its named tools during an active turn. It never grants arbitrary file/shell operations, skill listing, generic UI automation or person-only host actions.
+
+## Verify
+
+Use `pnpm nx show project <project>` for actual targets, then focused Nx lint, test and typecheck on changed owners. Run `pnpm nx run scripts:validate-agent-config` for skill or instruction changes. Check every local path cited above still exists with `git ls-files --error-unmatch <path>`, or `test -d <directory>` for directory links. For an external tool, check `tools/list` annotations, signed grant, `invokeAllowed`, ACP normalization and the visible card through a real mounted MCP route.

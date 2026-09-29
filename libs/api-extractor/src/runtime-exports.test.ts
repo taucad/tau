@@ -137,6 +137,8 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(content).toContain("from './runner/types.js'");
     for (const declarationFile of [
       'brep/index.d.ts',
+      'config/index.d.ts',
+      'config/node/index.d.ts',
       'mesh/index.d.ts',
       'model/index.d.ts',
       'runner/index.d.ts',
@@ -147,17 +149,16 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     ]) {
       expect(typeof files[declarationFile]).toBe('string');
     }
-    expect(files['config/index.d.ts']).toBeUndefined();
-
     expect(packageJson['name']).toBe('geospec');
     const exportsValue = packageJson['exports'];
     if (!exportsValue || typeof exportsValue !== 'object' || Array.isArray(exportsValue)) {
       throw new TypeError('Generated GeoSpec package.json exports must be an object.');
     }
     const packageExports: Record<string, unknown> = exportsValue as Record<string, unknown>;
-    expect(packageExports['./config']).toBeUndefined();
     const expectedPublicExports = [
       ['./brep', './brep/index.d.ts'],
+      ['./config', './config/index.d.ts'],
+      ['./config/node', './config/node/index.d.ts'],
       ['./model', './model/index.d.ts'],
       ['./runner/node', './runner/node/index.d.ts'],
       ['./runner/web', './runner/web/index.d.ts'],

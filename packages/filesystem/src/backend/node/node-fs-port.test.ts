@@ -160,6 +160,52 @@ describe('node filesystem client/host round trip', () => {
     expect(exact).toMatchObject([{ name: 'large.txt', type: 'file', size: 1028, contentKind: 'text', lineCount: 2 }]);
   });
 
+  it('fences checked deletion across ports and reports conflict and unchanged accurately', async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), 'tau-node-delete-'));
+    const root = join(sandbox, 'root');
+    const authorityRoot = join(sandbox, 'authority');
+    mkdirSync(root);
+    mkdirSync(authorityRoot);
+    writeFileSync(join(root, 'target.txt'), 'old');
+    const authority = new NodeFsAuthorityHost({
+      authorityDirectory: () => authorityRoot,
+      authorityIdentity: () => root,
+    });
+    const firstPorts = new MessageChannel();
+    const secondPorts = new MessageChannel();
+    const stopFirst = serveNodeFsProvider(firstPorts.port2, {
+      policy: tauPathPolicy,
+      allowRoot: () => true,
+      authority,
+    });
+    const stopSecond = serveNodeFsProvider(secondPorts.port2, {
+      policy: tauPathPolicy,
+      allowRoot: () => true,
+      authority,
+    });
+    const firstChannel = new NodeFsChannel(firstPorts.port1);
+    const secondChannel = new NodeFsChannel(secondPorts.port1);
+    cleanups.push(async () => {
+      firstChannel.close();
+      secondChannel.close();
+      await stopFirst();
+      await stopSecond();
+      firstPorts.port2.close();
+      secondPorts.port2.close();
+      rmSync(sandbox, { recursive: true, force: true });
+    });
+    const first = new NodeFsProviderClient(firstChannel, root);
+    const second = new NodeFsProviderClient(secondChannel, root);
+    const input = { path: 'target.txt', preconditions: [{ path: 'target.txt', expected: 'old' }] };
+    const results = await Promise.all([first.deleteFileChecked(input), second.deleteFileChecked(input)]);
+    expect(results.map(({ status }) => status).sort()).toEqual(['applied', 'conflict']);
+    expect(existsSync(join(root, 'target.txt'))).toBe(false);
+    expect(await first.readdirWithStats('', { content: 'head' })).toEqual([]);
+    expect(
+      await first.deleteFileChecked({ path: 'target.txt', preconditions: [{ path: 'target.txt', expected: null }] }),
+    ).toMatchObject({ status: 'unchanged' });
+  });
+
   it('serializes checked writes across distinct ports and releases the OS owner after both dispose', async () => {
     const sandbox = mkdtempSync(join(tmpdir(), 'tau-node-checked-'));
     const root = join(sandbox, 'root');
@@ -911,7 +957,7 @@ describe('node filesystem client/host round trip', () => {
         resolve(event.data);
       };
       port.addEventListener('message', listener);
-      port.postMessage({ v: 999, id: 9003, root, op: 'readdir', path: '' });
+      port.postMessage({ v: 3, id: 9003, root, op: 'readdir', path: '' });
     });
 
     expect(response).toMatchObject({ type: 'error', code: 'NODE_FS_PROTOCOL_VERSION' });

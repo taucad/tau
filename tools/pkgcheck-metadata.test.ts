@@ -5,7 +5,6 @@ import {
   bundledArtifactIssues,
   bundledWorkspaceMirrors,
   bundleDeclarationClosure,
-  bundleOwnershipIssues,
   bundleWitnessIssues,
   copyTargetPaths,
   doubledPathSegments,
@@ -73,26 +72,15 @@ describe('pkgcheck metadata', () => {
     ]);
   });
 
-  it('reports workspace modules bundled by more than one publishable root', () => {
-    expect(
-      bundleOwnershipIssues([
-        { owner: '@taucad/runtime', bundled: ['@taucad/vm'] },
-        { owner: 'geospec', bundled: ['@taucad/vm'] },
-      ]),
-    ).toEqual(['@taucad/vm is bundled by both @taucad/runtime and geospec']);
-  });
-
-  it('reports a mirror the manifest/tag rule never permitted, and leaves multi-owner rules alone', () => {
+  it('permits independent mirrors while rejecting one outside an owner’s manifest/tag rule', () => {
     expect(
       bundleWitnessIssues(
         [
           { owner: '@taucad/runtime', bundled: ['@taucad/runtime', '@taucad/rpc', '@taucad/billing'] },
-          { owner: '@taucad/esbuild', bundled: ['@taucad/vm'] },
+          { owner: '@taucad/esbuild', bundled: ['@taucad/rpc', '@taucad/vm'] },
         ],
         new Map([
           ['@taucad/runtime', ['@taucad/rpc']],
-          // A library the rule permits two owners is the release resolver's own
-          // invariant (`bundleOwnershipIssues`), not a mirror-side witness failure.
           ['@taucad/esbuild', ['@taucad/vm', '@taucad/rpc']],
         ]),
       ),

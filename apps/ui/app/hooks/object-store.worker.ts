@@ -17,6 +17,7 @@ import type {
 import { defaultPanelState } from '#constants/editor.constants.js';
 import { mergePanelState } from '#utils/panel-state.utils.js';
 import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
+import { seedInitialWorkbenchFiles } from '#workbench-records/initial-files.js';
 
 /**
  * Type for initial editor state overrides during project creation.
@@ -99,10 +100,10 @@ const createInitialEditorState = (args: {
     activePaneId: args.overrides?.activePaneId ?? seedPaneId,
     focusedChatId: args.chatId,
     panelState,
-    workbenchLayout: args.overrides?.workbenchLayout as EditorState['workbenchLayout'],
-    viewerLayout: args.overrides?.viewerLayout as EditorState['viewerLayout'],
-    viewSettings: (args.overrides?.viewSettings ?? {}) as EditorState['viewSettings'],
-    modelComponentDisplay: args.overrides?.modelComponentDisplay as EditorState['modelComponentDisplay'],
+    fileSidebars: (args.overrides?.fileSidebars ?? {}) as EditorState['fileSidebars'],
+    graphicsBackendPreferences: (args.overrides?.graphicsBackendPreferences ??
+      {}) as EditorState['graphicsBackendPreferences'],
+    previousLayout: args.overrides?.previousLayout as EditorState['previousLayout'],
     updatedAt: args.timestamp,
   };
 };
@@ -156,7 +157,7 @@ const objectStoreWorker = {
       ...options.storage,
       manifest: project,
       library: { projectId: project.id, lastActivityAt: timestamp },
-      files: options.files,
+      files: seedInitialWorkbenchFiles(options.files, project.assets.main.entryPath),
       ...(chat === undefined ? {} : { chat }),
       ...(options.attachmentSource === undefined ? {} : { attachmentSource: options.attachmentSource }),
       editorState: createInitialEditorState({
@@ -209,10 +210,9 @@ const objectStoreWorker = {
           activePaneId: sourceEditorState?.activePaneId,
           focusedChatId: mappedFocusedChatId,
           panelState: mergePanelState(defaultPanelState, sourceEditorState?.panelState),
-          workbenchLayout: sourceEditorState?.workbenchLayout,
-          viewerLayout: sourceEditorState?.viewerLayout,
-          viewSettings: sourceEditorState?.viewSettings ?? {},
-          modelComponentDisplay: sourceEditorState?.modelComponentDisplay,
+          fileSidebars: sourceEditorState?.fileSidebars ?? {},
+          graphicsBackendPreferences: sourceEditorState?.graphicsBackendPreferences ?? {},
+          previousLayout: sourceEditorState?.previousLayout,
           updatedAt: timestamp,
         }
       : undefined;
@@ -224,7 +224,7 @@ const objectStoreWorker = {
       sourceProjectId: options.sourceManifest.id,
       manifest: newProject,
       library: { projectId: newProject.id, lastActivityAt: timestamp },
-      files: options.files,
+      files: seedInitialWorkbenchFiles(options.files, newProject.assets.main.entryPath),
       chats: clonedChats,
       editorState,
     };

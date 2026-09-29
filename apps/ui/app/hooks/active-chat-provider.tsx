@@ -42,6 +42,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type { Chat } from '@ai-sdk/react';
+import { isResumableRunFailure } from '@taucad/agent-host';
 import { createAsyncLogic } from 'xstate';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
 import type { ActorRefFrom } from 'xstate';
@@ -57,6 +58,7 @@ import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession } from '#services/chat-session-store.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
+import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
@@ -178,6 +180,8 @@ export type ChatComposerContextValue = {
    * sends one keyed host cancel through the session store under the session provider.
    */
   stop: () => void;
+  /** Continue a failed host run while it can still be resumed. */
+  resume: (() => void) | undefined;
   /**
    * Most-recent `data-context-usage` part across the chat's messages, or
    * `undefined` when no usage data has streamed. Always `undefined` under
@@ -290,6 +294,7 @@ export function ChatComposerProvider({
       status: 'ready',
       agentActivity: 'ready',
       stop: noopStop,
+      resume: undefined,
       contextUsage: undefined,
       session: undefined,
       canSelectExecution: false,
@@ -371,6 +376,7 @@ export function HomeNewProjectComposerProvider({
       status: 'ready',
       agentActivity: 'ready',
       stop: noopStop,
+      resume: undefined,
       contextUsage: undefined,
       session: undefined,
       canSelectExecution: true,
@@ -431,6 +437,7 @@ function ActiveChatSessionProvider({
   const status = useSessionStatus(chatId);
   const agentActivity = useSessionAgentActivity(session);
   const stop = useSessionStop(session);
+  const resume = useSessionResume(session, chatId);
   const contextUsage = useSessionContextUsage(chatId);
   const consumeDraft = useConsumeDraft(session.draftActorRef);
 
@@ -453,6 +460,7 @@ function ActiveChatSessionProvider({
       status,
       agentActivity,
       stop,
+      resume,
       contextUsage,
       session: sessionValue,
       canSelectExecution: true,
@@ -467,6 +475,7 @@ function ActiveChatSessionProvider({
       status,
       agentActivity,
       stop,
+      resume,
       contextUsage,
       sessionValue,
       consumeDraft,
@@ -733,6 +742,43 @@ function useSessionStop(session: ChatSession): () => void {
   return useCallback(() => {
     store.stopRun(session.chatId);
   }, [session.chatId, store]);
+}
+
+/** Offer Resume only for a settled, resumable host failure. */
+function useSessionResume(session: ChatSession, chatId: string): (() => void) | undefined {
+  const store = useChatSessionStore();
+  const subscribe = useCallback((listener: () => void) => store.subscribeProjection(chatId, listener), [chatId, store]);
+  const snapshot = useCallback(() => store.getProjection(chatId), [chatId, store]);
+  const projection = useSyncExternalStore(subscribe, snapshot, snapshot);
+  const turn = useSelector(session.stateActorRef, (state) => state.context.turn);
+  const persistence = useSelector(session.persistenceActorRef, (state) => state);
+  const canResume = (current = projection): boolean => {
+    const run = current !== undefined && selectCaughtUp(current) ? selectCurrentRun(current) : undefined;
+    return (
+      run?.lifecycle === 'failed' &&
+      isResumableRunFailure(run.failure) &&
+      turn === undefined &&
+      persistence.matches({ requestLifecycle: 'idle', chatLoading: 'idle' }) &&
+      !persistence.context.isLoadingChat &&
+      session.chat.status !== 'submitted' &&
+      session.chat.status !== 'streaming'
+    );
+  };
+  const resume = useCallback(() => {
+    const current = store.getProjection(chatId);
+    const run = current !== undefined && selectCaughtUp(current) ? selectCurrentRun(current) : undefined;
+    if (
+      run?.lifecycle !== 'failed' ||
+      !isResumableRunFailure(run.failure) ||
+      session.stateActorRef.getSnapshot().context.turn !== undefined ||
+      !session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle', chatLoading: 'idle' })
+    ) {
+      return;
+    }
+    void store.touchChatRecency(chatId, Date.now());
+    void store.requestTurn(chatId, { kind: 'continue' });
+  }, [chatId, session, store]);
+  return canResume() ? resume : undefined;
 }
 
 /**

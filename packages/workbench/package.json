@@ -18,6 +18,7 @@
   "types": "./dist/index.d.mts",
   "files": [
     "dist",
+    "agent",
     "LICENSE",
     "README.md"
   ],
@@ -32,6 +33,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./agent/*": "./agent/*",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -42,6 +44,7 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
+      "./agent/*": "./agent/*",
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -58,5 +61,8 @@
     "@taucad/camera": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "zod": "catalog:"
+  },
+  "tau": {
+    "skills": "./agent/skills.json"
   }
 }

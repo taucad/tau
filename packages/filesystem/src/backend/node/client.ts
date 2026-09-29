@@ -11,7 +11,7 @@
 import type { z } from 'zod';
 import { Topic } from '@taucad/events';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
-import type { CheckedFileWrite, CheckedFileWriteResult } from '@taucad/types';
+import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import type {
   ExternalChangeFact,
   FileMode,
@@ -325,6 +325,30 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
       }
       throw Object.assign(
         new Error('Checked write outcome is unknown because its reply was unavailable.', { cause: error }),
+        {
+          code: 'CHECKED_WRITE_POTENTIALLY_APPLIED',
+          applicationState: 'potentially-applied',
+        },
+      );
+    }
+  }
+
+  public async deleteFileChecked(input: {
+    path: string;
+    preconditions: readonly FileWritePrecondition[];
+  }): Promise<CheckedFileWriteResult> {
+    this._assertRootedPath(input.path);
+    for (const precondition of input.preconditions) {
+      this._assertRootedPath(precondition.path);
+    }
+    try {
+      return await this._channel.request({ root: this._root, op: 'deleteFileChecked', ...input });
+    } catch (error) {
+      if ((error as { applicationState?: unknown }).applicationState !== undefined) {
+        throw error;
+      }
+      throw Object.assign(
+        new Error('Checked delete outcome is unknown because its reply was unavailable.', { cause: error }),
         {
           code: 'CHECKED_WRITE_POTENTIALLY_APPLIED',
           applicationState: 'potentially-applied',

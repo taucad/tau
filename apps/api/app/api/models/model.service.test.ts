@@ -16,6 +16,7 @@ const cappedModelIds = [
   'anthropic-claude-opus-5.5',
   'anthropic-claude-opus-5',
   'anthropic-claude-opus-4.8',
+  'anthropic-claude-sonnet-5.5',
   'anthropic-claude-sonnet-5',
   'openai-gpt-6-astra',
   'openai-gpt-6-sol',
@@ -47,6 +48,7 @@ const pdfInputModelIds = [
   'anthropic-claude-opus-5.5',
   'anthropic-claude-opus-5',
   'anthropic-claude-opus-4.8',
+  'anthropic-claude-sonnet-5.5',
   'anthropic-claude-sonnet-5',
   'anthropic-claude-sonnet-4.6',
   'anthropic-claude-haiku-4.5',
@@ -140,7 +142,7 @@ describe('modelList', () => {
       }
     });
 
-    it('should never offer Vertex a level past high, nor xhigh outside the models that accept it', () => {
+    it('should only offer xhigh and max on models that accept them', () => {
       const extraHigh = getCloudCatalogEntries()
         .filter((model) => model.support?.reasoning?.levels.includes('xhigh'))
         .map((model) => model.id);
@@ -150,9 +152,14 @@ describe('modelList', () => {
         'anthropic-claude-opus-5.5',
         'anthropic-claude-opus-5',
         'anthropic-claude-opus-4.8',
+        'anthropic-claude-sonnet-5.5',
         'openai-gpt-6-astra',
       ]);
-      expect(getCloudCatalogEntries().some((model) => model.support?.reasoning?.levels.includes('max'))).toBe(false);
+      expect(
+        getCloudCatalogEntries()
+          .filter((model) => model.support?.reasoning?.levels.includes('max'))
+          .map((model) => model.id),
+      ).toEqual(['anthropic-claude-sonnet-5.5']);
     });
   });
 
@@ -208,6 +215,27 @@ describe('ModelService', () => {
     for (const modelId of cappedModelIds) {
       expect(service.getContextWindow(modelId), modelId).toBe(maxEffectiveContextWindow);
     }
+  });
+
+  it('recommends Sonnet 5.5 while retaining Sonnet 5', async () => {
+    const listedModels = await createModelService().getModels();
+    expect(listedModels.find((model) => model.id === 'anthropic-claude-sonnet-5.5')).toMatchObject({
+      recommended: true,
+      model: 'claude-sonnet-5-5',
+      provider: { id: 'anthropic', name: 'Anthropic' },
+      support: {
+        reasoning: { levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+        toolChoice: false,
+        modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
+      },
+      details: {
+        contextWindow: maxEffectiveContextWindow,
+        maxTokens: 128_000,
+        cost: { inputTokens: 2, outputTokens: 10, cacheReadTokens: 0.2, cacheWriteTokens: 2.5 },
+      },
+      configuration: { thinking: { type: 'adaptive', display: 'summarized' }, outputConfig: { effort: 'high' } },
+    });
+    expect(modelList.anthropic['claude-sonnet-5']?.recommended).toBe(false);
   });
 
   it('recommends Opus 5.5 instead of Opus 5', async () => {

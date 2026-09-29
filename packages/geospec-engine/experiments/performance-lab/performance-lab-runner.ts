@@ -19,7 +19,7 @@ import type {
   HostClaimEvaluation,
   HostEngine,
   HostSubjectLifecycle,
-} from '#host-types.js';
+} from '@taucad/geospec-engine-native/node';
 
 /** Explicit browser WASM selection; omitted requests retain the existing ST path. @internal */
 export type PerformanceLabWasmExecution =

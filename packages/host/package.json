@@ -69,7 +69,16 @@
     "@taucad/jobs": "workspace:*",
     "@taucad/mcp": "workspace:*",
     "@taucad/parameters": "workspace:*",
+    "@taucad/project-core": "workspace:*",
+    "@taucad/slicer": "workspace:*",
+    "@taucad/units": "workspace:*",
+    "@taucad/workbench": "workspace:*",
     "basic-ftp": "catalog:",
+    "diff": "^8.0.4",
+    "fflate": "catalog:",
+    "js-yaml": "catalog:",
+    "minimatch": "^10.2.5",
+    "safe-regex": "^2.1.1",
     "ws": "catalog:"
   },
   "peerDependencies": {
@@ -78,8 +87,8 @@
     "@taucad/revisions": "^0.1.0-beta.0",
     "@taucad/runtime": "^0.1.0-beta.0",
     "geospec": "^0.1.0-beta.0",
-    "zod": "^4.0.0",
-    "xstate": "^6.0.0-alpha.59"
+    "xstate": "^6.0.0-alpha.59",
+    "zod": "^4.0.0"
   },
   "peerDependenciesMeta": {
     "@taucad/geospec-engine": {

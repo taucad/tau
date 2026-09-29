@@ -61,12 +61,14 @@ const staticFamilies = new Map<string, ActivityFamily>([
   ['tool-create_file', 'edit'],
   ['tool-delete_file', 'edit'],
   ['tool-apply_parameter_operation', 'edit'],
+  ['tool-arrange_workbench', 'edit'],
   ['tool-get_kernel_result', 'render'],
   ['tool-screenshot', 'screenshot'],
   ['tool-test_model', 'test'],
 ]);
 
 const nativeFamilies = new Map<string, ActivityFamily>([
+  ['arrange_workbench', 'edit'],
   ['use_skill', 'skill'],
   ['read_file', 'read'],
   ['list_directory', 'read'],
@@ -236,9 +238,10 @@ export const classifyActivityPart = (part: MyMessagePart): ActivityCategory => {
     if (part.toolName === agentApprovalToolName) {
       return 'skip';
     }
-    return tauMcpToolName(part) === 'export_geometry' ? 'write' : 'research';
+    const nativeName = tauMcpToolName(part);
+    return nativeName === 'export_geometry' || nativeName === 'arrange_workbench' ? 'write' : 'research';
   }
-  if (part.type === 'tool-export_geometry') {
+  if (part.type === 'tool-export_geometry' || part.type === 'tool-arrange_workbench') {
     return 'write';
   }
   if (staticFamilies.has(part.type)) {

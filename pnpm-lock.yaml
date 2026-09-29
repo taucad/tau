@@ -54,12 +54,6 @@ catalogs:
     '@fastify/otel':
       specifier: ^0.17.1
       version: 0.17.1
-    '@getpaseo/protocol':
-      specifier: 0.7.0-beta.1
-      version: 0.7.0-beta.1
-    '@getpaseo/relay':
-      specifier: 0.7.0-beta.1
-      version: 0.7.0-beta.1
     '@gltf-transform/core':
       specifier: ^4.4.0
       version: 4.4.0
@@ -1474,12 +1468,6 @@ importers:
       '@eslint-community/eslint-plugin-eslint-comments':
         specifier: 'catalog:'
         version: 4.7.2(eslint@9.32.0(jiti@2.7.0)(supports-color@10.2.2))
-      '@getpaseo/protocol':
-        specifier: 'catalog:'
-        version: 0.7.0-beta.1
-      '@getpaseo/relay':
-        specifier: 'catalog:'
-        version: 0.7.0-beta.1
       '@nestjs/schematics':
         specifier: ^11.1.0
         version: 11.1.0(prettier@3.9.6)(typescript@5.9.3)
@@ -2189,6 +2177,7 @@ importers:
       '@taucad/rhino':
         specifier: workspace:*
         version: link:../../../packages/plugins/rhino
+    devDependencies:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../../packages/runtime
@@ -2988,9 +2977,6 @@ importers:
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../../packages/parameters
-      '@taucad/runtime':
-        specifier: workspace:*
-        version: link:../../packages/runtime
       '@taucad/slicer':
         specifier: workspace:*
         version: link:../../packages/plugins/slicer
@@ -3006,13 +2992,16 @@ importers:
       geospec:
         specifier: workspace:*
         version: link:../../packages/geospec
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   libs/api-extractor:
     dependencies:
@@ -3032,6 +3021,9 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:../utils
+      '@taucad/workbench':
+        specifier: workspace:*
+        version: link:../../packages/workbench
       ai:
         specifier: 'catalog:'
         version: 6.0.208(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
@@ -3047,9 +3039,6 @@ importers:
       safe-regex:
         specifier: ^2.1.1
         version: 2.1.1
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
       '@taucad/runtime':
         specifier: workspace:*
@@ -3057,6 +3046,9 @@ importers:
       '@types/js-yaml':
         specifier: 'catalog:'
         version: 4.0.9
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   libs/events: {}
 
@@ -3074,6 +3066,7 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:../utils
+    devDependencies:
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -3470,6 +3463,12 @@ importers:
 
   packages/filesystem:
     dependencies:
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../kinematics
+      '@taucad/project-core':
+        specifier: workspace:*
+        version: link:../core/project
       jszip:
         specifier: ^3.10.1
         version: 3.10.1
@@ -3638,9 +3637,36 @@ importers:
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../parameters
+      '@taucad/project-core':
+        specifier: workspace:*
+        version: link:../core/project
+      '@taucad/slicer':
+        specifier: workspace:*
+        version: link:../plugins/slicer
+      '@taucad/units':
+        specifier: workspace:*
+        version: link:../units
+      '@taucad/workbench':
+        specifier: workspace:*
+        version: link:../workbench
       basic-ftp:
         specifier: 'catalog:'
         version: 6.2.1
+      diff:
+        specifier: ^8.0.4
+        version: 8.0.4
+      fflate:
+        specifier: 'catalog:'
+        version: 0.8.3
+      js-yaml:
+        specifier: 'catalog:'
+        version: 4.3.0
+      minimatch:
+        specifier: ^10.2.5
+        version: 10.2.6
+      safe-regex:
+        specifier: ^2.1.1
+        version: 2.1.1
       ws:
         specifier: 'catalog:'
         version: 8.21.3
@@ -3743,6 +3769,12 @@ importers:
       '@taucad/cache-core':
         specifier: workspace:*
         version: link:../core/cache
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../kinematics
+      '@taucad/project-core':
+        specifier: workspace:*
+        version: link:../core/project
       '@taucad/units':
         specifier: workspace:*
         version: link:../units
@@ -4053,6 +4085,9 @@ importers:
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../../parameters
+      '@taucad/project-core':
+        specifier: workspace:*
+        version: link:../../core/project
       '@taucad/units':
         specifier: workspace:*
         version: link:../../units
@@ -4438,6 +4473,9 @@ importers:
       isomorphic-git:
         specifier: 'catalog:'
         version: 1.38.5
+      nanoid:
+        specifier: 'catalog:'
+        version: 5.1.14
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -4485,6 +4523,9 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../filesystem
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../kinematics
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../parameters
@@ -4619,6 +4660,9 @@ importers:
       '@taucad/replicad':
         specifier: workspace:*
         version: link:../plugins/replicad
+      '@taucad/workbench':
+        specifier: workspace:*
+        version: link:../workbench
       '@taucad/zoo':
         specifier: workspace:*
         version: link:../plugins/zoo
@@ -7573,12 +7617,6 @@ packages:
         optional: true
       tailwindcss:
         optional: true
-
-  '@getpaseo/protocol@0.7.0-beta.1':
-    resolution: {integrity: sha512-y7Kamolq1tUTWND2CWy+jsI5LHo+3tcmvtXyj9Jgl6o2FMbxQLdvDuIviGw1NJB59oyLvevEEuB5+s9P4svSeQ==}
-
-  '@getpaseo/relay@0.7.0-beta.1':
-    resolution: {integrity: sha512-y25sX8XnemjucKMl3TUqzQ6G7BY8OAWZoYNst4VHWVkZb2mQIzOKLvZfA7FziSKfFvR92RIrOCHBIbeGExrtVg==}
 
   '@gltf-transform/core@4.4.0':
     resolution: {integrity: sha512-cOPxOhHFFz5hwmix+li1+Nnq5qMV/QD3fTCsVlApxxFACtFdjkt2R/juseD4gvZ7D2c/yl6OilKH0pvI735YyQ==}
@@ -26328,9 +26366,6 @@ packages:
   tw-animate-css@1.4.0:
     resolution: {integrity: sha512-7bziOlRqH0hJx80h/3mbicLW7o8qLsH5+RaLR2t+OHM3D0JlWGODQKQ4cxbK7WlvmUxpcj6Kgu6EKqjrGFe3QQ==}
 
-  tweetnacl@1.0.3:
-    resolution: {integrity: sha512-6rt+RN7aOi1nGMyC4Xa5DdYiukl2UWCbcJft7YhxReBGQD7OAM8Pbxw6YMo4r2diNEA8FEmu32YOn9rhaiE5yw==}
-
   typanion@3.14.0:
     resolution: {integrity: sha512-ZW/lVMRabETuYCd9O9ZvMhAh8GslSqaUjxmK/JLPCh6l73CvLBiuXswj/+7LdnWOgYsQ130FqLzFz5aGT4I3Ug==}
 
@@ -30334,19 +30369,6 @@ snapshots:
     optionalDependencies:
       '@tailwindcss/oxide': 4.3.2
       tailwindcss: 4.3.3
-
-  '@getpaseo/protocol@0.7.0-beta.1':
-    dependencies:
-      zod: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-
-  '@getpaseo/relay@0.7.0-beta.1':
-    dependencies:
-      base64-js: 1.5.1
-      tweetnacl: 1.0.3
-      ws: 8.21.3
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
 
   '@gltf-transform/core@4.4.0':
     dependencies:
@@ -52325,8 +52347,6 @@ snapshots:
       '@mixmark-io/domino': 2.2.0
 
   tw-animate-css@1.4.0: {}
-
-  tweetnacl@1.0.3: {}
 
   typanion@3.14.0: {}
 

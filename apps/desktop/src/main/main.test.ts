@@ -867,6 +867,31 @@ describe('desktop main deep links', () => {
   );
 
   it(
+    'keeps an E2E window hidden when a deep link arrives',
+    async () => {
+      const previous = process.env['TAU_E2E_HIDE_WINDOW'];
+      process.env['TAU_E2E_HIDE_WINDOW'] = '1';
+      try {
+        await bootAndWait();
+        expect(fakeWindow.show).not.toHaveBeenCalled();
+        listener('open-url')({ preventDefault: vi.fn() }, 'tau://i/github.com/taucad/tau-examples');
+        await vi.waitFor(() => {
+          expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/import/github.com/taucad/tau-examples');
+        });
+        expect(fakeWindow.show).not.toHaveBeenCalled();
+        expect(fakeWindow.focus).not.toHaveBeenCalled();
+      } finally {
+        if (previous === undefined) {
+          delete process.env['TAU_E2E_HIDE_WINDOW'];
+        } else {
+          process.env['TAU_E2E_HIDE_WINDOW'] = previous;
+        }
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'should load an import link delivered by open-url',
     async () => {
       await bootAndWait();

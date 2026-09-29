@@ -122,6 +122,7 @@ const harness = async (
   const view: ComposedViewProxy = Object.assign(
     composeView({ filesystem: provider }, { consumer: 'user', overlays: [overlay()], policy: tauPathPolicy }),
     rootedConnectionMembers(),
+    { deleteFileChecked: async () => ({ status: 'unchanged', content: new Uint8Array() }) },
   );
   return {
     authority,

@@ -75,6 +75,7 @@
     "@taucad/picogk": "workspace:*",
     "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
+    "@taucad/workbench": "workspace:*",
     "@taucad/zoo": "workspace:*",
     "geospec": "workspace:*"
   }

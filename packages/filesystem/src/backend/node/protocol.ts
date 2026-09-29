@@ -14,8 +14,8 @@ import type { CheckedFileWriteResult } from '@taucad/types';
 import { assertRootedPath } from '@taucad/utils/path';
 import type { FileMode, FileStat, HeadFileStat } from '#types.js';
 
-/** Wire version. Bump on any incompatible request/response shape change. @public */
-export const nodeFsProtocolVersion = 3;
+/** Wire version. Version 4 requires both checked deletion and head listing. @public */
+export const nodeFsProtocolVersion = 4;
 
 /**
  * Watch event as it crosses the port. A superset of the library's
@@ -96,11 +96,39 @@ const checkedWriteRequestSchema = z
   .refine((request) => request.preconditions.some(({ path }) => path === request.path), {
     message: 'Checked writes require a destination precondition.',
   });
+const checkedDeleteRequestSchema = z
+  .object({
+    ...rooted,
+    op: z.literal('deleteFileChecked'),
+    path: rootedPathSchema,
+    preconditions: z
+      .array(z.object({ path: rootedPathSchema, expected: dataSchema.nullable() }))
+      .min(1)
+      .max(maximumCheckedWritePreconditions),
+  })
+  .refine((request) => request.preconditions.some(({ path }) => path === request.path), {
+    message: 'Checked deletes require a destination precondition.',
+  })
+  .refine(
+    (request) =>
+      request.preconditions.reduce(
+        (total, { expected }) =>
+          total +
+          (expected === null
+            ? 0
+            : typeof expected === 'string'
+              ? new TextEncoder().encode(expected).byteLength
+              : expected.byteLength),
+        0,
+      ) <= maximumCheckedWriteBytes,
+    { message: 'Checked delete request exceeds its byte budget.' },
+  );
 
 export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   z.object({ ...rooted, op: z.literal('readFile'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('writeFile'), path: z.string(), data: dataSchema }),
   checkedWriteRequestSchema,
+  checkedDeleteRequestSchema,
   z.object({ ...rooted, op: z.literal('readdir'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('readdirWithStats'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('readdirHeadWithStats'), path: z.string() }),
@@ -174,6 +202,7 @@ export const nodeFsResultSchemas = {
   readFile: bytesSchema,
   writeFile: z.undefined(),
   writeFileChecked: checkedWriteResultSchema,
+  deleteFileChecked: checkedWriteResultSchema,
   readdir: z.array(z.string()),
   readdirWithStats: z.array(z.object({ name: z.string() }).and(fileStatSchema)),
   readdirHeadWithStats: z.array(z.object({ name: z.string() }).and(headFileStatSchema)),

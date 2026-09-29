@@ -201,4 +201,16 @@ describe('renderSkill', () => {
       renderSkill({ slug: 'cad-wordy', title: 'Wordy', description: 'y'.repeat(161), doctrine: 'ok' }),
     ).toThrow(/over the 160 ceiling/u);
   });
+
+  it('bounds the approved workbench exception without relaxing other skills', () => {
+    expect(() =>
+      renderSkill({ slug: 'workbench', title: 'Workbench', description: 'x'.repeat(540), doctrine: 'ok' }),
+    ).not.toThrow();
+    expect(() =>
+      renderSkill({ slug: 'workbench', title: 'Workbench', description: 'x'.repeat(541), doctrine: 'ok' }),
+    ).toThrow(/over the 540 ceiling/u);
+    expect(() =>
+      renderSkill({ slug: 'workbench', title: 'Workbench', description: 'ok', doctrine: 'x'.repeat(9601) }),
+    ).toThrow(/over the 2400 ceiling/u);
+  });
 });

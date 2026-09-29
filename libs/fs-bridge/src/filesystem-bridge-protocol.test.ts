@@ -39,8 +39,21 @@ describe('head-only directory metadata', () => {
 /* A literal, so a bump is a deliberate edit to this line and not a silent one:
  * every other assertion in the suite now reads the constant (G0-11). */
 describe('filesystem bridge protocol version', () => {
-  it('should be 3', () => {
-    expect(fileSystemBridgeProtocolVersion).toBe(3);
+  it('should be 4', () => {
+    expect(fileSystemBridgeProtocolVersion).toBe(4);
+  });
+
+  it('rejects a version 3 peer', () => {
+    expect(() =>
+      fileSystemBridgeSchemas.hello.parse({
+        ...createFileSystemBridgeHello({
+          state: 'ready',
+          capabilities: { persistent: false, writable: true, quotaBased: false },
+          watchable: false,
+        }),
+        v: 3,
+      }),
+    ).toThrow('protocol version mismatch');
   });
 });
 

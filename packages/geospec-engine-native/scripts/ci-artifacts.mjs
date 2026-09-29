@@ -20,6 +20,7 @@ import {
   closeSync,
   constants,
   existsSync,
+  fstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,

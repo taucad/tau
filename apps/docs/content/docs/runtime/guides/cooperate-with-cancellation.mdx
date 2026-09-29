@@ -29,7 +29,7 @@ export const calibrationMiddleware = defineMiddleware({
   id: 'calibration',
   name: 'Calibration',
 
-  async wrapCreateGeometry(input, handler, { signal }) {
+  async wrapEvaluate(input, handler, { signal }) {
     signal.throwIfAborted();
 
     const response = await fetch(`/api/calibration?entry=${encodeURIComponent(input.entryPath)}`, {
@@ -57,7 +57,7 @@ export const calibrationMiddleware = defineMiddleware({
 
 ## Middleware dependency hooks
 
-`getDependencies` receives `MiddlewareDependencyRuntime` as its second argument, with `options` beside `signal`, `filesystem`, and `logger`:
+`resolve` receives `MiddlewareDependencyServices` as its second argument, with `options` beside `signal`, `filesystem`, and `logger`:
 
 ```typescript
 import { defineMiddleware } from '@taucad/runtime/middleware';
@@ -70,14 +70,14 @@ export const calibrationFiles = defineMiddleware({
     directory: z.string().default('.tau/calibration'),
   }),
 
-  async getDependencies({ entryPath }, { filesystem, options, signal }) {
+  async resolve({ entryPath }, { filesystem, options, signal }) {
     signal.throwIfAborted();
 
     const path = `${options.directory}/${entryPath}.json`;
-    await filesystem.stat(path);
+    await filesystem.exists(path);
 
     signal.throwIfAborted();
-    return [{ path, watchDebounce: 0 }];
+    return [{ path, affects: ['evaluate'], watchDebounce: 0 }];
   },
 });
 ```
@@ -86,7 +86,7 @@ The runtime performs its own cancellation checks around filesystem boundaries. E
 
 ## Kernel methods
 
-`KernelRuntime.signal` is the same operation signal middleware sees. Pass it to the engine's native cancellation API when one exists — `fetch(url, { signal })` for a remote engine, for example. When an engine exposes a callback-style `cancel()` instead, adapt it with a once-only listener and remove the listener in `finally`:
+`KernelServices.signal` is the same operation signal middleware sees. Pass it to the engine's native cancellation API when one exists — `fetch(url, { signal })` for a remote engine, for example. When an engine exposes a callback-style `cancel()` instead, adapt it with a once-only listener and remove the listener in `finally`:
 
 ```typescript
 type CancellableEngine = {
@@ -114,7 +114,7 @@ The listener must belong to one operation. Never register it during persistent k
 
 ## Custom bundlers
 
-`detectImports`, `bundle`, and `execute` use the same `(input, runtime, context)` contract; `BundlerRuntime.signal` sits on the second argument. Initialization and cleanup are lifecycle-scoped rather than operation-scoped, so they receive no render signal — store durable bundler state in `context` and use only the per-call runtime for cancellation. See [Configure the Bundler](./bundler-configuration) for the full author contract.
+`detectImports`, `bundle`, and `execute` use `(input, services, context)`; `BundlerServices.signal` sits on the second argument. Initialization and `onDispose` are lifecycle-scoped rather than operation-scoped, so they receive no render signal — store durable bundler state in `context` and use only the per-call services for cancellation. See [Configure the Bundler](./bundler-configuration) for the full author contract.
 
 ## What cancellation cannot do
 

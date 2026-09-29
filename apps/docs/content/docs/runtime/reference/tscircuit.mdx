@@ -24,23 +24,19 @@ export default () => (
 
 Traces use tscircuit selectors (`.R1 > .pin1`, `net.GND`). Optional `defaultParameters` exports become editable parameters that Tau passes to the component as props.
 
-## Outputs and the `output` render option
+## Views and exports
 
-The kernel declares one render option:
+One evaluation retains the settled circuit JSON. It offers these separately declared views from that handle:
 
-```typescript
-render: {
-  optionsSchema: z.object({ output: z.enum(['3d', 'schematic', 'pcb']).default('3d') });
-}
-```
-
-| `output`    | Artifact                        |
+| View ID     | Artifact                        |
 | ----------- | ------------------------------- |
-| `3d`        | GLB board with component bodies |
+| `board`     | GLB board with component bodies |
 | `schematic` | Schematic SVG                   |
 | `pcb`       | PCB layout SVG                  |
 
-Pass it through `client.render({ source, renderOptions: { output: 'pcb' } })`. Each value is its own render identity: the runtime caches output kinds separately and never re-evaluates the circuit when switching. Exports derive from the retained circuit JSON: `glb`, `csv` (BOM), `txt` (readable netlist), and `json` (circuit JSON).
+The kernel declares export IDs `board` (GLB), `bom` (CSV), `netlist` (text), and `circuit` (JSON). Each has its own title, MIME type, extension, and optional options schema. A schematic-only result may offer only the schematic view; the ordered offers are returned by `evaluate`.
+
+The current client renders the first offered view and still addresses exports by extension. It cannot select `schematic` or `pcb` through a global `renderOptions.output` setting; explicit view selection arrives with the W3 document-view client migration. Kernel authors can already call the v2 `evaluate`/`render` hooks directly in isolated tests.
 
 ## Offline behaviour
 

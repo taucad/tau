@@ -46,7 +46,7 @@ This creates the package baseline; the kernel stub is intentionally non-function
 | `tsdown.config.ts`, `tsconfig*.json`, `vitest.config.ts`, `project.json`, `README.md`, `CHANGELOG.md`, `LICENSE`, `.size-limit.json` | Shared Tau conventions and a placeholder budget that must be measured before release              |
 | `src/index.ts`                                                                                                                       | `export { <alias>, <alias> as plugin } from '#<name>.plugin.js';` plus `export { <alias>Kernel }` |
 | `src/<name>.plugin.ts`                                                                                                               | `definePlugin` wiring the kernel into `kernels.default` and a `default` preset                    |
-| `src/<name>.kernel.ts`                                                                                                               | A `defineKernel` **stub** importing only from `@taucad/runtime/kernel`                            |
+| `src/<name>.kernel.ts`                                                                                                               | A v2 `defineKernel` **stub** with `views`, `exports`, `resolve`, `describe`, and `evaluate`       |
 | `src/<name>.plugin.test.ts`                                                                                                          | Alias-identity test, capability-id assertions, and (for `hostTarget: browser`) the payload guard  |
 | `src/<name>.plugin.test-d.ts`                                                                                                        | Type-level alias identity                                                                         |
 | `AGENTS.md`                                                                                                                          | Plugin identity, `kernel` capability, selected host, entrypoints, Nx commands and owner links     |
@@ -84,64 +84,69 @@ To change conventions for future packages, edit `tools/workspace-plugin/src/gene
 
 ```typescript
 import {
-  createKernelError,
+  createKernelParameterDeclaration,
   createKernelSuccess,
   defineKernel,
-  finalizeRenderOutput,
+  nonemptyExportFiles,
 } from '@taucad/runtime/kernel';
-import { createExportFile } from '@taucad/runtime/types';
 
 export const <alias>Kernel = defineKernel({
   id: '<name>',
   extensions: ['<ext>'],
   name: '<Name>Kernel',
   version: '1.0.0',
-  optionsSchema, // factory/initialize options (optional)
-  createOptionsSchema, // construction-affecting createGeometry input options (optional)
-  render: { optionsSchema: renderSchema, content: ['includeEdges'] }, // either field may be omitted
-  exportFormats: { glb: { optionsSchema: glbSchema } },
+  // optionsSchema configures initialize; evaluateOptionsSchema changes construction.
+  views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+  exports: { stl: { title: 'STL', mimeType: 'model/stl', extension: 'stl' } },
 
-  async initialize(options, runtime) {
-    /* load WASM/SDK; the return value becomes the kernel context */
+  async initialize(_options, _services) {
+    return { backend: await loadBackend() };
   },
-  async getDependencies({ entryPath }, runtime) {
-    /* usually runtime.bundler.resolveDependencies(entryPath) for JS/TS */
+  async resolve({ entryPath }, services) {
+    return services.bundler.resolveDependencies(entryPath);
   },
-  async getParameters({ entryPath }, runtime, context) {
-    /* extract defaults; return createKernelSuccess({ defaultParameters, jsonSchema }) */
+  async describe(_input, _services, _context) {
+    return createKernelSuccess({
+      parameters: createKernelParameterDeclaration(
+        {}, { type: 'object', properties: {}, additionalProperties: false },
+        { id: 'urn:taucad:<name>:parameters', name: '<Name>Parameters' },
+      ),
+    });
   },
-  async createGeometry({ entryPath, parameters }, runtime, context) {
-    /* bundle + execute user code */
-    return finalizeRenderOutput({ artifacts: [geometry], nativeHandle });
+  async evaluate({ entryPath, parameters }, services, context) {
+    const source = await services.filesystem.readFile(entryPath, 'utf8');
+    const handle = await context.backend.build(source, parameters);
+    return { handle, views: ['model'], exports: ['stl'] };
   },
-  async exportGeometry({ format, nativeHandle }, runtime, context) {
-    const bytes = new Uint8Array(); // replace with the backend export
-    return createKernelSuccess([createExportFile(format, `model.${format}`, bytes)]);
+  async render({ handle }, _services, context) {
+    return { content: await context.backend.renderGlb(handle) };
   },
-  serializeNativeHandle({ nativeHandle }, runtime, context) {
-    /* return a structured-cloneable durable snapshot */
+  async write({ handle }, _services, context) {
+    const bytes = await context.backend.writeStl(handle);
+    return { files: nonemptyExportFiles([{ name: 'model.stl', mimeType: 'model/stl', bytes }]) };
   },
-  deserializeNativeHandle({ serializedNativeHandle }, runtime, context) {
-    /* restore the native handle; define both snapshot hooks or neither */
+  serializeHandle({ handle }, _services, context) {
+    return context.backend.serialize(handle);
   },
-  async cleanup(context) {
-    /* release WASM/manual resources (optional but recommended) */
+  deserializeHandle({ serialized }, _services, context) {
+    return context.backend.deserialize(serialized);
+  },
+  async onDispose(context) {
+    await context.backend.dispose();
   },
 });
 ```
 
 Key patterns:
 
-- `runtime.bundler.registerModule(name, { code, version })` for built-in module registration
-- `runtime.bundler.bundle(entryPath)` + `runtime.execute(code)` for user code
-- `getParameters` returns `createKernelSuccess({ defaultParameters, jsonSchema })` or `createKernelError(issues)`
-- `createGeometry`/`meshGeometry` return `finalizeRenderOutput({ artifacts, nativeHandle })`; this finalizes render content and preserves the handle for mesh/export
-- `exportGeometry` returns `createKernelSuccess([createExportFile(format, name, bytes)], issues?)` or `createKernelError(issues)`
-- Add `serializeNativeHandle` and `deserializeNativeHandle` together when native handles can be cached; snapshots must be structured-cloneable
-- Throw an `Error` with an `.issues` array (custom `*BuildError`) for fatal geometry failures so the framework returns structured issues
-- Prefer stack-enrichment utilities from `@taucad/runtime/kernel` for JS/TS kernels
-- Keep backend payloads inside `initialize()` and the returned context — never in module-level caches
-- Follow `docs/policy/geometry-naming-policy.md` for shape labels, glTF node/mesh names, generated materials, scenes, component IDs, selectors, native handles, diagnostics, imports, and export artifact names
+- Declare keyed `views` and `exports` with title and MIME type; exports also name a file extension. Add route-specific `optionsSchema` and `content` only when the route fulfills them.
+- `evaluate` returns one opaque handle and ordered offered view/export IDs; the first offered view is the default for the current client bridge. A kernel may offer exports without views. Optional `instances` on a declared view names alternatives for the same evaluated handle.
+- `render` reads the handle and must not mutate it or re-evaluate source. It returns content; the runtime attaches the declared MIME type. `write` returns at least one file with `nonemptyExportFiles` and can use an open MIME type.
+- `services.bundler.registerModule(name, { code, version })`, `services.bundler.bundle(entryPath)` and `services.execute(code)` are available for JS/TS kernels. Services are operation-scoped; backend state stays in the context returned by `initialize`.
+- `describe` returns `createKernelSuccess({ parameters: declaration })` or `createKernelError(issues)`. `resolve` returns runtime paths.
+- Pair `serializeHandle` and `deserializeHandle` for retained handles; snapshots must be structured-cloneable. Use `releaseHandle` for per-handle resources and `onDispose` for backend teardown.
+- Throw an `Error` with `.issues` for fatal backend failures so the framework returns structured issues; keep backend payloads in `initialize()` and its context rather than module-level caches.
+- Follow `docs/policy/geometry-naming-policy.md` for shape labels, glTF nodes/meshes, scenes, selectors, diagnostics and export artifact names.
 
 Every production helper a kernel needs belongs on an appropriate public runtime author surface (`/kernel`, `/plugin`, or `/types`). If a cross-kernel production helper is missing, promote it to the relevant public entry (see `docs/research/kernel-package-extraction.md`, Finding F3) — never reach into `@taucad/runtime`'s `#` internals or move test-only support back into runtime.
 
@@ -199,9 +204,9 @@ Callers own clients returned by `createTestRuntimeClient` and always shut them d
 
 ### Minimum coverage
 
-- `getParameters` — defaults extraction + empty fallback
-- `createGeometry` — happy path + parameterized + error cases
-- `exportGeometry` — supported and unsupported formats + no-geometry failure
+- `describe` — defaults extraction + empty fallback
+- `evaluate` — handle, offers, parameterized and error cases
+- `render` / `write` — offered view and export IDs, route options, nonempty artifacts and no-handle failure
 - Geometry naming — parse GLB/glTF output and assert node/mesh parity, material/scene naming, component IDs/selectors, and artifact filenames per `docs/policy/geometry-naming-policy.md`
 
 Reference quality bar: `packages/plugins/openrscad/src/openrscad.kernel.test.ts`.

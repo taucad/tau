@@ -39,7 +39,7 @@ Concrete kernels ship in their own packages. Each package declares a package-nam
 
 No first-party kernel uses `'*'`. Import formats are owned by explicit backend kernels.
 
-`@taucad/opencascade-native` targets Node hosts. `@taucad/openrscad` needs no twin: its engine binds the N-API addon or WebAssembly build by export condition, and `backend` says which. Build123d additionally requires an explicit packaged interpreter/resource manifest and a host-owned project trust marker; it never falls back to system Python. tscircuit selects its artifact through the `output` render option; see [tscircuit](../reference/tscircuit).
+`@taucad/opencascade-native` targets Node hosts. `@taucad/openrscad` needs no twin: its engine binds the N-API addon or WebAssembly build by export condition, and `backend` says which. Build123d additionally requires an explicit packaged interpreter/resource manifest and a host-owned project trust marker; it never falls back to system Python. tscircuit offers separate board, schematic, and PCB views; see [tscircuit](../reference/tscircuit).
 
 ## Toolkit composition
 
@@ -65,7 +65,7 @@ export const runtime = defineRuntime({
 });
 ```
 
-Backends load in the selected kernel's `initialize()` and live in its context. Toolkit namespaces never rewrite flat capability IDs.
+Backends load in the selected kernel's `initialize()` and live in its context. Kernels declare keyed `views` and `exports`, and `evaluate` returns the IDs currently offered. `render` projects a selected view from the retained handle; `write` produces files for a selected export. Toolkit namespaces never rewrite flat capability IDs.
 
 ## Related
 

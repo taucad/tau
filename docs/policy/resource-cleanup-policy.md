@@ -3,7 +3,7 @@ title: 'Resource Cleanup Policy'
 description: 'Disposable interface, semantic vocabulary (close/terminate/stop), DisposableStore, toDisposable, and cleanup naming conventions.'
 status: active
 created: '2026-03-10'
-updated: '2026-03-10'
+updated: '2026-09-30'
 related:
   - docs/policy/library-api-policy.md
 ---
@@ -268,8 +268,8 @@ Lifecycle hooks called by the framework follow the `on*` prefix convention ([Lib
 ```typescript
 // CORRECT: follows on* convention
 type KernelDefinition = {
-  onInitialize(input, runtime): Promise<Context>;
-  onCreateGeometry(input, runtime, context): Promise<Result>;
+  initialize(options, services): Promise<Context>;
+  evaluate(input, services, context): Promise<Result>;
   onDispose?(context): Promise<void>;
 };
 
@@ -321,15 +321,11 @@ Permitted uses of `cleanup`:
 - **Domain-specific maintenance** that is not lifecycle teardown: `cleanupOldCacheEntries()`, `cleanupStaleSessions()`. These are operational housekeeping, not resource disposal.
 - **Internal implementation detail** inside a function body (local variable name in a `finally` block) where no public API is exposed.
 
-Migrate existing `cleanup` methods:
+The v2 plugin contract uses `onDispose` for kernel, bundler, and transcoder hooks. The framework calls each hook during disposal; a bundler's hook must not be skipped. Runtime-owned objects expose `dispose()` (or their semantic close/terminate method), independently of plugin hook naming. The current worker protocol still carries an internal `cleanup` command during graceful shutdown; that command is not an author hook and should not be exposed as one.
 
 - `KernelDefinition.cleanup?()` → `KernelDefinition.onDispose?()`
 - `BundlerDefinition.cleanup?()` → `BundlerDefinition.onDispose?()`
-- `KernelWorker.cleanup()` → `KernelWorker.dispose()`
-- `KernelWorker.onCleanup()` → `KernelWorker.onDispose()`
-- `RuntimeWorkerClient.cleanup()` → `RuntimeWorkerClient.dispose()`
-- `ErrorTrap.cleanup` → `ErrorTrap.dispose`
-- `EngineConnection.cleanup()` → `EngineConnection.dispose()`
+- `TranscoderDefinition.cleanup?()` → `TranscoderDefinition.onDispose?()`
 
 ## 11. Async Dispose
 

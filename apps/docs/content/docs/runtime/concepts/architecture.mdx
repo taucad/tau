@@ -168,13 +168,13 @@ Four layers stack inside the topology; each depends only on the one below.
 
 **Framework layer.** [`KernelRuntimeWorker`](./worker-model) runs inside the kernel worker and orchestrates [kernel selection](./kernel-selection), the [middleware chain](./middleware-model), the lazily loaded bundler for JS/TS kernels, the [render loop](./render-lifecycle), and cooperative abort.
 
-**Kernel layer.** Kernels are plain objects from `defineKernel`, implementing `getDependencies`, `getParameters`, `createGeometry`, and `exportGeometry`. No inheritance; state lives in the context returned by `initialize()`. See [Plugin System](./plugin-system).
+**Kernel layer.** Kernels are plain objects from `defineKernel`, implementing `resolve`, `describe`, and `evaluate`, plus `render` for declared views and `write` for declared exports. No inheritance; state lives in the context returned by `initialize()`. See [Plugin System](./plugin-system).
 
 ## Key Relationships
 
 - **Editor and filesystem:** file writes travel over Bridge A and trigger autonomous re-renders. The main thread never writes files through the kernel worker.
 - **Worker and filesystem:** the kernel worker reads and watches over Bridge B, scoped to the current dependency graph. With an inline Node filesystem (`fromNodeFs`) there is no File Manager Worker: the adapter watches host directories and delivers the same events in-isolate.
-- **Framework and kernel:** the framework loads kernel modules, initializes them, and invokes their methods with a `KernelRuntime` (filesystem, logger, bundler, execute, tracer).
+- **Framework and kernel:** the framework loads kernel modules, initializes them, and invokes their methods with a `KernelServices` (filesystem, logger, bundler, execute, tracer).
 - **Middleware and kernel:** middleware never references the kernel; it calls `handler(input)` to continue the chain.
 
 ## Implications

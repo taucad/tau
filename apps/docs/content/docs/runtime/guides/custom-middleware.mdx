@@ -16,7 +16,7 @@ Build middleware with `defineMiddleware` from `@taucad/runtime/middleware`. Midd
 
 ### 1. Wrap an operation
 
-Implement `wrapCreateGeometry` (or `wrapGetParameters`, `wrapExportGeometry`). The third argument is the operation runtime — destructure `logger`, `filesystem`, `dependencyHash`, `signal`, `state`, and `options` from it as needed:
+Implement `wrapEvaluate` (or `wrapDescribe`, `wrapWrite`). The third argument is the operation runtime — destructure `logger`, `filesystem`, `dependencyHash`, `signal`, `state`, and `options` from it as needed:
 
 ```typescript
 import { defineMiddleware } from '@taucad/runtime/middleware';
@@ -24,7 +24,7 @@ import { defineMiddleware } from '@taucad/runtime/middleware';
 const loggingMiddleware = defineMiddleware({
   id: 'logging',
   name: 'Logging',
-  async wrapCreateGeometry(input, handler, { logger }) {
+  async wrapEvaluate(input, handler, { logger }) {
     logger.debug('Computing geometry...');
     const result = await handler(input);
     logger.debug('Geometry computed');
@@ -39,10 +39,10 @@ const loggingMiddleware = defineMiddleware({
 
 ```typescript
 import { defineMiddleware } from '@taucad/runtime/middleware';
-import type { CreateGeometryResult } from '@taucad/runtime';
+import type { EvaluateResult } from '@taucad/runtime/types';
 import { z } from 'zod';
 
-const cache = new Map<string, { value: CreateGeometryResult; expiresAt: number }>();
+const cache = new Map<string, { value: EvaluateResult; expiresAt: number }>();
 
 const configurableCacheMiddleware = defineMiddleware({
   id: 'configurable-cache',
@@ -54,7 +54,7 @@ const configurableCacheMiddleware = defineMiddleware({
   stateSchema: z.object({
     cacheKey: z.string().optional(),
   }),
-  async wrapCreateGeometry(input, handler, { options, state, dependencyHash }) {
+  async wrapEvaluate(input, handler, { options, state, dependencyHash }) {
     if (!options.enabled) {
       return handler(input);
     }
@@ -72,7 +72,7 @@ const configurableCacheMiddleware = defineMiddleware({
 });
 ```
 
-`dependencyHash` is the framework's pre-computed SHA-256 hash over the operation's dependency set — the same key the first-party caches use.
+`dependencyHash` is the framework's pre-computed SHA-256 hash over the operation's dependency set. Cache the complete `EvaluateResult`, including offered view/export IDs and the exact native replay carrier when present; a result without those fields cannot safely stand in for evaluation.
 
 ### 3. Export and register the factory
 
@@ -84,6 +84,7 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad } from '@taucad/replicad';
 import { esbuild } from '@taucad/esbuild';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { myCache } from './examples/my-cache.middleware';
 
 const runtime = defineRuntime({
@@ -92,23 +93,23 @@ const runtime = defineRuntime({
 });
 
 const client = createRuntimeClient({
-  transport: inProcessTransport({ runtime }),
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
 
 ### 4. Declare operation-scoped dependencies
 
-Use `getDependencies` when a file affects an operation. `affects` is required; list only the operations whose result changes when the file changes:
+Use `resolve` when a file affects an operation. `affects` is required; list only the operations whose result changes when the file changes:
 
 ```typescript
 const metadataMiddleware = defineMiddleware({
   id: 'metadata',
   name: 'Metadata',
-  getDependencies({ entryPath }) {
+  resolve({ entryPath }) {
     return [
       {
         path: `${entryPath}.metadata.json`,
-        affects: ['createGeometry'],
+        affects: ['evaluate'],
         watchDebounce: 100,
       },
     ];
@@ -116,12 +117,12 @@ const metadataMiddleware = defineMiddleware({
 });
 ```
 
-Dependency scope is not inferred from wrap hooks. The available operation names are `getParameters`, `createGeometry`, `meshGeometry`, and `exportGeometry`.
+Dependency scope is not inferred from wrap hooks. The available operation names are `describe`, `evaluate`, `render`, and `write`.
 
 ## Variations
 
 - **Cancellation**: Destructure the fresh operation `signal`, pass it to cancellable APIs, and never retain it after the hook settles — see [Cooperate with Cancellation](./cooperate-with-cancellation).
-- **Other hooks**: Implement `wrapGetParameters` or `wrapExportGeometry` when the concern spans those operations.
+- **Other hooks**: Implement `wrapDescribe`, `wrapRender`, or `wrapWrite` for the corresponding operation. `wrapRender` receives a selected `view` and `mimeType`; `wrapWrite` receives a selected `exportId`, `mimeType`, and `extension`. Declare middleware content under `content.views[mimeType]` or `content.exports[extension]`; only that selected route’s keys reach its hook.
 
 ## Related
 

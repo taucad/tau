@@ -130,7 +130,7 @@ parentId: 'kernel-group',
 data: {
 label: 'Middleware Chain',
 description:
-'Onion-model wrappers around createGeometry, getParameters, and exportGeometry. Each middleware calls handler(input) to continue the chain. No direct kernel reference.',
+'Onion-model wrappers around describe, evaluate, render, and write. Each middleware calls the next handler to continue the chain. No direct kernel reference.',
 },
 },
 {
@@ -141,7 +141,7 @@ parentId: 'kernel-group',
 data: {
 label: 'Kernel Modules',
 description:
-'Plain objects from defineKernel(). Implement getDependencies, getParameters, createGeometry, and exportGeometry. State lives in a context returned by initialize().',
+'Plain objects from defineKernel(). Implement resolve, describe, and evaluate, plus render for views and write for exports. State lives in a context returned by initialize().',
 },
 },
 {

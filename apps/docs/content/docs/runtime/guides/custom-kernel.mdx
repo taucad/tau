@@ -16,84 +16,64 @@ Integrate a new CAD engine by implementing the kernel lifecycle with `defineKern
 
 ### 1. Implement the kernel definition
 
-`defineKernel` takes a single config object. Provide `id`, `extensions`, `initialize`, `getDependencies`, `getParameters`, `createGeometry`, and `exportGeometry`; `cleanup` is optional. Return successes with `createKernelSuccess`, failures with `createKernelError`, and geometry through `finalizeRenderOutput`:
+`defineKernel` takes one definition with static `views` and `exports` maps. Provide `initialize`, `resolve`, `describe`, and `evaluate`; add `render` when views are declared and `write` when exports are declared. `evaluate` returns an opaque handle and the ordered IDs offered for this result. The first offered view is the default. `render` returns only the selected view's content, and a successful `write` returns a nonempty file tuple:
 
 ```typescript
 import {
-  createKernelSuccess,
-  createKernelError,
   createKernelParameterDeclaration,
+  createKernelSuccess,
   defineKernel,
-  finalizeRenderOutput,
+  nonemptyExportFiles,
 } from '@taucad/runtime/kernel';
-import type { GeometryResponse } from '@taucad/runtime/types';
-import { z } from 'zod';
 
-type MyContext = {
-  engine: unknown;
-};
-
-type MyNativeHandle = null;
+const toSvg = (source: string): string =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><text>${source.length}</text></svg>`;
 
 export const myKernel = defineKernel({
   id: 'my-kernel',
   extensions: ['myformat'],
   name: 'MyKernel',
   version: '1.0.0',
-  exportFormats: {
-    glb: { optionsSchema: z.object({}).strict() },
-  },
+  views: { drawing: { title: 'Drawing', mimeType: 'image/svg+xml' } },
+  exports: { drawing: { title: 'Drawing', mimeType: 'image/svg+xml', extension: 'svg' } },
 
-  async initialize(_options, _runtime): Promise<MyContext> {
-    return { engine: null };
+  async initialize() {
+    return {};
   },
-
-  async getDependencies({ entryPath }, _runtime, _context) {
+  async resolve({ entryPath }) {
     return { resolved: [entryPath], unresolved: [] };
   },
-
-  async getParameters(input, runtime, _context) {
-    return createKernelSuccess(
-      createKernelParameterDeclaration(
+  async describe() {
+    return createKernelSuccess({
+      parameters: createKernelParameterDeclaration(
         {},
-        {
-          type: 'object',
-          properties: {},
-          additionalProperties: false,
-        },
-        { id: 'urn:taucad:my-kernel:parameters', name: 'MyKernelParameters' },
+        { type: 'object', properties: {}, additionalProperties: false },
+        { id: 'urn:taucad:docs:my-kernel', name: 'MyKernelParameters' },
       ),
-    );
+    });
   },
-
-  async createGeometry({ entryPath }, { filesystem }, _context) {
-    const code = await filesystem.readFile(entryPath, 'utf8');
-    const geometry: GeometryResponse = {
-      format: 'svg',
-      content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><text>${code.length}</text></svg>`,
-    };
-    const nativeHandle: MyNativeHandle = null;
-    return finalizeRenderOutput({ artifacts: [geometry], nativeHandle });
+  async evaluate({ entryPath }, services) {
+    const source = await services.filesystem.readFile(entryPath, 'utf8');
+    return { handle: { source }, views: ['drawing'], exports: ['drawing'] };
   },
-
-  async exportGeometry({ format, nativeHandle }, { logger }, _context) {
-    if (format !== 'glb') {
-      return createKernelError([
+  async render({ handle }) {
+    return { content: toSvg(handle.source) };
+  },
+  async write({ handle }) {
+    return {
+      files: nonemptyExportFiles([
         {
-          message: `Unsupported export format: ${format}`,
-          code: 'RUNTIME',
-          type: 'runtime',
-          severity: 'error',
+          name: 'model.svg',
+          mimeType: 'image/svg+xml',
+          bytes: new TextEncoder().encode(toSvg(handle.source)),
         },
-      ]);
-    }
-    const glbData = new Uint8Array();
-    return createKernelSuccess([{ name: 'model.glb', bytes: glbData, mimeType: 'model/gltf-binary' }]);
+      ]),
+    };
   },
 });
 ```
 
-Lifecycle methods receive the `KernelRuntime` as their second parameter: `filesystem`, `logger`, `signal`, `fileContentCache`, `bundler`, `tracer`, and `execute`. The value `initialize` returns is your context, passed as the third parameter to every later call.
+Lifecycle methods receive the `KernelServices` as their second parameter: `filesystem`, `logger`, `signal`, `fileContentCache`, `bundler`, `tracer`, and `execute`. The value `initialize` returns is your context, passed as the third parameter to every later call.
 
 ### 2. Register and use the kernel
 
@@ -115,7 +95,7 @@ const runtime = defineRuntime({
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
-const result = await client.export('glb', {
+const result = await client.export('svg', {
   source: { files: { 'model.myformat': '/* my custom format */' } },
 });
 
@@ -126,17 +106,17 @@ if (result.success) {
 }
 ```
 
-The `myformat` extension selects the kernel; see [Live Rendering](./live-rendering) for UI viewers.
+The `myformat` extension selects the kernel. The current client bridges to the first offered view and still addresses exports by file extension. Explicit view and export IDs in the client are part of the W3 document-view migration; the kernel authoring contract already uses them. See [Live Rendering](./live-rendering) for UI viewers.
 
 ### 3. Report real dependencies
 
-`getDependencies` returns every file path that affects the geometry. The framework uses the set for change detection, cache keys, and — in autonomous mode — watch-subscription scoping. Resolve relative import specifiers against the entry with `resolveImportPath`:
+`resolve` returns every file path that affects the geometry. The framework uses the set for change detection, cache keys, and — in autonomous mode — watch-subscription scoping. Resolve relative import specifiers against the entry with `resolveImportPath`:
 
 ```typescript
 import { resolveImportPath } from '@taucad/runtime/kernel';
 import type { KernelFileSystem } from '@taucad/runtime/kernel';
 
-export async function getDependencies(
+export async function resolve(
   { entryPath }: { entryPath: string },
   { filesystem }: { filesystem: KernelFileSystem },
 ): Promise<{ resolved: string[]; unresolved: string[] }> {
@@ -154,18 +134,19 @@ export async function getDependencies(
 
 ### 4. Extract parameters for parametric models
 
-`getParameters` returns a parameter declaration built by `createKernelParameterDeclaration(defaults, schema, identity)` and wrapped in `createKernelSuccess`; hosts generate parameter UI from the JSON Schema. Parse your format's parameter declarations however the engine defines them — the Replicad and JSCAD kernel sources show complete implementations.
+`describe` returns a parameter declaration built by `createKernelParameterDeclaration(defaults, schema, identity)` and wrapped in `createKernelSuccess`; hosts generate parameter UI from the JSON Schema. Parse your format's parameter declarations however the engine defines them — the Replicad and JSCAD kernel sources show complete implementations.
 
 ## Variations
 
 - **optionsSchema**: Add a Zod schema to validate kernel options; the inferred type flows to `initialize(options)`.
-- **render / exportFormats**: Colocate plugin-owned option schemas and framework-owned content declarations with each logical route. Only declare content the route fulfills natively.
-- **cleanup**: Implement `cleanup(context)` to tear down WASM instances or temp files when the worker is disposed.
+- **views / exports**: Colocate each route's title, MIME type, options schema, and content declaration. Exports also declare an extension; views may declare `instances: true` and return named instances from `evaluate`. Only offer routes the current handle can fulfill.
+- **evaluateOptionsSchema**: Add a Zod object schema for construction-affecting evaluation options; the inferred value reaches `evaluate({ options })`. Route-specific options belong on the selected view or export declaration.
+- **onDispose**: Implement `onDispose(context)` to release WASM instances or temporary resources when the worker is disposed. Render the same handle without changing it; release retained handles through `releaseHandle` when needed.
 - **detectImport / builtinModuleNames**: For JS/TS kernels, add `detectImport` (RegExp) or `builtinModuleNames` so the framework can select your kernel from imports.
-- **Bundler integration**: JS/TS kernels use `runtime.bundler` and `runtime.execute` — see [Configure the Bundler](./bundler-configuration).
+- **Bundler integration**: JS/TS kernels use `services.bundler` and `services.execute` — see [Configure the Bundler](./bundler-configuration).
 
 ## Related
 
 - [Plugin System](../concepts/plugin-system) — How kernels are loaded and selected
 - [API Reference: Kernels](../api/kernels) — KernelPlugin and kernel factory functions
-- [API Reference: Types](../api/types) — KernelRuntime, CreateGeometryInput, and related types
+- [API Reference: Types](../api/types) — KernelServices, EvaluateInput, RenderInput, and WriteInput

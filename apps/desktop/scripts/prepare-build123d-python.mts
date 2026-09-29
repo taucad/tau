@@ -12,6 +12,8 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
+// oxlint-disable-next-line no-restricted-imports -- this private script helper has no package import mapping.
+import { replaceResourceDirectory, verifyOcpWheel } from './build123d-wheel-integrity.mjs';
 
 type Target = {
   readonly archive: string;
@@ -145,9 +147,12 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   const workerFiles = ['worker.py', 'analyzer.py', 'glb.py'] as const;
   const sourceFilesSha256 = createHash('sha256');
   const sourceContents = await Promise.all(
-    [...workerFiles.map((name) => resolve(pythonSourceRoot, name)), topologySchema, import.meta.filename].map(
-      async (path) => readFile(path),
-    ),
+    [
+      ...workerFiles.map((name) => resolve(pythonSourceRoot, name)),
+      topologySchema,
+      import.meta.filename,
+      resolve(import.meta.dirname, 'build123d-wheel-integrity.mts'),
+    ].map(async (path) => readFile(path)),
   );
   for (const contents of sourceContents) {
     sourceFilesSha256.update(contents);
@@ -158,6 +163,7 @@ const prepareTarget = async (targetName: string): Promise<void> => {
       sourceArchiveSha256?: string;
       requirementsSha256?: string;
       sourceFilesSha256?: string;
+      ocpWheelRecordSha256?: string;
       sbom?: { readonly path?: string; readonly sha256?: string };
     };
     if (
@@ -165,7 +171,13 @@ const prepareTarget = async (targetName: string): Promise<void> => {
       installed.requirementsSha256 === (await digest(requirementsLock)) &&
       installed.sourceFilesSha256 === expectedSourceFilesSha256 &&
       installed.sbom?.path &&
-      installed.sbom.sha256 === (await digest(resolve(output, installed.sbom.path)))
+      installed.sbom.sha256 === (await digest(resolve(output, installed.sbom.path))) &&
+      installed.ocpWheelRecordSha256 ===
+        (await verifyOcpWheel(await findSitePackages(output), {
+          ocpVersion: sourceManifest.ocpVersion,
+          targetName,
+          expectedRecordSha256: installed.ocpWheelRecordSha256,
+        }))
     ) {
       console.log(`Build123d Python is current: ${targetName}`);
       return;
@@ -203,6 +215,10 @@ const prepareTarget = async (targetName: string): Promise<void> => {
     ),
   ) as Distribution[];
   const sitePackages = await findSitePackages(temporary);
+  const ocpWheelRecordSha256 = await verifyOcpWheel(sitePackages, {
+    ocpVersion: sourceManifest.ocpVersion,
+    targetName,
+  });
   await copyLicenses(sitePackages, resolve(temporary, 'tau-licenses'));
   const sbomPath = 'tau-python-sbom.cdx.json';
   await writeFile(
@@ -255,6 +271,7 @@ const prepareTarget = async (targetName: string): Promise<void> => {
         sourceArchiveSha256: target.sha256,
         requirementsSha256: await digest(requirementsLock),
         sourceFilesSha256: expectedSourceFilesSha256,
+        ocpWheelRecordSha256,
         pythonRelativePath: target.pythonRelativePath,
         pythonSha256: await digest(pythonExecutable),
         workerPath: 'tau-worker/worker.py',
@@ -271,8 +288,7 @@ const prepareTarget = async (targetName: string): Promise<void> => {
       2,
     )}\n`,
   );
-  await rm(output, { recursive: true, force: true });
-  await rename(temporary, output);
+  await replaceResourceDirectory(temporary, output);
   console.log(`Prepared Build123d Python: ${targetName}`);
 };
 

@@ -1,0 +1,132 @@
+{
+  "projectId": "proj_fixture",
+  "openFiles": [
+    {
+      "paneId": "pane_BLni4A2zZT9msCsLO2wUd",
+      "path": "docs/readme.md",
+      "name": "readme.md",
+      "lastAccessedAt": 1790600074041
+    }
+  ],
+  "activePaneId": "pane_BLni4A2zZT9msCsLO2wUd",
+  "focusedChatId": "chat_fixture",
+  "panelState": {
+    "desktopLayout": {
+      "chatOpen": true,
+      "workbenchOpen": true,
+      "chatWidth": 320,
+      "workbenchWidth": 420,
+      "compactAuxiliary": "chat"
+    },
+    "mobileActiveTab": "chat",
+    "kernelPaneview": {},
+    "modelPaneview": {},
+    "parametersPaneview": {},
+    "consolePaneview": {}
+  },
+  "workbenchLayout": {
+    "grid": {
+      "root": {
+        "type": "branch",
+        "data": [
+          {
+            "type": "leaf",
+            "data": {
+              "views": ["pane_BLni4A2zZT9msCsLO2wUd"],
+              "activeView": "pane_BLni4A2zZT9msCsLO2wUd",
+              "id": "2"
+            },
+            "size": 370
+          },
+          {
+            "type": "leaf",
+            "data": {
+              "views": ["workbench:parameters"],
+              "activeView": "workbench:parameters",
+              "id": "1"
+            },
+            "size": 370
+          }
+        ],
+        "size": 720
+      },
+      "width": 720,
+      "height": 740,
+      "orientation": "VERTICAL"
+    },
+    "panels": {
+      "workbench:parameters": {
+        "id": "workbench:parameters",
+        "contentComponent": "parameters",
+        "title": "Parameters"
+      },
+      "pane_BLni4A2zZT9msCsLO2wUd": {
+        "id": "pane_BLni4A2zZT9msCsLO2wUd",
+        "contentComponent": "editor",
+        "params": {
+          "filePath": "docs/readme.md",
+          "paneId": "pane_BLni4A2zZT9msCsLO2wUd",
+          "viewId": "source",
+          "filesOpen": true,
+          "filesWidth": 256
+        },
+        "title": "readme.md"
+      }
+    },
+    "activeGroup": "2"
+  },
+  "viewerLayout": {
+    "grid": {
+      "root": {
+        "type": "branch",
+        "data": [
+          {
+            "type": "leaf",
+            "data": {
+              "views": ["view_legacy"],
+              "activeView": "view_legacy",
+              "id": "1"
+            },
+            "size": 590
+          },
+          {
+            "type": "leaf",
+            "data": {
+              "views": ["pane_viewer_launcher"],
+              "activeView": "pane_viewer_launcher",
+              "id": "2"
+            },
+            "size": 590
+          }
+        ],
+        "size": 740
+      },
+      "width": 1180,
+      "height": 740,
+      "orientation": "HORIZONTAL"
+    },
+    "panels": {
+      "view_legacy": {
+        "id": "view_legacy",
+        "contentComponent": "viewer",
+        "params": {
+          "viewId": "view_legacy",
+          "entryPath": "parts/part.step"
+        },
+        "title": "part.step"
+      },
+      "pane_viewer_launcher": {
+        "id": "pane_viewer_launcher",
+        "contentComponent": "newTab",
+        "params": {
+          "mode": "launcher"
+        },
+        "title": "Viewer"
+      }
+    },
+    "activeGroup": "2"
+  },
+  "viewSettings": {},
+  "unitSettings": {},
+  "updatedAt": 1790600074045
+}

@@ -20,12 +20,14 @@ describe('bambuMachine', () => {
     const definition = await resolveRuntimePluginDefinition('machine', bambuMachine());
     const { properties } = definition.submissionConfiguration.manifest.legacyProjection.inputSchema;
     for (const key of ['expectedFilamentDiameter', 'expectedNozzleDiameter']) {
-      expect(properties?.[key]).toMatchObject({
-        type: 'number',
-        exclusiveMinimum: 0,
-        'x-tau-unit': 'mm',
-        'x-tau-quantity-kind': 'http://qudt.org/vocab/quantitykind/Diameter',
-        'x-tau-space': 'linear',
+      expect(properties).toMatchObject({
+        [key]: {
+          type: 'number',
+          exclusiveMinimum: 0,
+          'x-tau-unit': 'mm',
+          'x-tau-quantity-kind': 'http://qudt.org/vocab/quantitykind/Diameter',
+          'x-tau-space': 'linear',
+        },
       });
     }
   });

@@ -27,6 +27,7 @@
 
 import type { ResourceQueue } from '@taucad/filesystem';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
+import type { CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { applyClientTextMutation, createExactReplacementPlan } from '@taucad/chat/rpc';
 import type { RpcDirectoryEntry, RpcFileStat, RpcFileSystem } from '@taucad/chat/rpc';
 import { rpcClientErrorCode } from '@taucad/chat/schemas/rpc';
@@ -35,10 +36,13 @@ import { getErrno } from '@taucad/utils/error';
 import { assertRootedPath } from '@taucad/utils/path';
 
 const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder('utf-8', { fatal: true });
+// eslint-disable-next-line @typescript-eslint/naming-convention -- `ignoreBOM` is the native TextDecoder option name.
+const textDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 /** The project manifest: the one path whose content an agent may edit but never break. */
 const manifestPath = 'tau.json';
+const maximumCheckedPreconditions = 32;
+const maximumCheckedBytes = 8 * 1024 * 1024;
 
 const manifestRefusal = (message: string): Error =>
   Object.assign(new Error(message), { code: rpcClientErrorCode.validationError });
@@ -51,6 +55,19 @@ const assertNotAborted = (signal?: AbortSignal): void => {
     throw abortError(signal);
   }
 };
+
+const asBytes = (value: Uint8Array<ArrayBuffer> | string): Uint8Array<ArrayBuffer> =>
+  typeof value === 'string' ? textEncoder.encode(value) : new Uint8Array(value);
+
+const equalBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
+  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+
+const unsupported = (error: unknown): boolean =>
+  typeof error === 'object' &&
+  error !== null &&
+  'code' in error &&
+  error.code === 'CHECKED_WRITE_UNSUPPORTED' &&
+  (!('applicationState' in error) || error.applicationState === 'known-not-applied');
 
 /** Options for {@link createProviderRpcFileSystem}. @public */
 export type ProviderRpcFileSystemOptions = {
@@ -88,6 +105,53 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
   const { mutations, provider, signal } = options;
   const bytes = async (path: string): Promise<Uint8Array<ArrayBuffer>> =>
     new Uint8Array(await provider.readFile(assertRootedPath(path)));
+  // oxlint-disable-next-line typescript/no-restricted-types -- null is the checked-write absence sentinel.
+  const currentOrAbsent = async (path: string): Promise<Uint8Array<ArrayBuffer> | null> => {
+    try {
+      return await bytes(path);
+    } catch (error) {
+      if (getErrno(error) === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    }
+  };
+  const canonicalPreconditions = (preconditions: readonly FileWritePrecondition[]): FileWritePrecondition[] =>
+    preconditions.map(({ path, expected }) => ({
+      path: assertRootedPath(path),
+      expected: expected === null ? null : asBytes(expected),
+    }));
+  const assertCheckedBounds = (preconditions: readonly FileWritePrecondition[], dataBytes = 0): void => {
+    if (preconditions.length === 0 || preconditions.length > maximumCheckedPreconditions) {
+      throw new TypeError(`Checked mutations require 1-${String(maximumCheckedPreconditions)} preconditions.`);
+    }
+    if (
+      preconditions.reduce(
+        (total, { expected }) => total + (expected === null ? 0 : asBytes(expected).byteLength),
+        dataBytes,
+      ) > maximumCheckedBytes
+    ) {
+      throw new TypeError(`Checked mutation request exceeds ${String(maximumCheckedBytes)} bytes.`);
+    }
+  };
+  const compare = async (
+    preconditions: readonly FileWritePrecondition[],
+  ): Promise<CheckedFileWriteResult | undefined> => {
+    const compared = await Promise.all(
+      preconditions.map(async ({ path, expected }) => {
+        const actual = await currentOrAbsent(path);
+        return actual === null
+          ? expected === null
+            ? undefined
+            : { path, actual }
+          : expected !== null && equalBytes(actual, asBytes(expected))
+            ? undefined
+            : { path, actual };
+      }),
+    );
+    const conflicts = compared.filter((conflict) => conflict !== undefined);
+    return conflicts.length > 0 ? { status: 'conflict', conflicts } : undefined;
+  };
   /** Refuse bytes that would leave `tau.json` invalid or re-identify the project. */
   const assertManifestReplacement = async (
     path: string,
@@ -209,7 +273,14 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
 
   return {
     async readFile(path) {
-      return textDecoder.decode(await bytes(path));
+      const content = await bytes(path);
+      try {
+        return textDecoder.decode(content);
+      } catch {
+        throw Object.assign(new Error(`File '${path}' is not valid UTF-8 text.`), {
+          code: rpcClientErrorCode.invalidTextEncoding,
+        });
+      }
     },
     async writeFile(path, content) {
       await mutations.queueFor(path, async () => {
@@ -217,6 +288,73 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
         await assertManifestReplacement(path, next);
         assertNotAborted(signal);
         await provider.writeFile(assertRootedPath(path), next);
+      });
+    },
+    async writeFileChecked(input) {
+      const path = assertRootedPath(input.path);
+      const preconditions = canonicalPreconditions(input.preconditions);
+      const data = asBytes(input.data);
+      assertCheckedBounds(preconditions, data.byteLength);
+      if (!preconditions.some((precondition) => precondition.path === path)) {
+        throw new TypeError('Checked writes require a destination precondition.');
+      }
+      return mutations.queueFor(path, async () => {
+        await assertManifestReplacement(path, data);
+        assertNotAborted(signal);
+        if (provider.writeFileChecked !== undefined) {
+          try {
+            return await provider.writeFileChecked({ path, data, preconditions });
+          } catch (error) {
+            if (!unsupported(error)) {
+              throw error;
+            }
+          }
+        }
+        const conflict = await compare(preconditions);
+        if (conflict) {
+          return conflict;
+        }
+        const current = await currentOrAbsent(path);
+        if (current !== null && equalBytes(current, data)) {
+          return { status: 'unchanged', content: current };
+        }
+        assertNotAborted(signal);
+        await provider.writeFile(path, data);
+        return { status: 'applied', content: await bytes(path) };
+      });
+    },
+    async deleteFileChecked(input) {
+      const path = assertRootedPath(input.path);
+      const preconditions = canonicalPreconditions(input.preconditions);
+      assertCheckedBounds(preconditions);
+      if (path === manifestPath) {
+        throw manifestRefusal('tau.json is the project manifest and cannot be deleted; edit it instead.');
+      }
+      if (!preconditions.some((precondition) => precondition.path === path)) {
+        throw new TypeError('Checked deletes require a destination precondition.');
+      }
+      return mutations.queueFor(path, async () => {
+        assertNotAborted(signal);
+        if (provider.deleteFileChecked !== undefined) {
+          try {
+            return await provider.deleteFileChecked({ path, preconditions });
+          } catch (error) {
+            if (!unsupported(error)) {
+              throw error;
+            }
+          }
+        }
+        const conflict = await compare(preconditions);
+        if (conflict) {
+          return conflict;
+        }
+        const current = await currentOrAbsent(path);
+        if (current === null) {
+          return { status: 'unchanged', content: new Uint8Array() };
+        }
+        assertNotAborted(signal);
+        await provider.unlink(path);
+        return { status: 'applied', content: new Uint8Array() };
       });
     },
     async writeBinaryFile(path, data) {

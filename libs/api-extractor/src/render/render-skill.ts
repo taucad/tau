@@ -17,6 +17,10 @@ export const maxSkillBodyTokens = 800;
 /** Ceiling enforced by the same test on the frontmatter description. @public */
 export const maxSkillDescriptionChars = 160;
 
+/** Approved Agent Workbench Control skill (B9) ships the 92-line draft verbatim. */
+export const workbenchSkillBodyTokens = 2400;
+export const workbenchSkillDescriptionChars = 540;
+
 /** Inputs for one generated skill body. @public */
 export type SkillRenderOptions = {
   readonly slug: string;
@@ -64,9 +68,11 @@ const frontmatter = (options: SkillRenderOptions): string =>
  * ```
  */
 export const renderSkill = (options: SkillRenderOptions): RenderedSkill => {
-  if (options.description.length > maxSkillDescriptionChars) {
+  const maxDescription = options.slug === 'workbench' ? workbenchSkillDescriptionChars : maxSkillDescriptionChars;
+  const maxBody = options.slug === 'workbench' ? workbenchSkillBodyTokens : maxSkillBodyTokens;
+  if (options.description.length > maxDescription) {
     throw new RangeError(
-      `skill ${options.slug}: description is ${options.description.length} chars, over the ${maxSkillDescriptionChars} ceiling`,
+      `skill ${options.slug}: description is ${options.description.length} chars, over the ${maxDescription} ceiling`,
     );
   }
 
@@ -77,9 +83,9 @@ export const renderSkill = (options: SkillRenderOptions): RenderedSkill => {
   const body = sections.join('\n').trim();
   const bodyTokens = estimateTokens(body);
 
-  if (bodyTokens > maxSkillBodyTokens) {
+  if (bodyTokens > maxBody) {
     throw new RangeError(
-      `skill ${options.slug}: body is ~${bodyTokens} tokens, over the ${maxSkillBodyTokens} ceiling. Move detail into a reference file.`,
+      `skill ${options.slug}: body is ~${bodyTokens} tokens, over the ${maxBody} ceiling. Move detail into a reference file.`,
     );
   }
 

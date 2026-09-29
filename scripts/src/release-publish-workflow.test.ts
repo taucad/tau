@@ -2,19 +2,44 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createProjectGraphAsync, readCachedProjectGraph } from '@nx/devkit';
 import type { ProjectGraph } from '@nx/devkit';
+import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 import { publishable, workspace } from '@taucad/nx';
 
 const workflow = readFileSync(resolve(import.meta.dirname, '../../.github/workflows/publish.yml'), 'utf8');
 
-/**
- * Comments name the Nx mechanism (`nx-release-publish`) that makes the single
- * publish step ordered; only the commands must stay free of project names.
- */
-const commands = workflow
-  .split('\n')
-  .filter((line) => !line.trim().startsWith('#'))
-  .join('\n');
+const runScripts = (source: string): string[] => {
+  const document = load(source) as { jobs?: Record<string, { steps?: ReadonlyArray<{ run?: unknown }> }> };
+  return Object.values(document.jobs ?? {}).flatMap(({ steps }) =>
+    (steps ?? []).flatMap(({ run }) =>
+      typeof run === 'string'
+        ? [
+            run
+              .split('\n')
+              .filter((line) => !line.trim().startsWith('#'))
+              .join('\n'),
+          ]
+        : [],
+    ),
+  );
+};
+
+const scripts = runScripts(workflow);
+const commands = scripts.join('\n');
+const planPkgcheck =
+  'pnpm nx run-many -t pkgcheck --projects tag:type:package --graph=out/artifacts/geospec-native-engine/plan/packages.json';
+const projectSelector = /(?:^|\s)(?:-p|--projects)(?:\s|=|$)/u;
+
+const releaseCommandViolations = (runValues: readonly string[]): string[] => {
+  const logicalLines = runValues.flatMap((run) => run.replaceAll(/\\\r?\n[ \t]*/gu, ' ').split('\n'));
+  const selectedNxCommands = logicalLines.filter(
+    (line) => /\b(?:pnpm )?nx\b/u.test(line) && line.trim() !== planPkgcheck && projectSelector.test(line),
+  );
+  return [
+    ...selectedNxCommands,
+    ...(runValues.some((run) => run.includes('nx-release-publish')) ? ['nx-release-publish'] : []),
+  ];
+};
 
 const stepIndex = (name: string): number => workflow.indexOf(`name: ${name}`);
 
@@ -28,8 +53,31 @@ const projectGraph = async (): Promise<ProjectGraph> => {
 
 describe('release publish workflow', () => {
   it('names no project and re-implements no publish order', () => {
-    expect(commands).not.toMatch(/-p |--projects=|nx-release-publish/u);
+    expect(releaseCommandViolations(scripts)).toEqual([]);
     expect(commands).toContain('nx run scripts:release-gate');
+  });
+
+  it('rejects direct and continued publish selection while allowing plan pkgcheck', () => {
+    for (const command of [
+      'run: pnpm nx release publish --tag=beta --projects=some-package',
+      'run: pnpm nx release publish --tag=beta --projects some-package',
+      'run: pnpm nx release publish --tag=beta -p=some-package',
+      'run: pnpm nx release publish --tag=beta -p some-package',
+      'run: pnpm nx release publish --tag=beta \\\n          --projects some-package',
+      'run: pnpm nx release publish --tag=beta \\\n          -p some-package',
+      'run: pnpm nx run some-package:nx-release-publish',
+    ]) {
+      expect(releaseCommandViolations([command]), command).not.toEqual([]);
+    }
+    const foldedPublish = `jobs:
+  publish:
+    steps:
+      - run: >
+          pnpm nx release publish --tag=beta
+          --projects some-package
+`;
+    expect(releaseCommandViolations(runScripts(foldedPublish))).not.toEqual([]);
+    expect(releaseCommandViolations([`mkdir -p out/plan\n${planPkgcheck}`])).toEqual([]);
   });
 
   it('gates, asserts the publisher, dry-runs, then publishes', () => {

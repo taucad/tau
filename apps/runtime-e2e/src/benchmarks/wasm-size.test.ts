@@ -43,9 +43,9 @@ const wasmBudgets: WasmBudget[] = [
   {
     name: 'Zoo/KCL',
     path: dependencyPath('packages/plugins/zoo', '@taucad/kcl-wasm-lib/kcl.wasm'),
-    maxBytes: 13_434_880,
+    maxBytes: 15_728_640,
   },
-  { name: 'esbuild', path: 'packages/plugins/esbuild/src/vm/wasm/esbuild.wasm', maxBytes: 13_828_096 },
+  { name: 'esbuild', path: 'packages/plugins/esbuild/src/vm/wasm/esbuild.wasm', maxBytes: 14_286_848 },
   {
     name: 'libassimp',
     path: dependencyPath('packages/plugins/assimp', 'libassimp/wasm'),

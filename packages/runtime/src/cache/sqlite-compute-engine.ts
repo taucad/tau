@@ -278,9 +278,9 @@ export const createSqliteComputeEngine = (options: SqliteComputeEngineOptions): 
     // commits; `busy_timeout` is what makes two processes on one file wait
     // instead of failing; `synchronous` is raised to FULL only for the required
     // barrier, so disposable commits do not pay an fsync each.
+    db.exec('PRAGMA busy_timeout = 5000');
     db.exec('PRAGMA journal_mode = WAL');
     db.exec('PRAGMA synchronous = NORMAL');
-    db.exec('PRAGMA busy_timeout = 5000');
     db.exec('PRAGMA foreign_keys = ON');
     db.exec('PRAGMA auto_vacuum = INCREMENTAL');
     for (const statement of schema) {

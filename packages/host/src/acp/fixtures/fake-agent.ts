@@ -15,6 +15,8 @@
  * | (always) | one text chunk echoing `{ cwd, env, model, turn }`, a `usage_update`, then a permission-gated `write_file` tool call; the reply carries `PromptResponse.usage` |
  * | (turn 2 onward) | a second chunk naming the whole transcript, so a later turn provably recalls the earlier ones |
  * | `mcp` | calls `test_model` through the `tau` MCP server and reports the evidence |
+ * | `mcp-arrange-workbench` | writes a model, then opens its named Front view through `arrange_workbench` |
+ * | `mcp-arrange-conflict` | opens the same Front view, then retries with a stale `basedOn` digest |
  * | `mcp-screenshot` | writes a cube to `main.scad`, then first calls `screenshot` (`targetFile: main.scad`, `single`) through the same server, which saves the capture as a chat attachment; `mcp` then still runs |
  * | `escape` | tries `fs/write_text_file` above `cwd` and reports the refusal |
  * | `wrong-session` | tries `fs/write_text_file` under another ACP session id and reports the refusal |

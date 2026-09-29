@@ -90,13 +90,11 @@ beforeEach(() => {
 });
 
 describe('IndexedDbStorageProvider', () => {
-  // The v11 cutover preserves durable domain rows, drops the chat store a chat
-  // no longer lives in (W17), and intentionally clears the incompatible editor
-  // layout.
-  it('upgrades v9 to v11, preserves domain rows, drops chats, and clears editor layout rows', async () => {
+  // The v12 cut retains device state while removing the old portable editor fields.
+  it('upgrades v9 to v12, preserves domain and device rows, and drops chats and portable fields', async () => {
     const libraryRow: ProjectLibraryState = { projectId: 'proj_kept0000000000000000', lastActivityAt: 42 };
     const chatRow = { id: 'cht_kept', resourceId: 'proj_kept0000000000000000', name: 'Kept chat', messages: [] };
-    const editorRow: EditorState = {
+    const editorRow = {
       projectId: libraryRow.projectId,
       openFiles: [],
       activePaneId: undefined,
@@ -104,7 +102,7 @@ describe('IndexedDbStorageProvider', () => {
       panelState: defaultPanelState,
       workbenchLayout: undefined,
       viewerLayout: undefined,
-      viewSettings: {},
+      viewSettings: { old: { entryPath: 'index.ts' } },
       updatedAt: 42,
     };
     await new Promise<void>((resolve, reject) => {
@@ -129,7 +127,12 @@ describe('IndexedDbStorageProvider', () => {
 
     const provider = new IndexedDbStorageProvider();
     await expect(provider.getProjectLibraryState(libraryRow.projectId)).resolves.toEqual(libraryRow);
-    await expect(provider.getEditorState(libraryRow.projectId)).resolves.toBeUndefined();
+    await expect(provider.getEditorState(libraryRow.projectId)).resolves.toMatchObject({
+      focusedChatId: chatRow.id,
+      fileSidebars: {},
+      graphicsBackendPreferences: {},
+    });
+    expect(await provider.getEditorState(libraryRow.projectId)).not.toHaveProperty('viewSettings');
     await expect(provider.getAppUiPreferences()).resolves.toEqual({ id: 'singleton', projectDisclosure: {} });
 
     const upgraded = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -141,12 +144,73 @@ describe('IndexedDbStorageProvider', () => {
         reject(request.error ?? new Error('Failed to reopen the database'));
       });
     });
-    expect(upgraded.version).toBe(11);
+    expect(upgraded.version).toBe(12);
     expect([...upgraded.objectStoreNames]).toContain('appUiPreferences');
     /* No migration and no shim (A31/I15): the chat store is gone, and a chat is
      * `.tau/chats/<id>/chat.json` inside its project. */
     expect([...upgraded.objectStoreNames]).not.toContain('chats');
     upgraded.close();
+  });
+
+  it('cuts a v11 editor row to device fields while retaining sidebar pixels, backend and Restore seeds', async () => {
+    const previousLayout = {
+      layout: { version: 1, viewer: { kind: 'group', tabs: [{ kind: 'view', view: 'v-prior' }] } },
+      views: { 'v-prior': { version: 1, entryPath: 'models/other.ts' } },
+    };
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open('tau-db', 11);
+      request.addEventListener('upgradeneeded', () => {
+        request.result.createObjectStore('editor', { keyPath: 'projectId' }).put({
+          projectId: projectOneId,
+          openFiles: [{ paneId: 'pane-a', path: 'main.ts', name: 'main.ts', lastAccessedAt: 1 }],
+          activePaneId: 'pane-a',
+          focusedChatId: 'chat-a',
+          panelState: defaultPanelState,
+          previousLayout,
+          workbenchLayout: {
+            panels: {
+              'pane-a': { params: { filePath: 'main.ts', filesWidth: 312 } },
+              'pane-b': { params: { filePath: 'parts/other.ts', filesWidth: 240 } },
+            },
+          },
+          viewerLayout: { grid: {} },
+          viewSettings: {
+            'v-one': { entryPath: 'main.ts', graphicsSettings: { graphicsBackend: 'webgpu' } },
+            'v-two': { entryPath: 'parts/other.ts', graphicsSettings: { graphicsBackend: 'webgl' } },
+          },
+          unitSettings: { 'main.ts': { renderTimeout: 30_000 } },
+          modelComponentDisplay: { schemaVersion: 1, unitsById: {} },
+          updatedAt: 42,
+        });
+      });
+      request.addEventListener('success', () => {
+        request.result.close();
+        resolve();
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error('Failed to open legacy database'));
+      });
+    });
+    const provider = new IndexedDbStorageProvider();
+    const row = await provider.getEditorState(projectOneId);
+    expect(row).toEqual({
+      projectId: projectOneId,
+      openFiles: [{ paneId: 'pane-a', path: 'main.ts', name: 'main.ts', lastAccessedAt: 1 }],
+      activePaneId: 'pane-a',
+      focusedChatId: 'chat-a',
+      panelState: defaultPanelState,
+      fileSidebars: { 'main.ts': 312, 'parts/other.ts': 240 },
+      graphicsBackendPreferences: { 'v-one': 'webgpu', 'v-two': 'webgl' },
+      previousLayout,
+      updatedAt: 42,
+    });
+    await provider.updateEditorState({ ...row!, focusedChatId: 'chat-b' });
+    expect(await provider.getEditorState(projectOneId)).toEqual({
+      ...row,
+      focusedChatId: 'chat-b',
+      // oxlint-disable-next-line typescript/no-unsafe-assignment -- Vitest's asymmetric matcher is intentionally typed any.
+      updatedAt: expect.any(Number),
+    });
   });
 
   // A profile that never had the database gets the same stores from the same
@@ -164,7 +228,7 @@ describe('IndexedDbStorageProvider', () => {
         reject(request.error ?? new Error('Failed to open the database'));
       });
     });
-    expect(db.version).toBe(11);
+    expect(db.version).toBe(12);
     expect([...db.objectStoreNames].sort()).toEqual([
       'appUiPreferences',
       'editor',
@@ -298,9 +362,8 @@ describe('IndexedDbStorageProvider', () => {
         activePaneId: undefined,
         focusedChatId: 'chat_replay',
         panelState: defaultPanelState,
-        workbenchLayout: undefined,
-        viewerLayout: undefined,
-        viewSettings: {},
+        fileSidebars: {},
+        graphicsBackendPreferences: {},
         updatedAt: 1,
       };
 

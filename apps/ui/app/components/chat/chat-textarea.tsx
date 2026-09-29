@@ -131,13 +131,13 @@ export const ChatTextarea = memo(function ({
 
   const geometryUnits = projectContext?.geometryUnits;
   const mainEntryPath = projectContext?.mainEntryPath;
-  const viewSettings = useSelector(projectContext?.editorRef, (state) => state?.context.viewSettings);
+  const viewRecords = projectContext?.viewRecords;
   const mainGeometryFormat = useSelector(
     mainEntryPath ? geometryUnits?.get(mainEntryPath) : undefined,
     (state) => state?.context.geometry?.format,
   );
   const screenshotActionItems = useMemo((): ContextSuggestionItem[] => {
-    if (!geometryUnits || !viewSettings || !logic.imageInputSupported) {
+    if (!geometryUnits || !viewRecords || !logic.imageInputSupported) {
       return [];
     }
 
@@ -162,7 +162,7 @@ export const ChatTextarea = memo(function ({
       });
     }
 
-    for (const entryPath of listGeometryEntryPaths(geometryUnits, viewSettings, mainEntryPath ?? '')) {
+    for (const entryPath of listGeometryEntryPaths(geometryUnits, viewRecords, mainEntryPath ?? '')) {
       if (entryPath === mainEntryPath) {
         continue;
       }
@@ -178,7 +178,7 @@ export const ChatTextarea = memo(function ({
     }
 
     return items;
-  }, [geometryUnits, viewSettings, mainEntryPath, mainGeometryFormat, logic.imageInputSupported]);
+  }, [geometryUnits, viewRecords, mainEntryPath, mainGeometryFormat, logic.imageInputSupported]);
 
   const mounted = useRef(true);
   useEffect(() => {
@@ -211,12 +211,11 @@ export const ChatTextarea = memo(function ({
       if (!currentProjectContext) {
         return undefined;
       }
-      const { viewGraphics, editorRef, mainEntryPath: mainEntry } = currentProjectContext;
-      const { viewSettings } = editorRef.getSnapshot().context;
+      const { viewGraphics, viewRecords, mainEntryPath: mainEntry } = currentProjectContext;
       const target = entryPath ?? mainEntry;
 
       for (const [viewId, gRef] of viewGraphics) {
-        if (viewSettings[viewId]?.entryPath === target) {
+        if (viewRecords.get(viewId)?.entryPath === target) {
           return gRef;
         }
       }
@@ -335,6 +334,7 @@ export const ChatTextarea = memo(function ({
         // State
         dragKind={logic.dragKind}
         isSubmitting={logic.isSubmitting}
+        canResume={logic.canResume}
         isAttaching={logic.isAttaching}
         inputText={logic.inputText}
         attachments={logic.attachments}

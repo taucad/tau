@@ -793,6 +793,170 @@ export class MutationPipeline {
     return result;
   }
 
+  /** Delete under the same multi-path authority fence as a checked write. */
+  public async deleteFileCheckedResolved({
+    path,
+    resolution,
+    preconditions,
+    signal,
+    context,
+  }: {
+    path: string;
+    resolution: MountResolution;
+    preconditions: ReadonlyArray<{
+      path: string;
+      // oxlint-disable-next-line typescript/no-restricted-types -- absence is the checked-write sentinel.
+      expected: Uint8Array<ArrayBuffer> | string | null;
+      resolution: MountResolution;
+    }>;
+    signal?: AbortSignal;
+    context?: WorkspaceMutationContext;
+  }): Promise<CheckedFileWriteResult> {
+    if (preconditions.length === 0 || preconditions.length > maximumCheckedWritePreconditions) {
+      throw new TypeError(`Checked deletes require 1-${String(maximumCheckedWritePreconditions)} preconditions.`);
+    }
+    const ownedPreconditions = preconditions.map((precondition) => ({
+      ...precondition,
+      expected: precondition.expected === null ? null : asBytes(precondition.expected),
+    }));
+    if (
+      ownedPreconditions.reduce((total, precondition) => total + (precondition.expected?.byteLength ?? 0), 0) >
+      maximumCheckedWriteBytes
+    ) {
+      throw new TypeError(`Checked delete request exceeds ${String(maximumCheckedWriteBytes)} bytes.`);
+    }
+    const targetAuthority = resolution.entry;
+    if (
+      targetAuthority?.storageRootKey === undefined ||
+      ownedPreconditions.some(
+        (precondition) =>
+          precondition.resolution.provider !== resolution.provider ||
+          precondition.resolution.entry?.storageRootKey !== targetAuthority.storageRootKey,
+      )
+    ) {
+      throw new TypeError('Checked delete paths must share one admitted physical authority.');
+    }
+    // oxlint-disable-next-line typescript/no-restricted-types -- absence is the checked-write sentinel.
+    const physical = new Map<string, Uint8Array<ArrayBuffer> | null>();
+    const logicalByPhysical = new Map<string, string>();
+    for (const precondition of ownedPreconditions) {
+      const previous = physical.get(precondition.resolution.path);
+      if (physical.has(precondition.resolution.path)) {
+        if (
+          previous === null
+            ? precondition.expected !== null
+            : precondition.expected === null || !bytesEqual(previous!, precondition.expected)
+        ) {
+          throw new TypeError(`Checked delete aliases disagree for '${precondition.path}'.`);
+        }
+      } else {
+        physical.set(precondition.resolution.path, precondition.expected);
+        logicalByPhysical.set(precondition.resolution.path, precondition.path);
+      }
+    }
+    if (!physical.has(resolution.path)) {
+      throw new TypeError('Checked deletes require a destination precondition.');
+    }
+    if (signal?.aborted) {
+      throw checkedWriteFailure(
+        'known-not-applied',
+        signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError'),
+      );
+    }
+    const operations = [
+      { path, resolution },
+      ...ownedPreconditions.map(({ path, resolution }) => ({ path, resolution })),
+    ];
+    const locks = this.mutationLockPaths(operations);
+    const run = async (): Promise<CheckedFileWriteResult> =>
+      this._resourceQueue.queueForMany(locks, async () => {
+        await this.refreshMutationProviders(operations.map(({ resolution }) => resolution));
+        if (signal?.aborted) {
+          throw checkedWriteFailure(
+            'known-not-applied',
+            signal.reason instanceof Error
+              ? signal.reason
+              : new DOMException('The operation was aborted.', 'AbortError'),
+          );
+        }
+        let result: CheckedFileWriteResult;
+        const nativeDelete = resolution.provider.deleteFileChecked;
+        if (nativeDelete) {
+          try {
+            result = await nativeDelete.call(resolution.provider, {
+              path: resolution.path,
+              preconditions: [...physical].map(([preconditionPath, expected]) => ({
+                path: preconditionPath,
+                expected,
+              })),
+            });
+          } catch (error) {
+            if ((error as { applicationState?: unknown }).applicationState !== undefined) {
+              throw error;
+            }
+            throw checkedWriteFailure('potentially-applied', error);
+          }
+        } else {
+          const compared = await Promise.all(
+            ownedPreconditions.map(async (precondition) => {
+              const actual = await readFileOrAbsent(precondition.resolution.provider, precondition.resolution.path);
+              return actual === null
+                ? precondition.expected === null
+                  ? undefined
+                  : { path: precondition.path, actual }
+                : precondition.expected !== null && bytesEqual(actual, precondition.expected)
+                  ? undefined
+                  : { path: precondition.path, actual };
+            }),
+          );
+          const conflicts = compared.filter((conflict) => conflict !== undefined);
+          if (conflicts.length > 0) {
+            return { status: 'conflict', conflicts };
+          }
+          if (physical.get(resolution.path) === null) {
+            return { status: 'unchanged', content: new Uint8Array() };
+          }
+          if (signal?.aborted) {
+            throw checkedWriteFailure(
+              'known-not-applied',
+              signal.reason instanceof Error
+                ? signal.reason
+                : new DOMException('The operation was aborted.', 'AbortError'),
+            );
+          }
+          try {
+            await resolution.provider.unlink(resolution.path);
+          } catch (error) {
+            throw checkedWriteFailure('potentially-applied', error);
+          }
+          result = { status: 'applied', content: new Uint8Array() };
+        }
+        if (result.status === 'applied') {
+          if (this.isCurrentResolution(path, resolution)) {
+            this._filePool()?.invalidate(path);
+            this._treeIndexes.removeFile(path);
+          }
+          this.emitChangeEvent({ type: 'fileDeleted', path, backend: resolution.backend }, context, { operations });
+        }
+        return result.status === 'conflict'
+          ? {
+              status: 'conflict',
+              conflicts: result.conflicts.map((conflict) => ({
+                ...conflict,
+                path: logicalByPhysical.get(conflict.path) ?? conflict.path,
+              })),
+            }
+          : result;
+      });
+    const result = await (resolution.provider.deleteFileChecked === undefined
+      ? this._crossTabCoordinator.withRequiredLocks(locks, run)
+      : this._crossTabCoordinator.withLocks(locks, run));
+    if (result.status === 'applied') {
+      this._crossTabCoordinator.notifyMutation({ type: 'delete', path, authority: this.physicalAuthority(resolution) });
+    }
+    return result;
+  }
+
   public async appendFileResolved({
     path,
     resolution,

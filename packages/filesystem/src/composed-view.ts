@@ -27,6 +27,7 @@
 import type {
   CheckedFileWrite,
   CheckedFileWriteResult,
+  FileWritePrecondition,
   FileContentMetadata,
   FileProvenance,
   FileProvenanceSource,
@@ -828,6 +829,24 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
           writeFileChecked: async (input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult> => {
             const [target] = await writableTargets([input.path]);
             return base.writeFileChecked!({
+              ...input,
+              path: target!,
+              preconditions: input.preconditions.map(({ path, expected }) => ({
+                path: readablePath(canonical(path)),
+                expected,
+              })),
+            });
+          },
+        }),
+    ...(base.deleteFileChecked === undefined
+      ? {}
+      : {
+          deleteFileChecked: async (input: {
+            path: string;
+            preconditions: readonly FileWritePrecondition[];
+          }): Promise<CheckedFileWriteResult> => {
+            const [target] = await writableTargets([input.path]);
+            return base.deleteFileChecked!({
               ...input,
               path: target!,
               preconditions: input.preconditions.map(({ path, expected }) => ({

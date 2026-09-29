@@ -94,8 +94,10 @@ describe('useAgentConfig', () => {
       kind: 'acp',
       hostId: 'origin',
       agentId: 'codex',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP option IDs retain the provider's wire spelling.
       config: { thought_level: 'high' },
     });
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP option IDs retain the provider's wire spelling.
     execution.current = { kind: 'acp', hostId: 'origin', agentId: 'codex', config: { thought_level: 'high' } };
     view.rerender({ sessionData: undefined, status: 'ready', discoveredThoughtLevel });
     expect(thoughtValue(view.result.current)).toBe('high');

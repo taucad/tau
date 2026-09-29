@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChatDetailsUsage } from '#routes/w.$workspace.$project/chat-details-usage.js';
 
 const mocks = vi.hoisted(() => ({
   projectSend: vi.fn(),
@@ -82,7 +83,7 @@ vi.mock('#components/files/file-selector.js', () => ({
 
 const chatUsage = vi.hoisted(() => vi.fn());
 vi.mock('#routes/w.$workspace.$project/chat-details-usage.js', () => ({
-  ChatDetailsUsage: (props: { readonly enabled?: boolean }) => {
+  ChatDetailsUsage: (props: React.ComponentProps<typeof ChatDetailsUsage>) => {
     chatUsage(props);
     return <section aria-label='Chat usage' />;
   },

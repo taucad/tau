@@ -1,0 +1,33 @@
+---
+title: Configuration API
+description: Define, admit, project, and validate versioned runtime configuration without treating form metadata as authority.
+docType: reference
+wordBudgetOverride: 900
+---
+
+# Configuration API
+
+Import the configuration contracts from `@taucad/runtime/configuration`. The Zod quantity helper has its own `@taucad/runtime/configuration/zod` entry point. A configuration has a trusted Standard Schema for validation and a bounded, serializable manifest for display and transport. The manifest's form hints do not validate submitted values.
+
+## Definition and validation
+
+`defineConfiguration` accepts a `ConfigurationSource`: an `id`, `version`, Standard Schema, optional defaults, and restricted UI metadata. Non-Standard-JSON schemas also require a JSON Schema converter. It returns a `ConfigurationDefinition` containing the frozen `ConfigurationManifestV1`, canonical manifest text, diagnostics, schema, and asynchronous `manifestDigest()`.
+
+`validateConfiguration` takes `ValidateConfigurationInput`: definition, matching manifest digest, monotonically tracked form revision, raw value, explicit RFC 6901 pointers, and optional abort signal. `ValidateConfigurationResult` is discriminated by `type`: `valid` carries the parsed output and effective digest; `invalid` carries `ConfigurationIssue` values with code, message, and pointer. Keep the returned revision and digest with the form result so a late validation cannot overwrite a newer edit.
+
+`admitConfigurationManifest` parses an untrusted manifest into `ConfigurationAdmissionResult`, including cosmetic `ConfigurationAdmissionDiagnostic` entries. Admission checks the wire shape; it does not replace authoritative validation against the trusted definition. `admitJsonSchema` bounds and admits the `JsonSchema` used by the manifest and provider descriptors.
+
+## Native parameter projection and UI hints
+
+`ConfigurationManifestV1.parameters` has input and output `ConfigurationNativeProjection` values. A `usable` projection carries a `ParameterDeclaration` (exported from `@taucad/runtime/kernel`); an `unsupported` projection carries defaults and `ConfigurationNativeProjectionDiagnostic` reasons. Inspect the status before presenting a native parameter editor. The manifest also carries a draft-07 legacy projection.
+
+`RestrictedRjsfUiSchemaV1` wraps a JSON-only `RestrictedUiNodeV1`. Its `RestrictedUiWidgetV1` values are `color`, `radio`, `segmented`, `select`, `slider`, `textarea`, and `toggle`. `configurationIconIds` is the admitted icon vocabulary; `ConfigurationIconId` types its members. Unsupported icon hints produce a compatibility diagnostic rather than granting executable behavior.
+
+Import `quantity` and `QuantitySchemaOptions` from `@taucad/runtime/configuration/zod` to declare unit-bearing numeric fields. Import `quantityKinds` from `@taucad/units/quantity` for the reviewed quantity-kind identities. Use the declared units at the authority boundary, not a UI-only conversion.
+
+Import `SourceRevision` and `GetParameterDeclarationsResult` from `@taucad/runtime/types`. The former identifies the source state used by a runtime operation; the latter carries declarations resolved for that source. Consumers should not reuse them after the source changes.
+
+## Related
+
+- [Kernel parameter declarations](./kernels)
+- [Custom kernel guide](../guides/custom-kernel)

@@ -33,6 +33,10 @@ import {
 import { geoSpecRunFilterInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
 import { exportGeometryInputSchema, exportGeometryOutputSchema } from '#schemas/tools/export-geometry.tool.schema.js';
 import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/screenshot.tool.schema.js';
+import {
+  arrangeWorkbenchInputSchema,
+  arrangeWorkbenchOutputSchema,
+} from '#schemas/tools/arrange-workbench.tool.schema.js';
 import { editFileInputSchema, editFileOutputSchema } from '#schemas/tools/edit-file.tool.schema.js';
 import { useSkillInputSchema, useSkillOutputSchema } from '#schemas/tools/use-skill.tool.schema.js';
 import { revisionsInputSchema, revisionsOutputSchema } from '#schemas/tools/revisions.tool.schema.js';
@@ -92,6 +96,8 @@ export const rpcClientErrorCodeSchema = zod.enum([
   'UNSUPPORTED_TEXT_ENCODING',
   'INVALID_TEXT_ENCODING',
   'WRITE_VERIFICATION_FAILED',
+  'RECORD_CONFLICT',
+  'INVALID_RECORD',
 ]);
 
 /**
@@ -164,6 +170,8 @@ const createFileRpc = defineRpc({
   input: createFileInputSchema,
   success: createFileOutputSchema,
 });
+
+const arrangeWorkbenchRpc = defineRpc({ input: arrangeWorkbenchInputSchema, success: arrangeWorkbenchOutputSchema });
 
 const writeTodosRpc = defineRpc({
   input: updateTodosInputSchema,
@@ -323,6 +331,7 @@ export type RpcSchemasRegistry = {
   [rpcName.getParameters]: RpcSchemaEntry<GetParametersRpcInput, GetParametersRpcResult>;
   [rpcName.applyParameterOperation]: RpcSchemaEntry<ApplyParameterOperationRpcInput, ApplyParameterOperationRpcResult>;
   [rpcName.writeTodos]: RpcSchemaEntry<WriteTodosRpcInput, WriteTodosRpcResult>;
+  [rpcName.arrangeWorkbench]: typeof arrangeWorkbenchRpc;
 };
 
 /**
@@ -399,6 +408,7 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
     inputSchema: writeTodosRpc.inputSchema,
     resultSchema: writeTodosRpc.resultSchema,
   },
+  [rpcName.arrangeWorkbench]: arrangeWorkbenchRpc,
 };
 
 // =============================================================================
@@ -476,6 +486,8 @@ export const rpcClientErrorCode = {
   unsupportedTextEncoding: 'UNSUPPORTED_TEXT_ENCODING',
   invalidTextEncoding: 'INVALID_TEXT_ENCODING',
   writeVerificationFailed: 'WRITE_VERIFICATION_FAILED',
+  recordConflict: 'RECORD_CONFLICT',
+  invalidRecord: 'INVALID_RECORD',
 } as const satisfies Record<string, RpcClientErrorCode>;
 
 /** @public */

@@ -69,7 +69,7 @@ export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
 /**
  * The exact tool grant a host capability carries.
  *
- * The four CAD tools, plus the print tools (blueprint D5, Bambu Studio D13): an
+ * The four CAD tools, the workbench record tool, and the print tools (blueprint D5, Bambu Studio D13): an
  * external agent may read the slicing profiles a machine offers, and open,
  * read, list and stop a print request through the same ledger a Tau turn
  * uses, and is told to wait for the person — nothing here starts a print. Every name is dispatched into the daemon's own registry by tool name.
@@ -81,6 +81,7 @@ export const hostMcpAllowedTools = [
   toolName.testModel,
   toolName.screenshot,
   toolName.exportGeometry,
+  toolName.arrangeWorkbench,
   toolName.getPrintProfiles,
   toolName.requestPrint,
   toolName.getPrintRequest,
@@ -98,6 +99,7 @@ export type HostMcpAllowedTool = (typeof hostMcpAllowedTools)[number];
  * calls and this endpoint answers from the registry's own content.
  */
 const hostMcpRegistryTools: ReadonlySet<HostMcpAllowedTool> = new Set<HostMcpAllowedTool>([
+  toolName.arrangeWorkbench,
   toolName.getPrintProfiles,
   toolName.requestPrint,
   toolName.getPrintRequest,
@@ -111,6 +113,16 @@ const readOnlyRegistryTools: ReadonlySet<string> = new Set<string>([
   toolName.getPrintRequest,
   toolName.listPrintRequests,
 ]);
+
+/** Tool-specific hints where the derived registry defaults do not describe the effect. */
+const hostMcpAnnotationOverrides: Readonly<Partial<Record<string, NonNullable<TauMcpHostTool['annotations']>>>> = {
+  [toolName.arrangeWorkbench]: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+};
 
 const isJsonObject = (value: JsonValue): value is JsonObject =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -130,7 +142,7 @@ const hostToolOf = (definition: ReturnType<ToolRegistry['list']>[number]): TauMc
     name: definition.name,
     description: definition.description,
     inputSchema: definition.inputSchema,
-    annotations: {
+    annotations: hostMcpAnnotationOverrides[definition.name] ?? {
       readOnlyHint: reads,
       destructiveHint: definition.name === toolName.cancelPrint,
       idempotentHint: definition.name !== toolName.cancelPrint,

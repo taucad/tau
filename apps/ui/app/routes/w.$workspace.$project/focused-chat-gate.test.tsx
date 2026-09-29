@@ -2,11 +2,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import {
-  ChatPaneSkeleton,
   ChatHistoryGate,
   ChatInterfaceSessionGate,
   FocusedChatErrorPanel,
 } from '#routes/w.$workspace.$project/focused-chat-gate.js';
+import { ChatPaneSkeleton } from '#routes/w.$workspace.$project/chat-pane-skeleton.js';
 
 type StateValue = string | { [key: string]: StateValue };
 

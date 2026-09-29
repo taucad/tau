@@ -5,12 +5,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
-const { cadPreviewViewerMock } = vi.hoisted(() => ({
+const { cadPreviewViewerMock, warmProjectWorkspaceMock } = vi.hoisted(() => ({
   cadPreviewViewerMock: vi.fn(() => <div data-testid='cad-preview-viewer' />),
+  warmProjectWorkspaceMock: vi.fn(),
 }));
 
 vi.mock('#components/cad-preview.js', () => ({
   CadPreviewViewer: cadPreviewViewerMock,
+}));
+vi.mock('#lib/project-workspace-warmup.js', () => ({
+  warmProjectWorkspace: warmProjectWorkspaceMock,
 }));
 
 function LocationProbe(): React.JSX.Element {
@@ -31,21 +35,38 @@ describe('ProjectCard', () => {
   it('should expose the whole-card destination as a named keyboard-accessible link', async () => {
     render(
       <TestWrapper>
-        <ProjectCard to='/projects/project-1' linkLabel='Open Project One'>
+        <ProjectCard to='/w/home/project-1' linkLabel='Open Project One'>
           <div>Project One</div>
         </ProjectCard>
       </TestWrapper>,
     );
 
     const link = screen.getByRole('link', { name: 'Open Project One' });
-    expect(link).toHaveAttribute('href', '/projects/project-1');
+    expect(link).toHaveAttribute('href', '/w/home/project-1');
     // Neutral, instant hover edge at the owner; the brand hue and the colour transition are gone.
     expect(link.parentElement).toHaveClass('hover:border-foreground/30');
     expect(link.parentElement).not.toHaveClass('hover:border-primary/60', 'transition-colors');
 
     link.focus();
+    expect(warmProjectWorkspaceMock).toHaveBeenCalledOnce();
     await userEvent.keyboard('{Enter}');
-    expect(screen.getByTestId('location')).toHaveTextContent('/projects/project-1');
+    expect(screen.getByTestId('location')).toHaveTextContent('/w/home/project-1');
+  });
+
+  it('should leave the project editor asleep when a community card opens a share route', async () => {
+    warmProjectWorkspaceMock.mockClear();
+    render(
+      <TestWrapper>
+        <ProjectCard to='/s/example' linkLabel='Open shared example'>
+          Example
+        </ProjectCard>
+      </TestWrapper>,
+    );
+
+    const link = screen.getByRole('link', { name: 'Open shared example' });
+    await userEvent.hover(link);
+    link.focus();
+    expect(warmProjectWorkspaceMock).not.toHaveBeenCalled();
   });
 
   it('should leave nested controls independent from card navigation', async () => {
@@ -113,8 +134,10 @@ describe('ProjectCardMedia', () => {
 });
 
 describe('ProjectCardCadPreview', () => {
-  it('should match thumbnail perspective and show card-only edge lines', () => {
+  it('should load only on demand and match thumbnail perspective and edge lines', async () => {
     render(<ProjectCardCadPreview />);
+
+    await screen.findByTestId('cad-preview-viewer');
 
     expect(cadPreviewViewerMock).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -310,9 +310,18 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     const relink = join(assembly, 'tarballs/geospec-engine-native-source-relink.tar.gz');
     mkdirSync(dirname(relink), { recursive: true });
     assert.equal(
-      actualSpawnSync('tar', ['-czf', relink, '-C', join(assembly, 'kit'), 'geospec-engine-native-source-relink'], {
-        env: { ...process.env, COPYFILE_DISABLE: '1' },
-      }).status,
+      actualSpawnSync(
+        'tar',
+        [
+          '-czf',
+          relink,
+          '-C',
+          join(assembly, 'kit'),
+          'geospec-engine-native-source-relink/manifest.json',
+          ...sourcePaths.map((path) => `geospec-engine-native-source-relink/source/${path}`),
+        ],
+        { env: { ...process.env, COPYFILE_DISABLE: '1' } },
+      ).status,
       0,
     );
     const receipt = JSON.stringify({
@@ -665,6 +674,10 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     process.env = previousEnvironment;
   });
   assert.throws(() => verifyArtifacts(producer), /Missing GeoSpec artifact inventory/);
+  if (sourceOnly) {
+    process.env['GITHUB_RUN_ID'] = 'producer-A';
+    process.env['GITHUB_RUN_ATTEMPT'] = '1';
+  }
   const inventory = ensureDelivery(producer);
   assert.equal(readFileSync(join(legacyCache, 'occt-native/prefix-receipt.json'), 'utf8'), 'retained legacy receipt');
   assert.deepEqual(targets, [
@@ -683,8 +696,45 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
   assert.deepEqual(verifyArtifacts(producer), inventory);
   const builtTargets = [...targets];
   if (sourceOnly) {
+    const { delivery: rawDelivery } = inventory;
+    const delivery = /** @type {{run: unknown, assemblyRun: unknown, archives: {path: string}[]}} */ (rawDelivery);
+    assert.deepEqual(delivery.run, { id: 'producer-A', attempt: '1' });
+    assert.deepEqual(delivery.assemblyRun, delivery.run);
     const inventoryFile = join(producer, transportPath, 'inventory.json');
     assert.equal(inventory.schema, 'geospec-ci-artifacts-v3');
+    const relinkRecord = delivery.archives[2];
+    assert.ok(relinkRecord);
+    const relinkPath = join(producer, relinkRecord.path);
+    const originalRelink = readFileSync(relinkPath);
+    const assemblyKit = join(producer, 'fresh-assembly-1/kit');
+    const originalMembers = actualSpawnSync('tar', ['-tzf', relinkPath]).stdout.toString().trim().split('\n');
+    const extraLink = 'geospec-engine-native-source-relink/source/alias';
+    symlinkSync('manifest.json', join(assemblyKit, extraLink));
+    assert.equal(
+      actualSpawnSync('tar', ['-czf', relinkPath, '-C', assemblyKit, ...originalMembers, extraLink], {
+        env: { ...process.env, COPYFILE_DISABLE: '1' },
+      }).status,
+      0,
+    );
+    put(
+      inventoryFile,
+      JSON.stringify({
+        ...inventory,
+        delivery: {
+          ...delivery,
+          archives: delivery.archives.map((archive, index) =>
+            index === 2 ? { path: archive.path, ...fileRecordForTest(relinkPath) } : archive,
+          ),
+        },
+      }),
+    );
+    assert.throws(
+      () => verifyDelivery(producer),
+      /Source-relink archive does not contain current source/,
+      'a substituted tar link must fail even with a matching inventory hash',
+    );
+    put(relinkPath, originalRelink);
+    put(inventoryFile, JSON.stringify(inventory));
     const coordinatorFile = join(producer, packagePath, 'scripts/ci-artifacts.mjs');
     const coordinatorBytes = readFileSync(coordinatorFile);
     put(coordinatorFile, 'future coordinator edit');
@@ -703,6 +753,8 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     put(inventoryFile, JSON.stringify(inventory));
     assert.deepEqual(verifyArtifacts(producer).artifacts, inventory.artifacts);
     assert.throws(() => verifyDelivery(producer), /source kit differs/);
+    process.env['GITHUB_RUN_ID'] = 'assembly-B';
+    process.env['GITHUB_RUN_ATTEMPT'] = '2';
     const renewed = withProducerMarker(producer, () => ensureDelivery(producer), { pgid: process.pid });
     assert.equal(renewed.schema, 'geospec-ci-artifacts-v3');
     assert.equal(renewed.source.revision, revision, 'source kit records the current checkout revision');
@@ -711,6 +763,8 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       inventory.producerSource.revision,
       'receipt retains the original producer revision',
     );
+    assert.deepEqual(renewed.delivery.run, inventory.delivery.run, 'the original product producer remains A');
+    assert.deepEqual(renewed.delivery.assemblyRun, { id: 'assembly-B', attempt: '2' });
     assert.deepEqual(renewed.artifacts, inventory.artifacts, 'five generated products retain exact bytes');
     assert.deepEqual(
       targets,
@@ -737,8 +791,12 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       put(join(producer, path), `second source-only edit ${path}`);
       assert.deepEqual(verifyArtifacts(producer).artifacts, inventory.artifacts);
       assert.throws(() => verifyDelivery(producer), /source kit differs/);
+      process.env['GITHUB_RUN_ID'] = 'assembly-C';
+      process.env['GITHUB_RUN_ATTEMPT'] = '3';
       const second = withProducerMarker(producer, () => ensureDelivery(producer), { pgid: process.pid });
       assert.deepEqual(second.artifacts, inventory.artifacts);
+      assert.deepEqual(second.delivery.run, inventory.delivery.run, 'source-only relinks never relabel the product');
+      assert.deepEqual(second.delivery.assemblyRun, { id: 'assembly-C', attempt: '3' });
       assert.deepEqual(targets, [...builtTargets, ...Array.from({ length: index + 2 }, () => 'assemble-package')]);
     }
     for (const [path, value] of [

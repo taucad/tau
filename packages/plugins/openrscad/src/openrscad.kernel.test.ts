@@ -14,6 +14,7 @@ import {
   getInspectReport,
   getSignedVolumeFromGlb,
   expectLinearBaseColor,
+  expectKernelProjectionOrder,
   readGltfNamingSummary,
   validateGlbData,
 } from '@taucad/runtime-testing';
@@ -689,20 +690,34 @@ color("red") {
     expect(lineAccessor).toBeTypeOf('number');
     expect(edgedJson.accessors?.[lineAccessor!]?.count).toBe(24);
 
-    const repeated = await definition.render!(
-      {
-        handle: edged.handle,
-        view: 'model',
-        options: renderOptions,
-        content: { includeEdges: true },
-      },
-      runtime,
-      context,
-    );
-    if (typeof repeated.content === 'string') {
-      throw new TypeError('Expected repeated edged GLB render geometry');
-    }
-    expect(repeated.content).toBe(edged.geometry.content);
+    const project = async (handle: typeof edged.handle, includeEdges: boolean) => {
+      const result = await definition.render!(
+        { handle, view: 'model', options: renderOptions, content: { includeEdges } },
+        runtime,
+        context,
+      );
+      return result.content;
+    };
+    const write = async () => {
+      const result = await definition.write!(
+        {
+          exportId: 'glb',
+          handle: edged.handle,
+          options: { ...renderOptions, coordinateSystem: 'y-up', unit: { length: 'meter' } },
+        },
+        runtime,
+        context,
+      );
+      return result.files[0].bytes;
+    };
+    const ordered = await expectKernelProjectionOrder({
+      renderA: async () => project(edged.handle, true),
+      renderB: async () => project(edged.handle, false),
+      freshB: async () => project(plain.handle, false),
+      write,
+    });
+    expect(ordered.first).toEqual(edged.geometry.content);
+    expect(ordered.intervening).toEqual(plain.geometry.content);
 
     const exportInput = {
       handle: edged.handle,
@@ -735,7 +750,7 @@ color("red") {
     expect(repeatedEdgedExport.files[0].bytes).toEqual(edgedExport.files[0].bytes);
   });
 
-  it('renders once per request once a host keeps asking for the same edge variant', async () => {
+  it('never retains an edge variant on the native handle or in the kernel context', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const runtime = createRuntime({ 'project/model.scad': 'cube(2);' });
     const context = await definition.initialize({}, runtime);
@@ -754,13 +769,13 @@ color("red") {
       return { calls: renderToGlb.mock.calls.length, modes };
     };
 
-    // The first edged request learns the variant; every later one renders once.
+    // Evaluation always computes its plain preview; edged rendering is a pure projection.
     expect(await render(true)).toEqual({ calls: 2, modes: [4, 1] });
-    expect(await render(true)).toEqual({ calls: 1, modes: [4, 1] });
-    expect(await render(true)).toEqual({ calls: 1, modes: [4, 1] });
-    // Switching back is symmetric, and never serves the wrong variant.
-    expect(await render(false)).toEqual({ calls: 2, modes: [4] });
+    expect(await render(true)).toEqual({ calls: 2, modes: [4, 1] });
+    expect(await render(true)).toEqual({ calls: 2, modes: [4, 1] });
+    // Switching back never changes what the next evaluation caches.
     expect(await render(false)).toEqual({ calls: 1, modes: [4] });
+    expect(await render(true)).toEqual({ calls: 2, modes: [4, 1] });
   });
 
   it('exports native object-aware 3MF with one object and build item per spatial solid', async () => {

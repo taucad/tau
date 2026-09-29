@@ -32,12 +32,6 @@ type OpenRscadBackend = typeof OpenRscadModule;
 type OpenRscadContext = {
   backend: OpenRscadBackend;
   entryPath: string | undefined;
-  /**
-   * Whether the last display mesh asked for edges. A build renders the variant its mesh will most
-   * likely want, so a host that always shows edges renders once per request; a switch costs one
-   * extra render, which is what every edged request cost before.
-   */
-  includeEdges: boolean;
 };
 
 // `$fa`: the minimum fragment angle, in degrees.
@@ -112,12 +106,9 @@ type SourceBundle = {
 };
 
 type OpenRscadNativeHandle = {
-  /** The display GLB without edge overlays, once rendered. */
+  /** The plain GLB produced by evaluation; render never mutates this handle. */
   previewGlb?: Uint8Array<ArrayBuffer>;
   previewGlbTessellation?: string;
-  /** The display GLB with native edge overlays, once rendered. */
-  previewGlbWithEdges?: Uint8Array<ArrayBuffer>;
-  previewGlbWithEdgesTessellation?: string;
   source: string;
   files: Record<string, string>;
   binaryFiles: Record<string, Uint8Array<ArrayBuffer>>;
@@ -556,7 +547,7 @@ export const createOpenrscadKernel = ({
           data: backend.backendCause,
         });
       }
-      const context: OpenRscadContext = { backend, entryPath: undefined, includeEdges: false };
+      const context: OpenRscadContext = { backend, entryPath: undefined };
       return context;
     },
 
@@ -591,7 +582,7 @@ export const createOpenrscadKernel = ({
         filesystem,
         logger,
       });
-      const { includeEdges } = context;
+      const includeEdges = false;
       const span = tracer.startSpan('openrscad.export-3d', {
         phase: 'computingGeometry',
         includeEdges,
@@ -621,10 +612,8 @@ export const createOpenrscadKernel = ({
       const issues = collectIssues(result, bundle.source, normalizedEntryPath);
       const preview = asBuffer(result.bytes);
       const nativeHandle: OpenRscadNativeHandle = {
-        ...(includeEdges ? { previewGlbWithEdges: preview } : { previewGlb: preview }),
-        ...(includeEdges
-          ? { previewGlbWithEdgesTessellation: JSON.stringify(options.tessellation) }
-          : { previewGlbTessellation: JSON.stringify(options.tessellation) }),
+        previewGlb: preview,
+        previewGlbTessellation: JSON.stringify(options.tessellation),
         source: bundle.source,
         files: bundle.files,
         binaryFiles: bundle.binaryFiles,
@@ -647,11 +636,8 @@ export const createOpenrscadKernel = ({
 
     async render({ handle: nativeHandle, options, content }, { tracer }, context) {
       const includeEdges = content?.includeEdges === true;
-      context.includeEdges = includeEdges;
       const tessellation = JSON.stringify(options.tessellation);
-      const rendered = includeEdges
-        ? nativeHandle.previewGlbWithEdgesTessellation === tessellation && nativeHandle.previewGlbWithEdges
-        : nativeHandle.previewGlbTessellation === tessellation && nativeHandle.previewGlb;
+      const rendered = !includeEdges && nativeHandle.previewGlbTessellation === tessellation && nativeHandle.previewGlb;
       if (rendered) {
         return { content: rendered, issues: nativeHandle.issues };
       }
@@ -678,8 +664,6 @@ export const createOpenrscadKernel = ({
         span.end();
       }
       const preview = asBuffer(result.bytes);
-      nativeHandle[includeEdges ? 'previewGlbWithEdges' : 'previewGlb'] = preview;
-      nativeHandle[includeEdges ? 'previewGlbWithEdgesTessellation' : 'previewGlbTessellation'] = tessellation;
       return { content: preview, issues: collectIssues(result, nativeHandle.source, nativeHandle.entryPath) };
     },
 

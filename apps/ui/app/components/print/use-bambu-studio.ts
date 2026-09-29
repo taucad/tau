@@ -129,7 +129,7 @@ type Loaded = Readonly<{
 }>;
 
 /** The presets the person picked; the rest are Bambu Studio's defaults. Filaments are keyed by slot. @public */
-export type BambuStudioChosen = Readonly<Pick<PrintIntent, 'printer' | 'process' | 'filaments'>>;
+export type BambuStudioChosen = Readonly<Pick<PrintIntent, 'printer' | 'process' | 'preset' | 'filaments'>>;
 
 /** One Bambu Studio setting value a print intent may hold. */
 type SettingValue = NonNullable<PrintIntent['settings']>[string];
@@ -464,7 +464,7 @@ export const useBambuStudio = ({
   );
   const chooseProcess = useCallback(
     (process: string) => {
-      update((current) => ({ ...current, process }));
+      update(({ preset: _preset, ...current }) => ({ ...current, process }));
     },
     [update],
   );
@@ -482,7 +482,11 @@ export const useBambuStudio = ({
   );
   const resetChoice = useCallback(
     (choice: 'printer' | 'process') => {
-      update(({ [choice]: _removed, ...rest }) => rest);
+      if (choice === 'process') {
+        update(({ process: _process, preset: _preset, ...rest }) => rest);
+      } else {
+        update(({ printer: _printer, ...rest }) => rest);
+      }
     },
     [update],
   );

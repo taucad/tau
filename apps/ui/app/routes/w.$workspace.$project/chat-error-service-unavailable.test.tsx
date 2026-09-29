@@ -1,9 +1,6 @@
 /**
- * ChatErrorServiceUnavailable uses Try again copy with continuation behavior.
- *
- * `continueChat()` resumes the stream without touching `chat.messages`.
- * A destructive `regenerate()` here would erase partial assistant content
- * the user already saw before the network or service interruption.
+ * ChatErrorServiceUnavailable resumes only a run the host can continue.
+ * Try again explicitly replays an unrecoverable turn.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -20,8 +17,10 @@ const regenerate = vi.fn();
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => ({ continueChat, regenerate }),
-  useChatRetrySnapshot: () => ({ retryAttempt: 0, retryMaxAttempts: 5 }),
   useChatSelector: vi.fn(),
+}));
+vi.mock('#routes/w.$workspace.$project/use-open-new-chat.js', () => ({
+  useOpenNewChat: () => ({ openNewChat: vi.fn(), isReady: true }),
 }));
 
 describe('ChatErrorServiceUnavailable', () => {
@@ -68,6 +67,7 @@ describe('ChatErrorServiceUnavailable', () => {
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 });

@@ -16,31 +16,27 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 
-import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { HostSessionHandle } from '@taucad/runtime/host';
 import type { NodeMachineHost } from '@taucad/runtime/host/node';
 import type { ComputeGeneration, ComputeStoreControl } from '@taucad/runtime/types';
 
 import { hostSessionCookieName, startAgentServer } from '#agent-server.js';
-import { externalAgentDescriptorSchema } from '@taucad/agent-host';
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import type { AgentServerHandle } from '#agent-server.js';
 
 const token = 'agent-server-token-with-at-least-32-characters';
 
-const stubLauncher = (): NodeAgentLauncher =>
+const stubLauncher = (): AgentLauncher =>
   ({
-    execute: async () => ({
-      type: 'tail',
-      chatId: 'chat-1',
-      batch: { cursor: 0, nextCursor: 0, endCursor: 0, events: [] },
-    }),
-    events: () => ({ [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true, value: undefined }) }) }),
+    execute: async () => ({ commandId: 'cmd-1', generation: 0, status: 'applied', effect: 'not-applied', details: {} }),
+    read: async () => ({ status: 'batch', chatId: 'chat-1', cursor: 0, nextCursor: 0, endCursor: 0, events: [] }),
     liveEvents: () => ({ [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true, value: undefined }) }) }),
     pendingInterrupts: async () => [],
     host: undefined,
     close: async () => undefined,
-  }) as unknown as NodeAgentLauncher;
+  }) as unknown as AgentLauncher;
 
 let server: AgentServerHandle | undefined;
 const roots: string[] = [];

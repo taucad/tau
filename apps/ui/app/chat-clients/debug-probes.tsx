@@ -35,12 +35,12 @@ type DebugProbeGlobals = {
   /** The agent's isometric capture of `src/main.ts` once per cut list, as data URLs, through the packaged worker. */
   __tauCaptureSectionCuts?: (cutLists: ReadonlyArray<readonly SectionCutValues[]>) => Promise<string[]>;
   /**
-   * Park the chat's next admission or settlement, so a row can make a gesture,
-   * a reload or a stop land inside `run.queued.admitting` or `run.finishing.*`.
+   * Park the chat's next admission, so a row can make a gesture, a reload or a
+   * stop land inside `run.queued.admitting`.
    * @see armChatTurnHold
    */
   __tauHoldChatTurn?: (hold: ChatTurnHold) => void;
-  /** Let a parked admission or settlement carry on. @see releaseChatTurnHold */
+  /** Let a parked admission carry on. @see releaseChatTurnHold */
   __tauReleaseChatTurn?: (hold: ChatTurnHold) => void;
 };
 
@@ -144,7 +144,6 @@ export function DebugProbes(): ReactNode {
        * go. A row that wants one across a reload arms it again on the new
        * document, where this module's state starts empty anyway. */
       releaseChatTurnHold('admission');
-      releaseChatTurnHold('settlement');
       delete probeGlobals.__tauHoldChatTurn;
       delete probeGlobals.__tauReleaseChatTurn;
     };

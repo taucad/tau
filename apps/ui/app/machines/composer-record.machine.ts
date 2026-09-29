@@ -13,7 +13,7 @@
  * coalesce, fail, retry and drain on their own (`writes`).
  */
 
-import { matchesState, setup, types } from 'xstate';
+import { createAsyncLogic, matchesState, setup, types } from 'xstate';
 import type { StateValue } from 'xstate';
 import type {
   ComposerRecord,
@@ -22,7 +22,7 @@ import type {
   ComposerRecordStore,
 } from '#db/composer-record-store.js';
 import { isComposerRecordInputError } from '#db/composer-record-store.js';
-import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas } from '#lib/xstate.lib.js';
 import { getRetryDelay } from '#utils/backoff.utils.js';
 
 /** How many times a retryable write failure is retried before the patch is declared stalled. */
@@ -50,6 +50,8 @@ export type ComposerRecordMachineContext = {
   readonly attempt: number;
   /** @see ComposerRecordMachineInput.retryMaxAttempts */
   readonly retryMaxAttempts: number;
+  /** An effect or child failure no transition modelled; the record keeps answering (MC-R12). */
+  readonly fault?: string;
 };
 
 /** Events accepted by composerRecordMachine. @public */
@@ -68,17 +70,23 @@ export type ComposerRecordMachineEmitted =
   | { readonly type: 'writeRecovered' }
   | { readonly type: 'recordRemoved' };
 
-const readRecordActor = fromSafeAsync<{ type: 'recordRead'; result: ComposerRecordReadResult }>(async () => {
-  throw new Error('readRecordActor not provided');
+const readRecordActor = createAsyncLogic<{ type: 'recordRead'; result: ComposerRecordReadResult }>({
+  run: async () => {
+    throw new Error('composerRecordMachine: the readRecordActor actor was not provided.');
+  },
 });
 
-const writePatchActor = fromSafeAsync<void, ComposerRecordPatch>(async () => {
-  throw new Error('writePatchActor not provided');
+const writePatchActor = createAsyncLogic<void, ComposerRecordPatch>({
+  run: async () => {
+    throw new Error('composerRecordMachine: the writePatchActor actor was not provided.');
+  },
 });
 
 // oxlint-disable-next-line @typescript-eslint/no-unnecessary-type-arguments -- a throw-only body infers `Promise<never>` without it (XState policy, "Async Operations")
-const removeRecordActor = fromSafeAsync<void>(async () => {
-  throw new Error('removeRecordActor not provided');
+const removeRecordActor = createAsyncLogic<void>({
+  run: async () => {
+    throw new Error('composerRecordMachine: the removeRecordActor actor was not provided.');
+  },
 });
 
 const asError = (error: unknown): Error => (error instanceof Error ? error : new Error(String(error)));
@@ -157,6 +165,11 @@ export const composerRecordMachine = setup({
   },
 }).createMachine({
   id: 'composer-record',
+  version: '1',
+  /* A fault no transition modelled is recorded and the record keeps answering (MC-R12). */
+  onError: ({ event }) => ({
+    context: { fault: event.error instanceof Error ? event.error.message : 'composer-record fault' },
+  }),
   context: ({ input }) => ({
     record: undefined,
     pending: {},
@@ -172,6 +185,11 @@ export const composerRecordMachine = setup({
         loading: {
           invoke: {
             src: 'readRecordActor',
+            /* The result is the `recordRead` event its handler below reads. */
+            onDone: ({ event }, enq) => {
+              enq.raise(event.output);
+              return {};
+            },
             // A read that fails is not a record that is absent, but it is still
             // a composer the user may type into right now (D7).
             onError: ({ event }, enq) => {
@@ -321,6 +339,26 @@ export const composerRecordMachine = setup({
 });
 
 /**
+ * The (state, event) pairs `composerRecordMachine` leaves unanswered on purpose (MC-R17). `recordRead` is raised by
+ * the read's own `onDone` while `loading`, so no other state hears it.
+ *
+ * @public
+ */
+export const composerRecordIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  /* Removal is already under way. */
+  ['lifecycle.draining', 'remove'],
+  ['lifecycle.removing', 'remove'],
+  /* A removed record takes no write, so the deleted file cannot come back. */
+  ['writes.stopped', 'patch'],
+  ['writes.stopped', 'flushNow'],
+  /* An empty patch changes nothing; with nothing pending, or its write already on the wire, a flush has nothing to start. */
+  ['writes.idle', 'patch'],
+  ['writes.retrying', 'patch'],
+  ['writes.idle', 'flushNow'],
+  ['writes.persisting', 'flushNow'],
+];
+
+/**
  * The `provide()` bundle binding a machine instance to one record's store.
  *
  * @param store - The store for the record this actor owns.
@@ -335,12 +373,16 @@ export function composerRecordActors(store: ComposerRecordStore): {
 } {
   return {
     actors: {
-      readRecordActor: fromSafeAsync(async () => ({ type: 'recordRead', result: await store.read() })),
-      writePatchActor: fromSafeAsync(async ({ input }: { input: ComposerRecordPatch }) => {
-        await store.patch(input);
+      readRecordActor: createAsyncLogic({ run: async () => ({ type: 'recordRead', result: await store.read() }) }),
+      writePatchActor: createAsyncLogic({
+        run: async ({ input }: { input: ComposerRecordPatch }) => {
+          await store.patch(input);
+        },
       }),
-      removeRecordActor: fromSafeAsync(async () => {
-        await store.remove();
+      removeRecordActor: createAsyncLogic({
+        run: async () => {
+          await store.remove();
+        },
       }),
     },
   };

@@ -234,6 +234,7 @@ export type UiBrowserCommands = {
   uiStartTauServeFixture(options?: { readonly externalAgents?: boolean | 'codex' }): Promise<TargetTauServeFixture>;
   uiStopTauServeFixture(): Promise<void>;
   uiReleaseTauServeGateway(): Promise<void>;
+  uiIsTauServeGatewayHeld(): Promise<boolean>;
   uiReadTauServeFile(relativePath: string): Promise<string | undefined>;
   uiListTauServeChats(): Promise<readonly string[]>;
   uiTargetWorkers(urlSubstring?: string, surface?: TargetSurface): Promise<readonly TargetWorker[]>;
@@ -480,6 +481,7 @@ export const startTauServeFixture = (
 ): Promise<TargetTauServeFixture> => server.commands.uiStartTauServeFixture(options);
 export const stopTauServeFixture = (): Promise<void> => server.commands.uiStopTauServeFixture();
 export const releaseTauServeGateway = (): Promise<void> => server.commands.uiReleaseTauServeGateway();
+export const isTauServeGatewayHeld = (): Promise<boolean> => server.commands.uiIsTauServeGatewayHeld();
 export const readTauServeFile = (relativePath: string): Promise<string | undefined> =>
   server.commands.uiReadTauServeFile(relativePath);
 export const listTauServeChats = (): Promise<readonly string[]> => server.commands.uiListTauServeChats();

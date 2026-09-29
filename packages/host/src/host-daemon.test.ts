@@ -20,7 +20,7 @@ import type { MachineArtifactReference } from '@taucad/runtime/machine';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { createFileSystemBridgeProxy } from '@taucad/runtime/filesystem';
 import type { FileSystemBridgeConnection } from '@taucad/runtime/filesystem';
-import type * as RuntimeFileSystem from '@taucad/runtime/filesystem';
+import type * as runtimeFilesystem from '@taucad/runtime/filesystem';
 import { z } from 'zod';
 
 import { startHostDaemon } from '#host-daemon.js';
@@ -28,14 +28,16 @@ import type { HostDaemonEvent } from '#host-daemon.js';
 import { writeHostCredential } from '#credential-store.js';
 import * as revisions from '#revisions.js';
 import * as agentTools from '#agent-tools.js';
+import * as agentServer from '#agent-server.js';
 import * as machineHost from '#machine-host.js';
+import * as projectHosts from '#project-host.js';
 import type { HostJobWorkerFactory } from '#job-worker.js';
 
 /* Observe the filesystem the daemon binds to its runtime child, without changing
  * it: the captured thunk is the connection that child's bridge opens. */
 const runtimeFileSystemOpens = vi.hoisted(() => [] as Array<() => FileSystemBridgeConnection>);
 vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
-  const original = await importOriginal<typeof RuntimeFileSystem>();
+  const original = await importOriginal<typeof runtimeFilesystem>();
   return {
     ...original,
     fromFileSystemBridge: (open: () => FileSystemBridgeConnection) => {
@@ -53,6 +55,10 @@ const machineRuntimeSpy = vi.spyOn(machineHost, 'createNodeMachineRuntime');
  * has to build the real revision tree around the real launcher. */
 const realCreateProjectRevisions = revisions.createProjectRevisions;
 const revisionsSpy = vi.spyOn(revisions, 'createProjectRevisions');
+/* Observe the launcher the daemon serves on its agent channel, without changing it. */
+const agentServerSpy = vi.spyOn(agentServer, 'startAgentServer');
+/* Observe the credential port and model transport the daemon gives its project host. */
+const projectHostSpy = vi.spyOn(projectHosts, 'createProjectHost');
 
 let temporaryDirectory: string | undefined;
 const originalWorkingDirectory = process.cwd();
@@ -584,17 +590,11 @@ describe('startHostDaemon', () => {
       const tree = realCreateProjectRevisions(options);
       return {
         ...tree,
-        record: (launcher) => {
-          const recorded = tree.record(launcher);
-          return {
-            ...recorded,
-            close: async (): Promise<void> => {
-              revisionCloseEntered.resolve();
-              await allowRevisionClose.promise;
-              await recorded.close();
-              throw new Error('revision close failed after drain');
-            },
-          };
+        release: async (): Promise<void> => {
+          revisionCloseEntered.resolve();
+          await allowRevisionClose.promise;
+          await tree.release();
+          throw new Error('revision close failed after drain');
         },
       };
     });
@@ -965,6 +965,121 @@ describe('startHostDaemon', () => {
   /* G0-2/W14: the runtime child executes project code the agent wrote, so the
    * daemon binds it the agent's view. The trusted planes beside it — the
    * parameter authority and the revisions engine — keep the working copy. */
+  /* RH-A14 (RH-S6): the relay revoked the stored credential; until pairing returns a new one the daemon admits no
+   * Tau run on it, so the served launcher refuses a start with HOST_NOT_PAIRED. */
+  it('should refuse start with HOST_NOT_PAIRED while the daemon re-pairs', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-repair-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'revoked-credential-value-that-never-enters-a-url',
+    });
+
+    /* A relay that rejects the stored credential and then never approves the new pairing. */
+    const httpServer = createServer((request, response) => {
+      const { pathname } = new URL(request.url ?? '/', 'http://relay.invalid');
+      if (request.method === 'POST' && pathname === '/v1/agents/pairings') {
+        response.writeHead(200, { 'content-type': 'application/json' }).end(
+          JSON.stringify({
+            deviceCode: 'device-code-0123456789',
+            userCode: 'ABCD-1234',
+            verificationUri: 'https://tau.example/pair',
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            pollInterval: 250,
+          }),
+        );
+        return;
+      }
+      if (request.method === 'POST' && pathname === '/v1/agents/pairings/token') {
+        response.writeHead(202).end();
+        return;
+      }
+      response.writeHead(404).end();
+    });
+    resources.push(httpServer);
+    httpServer.on('upgrade', (_request, socket) => {
+      socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+    });
+    await new Promise<void>((resolve) => {
+      httpServer.listen(0, '127.0.0.1', resolve);
+    });
+    const address = httpServer.address();
+    if (!address || typeof address === 'string') {
+      throw new TypeError('Expected a TCP relay address.');
+    }
+    const events: HostDaemonEvent[] = [];
+    agentServerSpy.mockClear();
+    const daemon = startHostDaemon({
+      relayUrl: new URL(`http://127.0.0.1:${String(address.port)}`),
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+      agent: { ...(await agentOptionsIn(temporaryDirectory)), testModel: false },
+      onEvent: (event) => events.push(event),
+    });
+    await daemon.ready;
+    await vi.waitFor(
+      () => {
+        expect(events).toContainEqual(expect.objectContaining({ type: 'pairing', userCode: 'ABCD-1234' }));
+      },
+      { timeout: 10_000 },
+    );
+    const launcher = agentServerSpy.mock.calls.at(-1)?.[0].launcher;
+    if (launcher === undefined) {
+      throw new TypeError('Expected the daemon to serve its launcher.');
+    }
+
+    await expect(
+      launcher.execute({
+        type: 'start',
+        commandId: 'start-while-repairing',
+        payload: {
+          trigger: 'submit',
+          chatId: 'chat-repair',
+          runId: 'run-repair',
+          message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
+        },
+      }),
+    ).resolves.toMatchObject({ status: 'refused', effect: 'not-applied', code: 'HOST_NOT_PAIRED' });
+
+    await daemon.close();
+    expect(await daemon.closed).toEqual({ cause: 'requested' });
+  }, 30_000);
+
+  /* W6.r1 round 3 (GI-Q6): the account the pairing exchange returned, stored with the credential, is the principal
+   * the daemon's credential port and its funded transport name. */
+  it('should name the stored account as the principal of its credential and funded transport', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-principal-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+      accountId: 'account-1',
+    });
+    projectHostSpy.mockClear();
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+      agent: { ...(await agentOptionsIn(temporaryDirectory)), tauCloudEnabled: true },
+    });
+    await daemon.ready;
+    const options = projectHostSpy.mock.calls.at(-1)?.[0];
+    if (options === undefined) {
+      throw new TypeError('Expected the daemon to open a project host.');
+    }
+
+    await vi.waitFor(() => {
+      expect(options.credential()).toMatchObject({ mode: 'paired', principal: 'account-1' });
+    });
+    const { funding } = options.modelTransport as { readonly funding?: { principal: () => Promise<unknown> } };
+    await expect(funding?.principal()).resolves.toBe('account-1');
+
+    await daemon.close();
+  }, 30_000);
+
   it('should bind the runtime child a masked view and keep the revisions filesystem raw', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-runtime-view-'));
     process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
@@ -1126,57 +1241,6 @@ describe('startHostDaemon', () => {
     } finally {
       await daemon.close();
     }
-  }, 20_000);
-
-  /*
-   * PH19 ruling 2 keeps the API's run directory free of content, so nothing it
-   * receives may wait on a revision. The recorder's stream holds a terminal
-   * marker until the turn's whole-tree capture is durable — a guarantee clients
-   * need — and a reporter riding it both delays every directory update and
-   * queues events for the length of the capture, past which the launcher's
-   * fan-out errors the subscriber and the reporter never resubscribes.
-   */
-  it('reports runs from the launcher itself, never from the stream that waits for a revision', async () => {
-    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-reporter-stream-'));
-    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
-    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
-    const relay = await startRelay();
-    const subscriptions = { launcher: 0, recorded: 0 };
-    revisionsSpy.mockImplementationOnce((options) => {
-      const tree = realCreateProjectRevisions(options);
-      return {
-        ...tree,
-        record: (launcher) => {
-          const events = launcher.events.bind(launcher);
-          /* Patched in place, not wrapped: the daemon holds this very object,
-           * and counting subscriptions on a copy would not see the ones it
-           * makes. */
-          Object.assign(launcher, {
-            events: (signal: AbortSignal) => {
-              subscriptions.launcher += 1;
-              return events(signal);
-            },
-          });
-          const recorded = tree.record(launcher);
-          return {
-            ...recorded,
-            events: (signal: AbortSignal) => {
-              subscriptions.recorded += 1;
-              return recorded.events(signal);
-            },
-          };
-        },
-      };
-    });
-
-    const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
-    await daemon.ready;
-    /* Two on the launcher — the revision tree's own terminal-marker watch and
-     * the run reporter — and none on the wrapper, which no client is listening
-     * to yet. */
-    expect(subscriptions).toEqual({ launcher: 2, recorded: 0 });
-
-    await daemon.close();
   }, 20_000);
 
   /*

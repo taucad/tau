@@ -62,14 +62,6 @@ describe('describeRevisionFailure', () => {
     );
   });
 
-  /* The one sentence two layers refuse an unrooted placement with: the worker
-     client one hop from the seam, and the authority above it (finding 8). */
-  it('phrases a chat placed on files that are not there', () => {
-    expect(describeRevisionFailure('turn', 'PLACEMENT_UNROOTED').description).toBe(
-      'This chat’s files could not be found.',
-    );
-  });
-
   it('says the same thing about the engine whichever verb asked it', () => {
     expect(describeRevisionFailure('restore', 'ENGINE_UNAVAILABLE').description).toBe(
       describeRevisionFailure('save', 'ENGINE_UNAVAILABLE').description,
@@ -79,17 +71,24 @@ describe('describeRevisionFailure', () => {
 
   /* The fourth subject is not a toast channel at all: a turn that recorded
    * nothing is announced by `turn.failed`, whose `reason` the machines author
-   * — "The checkout did not settle the cut in time." (P4, W4 §D). */
+   * — "Something else changed this project first." (P4, W4 §D). */
   it('phrases a turn that recorded nothing, never in the machine’s own words', () => {
-    expect(describeRevisionFailure('turn', 'CUT_TIMED_OUT')).toEqual({
+    expect(describeRevisionFailure('turn', 'BASE_CUT_FAILED')).toEqual({
       title: 'Nothing was saved for that change',
-      description: 'Tau took too long to record that change. Try sending it again.',
+      description: 'Tau could not save this project’s earlier edits first. Try sending that again.',
     });
     expect(describeRevisionFailure('turn', 'LEASE_UNAVAILABLE').description).toContain('Another window');
     expect(describeRevisionFailure('turn', undefined).description).toBe(revisionFailureCopy.turn.fallback);
     /* A release is a category of its own: the turn was let go, not broken. */
     expect(describeRevisionFailure('turn', 'TURN_RELEASED').description).toBe(
       'The turn ended before it recorded a revision.',
+    );
+  });
+
+  /* RM-R11: a verb that arrives while another runs is refused by code, and the page says to wait. */
+  it('phrases a branch verb refused while another is still running', () => {
+    expect(describeRevisionFailure('branch', 'REVISIONS_BUSY').description).toBe(
+      'Another branch change is still in progress. Wait for it to finish, then try again.',
     );
   });
 

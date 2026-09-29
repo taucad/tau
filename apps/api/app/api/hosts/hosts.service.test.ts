@@ -220,6 +220,34 @@ describe('HostsService route admission', () => {
  * or one that predates the capability, must still pair and simply get no agent
  * grant, no browser marker, and no `agentUrl` anywhere.
  */
+/* GI-Q6 (W6 RH-S6): the daemon names the account it was paired to as its funded principal. */
+describe('HostsService pairing token exchange', () => {
+  it('returns the approving account with the device credential', async () => {
+    const approved = JSON.stringify({ deviceLabel: 'laptop', userCode: 'ABCD-EFGH', approvedUserId: 'user-7' });
+    const inserted: unknown[] = [];
+    const redis = {
+      client: { get: vi.fn(async () => approved), eval: vi.fn(async () => approved) },
+      createDuplicateClient: vi.fn(() => ({})),
+    } as unknown as RedisService;
+    const database = {
+      database: {
+        insert: () => ({
+          values: async (row: unknown) => {
+            inserted.push(row);
+          },
+        }),
+      },
+    } as unknown as DatabaseService;
+    const service = new HostsService(database, redis, {} as unknown as ConfigService<Environment, true>);
+
+    const token = await service.exchangePairing('device-code-0123456789');
+
+    expect(token).toMatchObject({ accountId: 'user-7' });
+    expect(inserted).toMatchObject([{ id: token?.deviceId, ownerId: 'user-7' }]);
+    service.onModuleDestroy();
+  });
+});
+
 describe('HostsService agent capability advertisement', () => {
   const deviceRow = {
     id: 'device-1',

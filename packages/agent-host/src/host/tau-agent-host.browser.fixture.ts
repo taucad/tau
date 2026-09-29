@@ -1,6 +1,7 @@
 import { createOpfsEventLog } from '#browser.js';
 import { createTauAgentHost } from '@taucad/agent-host';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
+import { fakePlacement } from '#host/tau-agent-host.fixture.js';
 import type { ToolRegistry } from '#waist/ports.js';
 
 type TestSyncAccessHandle = {
@@ -49,15 +50,11 @@ globalThis.addEventListener('message', async () => {
       model: { id: 'scripted-g2-model', contextWindow: 200_000 },
       modelTransport: new ScriptedParityModelTransport(scriptedParityResponses.slice(0, 2)),
       toolRegistry: readTool,
-      openEventLog: async () => createOpfsEventLog({ fileHandle }),
-      interruptPort: {
-        pause: async (request) => ({ interruptId: request.interruptId, outcome: 'approved' }),
-        pending: async () => [],
-        resume: async () => undefined,
-      },
+      openEventLog: async () => createOpfsEventLog({ fileHandle, access: 'write' }),
       createId: () => `worker-message-${id++}`,
       createLeaderEpoch: () => `worker-epoch-${epoch++}`,
       now: () => new Date('2026-09-01T00:00:00.000Z'),
+      placement: fakePlacement({ registry: readTool }).port,
     });
     const messages = await host.admit({
       chatId,
@@ -67,10 +64,13 @@ globalThis.addEventListener('message', async () => {
     });
     await host.close();
 
-    const reopened = await createOpfsEventLog({ fileHandle });
+    const reopened = await createOpfsEventLog({ fileHandle, access: 'write' });
     const events = await reopened.read();
     await reopened.close();
+    const file = await fileHandle.getFile();
+    const log = await file.text();
     globalThis.postMessage({
+      log,
       origin: location.origin,
       eventTypes: events.map((event) => event.type),
       final: messages.findLast((message) => message.role === 'assistant')?.content,

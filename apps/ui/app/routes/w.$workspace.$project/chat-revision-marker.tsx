@@ -1,4 +1,4 @@
-import { memo, useCallback, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { ChevronDown, RotateCw } from 'lucide-react';
 import { messageRole } from '@taucad/chat/constants';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
@@ -12,22 +12,18 @@ import {
   turnRevisionLabel,
 } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
 import type { TurnRevisionBase, TurnRevisionState } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
-import { useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { requestRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
+import { selectVisibleChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useRevisionCards, useRevisionChanges, useRevisions, useTurnRevision } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useRevisionStatus } from '#hooks/use-revision-status.js';
-import { useChatActions, useChatContext, useChatRetrySnapshot, useChatSelector } from '#hooks/use-chat.js';
+import { useChatActions, useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import { useProject } from '#hooks/use-project.js';
-import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
-import {
-  getHostTurnSettlement,
-  subscribeHostTurnSettlements,
-} from '#chat-clients/_internal/browser-agent-host-transport.js';
-
-const noSubscription = (): (() => void) => () => undefined;
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { selectTurnRevision } from '#machines/chat-projection.logic.js';
+import type { TurnRevisionLog } from '#machines/chat-projection.logic.js';
 
 /** Tucked under the user bubble, like a status strip attached to a composer (R11, R12). */
 const cardClassName = 'mx-2 -mt-3 rounded-b-lg border border-t-0 bg-muted/40 pt-3';
@@ -53,7 +49,40 @@ const turnSave = (card: RevisionCard | undefined, baseRevisionId: string | undef
   card?.revisionId === baseRevisionId ? undefined : card;
 
 /**
- * The revision facts for one request, read from their existing owners.
+ * One revision's card: from the loaded page when it is on it, looked up otherwise.
+ *
+ * @param revisionId - The revision, or `undefined` for none.
+ * @returns Its card, once the revision client has it.
+ */
+function useRevisionCard(revisionId: string | undefined): RevisionCard | undefined {
+  const { revisions } = useRevisions();
+  const loaded = revisions.find((revision) => revision.revisionId === revisionId);
+  return (
+    useRevisionCards(loaded === undefined && revisionId !== undefined ? [revisionId] : []).get(revisionId ?? '') ??
+    loaded
+  );
+}
+
+/**
+ * One turn's facts from its chat's log (PV-S9): `selectTurnRevision` over the store's projection.
+ *
+ * @param chatId - The chat.
+ * @param turnId - The turn's user-message id.
+ * @returns The newest attempt's facts, or `undefined` while the log names no run for the turn.
+ */
+function useTurnLog(chatId: string, turnId: string): TurnRevisionLog | undefined {
+  const chats = useChatSessionStore();
+  const subscribe = useCallback((listener: () => void) => chats.subscribeProjection(chatId, listener), [chats, chatId]);
+  const read = useCallback(() => chats.getProjection(chatId), [chats, chatId]);
+  const projection = useSyncExternalStore(subscribe, read, read);
+  return useMemo(
+    () => (projection === undefined ? undefined : selectTurnRevision(projection, turnId)),
+    [projection, turnId],
+  );
+}
+
+/**
+ * The revision facts for one request (§5.8): its log, the revision client's cards and whether the host answers.
  *
  * @param userMessageId - The user message that anchors the turn.
  * @param isLatestTurn - Whether this is the chat's latest turn.
@@ -62,54 +91,32 @@ const turnSave = (card: RevisionCard | undefined, baseRevisionId: string | undef
 function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): TurnRevisionState {
   const { projectId } = useProject();
   const { activeChatId } = useChatContext();
-  /* B4: the turn's own revision, looked up by the id its settlement names — not found by scanning a page. */
-  const turnRevision = useTurnRevision(userMessageId);
-  const { revisions } = useRevisions();
-  const outcome = useTurnOutcomes(projectId).find((notice) => notice.turnId === userMessageId)?.kind;
-  /* Stable closures: a fresh `subscribe` every render makes React unsubscribe
-     and resubscribe both stores on every render of every turn marker (C47). */
-  const readSettlement = useCallback(() => getHostTurnSettlement(activeChatId), [activeChatId]);
-  const settlement = useSyncExternalStore(subscribeHostTurnSettlements, readSettlement, () => undefined);
-  /* The turn's own durable lifecycle status, which survives the next message
-     and a reload — unlike the chat's live run state (C38). */
-  const turnStatus = useChatSelector((state) => state.messagesById.get(userMessageId)?.metadata?.status);
+  const log = useTurnLog(activeChatId, userMessageId);
+  const settled = useRevisionCard(log?.settlement?.revisionId);
+  const placement = log?.placement;
+  const baseRevisionId = placement?.baseRevisionId;
+  /* The base only names a working or unconfirmed turn, which only the latest turn can be. */
+  const baseCard = useRevisionCard(isLatestTurn && log?.settlement === undefined ? baseRevisionId : undefined);
+  const recorded = turnSave(useTurnRevision(userMessageId), baseRevisionId);
   const run = useChatSidebarStatus(projectId, activeChatId);
-  const { retryAttempt } = useChatRetrySnapshot();
-  const isRequestActive = useChatSelector((state) => state.status === 'submitted' || state.status === 'streaming');
-  const hasError = useChatSelector((state) => state.error !== undefined || state.persistedError !== undefined);
-  const authority = useOptionalChatWorkspaceAuthority();
-  const readWorkspace = useCallback(() => authority?.get(activeChatId), [authority, activeChatId]);
-  const workspace = useSyncExternalStore(authority?.subscribe ?? noSubscription, readWorkspace, () => undefined);
+  const hasError = useChatSelector((state) => selectVisibleChatError(state) !== undefined);
   /* The last visible state, so a reconnect holds what the summary said. */
   const [held, setHeld] = useState<TurnRevisionState>();
 
-  const baseRevisionId = workspace?.execution.baseRevisionId;
-  const loadedBase = revisions.find((revision) => revision.revisionId === baseRevisionId);
-  const baseCard =
-    useRevisionCards(
-      isLatestTurn && loadedBase === undefined && baseRevisionId !== undefined ? [baseRevisionId] : [],
-    ).get(baseRevisionId ?? '') ?? loadedBase;
   const base: TurnRevisionBase | undefined =
-    workspace === undefined
+    placement === undefined
       ? undefined
       : baseRevisionId === undefined
         ? { kind: 'first' }
         : { kind: 'revision', n: baseCard?.n };
 
   const state = deriveTurnRevisionState({
-    revision: turnSave(turnRevision, baseRevisionId),
-    outcome,
-    isSettledWithoutChange:
-      settlement?.type === 'turn.finalized' &&
-      settlement.turnId === userMessageId &&
-      settlement.revisionId === undefined,
-    isLatestTurn,
-    turnStatus,
-    runState: isLatestTurn ? run?.state : undefined,
-    isRequestActive: isLatestTurn && isRequestActive,
-    isRetrying: isLatestTurn && retryAttempt > 0,
-    hasError: isLatestTurn && hasError,
-    base: isLatestTurn ? base : undefined,
+    log,
+    settled,
+    recorded,
+    base,
+    isUnreachable: isLatestTurn && hasError,
+    isReconnecting: isLatestTurn && run?.state === 'reconnecting',
     previous: held,
   });
   if (stateKey(state) !== stateKey(held)) {
@@ -161,9 +168,12 @@ function useBackupException(): string | undefined {
  */
 function SavedRevisionDetails({
   revision,
+  note,
   onView,
 }: {
   readonly revision: RevisionCard;
+  /** What the revision holds, when it is not the turn's own work (V5 Q14). */
+  readonly note?: string;
   readonly onView: () => void;
 }): React.JSX.Element {
   const { headRevisionId, line } = useRevisions();
@@ -173,6 +183,9 @@ function SavedRevisionDetails({
   const named = revision.tags?.[0];
   return (
     <Collapsible open={isDetailsOpen} className='flex flex-col gap-2 px-3 pt-1 pb-2' onOpenChange={setIsDetailsOpen}>
+      {note === undefined || note === '' ? null : (
+        <p className='text-xs leading-relaxed text-muted-foreground'>{note}</p>
+      )}
       {named === undefined ? null : <p className='text-sm font-medium wrap-break-word'>{named}</p>}
       {exception === undefined ? null : (
         <p data-slot='marker-exception' className='text-xs text-muted-foreground'>
@@ -309,6 +322,7 @@ export const ChatRevisionMarker = memo(function ({
         ) : (
           <SavedRevisionDetails
             revision={savedRevision}
+            note={turnRevisionDetail(state)}
             onView={() => {
               openRevisions(savedRevision.revisionId);
             }}

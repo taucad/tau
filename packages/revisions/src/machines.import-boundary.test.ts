@@ -25,7 +25,7 @@ const importsOf = (file: string): readonly Import[] =>
     typeOnly: match[1] !== undefined,
   }));
 
-const importsXstate = (specifier: string): boolean => specifier === 'xstate' || specifier.startsWith('xstate/');
+const importsXstate = (specifier: string): boolean => specifier === 'xstate';
 const importsSiblingMachine = (specifier: string): boolean => /^#[a-z-]+\.machine\.js$/u.test(specifier);
 const importsPackageContract = (specifier: string): boolean =>
   specifier === '#revision-port.js' || specifier === '#revision-authority.js' || specifier === '#remotes.js';
@@ -119,12 +119,24 @@ describe('revision machine import boundary', () => {
         (entry) =>
           !entry.typeOnly ||
           importsXstate(entry.specifier) ||
+          entry.specifier.startsWith('xstate/') ||
           importsSiblingMachine(entry.specifier) ||
           importsMachineSchemas(entry.specifier),
       );
 
     expect(typesModules.length).toBeGreaterThan(0);
     expect(offenders).toEqual([]);
+  });
+
+  /* MC-R23: every machine's own suite runs under `guardActors`, so a silent drop,
+   * an unanswered timer or a fault fails the suite instead of passing unseen. */
+  it('should guard every machine test with the shared harness', () => {
+    const unguarded = machineFiles()
+      .map((file) => file.replace(/\.machine\.ts$/u, '.machine.test.ts'))
+      .filter((test) => !importsOf(test).some((entry) => entry.specifier === '@taucad/xstate-testing/inspect'))
+      .map((test) => test.slice(sourceDirectory.length));
+
+    expect(unguarded).toEqual([]);
   });
 
   it('keeps the one runtime-importable module import-free, which is why it is allowed', () => {

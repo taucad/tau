@@ -5,12 +5,17 @@ import { mock } from 'vitest-mock-extended';
 import { projectToManifest } from '@taucad/types';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
-import { sessionsActor } from '#services/sessions-store.js';
+import { createSessionsActor } from '#services/sessions-store.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import type { ActorRefFrom } from 'xstate';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { holdEditorConflictRecord } from '#lib/monaco-model-service.js';
+import type * as AgentHostClientModule from '#services/agent-host-client.js';
+import type * as HandleStoreModule from '#filesystem/handle-store.js';
+
+/** The registry these rows share, composed as the app's root composes its own (MC-R4). */
+const sessionsActor = createSessionsActor().start();
 
 const projectA = 'proj_aaaaaaaaaaaaaaaaaaaaa';
 const projectB = 'proj_bbbbbbbbbbbbbbbbbbbbb';
@@ -37,6 +42,72 @@ const projectProviderChatInputs: Array<{
 const editorSend = vi.fn();
 const projectSend = vi.fn();
 const connectRemote = vi.fn(async () => undefined);
+const connectorReleases: Array<ReturnType<typeof vi.fn>> = [];
+const publishProjectHostConnector = vi.fn(
+  (
+    _projectId: string,
+    _connector: (chatId: string) => Promise<unknown>,
+    _stoppability: (chatId: string) => Promise<unknown>,
+  ) => {
+    const release = vi.fn();
+    connectorReleases.push(release);
+    return release;
+  },
+);
+const browserClientOptions: unknown[] = [];
+const browserHostLeaseReleases: Array<ReturnType<typeof vi.fn>> = [];
+const retainBrowserAgentHostProject = vi.fn((_options: unknown) => {
+  const release = vi.fn();
+  browserHostLeaseReleases.push(release);
+  return release;
+});
+const daemonClientTransports: unknown[] = [];
+const cancelProjectedRun = vi.fn(async (): Promise<'stopped' | 'continuing'> => 'stopped');
+const storedHostSettings = new Map<
+  string,
+  { activeExecution?: { kind: 'tau'; model: string; hostId?: string }; activeKernel?: 'openscad' }
+>();
+let fileManagerReady = false;
+const projectWorkspace = { syncProjectRoots: vi.fn(async () => undefined) };
+const projectFileManagerRef = {
+  getSnapshot: () => ({
+    context: { rootDirectory: '/projects/live', openFileSystemBridge: vi.fn(), openRevisionSessionPort: vi.fn() },
+    matches: (state: string) => state === 'ready' && fileManagerReady,
+  }),
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
+const chatSessionStore = {
+  get: () => undefined,
+  setProjectSession: () => undefined,
+  setFocusedProject: () => undefined,
+  publishProjectHostConnector,
+  getChatHostSettings: async (chatId: string) => storedHostSettings.get(chatId),
+  cancelProjectedRun,
+};
+vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof AgentHostClientModule>()),
+  createBrowserAgentHostClient: (options: unknown) => {
+    browserClientOptions.push(options);
+    return { close: async () => undefined };
+  },
+  retainBrowserAgentHostProject,
+  createAgentHostClient: (transport: unknown) => {
+    daemonClientTransports.push(transport);
+    return { close: async () => undefined };
+  },
+  readBrowserRunStoppability: async () => 'stoppable',
+}));
+vi.mock('#services/daemon-agent-host-client.js', () => ({
+  createDaemonAgentHostTransport: (dial: unknown) => ({ dial }),
+}));
+vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof HandleStoreModule>()),
+  getProjectFileSystemConfig: async (projectId: string) => ({
+    projectId,
+    backend: 'opfs',
+    providerBasePath: projectId,
+  }),
+}));
 /* `quiesce` is W13's close cut: `closing.flushing` calls it on this client. */
 const revisionClient = { subscribeEvents: () => () => undefined, quiesce: async () => undefined };
 let editorIsIdle = true;
@@ -122,10 +193,8 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     );
   },
   useFileManager: () => ({
-    fileManagerRef: {
-      getSnapshot: () => ({ context: {}, matches: () => false }),
-      subscribe: () => ({ unsubscribe: () => undefined }),
-    },
+    fileManagerRef: projectFileManagerRef,
+    workspace: projectWorkspace,
   }),
   useOptionalFileManager: () => undefined,
 }));
@@ -168,10 +237,12 @@ vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionCommands: () => ({ connectRemote }),
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: () => ({
-    get: () => undefined,
-    setProjectSession: () => undefined,
-    setFocusedProject: () => undefined,
+  useChatSessionStore: () => chatSessionStore,
+}));
+vi.mock('#hooks/use-models.js', () => ({
+  useModels: () => ({
+    defaultExecution: { kind: 'tau', model: 'fixture-model' },
+    resolveModel: (id: string) => ({ id, name: id, isResolved: false, provider: { id: 'unknown', name: 'Unknown' } }),
   }),
 }));
 /* The `Mod+S` registration needs the application root's `KeyboardProvider`,
@@ -191,9 +262,6 @@ vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
 vi.mock('#routes/w.$workspace.$project/revision-restore.js', () => ({ RevisionRestore: () => null }));
 vi.mock('#routes/w.$workspace.$project/workbench-checkout-root.js', () => ({ WorkbenchCheckoutRoot: () => null }));
 vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({ RevisionOutcomes: () => null }));
-vi.mock('#routes/w.$workspace.$project/project-chat-run-settlement.js', () => ({
-  ProjectChatRunSettlement: () => null,
-}));
 vi.mock('#routes/w.$workspace.$project/project-command-items.js', () => ({
   ProjectCommandPaletteItems: () => null,
 }));
@@ -218,6 +286,7 @@ vi.mock('#routes/w.$workspace.$project/revision-conflict-chat.js', () => ({ Revi
 vi.mock('#hooks/use-focused-chat-read-state.js', () => ({ useFocusedChatReadState: () => undefined }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   ChatWorkspaceAuthorityProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  readRootedBridgeCapabilities: async () => ({ writable: true, durability: 'exclusive-append' }),
 }));
 /*
  * The notice presentation is W3's own suite. Here it stands in for every
@@ -302,7 +371,7 @@ const renderRouteProvider = ({
    * tree would never show one — include it exactly where the shell does.
    */
   const Provider = ({ children }: React.PropsWithChildren): React.JSX.Element => (
-    <SessionsProvider>
+    <SessionsProvider actor={sessionsActor}>
       <routeModule.ProjectRouteProviders
         projectId={currentProjectId}
         requestedChatId={requestedChatId}
@@ -337,6 +406,15 @@ beforeEach(() => {
   editorSend.mockReset();
   projectSend.mockReset();
   connectRemote.mockClear();
+  publishProjectHostConnector.mockClear();
+  connectorReleases.length = 0;
+  browserClientOptions.length = 0;
+  retainBrowserAgentHostProject.mockClear();
+  browserHostLeaseReleases.length = 0;
+  daemonClientTransports.length = 0;
+  storedHostSettings.clear();
+  cancelProjectedRun.mockClear();
+  fileManagerReady = false;
   editorObservers.clear();
   editorIsIdle = true;
 });
@@ -387,6 +465,91 @@ afterEach(async () => {
 });
 
 describe('project route session identity', () => {
+  it('closes an unseen live chat by projected host cancel without an SDK session', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    renderRouteProvider();
+    await screen.findAllByTestId('project-session');
+    const session = sessionsActor.getSnapshot().context.refs[projectA];
+    expect(session).toBeDefined();
+    session?.send({
+      type: 'projectedRunsChanged',
+      runs: ['chat-unseen', 'chat-other-build'],
+      stoppableRuns: ['chat-unseen'],
+    });
+    session?.send({ type: 'close', reason: 'user' });
+    session?.send({ type: 'confirmClose' });
+    await waitFor(() => {
+      expect(cancelProjectedRun).toHaveBeenCalledWith('chat-unseen');
+    });
+    expect(cancelProjectedRun).not.toHaveBeenCalledWith('chat-other-build');
+  });
+  it('keeps the project open when a preflight-stoppable run refuses cancellation', async () => {
+    cancelProjectedRun.mockResolvedValueOnce('continuing');
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    renderRouteProvider();
+    await screen.findAllByTestId('project-session');
+    const session = sessionsActor.getSnapshot().context.refs[projectA];
+    expect(session).toBeDefined();
+    session?.send({ type: 'projectedRunsChanged', runs: ['chat-unseen'], stoppableRuns: ['chat-unseen'] });
+    session?.send({ type: 'close', reason: 'user' });
+    session?.send({ type: 'confirmClose' });
+    await waitFor(() => {
+      expect(cancelProjectedRun).toHaveBeenCalledWith('chat-unseen');
+      expect(session?.getSnapshot().matches('failed')).toBe(true);
+    });
+    expect(sessionsActor.getSnapshot().context.refs[projectA]).toBe(session);
+  });
+  it('retains one project connector when focus moves to another live project', async () => {
+    fileManagerReady = true;
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const { Provider, view } = renderRouteProvider();
+    await screen.findAllByTestId('project-session');
+    expect(publishProjectHostConnector).toHaveBeenCalledWith(projectA, expect.any(Function), expect.any(Function));
+    const connector = publishProjectHostConnector.mock.calls[0]?.[1] as (chatId: string) => Promise<unknown>;
+    await connector('chat-browser');
+    expect(retainBrowserAgentHostProject).toHaveBeenCalledOnce();
+
+    currentProjectId = projectB;
+    view.rerender(<Provider>content</Provider>);
+    await waitFor(() => {
+      expect(focusedSessionId()).toBe(projectB);
+    });
+    expect(sessionIds()).toContain(projectA);
+    expect(publishProjectHostConnector.mock.calls.map(([projectId]) => projectId)).toEqual([projectA, projectB]);
+    expect(browserHostLeaseReleases[0]).not.toHaveBeenCalled();
+  });
+
+  it('opens unopened chats on their own persisted host and retains one browser host until unmount', async () => {
+    fileManagerReady = true;
+    storedHostSettings.set('chat-browser', {
+      activeExecution: { kind: 'tau', model: 'model-browser' },
+      activeKernel: 'openscad',
+    });
+    storedHostSettings.set('chat-daemon', {
+      activeExecution: { kind: 'tau', model: 'model-daemon', hostId: 'origin' },
+    });
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const { view } = renderRouteProvider();
+    await waitFor(() => {
+      expect(publishProjectHostConnector).toHaveBeenCalledWith(projectA, expect.any(Function), expect.any(Function));
+    });
+    const connector = publishProjectHostConnector.mock.calls[0]?.[1] as (chatId: string) => Promise<unknown>;
+
+    await connector('chat-browser');
+    await connector('chat-daemon');
+    await connector('chat-browser');
+    expect(browserClientOptions).toHaveLength(2);
+    expect(retainBrowserAgentHostProject).toHaveBeenCalledOnce();
+    expect(browserClientOptions[0]).toMatchObject({
+      authority: { projectId: projectA, workspaceId: 'live' },
+      projectStorage: { projectId: projectA, backend: 'opfs' },
+    });
+    expect((browserClientOptions[0] as { systemPrompt: string }).systemPrompt).toContain('model-browser');
+    expect(daemonClientTransports).toHaveLength(1);
+    view.unmount();
+    expect(connectorReleases[0]).toHaveBeenCalledOnce();
+    expect(browserHostLeaseReleases[0]).toHaveBeenCalledOnce();
+  });
   it('should settle parameters and both UI stores, and leave the cut to flushSync', async () => {
     const order: string[] = [];
     const parameters = mock<ParameterSetService>();

@@ -11,7 +11,7 @@ export const ChatErrorCredits = memo(function ({
   readonly description?: string;
   readonly details?: Record<string, unknown>;
 }): React.JSX.Element {
-  const { continueChat } = useChatActions();
+  const { regenerate } = useChatActions();
   return (
     <ChatErrorCard
       tone='neutral'
@@ -20,7 +20,7 @@ export const ChatErrorCredits = memo(function ({
       title='Request could not be completed'
       description='Retry with the providers configured by this server.'
       actions={
-        <Button variant='outline' size='sm' onClick={continueChat}>
+        <Button variant='outline' size='sm' onClick={regenerate}>
           <RefreshCcw className='size-3.5' />
           Try again
         </Button>

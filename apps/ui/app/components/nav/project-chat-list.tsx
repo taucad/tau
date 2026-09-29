@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { ChevronRight, Pencil, Square, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
@@ -24,7 +24,7 @@ import {
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { selectChatFacts, useChatSidebarStatus, useSidebarCommands } from '#hooks/use-sidebar-status.js';
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
-import { useChatSession } from '#hooks/use-chat-session.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { Button } from '@taucad/ui/components/button';
 import { toast } from '#components/ui/sonner.js';
 
@@ -41,12 +41,23 @@ export const sortProjectChats = (chats: readonly ChatRecord[]): ChatRecord[] => 
 export function ProjectChatList({
   project,
   isProjectActive,
+  isExpanded = true,
 }: {
   readonly project: ProjectListItem;
   readonly isProjectActive: boolean;
-}): React.JSX.Element {
+  readonly isExpanded?: boolean;
+}): React.ReactNode {
   const { chats: allChats, isLoading, error } = useChatRecords(project.id, { includeDeleted: true });
   const { updateChatName, deleteChat, restoreChat } = useChats(project.id, { enabled: false });
+  const store = useChatSessionStore();
+  useEffect(() => {
+    const releases = allChats.map((chat) => store.observe(chat.id, project.id));
+    return () => {
+      for (const release of releases) {
+        release();
+      }
+    };
+  }, [allChats, project.id, store]);
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -76,13 +87,17 @@ export function ProjectChatList({
   const listId = `project-chats-${project.id}`;
   const pendingUrl = navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : undefined;
 
+  if (!isExpanded) {
+    return null;
+  }
+
   const handleDelete = async (chat: ChatRecord): Promise<void> => {
     try {
       await deleteChat(chat.id);
       toast.success(`Moved ${chat.name} to Trash`);
-    } catch (cause) {
+    } catch (error) {
       toast.error(`Could not move ${chat.name} to Trash`);
-      console.error('Error trashing chat:', cause);
+      console.error('Error trashing chat:', error);
       return;
     }
     if (!isProjectActive || activeChatId !== chat.id || !project.slugs) {
@@ -103,9 +118,9 @@ export function ProjectChatList({
         return;
       }
       toast.success(`Restored ${chat.name}`);
-    } catch (cause) {
+    } catch (error) {
       toast.error(`Could not restore ${chat.name}`);
-      console.error('Error restoring chat:', cause);
+      console.error('Error restoring chat:', error);
     }
   };
 
@@ -237,7 +252,6 @@ function ProjectChatItem({
   readonly onDelete: () => Promise<void>;
 }): React.JSX.Element {
   const { closeChat } = useSidebarCommands();
-  useChatSession(chat.id, project.id);
   const status = useChatSidebarStatus(project.id, chat.id);
   const facts: SidebarFacts = status === undefined ? { mark: 'none', sentence: undefined } : selectChatFacts(status);
   /* D7: *Stop* only while there is something to stop. */

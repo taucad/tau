@@ -1,12 +1,19 @@
-import { EventLogError } from '#log/event-log-error.js';
-import { parseLogEvent } from '#log/event-schema.js';
+import { classifyLogRow, parseLogEvent } from '#log/event-schema.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
+/** One row kept by a tolerant read; `opaque` rows are carried but never folded or executed (CL-R1). @internal */
+export type ReadRow = { readonly event: AgentLogEvent; readonly opaque: boolean };
+
 type ParsedEventLog = {
+  /** Known and opaque rows in file order: exactly what the cursor indexes. */
+  readonly rows: readonly ReadRow[];
   readonly events: readonly AgentLogEvent[];
+  /** Lines with no valid row envelope: skipped, reported by byte offset and excluded from the cursor (CL-R1). */
+  readonly quarantined: readonly number[];
+  /** Bytes up to the end of the last complete line; a torn final line lies beyond it. */
   readonly validByteLength: number;
   readonly needsSeparator: boolean;
   readonly discardedTail: boolean;
@@ -29,35 +36,58 @@ const splitByteLines = (bytes: Uint8Array<ArrayBuffer>): ByteLine[] => {
   return lines;
 };
 
+const valueOf = (bytes: Uint8Array<ArrayBuffer>, line: ByteLine): unknown => {
+  const contentEnd = line.end > line.start && bytes[line.end - 1] === 13 ? line.end - 1 : line.end;
+  try {
+    return JSON.parse(decoder.decode(bytes.subarray(line.start, contentEnd))) as unknown;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Read a log tolerantly (D16): opening never fails because of a row's content. A torn final line (no newline, not a
+ * row) is left beyond `validByteLength` for the writer's first guarded append to repair; any other line without a row
+ * envelope is quarantined.
+ *
+ * @internal
+ */
 export const parseEventLogBytes = (bytes: Uint8Array<ArrayBuffer>): ParsedEventLog => {
   const lines = splitByteLines(bytes);
-  const events: AgentLogEvent[] = [];
+  const rows: ReadRow[] = [];
+  const quarantined: number[] = [];
   let validByteLength = 0;
   let needsSeparator = false;
 
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index]!;
-    const contentEnd = line.end > line.start && bytes[line.end - 1] === 13 ? line.end - 1 : line.end;
-    try {
-      const value: unknown = JSON.parse(decoder.decode(bytes.subarray(line.start, contentEnd)));
-      events.push(parseLogEvent(value));
-      validByteLength = line.end + (line.terminated ? 1 : 0);
-      needsSeparator = !line.terminated;
-    } catch (error) {
-      if (index === lines.length - 1 && !line.terminated) {
-        return { events, validByteLength: line.start, needsSeparator: false, discardedTail: true };
+  for (const line of lines) {
+    const classified = classifyLogRow(valueOf(bytes, line));
+    if (classified.class === 'quarantined') {
+      if (!line.terminated) {
+        return {
+          rows,
+          events: rows.map((row) => row.event),
+          quarantined,
+          validByteLength,
+          needsSeparator: false,
+          discardedTail: true,
+        };
       }
-      throw new EventLogError(
-        'LINE_INVALID',
-        `Invalid event-log line ${index + 1}; only a torn final line may be discarded.`,
-        {
-          cause: error,
-        },
-      );
+      quarantined.push(line.start);
+    } else {
+      rows.push({ event: classified.event, opaque: classified.class === 'opaque' });
     }
+    validByteLength = line.end + (line.terminated ? 1 : 0);
+    needsSeparator = !line.terminated;
   }
 
-  return { events, validByteLength, needsSeparator, discardedTail: false };
+  return {
+    rows,
+    events: rows.map((row) => row.event),
+    quarantined,
+    validByteLength,
+    needsSeparator,
+    discardedTail: false,
+  };
 };
 
 /**
@@ -73,10 +103,11 @@ export const serializeLogEventBytes = (event: AgentLogEvent, needsSeparator = fa
   encoder.encode(`${needsSeparator ? '\n' : ''}${serializeLogEvent(event)}`);
 
 /**
- * Parse a JSONL session log, discarding a malformed final line as a torn append.
+ * Parse a JSONL session log tolerantly: a malformed final line is a torn append and is dropped, any other line
+ * without a row envelope is skipped, and a row this build cannot interpret is kept as it was written (D16).
  *
  * @param text - Complete UTF-8 event-log text.
- * @returns Validated records in physical line order.
+ * @returns The kept records in physical line order.
  * @public
  */
 export const parseEventLog = (text: string): readonly AgentLogEvent[] =>

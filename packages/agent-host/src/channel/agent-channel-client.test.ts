@@ -1,7 +1,7 @@
 /**
  * One client, three endpoints.
  *
- * The daemon answers the same T0 vocabulary over a WebSocket (`tau serve`), a
+ * The daemon answers the same keyed commands over a WebSocket (`tau serve`), a
  * WHATWG message port (a browser worker or a `node:worker_threads` channel) and
  * an emitter-shaped port (Electron's `MessagePortMain`, or the same
  * `worker_threads` port driven through `on/off/start/close`). If the three ever
@@ -14,40 +14,42 @@ import { createServer } from 'node:http';
 import type { Server as HttpServer } from 'node:http';
 
 import { WebSocket, WebSocketServer } from 'ws';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { MessagePortLike } from '@taucad/rpc';
+import { ChannelClosedError, createChannelServer, wrapMessagePort } from '@taucad/rpc';
+import type { ChannelServer, CloseInfo, MessagePortLike, Port } from '@taucad/rpc';
 
 import { createAgentChannelClient } from '#channel/agent-channel-client.js';
-import type { AgentChannelCloseReason } from '#channel/agent-channel-client.js';
-import { serveAgentChannel } from '#launchers/node/agent-channel.js';
-import type { AgentChannelCommand, AgentChannelResponse } from '#launchers/node/agent-wire.js';
-import type { NodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
+import { serveAgentChannel } from '#launchers/agent-channel.js';
+import type { AgentLauncher } from '#launchers/agent-launcher.js';
+import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
 
-const emptyBatch = { cursor: 0, nextCursor: 0, endCursor: 0, events: [] } as const;
-
-type RecordingLauncher = NodeAgentLauncher & {
-  readonly seen: AgentChannelCommand[];
+type RecordingLauncher = AgentLauncher & {
+  readonly seen: HostCommand[];
   /** Set to hold `execute` open so a socket can die mid-call. */
   hold?: Promise<void> | undefined;
 };
 
+const answerFor = (command: HostCommand): CommandAnswer => ({
+  commandId: command.commandId,
+  generation: 0,
+  status: 'applied',
+  effect: 'not-applied',
+  details: { state: 'none' },
+});
+
 const recordingLauncher = (): RecordingLauncher => {
-  const seen: AgentChannelCommand[] = [];
+  const seen: HostCommand[] = [];
   const launcher = {
     seen,
     hold: undefined as Promise<void> | undefined,
-    execute: async (command: AgentChannelCommand): Promise<AgentChannelResponse> => {
+    execute: async (command: HostCommand): Promise<CommandAnswer> => {
       seen.push(command);
       await launcher.hold;
-      return { type: 'tail', chatId: command.chatId, batch: emptyBatch };
+      return answerFor(command);
     },
-    events: () => ({
-      // eslint-disable-next-line @typescript-eslint/no-empty-function -- an idle stream is the point.
-      async *[Symbol.asyncIterator]() {},
-    }),
     liveEvents: () => ({
-      // eslint-disable-next-line @typescript-eslint/no-empty-function -- an idle stream is the point.
+      // oxlint-disable-next-line no-empty-function -- an idle stream is the point.
       async *[Symbol.asyncIterator]() {},
     }),
     pendingInterrupts: async () => [],
@@ -56,6 +58,7 @@ const recordingLauncher = (): RecordingLauncher => {
   return launcher as unknown as RecordingLauncher;
 };
 
+const build = 'test-build';
 const disposers: Array<() => Promise<void> | void> = [];
 
 afterEach(async () => {
@@ -82,17 +85,35 @@ const whatwgOnly = (port: MessagePortLike): MessagePortLike => ({
   },
 });
 
+/** A connection that opens far enough to own an RPC wire, then loses its peer before hello. */
+const deadPort = (): Port<unknown> => ({
+  postMessage: () => undefined,
+  onMessage: () => () => undefined,
+  onClose: (handler) => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        handler();
+      }
+    });
+    return () => {
+      active = false;
+    };
+  },
+  close: () => undefined,
+});
+
 type ServedSocket = { readonly origin: string; kill: () => void };
 
 /** `tau serve`'s own accept path: one WebSocket per client on `/agent`. */
-const serveOverWebSocket = async (launcher: NodeAgentLauncher): Promise<ServedSocket> => {
+const serveOverWebSocket = async (launcher: AgentLauncher): Promise<ServedSocket> => {
   const httpServer: HttpServer = createServer();
   const sockets = new WebSocketServer({ noServer: true });
   let accepted: WebSocket | undefined;
   httpServer.on('upgrade', (request, socket, head) => {
     sockets.handleUpgrade(request, socket, head, (next) => {
       accepted = next;
-      serveAgentChannel(next, launcher);
+      serveAgentChannel(next, launcher, { build });
     });
   });
   await new Promise<void>((resolve) => {
@@ -119,68 +140,145 @@ const serveOverWebSocket = async (launcher: NodeAgentLauncher): Promise<ServedSo
   };
 };
 
+const cancel: HostCommand = { type: 'cancel', commandId: 'cmd-1', payload: { chatId: 'chat-1', runId: 'run-1' } };
+
 describe('createAgentChannelClient', () => {
   it('answers one command identically over a socket, a WHATWG port and an emitter port', async () => {
     const launcher = recordingLauncher();
-    const command: AgentChannelCommand = { type: 'tail', chatId: 'chat-1', cursor: 0, limit: 4 };
 
     const served = await serveOverWebSocket(launcher);
-    const socketClient = createAgentChannelClient(new WebSocket(`${served.origin}/agent`));
+    const socketClient = createAgentChannelClient({ connect: () => new WebSocket(`${served.origin}/agent`) });
     disposers.push(() => {
       socketClient.close();
     });
-    const overSocket = await socketClient.execute(command);
+    const overSocket = await socketClient.execute(cancel);
 
     const whatwg = new MessageChannel();
-    serveAgentChannel(whatwg.port1 as unknown as MessagePortLike, launcher);
-    const whatwgClient = createAgentChannelClient(whatwgOnly(whatwg.port2 as unknown as MessagePortLike));
+    serveAgentChannel(whatwg.port1 as unknown as MessagePortLike, launcher, { build });
+    const whatwgClient = createAgentChannelClient({
+      connect: () => whatwgOnly(whatwg.port2 as unknown as MessagePortLike),
+    });
     disposers.push(() => {
       whatwgClient.close();
       whatwg.port1.close();
     });
-    const overWhatwg = await whatwgClient.execute(command);
+    const overWhatwg = await whatwgClient.execute(cancel);
 
     const emitter = new MessageChannel();
-    serveAgentChannel(emitter.port1 as unknown as MessagePortLike, launcher);
+    serveAgentChannel(emitter.port1 as unknown as MessagePortLike, launcher, { build });
     // Driven through `on/off/start/close` — the Electron `MessagePortMain` shape.
-    const emitterClient = createAgentChannelClient(emitter.port2);
+    const emitterClient = createAgentChannelClient({ connect: () => emitter.port2 });
     disposers.push(() => {
       emitterClient.close();
       emitter.port1.close();
     });
-    const overEmitter = await emitterClient.execute(command);
+    const overEmitter = await emitterClient.execute(cancel);
 
-    expect(overSocket).toEqual({ type: 'tail', chatId: 'chat-1', batch: emptyBatch });
+    expect(overSocket).toEqual(answerFor(cancel));
     expect(overWhatwg).toEqual(overSocket);
     expect(overEmitter).toEqual(overSocket);
-    expect(launcher.seen).toEqual([command, command, command]);
+    expect(launcher.seen).toEqual([cancel, cancel, cancel]);
   });
 
-  it('surfaces a killed socket as a remote close and rejects the in-flight command', async () => {
+  it('should re-send an in-flight command with its key after the socket dies, and report the close code', async () => {
     const launcher = recordingLauncher();
     const held = Promise.withResolvers<void>();
     launcher.hold = held.promise;
     const served = await serveOverWebSocket(launcher);
-    const client = createAgentChannelClient(new WebSocket(`${served.origin}/agent`));
+    const client = createAgentChannelClient({ connect: () => new WebSocket(`${served.origin}/agent`) });
     disposers.push(() => {
       client.close();
       held.resolve();
     });
 
-    const closes: AgentChannelCloseReason[] = [];
-    client.onClose((reason) => {
-      closes.push(reason);
+    const closes: CloseInfo[] = [];
+    client.onClose((info) => {
+      closes.push(info);
     });
 
-    const inFlight = client.execute({ type: 'resume', chatId: 'chat-1' });
+    const inFlight = client.execute(cancel);
     // Let the command reach the launcher before the wire dies under it.
     await expect.poll(() => launcher.seen.length).toBe(1);
     served.kill();
+    await expect.poll(() => closes.length).toBe(1);
+    held.resolve();
 
-    await expect(inFlight).rejects.toMatchObject({ code: 'CHANNEL_CLOSED' });
-    // The rpc layer reports a dead port as `port-closed`; that reason rides
-    // through verbatim rather than being re-coded here.
-    /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- `expect.any` is typed `any` by vitest. */
-    expect(closes).toEqual([{ origin: 'remote', reason: 'port-closed', message: expect.any(String) }]);
+    await expect(inFlight).resolves.toEqual(answerFor(cancel));
+    expect(launcher.seen).toEqual([cancel, cancel]);
+    expect(closes).toMatchObject([{ origin: 'remote', code: 'PEER_GONE' }]);
+  });
+
+  it('should reject unanswered commands with the close error once the redial budget is spent', async () => {
+    vi.useFakeTimers();
+    try {
+      let dials = 0;
+      const client = createAgentChannelClient({
+        connect: () => {
+          dials += 1;
+          return deadPort();
+        },
+      });
+      disposers.push(() => {
+        client.close();
+      });
+
+      const failed = client.execute(cancel);
+      const failure = (async (): Promise<unknown> => {
+        try {
+          await failed;
+          return undefined;
+        } catch (error) {
+          return error;
+        }
+      })();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(dials).toBe(2);
+      await vi.advanceTimersByTimeAsync(250);
+      expect(dials).toBe(3);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(dials).toBe(4);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(dials).toBe(5);
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(dials).toBe(5);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(dials).toBe(6);
+      expect(await failure).toBeInstanceOf(ChannelClosedError);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should refuse an owner that speaks another wire version, without redialling', async () => {
+    const channel = new MessageChannel();
+    let dials = 0;
+    // An owner from after the compatibility window: its hello names a wire this client does not speak (I32).
+    const newer: ChannelServer = {
+      call: async () => {
+        throw new Error('An owner of another version is never asked anything.');
+      },
+      listen: async () => {
+        throw new Error('An owner of another version is never subscribed to.');
+      },
+    };
+    createChannelServer({
+      port: wrapMessagePort<unknown>(channel.port1 as unknown as MessagePortLike),
+      sessionKey: 'tau-agent',
+      hello: { wire: 3, build: 'future' },
+      impl: newer,
+    });
+    const client = createAgentChannelClient({
+      connect: () => {
+        dials += 1;
+        return channel.port2 as unknown as MessagePortLike;
+      },
+    });
+    disposers.push(() => {
+      client.close();
+      channel.port1.close();
+    });
+
+    await expect(client.execute(cancel)).rejects.toMatchObject({ code: 'WIRE_VERSION_UNSUPPORTED' });
+    expect(dials).toBe(1);
   });
 });

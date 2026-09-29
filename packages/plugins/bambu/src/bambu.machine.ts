@@ -6,6 +6,7 @@ import { quantityKinds } from '@taucad/units/quantity';
 import { z } from 'zod';
 
 import { bambuX1cManifest } from '#bambu.manifest.js';
+import { bambuExternalSpoolSlot } from '#bambu.protocol.js';
 
 const bindingConfiguration = defineConfiguration({
   id: 'bambu.machine.binding',
@@ -18,12 +19,18 @@ const bindingConfiguration = defineConfiguration({
   ui: { version: 1, rjsf: {} },
 });
 
+/** An AMS tray (`ams_id * 4 + tray`) or the external spool, as Bambu numbers them. */
+const traySlot = z.union([z.number().int().min(0).max(15), z.literal(bambuExternalSpoolSlot)]);
+
 /** Submission schema shared by the LAN provider and the simulator. @internal */
 export const bambuSubmissionConfiguration = defineConfiguration({
   id: 'bambu.machine.submission',
-  version: '1.1.0',
+  version: '1.2.0',
   schema: z.object({
-    amsMapping: z.array(z.number().int().min(-1).max(15)).max(16).default([]),
+    amsMapping: z
+      .array(z.union([traySlot, z.literal(-1)]))
+      .max(16)
+      .default([]),
     bedLeveling: z.boolean().default(true),
     expectedBedType: z.string().min(1).max(64),
     expectedFilamentDiameter: quantity({
@@ -32,7 +39,7 @@ export const bambuSubmissionConfiguration = defineConfiguration({
       space: 'linear',
     }).positive(),
     expectedMaterials: z
-      .array(z.strictObject({ slot: z.number().int().min(0).max(15), materialId: z.string().min(1).max(128) }))
+      .array(z.strictObject({ slot: traySlot, materialId: z.string().min(1).max(128) }))
       .min(1)
       .max(16),
     expectedModel: z.literal('X1C'),

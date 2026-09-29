@@ -1,12 +1,16 @@
+import type { UIMessage } from 'ai';
 import type { MyUIMessage } from '@taucad/chat';
+import type { AgentLogEvent, UserProviderMessage } from '@taucad/agent-host';
+import type { AgentChannelAdmissionConfig, AgentChannelModel, HostCommand } from '@taucad/agent-host/wire';
+import { isRecord } from '@taucad/utils/schema';
+import { isAttachmentUrl } from '#utils/attachment.utils.js';
 
 /**
  * The gesture a turn is admitted for, as the page's verbs express it.
  *
- * Four, not five: startup hydration and the transport's auto-retry are both
+ * Four gestures: startup hydration and an explicit Try again are both
  * `regenerate` — they differ in what dispatches them, never in what they rewind
- * to. *Try again* arrives as `continue` when the host can still continue the
- * run and as `regenerate` when it cannot; only the admission knows which.
+ * to. Resume is only `continue` and never falls through to `regenerate`.
  *
  * @public
  */
@@ -153,4 +157,103 @@ export const turnIntentOf = (messages: readonly MyUIMessage[], gesture: TurnGest
     return { trigger: 'submit', leaseTurnId };
   }
   return { trigger: 'regenerate', leaseTurnId, retainedMessageIds: retainedBefore(messages, leaseTurnId) };
+};
+
+type JsonValue = Extract<AgentLogEvent, { readonly type: 'message.appended' }>['message']['content'];
+
+/** The one user turn the host log records, including content-addressed files. @public */
+export const userProviderMessageOf = <Message extends UIMessage>(messages: readonly Message[]): UserProviderMessage => {
+  const message = messages.findLast((candidate) => candidate.role === 'user');
+  if (!message) {
+    throw new TypeError('Browser agent host admission requires a user message.');
+  }
+  const content: JsonValue[] = [];
+  for (const part of message.parts) {
+    if (part.type === 'text') {
+      content.push({ type: 'text', text: part.text });
+      continue;
+    }
+    if (part.type === 'file') {
+      if (isAttachmentUrl(part.url)) {
+        const byteLength = part.providerMetadata?.['common']?.['byteLength'];
+        content.push({
+          type: 'file-ref',
+          path: part.url,
+          mimeType: part.mediaType,
+          ...(typeof byteLength === 'number' && Number.isInteger(byteLength) && byteLength >= 0 ? { byteLength } : {}),
+          ...(part.filename === undefined ? {} : { filename: part.filename }),
+        });
+        continue;
+      }
+      const match = /^data:(image\/[^;,]+);base64,(.*)$/u.exec(part.url);
+      if (!match) {
+        throw new TypeError(`Browser agent host cannot record file part URL "${part.url}".`);
+      }
+      content.push({ type: 'image', mimeType: match[1]!, data: match[2]! });
+    }
+  }
+  const first = content[0];
+  const textOnly = content.length === 1 && isRecord(first) && first['type'] === 'text';
+  return {
+    id: message.id,
+    role: 'user',
+    content: textOnly && typeof first['text'] === 'string' ? first['text'] : content,
+  };
+};
+
+/** The sender's command key and the page's current admission/selection. @public */
+export type CommandContext = Readonly<{
+  chatId: string;
+  commandId: string;
+  /** The existing run for Resume; a Start uses the sender's command id. */
+  runId?: string;
+  config?: AgentChannelAdmissionConfig;
+  checkoutId?: string;
+  selection?: AgentChannelModel;
+}>;
+
+/**
+ * Turn a gesture into one host command before the session actor receives it.
+ * The transcript includes the newly composed Send or edited user message, so
+ * the command names exactly what the person saw when taking the gesture.
+ * Re-sending the same command repeats its key and payload byte-for-byte.
+ * @public
+ */
+export const commandOf = (
+  gesture: TurnGesture,
+  transcript: readonly MyUIMessage[],
+  context: CommandContext,
+): HostCommand => {
+  const intent = turnIntentOf(transcript, gesture);
+  if (intent.trigger === 'resume') {
+    if (context.runId === undefined) {
+      throw new Error('This chat has no run to resume.');
+    }
+    return {
+      type: 'resume',
+      commandId: context.commandId,
+      payload: {
+        chatId: context.chatId,
+        runId: context.runId,
+        ...(context.selection === undefined ? {} : { selection: context.selection }),
+      },
+    };
+  }
+  const message = transcript.find((candidate) => candidate.id === intent.leaseTurnId && candidate.role === 'user');
+  if (message === undefined) {
+    throw new Error('That user message is no longer in this chat.');
+  }
+  return {
+    type: 'start',
+    commandId: context.commandId,
+    payload: {
+      chatId: context.chatId,
+      runId: context.commandId,
+      message: userProviderMessageOf([message]),
+      trigger: intent.trigger,
+      ...(intent.trigger === 'submit' ? {} : { retainedMessageIds: [...intent.retainedMessageIds] }),
+      ...(context.config === undefined ? {} : { config: context.config }),
+      ...(context.checkoutId === undefined ? {} : { checkoutId: context.checkoutId }),
+    },
+  };
 };

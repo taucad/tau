@@ -149,7 +149,6 @@ export type RestoreCutAnswer =
       type: 'revisionMinted';
       checkoutId: string;
       trigger: CheckoutCutTrigger;
-      turnId?: string;
       requestId?: string;
       revisionId: string;
     }>
@@ -157,20 +156,18 @@ export type RestoreCutAnswer =
       type: 'nothingToSave';
       checkoutId: string;
       trigger: CheckoutCutTrigger;
-      turnId?: string;
       requestId?: string;
     }>
   | Readonly<{
       type: 'cutFailed';
       checkoutId: string | undefined;
       trigger: CheckoutCutTrigger;
-      turnId?: string;
       requestId?: string;
       reason: string;
       /** The refusal's category, when whoever refused named one (A1). */
       code?: RestoreFailureCode;
     }>
-  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string; requestId?: string }>;
+  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; requestId?: string }>;
 
 /** Events accepted by restoreMachine. @public */
 export type RestoreMachineEvent =
@@ -395,11 +392,20 @@ const restoreMachineDefinition = setup({
   }),
   initial: 'idle',
   on: {
+    /* The root forwards every answer to a cut no turn asked for; only `recording`
+     * and `minting` wait for one, by this machine's own request id. Elsewhere an
+     * answer is taken and changes nothing (MC-R16). */
+    revisionMinted: () => ({}),
+    nothingToSave: () => ({}),
+    cutFailed: () => ({}),
+    casLost: () => ({}),
+    /* A mint on the selection's line matters only to an idle *Undo*; a running verb re-reads when it settles. */
+    lineMinted: () => ({}),
     /* The selection only: a running verb keeps the checkout it pinned (A6).
      * Undo does not follow the selection anywhere its restore did not land (M1). */
     selectCheckout: ({ context, event }) =>
       event.checkoutId === context.checkoutId && event.branch === context.branch
-        ? undefined
+        ? {}
         : { context: { checkoutId: event.checkoutId, branch: event.branch, restoredRevisionId: undefined } },
   },
   states: {
@@ -415,7 +421,7 @@ const restoreMachineDefinition = setup({
         /* A new selection, or a mint on it, can change what *Undo* would reverse. */
         selectCheckout: ({ context, event }) =>
           event.checkoutId === context.checkoutId && event.branch === context.branch
-            ? undefined
+            ? {}
             : {
                 target: 'idle',
                 reenter: true,
@@ -473,13 +479,13 @@ const restoreMachineDefinition = setup({
         revisionMinted: ({ context, event, guards }) =>
           guards.answersOurCut(context, event)
             ? { target: 'planning', context: { recordedRevisionId: event.revisionId } }
-            : undefined,
+            : {},
         nothingToSave: ({ context, event, guards }) =>
-          guards.answersOurCut(context, event) ? { target: 'planning' } : undefined,
+          guards.answersOurCut(context, event) ? { target: 'planning' } : {},
         cutFailed: ({ context, event, guards }) =>
-          guards.answersOurCut(context, event) ? { target: 'failed', context: failFromAnswer(event) } : undefined,
+          guards.answersOurCut(context, event) ? { target: 'failed', context: failFromAnswer(event) } : {},
         casLost: ({ context, event, guards }) =>
-          guards.answersOurCut(context, event) ? { target: 'failed', context: failFromAnswer(event) } : undefined,
+          guards.answersOurCut(context, event) ? { target: 'failed', context: failFromAnswer(event) } : {},
       },
     },
     planning: {
@@ -557,14 +563,14 @@ const restoreMachineDefinition = setup({
                     context.mode !== 'undo' && selectionUnmoved(context) ? event.revisionId : undefined,
                 },
               }
-            : undefined,
+            : {},
         /* The tree already was the target's: a restore to where you are is nothing (A8). */
         nothingToSave: ({ context, event, guards }) =>
-          guards.answersOurCut(context, event) ? { target: 'settled' } : undefined,
+          guards.answersOurCut(context, event) ? { target: 'settled' } : {},
         cutFailed: ({ context, event, guards }) =>
-          guards.answersOurCut(context, event) ? { target: 'failed', context: unrecordedFromAnswer(event) } : undefined,
+          guards.answersOurCut(context, event) ? { target: 'failed', context: unrecordedFromAnswer(event) } : {},
         casLost: ({ context, event, guards }) =>
-          guards.answersOurCut(context, event) ? { target: 'failed', context: unrecordedFromAnswer(event) } : undefined,
+          guards.answersOurCut(context, event) ? { target: 'failed', context: unrecordedFromAnswer(event) } : {},
       },
     },
     applied: {

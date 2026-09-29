@@ -36,6 +36,8 @@ import { pluginCapabilityFilenameRule } from './rules/plugin-capability-filename
 import { noAuthoredPointerCursorRule } from './rules/no-authored-pointer-cursor.js';
 import { noInlineActorSelectorRule } from './rules/no-inline-actor-selector.js';
 import { noEngineeringVocabularyInCopyRule } from './rules/no-engineering-vocabulary-in-copy.js';
+import { xstateContractRule } from './rules/xstate-contract.js';
+import { xstateOwnerMachineRule } from './rules/xstate-owner-machine.js';
 import { noAsciiEllipsisRule } from './rules/no-ascii-ellipsis.js';
 import { requireAccessibleNameRule } from './rules/require-accessible-name.js';
 import { noLabelReplacingLoaderRule } from './rules/no-label-replacing-loader.js';
@@ -48,7 +50,7 @@ import { noRawPageHeadingRule } from './rules/no-raw-page-heading.js';
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.24.0',
+    version: '1.25.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -80,6 +82,8 @@ const plugin = {
     'no-authored-pointer-cursor': noAuthoredPointerCursorRule,
     'no-inline-actor-selector': noInlineActorSelectorRule,
     'no-engineering-vocabulary-in-copy': noEngineeringVocabularyInCopyRule,
+    'xstate-contract': xstateContractRule,
+    'xstate-owner-machine': xstateOwnerMachineRule,
     'no-ascii-ellipsis': noAsciiEllipsisRule,
     'require-accessible-name': requireAccessibleNameRule,
     'no-label-replacing-loader': noLabelReplacingLoaderRule,

@@ -17,12 +17,14 @@
  * held (which is now the machines') and minus branch-per-chat placement, which
  * is gone (D7/I18: a turn attaches to a checkout, it never creates one).
  *
- * **A turn is never rehydrated from disk.** `.tau/runs/<runId>.json` is a lease
- * record, not a resumable turn: a host that died mid-turn leaves an orphan, and
- * {@link RevisionActors.checkouts}' `sweepLeases` retires it against the
- * authority epoch on the next open (F13, R15).
+ * **A lease record is the index of unsettled attempts.** `.tau/runs/<runId>.json`
+ * names one attempt; it retires only on `acknowledge`, after the host appended
+ * the attempt's settlement row. A host that died mid-turn leaves the record,
+ * and the next leader of its chat reconciles it: a root adopts it into a new
+ * turn actor (RM-R14), never an epoch sweep (W8 TS-S7, TS-R13).
  */
 
+import { ResourceQueue } from '@taucad/filesystem';
 import type { PathPolicy, RootedFileSystem } from '@taucad/filesystem';
 import { randomUuid } from '@taucad/utils/id';
 import { walk } from '@taucad/filesystem/content-ops';
@@ -64,9 +66,9 @@ import type {
 } from '#resolution.machine.js';
 import type { ResolutionSide } from '#resolution.types.js';
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
-import type { AnyEventObject, AsyncActorLogic, AsyncLogicFunction } from 'xstate';
+import type { ActorOptions, AnyActorLogic, AnyEventObject, AsyncActorLogic, AsyncLogicFunction } from 'xstate';
 
-import { checkoutMachine, satisfiesCut } from '#checkout.machine.js';
+import { checkoutMachine } from '#checkout.machine.js';
 import type {
   CheckoutActors,
   CheckoutCaptureTreeActorInput,
@@ -90,12 +92,7 @@ import type {
   BranchMergeActorOutput,
   BranchRenameActorOutput,
 } from '#branch.machine.js';
-import type {
-  AddCheckoutActorOutput,
-  CheckoutsActors,
-  ListCheckoutsActorOutput,
-  SweepLeasesActorOutput,
-} from '#checkouts.machine.js';
+import type { AddCheckoutActorOutput, CheckoutsActors, ListCheckoutsActorOutput } from '#checkouts.machine.js';
 import { chatIdOfRef, chatRefName, chatRefPrefix, projectChats } from '#chat-ref.js';
 import { LfsQuotaError } from '#lfs-client.js';
 import { cleanLargeObjects } from '#lfs.js';
@@ -179,10 +176,12 @@ import type {
   UpdateRevisionRefResult,
   WriteRevisionInput,
 } from '#revision-port.js';
-import { turnCutSettlementMilliseconds, turnMachine } from '#turn.machine.js';
+import { turnMachine } from '#turn.machine.js';
 import type {
   TurnActors,
   TurnCaptureActorInput,
+  TurnFindActorInput,
+  TurnFindActorOutput,
   TurnLeaseActorInput,
   TurnMergeActorOutput,
   TurnPrepareActorInput,
@@ -192,7 +191,9 @@ import type {
   TurnRetireLeaseActorInput,
   TurnSettlement,
   TurnWriteLeaseActorInput,
+  TurnWriteLeaseActorOutput,
 } from '#turn.machine.js';
+import type { TurnAttemptKey, TurnCutOf, TurnLease as TurnLeaseRecord } from '#turn.types.js';
 
 /**
  * Opens the tree of one checkout.
@@ -224,19 +225,13 @@ export type UseCheckoutFileSystem = <Result>(
   operation: (filesystem: RevisionFileSystem) => Promise<Result>,
 ) => Promise<Result>;
 
-/** One turn's lease record, as `.tau/runs/<runId>.json` holds it (S7). @public */
-export type TurnLease = Readonly<{
-  runId: string;
-  turnId: string;
-  chatId: string;
-  checkoutId: string;
-  /** The revision the turn descends from, absent on an unborn branch. */
-  baseRevisionId?: string;
-  /** The host authority that wrote it; any other epoch's lease is stale (N3). */
-  authorityEpoch: string;
-  /** Milliseconds since the Unix epoch. */
-  startedAt: number;
-}>;
+/**
+ * One attempt's lease record, as `.tau/runs/<runId>.json` holds it. Defined beside
+ * the turn machine (RM-S14); named here too, so this subpath keeps its name.
+ *
+ * @public
+ */
+export type TurnLease = TurnLeaseRecord;
 
 /**
  * Where one turn was placed, that its lease is now held, or why it could not be
@@ -423,15 +418,11 @@ export type RevisionActorsOptions = Readonly<{
   useFileSystem?: UseCheckoutFileSystem;
   projectId: string;
   /**
-   * The authority this host holds the project under.
-   *
-   * A lease written under any other epoch belongs to a process that no longer
-   * owns this project, so it is stale and `sweepLeases` retires it. W19 moves
-   * the value under `project-session`; until then a host mints one per process.
+   * Timers and time for the whole tree (MC-R4): the actors' timers run on it, and
+   * its `now()` (milliseconds since the Unix epoch) stamps what this host mints,
+   * falling back to `Date.now`. Each root takes its own clock.
    */
-  authorityEpoch: string;
-  /** Milliseconds since the Unix epoch. Defaults to `Date.now`. */
-  clock?: () => number;
+  clock?: ActorOptions<AnyActorLogic>['clock'];
   /** Actor recorded on every revision this host mints. */
   actorId?: string;
   /**
@@ -631,8 +622,41 @@ export type RevisionActors = Readonly<{
    * has to wait for this first.
    */
   settled: () => Promise<void>;
-  /** Record an editor's overlapping edit as a conflicted revision (D14); see {@link EditorConflictInput}. */
+  /** The store reads the turn-placement adapter makes beside the root (W8 TS-S3). */
+  turns: TurnStore;
+  /** Free this root's liveness mark (RM-R8 narrowed); {@link createProjectRevisionsActor} calls it when the root stops. */
+  release: () => void /** Record an editor's overlapping edit as a conflicted revision (D14); see {@link EditorConflictInput}. */;
   recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
+}>;
+
+/**
+ * What one project's turn-placement adapter reads from the store beside its root (W8 TS-S3).
+ *
+ * The root drives the attempts; these are the reads it does not expose: the lease directory, a checkout's files, and a
+ * finalized settlement's graph facts. It also holds the per-record section in which a root takes over another root's
+ * record (RM-R8 narrowed).
+ *
+ * @public
+ */
+export type TurnStore = Readonly<{
+  /** Every lease record in `.tau/runs`, read now, never from a cached list (TS-R17). */
+  leases: () => Promise<readonly TurnLease[]>;
+  /** One checkout and its files, or `undefined` when the project has no checkout with that id. */
+  open: (checkoutId: string) => Promise<Readonly<{ checkout: Checkout; filesystem: RevisionFileSystem }> | undefined>;
+  /** A finalized settlement shaped for the wire, as {@link describeTurnSettlement} does. */
+  describe: (settlement: TurnSettlement) => Promise<TurnFinalizedEvent>;
+  /**
+   * Make this root the holder of the run's record before it adopts it (RM-R14): `held` while another root's liveness
+   * mark is held, and nothing changes. A missing record, or one this root holds, is `free`.
+   */
+  claim: (runId: string) => Promise<'free' | 'held'>;
+  /**
+   * Delete the record naming this attempt, for an acknowledge with no actor (TS-R5): `held` while another root's mark
+   * is held, `absent` when no record names the attempt. A record written before W5 names every attempt of its run.
+   */
+  retire: (key: TurnAttemptKey) => Promise<'retired' | 'absent' | 'held'>;
+  /** Resolves once the root that holds the run's record has stopped; at once when none does. */
+  holderReleased: (runId: string, signal: AbortSignal) => Promise<void>;
 }>;
 
 /**
@@ -709,6 +733,21 @@ const leasedMessage = 'An agent is working in this project’s files.';
 
 /** Where leases live, relative to the project. A `records` row in the registry. */
 const leaseDirectory = '.tau/runs';
+
+/*
+ * RM-R8 narrowed: the Web Lock manager that holds each root's liveness mark and each record's section. Node 24 has one
+ * per process, which is all a Node root needs: host and root share the process (TS-S4), and another process reaches a
+ * chat's attempts only through that chat's kernel writer lock (EQ2), which the holder's process keeps until they
+ * settle and the kernel frees only when that process, root included, dies.
+ */
+const lockManager = (): LockManager | undefined =>
+  (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks;
+/* ponytail: where the runtime has no lock manager (jsdom tests, or a browser page in an insecure context, where
+ * `navigator.locks` is undefined), the marks and sections are this module's own, which is exact only for roots in one
+ * realm: another tab's root then cannot see this mark (W8.r1 L-E). Managers are per runtime family, so a browser-realm
+ * host and a Node host serving the same store do not exclude each other either; one store has one host family (W6). */
+const heldMarks = new Map<string, Promise<void>>();
+const recordSections = new ResourceQueue();
 /** The trunk: a project's live tree starts on it and a turn records onto it. */
 const mainBranch = 'main';
 /** Identity every revision this host records is committed under. */
@@ -777,7 +816,6 @@ const holdsNoWork = (files: ImmutableRevisionTree, arriving: ImmutableRevisionTr
  * const actors = createRevisionActors({
  *   port: createNativeGitRevisionPort({ repositoryPath: '/srv/project' }),
  *   projectId: 'project-1',
- *   authorityEpoch: 'epoch-1',
  *   filesystem: (checkout) => new NodeFsProvider(checkout.root),
  * });
  * const restore = createActor(restoreMachine.provide({ actors: actors.restore }), {
@@ -788,7 +826,7 @@ const holdsNoWork = (files: ImmutableRevisionTree, arriving: ImmutableRevisionTr
  */
 // oxlint-disable-next-line eslint/max-lines-per-function -- one closure over one project's port; splitting it would thread the same six values through every half.
 export const createRevisionActors = (options: RevisionActorsOptions): RevisionActors => {
-  const { filesystem, projectId, authorityEpoch } = options;
+  const { filesystem, projectId } = options;
   /*
    * Every head this closure moves goes through one `updateRef`, so that is where
    * the operation log is written (D15, rule 10): queued after the move settles
@@ -835,7 +873,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const mergeOptions = options.parameters === undefined ? {} : { parameters: options.parameters };
   /* A host that cannot re-send a push remembers none: the identity function. */
   const recordHistoryPush = options.recordHistoryPush ?? (async <Result>(run: () => Promise<Result>) => run());
-  const clock = options.clock ?? Date.now;
+  const clock = (): number => options.clock?.now?.() ?? Date.now();
   /*
    * Settles once the project's `revision` stream knows its tail (D13, W5b a1b).
    * The open pull waits for it: the pull and the tail read are two reads of the
@@ -1819,10 +1857,23 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         try {
           const stored: unknown = JSON.parse(await records.readFile(`${leaseDirectory}/${name}`, 'utf8'));
           // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- validated field by field below.
-          const lease = stored as Partial<TurnLease>;
-          return typeof lease.runId === 'string' && typeof lease.authorityEpoch === 'string'
-            ? [Object.freeze({ ...lease, runId: lease.runId, authorityEpoch: lease.authorityEpoch } as TurnLease)]
-            : [];
+          const lease = stored as Partial<TurnLease> & Readonly<{ baseRevisionId?: string; authorityEpoch?: unknown }>;
+          if (typeof lease.runId !== 'string') {
+            return [];
+          }
+          /* A record written before W5 names no attempt (read as 0) and calls its head `baseRevisionId` (W8 TS-Q5); one
+           * written before W8 still carries the retired `authorityEpoch`, which nothing reads. */
+          const { baseRevisionId, authorityEpoch: _retired, ...rest } = lease;
+          const headRevisionId = lease.headRevisionId ?? baseRevisionId;
+          return [
+            // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the two required fields are checked above; the rest are the record's own.
+            Object.freeze({
+              ...rest,
+              runId: lease.runId,
+              attempt: typeof lease.attempt === 'number' ? lease.attempt : 0,
+              ...(headRevisionId === undefined ? {} : { headRevisionId }),
+            } as TurnLease),
+          ];
         } catch {
           return [];
         }
@@ -1830,6 +1881,28 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     );
     return leases.flat();
   };
+
+  /*
+   * Delete one attempt's lease, unless its record names another attempt or
+   * holder of the run, whose lease it is not (TS-R5, RM-S14). A missing record
+   * counts as retired.
+   */
+  const retireAttempt = async (key: TurnAttemptKey): Promise<void> => {
+    const record = await leaseOf(key.runId);
+    if (record !== undefined && !namesAttempt(record, key)) {
+      return;
+    }
+    await dropLease(key.runId);
+  };
+  const leaseOf = async (runId: string): Promise<TurnLease | undefined> => {
+    const leases = await readLeases();
+    return leases.find((lease) => lease.runId === runId);
+  };
+  /* A record written before W5 reads as attempt 0 and names every attempt of its run (TS-Q5). */
+  const namesAttempt = (record: TurnLease, key: TurnAttemptKey): boolean =>
+    (record.attempt === 0 || record.attempt === key.attempt) &&
+    record.turnId === key.turnId &&
+    record.chatId === key.chatId;
 
   /* Delete one lease. Retiring one that is already gone resolves (R17). */
   const dropLease = async (runId: string): Promise<void> => {
@@ -1840,6 +1913,70 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* A lease that was never written, or that another pass already retired,
        * is exactly the state the caller wanted. */
     }
+  };
+
+  /*
+   * RM-R8 narrowed (W8 H1): this root's liveness mark, taken before its first lease write and held until the root
+   * stops. A record names its holder; another root adopts or retires it only inside the record's section, and only
+   * while the holder's mark is free.
+   */
+  const rootInstanceId = `root_${randomUuid()}`;
+  const markOf = (holder: string): string => `tau:revisions-root:${projectId}:${holder}`;
+  const rootStopped = Promise.withResolvers<void>();
+  const takeMark = async (): Promise<void> => {
+    const name = markOf(rootInstanceId);
+    heldMarks.set(name, rootStopped.promise);
+    const locks = lockManager();
+    if (locks === undefined) {
+      return;
+    }
+    const taken = Promise.withResolvers<void>();
+    /* Never stolen; the browser frees it when the realm holding the root ends. A refused request leaves the in-process
+     * mark, which is all this realm can offer. */
+    const hold = async (): Promise<void> => {
+      try {
+        await locks.request(name, async () => {
+          taken.resolve();
+          await rootStopped.promise;
+        });
+      } catch {
+        /* See above. */
+      } finally {
+        taken.resolve();
+      }
+    };
+    void hold();
+    await taken.promise;
+  };
+  let marked: Promise<void> | undefined;
+  const holdMark = async (): Promise<void> => {
+    marked ??= takeMark();
+    await marked;
+  };
+  const markFree = async (holder: string | undefined): Promise<boolean> => {
+    if (holder === undefined || holder === rootInstanceId) {
+      return true;
+    }
+    const name = markOf(holder);
+    const locks = lockManager();
+    return locks === undefined
+      ? !heldMarks.has(name)
+      : locks.request(name, { ifAvailable: true }, (lock) => lock !== null);
+  };
+  const inRecordSection = async <T>(runId: string, operation: () => Promise<T>): Promise<T> => {
+    const name = `tau:revisions-lease:${projectId}:${runId}`;
+    return recordSections.queueFor(name, async () => {
+      const locks = lockManager();
+      return locks === undefined ? operation() : locks.request(name, async () => operation());
+    });
+  };
+  const writeLeaseRecord = async (lease: TurnLease): Promise<void> => {
+    const records = await recordsFileSystem();
+    await records.writeFile(leasePathOf(lease.runId), `${JSON.stringify(lease, undefined, 2)}\n`);
+  };
+  const releaseMark = (): void => {
+    heldMarks.delete(markOf(rootInstanceId));
+    rootStopped.resolve();
   };
 
   /**
@@ -2073,8 +2210,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
   /* A cut's generated title; a restore row reads `Restored Rev N`, never an invented number (A9). */
   const summaryOf = async (input: CheckoutWriteRevisionActorInput, undoes?: string): Promise<string> => {
-    if (input.turnId !== undefined) {
-      return `Agent turn ${input.turnId}`;
+    if (input.turn !== undefined) {
+      return `Agent turn ${input.turn.key.turnId}`;
     }
     if (input.restoredFrom === undefined) {
       if (undoes === undefined) {
@@ -2167,15 +2304,21 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const code: RestoreFailureCode = 'NOTHING_TO_UNDO';
     throw Object.assign(new Error('Nothing you did on this branch is left to undo.'), { code });
   };
-
+  /*
+   * RM-R9: a turn's revision names its admitting attempt and which of its two
+   * revisions it is, and lists the checkout's other leases. The actor is the
+   * run's for a result; a base holds bytes nobody in this attempt wrote, so it
+   * keeps the attribution of the first other lease, or the person's.
+   */
   const provenanceOf = (
     trigger: CheckoutCutTrigger,
     leaseIds: readonly string[],
-    about: Readonly<{ turnId?: string | undefined; restoredFrom?: string | undefined }> = {},
+    about: Readonly<{ turn?: TurnCutOf | undefined; restoredFrom?: string | undefined }> = {},
   ): RevisionProvenance => {
-    const { turnId, restoredFrom } = about;
-    const [only] = leaseIds;
-    const actor = options.actor?.({ runId: only, trigger });
+    const { turn, restoredFrom } = about;
+    const runId = turn?.key.runId;
+    const heldRunIds = leaseIds.filter((id) => id !== runId).toSorted();
+    const actor = options.actor?.({ runId: turn?.turnCut === 'result' ? runId : heldRunIds[0], trigger });
     return Object.freeze({
       /* Only the restore row is the restore's: the cut before it records the
        * person's own bytes under the same trigger (D1, A9). */
@@ -2190,14 +2333,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* One id, not two: `actorId` *is* the actor's id whenever the host could
        * resolve one, so nothing has to decide which of the pair to believe. */
       actorId: actor?.id ?? actorId,
-      /* The head of the set is the run that minted (`writeLease` puts its own
-       * run first), and that attribution is what a card shows today. Dropping it
-       * when a second chat holds the same checkout would lose attribution in
-       * exactly AC9's scenario. */
-      ...(only === undefined ? {} : { runId: only }),
-      /* The turn a card hangs under, durable on the revision itself: the graph
-       * is the only record a reload has, on every host (I3, S10). */
-      ...(turnId === undefined ? {} : { turnId }),
+      ...(turn === undefined
+        ? {}
+        : {
+            runId: turn.key.runId,
+            attempt: turn.key.attempt,
+            turnCut: turn.turnCut,
+            /* The turn a card hangs under, durable on the revision itself (I3, S10). */
+            turnId: turn.key.turnId,
+          }),
+      ...(heldRunIds.length === 0 ? {} : { heldRunIds }),
       /* S37: who, in the shape stock `git log` renders, and what asked (S30). */
       ...(actor === undefined ? {} : { actor }),
       trigger,
@@ -2676,6 +2821,52 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
   return {
     settled,
+    turns: {
+      leases: readLeases,
+      open: async (checkoutId) => {
+        const places = await listPlaces();
+        const checkout = places.find((candidate) => candidate.id === checkoutId);
+        return checkout === undefined ? undefined : { checkout, filesystem: await filesystem(checkout) };
+      },
+      describe: async (settlement) => describeTurnSettlement(port, projectId, settlement),
+      claim: async (runId) =>
+        inRecordSection(runId, async () => {
+          const record = await leaseOf(runId);
+          if (record === undefined || record.holder === rootInstanceId) {
+            return 'free';
+          }
+          if (!(await markFree(record.holder))) {
+            return 'held';
+          }
+          /* Re-stamped in the same section, so a third root probes this one's mark from here on. */
+          await holdMark();
+          await writeLeaseRecord(Object.freeze({ ...record, holder: rootInstanceId }));
+          return 'free';
+        }),
+      retire: async (key) =>
+        inRecordSection(key.runId, async () => {
+          const record = await leaseOf(key.runId);
+          if (record === undefined || !namesAttempt(record, key)) {
+            return 'absent';
+          }
+          if (!(await markFree(record.holder))) {
+            return 'held';
+          }
+          await dropLease(key.runId);
+          return 'retired';
+        }),
+      holderReleased: async (runId, signal) => {
+        const lease = await leaseOf(runId);
+        const holder = lease?.holder;
+        if (holder === undefined || holder === rootInstanceId) {
+          return;
+        }
+        const name = markOf(holder);
+        const locks = lockManager();
+        await (locks === undefined ? heldMarks.get(name) : locks.request(name, { signal }, () => undefined));
+      },
+    },
+    release: releaseMark,
     recordEditorConflict,
     checkout: {
       cut: fromAuthorityPromise<CheckoutCutActorOutput, CheckoutCutActorInput>(async ({ input }) => {
@@ -2732,66 +2923,76 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         },
       ),
 
-      writeRevision: fromAuthorityPromise<Readonly<{ revisionId: string }>, CheckoutWriteRevisionActorInput>(
-        async ({ input }) => {
-          const held = cuts.take(input.cutId);
-          /*
-           * A request that names no lease is not a request made in a vacuum.
-           *
-           * A `save`, an `idle` mint, and a turn's dirty-base pre-mint (whose
-           * own lease is not written yet) all absorb whatever the chats holding
-           * this checkout had in flight. Recording the leases that were held is
-           * what keeps the History row truthful with two chats on one checkout
-           * (AC9) instead of crediting a person for an agent's bytes.
-           */
-          const heldLeases: readonly TurnLease[] = input.leaseIds.length > 0 ? [] : await readLeases();
-          const leaseIds =
-            input.leaseIds.length > 0
-              ? input.leaseIds
-              : heldLeases.filter((lease) => lease.checkoutId === input.checkoutId).map((lease) => lease.runId);
-          /* The `restore` cut that mints an undo's planned tree is that undo (D15). */
-          const pendingUndo = input.trigger === 'restore' ? pendingUndos.get(input.checkoutId) : undefined;
-          const undoes = pendingUndo?.treeId === input.treeId ? pendingUndo.undoes : undefined;
-          if (undoes !== undefined) {
-            pendingUndos.delete(input.checkoutId);
+      writeRevision: fromAuthorityPromise<
+        Readonly<{ status: 'written'; revisionId: string }> | Readonly<{ status: 'held'; heldBy: TurnAttemptKey }>,
+        CheckoutWriteRevisionActorInput
+      >(async ({ input }) => {
+        const held = cuts.take(input.cutId);
+        /*
+         * RM-R16, the fresh fence: a cut no turn asked for reads the lease
+         * records after its capture and before its compare-and-swap. A lease
+         * on this checkout — another tab's, another host's — means an agent
+         * is recording these bytes, so nothing is minted and the answer names
+         * the attempt that holds them. The order is enough: agent bytes exist
+         * only after their record, and a record retired after this read has
+         * already been cut, so the compare-and-swap refuses a save built on
+         * the older head.
+         */
+        if (input.turn === undefined) {
+          const leases = await readLeases();
+          const holder = leases.find((lease) => lease.checkoutId === input.checkoutId);
+          if (holder !== undefined) {
+            return {
+              status: 'held',
+              heldBy: {
+                chatId: holder.chatId,
+                turnId: holder.turnId,
+                runId: holder.runId,
+                attempt: holder.attempt,
+              },
+            };
           }
-          const provenance = provenanceOf(input.trigger, leaseIds, {
-            turnId: input.turnId,
-            restoredFrom: input.restoredFrom,
-          });
-          const receipt = await port.writeRevision({
-            parents: input.parents.map((parent) => revisionId(parent)),
-            tree: held.tree,
-            provenance,
-            summary: Object.freeze({
-              generated: await summaryOf(input, undoes),
-            }),
-          });
-          mintedOperations.set(receipt.commitId, {
-            kind: input.trigger,
-            ...(undoes === undefined ? {} : { undoes }),
-            actor: provenance.actor,
-            actorId: provenance.actorId,
-          });
-          /* The claim {@link revisionTreeId} makes, checked where it is cheap:
-           * a tree id this host computed differently from the engine's would
-           * hold the I5 gate open forever and mint an identical revision per
-           * turn, silently. */
-          const recorded = await treeIdOf(receipt.commitId);
-          if (recorded !== input.treeId) {
-            throw new RevisionPortError(
-              'ENGINE_FAILED',
-              `The store recorded tree ${String(recorded)} for a cut computed as ${input.treeId}.`,
-            );
-          }
-          /* The revision's tree is the one just cut, so the next walk inherits
-           * its modes without reading it back from the store. */
-          const basis = heldTree(held.tree);
-          memosOf(input.checkoutId).basis =
-            basis === undefined ? undefined : { revisionId: receipt.commitId, tree: basis };
-          return { revisionId: receipt.commitId };
-        },
-      ),
+        }
+        /* The `restore` cut that mints an undo's planned tree is that undo (D15). */
+        const pendingUndo = input.trigger === 'restore' ? pendingUndos.get(input.checkoutId) : undefined;
+        const undoes = pendingUndo?.treeId === input.treeId ? pendingUndo.undoes : undefined;
+        if (undoes !== undefined) {
+          pendingUndos.delete(input.checkoutId);
+        }
+        const provenance = provenanceOf(input.trigger, input.leaseIds, {
+          turn: input.turn,
+          restoredFrom: input.restoredFrom,
+        });
+        const receipt = await port.writeRevision({
+          parents: input.parents.map((parent) => revisionId(parent)),
+          tree: held.tree,
+          provenance,
+          summary: Object.freeze({ generated: await summaryOf(input, undoes) }),
+        });
+        mintedOperations.set(receipt.commitId, {
+          kind: input.trigger,
+          ...(undoes === undefined ? {} : { undoes }),
+          actor: provenance.actor,
+          actorId: provenance.actorId,
+        });
+        /* The claim {@link revisionTreeId} makes, checked where it is cheap:
+         * a tree id this host computed differently from the engine's would
+         * hold the I5 gate open forever and mint an identical revision per
+         * turn, silently. */
+        const recorded = await treeIdOf(receipt.commitId);
+        if (recorded !== input.treeId) {
+          throw new RevisionPortError(
+            'ENGINE_FAILED',
+            `The store recorded tree ${String(recorded)} for a cut computed as ${input.treeId}.`,
+          );
+        }
+        /* The revision's tree is the one just cut, so the next walk inherits
+         * its modes without reading it back from the store. */
+        const basis = heldTree(held.tree);
+        memosOf(input.checkoutId).basis =
+          basis === undefined ? undefined : { revisionId: receipt.commitId, tree: basis };
+        return { status: 'written', revisionId: receipt.commitId };
+      }),
 
       casHead: fromAuthorityPromise<CheckoutCasHeadActorOutput, CheckoutCasHeadActorInput>(async ({ input }) => {
         /* No detached checkout exists (D1): a revision no ref reaches would be
@@ -2801,6 +3002,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             'UNSUPPORTED_OPERATION',
             'These files are not on a branch, so nothing can record them.',
           );
+        }
+        /* W0.10 (W5 F7): the mint runs inside the checkout fence, which every
+         * move of this checkout also takes. A checkout that has left the mint's
+         * branch refuses here, or a fresh branch's equal head would let its
+         * save land on the branch it left. */
+        const place = await placeOf(input.checkoutId);
+        if (place.branch !== input.branch) {
+          return { status: 'conflicted', head: await headOf(place) };
         }
         const result = await port.updateRef({
           name: input.branch,
@@ -2815,15 +3024,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       readHead: fromAuthorityPromise<CheckoutHead, CheckoutFenceActorInput>(async ({ input }) => {
         const place = await placeOf(input.checkoutId);
         const head = await headOf(place);
-        return { revisionId: head, treeId: await treeIdOf(head) };
+        /* RM-R5: all three facts the checkout owns, from one read. */
+        return { revisionId: head, treeId: await treeIdOf(head), branch: place.branch };
       }),
 
       /*
-       * Node has no cross-process live-tree lock, and does not need one: the
-       * expected-old ref update inside `casHead` is the fence two processes
-       * actually meet at (I7). This one serializes the mints of one checkout
-       * inside this process, which is what keeps two chats from cutting the
-       * same tree at once. The browser's is a Web Lock (W3d).
+       * The checkout fence is the same in-process queue on every host: it
+       * serializes the mints of one checkout inside this process, which is what
+       * keeps two chats from cutting the same tree at once. Nothing here spans
+       * documents or processes. Across documents, the ref Web Lock serializes
+       * publication; across processes, git's lockfile does, and the
+       * expected-old update inside `casHead` is where writers meet (I7, RM-S14).
        */
       fence: createCallbackLogic<AnyEventObject, CheckoutFenceActorInput>(({ input, sendBack }) => {
         let live = true;
@@ -2845,7 +3056,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
     turn: {
       prepare: fromAuthorityPromise<TurnPrepareActorOutput, TurnPrepareActorInput>(async ({ input }) => {
-        const { turnId, chatId, runId } = input;
+        const { turnId, chatId, runId } = input.key;
         try {
           await ensureStore();
           const places = await listPlaces();
@@ -2872,12 +3083,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           const tree = await capture(place);
           const dirty =
             headTreeId === undefined ? tree.size > 0 : headTreeId !== (await checkoutTreeId(place.id, tree));
-          const leases = await readLeases();
-          const staleRunIds = leases
-            .filter((lease) => lease.authorityEpoch !== authorityEpoch)
-            .map((lease) => lease.runId);
           options.onPlacement?.({ turnId, chatId, runId, status: 'placed', checkout: place, baseRevisionId });
-          return { checkoutId: place.id, branch, baseRevisionId, dirty, staleRunIds };
+          return { checkoutId: place.id, branch, baseRevisionId, dirty };
         } catch (error) {
           /* A turn a host could not place is refused, never run unrecorded
            * (I-EDIT); the host learns here, because a `turn` that never
@@ -2893,36 +3100,81 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }
       }),
 
-      writeLease: fromAuthorityPromise<Readonly<{ leaseIds: readonly string[] }>, TurnWriteLeaseActorInput>(
-        async ({ input }) =>
-          withCheckoutFence(input.checkoutId, async () => {
-            const records = await recordsFileSystem();
-            const lease: TurnLease = Object.freeze({
-              runId: input.runId,
-              turnId: input.turnId,
-              chatId: input.chatId,
-              checkoutId: input.checkoutId,
-              ...(input.baseRevisionId === undefined ? {} : { baseRevisionId: input.baseRevisionId }),
-              authorityEpoch,
-              startedAt: now(),
-            });
-            await records.writeFile(leasePathOf(input.runId), `${JSON.stringify(lease, undefined, 2)}\n`);
-            /* Every lease on this checkout, this turn's included and first: the
-             * provenance set (AC9), never a retirement list. The order carries
-             * the attribution — `provenanceOf` records the head of the set as the
-             * run that minted, and a directory read has no order of its own. */
-            const leases = await readLeases();
-            const held = leases
-              .filter((lease) => lease.checkoutId === input.checkoutId)
-              .map((lease) => lease.runId)
-              .filter((runId) => runId !== input.runId);
-            return { leaseIds: [input.runId, ...held] };
-          }),
+      /* RM-R12: the record, naming the attempt and the head read inside the fence, before any mint of the attempt. */
+      writeLease: fromAuthorityPromise<TurnWriteLeaseActorOutput, TurnWriteLeaseActorInput>(async ({ input }) =>
+        withCheckoutFence(input.checkoutId, async () => {
+          /* RM-R8 narrowed: the mark before the first record that names this root. */
+          await holdMark();
+          const headRevisionId = await headOf(await placeOf(input.checkoutId));
+          const lease: TurnLease = Object.freeze({
+            runId: input.key.runId,
+            turnId: input.key.turnId,
+            chatId: input.key.chatId,
+            checkoutId: input.checkoutId,
+            attempt: input.key.attempt,
+            ...(headRevisionId === undefined ? {} : { headRevisionId }),
+            startedAt: now(),
+            holder: rootInstanceId,
+          });
+          await writeLeaseRecord(lease);
+          /* Every lease on this checkout, this attempt's first: the provenance
+           * set (AC9), never a retirement list. The others are announced as
+           * `leaseHeld` (RM-R16). */
+          const leases = await readLeases();
+          const others = leases.filter(
+            (other) => other.checkoutId === input.checkoutId && other.runId !== input.key.runId,
+          );
+          return {
+            lease,
+            leaseIds: [input.key.runId, ...others.map((other) => other.runId)],
+            held: others.map(
+              (other): TurnAttemptKey => ({
+                chatId: other.chatId,
+                turnId: other.turnId,
+                runId: other.runId,
+                attempt: other.attempt,
+              }),
+            ),
+          };
+        }),
       ),
 
+      /* Only the record naming this attempt is dropped; a missing one counts as retired (TS-R5, RM-S14). */
       retireLease: fromAuthorityPromise<void, TurnRetireLeaseActorInput>(async ({ input }) => {
-        await dropLease(input.runId);
+        await retireAttempt(input.key);
       }),
+
+      /*
+       * Find-or-cut (RM-R14): walk first parents from the checkout's head back
+       * to, not including, the lease's head, and return the revisions whose
+       * provenance names this attempt, by `turnCut`. Under the checkout fence,
+       * so a mint of this checkout is not half-published while it reads.
+       */
+      find: fromAuthorityPromise<TurnFindActorOutput, TurnFindActorInput>(async ({ input }) =>
+        withCheckoutFence(input.checkoutId, async () => {
+          const leases = input.stopAt === undefined ? await readLeases() : [];
+          const stopAt = input.stopAt ?? leases.find((lease) => lease.runId === input.key.runId)?.headRevisionId;
+          let cursor = await headOf(await placeOf(input.checkoutId));
+          const found: { base?: string; result?: string } = {};
+          while (cursor !== undefined && cursor !== stopAt && found.result === undefined) {
+            // oxlint-disable-next-line no-await-in-loop -- a first-parent walk reads one commit at a time.
+            const record = await port.readRevision(revisionId(cursor));
+            if (record === undefined) {
+              break;
+            }
+            const { provenance } = record;
+            if (provenance.runId === input.key.runId && (provenance.attempt ?? 0) === input.key.attempt) {
+              if (provenance.turnCut === 'result') {
+                found.result = record.id;
+              } else if (provenance.turnCut === 'base') {
+                found.base ??= record.id;
+              }
+            }
+            cursor = record.parents[0];
+          }
+          return found;
+        }),
+      ),
 
       capture: fromAuthorityPromise<Readonly<{ captureId: string }>, TurnCaptureActorInput>(async ({ input }) => ({
         captureId: captures.put(input.turnId, await capture(await placeOf(input.checkoutId))),
@@ -2961,8 +3213,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * time, so this grants on sight. The record is `.tau/runs/<runId>.json`
        * and the only exclusion in the system is the mint fence above.
        */
-      lease: createCallbackLogic<AnyEventObject, TurnLeaseActorInput>(({ input, sendBack }) => {
-        options.onPlacement?.({ runId: input.runId, status: 'leased', checkoutId: input.checkoutId });
+      lease: createCallbackLogic<AnyEventObject, TurnLeaseActorInput>(({ sendBack }) => {
+        /* `onPlacement('leased')` is reported on the root's `turnPlaced`, after the base (RM-S14). */
         sendBack({ type: 'leaseGranted' });
         return (): void => undefined;
       }),
@@ -3119,19 +3371,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         swept.delete(input.id);
       }),
 
-      /* F13: a lease from a superseded epoch belongs to a process that no longer
-       * owns this project — a crashed daemon, a previous window — and is retired
-       * on open. A live turn is never rehydrated from one. */
-      sweepLeases: fromAuthorityPromise<SweepLeasesActorOutput, Readonly<{ projectId: string }>>(async () => {
-        const leases = await readLeases();
-        const stale = leases.filter((lease) => lease.authorityEpoch !== authorityEpoch);
-        await Promise.all(stale.map(async (lease) => dropLease(lease.runId)));
-        return { retiredRunIds: stale.map((lease) => lease.runId) };
-      }),
-
-      retireLease: fromAuthorityPromise<void, Readonly<{ projectId: string; runId: string }>>(async ({ input }) => {
-        await dropLease(input.runId);
-      }),
+      /* A turn's retirement names its attempt and is checked like the turn's own; a run-only one drops the record. */
+      retireLease: fromAuthorityPromise<void, Readonly<{ projectId: string; runId: string; key?: TurnAttemptKey }>>(
+        async ({ input }) => {
+          await (input.key === undefined ? dropLease(input.runId) : retireAttempt(input.key));
+        },
+      ),
     },
 
     /*
@@ -3261,7 +3506,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         if (removed.status !== 'updated') {
           throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} moved while the branch was renamed.`);
         }
-        return { branch: input.name };
+        /* RM-R5: the checkout whose HEAD this moved re-reads its branch. */
+        const places = live?.branch === input.branch ? await listPlaces() : [];
+        const moved = places.find((place) => place.kind === 'live');
+        return { branch: input.name, ...(moved === undefined ? {} : { checkoutId: moved.id }) };
       }),
     },
 
@@ -4491,8 +4739,25 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 };
 
+/**
+ * One project's running revision actor tree, as {@link createProjectRevisionsActor} returns it.
+ *
+ * @public
+ */
+export type ProjectRevisions = Readonly<{
+  /** The root, unstarted. */
+  actor: ProjectRevisionsActor;
+  /** Resolves once nothing the tree started is still writing to the project. */
+  settled: () => Promise<void>;
+  /** The store reads a turn-placement adapter makes beside the root (W8 TS-S3). */
+  turns: TurnStore;
+  /** Record an editor's overlapping edit; the *Needs your decision* card follows (D14). */
+  recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
+}>;
+
 /** Options for one project's running revision actor tree. @public */
 export type ProjectRevisionActorOptions = RevisionActorsOptions &
+  Pick<ActorOptions<AnyActorLogic>, 'inspect' | 'onRejectedEvent'> &
   Readonly<{
     /**
      * The checkout that is the project directory itself.
@@ -4513,9 +4778,12 @@ export type ProjectRevisionActorOptions = RevisionActorsOptions &
  * checkout filesystems they pass. The actor is returned **unstarted**, so a
  * caller can subscribe before the registry opens.
  *
- * @param options - The same dependencies {@link createRevisionActors} takes.
- * @returns The root actor, ready to `start()`, and the `settled` wait a caller
- *   owes the project after it stops that actor.
+ * @param options - The same dependencies {@link createRevisionActors} takes, plus the
+ *   tree's `inspect` and `onRejectedEvent`. Production passes neither; tests pass the
+ *   harness (MC-R4).
+ * @returns The root actor, ready to `start()`, the `settled` wait a caller
+ *   owes the project after it stops that actor, and the store reads a
+ *   turn-placement adapter needs (`turns`).
  * @public
  *
  * @example <caption>Serve one project on a disk host</caption>
@@ -4527,21 +4795,13 @@ export type ProjectRevisionActorOptions = RevisionActorsOptions &
  * const { actor } = createProjectRevisionsActor({
  *   port: createNativeGitRevisionPort({ repositoryPath: '/srv/project' }),
  *   projectId: 'project-1',
- *   authorityEpoch: 'epoch-1',
  *   filesystem: () => new NodeFsProvider('/srv/project'),
  * });
  * actor.start();
- * actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+ * actor.send({ type: 'admitTurn', key: { chatId: 'chat-1', turnId: 'turn-1', runId: 'run-1', attempt: 0 } });
  * ```
  */
-export const createProjectRevisionsActor = (
-  options: ProjectRevisionActorOptions,
-): Readonly<{
-  actor: ProjectRevisionsActor;
-  settled: () => Promise<void>;
-  /** Record an editor's overlapping edit; the *Needs your decision* card follows (D14). */
-  recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
-}> => {
+export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions): ProjectRevisions => {
   const actors = createRevisionActors(options);
   const actor = createActor(
     projectRevisionsMachine.provide({
@@ -4563,8 +4823,37 @@ export const createProjectRevisionsActor = (
         ...(options.liveCheckoutId === undefined ? {} : { liveCheckoutId: options.liveCheckoutId }),
         ...(options.selectedCheckoutId === undefined ? {} : { selectedCheckoutId: options.selectedCheckoutId }),
       },
+      ...(options.clock === undefined ? {} : { clock: options.clock }),
+      ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
+      ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
     },
   );
+  /* RM-S14: a host hears of the placement after the base is minted, and of a refusal that followed the record. */
+  actor.on('turnPlaced', (event) => {
+    options.onPlacement?.({ runId: event.key.runId, status: 'leased', checkoutId: event.checkoutId ?? '' });
+  });
+  actor.on('turnRefused', (event) => {
+    options.onPlacement?.({
+      runId: event.runId,
+      status: 'refused',
+      turnId: event.turnId,
+      chatId: event.chatId,
+      reason: event.reason,
+    });
+  });
+  /* RM-R8 narrowed: the root's liveness mark lives as long as the root and every write it started (W8.r1 L-D). */
+  const releaseAfterWrites = async (): Promise<void> => {
+    try {
+      await actors.settled();
+    } finally {
+      actors.release();
+    }
+  };
+  const releaseSettled = (): void => {
+    // async-iife: bootstrap -- the stop is synchronous and nothing awaits it; `settled` never rejects.
+    void releaseAfterWrites();
+  };
+  actor.subscribe({ complete: releaseSettled, error: releaseSettled });
   const recordEditorConflict = async (input: EditorConflictInput): Promise<EditorConflictOutcome> => {
     const outcome = await actors.recordEditorConflict(input);
     if (outcome.status === 'recorded') {
@@ -4576,27 +4865,13 @@ export const createProjectRevisionsActor = (
     }
     return outcome;
   };
-  return { actor, settled: actors.settled, recordEditorConflict };
+  return { actor, settled: actors.settled, turns: actors.turns, recordEditorConflict };
 };
 
 /* How far each wait outlasts the bound it awaits, so the inner reason always lands first (rule 9). */
 /* How long an open pull waits for the stream's tail (W5b a1b): one tail read is a zero-wait GET, well inside the pull's 10 s deadline. */
 const streamTailWaitMilliseconds = 2000;
 const nestedBoundMarginMilliseconds = 2000;
-
-/**
- * How long an admission waits for its turn to take its lease.
- *
- * The host's patience: a turn whose base mint never settles must refuse the
- * run rather than hold the client open for the life of the process. Rule 9
- * nests it strictly outside the turn's own cut settlement
- * (`turnCutSettlementMilliseconds`), so a base cut that times out answers with
- * its own reason before this wait's generic one. Both compositions read this
- * one value (W10.5): a bound kept in two places is two bounds.
- *
- * @public
- */
-export const admissionMilliseconds = turnCutSettlementMilliseconds + nestedBoundMarginMilliseconds;
 
 /**
  * How long a host waits for the scheduler before it lets a project go.
@@ -4702,18 +4977,18 @@ export const closeCutMilliseconds = 5000;
  * @public
  */
 export const releaseUnplacedTurns = (actor: ProjectRevisionsActor): readonly string[] => {
-  const { pendingAdmissions, turnRefs } = actor.getSnapshot().context;
+  /* The root's own facts, never a child's snapshot (RM-R7). */
+  const { pendingAdmissions, turnFacts } = actor.getSnapshot().context;
   const unplaced = [
-    ...pendingAdmissions.map(({ turnId, runId }) => ({ turnId, runId })),
-    ...Object.values(turnRefs)
-      .map((ref) => ref.getSnapshot().context)
-      .filter((turn) => turn.checkoutId === undefined)
-      .map(({ turnId, runId }) => ({ turnId, runId })),
+    ...pendingAdmissions.map(({ key }) => key),
+    ...Object.values(turnFacts)
+      .filter((fact) => fact.checkoutId === undefined && !fact.placed && fact.abandoned !== true)
+      .map(({ key }) => key),
   ];
-  for (const turn of unplaced) {
-    actor.send({ type: 'release', ...turn });
+  for (const key of unplaced) {
+    actor.send({ type: 'turnAbandoned', key });
   }
-  return unplaced.map((turn) => turn.runId);
+  return unplaced.map((key) => key.runId);
 };
 
 /**
@@ -4735,7 +5010,9 @@ export const releaseUnplacedTurns = (actor: ProjectRevisionsActor): readonly str
  *
  * @param actor - The project's running revision root.
  * @param trigger - `close`, or the browser's `hidden` close preparation.
- * @param timeoutMilliseconds - One bound for all the cuts. Defaults to {@link closeCutMilliseconds}.
+ * @param timeoutMilliseconds - One bound for all the cuts. `hidden` defaults to {@link closeCutMilliseconds}, because
+ *   a frozen page answers nothing; `close` has none (B8, B3: each cut is answered by its request id, and the quit
+ *   itself is bounded by its owner, B9).
  * @returns Once every cut has answered. Rejects with the first refusal (a failed cut, a
  *   lost compare-and-swap) once all have answered, or at the bound.
  * @public
@@ -4743,27 +5020,30 @@ export const releaseUnplacedTurns = (actor: ProjectRevisionsActor): readonly str
 export const awaitCheckoutCuts = async (
   actor: ProjectRevisionsActor,
   trigger: 'hidden' | 'close',
-  timeoutMilliseconds: number = closeCutMilliseconds,
+  timeoutMilliseconds: number | undefined = trigger === 'hidden' ? closeCutMilliseconds : undefined,
 ): Promise<void> => {
-  const { checkouts, checkoutRefs, turnRefs } = actor.getSnapshot().context;
-  const turnCheckouts = Object.values(turnRefs).map((ref) => ref.getSnapshot().context.checkoutId);
+  const { checkouts, checkoutRefs, turnFacts } = actor.getSnapshot().context;
+  const turnCheckouts = Object.values(turnFacts)
+    .filter((fact) => !fact.settled && fact.abandoned !== true)
+    .map((fact) => fact.checkoutId);
   const ids = checkouts
     .filter(
       (checkout) =>
         checkoutRefs[checkout.id] !== undefined &&
-        checkout.leaseRunIds.length === 0 &&
+        /* Another holder's lease is not skipped: the listing lags a retirement, so the cut reads the records itself
+         * and a live lease answers `nothingToSave{heldBy}` (RM-R16). */
         !turnCheckouts.some((id) => id === undefined || id === checkout.id),
     )
     .map((checkout) => checkout.id);
-  /* Each answer settles to its refusal, or `undefined` when the checkout recorded or had nothing to record. */
-  const answers = new Map(ids.map((id) => [id, Promise.withResolvers<string | undefined>()]));
-  const answer = (
-    event: Readonly<{ checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>,
-    refusal?: string,
-  ): void => {
-    /* A queued `hidden` absorbed by a later `close` is answered as `close` (RV-W2b #4). */
-    if (satisfiesCut(event.trigger, trigger) && event.turnId === undefined) {
-      answers.get(event.checkoutId)?.resolve(refusal);
+  /* Each answer settles to its refusal, or `undefined` when the checkout recorded or had nothing to record.
+   * Keyed by the request id each cut mints, which every answer echoes (RM-R1, RM-R2). */
+  const requests = new Map(ids.map((id) => [`${trigger}:${id}:${randomUuid()}`, id]));
+  const answers = new Map(
+    [...requests.keys()].map((requestId) => [requestId, Promise.withResolvers<string | undefined>()]),
+  );
+  const answer = (event: Readonly<{ requestId?: string }>, refusal?: string): void => {
+    if (event.requestId !== undefined) {
+      answers.get(event.requestId)?.resolve(refusal);
     }
   };
   const subscriptions = [
@@ -4783,12 +5063,15 @@ export const awaitCheckoutCuts = async (
     }),
   ];
   const deadline = Promise.withResolvers<never>();
-  const bound = setTimeout(() => {
-    deadline.reject(new Error(`The ${trigger} revision was not recorded before the deadline.`));
-  }, timeoutMilliseconds);
+  const bound =
+    timeoutMilliseconds === undefined
+      ? undefined
+      : setTimeout(() => {
+          deadline.reject(new Error(`The ${trigger} revision was not recorded before the deadline.`));
+        }, timeoutMilliseconds);
   try {
-    for (const id of ids) {
-      actor.send({ type: 'cut', trigger, checkoutId: id, leaseIds: [] });
+    for (const [requestId, id] of requests) {
+      actor.send({ type: 'cut', requestId, trigger, checkoutId: id, leaseIds: [] });
     }
     const refusals = await Promise.race([
       Promise.all([...answers.values()].map(async (pending) => pending.promise)),

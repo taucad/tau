@@ -106,6 +106,8 @@ export const machineManifestSchema = z.strictObject({
     units: z.number().int().min(0).max(8),
     slotsPerUnit: z.number().int().min(0).max(8),
     externalSpool: z.boolean(),
+    /** The slot the external spool reports and is printed from, beside the unit slots; the provider's own numbering. */
+    externalSpoolSlot: z.number().int().min(0).max(255).optional(),
     drying: z.boolean(),
   }),
   /** Whether the machine's camera can capture a still; no live-stream contract exists. */

@@ -38,15 +38,22 @@ import {
   createRevisionActors as createRevisionActorsUntracked,
   describeTurnRelease,
   revisionTreeId,
-  admissionMilliseconds,
   syncQuiesceMilliseconds,
 } from '#revision-effects.js';
 import type { RevisionActors, RevisionActorsOptions } from '#revision-effects.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+
 import type { ParameterRecordCodec, RevisionId } from '#algorithms/index.js';
 import type { SyncMergeActorOutput } from '#sync.machine.js';
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { syncPullDeadlineMilliseconds } from '#sync.machine.js';
-import { turnCutSettlementMilliseconds } from '#turn.machine.js';
+
+/** A clock stopped at `time`: these rows read only its `now()`. */
+const clockAt = (time: number): StepClock => {
+  const clock = new StepClock();
+  clock.set(time);
+  return clock;
+};
 
 const roots: string[] = [];
 
@@ -147,7 +154,6 @@ const fixture = async (
   const actors = createRevisionActors({
     port,
     projectId: 'project-1',
-    authorityEpoch: 'epoch-1',
     filesystem: async (checkout) =>
       wrap(
         native === undefined
@@ -203,7 +209,6 @@ const run = async <Output>(actor: unknown, input: unknown): Promise<Output> =>
 describe('lifecycle bounds', () => {
   it('nests every inner bound strictly inside the wait that awaits it (rule 9)', () => {
     expect(syncPullDeadlineMilliseconds).toBeLessThan(syncQuiesceMilliseconds);
-    expect(turnCutSettlementMilliseconds).toBeLessThan(admissionMilliseconds);
   });
 });
 
@@ -231,7 +236,14 @@ describe('the capture memo', () => {
   it('reads a same-size rewrite after the clock steps back, instead of trusting the high-water mark (RV-W4W5a #5)', async () => {
     const realNow = Date.now();
     /* The wall clock ran a minute ahead for the first capture, then was corrected. */
+    /* A wall clock that steps back, which a `StepClock` cannot: only `now()` is read here. */
+    const steps = new StepClock();
     let reading = realNow + 60_000;
+    const clock = {
+      setTimeout: steps.setTimeout.bind(steps),
+      clearTimeout: steps.clearTimeout.bind(steps),
+      now: () => reading,
+    };
     const { port, actors, root } = await fixture(
       { 'part.ts': 'zzzz\n' },
       (real) =>
@@ -243,7 +255,7 @@ describe('the capture memo', () => {
             return [{ ...stat, path: 'part.ts', name: 'part.ts' }];
           },
         }),
-      { clock: () => reading },
+      { clock },
     );
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
     await run(actors.checkout.captureTree, { checkoutId: 'live' });
@@ -378,75 +390,61 @@ describe('a turn lease', () => {
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
 
     const first = await run<{ leaseIds: readonly string[] }>(actors.turn.writeLease, {
-      runId: 'run-1',
-      turnId: 'turn-1',
-      chatId: 'chat-1',
+      key: { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 1 },
       checkoutId: 'live',
-      baseRevisionId: undefined,
+      headRevisionId: undefined,
     });
     expect(first.leaseIds).toEqual(['run-1']);
 
     /* Leases are plural: a second chat on the same checkout sees both, which is
      * the provenance set a settlement carries (AC9). */
-    const second = await run<{ leaseIds: readonly string[] }>(actors.turn.writeLease, {
-      runId: 'run-2',
-      turnId: 'turn-2',
-      chatId: 'chat-2',
+    const secondKey = { runId: 'run-2', turnId: 'turn-2', chatId: 'chat-2', attempt: 1 };
+    const second = await run<{ leaseIds: readonly string[]; held: readonly unknown[] }>(actors.turn.writeLease, {
+      key: secondKey,
       checkoutId: 'live',
-      baseRevisionId: undefined,
+      headRevisionId: undefined,
     });
     /* This turn's own run first: the head of the set is the attribution a mint
      * records, and a directory read has no order of its own. */
     expect(second.leaseIds).toEqual(['run-2', 'run-1']);
+    /* The other attempt holding the checkout, announced as `leaseHeld` (RM-R16). */
+    expect(second.held).toEqual([{ runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 1 }]);
     expect(JSON.parse(await filesystem.readFile('.tau/runs/run-2.json', 'utf8'))).toMatchObject({
       runId: 'run-2',
       turnId: 'turn-2',
       chatId: 'chat-2',
       checkoutId: 'live',
-      authorityEpoch: 'epoch-1',
+      attempt: 1,
     });
 
-    await run(actors.turn.retireLease, { runId: 'run-2', turnId: 'turn-2', checkoutId: 'live', outcome: 'finalized' });
+    /* Another attempt of the same run leaves the record alone (TS-R5); attempt 0 is a record written before W5. */
+    await run(actors.turn.retireLease, { key: { ...secondKey, attempt: 2 }, checkoutId: 'live', outcome: 'finalized' });
+    expect(await filesystem.exists('.tau/runs/run-2.json')).toBe(true);
+    await run(actors.turn.retireLease, { key: secondKey, checkoutId: 'live', outcome: 'finalized' });
     /* Retiring one that is already gone resolves: a rejection here would reach
      * the host as a user-visible failure for a non-event (R17). */
-    await run(actors.turn.retireLease, { runId: 'run-2', turnId: 'turn-2', checkoutId: 'live', outcome: 'finalized' });
+    await run(actors.turn.retireLease, { key: secondKey, checkoutId: 'live', outcome: 'finalized' });
     expect(await filesystem.exists('.tau/runs/run-2.json')).toBe(false);
     expect(await filesystem.exists('.tau/runs/run-1.json')).toBe(true);
   }, 30_000);
 
-  it('sweeps only the leases a superseded authority wrote, and lists the rest on the record', async () => {
+  /* A stray `acknowledge` reaches the registry with its key: another attempt's or holder's record stays (TS-R5). */
+  it('should retire a registry lease only when its record names the retiring attempt', async () => {
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
-    await filesystem.writeFile(
-      '.tau/runs/run-dead.json',
-      JSON.stringify({
-        runId: 'run-dead',
-        turnId: 'turn-dead',
-        chatId: 'chat-dead',
-        checkoutId: 'live',
-        authorityEpoch: 'epoch-0',
-        startedAt: 1,
-      }),
-    );
-    await run(actors.turn.writeLease, {
-      runId: 'run-live',
-      turnId: 'turn-live',
-      chatId: 'chat-live',
-      checkoutId: 'live',
-      baseRevisionId: undefined,
-    });
+    const key = { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 1 };
+    await run(actors.turn.writeLease, { key, checkoutId: 'live', headRevisionId: undefined });
 
-    const swept = await run<{ retiredRunIds: readonly string[] }>(actors.checkouts.sweepLeases, {
+    await run(actors.checkouts.retireLease, { projectId: 'project-1', runId: 'run-1', key: { ...key, attempt: 0 } });
+    await run(actors.checkouts.retireLease, {
       projectId: 'project-1',
+      runId: 'run-1',
+      key: { ...key, chatId: 'chat-2' },
     });
-    expect(swept.retiredRunIds).toEqual(['run-dead']);
+    expect(await filesystem.exists('.tau/runs/run-1.json')).toBe(true);
 
-    const registry = await run<{ checkouts: ReadonlyArray<{ id: string; leaseRunIds: readonly string[] }> }>(
-      actors.checkouts.listCheckouts,
-      { projectId: 'project-1' },
-    );
-    expect(registry.checkouts).toHaveLength(1);
-    expect(registry.checkouts[0]).toMatchObject({ id: 'live', kind: 'live', leaseRunIds: ['run-live'] });
+    await run(actors.checkouts.retireLease, { projectId: 'project-1', runId: 'run-1', key });
+    expect(await filesystem.exists('.tau/runs/run-1.json')).toBe(false);
   }, 30_000);
 });
 
@@ -601,14 +599,57 @@ describe('settling a turn', () => {
       treeId: cut.treeId,
       parents: [],
       trigger: 'turn',
-      turnId: 'turn-2',
+      turn: { key: { runId: 'run-2', turnId: 'turn-2', chatId: 'chat-2', attempt: 1 }, turnCut: 'result' },
       /* `writeLease` puts the minting turn's own run first; a second chat
        * holding the same checkout must not cost the revision its attribution. */
       leaseIds: ['run-2', 'run-1'],
     });
 
+    /* RM-R9: the attempt and the cut are durable on the revision, and the other lease is named apart. */
     const record = await port.readRevision(revisionId(written.revisionId));
-    expect(record?.provenance).toMatchObject({ source: 'agent', runId: 'run-2' });
+    expect(record?.provenance).toMatchObject({
+      source: 'agent',
+      runId: 'run-2',
+      attempt: 1,
+      turnCut: 'result',
+      turnId: 'turn-2',
+      heldRunIds: ['run-1'],
+    });
+  }, 30_000);
+
+  it('should answer nothingToSave naming the lease when a save finds a lease another tab wrote', async () => {
+    const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+      checkoutId: 'live',
+      trigger: 'save',
+    });
+    /* Another tab's record, written after this save captured: its agent bytes may be in the tree. */
+    await filesystem.writeFile(
+      '.tau/runs/run-tab.json',
+      JSON.stringify({
+        runId: 'run-tab',
+        turnId: 'turn-tab',
+        chatId: 'chat-tab',
+        checkoutId: 'live',
+        attempt: 0,
+        startedAt: 1,
+      }),
+    );
+
+    const written = await run<Readonly<Record<string, unknown>>>(actors.checkout.writeRevision, {
+      checkoutId: 'live',
+      cutId: cut.cutId,
+      treeId: cut.treeId,
+      parents: [],
+      trigger: 'save',
+      leaseIds: [],
+    });
+
+    expect(written).toEqual({
+      status: 'held',
+      heldBy: { runId: 'run-tab', turnId: 'turn-tab', chatId: 'chat-tab', attempt: 0 },
+    });
   }, 30_000);
 
   it('reports a structural conflict as a conflicted turn rather than throwing', async () => {
@@ -656,7 +697,6 @@ const startTree = async (
   const { actor } = createProjectRevisionsActor({
     port,
     projectId: 'project-1',
-    authorityEpoch: 'epoch-1',
     filesystem: async () => filesystem,
     ...extra,
   });
@@ -683,6 +723,7 @@ const startTree = async (
     saves += 1;
     actor.send({
       type: 'cut',
+      requestId: `save-${String(saves)}`,
       trigger: 'save',
       checkoutId: selectRevisionStatus(actor.getSnapshot()).checkoutId,
       leaseIds: [],
@@ -960,11 +1001,9 @@ describe('restore, through the machine that owns it', () => {
     });
     /* Another window's turn leases the checkout before the person confirms. */
     await run(actors.turn.writeLease, {
-      runId: 'run-1',
-      turnId: 'turn-1',
-      chatId: 'chat-1',
+      key: { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 0 },
       checkoutId: 'live',
-      baseRevisionId: first.revisionId,
+      headRevisionId: first.revisionId,
     });
 
     await expect(run(actors.restore.applyPlan, { checkoutId: 'live', planId: plan.planId })).rejects.toMatchObject({
@@ -1030,7 +1069,6 @@ describe('the checkout registry', () => {
     const actors = createRevisionActors({
       port,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => filesystem,
       useFileSystem: async (checkout, operation) => {
         events.push(`open:${checkout.kind}`);
@@ -1049,9 +1087,7 @@ describe('the checkout registry', () => {
     });
 
     await run(actors.turn.prepare, {
-      turnId: 'turn-1',
-      chatId: 'chat-1',
-      runId: 'run-1',
+      key: { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1', attempt: 0 },
       checkoutId: linked?.id,
     });
     expect(events).toEqual(['open:linked', 'close:linked', 'placed']);
@@ -1060,9 +1096,7 @@ describe('the checkout registry', () => {
     refuse = true;
     await expect(
       run(actors.turn.prepare, {
-        turnId: 'turn-2',
-        chatId: 'chat-1',
-        runId: 'run-2',
+        key: { turnId: 'turn-2', chatId: 'chat-1', runId: 'run-2', attempt: 0 },
         checkoutId: linked?.id,
       }),
     ).rejects.toThrow('candidate admission refused');
@@ -1086,10 +1120,9 @@ describe('the checkout registry', () => {
     const actors = createRevisionActors({
       port,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => filesystem,
       /* Forty days after the revision both branches name. */
-      clock: () => recordedAt + 40 * day,
+      clock: clockAt(recordedAt + 40 * day),
     });
 
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
@@ -1126,9 +1159,8 @@ describe('the checkout registry', () => {
     const actors = createRevisionActors({
       port,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => filesystem,
-      clock: () => recordedAt + 60_000,
+      clock: clockAt(recordedAt + 60_000),
     });
 
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
@@ -1314,10 +1346,9 @@ for (const actorSet of actorSets) {
 
       await context.filesystem.writeFile('main.ts', 'base\n');
       await run(context.actors.turn.writeLease, {
-        runId: 'run-1',
-        turnId: 'turn-1',
-        chatId: 'chat-1',
+        key: { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 0 },
         checkoutId: 'live',
+        headRevisionId: undefined,
       });
       /* And a leased one waits for its lease (rule 9). */
       await expect(run(context.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
@@ -1326,7 +1357,11 @@ for (const actorSet of actorSets) {
         revisionId: context.remote,
       });
       expect(await context.filesystem.readFile('main.ts', 'utf8')).toBe('base\n');
-      await run(context.actors.turn.retireLease, { runId: 'run-1' });
+      await run(context.actors.turn.retireLease, {
+        key: { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 0 },
+        checkoutId: 'live',
+        outcome: 'finalized',
+      });
 
       const protectedTree = new ImmutableRevisionTree([
         ...context.remoteTree.entries().map((entry) => [entry.path, entry.content, entry.mode] as const),
@@ -1368,7 +1403,6 @@ for (const actorSet of actorSets) {
       const failingActors = createRevisionActors({
         port: context.port,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: () => wrapped,
       });
       await expect(run(failingActors.sync.fastForward, { remote: 'tau', branch: 'main' })).rejects.toThrow(
@@ -1393,7 +1427,6 @@ for (const actorSet of actorSets) {
       const refusingActors = createRevisionActors({
         port: refusingPort,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: () => context.filesystem,
       });
       await expect(run(refusingActors.sync.fastForward, { remote: 'tau', branch: 'main' })).rejects.toMatchObject({
@@ -1425,7 +1458,6 @@ for (const actorSet of actorSets) {
       const racingActors = createRevisionActors({
         port: racingPort,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: () => context.filesystem,
       });
 
@@ -1457,7 +1489,6 @@ for (const actorSet of actorSets) {
       const heldActors = createRevisionActors({
         port: heldPort,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: () => context.filesystem,
       });
       const running = createActor(heldActors.sync.fastForward, {
@@ -1491,7 +1522,6 @@ for (const actorSet of actorSets) {
       const actors = createRevisionActors({
         port: context.port,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: () => wrapped,
       });
 
@@ -1608,10 +1638,9 @@ for (const actorSet of actorSets) {
         remote: { 'main.ts': 'theirs\n' },
       });
       await run(context.actors.turn.writeLease, {
-        runId: 'run-1',
-        turnId: 'turn-1',
-        chatId: 'chat-1',
+        key: { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 0 },
         checkoutId: 'live',
+        headRevisionId: undefined,
       });
       const held = { status: 'held', hold: 'leased', checkoutId: 'live', revisionId: context.remote };
 
@@ -1716,7 +1745,6 @@ for (const actorSet of actorSets) {
       const actors = createRevisionActors({
         port: wrappedPort,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: () => context.filesystem,
       });
 
@@ -1764,6 +1792,40 @@ describe('checkout fence cancellation', () => {
     await actors.settled();
   });
 });
+
+for (const actorSet of actorSets) {
+  describe.runIf(actorSet.enabled)(`the checkout's compare-and-swap — ${actorSet.name}`, () => {
+    /* W0.10, W5 F7: after a live switch to a branch made from `main`, the two
+     * heads are equal, so an expected-old swap of `main` used to succeed and
+     * land the switched checkout's save on the branch it left. */
+    it('should refuse a compare-and-swap on a branch the checkout left', async () => {
+      const { port, actors } = await fixture({ 'main.ts': 'base\n' }, (filesystem) => filesystem, {
+        actorSet: actorSet.name,
+      });
+      await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      const commit = async (content: string, parents: readonly string[]) => {
+        const receipt = await port.writeRevision({
+          parents: parents.map((parent) => revisionId(parent)),
+          tree: new ImmutableRevisionTree([['main.ts', content]]),
+          provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 25) },
+          summary: { generated: content },
+        });
+        return revisionId(receipt.commitId);
+      };
+      const base = await commit('base\n', []);
+      await port.updateRef({ name: 'main', expectedHead: undefined, head: base });
+      await port.updateRef({ name: 'feature', expectedHead: undefined, head: base });
+      await port.setHead('feature');
+      const next = await commit('next\n', [base]);
+
+      await expect(
+        run(actors.checkout.casHead, { checkoutId: 'live', branch: 'main', expectedHead: base, head: next }),
+      ).resolves.toMatchObject({ status: 'conflicted' });
+      expect(await port.readRef('main')).toBe(base);
+      await actors.settled();
+    }, 30_000);
+  });
+}
 
 describe('independent sync record failures', () => {
   it('pushes history and a second chat when the first chat cannot be prepared', async () => {
@@ -1813,7 +1875,6 @@ describe('independent sync record failures', () => {
     const actors = createRevisionActors({
       port: isolatedPort,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => context.filesystem,
       deviceId: () => 'device-one',
     });
@@ -1872,7 +1933,6 @@ describe('independent sync record failures', () => {
     const actors = createRevisionActors({
       port,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => context.filesystem,
       deviceId: () => 'device-one',
     });
@@ -2053,7 +2113,6 @@ describe('independent sync record failures', () => {
     const actors = createRevisionActors({
       port: refusing,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => context.filesystem,
       deviceId: () => 'device-one',
     });
@@ -2085,7 +2144,6 @@ describe('independent sync record failures', () => {
     const actors = createRevisionActors({
       port: refusing,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => context.filesystem,
       deviceId: () => 'device-one',
     });
@@ -2142,7 +2200,6 @@ describe('independent sync record failures', () => {
     const actors = createRevisionActors({
       port: remote,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => projecting,
       deviceId: () => 'device-b',
     });
@@ -2236,7 +2293,6 @@ describe('independent sync record failures', () => {
         fetch: async () => ({ refs: [fetchedRef] }),
       },
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => context.filesystem,
       deviceId: () => 'device-b',
       onChatsProjected: (chatIds) => projected.push([...chatIds]),
@@ -2277,7 +2333,6 @@ describe('independent sync record failures', () => {
         },
       },
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => context.filesystem,
     });
 
@@ -2310,7 +2365,6 @@ describe('independent sync record failures', () => {
         },
       },
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => context.filesystem,
     });
 
@@ -2362,7 +2416,6 @@ describe('independent sync record failures', () => {
     const actors = createRevisionActors({
       port: remote,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => context.filesystem,
     });
 
@@ -2633,7 +2686,6 @@ for (const actorSet of actorSets) {
       const actors = createRevisionActors({
         port: refusingPort,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: () => context.filesystem,
       });
 
@@ -2803,7 +2855,6 @@ for (const actorSet of actorSets) {
         const second = createRevisionActors({
           port: context.port,
           projectId: 'project-1',
-          authorityEpoch: 'epoch-1',
           deviceId: () => 'device-b',
           filesystem: async () => context.filesystem,
         });
@@ -3002,7 +3053,6 @@ for (const actorSet of actorSets) {
         const reloaded = createRevisionActors({
           port: context.port,
           projectId: 'project-1',
-          authorityEpoch: 'epoch-1',
           deviceId: () => 'device-a',
           filesystem: async () => context.filesystem,
         });
@@ -3026,7 +3076,6 @@ for (const actorSet of actorSets) {
         const tree = createProjectRevisionsActor({
           port: context.port,
           projectId: 'project-1',
-          authorityEpoch: 'epoch-1',
           deviceId: () => 'device-a',
           filesystem: async () => context.filesystem,
         });
@@ -3297,7 +3346,6 @@ describe('the revision stream subscription (W5b; RV-W5b F3, F5, F9)', () => {
     const actors = createRevisionActors({
       port: { init: vi.fn(async () => undefined) } as unknown as RevisionPort,
       projectId: 'p',
-      authorityEpoch: 'e',
       filesystem: () => {
         throw new Error('unused');
       },
@@ -3407,7 +3455,6 @@ describe('the revision stream subscription (W5b; RV-W5b F3, F5, F9)', () => {
         },
       },
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => context.filesystem,
       remoteMoves: (_input, handlers) => {
         stream = handlers;
@@ -3480,10 +3527,10 @@ describe('the fact a released turn publishes', () => {
       describeTurnRelease({
         ...released,
         outcome: 'failed',
-        reason: 'The checkout did not settle the cut in time.',
-        code: 'CUT_TIMED_OUT',
+        reason: 'The checkout could not record the turn.',
+        code: 'BASE_CUT_FAILED',
       }),
-    ).toMatchObject({ type: 'turn.failed', code: 'CUT_TIMED_OUT' });
+    ).toMatchObject({ type: 'turn.failed', code: 'BASE_CUT_FAILED' });
   });
 
   /* E5: a failure nothing classified carries no code at all, and the page says

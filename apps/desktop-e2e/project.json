@@ -6,6 +6,7 @@
   "tags": ["scope:ui", "type:e2e"],
   "implicitDependencies": ["desktop", "api"],
   "targets": {
+    "formal:logs": {},
     "test": {
       "executor": "nx:noop"
     },

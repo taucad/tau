@@ -1,0 +1,7 @@
+{
+  "lean": {
+    "modules": ["ChatLedger", "ChatLedgerProofs", "ChatLedgerAxioms", "CommandIdempotency"],
+    "axioms": ["propext", "Quot.sound", "Classical.choice"],
+    "oracle": "ChatLedgerOracle.lean"
+  }
+}

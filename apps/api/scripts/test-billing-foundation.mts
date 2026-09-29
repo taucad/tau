@@ -253,6 +253,10 @@ async function main(): Promise<void> {
     testEnvironment['NODE_ENV'] = 'test';
     testEnvironment['BILLING_TEST_DATABASE_URL'] = `postgres://billing_test:${password}@${address}/billing_test`;
     testEnvironment['BILLING_TEST_OWNED'] = project;
+    // GI-A4: a failing model sequence prints its seed; forward it so the run replays.
+    if (process.env['CREDIT_OPERATION_MODEL_SEED'] !== undefined) {
+      testEnvironment['CREDIT_OPERATION_MODEL_SEED'] = process.env['CREDIT_OPERATION_MODEL_SEED'];
+    }
     if (runtime === 'native') {
       testEnvironment['BILLING_TEST_DATA_DIRECTORY'] = dataDirectory;
     }

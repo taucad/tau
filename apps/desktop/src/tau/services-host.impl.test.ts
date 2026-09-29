@@ -6,11 +6,15 @@ import { dirname, join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { TurnPlacementPort } from '@taucad/agent-host';
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
-import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
+import type { AgentChannelClient, AgentChannelEndpoint } from '@taucad/agent-host/channel-client';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
-import { acquireNodeAuthorityWriter, toNodeFsPort } from '@taucad/filesystem/backend/node';
+import { acquireNodeAuthorityWriter, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
+import type * as AgentHost from '@taucad/agent-host';
+import type * as AgentLauncher from '@taucad/agent-host/launcher';
 import { requireRevisionToolchain } from '@taucad/host';
 import type * as TauHost from '@taucad/host';
 import type * as AgentTools from '@taucad/host/agent-tools';
@@ -20,17 +24,27 @@ import { createServicesHost, refusedRuntimePortMessage } from '#tau/services-hos
 import type { AgentHostConfig, ServicesHostOptions, UtilityMessage, UtilityPort } from '#tau/services-host.impl.js';
 
 /**
- * Every `createAcpExternalAgentPort` call the utility makes, in order.
+ * Every `createProjectHostActor` call the utility makes, and every project host
+ * it served a connection on, in order.
  *
- * The MCP wiring is invisible from the channel — it only shows up in what the
- * external-agent port was handed — so the real factory is wrapped rather than
+ * The MCP wiring is invisible from the channel — it only shows up in the host's
+ * options and its endpoint — so the real factory is wrapped rather than
  * replaced: every other assertion in this file still exercises the genuine
- * port, including its "cannot start the codex agent" refusal.
+ * host, including its "cannot start the codex agent" refusal.
  */
-const acpPortCalls = vi.hoisted(() => [] as Array<Parameters<typeof TauHost.createAcpExternalAgentPort>[0]>);
+const projectHostCalls = vi.hoisted(() => [] as Array<Parameters<typeof TauHost.createProjectHostActor>[0]>);
+const servedHosts = vi.hoisted(() => [] as TauHost.ProjectHost[]);
 const toolRegistryCalls = vi.hoisted(() => [] as Array<Parameters<typeof AgentTools.createHostToolRegistry>[0]>);
 const toolRegistries = vi.hoisted(() => [] as Array<ReturnType<typeof AgentTools.createHostToolRegistry>>);
 const runtimeClientCalls = vi.hoisted(() => [] as Array<ReturnType<typeof RuntimeClient.createRuntimeClient>>);
+/** The options of every model transport the utility built (this test build is self-host, `tauCloudBuildEnabled`). */
+const transportCalls = vi.hoisted(
+  () => [] as Array<Parameters<typeof AgentHost.createTauCloudGatewayModelTransport>[0]>,
+);
+/** One-shot hold on the next launcher close, so a test can act while that close is in flight. */
+const launcherCloseGate = vi.hoisted(() => ({
+  next: undefined as undefined | Readonly<{ entered: () => void; hold: Promise<void> }>,
+}));
 
 /* The same `git` + `git lfs` probe the host refuses on (OQ-B8): the row that
  * builds a bundled-git stand-in needs both, so without them it skips rather than
@@ -44,9 +58,49 @@ vi.mock('@taucad/host', async (importOriginal) => {
   const actual = await importOriginal<typeof TauHost>();
   return {
     ...actual,
-    createAcpExternalAgentPort: (options: Parameters<typeof TauHost.createAcpExternalAgentPort>[0]) => {
-      acpPortCalls.push(options);
-      return actual.createAcpExternalAgentPort(options);
+    createProjectHostActor: (options: Parameters<typeof TauHost.createProjectHostActor>[0]) => {
+      projectHostCalls.push(options);
+      return actual.createProjectHostActor({
+        ...options,
+        serve: (connectionId, host) => {
+          servedHosts.push(host);
+          options.serve(connectionId, host);
+        },
+      });
+    },
+  };
+});
+
+vi.mock('@taucad/agent-host', async (importOriginal) => {
+  const actual = await importOriginal<typeof AgentHost>();
+  return {
+    ...actual,
+    createGatewayModelTransport: (options: Parameters<typeof actual.createTauCloudGatewayModelTransport>[0]) => {
+      transportCalls.push(options);
+      return actual.createGatewayModelTransport(options);
+    },
+  };
+});
+
+/* The project host's launcher, with its close held when a test arms the gate. */
+vi.mock('@taucad/agent-host/launcher', async (importOriginal) => {
+  const actual = await importOriginal<typeof AgentLauncher>();
+  return {
+    ...actual,
+    createAgentLauncher: (options: Parameters<typeof AgentLauncher.createAgentLauncher>[0]) => {
+      const launcher = actual.createAgentLauncher(options);
+      const { close } = launcher;
+      return Object.assign(launcher, {
+        close: async () => {
+          const gate = launcherCloseGate.next;
+          launcherCloseGate.next = undefined;
+          if (gate !== undefined) {
+            gate.entered();
+            await gate.hold;
+          }
+          return close();
+        },
+      });
     },
   };
 });
@@ -738,7 +792,8 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     for (const host of hosts.splice(0)) {
       host.dispose();
     }
-    acpPortCalls.length = 0;
+    projectHostCalls.length = 0;
+    servedHosts.length = 0;
     toolRegistryCalls.length = 0;
     toolRegistries.length = 0;
     runtimeClientCalls.length = 0;
@@ -774,7 +829,10 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
   ) => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-'));
     workspaces.push(workspaceRoot);
-    const harness = hostHarness(hostOverrides);
+    /* The agent host reads through the utility's one authority, as it does in production. */
+    const authorityDirectory = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-authority-'));
+    workspaces.push(authorityDirectory);
+    const harness = hostHarness({ authorityDirectory, serve: serveNodeFsProvider, ...hostOverrides });
     hosts.push(harness.host);
     harness.host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot] }));
     harness.host.handleMessage(frame({ type: 'agentHost', config: { ...config, ...overrides } }));
@@ -787,16 +845,24 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
   const startExternal = async (client: AgentChannelClient, agentId: string): Promise<unknown> =>
     client.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId: `chat-${agentId}`,
-      runId: `run-${agentId}`,
-      message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
-      config: {
-        agent: { kind: 'acp', id: agentId },
-        systemPrompt: 'You are Tau.',
-        toolChoice: 'auto',
+      commandId: `start-${agentId}`,
+      payload: {
+        trigger: 'submit',
+        chatId: `chat-${agentId}`,
+        runId: `run-${agentId}`,
+        message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
+        config: {
+          agent: { kind: 'acp', id: agentId },
+          systemPrompt: 'You are Tau.',
+          toolChoice: 'auto',
+        },
       },
     });
+
+  /** Attach to a chat nothing wrote: an open launcher answers at once, with nothing to take over. */
+  const attachUnwritten = async (client: AgentChannelClient, chatId: string): Promise<unknown> =>
+    client.execute({ type: 'attach', commandId: `attach-${chatId}`, payload: { chatId } });
+  const unwrittenAttach = { status: 'applied', effect: 'not-applied', details: { takeover: false, endCursor: 0 } };
 
   /**
    * Hand the host one leg of a `worker_threads` channel and dial the other.
@@ -828,7 +894,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
         [channel.port1 as unknown as UtilityPort],
       ),
     );
-    const client = createAgentChannelClient(channel.port2 as unknown as Parameters<typeof createAgentChannelClient>[0]);
+    const client = createAgentChannelClient({ connect: () => channel.port2 as unknown as AgentChannelEndpoint });
     clients.push(client);
     return client;
   };
@@ -838,12 +904,9 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     const client = connect(host, workspaceRoot);
 
     /* An empty workspace has no `.tau/chats/<id>/events.jsonl`, so the honest
-     * answer is an empty batch rather than a failure. */
-    await expect(client.execute({ type: 'tail', chatId: 'chat-1', cursor: 0, limit: 8 })).resolves.toEqual({
-      type: 'tail',
-      chatId: 'chat-1',
-      batch: { cursor: 0, nextCursor: 0, endCursor: 0, events: [] },
-    });
+     * answer is an empty chat rather than a failure, and opening it creates nothing. */
+    await expect(attachUnwritten(client, 'chat-1')).resolves.toMatchObject(unwrittenAttach);
+    expect(existsSync(join(workspaceRoot, '.tau', 'chats', 'chat-1'))).toBe(false);
   });
 
   /**
@@ -991,7 +1054,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     ]);
   });
 
-  it('should terminate a client that was still connecting when its last run settled', async () => {
+  it('should terminate a client that was still connecting when its last run settled, and connect its caller afresh', async () => {
     type RuntimeLease = Awaited<ReturnType<NonNullable<ServicesHostOptions['requestRuntimePort']>>>;
     const leases: Array<ReturnType<typeof Promise.withResolvers<RuntimeLease>>> = [];
     const requestRuntimePort = vi.fn(async () => {
@@ -1012,18 +1075,18 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
 
     checkouts.delete('run-1');
     leases[0]!.resolve({ port: fakeRuntimePort(), release: vi.fn() });
-    await connecting;
 
     await vi.waitFor(() => {
       expect(runtimeClientCalls[0]!.terminate).toHaveBeenCalledOnce();
     });
-    checkouts.set('run-2', candidateCheckout(cwd));
-    const reconnected = registry.runtimeClient!(cwd);
+    /* W6.r1 finding 15: the caller still connecting is never handed the client being closed; it gets a fresh one. */
     await vi.waitFor(() => {
       expect(requestRuntimePort).toHaveBeenCalledTimes(2);
     });
     leases[1]!.resolve({ port: fakeRuntimePort(), release: vi.fn() });
-    expect(await reconnected).toBe(runtimeClientCalls[1]);
+    expect(await connecting).toBe(runtimeClientCalls[1]);
+    checkouts.set('run-2', candidateCheckout(cwd));
+    expect(await registry.runtimeClient!(cwd)).toBe(runtimeClientCalls[1]);
   });
 
   it('should never serve a terminated client from the cache', async () => {
@@ -1104,6 +1167,164 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     });
   });
 
+  /* L6 N2 / L2b HD-7 / W0.11: main allows a retain while a release is in
+   * flight. A remount whose connect arrived while the launcher was closing
+   * adopted it, the release finished closing it, and every later command
+   * answered LAUNCHER_CLOSED until the next release. */
+  it('should serve a remount that arrives during release on a fresh launcher', async () => {
+    const released = vi.fn();
+    const { host, log, workspaceRoot } = await configuredHost({}, { agentHostReleased: released });
+    const connectAt = (attachmentGeneration: string): AgentChannelClient => {
+      const channel = new MessageChannel();
+      channels.push(channel);
+      host.handleMessage(
+        frame(
+          {
+            type: 'concern',
+            concern: 'agentHost',
+            context: { workspaceRoot, projectId: 'proj_test', attachmentGeneration },
+          },
+          [channel.port1 as unknown as UtilityPort],
+        ),
+      );
+      const client = createAgentChannelClient({ connect: () => channel.port2 as unknown as AgentChannelEndpoint });
+      clients.push(client);
+      return client;
+    };
+    connectAt('1');
+    const entered = Promise.withResolvers<void>();
+    const hold = Promise.withResolvers<void>();
+    launcherCloseGate.next = { entered: entered.resolve, hold: hold.promise };
+    host.handleMessage(
+      frame({
+        type: 'agent-host-release',
+        requestId: 'release-1',
+        workspaceRoot,
+        projectId: 'proj_test',
+        attachmentGeneration: 1,
+      }),
+    );
+    await entered.promise;
+
+    const remount = connectAt('2');
+    hold.resolve();
+    await vi.waitFor(
+      () => {
+        expect(released).toHaveBeenCalledWith('release-1');
+      },
+      { timeout: 10_000 },
+    );
+
+    await expect(attachUnwritten(remount, 'chat-1')).resolves.toMatchObject(unwrittenAttach);
+    expect(
+      log.mock.calls.filter(([event]) => event === 'agent-host-served').map(([, detail]) => detail as unknown),
+    ).toMatchObject([{ reused: false }, { reused: false }]);
+  });
+
+  it('should keep quiesce pending through a failed close retry', async () => {
+    const quiesced = vi.fn();
+    const { host, workspaceRoot } = await configuredHost({}, { quiesced });
+    const client = connect(host, workspaceRoot);
+    await attachUnwritten(client, 'chat-1');
+    const entered = Promise.withResolvers<void>();
+    const hold = Promise.withResolvers<void>();
+    const { revisions } = servedHosts.at(-1)!;
+    const { release } = revisions;
+    let writes = 0;
+    vi.spyOn(revisions, 'release').mockImplementation(async () => {
+      writes += 1;
+      if (writes === 1) {
+        throw new Error('The first revision write failed.');
+      }
+      entered.resolve();
+      await hold.promise;
+      await release();
+    });
+
+    const quiescence = host.quiesce();
+    try {
+      await entered.promise;
+      await expect(
+        Promise.race([
+          quiescence.then(
+            () => 'settled',
+            () => 'settled',
+          ),
+          new Promise<'pending'>((resolve) => {
+            setTimeout(() => {
+              resolve('pending');
+            }, 50);
+          }),
+        ]),
+      ).resolves.toBe('pending');
+      expect(quiesced).not.toHaveBeenCalled();
+    } finally {
+      hold.resolve();
+    }
+    await expect(quiescence).rejects.toThrow('could not quiesce every accepted operation');
+    expect(writes).toBe(2);
+    host.handleMessage(frame({ type: 'quiesce' }));
+    await vi.waitFor(() => {
+      expect(quiesced).toHaveBeenCalledWith({
+        type: 'quiesce-failed',
+        message: 'The services host could not quiesce every accepted operation.',
+      });
+    });
+  });
+
+  it('should wait for a retired host retry when release failed before quiesce', async () => {
+    const released = vi.fn();
+    const { host, workspaceRoot } = await configuredHost({}, { agentHostReleased: released });
+    const client = connect(host, workspaceRoot);
+    await attachUnwritten(client, 'chat-1');
+    const entered = Promise.withResolvers<void>();
+    const hold = Promise.withResolvers<void>();
+    const { revisions } = servedHosts.at(-1)!;
+    const { release } = revisions;
+    let writes = 0;
+    vi.spyOn(revisions, 'release').mockImplementation(async () => {
+      writes += 1;
+      if (writes === 1) {
+        throw new Error('The first revision write failed.');
+      }
+      entered.resolve();
+      await hold.promise;
+      await release();
+    });
+
+    host.handleMessage(
+      frame({
+        type: 'agent-host-release',
+        requestId: 'release-1',
+        workspaceRoot,
+        projectId: 'proj_test',
+        attachmentGeneration: 1,
+      }),
+    );
+    await entered.promise;
+    expect(released).toHaveBeenCalledWith('release-1', 'The first revision write failed.');
+    const quiescence = host.quiesce();
+    try {
+      await expect(
+        Promise.race([
+          quiescence.then(
+            () => 'settled',
+            () => 'settled',
+          ),
+          new Promise<'pending'>((resolve) => {
+            setTimeout(() => {
+              resolve('pending');
+            }, 50);
+          }),
+        ]),
+      ).resolves.toBe('pending');
+    } finally {
+      hold.resolve();
+    }
+    await expect(quiescence).resolves.toBeUndefined();
+    expect(writes).toBe(2);
+  });
+
   it('keeps one always-on launcher per root across connections', async () => {
     const { host, log, physicalRoot, workspaceRoot } = await configuredHost();
     connect(host, workspaceRoot);
@@ -1123,12 +1344,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     async (geoSpecEngine) => {
       const { host, workspaceRoot } = await configuredHost();
       const client = connect(host, workspaceRoot, 'proj_test', geoSpecEngine);
-      await expect(
-        client.execute({ type: 'tail', chatId: 'chat-guidance', cursor: 0, limit: 1 }),
-      ).resolves.toMatchObject({
-        type: 'tail',
-        batch: { events: [] },
-      });
+      await expect(attachUnwritten(client, 'chat-guidance')).resolves.toMatchObject(unwrittenAttach);
       expect(toolRegistryCalls).toHaveLength(1);
       expect(toolRegistryCalls[0]?.geospecAuthoringMode).toBe(geoSpecEngine ?? 'legacy');
       const description = toolRegistries[0]?.list().find((tool) => tool.name === 'test_model')?.description;
@@ -1140,14 +1356,73 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
   );
 
   it.each(['legacy', 'native'] as const)(
+    'routes the %s GeoSpec runner through the supervised geometry port',
+    async (geoSpecEngine) => {
+      const geometryChannel = new MessageChannel();
+      const requestGeometryPort = vi.fn(async () => geometryChannel.port1 as unknown as UtilityPort);
+      const requestRuntimePort = vi.fn(async () => {
+        throw new Error('GeoSpec must not request a runtime port from services.');
+      });
+      const { host, physicalRoot, workspaceRoot } = await configuredHost(
+        {},
+        { requestGeometryPort, requestRuntimePort },
+      );
+      const client = connect(host, workspaceRoot, 'proj_test', geoSpecEngine);
+      await expect(attachUnwritten(client, `chat-geospec-${geoSpecEngine}`)).resolves.toMatchObject(unwrittenAttach);
+      const runnerOption = projectHostCalls[0]!.host().geospecRunner;
+      if (!runnerOption) {
+        throw new Error('The desktop project host has no GeoSpec runner.');
+      }
+      const runner = await runnerOption(physicalRoot);
+      const received = vi.fn();
+      geometryChannel.port2.on('message', (message) => {
+        received(message);
+        geometryChannel.port2.postMessage({
+          type: 'result',
+          result: { success: true, passed: 1, failed: 0, selectedTests: 1, files: [] },
+          sourceRevisions: [],
+        });
+      });
+      try {
+        expect(requestGeometryPort).toHaveBeenCalledWith(physicalRoot, geoSpecEngine);
+        expect(requestRuntimePort).not.toHaveBeenCalled();
+        expect(runtimeClientCalls).toHaveLength(0);
+        await expect(runner.run({ files: ['model.test.ts'] })).resolves.toMatchObject({ success: true });
+        expect(received).toHaveBeenCalledWith({ type: 'run', options: { files: ['model.test.ts'] } });
+      } finally {
+        await runner.close();
+        geometryChannel.port2.close();
+      }
+    },
+  );
+
+  it('should refuse an invalid GeoSpec engine before opening a project host', async () => {
+    const { host, log, workspaceRoot } = await configuredHost();
+    const port = stubPort();
+    host.handleMessage(
+      frame(
+        {
+          type: 'concern',
+          concern: 'agentHost',
+          context: { workspaceRoot, projectId: 'proj_test', geoSpecEngine: 'unknown' },
+        },
+        [port],
+      ),
+    );
+
+    await vi.waitFor(() => {
+      expect(port.close).toHaveBeenCalledOnce();
+    });
+    expect(log).toHaveBeenCalledWith('agent-host.invalid-geospec-engine', { geoSpecEngine: 'unknown' });
+    expect(projectHostCalls).toHaveLength(0);
+  });
+
+  it.each(['legacy', 'native'] as const)(
     'should snapshot the GeoSpec engine %s per root and require reload for an explicit change',
     async (geoSpecEngine) => {
       const { host, log, physicalRoot, workspaceRoot } = await configuredHost();
       const first = connect(host, workspaceRoot, 'proj_test', geoSpecEngine);
-      await expect(first.execute({ type: 'tail', chatId: 'chat-choice', cursor: 0, limit: 1 })).resolves.toMatchObject({
-        type: 'tail',
-        batch: { events: [] },
-      });
+      await expect(attachUnwritten(first, 'chat-choice')).resolves.toMatchObject(unwrittenAttach);
       connect(host, workspaceRoot, 'proj_test', geoSpecEngine);
       // Omission always means legacy, including a reconnect.
       if (geoSpecEngine === 'legacy') {
@@ -1170,10 +1445,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
         reason: 'Reload the project host to change the GeoSpec engine.',
       });
       // The original launcher still serves its existing channel.
-      await expect(first.execute({ type: 'tail', chatId: 'chat-choice', cursor: 0, limit: 1 })).resolves.toMatchObject({
-        type: 'tail',
-        batch: { events: [] },
-      });
+      await expect(attachUnwritten(first, 'chat-choice-still-served')).resolves.toMatchObject(unwrittenAttach);
     },
   );
 
@@ -1210,11 +1482,85 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     ]);
   });
 
+  /* W8 D13 (RH-S11): the desktop places a turn the way the daemon does, so its project host takes the same factory. */
+  it("should build each project host's placement port from the factory it was given", async () => {
+    const reconcile = vi.fn<TurnPlacementPort['reconcile']>(async ({ requestId }) => ({
+      requestId,
+      status: 'applied',
+      held: [],
+    }));
+    const unused = async (): Promise<never> => {
+      throw new Error('Not placed in this test.');
+    };
+    const turnPlacement = vi.fn<NonNullable<ServicesHostOptions['turnPlacement']>>(() => ({
+      admit: unused,
+      complete: unused,
+      abandon: unused,
+      acknowledge: unused,
+      reconcile,
+      settlements: () => ({
+        [Symbol.asyncIterator]: async function* nothing(): AsyncGenerator<never> {
+          yield* [];
+        },
+      }),
+    }));
+    const { host, workspaceRoot } = await configuredHost({}, { turnPlacement });
+    connect(host, workspaceRoot);
+
+    await vi.waitFor(
+      () => {
+        expect(reconcile).toHaveBeenCalledOnce();
+      },
+      { timeout: 10_000 },
+    );
+    expect(turnPlacement).toHaveBeenCalledOnce();
+    expect(turnPlacement.mock.calls[0]![0].revisions).toBe(servedHosts.at(-1)?.revisions);
+  }, 15_000);
+
+  /* W6.r1 finding 16 (GI-Q6): the session credential names the signed-in account, so a resume refuses another's attempt. */
+  it("should forward the signed-in session's user id as the credential's principal", async () => {
+    const { host, workspaceRoot } = await configuredHost();
+    host.handleMessage(frame({ type: 'authToken', token: 'bearer-1', principal: 'user_1' }));
+    connect(host, workspaceRoot);
+    await vi.waitFor(() => {
+      expect(projectHostCalls).toHaveLength(1);
+    });
+    const options = projectHostCalls[0]!.host();
+
+    expect(options.credential()).toEqual({ mode: 'session', principal: 'user_1' });
+    /* Read per admission: a sign-out drops it, and the next account's id replaces it. */
+    host.handleMessage(frame({ type: 'authToken', token: undefined }));
+    expect(options.credential()).toEqual({ mode: 'session' });
+    host.handleMessage(frame({ type: 'authToken', token: 'bearer-2', principal: 'user_2' }));
+    expect(options.credential()).toEqual({ mode: 'session', principal: 'user_2' });
+  });
+
+  /* W6.r1 round 3: the funded transport names the same account, read per invocation. */
+  it("should give the funded transport the signed-in session's user id as its principal", async () => {
+    const { host, workspaceRoot } = await configuredHost();
+    host.handleMessage(frame({ type: 'authToken', token: 'bearer-1', principal: 'user_1' }));
+    connect(host, workspaceRoot);
+    await vi.waitFor(() => {
+      expect(transportCalls).not.toHaveLength(0);
+    });
+    const { funding } = createTauCloudGatewayModelTransport(transportCalls.at(-1)!);
+    if (funding.type !== 'funded') {
+      throw new TypeError('The Tau Cloud gateway transport is always funded.');
+    }
+
+    await expect(funding.principal()).resolves.toBe('user_1');
+    host.handleMessage(frame({ type: 'authToken', token: undefined }));
+    await expect(funding.principal()).resolves.toBeUndefined();
+  });
+
   it('starts no external agents when main discovered none', async () => {
     /* The honest empty list, not a refusal: a machine without the pinned
      * adapters — or without their CLIs — is simply a Tau-runs-only host. */
     const { host, workspaceRoot } = await configuredHost();
-    await expect(startExternal(connect(host, workspaceRoot), 'codex')).rejects.toThrow(/runs no acp agents/u);
+    await expect(startExternal(connect(host, workspaceRoot), 'codex')).resolves.toMatchObject({
+      status: 'refused',
+      message: expect.stringMatching(/runs no acp agents/u) as unknown as string,
+    });
   });
 
   it('wires the agents main discovered into launcher 2, and only those', async () => {
@@ -1236,7 +1582,10 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     /* The port's own inventory answers — a different refusal from the "runs no
      * acp agents" above, and the only way to reach it is a wired port whose
      * list is exactly what main discovered. */
-    await expect(startExternal(client, 'codex')).rejects.toThrow(/cannot start the codex agent/u);
+    await expect(startExternal(client, 'codex')).resolves.toMatchObject({
+      status: 'refused',
+      message: expect.stringMatching(/cannot start the codex agent/u) as unknown as string,
+    });
   });
 
   it('serves its own MCP endpoint to the agents it wires (V7)', async () => {
@@ -1255,28 +1604,33 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     });
     connect(host, workspaceRoot);
 
-    const [wired] = acpPortCalls;
-    expect(wired).toBeDefined();
+    const wired = projectHostCalls[0]?.host();
+    expect(wired?.externalAgents?.agents.map(({ id }) => id)).toEqual(['codex']);
     /* The socket binds a tick after the connection is served, exactly as the
      * daemon's own URL resolves per run rather than at wiring time. */
-    await expect.poll(() => wired!.mcp?.url ?? '').toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\//u);
+    await expect.poll(() => wired?.externalAgents?.mcpUrl() ?? '').toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\//u);
+    const mcpUrl = wired!.externalAgents!.mcpUrl();
     const [skillBundle] = wired!.systemSkillBundles ?? [];
     expect(typeof skillBundle?.slug).toBe('string');
     expect(skillBundle?.files.some(({ path }) => path === 'SKILL.md')).toBe(true);
-    expect(wired!.mcp?.activate).toEqual(expect.any(Function));
+    await vi.waitFor(() => {
+      expect(servedHosts[0]?.mcp).toBeDefined();
+    });
+    const endpoint = servedHosts[0]!.mcp!;
+    expect(endpoint.activate).toEqual(expect.any(Function));
     /* A capability, not the channel token (VI4): a distinct prefix, a distinct
      * secret, and a grant of the four CAD tools. */
-    expect(wired!.mcp?.mint({ runId: 'run-1', chatId: 'chat-1' }).token).toMatch(/^tau-mcp-host-v1\./u);
+    expect(endpoint.mint({ runId: 'run-1', chatId: 'chat-1' }).token).toMatch(/^tau-mcp-host-v1\./u);
 
     /* The listener is real and the route reaches the endpoint: an unadmitted
      * request is refused by the capability check, not by a missing route. */
-    const refused = await fetch(wired!.mcp!.url, {
+    const refused = await fetch(mcpUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
     });
     expect(refused.status).toBe(401);
-    const unrouted = await fetch(new URL('/mcp/elsewhere', wired!.mcp!.url));
+    const unrouted = await fetch(new URL('/mcp/elsewhere', mcpUrl));
     expect(unrouted.status).toBe(404);
   });
 
@@ -1292,17 +1646,20 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
        failed turn already made are exactly what would otherwise be unrecorded. */
     await client.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId: 'chat-revision',
-      runId: 'run-revision',
-      message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
-      config: {
-        systemPrompt: 'You are Tau.',
-        toolChoice: 'auto',
-        model: {
-          id: 'fixture-model',
-          providerKind: 'vertexai',
-          contextWindow: 200_000,
+      commandId: 'cmd-revision',
+      payload: {
+        trigger: 'submit',
+        chatId: 'chat-revision',
+        runId: 'run-revision',
+        message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
+        config: {
+          systemPrompt: 'You are Tau.',
+          toolChoice: 'auto',
+          model: {
+            id: 'fixture-model',
+            providerKind: 'vertexai',
+            contextWindow: 200_000,
+          },
         },
       },
     });
@@ -1321,21 +1678,17 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     };
     await expect.poll(head, { timeout: 10_000 }).toMatch(/^[\da-f]{40}$/u);
     const finalized = async (): Promise<unknown> => {
-      const result = await client.execute({
-        type: 'tail',
-        chatId: 'chat-revision',
-        cursor: 0,
-        limit: 16,
-      });
-      return result.type === 'tail' ? result.batch.events.find((event) => event.type === 'turn.finalized') : undefined;
+      const result = await client.read({ chatId: 'chat-revision', cursor: 0, limit: 16, maxBytes: 1_048_576 });
+      return result.status === 'batch'
+        ? result.events.find(
+            (event) =>
+              typeof event === 'object' && event !== null && 'type' in event && event.type === 'turn.finalized',
+          )
+        : undefined;
     };
     await expect.poll(finalized, { timeout: 10_000 }).toMatchObject({ type: 'turn.finalized', projectId });
-    const nativeHistory = await client.execute({
-      type: 'revision',
-      request: { command: 'log', limit: 8 },
-    });
+    const nativeHistory = await client.revision({ command: 'log', limit: 8 });
     expect(nativeHistory).toMatchObject({
-      type: 'revision',
       status: { projectId, line: { kind: 'branch', name: 'main' } },
       result: [expect.objectContaining({ revisionNumber: 1 })],
     });
@@ -1434,17 +1787,20 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
 
     await client.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId: 'chat-direct',
-      runId: 'run-direct',
-      message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
-      config: {
-        systemPrompt: 'You are Tau.',
-        toolChoice: 'auto',
-        model: {
-          id: 'fixture-model',
-          providerKind: 'vertexai',
-          contextWindow: 200_000,
+      commandId: 'cmd-direct',
+      payload: {
+        trigger: 'submit',
+        chatId: 'chat-direct',
+        runId: 'run-direct',
+        message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
+        config: {
+          systemPrompt: 'You are Tau.',
+          toolChoice: 'auto',
+          model: {
+            id: 'fixture-model',
+            providerKind: 'vertexai',
+            contextWindow: 200_000,
+          },
         },
       },
     });
@@ -1490,19 +1846,16 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
        boots beside it and asks for this port first. Refusing the early request
        closed the renderer's channel, and the page read that as a dead host. */
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-'));
-    workspaces.push(workspaceRoot);
-    const harness = hostHarness();
+    const authorityDirectory = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-authority-'));
+    workspaces.push(workspaceRoot, authorityDirectory);
+    const harness = hostHarness({ authorityDirectory, serve: serveNodeFsProvider });
     hosts.push(harness.host);
     harness.host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot] }));
     const client = connect(harness.host, workspaceRoot);
 
     harness.host.handleMessage(frame({ type: 'agentHost', config }));
 
-    await expect(client.execute({ type: 'tail', chatId: 'chat-early', cursor: 0, limit: 8 })).resolves.toEqual({
-      type: 'tail',
-      chatId: 'chat-early',
-      batch: { cursor: 0, nextCursor: 0, endCursor: 0, events: [] },
-    });
+    await expect(attachUnwritten(client, 'chat-early')).resolves.toMatchObject(unwrittenAttach);
     expect(harness.log).not.toHaveBeenCalledWith('agent-host.not-configured', expect.anything());
   }, 20_000);
 

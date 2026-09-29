@@ -59,7 +59,7 @@ const temperaturePoint = z.unknown().transform((value, context) => {
 });
 const percentage = z.number().min(0).max(100);
 const material = z.strictObject({
-  slot: count.max(127),
+  slot: count.max(255),
   state: z.enum(['empty', 'loaded', 'unknown']),
   materialId: identity.optional(),
   profileId: identity.optional(),
@@ -146,8 +146,8 @@ const snapshotSchema = z.strictObject({
     .optional(),
   materialSystem: z
     .strictObject({
-      currentSlot: count.max(127).optional(),
-      targetSlot: count.max(127).optional(),
+      currentSlot: count.max(255).optional(),
+      targetSlot: count.max(255).optional(),
       units: z
         .array(
           z.strictObject({

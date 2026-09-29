@@ -33,24 +33,24 @@ Files, history, chats, and UI state must not become competing authorities. One g
 
 Use each term for exactly one concept and keep engineering terms out of product copy.
 
-| Term            | Meaning                                                                                             |
-| --------------- | --------------------------------------------------------------------------------------------------- |
-| Workspace       | Directory served by one authority and the unit a client binds to; Home is a workspace               |
-| Project         | Directory containing `tau.json`; unit of export, portability, and revision history                  |
-| Revision        | Immutable authored tree plus parents, provenance, and summary, addressed by commit id               |
-| Revision graph  | Revisions and named refs of one project; one repository per project                                 |
-| Branch          | Movable named ref; `main` is the default for a new project, while an import may select another line |
-| Head            | Revision named by a branch or applied to a checkout                                                 |
-| Checkout        | Addressable working copy of one branch; never a revision                                            |
-| Live checkout   | The project directory, tracking `main` for a new project or the selected imported branch            |
-| Linked checkout | Additional private working copy, one per branch                                                     |
-| Turn            | One agent run against one checkout; produces at most one revision                                   |
-| Lease           | Host record attaching a run to a checkout, stored under `.tau/runs/`                                |
-| Backend         | Local revision engine behind `RevisionPort`                                                         |
-| Remote          | Peer Git revision graph; refs and objects move, never working trees                                 |
-| Named version   | Annotated tag with note, actor, and creation time                                                   |
-| Publication     | Share record pointing at a named version synced to Tau Cloud                                        |
-| Project session | All resources held for one live project on one client                                               |
+| Term            | Meaning                                                                                                                                                                             |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workspace       | Directory served by one authority and the unit a client binds to; Home is a workspace                                                                                               |
+| Project         | Directory containing `tau.json`; unit of export, portability, and revision history                                                                                                  |
+| Revision        | Immutable authored tree plus parents, provenance, and summary, addressed by commit id                                                                                               |
+| Revision graph  | Revisions and named refs of one project; one repository per project                                                                                                                 |
+| Branch          | Movable named ref; `main` is the default for a new project, while an import may select another line                                                                                 |
+| Head            | Revision named by a branch or applied to a checkout                                                                                                                                 |
+| Checkout        | Addressable working copy of one branch; never a revision                                                                                                                            |
+| Live checkout   | The project directory, tracking `main` for a new project or the selected imported branch                                                                                            |
+| Linked checkout | Additional private working copy, one per branch                                                                                                                                     |
+| Turn            | One attempt of an agent run against one checkout. Its placement may first mint the dirty base it found, attributed to the attempt; its settlement mints at most one result revision |
+| Lease           | Host record attaching a run to a checkout, stored under `.tau/runs/`                                                                                                                |
+| Backend         | Local revision engine behind `RevisionPort`                                                                                                                                         |
+| Remote          | Peer Git revision graph; refs and objects move, never working trees                                                                                                                 |
+| Named version   | Annotated tag with note, actor, and creation time                                                                                                                                   |
+| Publication     | Share record pointing at a named version synced to Tau Cloud                                                                                                                        |
+| Project session | All resources held for one live project on one client                                                                                                                               |
 
 Use **Revision**, **Branch**, **Current**, **Restore**, **Switch**, **Merge**, **Discard**, **Work in**, **Sync**, **Tau Cloud**, **system**, and **Read-only** in operator-facing UI. Never expose checkout, lease, backend, worktree, ref, or HEAD as product vocabulary.
 
@@ -128,7 +128,7 @@ Run one `project-revisions.machine` actor system per live project. Run the revis
 | Machine                                          | Cardinality and ownership                                                  |
 | ------------------------------------------------ | -------------------------------------------------------------------------- |
 | `project-revisions`                              | one root per project; owns selection, routing, and revision children       |
-| `checkouts`                                      | one invoked child; owns checkout registry and stale-lease sweep            |
+| `checkouts`                                      | one invoked child; owns the checkout registry and lists leases at open     |
 | `checkout`                                       | one spawned child per checkout; the only revision minter for that checkout |
 | `turn`                                           | one spawned child per admitted turn                                        |
 | `sync`, `remote`, `branch`, `restore`, `publish` | one invoked child each per project                                         |
@@ -157,7 +157,7 @@ Apply one tree-hash gate: mint only when the checkout's versioned `treeId` diffe
 | `save`           | `Mod+S` after editor buffers flush                                                             | normal row                              |
 | `idle`           | 5 minutes after the last checkout write                                                        | fold with consecutive automatic rows    |
 | `hidden`         | browser becomes hidden after a write                                                           | fold with automatic rows                |
-| `turn`           | turn finalizes                                                                                 | normal row and chat card                |
+| `turn`           | every executed attempt ends                                                                    | normal row and chat card                |
 | `restore`        | before a restore, a dirty checkout; after it, the restored tree with provenance `restoredFrom` | normal row naming the restored revision |
 | `merge`          | before a fetch or branch merge touches a dirty checkout; after it, the merge revision          | normal row                              |
 | `switch`, `sync` | before or after the operation as required                                                      | normal row                              |
@@ -168,9 +168,9 @@ Keep the idle window configurable per workspace, never per project. Keep every a
 
 ### 8. Keep turn, branch, and conflict state explicit
 
-Write leases and run records under `.tau/runs/<runId>.json` through the host record writer. Retire a lease at turn end, keep its checkout, and use the authority epoch to retire stale leases on next prepare. Never add heartbeat leases.
+Write the lease record `.tau/runs/<runId>.json`, naming the attempt, before the placement's first mint. Retire it only when the host acknowledges that the attempt's settlement row is durable, and keep its checkout. Only the holder root settles its lease; another root adopts, settles or retires it only when the holder root's liveness mark is free, after reconciling it, and the chat's leader otherwise only abandons the run; never retire a lease by epoch. Read lease records at mint time, never from a cached list. Never add heartbeat leases; liveness belongs to the port session, the chat lock and the root's liveness mark.
 
-Mint a turn revision from the entire checkout's versioned tree and identify all active leases in provenance. A turn produces at most one revision. Do not let turn completion delete a checkout.
+Mint a turn revision from the entire checkout's versioned tree. Its provenance names the admitting attempt `{turnId, runId, attempt}` and its `turnCut`, `base` or `result`, and lists the checkout's other leases in `heldRunIds`. An attempt mints at most one base and one result. Do not let turn completion delete a checkout.
 
 Create conflicts only from a branch merge or sync divergence whose changes overlap; rule 9 merges the rest. Record a conflicted revision on its conflict line `refs/heads/conflicts/<branch>/<device>`, where `<branch>` is the line the decision lands on and `<device>` is the recording device's record device (rule 10), and parent it on the two diverged heads and on the conflict line's current tip so that line always fast-forwards. Never record a conflicted revision on `main` or a named branch, and never as unowned loose files. Reserve `conflicts` and every name under it: refuse them as user branch names. Push this device's conflict lines with the history set and never re-push another device's line; the Hosted Remote admits a conflicted commit on a conflict line and refuses it on every other line. Render the same resolution surface for a fetched conflict as for a local one, under the one sentence **Needs your decision** naming `<branch>`. Offer explicit per-file **Keep mine**, **Keep theirs**, **Open in editor**, and **Ask chat to resolve** for text; offer choose-one only for binary and parametric files. Let **Ask chat to resolve** seed a turn on that line. Resolve by minting a merge revision on `<branch>` with the conflicted revision among its parents; that lands the decision with no further merge or sync retry. Derive "resolved" from that ancestry and hide resolved conflict lines from listings. Remove an abandoned foreign conflict line only through the audited removal verb of rule 14.
 
@@ -269,13 +269,13 @@ Create one app-singleton `sessions.machine` with `createActor`, not a route hook
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `sessions`        | `ready → quitting → quiesced`; owns live-set budget and all project-session refs                                                                                                     |
 | `project-session` | `opening → live.idle \| live.busy → closing → closed`, with failure per owned region; owns views, runtime, agent host, compute admission, watchers, revision root, and chat sessions |
-| `chat-session`    | parallel `run`, `read`, and `revision` facets; owns run holds, settlement, and unread record                                                                                         |
+| `chat-session`    | gesture, stream and attachment regions; the host owns run holds and settlement through the turn-placement port; unread derives from the log                                          |
 
 Use the complete chat facets: `run.idle → queued → running.generating | running.tool | running.waiting.approval | running.waiting.input | running.reconnecting → finishing → done | failed | stopped`; `read.read | read.unread`; and revision line (`onMain | onBranch`), tree (`clean | dirty`), and sync (`synced | pending | conflicted`) regions. Add a source signal to this vocabulary before showing a new state.
 
-Navigation opens a closed project but never closes a live one. Close only by an explicit user action or a visible idle/budget policy. Require explicit confirmation before a user close cancels any running agent. After confirmation, cancel or quiesce and await producer runs, flush their final editor, chat, and record bytes and sync, then release leases and stop project resources. Never policy-close a project with a running agent, dirty checkout, or unacknowledged push. Close a chat by cancelling its run and releasing its lease while retaining its record.
+Navigation opens a closed project but never closes a live one. Close only by an explicit user action or a visible idle/budget policy. Require explicit confirmation before a user close cancels any running agent. After confirmation, cancel or quiesce and await producer runs, flush their final editor, chat, and record bytes and sync, then await the acknowledgement of every turn settlement (leases retire through it) and stop project resources. Never policy-close a project with a running agent, dirty checkout, or unacknowledged push. Close a chat by cancelling its run and awaiting its turn settlement's acknowledgement while retaining its record. Closing the page's own subscriptions when project identity changes never closes the project's revision root while a placement session for it is live.
 
-Use this project-close order: cancel and settle runs; flush editor, chat, and record producers; quiesce revision and sync persistence; release leases and the project-owned agent host; then stop the remaining project resources. A failed local persistence or release step keeps the session live with a visible recoverable failure. A remote failure may close only after the durable local queue records the unacknowledged work.
+Use this project-close order: cancel and settle runs; flush editor, chat, and record producers; quiesce revision and sync persistence; await the acknowledgement of every turn settlement (leases retire through it) and release the project-owned agent host; then stop the remaining project resources. A failed local persistence or release step keeps the session live with a visible recoverable failure. A remote failure may close only after the durable local queue records the unacknowledged work.
 
 On `hidden`, await editor, chat, and record flush registrants before delivering `hidden` to session registrants. Keep `pagehide` synchronous and precomputed-only: it may send the prepared best-effort payload, but never awaits or starts a fresh flush. Never use registration insertion order as lifecycle ordering.
 

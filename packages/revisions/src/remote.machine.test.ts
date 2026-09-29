@@ -51,16 +51,21 @@
  */
 
 import { createActor, createAsyncLogic, setup } from 'xstate';
-import type { Actor, AnyActorRef, AsyncActorLogic } from 'xstate';
+import type { Actor, AnyActorRef, AnyMachineSnapshot, AsyncActorLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 import * as machineModule from '#remote.machine.js';
 import { remoteMachine, selectRemoteFacet } from '#remote.machine.js';
 import { reauthorizationRequired } from '#remotes.js';
 import { RevisionPortError } from '#revision-port.js';
-import { createFakeParent } from '#test/fake-actors.js';
+import { createFakeParent } from '@taucad/xstate-testing/fakes';
 import type { RevisionPortErrorCode } from '#revision-port.js';
 import type { SyncFailureReason } from '#sync.types.js';
+import type { RemoteMachineEvent, RemoteStorage } from '#remote.types.js';
 import type {
   RemoteActors,
   RemoteInitialSyncActorOutput,
@@ -68,9 +73,69 @@ import type {
   RemoteRecord,
   RemoteValidateActorOutput,
 } from '#remote.machine.js';
-import type { RemoteStorage } from '#remote.types.js';
 
 const tauRemote: RemoteRecord = { name: 'tau', url: 'https://api.tau.new/v1/git/p1.git', kind: 'tau' };
+
+/**
+ * Known defects (MC-S5): public events a reachable state neither takes nor
+ * declares ignored. W5 answers each one or moves it to an exported
+ * `remoteIgnoredEvents` (D13, MC-R17), and deletes the row as it lands.
+ */
+const knownDefects: IgnoredEvents = {
+  remote: [
+    // W5: every event a state does not name is dropped without an answer.
+    ['reading', 'authorized'],
+    ['reading', 'validated'],
+    ['reading', 'disconnect'],
+    ['reading', 'cancel'],
+    ['reading', 'quotaRefused'],
+    ['choosing', 'connect'],
+    ['choosing', 'authorized'],
+    ['choosing', 'validated'],
+    ['choosing', 'disconnect'],
+    ['choosing', 'quotaRefused'],
+    ['connected', 'authorized'],
+    ['connected', 'validated'],
+    ['connected', 'cancel'],
+    ['failed', 'authorized'],
+    ['failed', 'validated'],
+    ['failed', 'cancel'],
+    ['failed', 'quotaRefused'],
+    ['none', 'authorized'],
+    ['none', 'validated'],
+    ['none', 'disconnect'],
+    ['none', 'cancel'],
+    ['none', 'quotaRefused'],
+    ['authorizing', 'connect'],
+    ['authorizing', 'validated'],
+    ['authorizing', 'disconnect'],
+    ['authorizing', 'quotaRefused'],
+    ['disconnecting', 'connect'],
+    ['disconnecting', 'authorized'],
+    ['disconnecting', 'validated'],
+    ['disconnecting', 'disconnect'],
+    ['disconnecting', 'cancel'],
+    ['disconnecting', 'quotaRefused'],
+    ['validating', 'connect'],
+    ['validating', 'authorized'],
+    ['validating', 'disconnect'],
+    ['validating', 'quotaRefused'],
+    ['abandoning', 'connect'],
+    ['abandoning', 'authorized'],
+    ['abandoning', 'validated'],
+    ['abandoning', 'disconnect'],
+    ['abandoning', 'cancel'],
+    ['abandoning', 'quotaRefused'],
+    ['reconnectRequired', 'validated'],
+    ['reconnectRequired', 'cancel'],
+    ['reconnectRequired', 'quotaRefused'],
+    ['initialSync', 'connect'],
+    ['initialSync', 'authorized'],
+    ['initialSync', 'validated'],
+    ['initialSync', 'disconnect'],
+    ['initialSync', 'quotaRefused'],
+  ],
+};
 
 const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
@@ -139,8 +204,11 @@ const start = (
     readStorage: createAsyncLogic({ run: async (): Promise<RemoteStorage | undefined> => undefined }),
     ...overrides,
   };
+  const guard = guardActors({ ignore: knownDefects });
   const actor = createActor(remoteMachine.provide({ actors }), {
     input: { projectId: 'p1', ...(parentRef === undefined ? {} : { parentRef }) },
+    clock: new StepClock(),
+    inspect: guard.inspect,
   });
   const emitted: RemoteMachineEmitted[] = [];
   for (const type of ['remoteConnected', 'remoteDisconnected', 'toast.info', 'toast.error'] as const) {
@@ -160,6 +228,7 @@ const settle = async (): Promise<void> => {
 describe('remoteMachine', () => {
   it('tells its parent when the remote comes and goes, so a sibling scheduler starts on the fact (W18 review DEF-6b, P53)', async () => {
     const received: Array<{ type: string }> = [];
+    const guard = guardActors({ ignore: knownDefects });
     const parent = createActor(
       setup({}).createMachine({
         on: {
@@ -171,9 +240,12 @@ describe('remoteMachine', () => {
           },
         },
       }),
+      { inspect: guard.inspect },
     ).start();
     const actor = createActor(remoteMachine.provide({ actors: start().actor.logic.sources.actors as RemoteActors }), {
       input: { projectId: 'p1', parentRef: parent },
+      clock: new StepClock(),
+      inspect: guard.inspect,
     });
     actor.start();
     await settle();
@@ -816,6 +888,43 @@ describe('remoteMachine', () => {
     const facet = selectRemoteFacet(actor.getSnapshot());
     expect({ error: facet.error, reason: facet.reason }).toStrictEqual({ error: undefined, reason: undefined });
     actor.stop();
+  });
+
+  it('should answer every public event in every reachable state', () => {
+    const outputs: Readonly<Record<string, unknown>> = {
+      readRemote: { remote: tauRemote },
+      writeRemote: { remote: tauRemote },
+      removeRemote: undefined,
+      authorize: undefined,
+      validate: { storage: { used: 1, quota: 2 } },
+      initialSync: {},
+    };
+    /* Effect outcomes reach the states behind each invoke; they are not public. */
+    const outcomes = Object.values(remoteMachine.root.states)
+      .flatMap((node) => node.invoke)
+      .flatMap((invoke) => [
+        { type: `xstate.done.actor.${invoke.id}`, output: outputs[typeof invoke.src === 'string' ? invoke.src : ''] },
+        { type: `xstate.error.actor.${invoke.id}`, error: new Error('failed') },
+        { type: `xstate.error.actor.${invoke.id}`, error: reauthorizationRequired('Sign in to GitHub again.') },
+      ]);
+    const publicEvents: readonly RemoteMachineEvent[] = [
+      { type: 'connect', kind: 'tau' },
+      { type: 'connect', kind: 'none' },
+      { type: 'authorized' },
+      { type: 'validated', storage: { used: 1, quota: 2 } },
+      { type: 'disconnect' },
+      { type: 'cancel' },
+      { type: 'quotaRefused', paths: ['big.stl'], used: 3, quota: 2 },
+    ];
+    const options = {
+      input: { projectId: 'p1' },
+      events: [...publicEvents, ...outcomes],
+      limit: 5000,
+      serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
+    };
+
+    expect(unansweredEvents(remoteMachine, { ...options, ignore: knownDefects['remote'] })).toEqual([]);
+    expect(unreachedStates(remoteMachine, options)).toEqual([]);
   });
 
   it('31 (L2-F10): replacing a remote forgets the refused files of the one it replaced', async () => {

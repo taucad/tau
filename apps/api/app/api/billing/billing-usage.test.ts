@@ -4,10 +4,12 @@ import type { ConfigService } from '@nestjs/config';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type postgres from 'postgres';
 import { mock, mockDeep } from 'vitest-mock-extended';
-import { describe, expect, it } from 'vitest';
+import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import { describe, expect, it, vi } from 'vitest';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
 import type { Environment } from '#config/environment.config.js';
 import type { DatabaseService, DatabaseType } from '#database/database.service.js';
+import type { MetricsService } from '#telemetry/metrics.js';
 
 type Tx = Parameters<Parameters<DatabaseType['transaction']>[0]>[0];
 
@@ -24,10 +26,36 @@ const createService = (environment = 'staging', secret = 'billing-usage-test-sec
   const databaseService = mockDeep<DatabaseService>();
   const configService = mock<ConfigService<Environment, true>>();
   configService.get.mockImplementation((key: string) => (key === 'BILLING_ENVIRONMENT' ? environment : secret));
-  return { databaseService, service: new BillingUsageService(databaseService, configService) };
+  return {
+    databaseService,
+    service: new BillingUsageService(databaseService, configService, mock<CreditLedgerService>()),
+  };
 };
 
 describe('BillingUsageService query admission', () => {
+  it('counts a voided attempt resolution once with a bounded outcome', async () => {
+    const databaseService = mockDeep<DatabaseService>();
+    const configService = mock<ConfigService<Environment, true>>();
+    configService.get.mockReturnValue('staging');
+    const ledger = mock<CreditLedgerService>();
+    ledger.resolveAttempt.mockResolvedValue({ voided: true });
+    const metrics = { billingAttemptResolutions: { add: vi.fn() } };
+    const service = new BillingUsageService(
+      databaseService,
+      configService,
+      ledger,
+      metrics as unknown as MetricsService,
+    );
+
+    await expect(
+      service.getAttemptReceipt({ authUserId: 'owner', surface: 'gateway', attemptKey: 'key', rawQuery: {} }),
+    ).resolves.toEqual({ state: 'not_found', voided: true });
+    expect(metrics.billingAttemptResolutions.add).toHaveBeenCalledWith(1, {
+      'deployment.environment': 'staging',
+      'tau.billing.attempt_resolution.outcome': 'voided',
+    });
+  });
+
   it('rejects caller-provided ownership selectors before touching PostgreSQL', async () => {
     const { databaseService, service } = createService();
     await expect(

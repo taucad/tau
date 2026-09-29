@@ -1,0 +1,31 @@
+{
+  "configs": {
+    "ToySeam.pr.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "ToySeam: effects at most once and every request answered (FM-S11)"
+    },
+    "ToySeam.no-dedupe.cfg": {
+      "tier": "pr",
+      "expect": { "violated": "EffectAtMostOnce" },
+      "kind": "witness",
+      "ref": "Dedupe off: the guard against a vacuous EffectAtMostOnce (FM-R3)"
+    }
+  },
+  "logs": {
+    "ToySeamTrace": {
+      "ToySeam/traces/clean-1.ndjson": { "tier": "pr", "expect": "pass", "ref": "seed 1, duplicate (FM-A14)" },
+      "ToySeam/traces/clean-7.ndjson": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "seed 7, duplicate, freeze and thaw (FM-A14)"
+      },
+      "ToySeam/traces/no-dedupe-1.ndjson": {
+        "tier": "pr",
+        "expect": { "rejected": { "row": 8, "rules": ["serve"] } },
+        "kind": "witness",
+        "ref": "seed 1 without dedupe: the effect runs twice under duplicate (FM-S11 red)"
+      }
+    }
+  }
+}

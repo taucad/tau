@@ -72,12 +72,16 @@ const brokerHarness = () => {
     }),
     dispose: vi.fn(),
   }));
-  const connectGeometry = vi.fn((_input: Readonly<{
-    root: string;
-    context: Readonly<Record<string, string>>;
-    engine: 'native' | 'legacy';
-    stillAuthorized: () => boolean;
-  }>) => ({ id: 'geometry' }));
+  const connectGeometry = vi.fn(
+    (
+      _input: Readonly<{
+        root: string;
+        context: Readonly<Record<string, string>>;
+        engine: 'native' | 'legacy';
+        stillAuthorized: () => boolean;
+      }>,
+    ) => ({ id: 'geometry' }),
+  );
   const revokeGeometry = vi.fn();
   const options = {
     utilityEntry: '/dist/main/chunks/services-host.js',
@@ -96,7 +100,17 @@ const brokerHarness = () => {
     revokeGeometry,
     log,
   } as unknown as ServicesBrokerOptions;
-  return { broker: createServicesBroker(options), channels, connectRuntime, connectGeometry, revokeGeometry, fork, log, runtimeExits, spawns };
+  return {
+    broker: createServicesBroker(options),
+    channels,
+    connectRuntime,
+    connectGeometry,
+    revokeGeometry,
+    fork,
+    log,
+    runtimeExits,
+    spawns,
+  };
 };
 
 describe('createServicesBroker', () => {
@@ -104,26 +118,45 @@ describe('createServicesBroker', () => {
     expect(servicesConcerns).toContain('runtimeFileSystem');
     expect(servicesConcerns).not.toContain('exactMeasurement');
     expect(servicesConcerns).not.toContain('geospecPerformance');
-    expect(rendererServicesConcerns).toEqual(['nodeFs', 'agentHost', 'geospecPerformance', 'exactMeasurement', 'machines']);
+    expect(rendererServicesConcerns).toEqual([
+      'nodeFs',
+      'agentHost',
+      'geospecPerformance',
+      'exactMeasurement',
+      'machines',
+    ]);
   });
 
   it('grants geometry runner ports only for registered project roots', () => {
     const { broker, connectGeometry, spawns } = brokerHarness();
     broker.connect('agentHost', { workspaceRoot: '/projects/widget', projectId: 'widget', computeMode: 'memory' });
     const utility = spawns[0]!;
-    utility.message({ type: 'geometry-port-request', requestId: 'wrong', workspaceRoot: '/projects/other', engine: 'native' });
+    utility.message({
+      type: 'geometry-port-request',
+      requestId: 'wrong',
+      workspaceRoot: '/projects/other',
+      engine: 'native',
+    });
     expect(connectGeometry).not.toHaveBeenCalled();
     expect(utility.posted.at(-1)).toEqual({
-      type: 'geometry-port-refused', requestId: 'wrong', message: 'Main refused an unadmitted GeoSpec runner root or engine.',
+      type: 'geometry-port-refused',
+      requestId: 'wrong',
+      message: 'Main refused an unadmitted GeoSpec runner root or engine.',
     });
-    utility.message({ type: 'geometry-port-request', requestId: 'allowed', workspaceRoot: '/projects/widget', engine: 'native' });
+    utility.message({
+      type: 'geometry-port-request',
+      requestId: 'allowed',
+      workspaceRoot: '/projects/widget',
+      engine: 'native',
+    });
     expect(connectGeometry.mock.calls[0]?.[0]).toMatchObject({
-      root: '/projects/widget', context: { projectRoot: '/projects/widget' }, engine: 'native',
+      root: '/projects/widget',
+      context: { projectRoot: '/projects/widget' },
+      engine: 'native',
     });
-    expect(utility.postMessage).toHaveBeenLastCalledWith(
-      { type: 'geometry-port', requestId: 'allowed' },
-      [expect.objectContaining({ id: 'geometry' })],
-    );
+    expect(utility.postMessage).toHaveBeenLastCalledWith({ type: 'geometry-port', requestId: 'allowed' }, [
+      expect.objectContaining({ id: 'geometry' }),
+    ]);
   });
 
   it('signals geometry to abort an admitted suite when its candidate grant is released', () => {
@@ -131,7 +164,12 @@ describe('createServicesBroker', () => {
     broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'project-widget', computeMode: 'durable' });
     const checkout = '/home/.tau/checkouts/project-widget/trun-1';
     spawns[0]!.message({ type: 'runtime-context-register', workspaceRoot: checkout, projectRoot: '/home/widget' });
-    spawns[0]!.message({ type: 'geometry-port-request', requestId: 'suite', workspaceRoot: checkout, engine: 'native' });
+    spawns[0]!.message({
+      type: 'geometry-port-request',
+      requestId: 'suite',
+      workspaceRoot: checkout,
+      engine: 'native',
+    });
     const grant = connectGeometry.mock.calls[0]?.[0];
     expect(grant?.stillAuthorized()).toBe(true);
     revokeGeometry.mockClear();
@@ -401,6 +439,32 @@ describe('createServicesBroker', () => {
       requestId: 'runtime-a',
       message: 'The desktop shell has not admitted /home/a as a runtime root.',
     });
+  });
+
+  /* L6 N3 / W0.11: a release that outlives its deadline may still be closing
+   * in the utility. Had main restarted the root's generation, the next
+   * adoption would reuse that release's number and the stale release would
+   * pass the utility's checks and delete the new session's launcher. */
+  it('never reuses a timed-out release generation for the next adoption', async () => {
+    const { broker, spawns } = brokerHarness();
+    const posted = (): Array<Record<string, unknown>> =>
+      (spawns[0]?.posted ?? []).filter(
+        (message): message is Record<string, unknown> => typeof message === 'object' && message !== null,
+      );
+    broker.retainAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' });
+    broker.connect('agentHost', { workspaceRoot: '/home/a', projectId: 'a' });
+    await expect(
+      broker.releaseAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' }, 0),
+    ).rejects.toThrow('timed out');
+    const staleGeneration = posted().find((message) => message['type'] === 'agent-host-release')?.[
+      'attachmentGeneration'
+    ];
+
+    broker.retainAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' });
+    broker.connect('agentHost', { workspaceRoot: '/home/a', projectId: 'a' });
+
+    const remount = posted().at(-1) as { context?: Record<string, string> };
+    expect(Number(remount.context?.['attachmentGeneration'])).toBeGreaterThan(Number(staleGeneration));
   });
 
   it('mints runtime ports only from a main-admitted agent context', () => {

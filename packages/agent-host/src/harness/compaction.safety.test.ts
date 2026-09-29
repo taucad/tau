@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { estimateContextTokens, estimateTokens } from '@earendil-works/pi-agent-core';
 import type { Api, Context, Model, Usage } from '@earendil-works/pi-ai';
-import { createMemoryEventLogFile } from '#harness/harness.fixture.js';
+import { createMemoryEventLogFile, fundedFacet } from '#harness/harness.fixture.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
 import { createAgentSession } from '#harness/session.js';
 import type { AgentSession } from '#harness/session.js';
@@ -24,21 +24,29 @@ const usage = (totalTokens: number): Usage => ({
 });
 
 class ScriptedTransport implements ModelTransport {
+  public readonly funding = { type: 'unfunded' } as const;
   public readonly requests: ModelStreamRequest[] = [];
   // oxlint-disable-next-line typescript/parameter-properties -- TypeScript's erasableSyntaxOnly forbids parameter properties.
-  private readonly eventsFor: (call: number, request: ModelStreamRequest) => readonly ModelStreamEvent[];
+  private readonly eventsFor: (call: number, request: ModelStreamRequest) => readonly ModelStreamEvent[] | Error;
 
-  public constructor(eventsFor: (call: number, request: ModelStreamRequest) => readonly ModelStreamEvent[]) {
+  public constructor(eventsFor: (call: number, request: ModelStreamRequest) => readonly ModelStreamEvent[] | Error) {
     this.eventsFor = eventsFor;
   }
 
   public async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
     this.requests.push(request);
-    for (const event of this.eventsFor(this.requests.length, request)) {
+    const events = this.eventsFor(this.requests.length, request);
+    if (events instanceof Error) {
+      throw events;
+    }
+    for (const event of events) {
       yield event;
     }
   }
 }
+
+/** A provider's context-overflow refusal: the only overflow the retry sends again (RV5-F1). */
+const overflowRefusal = (): Error => new Error('prompt is too long: the request exceeds the context window');
 
 const toolRegistry = (name: string, result: (call: number) => JsonValue = (call) => ({ call })): ToolRegistry => {
   let calls = 0;
@@ -249,7 +257,9 @@ describe('compaction safety regressions', () => {
     const events = await log.read();
     const compactedIndex = events.findIndex((event) => event.type === 'history.compacted');
     const compacted = events[compactedIndex];
-    const terminal = events.findLast((event) => event.type === 'run.lifecycle');
+    /* The session never writes `run.lifecycle`: its owner (M1) maps the outcome to the ending row (RA-S4). */
+    expect(events.some((event) => event.type === 'run.lifecycle')).toBe(false);
+    const terminal = await session.snapshot();
     expect(compacted?.type).toBe('history.compacted');
     if (compacted?.type === 'history.compacted') {
       const before = reduceEventLog(events.slice(0, compactedIndex));
@@ -259,7 +269,7 @@ describe('compaction safety regressions', () => {
         before.filter((message) => !afterIds.has(message.id)).map((message) => message.id),
       );
     }
-    expect(terminal).toMatchObject({ type: 'run.lifecycle', state: 'completed' });
+    expect(terminal).toMatchObject({ state: 'completed' });
     const compactedRequest = transport.requests.find((request) =>
       request.messages.some((message) => JSON.stringify(message.content).includes('<summary>')),
     );
@@ -363,10 +373,7 @@ describe('compaction safety regressions', () => {
         ];
       }
       if (call === 3) {
-        return [
-          { type: 'usage', usage: usage(contextWindow) },
-          { type: 'completed', stopReason: 'length' },
-        ];
+        return overflowRefusal();
       }
       return [
         { type: 'text-delta', text: 'recovered' },
@@ -489,7 +496,7 @@ describe('compaction safety regressions', () => {
     const events = await log.read();
     expect(events.filter((event) => event.type === 'message.envelope-replaced')).toHaveLength(1);
     expect(events.some((event) => event.type === 'history.compacted')).toBe(false);
-    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'completed' });
+    expect(await session.snapshot()).toMatchObject({ state: 'completed' });
     await log.close();
     await session.close();
   });
@@ -564,7 +571,7 @@ describe('compaction safety regressions', () => {
     expect(events.find((event) => event.type === 'history.compacted')).toMatchObject({
       evictedMessageIds: ['ledger-user', 'ledger-call', 'ledger-input', 'ledger-output'],
     });
-    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'completed' });
+    expect(await session.snapshot()).toMatchObject({ state: 'completed' });
     await log.close();
     await session.close();
   });
@@ -677,7 +684,7 @@ describe('compaction safety regressions', () => {
       details: { summary: 'generated', overBudget: true },
     });
     expect(compacted?.type === 'history.compacted' ? compacted.evictedMessageIds.length : 0).toBeGreaterThan(0);
-    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'completed' });
+    expect(await session.snapshot()).toMatchObject({ state: 'completed' });
     await log.close();
     await session.close();
   });
@@ -698,10 +705,7 @@ describe('compaction safety regressions', () => {
     const tiers: string[] = [];
     const transport = new ScriptedTransport((call) =>
       call === 1
-        ? [
-            { type: 'usage', usage: usage(contextWindow) },
-            { type: 'completed', stopReason: 'length' },
-          ]
+        ? overflowRefusal()
         : [
             { type: 'text-delta', text: 'recovered once' },
             { type: 'completed', stopReason: 'stop' },
@@ -790,7 +794,7 @@ describe('compaction safety regressions', () => {
     if (failure === 'rejects') {
       expect(compacted.details?.summarizerError).toBe('summary provider rejected');
     }
-    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'completed' });
+    expect(await session.snapshot()).toMatchObject({ state: 'completed' });
     await log.close();
     await session.close();
   });
@@ -831,7 +835,7 @@ describe('compaction safety regressions', () => {
     expect(compacted).toMatchObject({ type: 'history.compacted' });
     expect(compacted?.details?.summarizerError).toBe('Summarization failed: Compaction summary emitted a tool call.');
     expect(JSON.stringify(compacted)).toMatch(/project files/iu);
-    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'completed' });
+    expect(await session.snapshot()).toMatchObject({ state: 'completed' });
     await log.close();
     await session.close();
   });
@@ -855,6 +859,7 @@ describe('compaction safety regressions', () => {
       const release = Promise.withResolvers<void>();
       let summarizerSignal: AbortSignal | undefined;
       const transport: ModelTransport = {
+        funding: { type: 'unfunded' },
         async *stream(request): AsyncGenerator<ModelStreamEvent> {
           if (request.invocationPurpose === 'compaction') {
             summarizerSignal = request.signal;
@@ -871,7 +876,7 @@ describe('compaction safety regressions', () => {
       const running =
         operation === 'prompt'
           ? session.prompt({ id: 'abort-user-next', role: 'user', content: 'continue' })
-          : session.agent.continue();
+          : session.continue();
       await started.promise;
       session.abort();
       release.resolve();
@@ -888,7 +893,7 @@ describe('compaction safety regressions', () => {
       const log = await file.open();
       const events = await log.read();
       expect(events.some((event) => event.type === 'history.compacted')).toBe(false);
-      expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'cancelled' });
+      expect(await session.snapshot()).toMatchObject({ state: 'cancelled' });
       await log.close();
       await session.close();
     },
@@ -910,14 +915,22 @@ describe('compaction safety regressions', () => {
     const stored = await file.open();
     const current: { session?: AgentSession } = {};
     let abortOnRead = false;
+    const abortOnce = (): void => {
+      if (abortOnRead) {
+        abortOnRead = false;
+        current.session?.abort();
+      }
+    };
+    /* The history is read through `messages()` (RA-S10), the rows through `read()`: either read may be the last. */
     const eventLog: EventLogAppender = {
       ...stored,
       read: async () => {
-        if (abortOnRead) {
-          abortOnRead = false;
-          current.session?.abort();
-        }
+        abortOnce();
         return stored.read();
+      },
+      messages: async () => {
+        abortOnce();
+        return stored.messages();
       },
     };
     const session = await createSession({
@@ -935,7 +948,7 @@ describe('compaction safety regressions', () => {
 
     const events = await stored.read();
     expect(events.some((event) => event.type === 'history.compacted')).toBe(false);
-    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'cancelled' });
+    expect(await session.snapshot()).toMatchObject({ state: 'cancelled' });
     await session.close();
   });
 
@@ -987,14 +1000,16 @@ describe('compaction safety regressions', () => {
     const requests: ModelStreamRequest[] = [];
     let generationCalls = 0;
     const transport: ModelTransport = {
-      usesBillingAttempt: () => true,
-      lookupAttempt: async () => undefined,
+      // The refused attempt was bound, so the retry resolves and records it first; a refusal settles uncharged (W0.19).
+      funding: fundedFacet(async (attemptId) => ({
+        status: 'terminal',
+        operationId: `operation-${attemptId}`,
+        outcome: 'released',
+        chargedCreditAtoms: '0',
+      })),
       async *stream(request): AsyncGenerator<ModelStreamEvent> {
         requests.push(request);
-        await request.onInvocationBound?.({
-          operationId: `operation-${request.attemptId}`,
-          status: 'pending',
-        });
+        await request.onInvocationBound?.({ operationId: `operation-${request.attemptId}` });
         if (request.invocationPurpose === 'compaction') {
           yield { type: 'text-delta', text: 'Earlier funded work.' };
           yield { type: 'completed', stopReason: 'stop' };
@@ -1008,9 +1023,7 @@ describe('compaction safety regressions', () => {
             toolName: 'inspect',
             input: { targetFile: 'overflow.ts' },
           };
-          yield { type: 'usage', usage: usage(contextWindow) };
-          yield { type: 'completed', stopReason: 'length' };
-          return;
+          throw overflowRefusal();
         }
         yield { type: 'text-delta', text: 'Recovered after compaction.' };
         yield { type: 'completed', stopReason: 'stop' };
@@ -1037,8 +1050,14 @@ describe('compaction safety regressions', () => {
     expect(toolOutputs).toHaveLength(1);
     const log = await file.open();
     const events = await log.read();
-    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'completed' });
+    expect(await session.snapshot()).toMatchObject({ state: 'completed' });
     expect(events.some((event) => event.type === 'history.compacted')).toBe(true);
+    /* The refused attempt's answer is recorded before the retry is prepared (ChargeAfterRecordedLoss, RA-S11). */
+    const settled = events.findIndex((event) => event.type === 'model.invocation-settled');
+    expect(events[settled]).toMatchObject({ outcome: 'released', chargedCreditAtoms: '0' });
+    expect(settled).toBeLessThan(
+      events.findLastIndex((event) => event.type === 'model.invocation-prepared' && event.purpose === 'generation'),
+    );
     await log.close();
     await session.close();
   });
@@ -1047,17 +1066,25 @@ describe('compaction safety regressions', () => {
     const file = createMemoryEventLogFile();
     const stored = await file.open();
     let readsBeforeFailure: number | undefined;
+    const failOnce = (): void => {
+      if (readsBeforeFailure === 0) {
+        readsBeforeFailure = undefined;
+        throw new Error('projection read rejected once');
+      }
+      if (readsBeforeFailure !== undefined) {
+        readsBeforeFailure--;
+      }
+    };
+    /* The history is read through `messages()` (RA-S10), the rows through `read()`. */
     const eventLog: EventLogAppender = {
       ...stored,
       read: async () => {
-        if (readsBeforeFailure === 0) {
-          readsBeforeFailure = undefined;
-          throw new Error('projection read rejected once');
-        }
-        if (readsBeforeFailure !== undefined) {
-          readsBeforeFailure--;
-        }
+        failOnce();
         return stored.read();
+      },
+      messages: async () => {
+        failOnce();
+        return stored.messages();
       },
     };
     const transport = new ScriptedTransport((call) =>

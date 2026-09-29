@@ -1,18 +1,13 @@
-import type { AgentChannelResultOperation, EventLogBatch, HostRunSnapshot } from '@taucad/agent-host';
-import type {
-  AgentHostWorkerCommandInput,
-  AgentHostWorkerEvent,
-  AgentHostWorkerLiveEvent,
-} from '#workers/agent-host.contract.js';
+import type { AgentLiveEvent } from '@taucad/agent-host';
+import type { CommandAnswer, HostCommand, ReadAnswer, ReadInput } from '@taucad/agent-host/wire';
 
 /**
- * The wire the agent-host client is driven over.
+ * The wire the agent-host client is driven over: the keyed seam vocabulary (`@taucad/agent-host/wire`).
  *
  * Ruling 6 ("one client, N channels"): the browser worker and a paired daemon
- * are two *transports* feeding the same projection, not two clients. Everything
- * a projection needs — the command vocabulary, the durable event stream, the
- * ephemeral delta stream — is expressed here once; only the plumbing under it
- * differs.
+ * are two *transports* feeding the same projection, not two clients. Commands
+ * are answered by key, durable rows are pulled with `read`, and live deltas are
+ * pushed per chat; only the plumbing under them differs.
  *
  * @public
  */
@@ -23,59 +18,32 @@ export type AgentHostTransport = {
    * daemon is configured from its own CLI and is ready as soon as it is dialed.
    */
   readonly ready: Promise<void>;
-  /** Issue one command. `close` is answered by whichever half owns teardown. */
-  call(request: AgentHostTransportRequest, signal?: AbortSignal): Promise<AgentHostTransportResponse>;
-  /** Subscribe to one of the two host streams for as long as `signal` lives. */
-  listen<Name extends keyof AgentHostTransportStreams>(
-    name: Name,
-    signal: AbortSignal,
-  ): AsyncIterable<AgentHostTransportStreams[Name]>;
   /**
-   * Report the wire's own death — a crashed worker, a dropped socket. Fires at
-   * most once. A transport that cannot observe it simply never notifies, and
-   * commands then fail on their own deadline instead.
+   * The worker-only calls, in today's shape. Absent on a daemon, whose teardown
+   * is local. Every host appends its own settlement rows (W8 TS-S6).
+   * ponytail: W6 makes `close` the channel's own.
+   */
+  readonly worker?: {
+    close(signal: AbortSignal): Promise<void>;
+  };
+  /**
+   * Send one keyed command and await its answer. A transport that heals re-sends
+   * it with the same key on the replacement, so the owner answers it once.
+   */
+  execute(command: HostCommand, signal?: AbortSignal): Promise<CommandAnswer>;
+  /** One long-poll read of a chat's durable rows: a batch, or a refusal the reader resets on. */
+  read(input: ReadInput): Promise<ReadAnswer>;
+  /** Ephemeral model deltas for one chat, for as long as `signal` lives. */
+  liveEvents(chatId: string, signal: AbortSignal): AsyncIterable<AgentLiveEvent>;
+  /**
+   * Report the wire's final death — a worker that could not be replaced, a
+   * daemon that could not be redialled. Fires at most once. A transport that
+   * cannot observe it simply never notifies, and commands then reject on their
+   * own.
    */
   onClose?(handler: (reason: AgentHostTransportCloseReason) => void): () => void;
   /** Release local resources. Idempotent, and never throws. */
   close(): void;
-};
-
-/** Every command the client half issues. @public */
-export type AgentHostTransportRequest = AgentHostWorkerCommandInput | { readonly type: 'close' };
-
-/**
- * Every answer a host may return.
- *
- * Deliberately the union of the worker's and the daemon's answers: the daemon
- * additionally answers `interrupt` (it can *raise* an approval, which a browser
- * client never does), and widening the operation here is cheaper than teaching
- * the projection two response shapes.
- *
- * @public
- */
-export type AgentHostTransportResponse =
-  | {
-      readonly type: 'result';
-      readonly operation: AgentChannelResultOperation | 'record-settlement';
-      readonly snapshot: HostRunSnapshot;
-    }
-  | { readonly type: 'tail'; readonly chatId: string; readonly batch: EventLogBatch }
-  | {
-      readonly type: 'attach';
-      readonly chatId: string;
-      readonly batch: EventLogBatch;
-      readonly leadership:
-        | { readonly role: 'leader'; readonly generation: string }
-        | { readonly role: 'follower'; readonly generation?: string | undefined };
-      readonly snapshot?: HostRunSnapshot | undefined;
-      readonly takeover: boolean;
-    }
-  | { readonly type: 'closed' };
-
-/** The two host streams, by name. @public */
-export type AgentHostTransportStreams = {
-  readonly events: AgentHostWorkerEvent;
-  readonly liveEvents: AgentHostWorkerLiveEvent;
 };
 
 /** Why a transport died, as a typed reason rather than an opaque timeout. @public */

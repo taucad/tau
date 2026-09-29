@@ -103,8 +103,9 @@ vi.mock('@taucad/fs-bridge', () => ({
   openFileSystemBridge: (worker: unknown, options: unknown) => mockOpenFileSystemBridge(worker, options),
   waitForWorkerReady: async () => mockWaitForWorkerReady(),
   createFileSystemBridgeProxy: vi.fn(() => ({
-    closed: new Promise<void>(() => {
-      /* A live worker never settles it; `ready` fails over when it does (G2c-2). */
+    /* A live worker never settles it; `ready` fails over when it does (G2c-2). A case kills one with `proxyDeaths`. */
+    closed: new Promise<void>((resolve) => {
+      proxyDeaths.push(resolve);
     }),
     configureProjectRoots: mockConfigureProjectRoots,
     mount: mockMount,
@@ -172,6 +173,14 @@ vi.mock('#filesystem/handle-store.js', () => ({
   updateWorkspaceHandle: handleStoreTestState.updateWorkspaceHandle,
   disconnectWorkspace: handleStoreTestState.disconnectWorkspace,
   restoreWorkspaceHandle: handleStoreTestState.restoreWorkspaceHandle,
+}));
+
+/* W6 RV1-F1: the agent host re-broker the root provider fires when its worker is replaced. */
+const mockReprovideAgentHostProjects = vi.hoisted(() => vi.fn(async () => undefined));
+/* One `closed` settler per proxy the file manager opened, newest last: settling it is that worker's death. */
+const proxyDeaths = vi.hoisted(() => [] as Array<() => void>);
+vi.mock('#services/agent-host-client.js', () => ({
+  reprovideAgentHostProjects: mockReprovideAgentHostProjects,
 }));
 
 // Stub the workspace-telemetry hook so the provider doesn't pull in
@@ -447,6 +456,44 @@ describe('FileManagerProvider — bindProjectToWorkspace', () => {
       );
     return renderHook(() => useFileManager(), { wrapper });
   };
+
+  /* Finding 7: a provider's first worker replaced no host's bridges, so mounting one (the share page's among them)
+   * never re-brokers the agent host. */
+  it('should not re-broker agent project hosts when a provider mounts its first worker', async () => {
+    const { result } = renderProvider('proj-first');
+
+    await vi.waitFor(() => {
+      expect(result.current.contentService).toBeDefined();
+    });
+
+    expect(mockReprovideAgentHostProjects).not.toHaveBeenCalled();
+  });
+
+  /* RV1-F1 (W6.r1 round 3): a restart replaces the root mount's worker, so each open agent project host is re-brokered
+   * onto the new one, once. */
+  it('should re-broker agent project hosts when the file manager restarts its worker', async () => {
+    const { result } = renderProvider('proj-restart');
+    await vi.waitFor(() => {
+      expect(result.current.contentService).toBeDefined();
+    });
+    const firstContentService = result.current.contentService;
+    const workers = workerTestState.instances.length;
+    mockReprovideAgentHostProjects.mockClear();
+
+    /* The root mount's worker dies, so every proxy over it closes; the file manager restarts it once, unasked (RV1-F1). */
+    act(() => {
+      for (const die of proxyDeaths.splice(0)) {
+        die();
+      }
+    });
+
+    await vi.waitFor(() => {
+      expect(workerTestState.instances.length).toBe(workers + 1);
+      expect(result.current.contentService).toBeDefined();
+      expect(result.current.contentService).not.toBe(firstContentService);
+      expect(mockReprovideAgentHostProjects).toHaveBeenCalledTimes(1);
+    });
+  });
 
   it('should persist ProjectFileSystemConfig before dispatching reloadWorkspace', async () => {
     const { result } = renderProvider('proj-bind');

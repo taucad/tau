@@ -1,0 +1,66 @@
+[
+  {
+    "id": "retry-limit-2",
+    "drift": "D24 policy: a second re-cut after a lost CAS",
+    "file": "src/turn.machine.ts",
+    "test": "src/turn.machine.conformance.test.ts",
+    "find": "export const turnCasRetryLimit = 1;",
+    "replace": "export const turnCasRetryLimit = 2;"
+  },
+  {
+    "id": "no-resolving-completion-buffer",
+    "drift": "R6: a turnCompleted while the attempt resolves its checkout is dropped",
+    "file": "src/turn.machine.ts",
+    "test": "src/turn.machine.conformance.test.ts",
+    "find": "      on: {\n        turnCompleted: { context: { completionRequested: true } },\n        turnAbandoned: { context: { releasing: true } },\n      },\n    },\n\n    /* RM-R12:",
+    "replace": "      on: {\n        turnAbandoned: { context: { releasing: true } },\n      },\n    },\n\n    /* RM-R12:"
+  },
+  {
+    "id": "no-held-replay",
+    "drift": "R6: placing the attempt no longer starts a buffered completion",
+    "file": "src/turn.machine.ts",
+    "test": "src/turn.machine.conformance.test.ts",
+    "find": "const target = context.completionRequested ? 'capturing' : 'held';",
+    "replace": "const target = 'held';"
+  },
+  {
+    "id": "lease-refusal-ignored",
+    "drift": "F6: a refused lease goes unanswered while acquiring",
+    "file": "src/turn.machine.ts",
+    "test": "src/turn.machine.conformance.test.ts",
+    "find": "        leaseRefused: ({ context, event }) => refuseLeased(context.lease, 'LEASE_UNAVAILABLE', event.reason),\n",
+    "replace": ""
+  },
+  {
+    "id": "capturing-ignores-abandon",
+    "drift": "R12: turnAbandoned while capturing is no longer handled",
+    "file": "src/turn.machine.ts",
+    "test": "src/turn.machine.conformance.test.ts",
+    "find": "      on: {\n        turnAbandoned: { context: { releasing: true } },\n      },\n    },\n\n    merging: {",
+    "replace": "    },\n\n    merging: {"
+  },
+  {
+    "id": "base-refusal-code",
+    "drift": "RM-S7: a refused base cut reports the result cut's code",
+    "file": "src/turn.machine.ts",
+    "test": "src/turn.machine.conformance.test.ts",
+    "find": "            : refuseLeased(context.lease, 'BASE_CUT_FAILED', event.reason);",
+    "replace": "            : refuseLeased(context.lease, 'CAS_LOST', event.reason);"
+  },
+  {
+    "id": "retire-error-retires",
+    "drift": "RM-R10: a failed retirement retires the attempt anyway, orphaning its record",
+    "file": "src/turn.machine.ts",
+    "test": "src/turn.machine.conformance.test.ts",
+    "find": "          return { target: 'settled', context: { lease: context.lease } };\n        },\n      },\n    },\n\n    /* TS-R1:",
+    "replace": "          return { target: 'retired' };\n        },\n      },\n    },\n\n    /* TS-R1:"
+  },
+  {
+    "id": "settle-without-announcement",
+    "drift": "RM-R10: an attempt settles without telling the parent",
+    "file": "src/turn.machine.ts",
+    "test": "src/turn.machine.conformance.test.ts",
+    "find": "  announce({ ...context, ...fields }, enq);\n  return { target: 'settled', context: fields } as const;",
+    "replace": "  return { target: 'settled', context: fields } as const;"
+  }
+]

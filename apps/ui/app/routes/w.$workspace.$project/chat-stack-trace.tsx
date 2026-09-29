@@ -500,6 +500,7 @@ export function ChatStackTrace({ entryPath, className, side, ...props }: ChatSta
             id: generatePrefixedId(idPrefix.request),
             kind: 'regenerate-tail',
             messageId: message.id,
+            message,
             source: 'fix-with-ai-new-chat',
             createdAt: Date.now(),
           },

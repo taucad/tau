@@ -65,6 +65,7 @@ describe('RevisionConflictChat', () => {
        placement is what tells the agent where to read them (A22). */
     const [message] = (seeded as { messages: ReadonlyArray<{ parts: ReadonlyArray<{ text?: string }> }> }).messages;
     expect(message?.parts.map((part) => part.text ?? '').join('')).toContain('src/bracket.ts');
+    expect((seeded as { startupRequest: { message: unknown } }).startupRequest.message).toEqual(message);
 
     await waitFor(() => {
       expect(bindConflict).toHaveBeenCalledWith('chat_seeded', {

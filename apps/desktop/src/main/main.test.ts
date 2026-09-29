@@ -226,6 +226,8 @@ vi.mock('#main/auth-service.js', () => ({
   createAuthService: vi.fn(() => ({
     restore: vi.fn(async () => state.authRestored),
     token: vi.fn(() => state.authToken),
+    principal: vi.fn(() => undefined),
+    refresh: vi.fn(async () => undefined),
     onChange: vi.fn(),
     dispose: vi.fn(),
     handleCallback: state.authHandleCallback,
@@ -282,11 +284,11 @@ vi.mock('#main/geometry-broker.js', () => ({
   createGeometryBroker: vi.fn((options: { sampleResidentBytes: typeof state.geometrySampleResidentBytes }) => {
     state.geometrySampleResidentBytes = options.sampleResidentBytes;
     return {
-    connectMeasurement: state.geometryMeasurementConnect,
-    connectPerformance: state.geometryPerformanceConnect,
-    connectSuite: vi.fn(),
-    revokeUnauthorized: vi.fn(),
-    dispose: state.geometryDispose,
+      connectMeasurement: state.geometryMeasurementConnect,
+      connectPerformance: state.geometryPerformanceConnect,
+      connectSuite: vi.fn(),
+      revokeUnauthorized: vi.fn(),
+      dispose: state.geometryDispose,
     };
   }),
 }));
@@ -1004,51 +1006,74 @@ describe('desktop main machine store', () => {
     }
   };
 
-  it('routes exact measurement and debug performance to geometry, never the services singleton', async () => {
-    const { desktopEnvironment } = await import('#main/environment.js');
-    vi.mocked(desktopEnvironment).mockReturnValueOnce({
-      TAU_API_URL: 'http://127.0.0.1:1',
-      TAU_WEBSOCKET_URL: 'ws://127.0.0.1:1',
-      TAU_FRONTEND_URL: 'http://127.0.0.1:1',
-      TAU_DEBUG: 'true',
-    } as ReturnType<typeof desktopEnvironment>);
-    await boot();
-    const postMessage = vi.fn();
-    for (const [requestId, concern] of [['measure', 'exactMeasurement'], ['diagnostic', 'geospecPerformance']] as const) {
-      for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
-        listener({ senderFrame: { url: 'app://tau/index.html', postMessage } }, { requestId, concern });
+  it(
+    'routes exact measurement and debug performance to geometry, never the services singleton',
+    async () => {
+      const { desktopEnvironment } = await import('#main/environment.js');
+      vi.mocked(desktopEnvironment).mockReturnValueOnce({
+        TAU_API_URL: 'http://127.0.0.1:1',
+        TAU_WEBSOCKET_URL: 'ws://127.0.0.1:1',
+        TAU_FRONTEND_URL: 'http://127.0.0.1:1',
+        TAU_DEBUG: 'true',
+      } as ReturnType<typeof desktopEnvironment>);
+      await boot();
+      const postMessage = vi.fn();
+      for (const [requestId, concern] of [
+        ['measure', 'exactMeasurement'],
+        ['diagnostic', 'geospecPerformance'],
+      ] as const) {
+        for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+          listener({ senderFrame: { url: 'app://tau/index.html', postMessage } }, { requestId, concern });
+        }
       }
-    }
-    expect(state.geometryMeasurementConnect).toHaveBeenCalledOnce();
-    expect(state.geometryPerformanceConnect).toHaveBeenCalledOnce();
-    expect(state.servicesConnect).not.toHaveBeenCalled();
-    expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, { requestId: 'measure' }, [{ id: 'geometry-measurement-port' }]);
-    expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, { requestId: 'diagnostic' }, [{ id: 'geometry-performance-port' }]);
-  }, bootMilliseconds);
+      expect(state.geometryMeasurementConnect).toHaveBeenCalledOnce();
+      expect(state.geometryPerformanceConnect).toHaveBeenCalledOnce();
+      expect(state.servicesConnect).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, { requestId: 'measure' }, [
+        { id: 'geometry-measurement-port' },
+      ]);
+      expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, { requestId: 'diagnostic' }, [
+        { id: 'geometry-performance-port' },
+      ]);
+    },
+    bootMilliseconds,
+  );
 
-  it('refuses the diagnostic geometry port when TAU_DEBUG is absent', async () => {
-    await boot();
-    const postMessage = vi.fn();
-    for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
-      listener({ senderFrame: { url: 'app://tau/index.html', postMessage } }, { requestId: 'diagnostic', concern: 'geospecPerformance' });
-    }
-    expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, {
-      requestId: 'diagnostic', error: 'GeoSpec performance tools require TAU_DEBUG.',
-    });
-    expect(state.geometryPerformanceConnect).not.toHaveBeenCalled();
-    expect(state.servicesConnect).not.toHaveBeenCalled();
-  }, bootMilliseconds);
+  it(
+    'refuses the diagnostic geometry port when TAU_DEBUG is absent',
+    async () => {
+      await boot();
+      const postMessage = vi.fn();
+      for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+        listener(
+          { senderFrame: { url: 'app://tau/index.html', postMessage } },
+          { requestId: 'diagnostic', concern: 'geospecPerformance' },
+        );
+      }
+      expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, {
+        requestId: 'diagnostic',
+        error: 'GeoSpec performance tools require TAU_DEBUG.',
+      });
+      expect(state.geometryPerformanceConnect).not.toHaveBeenCalled();
+      expect(state.servicesConnect).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
 
-  it('samples only the exact geometry utility pid and converts Electron KiB to bytes', async () => {
-    await boot();
-    app.getAppMetrics.mockReturnValue([
-      { pid: 41, memory: { workingSetSize: 999 } },
-      { pid: 42, memory: { workingSetSize: 512 } },
-    ]);
-    expect(state.geometrySampleResidentBytes?.({ pid: 42 })).toBe(512 * 1024);
-    expect(state.geometrySampleResidentBytes?.({ pid: 43 })).toBeUndefined();
-    expect(state.geometrySampleResidentBytes?.({ pid: undefined })).toBeUndefined();
-  }, bootMilliseconds);
+  it(
+    'samples only the exact geometry utility pid and converts Electron KiB to bytes',
+    async () => {
+      await boot();
+      app.getAppMetrics.mockReturnValue([
+        { pid: 41, memory: { workingSetSize: 999 } },
+        { pid: 42, memory: { workingSetSize: 512 } },
+      ]);
+      expect(state.geometrySampleResidentBytes?.({ pid: 42 })).toBe(512 * 1024);
+      expect(state.geometrySampleResidentBytes?.({ pid: 43 })).toBeUndefined();
+      expect(state.geometrySampleResidentBytes?.({ pid: undefined })).toBeUndefined();
+    },
+    bootMilliseconds,
+  );
 
   it(
     'should keep the machine store under the config directory and connect a machines port that names no root, for a trusted frame only',

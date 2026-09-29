@@ -9,15 +9,18 @@
  * endpoint and the stub API neither case reads.
  */
 
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
-import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import { captureChatLogs, chatLogDestination } from '@taucad/formal/capture';
+
+import type { AgentLauncher } from '@taucad/agent-host/launcher';
+
+import { createNodeLauncher } from '#node-launcher.fixture.js';
 import type { AgentLogEvent, ToolRegistry } from '@taucad/agent-host';
 
 import { createAcpExternalAgentPort } from '#acp/run.js';
@@ -45,15 +48,26 @@ afterEach(async () => {
     // oxlint-disable-next-line no-await-in-loop -- teardown order is the invariant under test.
     await close();
   }
+  /* Field trace validation: keep each chat log before its root goes (formal:nightly). */
+  const chatLogs = chatLogDestination('host', expect.getState().testPath);
+  await Promise.all(roots.map(async (root) => captureChatLogs(root, chatLogs)));
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
 
-/** One external-capable launcher over its own project root. */
-const startHarness = async (): Promise<{ readonly launcher: NodeAgentLauncher; readonly workspaceRoot: string }> => {
+/**
+ * One external-capable launcher over its own project root.
+ *
+ * @param from - A project root to copy first: the durable state a restarted host finds.
+ */
+const startHarness = async (
+  from?: string,
+): Promise<{ readonly launcher: AgentLauncher; readonly workspaceRoot: string }> => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-interrupts-'));
   roots.push(workspaceRoot);
-  await writeFile(join(workspaceRoot, 'main.scad'), 'cube(10);\n', 'utf8');
-  const launcher = createNodeAgentLauncher({
+  await (from === undefined
+    ? writeFile(join(workspaceRoot, 'main.scad'), 'cube(10);\n', 'utf8')
+    : cp(from, workspaceRoot, { recursive: true }));
+  const launcher = createNodeLauncher({
     workspaceRoot,
     /* Never dialled: an external turn never reaches the gateway. */
     gatewayBaseUrl: 'http://127.0.0.1:1/',
@@ -117,11 +131,14 @@ describe('an approval nobody answers', () => {
 
     await launcher.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId,
-      runId,
-      message: { id: 'user-1', role: 'user', content: 'abandon this turn' },
-      config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+      commandId: 'cmd-1',
+      payload: {
+        trigger: 'submit',
+        chatId,
+        runId,
+        message: { id: 'user-1', role: 'user', content: 'abandon this turn' },
+        config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+      },
     });
     await until(
       async () => lifecycleOf(await readLog(workspaceRoot, chatId)).some((state) => state === 'failed'),
@@ -155,11 +172,14 @@ describe('an approval nobody answers', () => {
 
     await launcher.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId,
-      runId,
-      message: { id: 'user-1', role: 'user', content: 'write the file please' },
-      config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+      commandId: 'cmd-1',
+      payload: {
+        trigger: 'submit',
+        chatId,
+        runId,
+        message: { id: 'user-1', role: 'user', content: 'write the file please' },
+        config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+      },
     });
     await until(
       async () => {
@@ -174,12 +194,90 @@ describe('an approval nobody answers', () => {
      * the runner's turn stays suspended inside `approve`, and `cancel` — which
      * observes settlement (D12) — never returns at all. */
     await expect(
-      Promise.race([launcher.execute({ type: 'cancel', chatId, runId }).then(() => 'settled'), delay(15_000, 'hung')]),
+      Promise.race([
+        launcher.execute({ type: 'cancel', commandId: 'cmd-2', payload: { chatId, runId } }).then(() => 'settled'),
+        delay(15_000, 'hung'),
+      ]),
     ).resolves.toBe('settled');
 
     const events = await readLog(workspaceRoot, chatId);
     expect(lifecycleOf(events)).toContain('cancelled');
     expect(interruptsOf(events)).toContainEqual(expect.objectContaining({ phase: 'resolved', reason: 'cancelled' }));
     expect(await launcher.pendingInterrupts(runId)).toEqual([]);
+  }, 90_000);
+
+  /*
+   * EA-S8 (W10 EA-A9): no child and no adapter survives a restart, so a durable `requested` row
+   * without its `resolved` row is an orphan.
+   */
+  const orphan = async () => {
+    const first = await startHarness();
+    const chatId = 'chat-orphaned-approval';
+    const runId = 'run-orphaned-approval';
+    await first.launcher.execute({
+      type: 'start',
+      commandId: 'cmd-1',
+      payload: {
+        trigger: 'submit',
+        chatId,
+        runId,
+        message: { id: 'user-1', role: 'user', content: 'write the file please' },
+        config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+      },
+    });
+    await until(
+      async () => lifecycleOf(await readLog(first.workspaceRoot, chatId)).includes('paused'),
+      'the durable pause',
+      async () => readLog(first.workspaceRoot, chatId),
+    );
+    /* The crash: the durable state at the pause, under a host that never saw the run. */
+    const restarted = await startHarness(first.workspaceRoot);
+    /* `attach` is a read (RH-R1), but a paused external run with no driver is an orphan (M1's `isOrphaned`): the
+     * attach asks leadership to claim, and the claim's rehydration settles it (W7 RA-S14, RH-R9). */
+    await expect(
+      restarted.launcher.execute({ type: 'attach', commandId: 'cmd-2', payload: { chatId } }),
+    ).resolves.toMatchObject({ details: { takeover: true } });
+    await until(
+      async () => lifecycleOf(await readLog(restarted.workspaceRoot, chatId)).includes('failed'),
+      'the claim settling the orphan',
+      async () => readLog(restarted.workspaceRoot, chatId),
+    );
+    const events = await readLog(restarted.workspaceRoot, chatId);
+    const requested = interruptsOf(events).find((event) => event.phase === 'requested');
+    return { ...restarted, chatId, runId, events, interruptId: requested?.interruptId };
+  };
+
+  it('refuses a late answer to an orphaned approval with INTERRUPT_NOT_PENDING', async () => {
+    const { launcher, chatId, runId, interruptId } = await orphan();
+
+    expect(interruptId).toBeDefined();
+    await expect(
+      launcher.execute({
+        type: 'resolve-interrupt',
+        commandId: 'cmd-3',
+        payload: { chatId, runId, interruptId: interruptId ?? '', outcome: 'approved' },
+      }),
+    ).resolves.toMatchObject({ status: 'refused', code: 'INTERRUPT_NOT_PENDING', effect: 'not-applied' });
+  }, 90_000);
+
+  /*
+   * M1's rehydration (W7 RA-S14) resolves the orphan `cancelled` with EXTERNAL_AGENT_RECOVERY_UNKNOWN
+   * before the run's terminal row.
+   */
+  it('resolves an orphaned approval with a code after a restart', async () => {
+    const { events, interruptId } = await orphan();
+    const resolvedAt = events.findIndex(
+      (event) =>
+        event.type === 'interrupt.recorded' &&
+        event.phase === 'resolved' &&
+        event.interruptId === interruptId &&
+        event.reason === 'cancelled',
+    );
+    const failedAt = events.findIndex((event) => event.type === 'run.lifecycle' && event.state === 'failed');
+
+    expect(interruptId).toBeDefined();
+    expect(events[resolvedAt]).toMatchObject({ payload: { code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' } });
+    expect(events[failedAt]).toMatchObject({ detail: { code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' } });
+    expect(resolvedAt).toBeLessThan(failedAt);
   }, 90_000);
 });

@@ -76,7 +76,6 @@ import { NewProjectChatComposer } from '#components/chat/new-project-chat-compos
 import { ChatComposerProvider } from '#hooks/active-chat-provider.js';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { useSidebarCommands } from '#hooks/use-sidebar-status.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
@@ -188,6 +187,7 @@ export function ProjectLibrary(): React.JSX.Element {
     error: listingError,
     retry,
     deleteProject,
+    verifyProjectQuiescent,
     duplicateProject,
     restoreProject,
     permanentlyDeleteProject: deleteProjectPermanently,
@@ -223,7 +223,6 @@ export function ProjectLibrary(): React.JSX.Element {
     },
     [openCloudProject],
   );
-  const { closeProject } = useSidebarCommands();
 
   const handleToggleDeleted = useCallback(
     (value: boolean) => {
@@ -246,9 +245,15 @@ export function ProjectLibrary(): React.JSX.Element {
           }
           return true;
         }
-        if (announce) toast.error(`Could not move ${project.name} to Trash`);
+        if (announce) {
+          toast.error(`Could not move ${project.name} to Trash`);
+        }
       } catch (error) {
-        if (announce) toast.error(`Could not move ${project.name} to Trash`);
+        if (announce) {
+          toast.error(`Could not move ${project.name} to Trash`, {
+            description: error instanceof Error ? error.message : undefined,
+          });
+        }
         console.error('Error trashing project:', error);
       }
       return false;
@@ -258,15 +263,24 @@ export function ProjectLibrary(): React.JSX.Element {
 
   const handleDelete = useCallback(
     async (project: ProjectListItem, options?: { announce?: boolean }): Promise<boolean> => {
-      closeProject(project.id);
       return trashProject(project, options?.announce);
     },
-    [closeProject, trashProject],
+    [trashProject],
   );
 
-  const handlePermanentlyDelete = useCallback((project: ProjectListItem) => {
-    setPermanentDeleteTarget(project);
-  }, []);
+  const handlePermanentlyDelete = useCallback(
+    async (project: ProjectListItem) => {
+      try {
+        await verifyProjectQuiescent(project.id);
+        setPermanentDeleteTarget(project);
+      } catch (error) {
+        toast.error(`Could not delete ${project.name} permanently`, {
+          description: error instanceof Error ? error.message : undefined,
+        });
+      }
+    },
+    [verifyProjectQuiescent],
+  );
 
   const handleDiscardRecovery = useCallback(
     async (operationId: string): Promise<void> => {
@@ -329,15 +343,16 @@ export function ProjectLibrary(): React.JSX.Element {
       return;
     }
     try {
-      closeProject(project.id);
       await deleteProjectPermanently(project.id);
       setPermanentDeleteTarget(undefined);
       toast.success(`Permanently deleted ${project.name}`);
     } catch (error) {
-      toast.error(`Could not permanently delete ${project.name}`);
+      toast.error(`Could not permanently delete ${project.name}`, {
+        description: error instanceof Error ? error.message : undefined,
+      });
       console.error('Error permanently deleting project:', error);
     }
-  }, [closeProject, deleteProjectPermanently, permanentDeleteTarget]);
+  }, [deleteProjectPermanently, permanentDeleteTarget]);
 
   const confirmWorkspaceBindingRepair = useCallback(async (): Promise<void> => {
     const target = repairTarget;
@@ -959,33 +974,27 @@ function BulkActions({ table, deleteProject }: BulkActionsProps) {
 
   const handleBulkDelete = async (): Promise<void> => {
     setIsDeleting(true);
-    let successCount = 0;
-    let errorCount = 0;
-
-    // Delete each selected project
-    for (const row of selectedRows) {
-      try {
-        const project = row.original;
-        /* Never selectable (D20): a Tau-Cloud-only row has nothing here to trash. */
-        if (isCloudOnly(project)) {
-          continue;
+    /* Never selectable (D20): a Tau-Cloud-only row has nothing here to trash. */
+    const projects = selectedRows
+      .map((row) => row.original)
+      .filter((project): project is ProjectListItem => !isCloudOnly(project));
+    const results = await Promise.all(
+      projects.map(async (project) => {
+        try {
+          return await deleteProject(project, { announce: false });
+        } catch (error) {
+          console.error('Error deleting project:', error);
+          return false;
         }
-        if (await deleteProject(project, { announce: false })) {
-          successCount++;
-        } else {
-          errorCount++;
-        }
-      } catch (error) {
-        errorCount++;
-        console.error('Error deleting project:', error);
-      }
-    }
+      }),
+    );
+    const successCount = results.filter(Boolean).length;
+    const errorCount = results.length - successCount;
 
     setIsDeleting(false);
     setShowDeleteDialog(false);
     table.resetRowSelection();
 
-    // Show toast with results
     if (successCount > 0 && errorCount === 0) {
       toast.success(`Moved ${successCount} project${successCount === 1 ? '' : 's'} to Trash`);
     } else if (successCount > 0 && errorCount > 0) {

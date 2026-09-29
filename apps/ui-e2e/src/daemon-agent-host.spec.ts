@@ -63,17 +63,28 @@ const createProject = async (origin: string): Promise<void> => {
 };
 
 const agentTrigger = selectors.getByRole('button', { name: /^Agent and model: /u });
-const tauHostSegment = selectors.getByRole('tab', { name: /^Tau Host · /u });
 
 /** Open the agent sheet and wait for the daemon's segment under *Runs on*. */
-const openRunsOn = async (): Promise<void> => {
+const openRunsOn = async (workspace: string) => {
   await target.expectVisible(agentTrigger, 60_000);
   await target.click(agentTrigger);
+  const descriptor = await target.evaluate(async () => {
+    const response = await fetch('/.well-known/tau-host');
+    if (!response.ok) {
+      throw new Error(`Tau Host discovery failed (${String(response.status)}).`);
+    }
+    return (await response.json()) as { readonly label: string; readonly workspaceRoot: string };
+  });
+  expect(descriptor.workspaceRoot).toBe(workspace);
+  const tauHostSegment = selectors
+    .getByRole('tablist', { name: 'Where Tau runs' })
+    .getByRole('tab', { name: descriptor.label, exact: true });
   await target.expectVisible(tauHostSegment, 60_000);
+  return tauHostSegment;
 };
 
 const selectTauHost = async (workspace: string): Promise<void> => {
-  await openRunsOn();
+  const tauHostSegment = await openRunsOn(workspace);
   await target.click(tauHostSegment);
   // The note names the directory the turn will write to — the one fact a user
   // needs before placing a turn there.
@@ -242,6 +253,48 @@ describe('daemon agent host (AV-4, rung 1)', () => {
     await target.stopTauServeFixture();
   }, 300_000);
 
+  test('stops a daemon run from the composer after reattaching to it', async () => {
+    const { origin, workspace } = await target.startTauServeFixture();
+    try {
+      await target.setViewport({ width: 1440, height: 900 });
+      await createProject(origin);
+      await selectTauHost(workspace);
+      await sendFirstPrompt('Create the Tau Host proof file.');
+      await target.expectVisible(selectors.getByText(partialText, { exact: true }), 120_000);
+      await expect.poll(async () => target.readTauServeFile(proofFile), { timeout: 120_000 }).toBe(proofContent);
+
+      /* The daemon is held on its second gateway request while the page dies.
+       * Only the reattached page's Stop gesture may cancel that host run. */
+      await target.reload();
+      await ensureChatOpen();
+      const stop = selectors.getByCss('button:has(svg.lucide-square)').last();
+      await target.expectVisible(stop, 120_000);
+      await expect.poll(target.isTauServeGatewayHeld, { timeout: 120_000 }).toBe(true);
+      const liveLog = await durableLog();
+      const beforeStop = liveLog
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as { readonly type: string; readonly state?: string });
+      expect(beforeStop.filter(({ type }) => type === 'run.lifecycle').map(({ state }) => state)).toEqual([
+        'admitted',
+        'running',
+      ]);
+      expect(beforeStop.filter(({ type }) => type === 'turn.finalized' || type === 'turn.failed')).toHaveLength(0);
+      await target.click(stop);
+      await expect.poll(durableLog, { timeout: 120_000 }).toContain('"state":"cancelled"');
+      const log = await durableLog();
+      const events = log
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as { readonly type: string; readonly state?: string });
+      expect(events.filter(({ type, state }) => type === 'run.lifecycle' && state === 'admitted')).toHaveLength(1);
+      expect(events.filter(({ type, state }) => type === 'run.lifecycle' && state === 'cancelled')).toHaveLength(1);
+      expect(await target.isVisible(selectors.getByText(finalText, { exact: true }))).toBe(false);
+    } finally {
+      await target.stopTauServeFixture();
+    }
+  }, 300_000);
+
   /**
    * The same placement, chosen one step earlier — before the project exists.
    *
@@ -287,7 +340,7 @@ describe('daemon agent host (AV-4, rung 1)', () => {
     await dismissCookieBanner();
 
     // The seed carried the chip's promise into the chat that now owns the turn.
-    await openRunsOn();
+    const tauHostSegment = await openRunsOn(workspace);
     await expect
       .poll(async () => target.getAttribute(tauHostSegment, 'aria-selected'), { timeout: 60_000 })
       .toBe('true');

@@ -36,7 +36,7 @@ import {
   projectCloseMilliseconds,
   projectReleaseMilliseconds,
 } from '@taucad/host';
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 
 import { appOrigin, appSchemePrivileges, registerAppProtocol } from '#main/app-protocol.js';
 import { createAuthService } from '#main/auth-service.js';
@@ -565,8 +565,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
       tauApiUrl: environment['TAU_API_URL']!,
       tauWebSocketUrl: environment['TAU_WEBSOCKET_URL']!,
     },
-    onSpawn: (utility) => { forwardUtilityDiagnostics('geometry', utility, log); },
-    log: (event, detail) => { log.log('warn', event, detail); },
+    onSpawn: (utility) => {
+      forwardUtilityDiagnostics('geometry', utility, log);
+    },
+    log: (event, detail) => {
+      log.log('warn', event, detail);
+    },
   });
 
   const trustedComputeRoot = (event: IpcMainInvokeEvent, projectRoot: unknown): string => {
@@ -610,7 +614,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
     createChannel: () => new MessageChannelMain(),
     connectRuntime: (context) => runtimeMain.connect({ purpose: 'main-process-client', context }),
     connectGeometry: (input) => geometry.connectSuite(input),
-    revokeGeometry: () => { geometry.revokeUnauthorized(); },
+    revokeGeometry: () => {
+      geometry.revokeUnauthorized();
+    },
     onSpawn: (utility) => {
       forwardUtilityDiagnostics('services', utility, log);
     },
@@ -676,13 +682,29 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const publishRoots = (): void => {
     services.post({ type: 'allowRoots', roots: roots.roots() });
   };
+  /* The session's user id rides with the bearer as the launcher's `principal` (GI-Q6). */
   const publishCredential = (): void => {
-    services.post({ type: 'authToken', token: auth.token() });
+    services.post({ type: 'authToken', token: auth.token(), principal: auth.principal() });
+  };
+  /* `get-session` names the user; a restored or fresh sign-in asks once rather than waiting for the hourly probe. */
+  const identify = (): void => {
+    if (auth.token() === undefined || auth.principal() !== undefined) {
+      return;
+    }
+    // async-iife: bootstrap -- a failed probe leaves the principal unknown until the next refresh, as before.
+    void (async (): Promise<void> => {
+      try {
+        await auth.refresh();
+      } catch (error) {
+        log.log('warn', 'auth.identify-failed', error);
+      }
+    })();
   };
 
   await auth.restore();
   publishRoots();
   publishCredential();
+  identify();
 
   /* E7's daemon-capability half: launcher 2 runs in the services utility with a
    * bearer transport (E11's option exists for exactly this host — nothing else
@@ -747,6 +769,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   auth.onChange(() => {
     publishCredential();
+    identify();
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send('tau:auth-changed');
     }
@@ -976,11 +999,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
         refuse('services.invalid-geospec-engine');
         return;
       }
-      const port = concern === 'exactMeasurement'
-        ? geometry.connectMeasurement()
-        : concern === 'geospecPerformance'
-          ? geometry.connectPerformance()
-          : services.connect(concern as ServicesConcern, resolved);
+      const port =
+        concern === 'exactMeasurement'
+          ? geometry.connectMeasurement()
+          : concern === 'geospecPerformance'
+            ? geometry.connectPerformance()
+            : services.connect(concern as ServicesConcern, resolved);
       event.senderFrame?.postMessage(servicesPortRelayTag, { requestId }, [port]);
     } catch (error) {
       /* Quit and reload refuse new concerns by design: an expected answer the

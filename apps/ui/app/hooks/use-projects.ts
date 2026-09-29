@@ -7,6 +7,7 @@ import type { CreatedProject } from '#hooks/use-project-manager.js';
 import { projectLibraryEntryToListItem } from '#types/project-library.types.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { selectCaughtUp } from '#machines/chat-projection.logic.js';
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- let types be inferred
 export function useProjects(options?: { includeDeleted?: boolean }) {
@@ -18,6 +19,7 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     getProjectListing,
     updateProject,
     getProject,
+    getChatsForResource,
     deleteProject,
     restoreProject,
     permanentlyDeleteProject,
@@ -66,15 +68,41 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     [sessions],
   );
 
+  const requireQuiescentProject = useCallback(
+    async (projectId: string): Promise<void> => {
+      const chats = await getChatsForResource(projectId, { includeDeleted: true });
+      if (chats.length > 0) {
+        if (sessions.getSnapshot().context.refs[projectId] === undefined) {
+          throw new Error('Restore and open this project to verify its chats before deleting it.');
+        }
+        const observed = new Set(chatSessions.observedChatIdsOf(projectId));
+        if (
+          chats.some((chat) => {
+            const projection = chatSessions.getProjection(chat.id);
+            return !observed.has(chat.id) || projection === undefined || !selectCaughtUp(projection);
+          })
+        ) {
+          throw new Error('Wait for every chat history to load before deleting this project.');
+        }
+      }
+      const plan = await chatSessions.getProjectClosePlan(projectId);
+      if (plan.liveChatIds.length > 0) {
+        throw new Error('This project has running work. Stop it and wait for the chat log to settle before deleting.');
+      }
+    },
+    [chatSessions, getChatsForResource, sessions],
+  );
+
   const handleDeleteProject = useCallback(
     async (projectId: string): Promise<boolean> => {
+      await requireQuiescentProject(projectId);
       await closeProjectSession(projectId);
       const trashed = await deleteProject(projectId);
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
       return trashed;
     },
-    [closeProjectSession, deleteProject, queryClient],
+    [closeProjectSession, deleteProject, queryClient, requireQuiescentProject],
   );
 
   const handleRestoreProject = useCallback(
@@ -94,6 +122,7 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
 
   const handlePermanentlyDeleteProject = useCallback(
     async (projectId: string) => {
+      await requireQuiescentProject(projectId);
       await closeProjectSession(projectId);
       // Live composer records must stop before their directory is removed, or they write it back (D11).
       await chatSessions.removeProject(projectId);
@@ -101,7 +130,7 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.removeQueries({ queryKey: ['project', projectId] });
     },
-    [chatSessions, closeProjectSession, permanentlyDeleteProject, queryClient],
+    [chatSessions, closeProjectSession, permanentlyDeleteProject, queryClient, requireQuiescentProject],
   );
 
   const handleDuplicateProject = useCallback(
@@ -169,6 +198,7 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     isLoading: isLoading || isWorkerLoading,
     error: error instanceof Error ? error : undefined,
     retry: refetch,
+    verifyProjectQuiescent: requireQuiescentProject,
     deleteProject: handleDeleteProject,
     restoreProject: handleRestoreProject,
     permanentlyDeleteProject: handlePermanentlyDeleteProject,

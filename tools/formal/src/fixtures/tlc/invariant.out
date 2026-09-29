@@ -1,0 +1,74 @@
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-25 11:04:29.
+Error: Invariant NoUnretiredLease is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ emits = <<>>
+/\ out = <<>>
+/\ world = [ orphans |-> {},
+  cutOpen |-> FALSE,
+  leaseFile |-> FALSE,
+  retireFailed |-> FALSE,
+  lateMint |-> FALSE ]
+/\ act = <<"Init">>
+/\ turn = [ outcome |-> "none",
+  revision |-> "none",
+  code |-> "NONE",
+  phase |-> "resolving",
+  retries |-> 0,
+  completion |-> FALSE,
+  base |-> "none" ]
+
+State 2: <PrepareOk(FALSE,FALSE) line 82, col 3 to line 87, col 41 of module TurnProtocol>
+/\ emits = <<>>
+/\ out = <<"turnPrepared">>
+/\ world = [ orphans |-> {},
+  cutOpen |-> FALSE,
+  leaseFile |-> FALSE,
+  retireFailed |-> FALSE,
+  lateMint |-> FALSE ]
+/\ act = <<"PrepareOk", FALSE, FALSE>>
+/\ turn = [ outcome |-> "none",
+  revision |-> "none",
+  code |-> "NONE",
+  phase |-> "writingLease",
+  retries |-> 0,
+  completion |-> FALSE,
+  base |-> "rev-1" ]
+
+State 3: <Release("release") line 163, col 3 to line 169, col 28 of module TurnProtocol>
+/\ emits = <<>>
+/\ out = <<"turnReleased:released:NONE">>
+/\ world = [ orphans |-> {"writeLease"},
+  cutOpen |-> FALSE,
+  leaseFile |-> FALSE,
+  retireFailed |-> FALSE,
+  lateMint |-> FALSE ]
+/\ act = <<"Release", "release">>
+/\ turn = [ outcome |-> "released",
+  revision |-> "none",
+  code |-> "NONE",
+  phase |-> "released",
+  retries |-> 0,
+  completion |-> FALSE,
+  base |-> "rev-1" ]
+
+State 4: <OrphanDone("writeLease",TRUE) line 235, col 3 to line 241, col 35 of module TurnProtocol>
+/\ emits = <<>>
+/\ out = <<>>
+/\ world = [ orphans |-> {},
+  cutOpen |-> FALSE,
+  leaseFile |-> TRUE,
+  retireFailed |-> FALSE,
+  lateMint |-> FALSE ]
+/\ act = <<"OrphanDone", "writeLease", TRUE>>
+/\ turn = [ outcome |-> "released",
+  revision |-> "none",
+  code |-> "NONE",
+  phase |-> "released",
+  retries |-> 0,
+  completion |-> FALSE,
+  base |-> "rev-1" ]
+
+64 states generated, 46 distinct states found, 30 states left on queue.
+The depth of the complete state graph search is 4.

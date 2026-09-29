@@ -267,23 +267,24 @@ const raiseInterrupt = async (input: {
   readonly runId: string;
   readonly interruptId: string;
 }): Promise<void> => {
-  const socket = new WebSocket(new URL('/agent', input.origin).href.replace('http:', 'ws:'), {
-    headers: { authorization: `Bearer ${agentToken}` },
-  });
-  const client = createAgentChannelClient(socket, { sessionKey: 'tau-agent' });
-  await new Promise<void>((resolve, reject) => {
-    socket.once('open', resolve);
-    socket.once('error', reject);
+  const client = createAgentChannelClient({
+    connect: () =>
+      new WebSocket(new URL('/agent', input.origin).href.replace('http:', 'ws:'), {
+        headers: { authorization: `Bearer ${agentToken}` },
+      }),
   });
   try {
     await client.execute({
       type: 'interrupt',
-      chatId: input.chatId,
-      runId: input.runId,
-      interruptId: input.interruptId,
-      kind: 'approval',
-      prompt: 'May I write the plate?',
-      payload: { options: offeredOptions },
+      commandId: `raise-${input.interruptId}`,
+      payload: {
+        chatId: input.chatId,
+        runId: input.runId,
+        interruptId: input.interruptId,
+        kind: 'approval',
+        prompt: 'May I write the plate?',
+        payload: { options: offeredOptions },
+      },
     });
   } finally {
     client.close('interrupt raised');
@@ -447,7 +448,7 @@ describe('tau tui', () => {
     expect(terminal.rawModeCalls()).toContain(true);
 
     await submit(terminal, 'hello daemon');
-    await untilPainted(terminal, /start: (admitted|running)/u);
+    await untilPainted(terminal, /start: applied at \d+/u);
     // The transcript rows are the daemon's durable events, not this view's echo.
     await untilPainted(terminal, /0 {2}run\.lifecycle {2}admitted/u);
     await untilPainted(terminal, /run running/u);
@@ -517,7 +518,7 @@ describe('tau tui', () => {
     await untilPainted(terminal, /y sends Allow once \(allow-once\), n sends Reject once \(reject-once\)/u);
 
     terminal.stdin.write('y');
-    await untilPainted(terminal, /resolve-interrupt: /u);
+    await untilPainted(terminal, /approve: (applied at \d+|nothing recorded)/u);
     const resolved = await until(async () => {
       const log = await chatLog('chat-tui-approve');
       return log
@@ -534,11 +535,11 @@ describe('tau tui', () => {
   it('should report the label the daemon returned for a cancel', async () => {
     const { terminal, finished } = mount('chat-tui-cancel');
     await submit(terminal, 'hold this one');
-    await untilPainted(terminal, /start: (admitted|running)/u);
+    await untilPainted(terminal, /start: applied at \d+/u);
 
     terminal.stdin.write('c');
-    /* D12: the operation and the state are both the daemon's words. */
-    await untilPainted(terminal, /cancel: (admitted|running|paused|completed|failed|cancelled)/u);
+    /* D12: the answer is the daemon's words: the terminal row's cursor, or the state it found. */
+    await untilPainted(terminal, /cancel: (applied at \d+|nothing recorded)/u);
 
     terminal.stdin.write('q');
     await expect(finished).resolves.toBeUndefined();

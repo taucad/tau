@@ -76,9 +76,8 @@ const nameGeneratorFetch: typeof globalThis.fetch = async (input, init) => {
 };
 
 /**
- * Dedicated transport for the simple-text name profiles. Distinct from
- * `sharedChatTransport` (consumed by the CAD `Chat<MyUIMessage>` factory)
- * because we need a name-profile-specific fetch wrapper to preserve the
+ * Dedicated transport for the simple-text name profiles. Distinct from the
+ * CAD chat's per-session projection transport because this needs a profile-specific fetch wrapper to preserve the
  * `NameGeneratorRequestError` contract; the CAD path uses the SDK's
  * default error shape.
  */

@@ -8,6 +8,6 @@
     "types": ["node"],
     "target": "ESNext"
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.json"],
   "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "src/**/*.test-d.ts", "src/**/*.fixture.ts"]
 }

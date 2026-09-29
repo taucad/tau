@@ -1,0 +1,5 @@
+{"t":1,"kind":"send","actor":"client","commandId":"k1","generation":1}
+{"t":2,"kind":"append","actor":"g1","commandId":"k1","generation":1}
+{"t":3,"kind":"close","actor":"client","generation":1}
+{"t":4,"kind":"send","actor":"client","commandId":"k1","generation":1}
+{"t":5,"kind":"append","actor":"g1","commandId":"k1","generation":1}

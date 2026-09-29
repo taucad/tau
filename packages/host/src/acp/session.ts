@@ -51,16 +51,15 @@
  * is nowhere for a replayed update to go.
  */
 
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { lstat, realpath } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 
-import { CreateElicitationRequest as CreateElicitationRequestGuards, client } from '@agentclientprotocol/sdk';
+import { CreateElicitationRequest as CreateElicitationRequestGuards } from '@agentclientprotocol/sdk';
 import type {
   AgentCapabilities,
   AuthMethod,
   ClientCapabilities,
-  ClientConnection,
   ContentBlock,
   CreateElicitationRequest,
   Implementation,
@@ -72,11 +71,10 @@ import type {
   Usage as AcpUsage,
 } from '@agentclientprotocol/sdk';
 
-import type { ExternalAgentTurn } from '@taucad/agent-host/node-launcher';
+import type { ExternalAgentTurn } from '@taucad/agent-host/launcher';
+import type { ExternalAgentLogin, ExternalAgentStop } from '@taucad/agent-host/wire';
 import type {
   ExternalAgentLogEvent,
-  ExternalAgentLogin,
-  ExternalAgentStop,
   JsonObject,
   JsonValue,
   ProviderMessage,
@@ -84,7 +82,6 @@ import type {
   ToolInputProviderMessage,
 } from '@taucad/agent-host';
 
-import { spawnAcpAdapter } from '#acp/spawn.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import { maskedPathCode } from '@taucad/agent-tools/registry';
@@ -106,11 +103,11 @@ import { checkProjectManifestReplacement } from '@taucad/types';
 
 const maskedPath = (message: string): Error => Object.assign(new Error(message), { code: maskedPathCode });
 
-/** ACP protocol version this client speaks. */
-const protocolVersion = 1;
+/** ACP protocol version this client speaks. @internal */
+export const protocolVersion = 1;
 
-/** JSON-RPC code both pinned adapters answer with when the user is logged out. */
-const authRequiredCode = -32_000;
+/** JSON-RPC code both pinned adapters answer with when the user is logged out. @internal */
+export const authRequiredCode = -32_000;
 
 /**
  * What Tau tells the agent it can do, which is what the agent offers back.
@@ -133,8 +130,10 @@ const authRequiredCode = -32_000;
  * assistant prose, then as a bare `-32603 Internal error` with a stack trace on
  * stderr. With it the turn ends `end_turn` and names the failure once, typed,
  * in the response's `_meta` (see {@link airSessionFailureOf}).
+ *
+ * @internal
  */
-const clientCapabilities: ClientCapabilities = {
+export const clientCapabilities: ClientCapabilities = {
   fs: { readTextFile: true, writeTextFile: true },
   terminal: false,
   elicitation: { url: {} },
@@ -154,14 +153,6 @@ const clientCapabilities: ClientCapabilities = {
  * done.
  */
 const textIdleFlushDelay = 250;
-
-/**
- * Milliseconds `session/close` is waited on before the child is killed anyway.
- *
- * Closing is a courtesy to the vendor's own bookkeeping; an adapter that has
- * stopped answering must not be able to hang host shutdown behind it.
- */
-const sessionCloseTimeout = 2000;
 
 /** What one ACP turn reported beyond the durable log. @public */
 export type AcpTurnOutcome = {
@@ -196,10 +187,12 @@ export type AcpPromptTurn = Pick<ExternalAgentTurn, 'append' | 'appendSession' |
  *
  * @param capability - The capability field as `initialize` reported it.
  * @returns `true` when the agent advertised it.
+ * @internal
  */
-const advertised = (capability: unknown): boolean => capability !== null && capability !== undefined;
+export const advertised = (capability: unknown): boolean => capability !== null && capability !== undefined;
 
-const isPresent = <Value>(value: Value): value is NonNullable<Value> => value !== null && value !== undefined;
+/** @internal */
+export const isPresent = <Value>(value: Value): value is NonNullable<Value> => value !== null && value !== undefined;
 
 /**
  * A path is inside the session's own directory, and reachable there at the
@@ -320,16 +313,18 @@ export const writeSessionTextFile = async (
 };
 
 // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- an ACP payload is JSON by construction of its transport.
-const asJson = (value: unknown): JsonValue => (value === undefined ? null : (value as JsonValue));
+/** @internal */
+export const asJson = (value: unknown): JsonValue => (value === undefined ? null : (value as JsonValue));
 
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+/** @internal */
+export const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
     ? // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a JSON object is a string-keyed record.
       (value as Record<string, unknown>)
     : undefined;
 
-/** One AIR `sessionFailure`, reduced to what a surface renders. */
-type AcpSessionFailure = ExternalAgentStop['failure'] & { readonly severity: string };
+/** One AIR `sessionFailure`, reduced to what a surface renders. @internal */
+export type AcpSessionFailure = ExternalAgentStop['failure'] & { readonly severity: string };
 
 /**
  * The AIR `sessionFailure` an agent attached to a prompt response or a
@@ -340,8 +335,9 @@ type AcpSessionFailure = ExternalAgentStop['failure'] & { readonly severity: str
  *
  * @param meta - The `_meta` the agent sent.
  * @returns The failure, or `undefined` when there is none or it is a warning.
+ * @internal
  */
-const airSessionFailureOf = (meta: unknown): AcpSessionFailure | undefined => {
+export const airSessionFailureOf = (meta: unknown): AcpSessionFailure | undefined => {
   const failure = asRecord(asRecord(asRecord(asRecord(meta)?.['jetbrains'])?.['air'])?.['sessionFailure']);
   const { category, severity, title, actions } = failure ?? {};
   if (typeof category !== 'string' || severity !== 'error' || typeof title !== 'string') {
@@ -355,8 +351,15 @@ const airSessionFailureOf = (meta: unknown): AcpSessionFailure | undefined => {
   };
 };
 
-/** When an exhausted limit refreshes, and the agent's own name for its window. */
-type AcpLimitReset = { readonly resetsAt: number; readonly window?: string };
+/**
+ * When an exhausted limit refreshes, and the agent's own name for its window.
+ *
+ * Epoch seconds, as both vendors report it. It rides the chat's session record
+ * (W10 EA-R9), so a stop after an eviction or a restart can still name it.
+ *
+ * @public
+ */
+export type AcpLimitReset = { readonly resetsAt: number; readonly window?: string };
 
 /**
  * One reported reset, kept only when it is a usable epoch second.
@@ -382,8 +385,9 @@ const limitResetOf = (resetsAt: unknown, window: string | undefined): AcpLimitRe
  * @param prior - The reset held from an earlier update of this session.
  * @param meta - The `_meta` of the update that just arrived.
  * @returns The reset to hold now.
+ * @internal
  */
-const claudeLimitReset = (prior: AcpLimitReset | undefined, meta: unknown): AcpLimitReset | undefined => {
+export const claudeLimitReset = (prior: AcpLimitReset | undefined, meta: unknown): AcpLimitReset | undefined => {
   const report = asRecord(asRecord(meta)?.['_claude/rateLimit']);
   const status = report?.['status'];
   if (typeof status !== 'string') {
@@ -406,8 +410,9 @@ const claudeLimitReset = (prior: AcpLimitReset | undefined, meta: unknown): AcpL
  *
  * @param stop - The AIR failure the agent sent.
  * @returns Whether waiting for a reset can make this stop go away.
+ * @internal
  */
-const limitWithReset = (stop: AcpSessionFailure): boolean =>
+export const limitWithReset = (stop: AcpSessionFailure): boolean =>
   stop.category === 'limit' && !stop.actions.includes('new_session');
 
 /** Claude's window vocabulary for the window lengths `codex-acp` measures in minutes. */
@@ -424,8 +429,9 @@ const codexWindowNames: Record<number, string> = { 300: 'five_hour', 10_080: 'se
  *
  * @param meta - The `_meta` of the prompt response.
  * @returns The reset, or `undefined` when the adapter attached none.
+ * @internal
  */
-const codexLimitReset = (meta: unknown): AcpLimitReset | undefined => {
+export const codexLimitReset = (meta: unknown): AcpLimitReset | undefined => {
   const report = asRecord(asRecord(meta)?.['_codex/rateLimit']);
   const minutes = report?.['windowMinutes'];
   return limitResetOf(report?.['resetsAt'], typeof minutes === 'number' ? codexWindowNames[minutes] : undefined);
@@ -440,8 +446,9 @@ const codexLimitReset = (meta: unknown): AcpLimitReset | undefined => {
  *
  * @param title - The failure title as the agent sent it.
  * @returns The body's `error.message`, or the title unchanged.
+ * @internal
  */
-const providerSentence = (title: string): string => {
+export const providerSentence = (title: string): string => {
   if (!title.startsWith('{')) {
     return title;
   }
@@ -456,15 +463,17 @@ const providerSentence = (title: string): string => {
 /**
  * Whether an ACP restore failure proves that only the old session is unavailable.
  *
- * @param error - Failure returned by `session/load` or `session/resume`.
+ * @param error - Failure returned by `session/load` or `session/resume`: its code and message.
  * @returns Whether opening a fresh session is safe.
+ * @internal
  */
-const recoverableSessionLoss = (error: unknown): boolean => {
+export const recoverableSessionLoss = (error: unknown): boolean => {
   const code = asRecord(error)?.['code'];
+  const message = asRecord(error)?.['message'];
   return (
     code === -32_002 ||
     code === -32_601 ||
-    (code === -32_602 && error instanceof Error && /unknown session/iu.test(error.message))
+    (code === -32_602 && typeof message === 'string' && /unknown session/iu.test(message))
   );
 };
 
@@ -495,8 +504,9 @@ const terminalCommandOf = (method: AuthMethod): string | undefined => {
  * @param adapter - Agent the user has to log in to, including its CLI login fallback.
  * @param authMethods - Methods `initialize` listed.
  * @returns The payload of both the refusal and the durable login interrupt.
+ * @internal
  */
-const loginOf = (adapter: AcpAdapter, authMethods: readonly AuthMethod[]): ExternalAgentLogin => ({
+export const loginOf = (adapter: AcpAdapter, authMethods: readonly AuthMethod[]): ExternalAgentLogin => ({
   kind: 'external-agent-login',
   agentId: adapter.id,
   authMethods: [
@@ -527,8 +537,9 @@ const loginOf = (adapter: AcpAdapter, authMethods: readonly AuthMethod[]): Exter
  * @param request - The `elicitation/create` parameters as received.
  * @returns The login facts, or `undefined` for a mode Tau cannot present; the
  * `url` is dropped unless it is one a browser will actually open.
+ * @internal
  */
-const urlLoginOf = (agentId: string, request: CreateElicitationRequest): ExternalAgentLogin | undefined => {
+export const urlLoginOf = (agentId: string, request: CreateElicitationRequest): ExternalAgentLogin | undefined => {
   if (!CreateElicitationRequestGuards.isUrl(request)) {
     return undefined;
   }
@@ -825,6 +836,8 @@ export type OpenAcpSessionOptions = {
   readonly acpSessionId?: string | undefined;
   /** Cumulative usage remembered with that session. */
   readonly priorUsage?: AcpUsage | undefined;
+  /** The limit reset the chat's record holds, so a stop in a new session can still name it (W10 F8). */
+  readonly limit?: AcpLimitReset | undefined;
   /** Existing durable ACP session-state envelope to replace across reconnects. */
   readonly sessionMessageId?: string | undefined;
   readonly onFrame?: ((frame: AcpWireFrame) => void) | undefined;
@@ -860,14 +873,20 @@ export type AcpSession = {
   readonly agent: AcpAgentFacts;
   /** Config options as the session last reported them, `config_option_update` included. */
   readonly configOptions: readonly SessionConfigOption[] | undefined;
-  /** Select a model on a throwaway discovery session to read that model's own configuration options. */
-  probeModel(model: string): Promise<readonly SessionConfigOption[] | undefined>;
   /** The mode the agent last reported, when it pushed one. */
   readonly modeId: string | undefined;
   /** `true` when a requested session could be neither resumed nor loaded. */
   readonly contextLost: boolean;
+  /** The vendor's cumulative usage as of the last turn whose report is durable; the next turn's baseline. */
+  readonly usage: AcpUsage | undefined;
+  /** The limit reset this session is behind, if the agent reported one. */
+  readonly limit: AcpLimitReset | undefined;
+  /** The title the agent last proposed for this conversation. */
+  readonly title: string | undefined;
   /** Resolves when the connection is gone, however it went. */
   readonly closed: Promise<void>;
+  /** Select a model on an idle discovery session to read its configuration options. */
+  probeModel(model: string): Promise<readonly SessionConfigOption[] | undefined>;
   /**
    * Run one turn against this session.
    *
@@ -903,8 +922,8 @@ type TurnProjection = {
   flush(): Promise<void>;
 };
 
-/** Latest replaceable presentation facts for one ACP session. */
-type AcpSessionPresentation = {
+/** Latest replaceable presentation facts for one ACP session. @internal */
+export type AcpSessionPresentation = {
   readonly sessionId?: string | undefined;
   readonly title?: string | undefined;
   readonly plan?: JsonValue | undefined;
@@ -914,10 +933,17 @@ type AcpSessionPresentation = {
   readonly modes?: readonly JsonValue[] | undefined;
 };
 
-const emptySessionPresentation: AcpSessionPresentation = { commands: [], configOptions: [] };
+/** @internal */
+export const emptySessionPresentation: AcpSessionPresentation = { commands: [], configOptions: [] };
 
-/** Non-model configuration values the session currently confirms. */
-const confirmedConfiguration = (
+/**
+ * Non-model configuration values the session currently confirms.
+ *
+ * @internal
+ * @param options - Config options as the session last reported them.
+ * @returns Each non-model option's current value, by id.
+ */
+export const confirmedConfiguration = (
   options: readonly SessionConfigOption[] | undefined,
 ): Readonly<Record<string, string | boolean>> =>
   Object.fromEntries(
@@ -935,8 +961,9 @@ const confirmedConfiguration = (
  * @param state - Current presentation state.
  * @param update - ACP update to apply.
  * @returns The replacement presentation state.
+ * @internal
  */
-const presentationAfter = (state: AcpSessionPresentation, update: SessionUpdate): AcpSessionPresentation => {
+export const presentationAfter = (state: AcpSessionPresentation, update: SessionUpdate): AcpSessionPresentation => {
   switch (update.sessionUpdate) {
     case 'plan': {
       return { ...state, plan: asJson({ type: 'items', entries: update.entries }) };
@@ -1696,837 +1723,4 @@ export const chooseOption = (
     return pick('allow_once');
   }
   return resolution.outcome === 'denied' ? pick('reject_once') : undefined;
-};
-
-/**
- * Open — or restore — one ACP session, and keep it alive for the whole chat.
- *
- * @param options - Adapter, working directory, MCP servers and the session to restore.
- * @returns The live session: its id, its options, and the seams to prompt and close it.
- * @public
- *
- * @example <caption>One session, two turns</caption>
- * ```typescript
- * import { openAcpSession } from '@taucad/host';
- * import type { AcpAdapter } from '@taucad/host';
- *
- * declare const adapter: AcpAdapter;
- * declare const turn: Parameters<Awaited<ReturnType<typeof openAcpSession>>['prompt']>[1];
- * const session = await openAcpSession({ adapter, cwd: process.cwd(), createId: () => '1' });
- * await session.prompt('Model a bracket.', turn);
- * await session.prompt('Now fillet it.', turn);
- * await session.close();
- * ```
- */
-// oxlint-disable-next-line eslint/max-lines-per-function -- the session *is* one protocol conversation: its handlers, its restore ladder and its prompt all close over the same connection, and splitting them would only move that state into an object nobody else reads.
-export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<AcpSession> => {
-  const { cwd } = options;
-  const adapter = spawnAcpAdapter({
-    adapter: options.adapter,
-    cwd,
-    ...(options.onFrame ? { onFrame: options.onFrame } : {}),
-  });
-  /** The turn in flight, if any. Absent, an update has nowhere to go — the load replay guard. */
-  let active: TurnProjection | undefined;
-  /** The same turn's durable seams, for the records that are not `session/update`. */
-  let activeTurn: AcpPromptTurn | undefined;
-  const pendingFileRequests = new Set<Promise<unknown>>();
-  const settleFileRequest = async <Result>(request: Promise<Result>): Promise<Result> => {
-    pendingFileRequests.add(request);
-    try {
-      return await request;
-    } finally {
-      pendingFileRequests.delete(request);
-    }
-  };
-  let configOptions: readonly SessionConfigOption[] | undefined;
-  let presentation: AcpSessionPresentation = emptySessionPresentation;
-  /**
-   * The session's cumulative usage as of the last turn that reported one.
-   *
-   * Lives exactly as long as the vendor's own counter — a new session restarts
-   * both — so a turn's own share is `current - this` (see {@link usageMetadata}).
-   */
-  let { priorUsage } = options;
-  let modeId: string | undefined;
-  /**
-   * The reset of the limit this session is currently behind, if it is behind one.
-   *
-   * Session-scoped because the report arrives on its own update, which may
-   * precede the turn that fails on it (see {@link claudeLimitReset}).
-   */
-  let limitReset: AcpLimitReset | undefined;
-  const pendingElicitations = new Map<string, { readonly sessionId: string; readonly turn: AcpPromptTurn }>();
-  /* Empty until `initialize` answers, so a handshake that fails with `-32000`
-   * still refuses with the right code — just with no methods to offer. */
-  let facts: AcpAgentFacts = {
-    protocolVersion,
-    agentCapabilities: undefined,
-    authMethods: [],
-    agentInfo: undefined,
-  };
-  const sessionMessageId = options.sessionMessageId ?? options.createId();
-  let sessionCommitted = options.sessionMessageId !== undefined;
-  const persistSessionState = async (
-    append: (events: readonly ExternalAgentLogEvent[]) => Promise<void>,
-    state: AcpSessionPresentation,
-  ): Promise<void> => {
-    const message: ProviderMessage = {
-      id: sessionMessageId,
-      role: 'assistant',
-      content: [
-        asJson({
-          type: 'acp-session',
-          agentId: options.adapter.id,
-          commands: state.commands,
-          configOptions: state.configOptions,
-          ...(state.sessionId === undefined ? {} : { sessionId: state.sessionId }),
-          ...(state.title === undefined ? {} : { title: state.title }),
-          ...(state.plan === undefined ? {} : { plan: state.plan }),
-          ...(state.modeId === undefined ? {} : { modeId: state.modeId }),
-          ...(state.modes === undefined ? {} : { modes: state.modes }),
-        }),
-      ],
-      metadata: { tauInternal: { kind: 'external-agent-session', origin: 'external', agentId: options.adapter.id } },
-    };
-    await append([
-      sessionCommitted
-        ? { type: 'message.envelope-replaced', messageId: sessionMessageId, replacement: message }
-        : { type: 'message.appended', message },
-    ]);
-    sessionCommitted = true;
-  };
-  let sessionWriter: ((events: readonly ExternalAgentLogEvent[]) => Promise<void>) | undefined;
-  let sessionWrite = Promise.resolve();
-  let sessionWriteError: unknown;
-  let pendingSessionState: AcpSessionPresentation | undefined;
-  const persistIdleSessionState = (state: AcpSessionPresentation): void => {
-    if (!sessionWriter) {
-      return;
-    }
-    const append = sessionWriter;
-    const priorWrite = sessionWrite;
-    const write = async (): Promise<void> => {
-      await priorWrite;
-      try {
-        await persistSessionState(append, state);
-        pendingSessionState = undefined;
-        sessionWriteError = undefined;
-      } catch (error) {
-        pendingSessionState = state;
-        sessionWriteError = error;
-      }
-    };
-    sessionWrite = write();
-  };
-
-  const authRequired = (): Error =>
-    Object.assign(
-      new Error(
-        `${options.adapter.id} is not logged in. Sign in to it on the machine running this agent, then try again.`,
-      ),
-      { code: 'EXTERNAL_AGENT_AUTH_REQUIRED', login: loginOf(options.adapter, facts.authMethods) },
-    );
-
-  /**
-   * The coded error for a failure the agent classified itself.
-   *
-   * `access` is the logged-out case and reuses its refusal. A `limit` is the
-   * person's own account and is not a crash; everything else is a stop the
-   * agent could still name. The provider's sentence is the message, verbatim,
-   * with no stderr: the agent already said what happened.
-   *
-   * A `limit` also carries its reset when the agent reported one as data —
-   * Codex beside this failure, Claude on an earlier `usage_update` — and only
-   * while that reset is still ahead. A reset already past would release a card's
-   * held Resume the moment it rendered, into the same limit.
-   *
-   * @param stop - The AIR failure the agent sent.
-   * @param meta - The `_meta` the failure travelled in.
-   * @returns The error the run records.
-   */
-  const stopped = (stop: AcpSessionFailure, meta: unknown): Error => {
-    if (stop.category === 'access') {
-      return authRequired();
-    }
-    const title = providerSentence(stop.title);
-    const reset = limitWithReset(stop) ? (codexLimitReset(meta) ?? limitReset) : undefined;
-    const details: ExternalAgentStop = {
-      agentId: options.adapter.id,
-      failure: { category: stop.category, title, actions: stop.actions },
-      ...(reset && reset.resetsAt * 1000 > Date.now() ? reset : {}),
-    };
-    return Object.assign(new Error(title), {
-      code: stop.category === 'limit' ? 'EXTERNAL_AGENT_LIMIT_REACHED' : 'EXTERNAL_AGENT_FAILED',
-      details,
-    });
-  };
-
-  /**
-   * A refusal the user can act on, or the vendor failure that is left over.
-   *
-   * Three rungs, in order. An error that already carries a Tau code *is* the
-   * answer — wrapping it would bury the one thing a surface renders. A JSON-RPC
-   * `-32000` is the logged-out case, and it becomes `EXTERNAL_AGENT_AUTH_REQUIRED`
-   * carrying the methods the agent listed, never `codex failed: Authentication
-   * required` plus eight kilobytes of stderr (r4 §2). Everything else is a
-   * genuine failure: the message says so plainly, and the stderr tail travels
-   * beside it as `details.diagnostics` for a surface to show on request.
-   *
-   * @param error - Whatever the connection or a guard threw.
-   * @returns The error the run records.
-   */
-  const failure = (error: unknown): Error => {
-    const code = asRecord(error)?.['code'];
-    if (error instanceof Error && typeof code === 'string') {
-      return error;
-    }
-    if (code === authRequiredCode) {
-      return authRequired();
-    }
-    const vendorMessage = error instanceof Error ? error.message : String(error);
-    const stderr = adapter.stderr();
-    const details: ExternalAgentStop = {
-      agentId: options.adapter.id,
-      /* The card names the agent itself; its body is the vendor's own words. */
-      failure: { category: 'internal', title: vendorMessage, actions: ['retry'] },
-      ...(stderr === '' ? {} : { diagnostics: stderr }),
-    };
-    return Object.assign(new Error(`${options.adapter.displayName} stopped unexpectedly: ${vendorMessage}`), {
-      code: 'EXTERNAL_AGENT_FAILED',
-      details,
-    });
-  };
-
-  /**
-   * Record one login the user has to complete, where every surface can see it.
-   *
-   * A URL elicitation is the portable login flow (V11): the agent hands Tau a
-   * verification URL and a code and waits, so the durable interrupt *is* the
-   * affordance — the banner, the CLI and the TUI all render the same record.
-   *
-   * @param login - The facts to render.
-   * @param reason - The agent's own message, kept verbatim as the prompt.
-   */
-  const recordLogin = async (login: ExternalAgentLogin, reason: string, turn: AcpPromptTurn): Promise<void> => {
-    await turn.append([
-      {
-        type: 'interrupt.recorded',
-        interruptId: login.elicitationId ?? options.createId(),
-        phase: 'requested',
-        reason,
-        payload: asJson(login),
-      },
-    ]);
-  };
-
-  let acpSessionId = options.acpSessionId ?? '';
-  const connection: ClientConnection = client({ name: 'tau-host' })
-    .onNotification('session/update', ({ params }) => {
-      if (acpSessionId !== '' && params.sessionId !== acpSessionId) {
-        return;
-      }
-      presentation = presentationAfter(presentation, params.update);
-      if (params.update.sessionUpdate === 'config_option_update') {
-        configOptions = params.update.configOptions;
-      }
-      if (params.update.sessionUpdate === 'current_mode_update') {
-        modeId = params.update.currentModeId;
-      }
-      if (params.update.sessionUpdate === 'usage_update') {
-        limitReset = claudeLimitReset(limitReset, params.update._meta);
-      }
-      if (active) {
-        active.update(params.update);
-      } else {
-        persistIdleSessionState(presentation);
-      }
-    })
-    .onRequest('session/request_permission', async ({ params }) => {
-      if (params.sessionId !== acpSessionId) {
-        return { outcome: { outcome: 'cancelled' } };
-      }
-      const turn = active;
-      const promptTurn = activeTurn;
-      if (!turn || !promptTurn || promptTurn.signal.aborted) {
-        /* Replay, or an agent acting between turns: nobody is waiting to decide. */
-        return { outcome: { outcome: 'cancelled' } };
-      }
-      let abortApproval: (() => void) | undefined;
-      const aborted = new Promise<undefined>((resolve) => {
-        abortApproval = (): void => {
-          resolve(undefined);
-        };
-        if (promptTurn.signal.aborted) {
-          resolve(undefined);
-        } else {
-          promptTurn.signal.addEventListener('abort', abortApproval, { once: true });
-        }
-      });
-      const resolution = await Promise.race([
-        turn.approve({
-          prompt: params.toolCall.title ?? `Allow ${params.toolCall.toolCallId}?`,
-          payload: asJson({ toolCall: params.toolCall, options: params.options }),
-        }),
-        aborted,
-      ]);
-      if (abortApproval) {
-        promptTurn.signal.removeEventListener('abort', abortApproval);
-      }
-      // oxlint-disable-next-line typescript/no-unnecessary-condition -- AbortSignal.aborted is mutable after the initial guard.
-      if (resolution === undefined || promptTurn.signal.aborted) {
-        return { outcome: { outcome: 'cancelled' } };
-      }
-      const optionId = chooseOption(params.options, resolution);
-      return optionId === undefined
-        ? { outcome: { outcome: 'cancelled' } }
-        : { outcome: { outcome: 'selected', optionId } };
-    })
-    .onRequest('elicitation/create', async ({ params }) => {
-      const login = urlLoginOf(options.adapter.id, params);
-      const promptTurn = activeTurn;
-      if (
-        !login ||
-        !promptTurn ||
-        promptTurn.signal.aborted ||
-        ('sessionId' in params && params.sessionId !== acpSessionId)
-      ) {
-        /* A form Tau has no surface for, a mode a later protocol invents, or an
-         * agent asking between turns with nobody watching: declining is the
-         * honest answer, and the agent falls back to whatever it does for a
-         * client that cannot present one. Accepting one Tau cannot record would
-         * leave the user waiting on a login they were never shown. */
-        return { action: 'decline' };
-      }
-      if (!login.elicitationId) {
-        return { action: 'decline' };
-      }
-      pendingElicitations.set(login.elicitationId, { sessionId: acpSessionId, turn: promptTurn });
-      await recordLogin(login, params.message, promptTurn);
-      /* Answered at once, and deliberately: the agent polls its own
-       * verification endpoint and says so with `elicitation/complete`, so
-       * holding this response open would stall the very flow it is waiting on. */
-      return { action: 'accept' };
-    })
-    .onNotification('elicitation/complete', ({ params }) => {
-      const pending = pendingElicitations.get(params.elicitationId);
-      pendingElicitations.delete(params.elicitationId);
-      if (
-        !pending ||
-        pending.sessionId !== acpSessionId ||
-        pending.turn !== activeTurn ||
-        pending.turn.signal.aborted
-      ) {
-        return;
-      }
-      /* async-iife: the agent is telling us, not asking; the turn continues
-       * whether or not the resolution has landed yet. */
-      void pending.turn.append([
-        {
-          type: 'interrupt.recorded',
-          interruptId: params.elicitationId,
-          phase: 'resolved',
-          reason: 'approved',
-          payload: { outcome: 'approved' },
-        },
-      ]);
-    })
-    .onRequest('fs/read_text_file', async ({ params }) => {
-      if (params.sessionId !== acpSessionId || !activeTurn || activeTurn.signal.aborted) {
-        throw Object.assign(new Error('This ACP filesystem request has no active session turn.'), {
-          code: 'EXTERNAL_AGENT_INVALID_SESSION',
-        });
-      }
-      return { content: await settleFileRequest(readSessionTextFile(cwd, params)) };
-    })
-    .onRequest('fs/write_text_file', async ({ params }) => {
-      if (params.sessionId !== acpSessionId || !activeTurn || activeTurn.signal.aborted) {
-        throw Object.assign(new Error('This ACP filesystem request has no active session turn.'), {
-          code: 'EXTERNAL_AGENT_INVALID_SESSION',
-        });
-      }
-      await settleFileRequest(writeSessionTextFile(cwd, params));
-      return {};
-    })
-    .connect(adapter.stream);
-
-  const onBootstrapAbort = (): void => {
-    connection.close();
-    adapter.close();
-  };
-  options.signal?.addEventListener('abort', onBootstrapAbort, { once: true });
-  if (options.signal?.aborted) {
-    onBootstrapAbort();
-  }
-
-  let contextLost = false;
-  try {
-    const initialized = await connection.agent.request('initialize', {
-      protocolVersion,
-      clientCapabilities,
-      clientInfo: { name: 'tau-host', version: '1' },
-    });
-    facts = {
-      protocolVersion: initialized.protocolVersion,
-      agentCapabilities: initialized.agentCapabilities,
-      authMethods: initialized.authMethods ?? [],
-      agentInfo: initialized.agentInfo ?? undefined,
-    };
-    if (initialized.protocolVersion !== protocolVersion) {
-      /* ACP's own instruction to a client that does not speak the version the
-       * agent answered with: disconnect. Prompting anyway would send a v1 turn
-       * to an agent that has told us it speaks something else. */
-      throw Object.assign(
-        new Error(
-          `${options.adapter.id} speaks ACP version ${String(initialized.protocolVersion)}; this Tau Host speaks ${String(protocolVersion)}. Update one of them.`,
-        ),
-        { code: 'EXTERNAL_AGENT_UNAVAILABLE' },
-      );
-    }
-    const capabilities = initialized.agentCapabilities;
-    const canClose = advertised(capabilities?.sessionCapabilities?.close);
-    const additionalDirectories = [...(options.additionalDirectories ?? [])];
-    const supportsDirectories = advertised(capabilities?.sessionCapabilities?.additionalDirectories);
-    const supportsPluginDirectories = initialized._meta?.['x.ai/pluginDirs'] === true;
-    if (additionalDirectories.length > 0 && !supportsDirectories && !supportsPluginDirectories) {
-      throw Object.assign(
-        new Error(`${options.adapter.id} does not support ACP additional directories required for Tau skills.`),
-        { code: 'EXTERNAL_AGENT_UNAVAILABLE' },
-      );
-    }
-    const mcpServers = [...(options.mcpServers ?? [])];
-    if (
-      mcpServers.some((server) => 'type' in server && server.type === 'http') &&
-      capabilities?.mcpCapabilities?.http !== true
-    ) {
-      throw Object.assign(new Error(`${options.adapter.id} does not support the HTTP MCP server required by Tau.`), {
-        code: 'EXTERNAL_AGENT_UNAVAILABLE',
-      });
-    }
-    /* Grok loads skills from a plugin's skills/ directory. Tau's verified
-     * publication already has that layout under .agents, outside the project.
-     * Restoring conversation must not restore vendor-owned Git state: Tau's
-     * revision host owns the working tree for both resume and load. */
-    const lifecycleDirectories = {
-      ...(supportsDirectories && additionalDirectories.length > 0 ? { additionalDirectories } : {}),
-      ...(supportsPluginDirectories
-        ? {
-            _meta: {
-              'x.ai/restore_code': false,
-              ...(additionalDirectories.length > 0
-                ? { pluginDirs: additionalDirectories.map((directory) => join(directory, '.agents')) }
-                : {}),
-            },
-          }
-        : {}),
-    };
-
-    /**
-     * The prompt blocks this agent can actually receive (V12).
-     *
-     * Two different answers, on purpose. An `image` or `audio` block an agent
-     * cannot read is *refused*: silently sending the text half would answer a
-     * question about a picture the model never saw, and the user would never
-     * know why the answer is wrong. Text resources degrade to baseline ACP text;
-     * binary resources are refused for the same reason as image and audio.
-     *
-     * @param blocks - The blocks this turn wants to send.
-     * @returns The blocks that go on the wire.
-     * @throws When a block carries content the agent did not advertise.
-     */
-    const sendable = (blocks: readonly ContentBlock[]): ContentBlock[] => {
-      const promptCapabilities = capabilities?.promptCapabilities;
-      const media = blocks.find(
-        (block) => (block.type === 'image' || block.type === 'audio') && promptCapabilities?.[block.type] !== true,
-      );
-      if (media) {
-        throw Object.assign(
-          new Error(
-            `${options.adapter.id} cannot read ${media.type} content, so this turn was not sent. Describe it in text, or run it on an agent that can.`,
-          ),
-          { code: 'EXTERNAL_AGENT_CONTENT_UNSUPPORTED' },
-        );
-      }
-      if (promptCapabilities?.embeddedContext === true) {
-        return [...blocks];
-      }
-      const binaryResource = blocks.find((block) => block.type === 'resource' && 'blob' in block.resource);
-      if (binaryResource) {
-        throw Object.assign(
-          new Error(
-            `${options.adapter.id} cannot read embedded binary content, so this turn was not sent. Describe it in text, or run it on an agent that can.`,
-          ),
-          { code: 'EXTERNAL_AGENT_CONTENT_UNSUPPORTED' },
-        );
-      }
-      return blocks.map((block) =>
-        block.type === 'resource' && 'text' in block.resource
-          ? { type: 'text', text: `[${block.resource.uri}]\n${block.resource.text}` }
-          : block,
-      );
-    };
-    /* `resume` first: it restores the agent's own context without streaming the
-     * transcript Tau already owns. `load` is the fallback for an adapter that
-     * only advertises that one, and its replay lands with no turn open. */
-    const restore = async (sessionId: string): Promise<boolean> => {
-      if (advertised(capabilities?.sessionCapabilities?.resume)) {
-        try {
-          const resumed = await connection.agent.request('session/resume', {
-            sessionId,
-            cwd,
-            mcpServers,
-            ...lifecycleDirectories,
-          });
-          configOptions = resumed.configOptions ?? undefined;
-          modeId = resumed.modes?.currentModeId ?? modeId;
-          presentation = {
-            ...presentation,
-            sessionId,
-            configOptions: (configOptions ?? []).map((option) => asJson(option)),
-            ...(modeId === undefined ? {} : { modeId }),
-            ...(isPresent(resumed.modes) ? { modes: resumed.modes.availableModes.map((mode) => asJson(mode)) } : {}),
-          };
-          return true;
-        } catch (error) {
-          if (!recoverableSessionLoss(error)) {
-            throw error;
-          }
-          /* The vendor lost it; try the other rung. */
-        }
-      }
-      if (capabilities?.loadSession === true) {
-        try {
-          const loaded = await connection.agent.request('session/load', {
-            sessionId,
-            cwd,
-            mcpServers,
-            ...lifecycleDirectories,
-          });
-          configOptions = loaded.configOptions ?? undefined;
-          modeId = loaded.modes?.currentModeId ?? modeId;
-          presentation = {
-            ...presentation,
-            sessionId,
-            configOptions: (configOptions ?? []).map((option) => asJson(option)),
-            ...(modeId === undefined ? {} : { modeId }),
-            ...(isPresent(loaded.modes) ? { modes: loaded.modes.availableModes.map((mode) => asJson(mode)) } : {}),
-          };
-          return true;
-        } catch (error) {
-          if (!recoverableSessionLoss(error)) {
-            throw error;
-          }
-          /* Both rungs failed: the conversation is gone, and the caller says so. */
-        }
-      }
-      return false;
-    };
-
-    if (acpSessionId === '' || !(await restore(acpSessionId))) {
-      contextLost = acpSessionId !== '';
-      priorUsage = undefined;
-      const created = await connection.agent.request('session/new', { cwd, mcpServers, ...lifecycleDirectories });
-      acpSessionId = created.sessionId;
-      configOptions = created.configOptions ?? undefined;
-      modeId = created.modes?.currentModeId ?? modeId;
-      presentation = {
-        ...presentation,
-        sessionId: acpSessionId,
-        configOptions: (configOptions ?? []).map((option) => asJson(option)),
-        ...(modeId === undefined ? {} : { modeId }),
-        ...(isPresent(created.modes) ? { modes: created.modes.availableModes.map((mode) => asJson(mode)) } : {}),
-      };
-    }
-
-    let closing: Promise<void> | undefined;
-    const waitForChildExit = async (): Promise<void> => {
-      if (adapter.child.exitCode !== null || adapter.child.signalCode !== null) {
-        return;
-      }
-      let timer: NodeJS.Timeout | undefined;
-      const exited = new Promise<boolean>((resolve) => {
-        adapter.child.once('exit', () => {
-          if (timer) {
-            clearTimeout(timer);
-          }
-          resolve(true);
-        });
-      });
-      const didExit = await Promise.race([
-        exited,
-        new Promise<boolean>((resolve) => {
-          timer = setTimeout(() => {
-            resolve(false);
-          }, sessionCloseTimeout);
-          timer.unref();
-        }),
-      ]);
-      if (!didExit) {
-        adapter.child.kill('SIGKILL');
-        await exited;
-      }
-    };
-    const stopTransport = async (): Promise<void> => {
-      connection.close();
-      adapter.close();
-      await waitForChildExit();
-    };
-    options.signal?.removeEventListener('abort', onBootstrapAbort);
-    return {
-      acpSessionId,
-      contextLost,
-      agent: facts,
-      get configOptions(): readonly SessionConfigOption[] | undefined {
-        return configOptions;
-      },
-      probeModel: async (model) => {
-        const choice = modelChoice(configOptions);
-        if (!choice?.values.includes(model)) {
-          return undefined;
-        }
-        if (choice.currentValue !== model) {
-          const set = await connection.agent.request('session/set_config_option', {
-            sessionId: acpSessionId,
-            configId: choice.configId,
-            value: model,
-          });
-          configOptions = set.configOptions;
-        }
-        return configOptions;
-      },
-      get modeId(): string | undefined {
-        return modeId;
-      },
-      closed: connection.closed,
-      close: async () => {
-        closing ??= (async () => {
-          activeTurn = undefined;
-          try {
-            if (canClose) {
-              await Promise.race([
-                connection.agent.request('session/close', { sessionId: acpSessionId }),
-                new Promise((resolve) => {
-                  setTimeout(resolve, sessionCloseTimeout).unref();
-                }),
-              ]);
-            }
-          } catch {
-            /* A session the agent cannot end is still a child this host kills. */
-          }
-          await stopTransport();
-          await Promise.allSettled(pendingFileRequests);
-          await sessionWrite;
-        })();
-        await closing;
-      },
-      // oxlint-disable-next-line eslint/max-params -- Mirrors the public ACP session port without a second options wrapper.
-      prompt: async (prompt, turn, model, configuration) => {
-        await sessionWrite;
-        if (pendingSessionState !== undefined) {
-          persistIdleSessionState(pendingSessionState);
-          await sessionWrite;
-        }
-        if (sessionWriteError !== undefined) {
-          throw failure(sessionWriteError);
-        }
-        sessionWriter = turn.appendSession;
-        const projection = createTurnProjection({
-          turn,
-          createId: options.createId,
-          agentId: options.adapter.id,
-          ...(options.adapter.nativeToolName ? { nativeToolName: options.adapter.nativeToolName } : {}),
-          ...(priorUsage === undefined ? {} : { priorUsage }),
-          ...(mcpServers.some((server) => server.name === 'tau') ? { tauMcpServerName: 'tau' } : {}),
-          publishSessionState: async (state) => persistSessionState(turn.appendSession ?? turn.append, state),
-        });
-        active = projection;
-        activeTurn = turn;
-        projection.sessionState(presentation);
-        /* Cancellation stops the *prompt* (D12): the connection, the child and
-         * the vendor session all stay up for the next turn. */
-        const cancelled = Promise.withResolvers<never>();
-        // oxlint-disable-next-line promise/prefer-await-to-then -- A pending cancellation promise cannot be awaited during a successful turn.
-        const handledCancellation = cancelled.promise.catch(() => undefined);
-        void handledCancellation;
-        let outstandingRequest: Promise<unknown> | undefined;
-        const requestDuringTurn = async <Result>(request: Promise<Result>): Promise<Result> => {
-          outstandingRequest = request;
-          try {
-            return await Promise.race([request, cancelled.promise]);
-          } finally {
-            if (!turn.signal.aborted && outstandingRequest === request) {
-              outstandingRequest = undefined;
-            }
-          }
-        };
-        const cancellationError = (): Error =>
-          Object.assign(new Error('The external agent turn was cancelled.'), { code: 'EXTERNAL_AGENT_CANCELLED' });
-        const notifyCancel = (): void => {
-          void connection.agent.notify('session/cancel', { sessionId: acpSessionId });
-        };
-        const onAbort = (): void => {
-          notifyCancel();
-          cancelled.reject(cancellationError());
-        };
-        try {
-          /* Attached before any request, so a cancel during `set_config_option`
-           * stops the turn instead of waiting for the agent (review 1-review S3). */
-          turn.signal.addEventListener('abort', onAbort, { once: true });
-          if (turn.signal.aborted) {
-            notifyCancel();
-            throw cancellationError();
-          }
-          if (model !== undefined) {
-            const choice = modelChoice(configOptions);
-            /* Refused, never silently ignored: the alternative is billing the
-             * user's own account for a model they did not choose. */
-            if (!choice?.values.includes(model)) {
-              throw Object.assign(
-                new Error(
-                  `${options.adapter.id} does not offer the model "${model}". It offers: ${(choice?.values ?? []).join(', ') || 'none'}.`,
-                ),
-                { code: 'EXTERNAL_AGENT_MODEL_UNAVAILABLE' },
-              );
-            }
-            /* The session holds the selection, so it is set once and not per turn. */
-            if (choice.currentValue !== model) {
-              const set = await requestDuringTurn(
-                connection.agent.request('session/set_config_option', {
-                  sessionId: acpSessionId,
-                  configId: choice.configId,
-                  value: model,
-                }),
-              );
-              configOptions = set.configOptions;
-              presentation = { ...presentation, configOptions: configOptions.map((option) => asJson(option)) };
-              projection.sessionState(presentation);
-            }
-          }
-          for (const [configId, value] of Object.entries(configuration ?? {})) {
-            const option = configOptions?.find((candidate) => candidate.id === configId);
-            if (option?.category === 'model' && model !== undefined && value !== model) {
-              throw Object.assign(
-                new Error(
-                  `${options.adapter.id} received conflicting model selections: ${model} and ${String(value)}.`,
-                ),
-                { code: 'EXTERNAL_AGENT_CONFIG_UNAVAILABLE' },
-              );
-            }
-            const accepted =
-              option?.type === 'boolean'
-                ? typeof value === 'boolean'
-                : option?.type === 'select' &&
-                  typeof value === 'string' &&
-                  option.options.some((entry) =>
-                    ('options' in entry ? entry.options : [entry]).some((candidate) => candidate.value === value),
-                  );
-            if (!accepted || !option) {
-              throw Object.assign(
-                new Error(`${options.adapter.id} does not offer configuration ${configId}=${String(value)}.`),
-                {
-                  code: 'EXTERNAL_AGENT_CONFIG_UNAVAILABLE',
-                },
-              );
-            }
-            if (option.currentValue === value) {
-              continue;
-            }
-            // oxlint-disable-next-line no-await-in-loop -- each response replaces the complete option set used by the next selection.
-            const set = await requestDuringTurn(
-              connection.agent.request(
-                'session/set_config_option',
-                typeof value === 'boolean'
-                  ? { sessionId: acpSessionId, configId: option.id, type: 'boolean', value }
-                  : { sessionId: acpSessionId, configId: option.id, value },
-              ),
-            );
-            configOptions = set.configOptions;
-            presentation = { ...presentation, configOptions: configOptions.map((entry) => asJson(entry)) };
-            projection.sessionState(presentation);
-          }
-          const answered = await requestDuringTurn(
-            connection.agent.request('session/prompt', {
-              sessionId: acpSessionId,
-              prompt: sendable(typeof prompt === 'string' ? [{ type: 'text', text: prompt }] : prompt),
-            }),
-          );
-          /* Read back, not echoed: `configOptions` has absorbed every
-           * `config_option_update` the turn pushed, so this is the model the
-           * agent actually finished on (V6). */
-          const ran = modelChoice(configOptions)?.currentValue ?? model;
-          projection.report({ usage: answered.usage ?? undefined, model: ran });
-          try {
-            await projection.flush();
-          } catch {
-            /* A stable final message identity makes one transient storage
-             * failure retryable without attributing the report twice. */
-            await projection.flush();
-          }
-          /* Advance only after the report is durable. Otherwise an append
-           * failure makes the next successful turn under-report usage. */
-          priorUsage = answered.usage ?? priorUsage;
-          /* A typed failure ends the turn `end_turn`: the stop reason alone
-           * would record a usage limit as a completed turn. Both pins attach
-           * this turn's failure here; a `session_info_update` failure belongs
-           * to another turn (Codex) or to no turn at all (Claude), so it never
-           * fails this one. */
-          const stop = airSessionFailureOf(answered._meta);
-          if (stop) {
-            throw stopped(stop, answered._meta);
-          }
-          return {
-            stopReason: answered.stopReason,
-            acpSessionId,
-            model: ran,
-            title: projection.title,
-            ...(priorUsage === undefined ? {} : { usage: priorUsage }),
-            configuration: confirmedConfiguration(configOptions),
-          };
-        } catch (error) {
-          if (turn.signal.aborted && outstandingRequest) {
-            const waitForSettlement = async (): Promise<boolean> => {
-              try {
-                await outstandingRequest;
-              } catch {
-                // A rejected request is settled too.
-              }
-              return true;
-            };
-            const settled = await Promise.race([
-              waitForSettlement(),
-              new Promise<boolean>((resolve) => {
-                const timer = setTimeout(() => {
-                  resolve(false);
-                }, sessionCloseTimeout);
-                timer.unref();
-              }),
-            ]);
-            if (!settled) {
-              await stopTransport();
-            }
-          }
-          try {
-            await projection.flush();
-          } catch {
-            /* The turn is already failing; a projection error adds nothing. */
-          }
-          throw failure(error);
-        } finally {
-          turn.signal.removeEventListener('abort', onAbort);
-          active = undefined;
-          /* The same lifetime as `active`, and for the same reason: a record
-           * that arrives between turns has no run to belong to, and appending it
-           * to the previous one reopens a message that is already finished
-           * (4-review S6). */
-          activeTurn = undefined;
-          await Promise.allSettled(pendingFileRequests);
-        }
-      },
-    };
-  } catch (error) {
-    options.signal?.removeEventListener('abort', onBootstrapAbort);
-    connection.close();
-    adapter.close();
-    throw failure(error);
-  }
 };

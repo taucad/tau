@@ -5,74 +5,12 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createTauAgentHost } from '@taucad/agent-host';
-import type {
-  InterruptApprovalPort,
-  JsonValue,
-  ModelStreamEvent,
-  ModelStreamRequest,
-  ModelTransport,
-} from '@taucad/agent-host';
 import { createNodeEventLog } from '@taucad/agent-host/node';
 import type { RpcFileSystem } from '@taucad/chat/rpc';
 import { serializeTodoList, todoListPath } from '@taucad/chat';
 
 import { createChatToolRegistry } from '#registry/tool-registry.js';
-
-/**
- * The scripted model (V08): a turn with three steps that keeps the person's
- * list current — creates it, moves on, finishes — and then answers.
- *
- * ponytail: the host package's `scripted-model.fixture.ts` is not on its export
- * map, so the same shape lives here; lift it if a third package needs it.
- */
-type ScriptedResponse = {
-  readonly text?: string | undefined;
-  readonly toolCalls?:
-    | ReadonlyArray<{ readonly id: string; readonly name: string; readonly input: JsonValue }>
-    | undefined;
-};
-
-const scriptedTransport = (
-  responses: readonly ScriptedResponse[],
-): ModelTransport & { readonly requests: ModelStreamRequest[] } => {
-  const requests: ModelStreamRequest[] = [];
-  let cursor = 0;
-  return {
-    requests,
-    async *stream(request): AsyncGenerator<ModelStreamEvent> {
-      requests.push(request);
-      const response = responses[cursor];
-      cursor += 1;
-      if (!response) {
-        throw new Error(`Scripted model exhausted after ${String(cursor - 1)} calls.`);
-      }
-      if (response.text !== undefined) {
-        yield { type: 'text-delta', text: response.text };
-      }
-      for (const call of response.toolCalls ?? []) {
-        yield { type: 'tool-input', toolCallId: call.id, toolName: call.name, input: call.input };
-      }
-      yield {
-        type: 'usage',
-        usage: {
-          input: 100,
-          output: 10,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 110,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        },
-      };
-      yield { type: 'completed', stopReason: response.toolCalls?.length ? 'toolUse' : 'stop' };
-    },
-  };
-};
-
-const resolvedInterruptPort: InterruptApprovalPort = {
-  pause: async (request) => ({ interruptId: request.interruptId, outcome: 'approved' }),
-  pending: async () => [],
-  resume: async () => undefined,
-};
+import { placementOver, scriptedTransport } from '#registry/tau-host.fixture.js';
 
 /** A project filesystem that remembers what the tools write. */
 const memoryFileSystem = (files: Map<string, string>): RpcFileSystem => ({
@@ -143,16 +81,17 @@ describe('update_todos through createTauAgentHost', () => {
       { text: 'The pyramid is modelled and slicing is under way.' },
     ]);
     let tick = 0;
+    const toolRegistry = createChatToolRegistry({
+      fileSystemFor: () => memoryFileSystem(files),
+      testingEnabled: false,
+    });
     const host = createTauAgentHost({
       systemPrompt: 'You are the task-list fixture.',
       model: { id: 'scripted-todo-model', contextWindow: 200_000 },
       modelTransport: transport,
-      toolRegistry: createChatToolRegistry({
-        fileSystemFor: () => memoryFileSystem(files),
-        testingEnabled: false,
-      }),
-      openEventLog: async () => createNodeEventLog({ filePath: logPath }),
-      interruptPort: resolvedInterruptPort,
+      toolRegistry,
+      placement: placementOver(toolRegistry),
+      openEventLog: async () => createNodeEventLog({ filePath: logPath, access: 'write' }),
       createId: createIds('message'),
       createLeaderEpoch: createIds('epoch'),
       now: () => new Date(Date.UTC(2026, 8, 24, 0, 0, tick++)),

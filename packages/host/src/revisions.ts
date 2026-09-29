@@ -6,33 +6,28 @@
  * identically in a page, in this daemon and in the Electron utility; this module
  * is the Node composition of that tree: it starts one actor per served project,
  * gives it the effects `@taucad/revisions/revision-effects` builds over a
- * {@link RevisionPort}, and wires the launcher's turn boundary to the root's
- * `admitTurn` / `turnCompleted` / `turnAbandoned` events.
- *
- * It wraps the launcher rather than reaching inside it because both host
- * compositions — the daemon (launcher 1) and the Electron services utility
- * (launcher 2) — build the launcher the same way, and the wrapper is the only
- * seam that is strictly ordered *before* `host.admit`. Observing the durable
- * stream alone would race the first tool write.
+ * {@link RevisionPort}, and hands the host's run actor (M1) the project's
+ * turn-placement port over that tree (W8 TS-S4): M1 admits, completes and
+ * acknowledges every attempt itself, and appends its settlement rows.
  */
 
-import type { SnapshotFrom } from 'xstate';
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, watch as watchDirectory, writeFileSync } from 'node:fs';
+import { waitFor } from 'xstate';
+import type { ActorOptions, AnyActorLogic, SnapshotFrom } from 'xstate';
+import { randomUUID } from 'node:crypto';
+import { readFileSync, watch as watchDirectory } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { rm, writeFile } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
-import { basename, dirname, join, sep } from 'node:path';
+import { basename, join, sep } from 'node:path';
 import { z } from 'zod';
-import { chatRecordSchema } from '@taucad/chat';
 
 import { jsonValueSchema } from '@taucad/agent-host';
-import type { AgentChannelRevisionEvent, JsonValue } from '@taucad/agent-host';
+import type { JsonValue } from '@taucad/agent-host';
+import type { AgentChannelRevisionEvent } from '@taucad/agent-host/wire';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
 import { revisionId } from '@taucad/revisions/algorithms';
 import {
-  admissionMilliseconds,
   awaitCheckoutCuts,
   awaitSyncSettled,
   closeCutMilliseconds,
@@ -44,6 +39,7 @@ import {
 } from '@taucad/revisions/revision-effects';
 import type {
   CheckoutFileSystems,
+  ProjectRevisionsActor,
   UseCheckoutFileSystem,
   TurnConflictedEvent as SettlementConflicted,
   TurnFailedEvent as SettlementFailed,
@@ -52,7 +48,6 @@ import type {
 import {
   generatedGitattributesPath,
   generatedIgnorePath,
-  readChatRecord,
   readRevisionDiff,
   readRevisionLog,
   readRevisionPlace,
@@ -62,6 +57,7 @@ import {
   tauRemoteUrl,
   watchRevisionStream,
 } from '@taucad/revisions';
+import { selectBranchNeedsConfirmation } from '@taucad/revisions/branch-machine';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import type { ParameterRecordCodec } from '@taucad/revisions/algorithms';
 import type { branchMachine } from '@taucad/revisions/branch-machine';
@@ -92,8 +88,8 @@ import type {
   NativeGitRemoteCredential,
   TauApiCredential,
 } from '@taucad/revisions/node';
-import { publishPushMilliseconds } from '@taucad/revisions/publish-machine';
-import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import { createTurnPlacementPort } from '@taucad/revisions/turn-placement';
+import type { TurnPlacementAdapter, TurnPlacementPortOptions } from '@taucad/revisions/turn-placement';
 import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
 import { defaultConfigDirectory } from '#credential-store.js';
@@ -171,8 +167,15 @@ export type HostRevisionEvent =
       readonly missing: readonly MissingGitTool[];
     };
 
-/** Options for {@link createProjectRevisions}. @public */
-export type ProjectRevisionsOptions = {
+/**
+ * Options for {@link createProjectRevisions}.
+ *
+ * `clock`, `inspect` and `onRejectedEvent` go to the revision actor tree (MC-R4):
+ * production passes none, and tests pass a `StepClock` and the harness inspector.
+ *
+ * @public
+ */
+export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'> & {
   /** Absolute workspace root this host owns: the live checkout's tree. */
   readonly workspaceRoot: string;
   /**
@@ -243,15 +246,6 @@ export type ProjectRevisionsOptions = {
     | ((input: { readonly runId: string | undefined; readonly trigger: string }) => RevisionActor | undefined)
     | undefined;
   /**
-   * The authority epoch leases are written under (N3, C71).
-   *
-   * A lease from any other epoch belongs to a host that no longer owns this
-   * project, and `sweepLeases` retires it on open. The value given here is only
-   * the *claim*: a project another running host already holds keeps that host's
-   * epoch, so opening it never retires a live turn's lease.
-   */
-  readonly authorityEpoch?: string | undefined;
-  /**
    * Observe this workspace's own writes, so the checkout knows it is dirty.
    *
    * On by default on a disk host, because without it `changed` has no caller
@@ -286,10 +280,11 @@ export type ProjectRevisions = {
     describe(): Promise<RevisionPlace>;
   }>;
   /**
-   * The same launcher, with every turn admitted before it runs and settled when
-   * its durable lifecycle marker turns terminal.
+   * Open this project's turn-placement session over its revision tree (W8 TS-S4, D9). The host process is the session,
+   * so a Node host opens one and hands it to its launcher; its tools are what `openTools` makes of an attempt's
+   * revocable view of its checkout.
    */
-  record(launcher: NodeAgentLauncher): NodeAgentLauncher;
+  placement<Tools>(openTools: TurnPlacementPortOptions<Tools>['openTools']): TurnPlacementAdapter<Tools>;
   /** One content-change event on a checkout, from whatever observes writes. */
   changed(checkoutId: string, paths: readonly string[]): void;
   /**
@@ -300,11 +295,9 @@ export type ProjectRevisions = {
    * shows are all the same settled values (A38, P28).
    */
   status(): RevisionStatusProjection;
-  /** Stop the tree. Pending admissions are refused rather than left hanging. */
+  /** Record what is on disk, then stop the tree. The launcher closes first, so its attempts are settled. */
   release(): Promise<void>;
 };
-
-const terminalStates = new Set(['completed', 'failed', 'cancelled']);
 
 /**
  * How long the workspace watcher gathers writes before it raises one `changed`.
@@ -345,16 +338,18 @@ const liveRoot = Symbol('live checkout');
 /** A watched checkout root: the live one, or a linked checkout by id. */
 type WatchKey = string | typeof liveRoot;
 
-/** How long a host waits for the live checkout, and then for the `close` cuts, before it lets the project go. */
+/** What a caller allows each of the close flush's two answered waits: the live checkout, then the `close` cuts. */
 const closeFlushMilliseconds = closeCutMilliseconds;
 
 /**
- * The longest `release()` holds one project before it lets go (rule 9).
+ * How long a caller that waits on `release()` allows one project (rule 9): the caller's bound, not the host's.
  *
- * The close flush runs three bounded waits in sequence: the live checkout
- * (a registry that answers late), the close cuts, then the scheduler's
- * quiesce. A caller that waits on `release()` — desktop quit — nests strictly
- * outside this, so the host's own reason lands before the caller's generic one.
+ * The close flush waits for the registry's live checkout and then for every
+ * `close` cut by request id, with no bound of its own (B3, B8), and only the
+ * scheduler's quiesce is bounded (W13 P33). This budget allows each of the two
+ * answered waits one close-cut bound before the quiesce. A caller that waits on
+ * `release()` (desktop quit, B9) nests strictly outside it, so a host that is
+ * merely slow answers before the caller gives up with its generic reason.
  *
  * @public
  */
@@ -363,14 +358,17 @@ export const projectReleaseMilliseconds = closeFlushMilliseconds * 2 + syncQuies
 /**
  * The longest a recorded launcher's `close()` holds one project (rule 9, RV-W2b #1).
  *
- * `close()` first drains the runs it started, and a run ends within its
- * admission — which itself outlasts its turn's base-cut settlement — before
- * {@link projectReleaseMilliseconds}. A utility quit that waits on it nests
- * outside this sum.
+ * `close()` first drains the runs it started (T3), then releases the project
+ * within {@link projectReleaseMilliseconds}. A drained run's completion cut is
+ * answered, not bounded (B3), so the drain is allowed one close-cut bound.
+ * A utility quit that waits on it nests outside this sum.
+ *
+ * ponytail: W8 deleted the admission bound this used to add; one close-cut bound
+ * for the drain is a stand-in until the drain has a bound of its own.
  *
  * @public
  */
-export const projectCloseMilliseconds = admissionMilliseconds + projectReleaseMilliseconds;
+export const projectCloseMilliseconds = closeCutMilliseconds + projectReleaseMilliseconds;
 
 const hostRevisionRequestSchema = z.object({ command: z.string().min(1) }).catchall(jsonValueSchema);
 
@@ -394,101 +392,6 @@ const revisionJson = (value: unknown): JsonValue =>
  * other's.
  */
 const hostDeviceId = `${hostname()}:${userInfo().username}`;
-
-/**
- * How long an admission waits for the checkout registry's first answer.
- *
- * Short, because the wait is only an ordering convenience: a registry that
- * cannot answer refuses the turn a moment later inside `prepare`, which is the
- * refusal a client should see rather than a stalled start.
- */
-const registryMilliseconds = 5000;
-
-/**
- * The authority epoch this process mints for a project nothing else owns.
- *
- * One per **process**, not one per call: `sweepLeases` retires every lease whose
- * epoch is not the current one, so a second {@link createProjectRevisions} with
- * an epoch of its own would retire the first's *live* leases the moment it
- * opened (N3).
- */
-const processAuthorityEpoch = randomUUID();
-
-/** Who holds a project on this machine, and the epoch its leases carry. */
-type ProjectAuthorityRecord = Readonly<{ epoch: string; pid: number }>;
-
-/**
- * Where this machine records which host holds a project.
- *
- * Beside the linked checkouts, in this host's own data directory — never inside
- * a served tree, because nothing a project carries may say who is running it.
- *
- * @param workspaceRoot - The project directory, which is the identity.
- * @returns The record's absolute path.
- */
-const authorityRecordPath = (workspaceRoot: string): string =>
-  join(
-    defaultConfigDirectory(),
-    'authority',
-    `${createHash('sha256').update(workspaceRoot).digest('hex').slice(0, 32)}.json`,
-  );
-
-/**
- * Whether the process that last claimed a project is still there.
- *
- * `EPERM` is alive too: another user's process answers the signal check without
- * accepting it.
- *
- * @param pid - The recorded owner.
- * @returns Whether it is still running.
- */
-const ownerIsRunning = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
-};
-
-/**
- * The epoch one project's leases are written and swept under (C71, N3).
- *
- * The epoch belongs to the **project**, not to the process: `sweepLeases`
- * retires every lease from another epoch, so a second process opening a project
- * a first is mid-turn on used to delete the live lease and take the running
- * turn's run id out of its own provenance. A host therefore adopts the epoch of
- * whichever host still holds this project, and mints a new one only when that
- * owner is gone — which is exactly when the leases it left behind are stale.
- * The browser leg made the same move per document (`file-manager.worker.ts`).
- *
- * ponytail: the owner is a pid, so a pid reused after a reboot reads as the same
- * host and its predecessor's leases survive one more open. W19's
- * `project-session` identity is the upgrade path; a heartbeat is not (Rule 8).
- *
- * @param workspaceRoot - The project this host is opening.
- * @param minted - The epoch to claim it with when nothing else holds it.
- * @returns The epoch this host must write and sweep under.
- */
-const projectAuthorityEpoch = (workspaceRoot: string, minted: string): string => {
-  const path = authorityRecordPath(workspaceRoot);
-  try {
-    const record = JSON.parse(readFileSync(path, 'utf8')) as Partial<ProjectAuthorityRecord>;
-    if (typeof record.epoch === 'string' && typeof record.pid === 'number' && ownerIsRunning(record.pid)) {
-      return record.epoch;
-    }
-  } catch {
-    /* No record, or one this host cannot read: nothing holds this project. */
-  }
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify({ epoch: minted, pid: process.pid } satisfies ProjectAuthorityRecord)}\n`);
-  } catch {
-    /* A host that cannot record its own claim still records revisions; it only
-     * loses the guarantee that a later process will not sweep its leases. */
-  }
-  return minted;
-};
 
 /**
  * The store a disk host's project is recorded in (S12, OQ-B8).
@@ -544,61 +447,46 @@ export const createProjectRevisionPort = (
 };
 
 /**
- * Settles when the checkout registry has answered for the first time.
+ * Settles when the checkout registry has answered for the first time, with or without checkouts (B4).
  *
- * A turn on a dirty checkout asks its *checkout actor* to mint the base before
- * it takes its lease, and the root spawns those actors from the registry's first
- * announcement — so anything sent before that is answered for a checkout nothing
- * has spawned yet. Leases themselves need no such wait: the registry buffers
- * them (W3b R22/R30).
+ * A turn on a dirty checkout asks its *checkout actor* to mint the base, and the root spawns those actors from the
+ * registry's first answer, so a verb waits for it. The registry answers even when it lists nothing (W5 RM-R11), so
+ * the wait is an answer, never a bound.
  *
  * @param actor - The started root actor.
- * @returns A promise that settles on the first non-empty registry, or the bound.
+ * @returns A promise that settles on the registry's first answer.
  */
-const registryAnswered = async (actor: {
-  subscribe: (listener: (snapshot: { context: { checkouts: readonly unknown[] } }) => void) => {
-    unsubscribe: () => void;
-  };
-  getSnapshot: () => { context: { checkouts: readonly unknown[] } };
-}): Promise<void> =>
-  new Promise<void>((resolve) => {
-    setTimeout(resolve, registryMilliseconds).unref();
-    const subscription = actor.subscribe((snapshot) => {
-      if (snapshot.context.checkouts.length > 0) {
-        resolve();
-        subscription.unsubscribe();
-      }
-    });
-    if (actor.getSnapshot().context.checkouts.length > 0) {
-      resolve();
-      subscription.unsubscribe();
-    }
-  });
+const registryAnswered = async (actor: ProjectRevisionsActor): Promise<void> => {
+  await waitFor(actor, (snapshot) => snapshot.context.registrySettled);
+};
 
 /**
- * Start one project's revision tree and record every turn a launcher admits.
+ * Start one project's revision tree, whose placement session a launcher places and settles every turn through.
  *
  * @param options - The root, the port, and where turns publish their checkouts.
- * @returns The running tree and the launcher wrapper.
+ * @returns The running tree and its placement session.
  * @public
  *
- * @example <caption>Launcher 1, recording every turn</caption>
+ * @example <caption>Launcher 1, placing every turn</caption>
  * ```typescript
- * import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
- * import { createProjectRevisions } from '@taucad/host';
+ * import { createGatewayModelTransport } from '@taucad/agent-host';
  * import type { ToolRegistry } from '@taucad/agent-host';
+ * import { createAgentLauncher } from '@taucad/agent-host/launcher';
+ * import { createNodeChatStore } from '@taucad/agent-host/node';
+ * import { createProjectRevisions } from '@taucad/host';
  *
  * declare const toolRegistry: ToolRegistry;
  * const revisions = createProjectRevisions({ workspaceRoot: '/srv/project' });
- * const launcher = revisions.record(
- *   createNodeAgentLauncher({
- *     workspaceRoot: '/srv/project',
- *     gatewayBaseUrl: 'https://api.tau.new/',
- *     systemPrompt: 'You are Tau.',
- *     toolRegistry,
- *   }),
- * );
+ * const launcher = createAgentLauncher({
+ *   chats: createNodeChatStore({ workspaceRoot: '/srv/project' }),
+ *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/' }),
+ *   credential: () => ({ mode: 'session' }),
+ *   systemPrompt: 'You are Tau.',
+ *   toolRegistry,
+ *   turnPlacement: revisions.placement(() => toolRegistry),
+ * });
  * await launcher.close();
+ * await revisions.release();
  * ```
  */
 // oxlint-disable-next-line eslint/max-lines-per-function -- one closure over one project's actor tree; every half reads the same five values.
@@ -649,90 +537,27 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     })();
   }
   /**
-   * Publish one host revision fact, on the wire and to the caller's reporter.
-   *
-   * The three turn facts are also **records in the chat's own durable log**, so
-   * a client reads them the way it reads every other durable fact — replayed on
-   * every reattach, in the same order, with no second channel to keep in step
-   * (S9). `record(launcher)` supplies the appender; a host that only opens a
-   * project and never records a turn has nobody to append for.
+   * Publish one host revision fact, on the wire and to the caller's reporter. Reporting only: the turn's own rows
+   * are M1's, appended from the placement session's settlements (W8 TS-S4, TS-R18).
    */
-  let appendToChatLog:
-    | ((chatId: string, event: TurnConflictedEvent | TurnFailedEvent | TurnFinalizedEvent) => Promise<unknown>)
-    | undefined;
-  const recordInChatLog = async (event: TurnConflictedEvent | TurnFailedEvent | TurnFinalizedEvent): Promise<void> => {
-    try {
-      await appendToChatLog?.(event.chatId, event);
-    } catch {
-      /* A log that will not take the record does not un-record the revision:
-       * the revision is already in the graph, and a client that missed the
-       * record reads the graph on its next attach. */
-    }
-  };
-  /**
-   * Chat-log appends still in flight.
-   *
-   * `report` cannot await — it runs inside an actor's emit — so the promise is
-   * held here and drained by `release()`. Without that, a host that refuses a
-   * turn and is closed in the same tick is still writing into `.tau/chats/**`
-   * while its caller removes the directory.
-   */
-  const recording = new Set<Promise<void>>();
   const report = (event: HostRevisionEvent): void => {
     options.events?.(event);
-    if (event.type !== 'turn.finalized' && event.type !== 'turn.conflicted' && event.type !== 'turn.failed') {
-      return;
+    if (event.type === 'turn.finalized' || event.type === 'turn.conflicted' || event.type === 'turn.failed') {
+      emitChannel({ kind: 'event', value: revisionJson(event) });
     }
-    emitChannel({ kind: 'event', value: revisionJson(event) });
-    const appended = (async (): Promise<void> => {
-      await recordInChatLog(event);
-      actor.send({ type: 'sync', event: { type: 'recordsChanged' } });
-    })();
-    recording.add(appended);
-    const forget = async (): Promise<void> => {
-      /* The rejection is the caller's to see through `release()`; this arm only
-       * stops a settled append from holding the set open. */
-      await appended.catch(() => undefined);
-      recording.delete(appended);
-    };
-    void forget();
   };
-
-  /** One pending admission per run, settled by the placement callback. */
-  const admissions = new Map<string, PromiseWithResolvers<void>>();
-  /**
-   * Refuse one waiting admission, with the reason it was refused for.
-   *
-   * One sentence for every way a turn can end without its lease — `prepare`
-   * throwing, the turn announcing its release (W19-b-a2), and the bound — so a
-   * caller never has to tell a refusal apart from the host running out of
-   * patience. Read-then-delete, so a run whose `prepare` refused it and then
-   * announced a release is answered once.
-   *
-   * @param runId - The run whose admission is waiting.
-   * @param reason - What the host can tell the person, already a sentence.
-   */
-  const refuseAdmission = (runId: string, reason: string): void => {
-    const pending = admissions.get(runId);
-    admissions.delete(runId);
-    pending?.reject(
-      Object.assign(new Error(`This Tau Host could not open a revision for the turn: ${reason}`), {
-        code: 'REVISION_PREPARE_FAILED',
-      }),
-    );
-  };
-  /** Each admitted run's turn id, so a terminal marker can name the turn. */
-  const turns = new Map<string, string>();
   /** Monotonic per checkout, one increment per content-change event (A38, F9). */
   const generations = new Map<string, number>();
   const filesystems =
     options.filesystem ??
     ((checkout: Parameters<NonNullable<ProjectRevisionsOptions['filesystem']>>[0]) =>
       new NodeFsProvider(checkout.kind === 'live' ? options.workspaceRoot : checkout.root));
-  const { actor, settled, recordEditorConflict } = createProjectRevisionsActor({
+  const tree = createProjectRevisionsActor({
     port,
     projectId,
-    authorityEpoch: projectAuthorityEpoch(options.workspaceRoot, options.authorityEpoch ?? processAuthorityEpoch),
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
+    ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
     ...(options.actorId === undefined ? {} : { actorId: options.actorId }),
     ...(options.actor === undefined ? {} : { actor: options.actor }),
     /*
@@ -832,18 +657,9 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         value: revisionJson({ type: 'chats.projected', projectId, chatIds }),
       });
     },
+    /* V19: where each placed run works, for the external agent port and the MCP endpoint's tools. */
     onPlacement: (placement) => {
-      if (placement.status === 'refused') {
-        refuseAdmission(placement.runId, placement.reason);
-        return;
-      }
-      const pending = admissions.get(placement.runId);
-      if (placement.status === 'leased') {
-        /* The admission ends here, not at `placed`: a dirty checkout is minted
-         * as the turn's base *between* the two, and a run admitted before that
-         * cut would fold its own writes into its own parent. */
-        admissions.delete(placement.runId);
-        pending?.resolve();
+      if (placement.status !== 'placed') {
         return;
       }
       options.checkouts?.set(placement.runId, {
@@ -853,6 +669,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       });
     },
   });
+  const { actor, settled, recordEditorConflict } = tree;
 
   /**
    * Report one settled turn, with the two graph facts it does not carry.
@@ -864,7 +681,6 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
    */
   const reportSettlement = async (settlement: TurnSettlement): Promise<void> => {
     options.checkouts?.delete(settlement.runId);
-    turns.delete(settlement.runId);
     report(await describeTurnSettlement(port, projectId, settlement));
   };
 
@@ -882,7 +698,6 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   });
   actor.on('turnConflicted', (settlement) => {
     options.checkouts?.delete(settlement.runId);
-    turns.delete(settlement.runId);
     report({
       type: 'turn.conflicted',
       turnId: settlement.turnId,
@@ -904,25 +719,10 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
    * as an event rather than as a per-host poll of the turn actor. */
   actor.on('turnReleased', (event) => {
     const failure = describeTurnRelease(event);
-    turns.delete(event.runId);
     options.checkouts?.delete(event.runId);
-    if (failure === undefined) {
-      return;
+    if (failure !== undefined) {
+      report(failure);
     }
-    report(failure);
-    /*
-     * The reason, now, rather than the bound's sentence half a minute later.
-     *
-     * `prepare`'s catch is the only place a placement is *refused*
-     * (`revision-effects.ts`), so a turn that ended any other way before its
-     * lease — a base cut the checkout could not settle, a lease it could not
-     * write, an abandonment — left `admit` waiting out `admissionMilliseconds`
-     * and then answering "it was never leased", which names nothing anybody can
-     * act on (I12; the browser leg fixed the same gap in W19-b). A `finalized`
-     * or `conflicted` turn held its lease, so its admission was already
-     * resolved at `leased` and there is nothing here to settle.
-     */
-    refuseAdmission(event.runId, failure.reason);
   });
   const channelStatus = (snapshot: Parameters<typeof selectRevisionStatus>[0]): RevisionStatusProjection => {
     const status = selectRevisionStatus(snapshot);
@@ -993,7 +793,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   /* D3 on desktop too: a *Save* another writer beat is an answer, not a silent
    * `dirty`. Only `save`, as in the worker (N6). */
   actor.on('casLost', (lost) => {
-    if (lost.turnId !== undefined || lost.trigger !== 'save') {
+    if (lost.turn !== undefined || lost.trigger !== 'save') {
       return;
     }
     emitChannel({
@@ -1007,7 +807,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     });
   });
   actor.on('nothingToSave', (event) => {
-    if (event.trigger === 'save' && event.turnId === undefined) {
+    if (event.trigger === 'save' && event.turn === undefined) {
       emitChannel({ kind: 'toast', value: revisionJson({ type: 'nothingToSave' }) });
     }
   });
@@ -1059,66 +859,6 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       value: revisionJson({ ...toast, type: 'error', subject: 'branch' }),
     });
   });
-  const admit = async (input: {
-    readonly runId: string;
-    readonly chatId: string;
-    readonly turnId: string;
-    readonly checkoutId?: string | undefined;
-  }): Promise<void> => {
-    const pending = Promise.withResolvers<void>();
-    admissions.set(input.runId, pending);
-    turns.set(input.runId, input.turnId);
-    const bound = setTimeout(() => {
-      if (!admissions.has(input.runId)) {
-        return;
-      }
-      /*
-       * The root is told, not only the caller (T4-02).
-       *
-       * An admission the root is still holding — buffered before the registry
-       * answered, or queued behind the turn id a running turn holds (V8) —
-       * outlives this wait: the root replays it later, the turn it spawns takes
-       * the checkout's lease, and nothing is left to send it `turnCompleted`,
-       * so the checkout reads as held for the life of the process and every
-       * save on it records nothing. A lease has no heartbeat by policy (§8),
-       * so this host giving up is the only liveness signal it has.
-       */
-      actor.send({ type: 'turnAbandoned', turnId: input.turnId, runId: input.runId });
-      /*
-       * And the run id becomes admittable again, as it does on every other way
-       * an admission ends (`turnReleased`, a failed `execute`).
-       *
-       * `execute` skips admission for a run it has already admitted, so a
-       * client retrying the run id this bound just refused went straight to the
-       * launcher: the agent ran with no lease, unfenced, and its turn recorded
-       * no revision (I-EDIT).
-       */
-      turns.delete(input.runId);
-      refuseAdmission(input.runId, 'it was never leased.');
-    }, admissionMilliseconds);
-    /* No wait for the registry: the root holds an admission that arrives before
-     * it and replays it, so there is nothing here to compensate for (A38). The
-     * watcher is caught up, so the dirty base the turn mints holds the
-     * person's last writes and not the agent's (E1). */
-    await settleWatch();
-    actor.send({
-      type: 'admitTurn',
-      turnId: input.turnId,
-      chatId: input.chatId,
-      runId: input.runId,
-      ...(input.checkoutId === undefined ? {} : { checkoutId: input.checkoutId }),
-    });
-    /* The placement is awaited, not assumed: the agent's session and Tau's own
-     * file tools are rooted from it, the turn's base is minted before the agent
-     * can write, and a turn this host could not place is refused rather than
-     * run unrecorded (I-EDIT). */
-    try {
-      await pending.promise;
-    } finally {
-      clearTimeout(bound);
-    }
-  };
-
   /*
    * The project's own writes, coalesced into one `changed` per burst.
    *
@@ -1310,70 +1050,54 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   };
 
   /**
-   * The live checkout, once the registry has one, or `undefined` at the bound.
+   * The live checkout, once the registry has answered (B3: an answer, not a bound).
    *
-   * @returns The live checkout's id, when this host has one in time.
+   * @returns The live checkout's id, or `undefined` when the registry answered with none.
    */
   const waitForLiveCheckout = async (): Promise<string | undefined> => {
-    const current = actor.getSnapshot().context.liveCheckoutId;
-    if (current !== undefined) {
-      return current;
-    }
-    const found = Promise.withResolvers<string | undefined>();
-    const subscription = actor.subscribe((snapshot) => {
-      if (snapshot.context.liveCheckoutId !== undefined) {
-        found.resolve(snapshot.context.liveCheckoutId);
-      }
-    });
-    const bound = setTimeout(() => {
-      found.resolve(undefined);
-    }, closeFlushMilliseconds).unref();
-    try {
-      return await found.promise;
-    } finally {
-      clearTimeout(bound);
-      subscription.unsubscribe();
-    }
+    const snapshot = await waitFor(
+      actor,
+      (current) => current.context.liveCheckoutId !== undefined || current.context.registrySettled,
+    );
+    return snapshot.context.liveCheckoutId;
   };
 
   /**
    * Record what is on disk before this host lets the project go (S30 `close`).
    *
    * The checkout's I5 gate decides whether anything is minted, so a clean
-   * checkout pays one tree hash. Bounded, because quitting must not hang on a
-   * store that stopped answering: a revision that was not minted here is minted
-   * by the next host to open the project, from the same bytes.
+   * checkout pays one tree hash. The registry and every cut are answered by
+   * request id, not bounded (B3, B8); only the scheduler's quiesce is. A quit
+   * that must not hang is bounded by its owner (desktop quit, B9): a revision
+   * not minted here is minted by the next host to open the project, from the
+   * same bytes.
    *
    * @returns Nothing; the outcome is the revision, or the absence of one.
    */
   const flushClose = async (): Promise<void> => {
     /*
-     * A missing live checkout is *not yet*, not "nothing to do" (W6-a3).
-     *
-     * The registry is read asynchronously, so a host that quits while the
-     * project is still opening used to return here immediately and let the tree
-     * go with nothing recorded. The wait is the same bound the cut gets, and it
-     * ends the same way: after it, whatever is on disk is recorded by the next
-     * host to open the project.
+     * A missing live checkout is *not yet*, not "nothing to do" (W6-a3): the
+     * registry is read asynchronously, so the close waits for its answer. A
+     * registry that answered with no live checkout has nothing to record.
      */
     const checkoutId = await waitForLiveCheckout();
     if (checkoutId === undefined) {
-      throw new Error('The project checkout was not ready before the close deadline.');
+      throw new Error('This project has no live checkout to record at close.');
     }
     /*
-     * Every checkout no turn holds, live and linked (the close ruling, D6).
+     * Every checkout no turn of this root holds, live and linked (the close ruling, D6).
      *
-     * A turn holding a checkout is already recording those bytes: minting here
-     * would pass the I5 gate first and leave the turn's own settlement with an
-     * unchanged tree — the turn's revision, recorded under `close` and credited
-     * to nobody. A process that dies before the turn settles loses nothing
-     * either: the next host to open the project mints from the same bytes.
+     * Another holder's lease is not skipped here: the registry's list lags a
+     * retirement, so a refused turn's record would skip the close silently. The
+     * cut reads the records itself instead, and a live lease answers
+     * `nothingToSave{heldBy}` (RM-R16); a process that dies before that turn
+     * settles loses nothing, since the next host mints from the same bytes.
      */
     /* A turn still waiting to be placed would hold every checkout from the
-     * cuts; a closing host is not going to run it (RV-W2b #5). */
-    for (const runId of releaseUnplacedTurns(actor)) {
-      refuseAdmission(runId, 'it stopped serving this project before the turn was placed.');
-    }
+     * cuts; a closing host is not going to run it. Abandoned, it releases
+     * whatever it is granted, and the placement port refuses its admission
+     * (RV-W2b #5, TS-R1). */
+    releaseUnplacedTurns(actor);
     let refused: Error | undefined;
     try {
       await settleWatch();
@@ -1406,30 +1130,28 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     }
   };
 
+  /* A retried close (the launcher refused its own release) finds the tree stopped, where a cut is never answered. */
+  let stopped = false;
   const release = async (): Promise<void> => {
-    /* A refused close keeps everything: the caller's next close re-attempts
-     * the cut, so nothing below runs until one succeeds. */
-    await flushClose();
-    stopWatchingCheckouts();
-    for (const watcher of watchers.values()) {
-      watcher?.close();
+    if (!stopped) {
+      /* A refused close keeps everything: the caller's next close re-attempts
+       * the cut, so nothing below runs until one succeeds. */
+      await flushClose();
+      stopWatchingCheckouts();
+      for (const watcher of watchers.values()) {
+        watcher?.close();
+      }
+      watchers.clear();
+      if (coalescing !== undefined) {
+        clearTimeout(coalescing);
+        coalescing = undefined;
+      }
+      actor.stop();
+      stopped = true;
     }
-    watchers.clear();
-    if (coalescing !== undefined) {
-      clearTimeout(coalescing);
-      coalescing = undefined;
-    }
-    /* The fourth way a turn ends without its lease, in the same frame and with
-     * the same code as the other three — a client cannot act on a refusal it
-     * has to tell apart by its wording. */
-    for (const runId of admissions.keys()) {
-      refuseAdmission(runId, 'it stopped serving this project before the turn was placed.');
-    }
-    actor.stop();
     /* Stopping the tree cancels nothing already in flight; the store's own
-     * creation and the chat-log appends are the effects that outlive it, and a
-     * caller that removes the project directory next must not race either. */
-    await Promise.all(recording);
+     * creation outlives it, and a caller that removes the project directory
+     * next must not race it. */
     await settled();
   };
 
@@ -1454,6 +1176,9 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     }
     return value;
   };
+  /* A verb names its request (RM-R1): the page's own id when it sent one, else one minted here. */
+  const requestIdOf = (request: Record<string, JsonValue>): string =>
+    optionalText(request, 'requestId') ?? randomUUID();
   /**
    * What one `remoteCredential` frame makes this host hold (D4, D16b).
    *
@@ -1595,7 +1320,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         actor.getSnapshot().children.restore?.send({ type: request.command });
         break;
       case 'switch':
-        actor.send({ type: 'switch', branch: text('branch') });
+        actor.send({ type: 'switch', requestId: requestIdOf(request), branch: text('branch') });
         break;
       case 'followChat':
         actor.send({ type: 'followChat', chatId: text('chatId') });
@@ -1603,21 +1328,54 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       case 'pinTo':
         actor.send({ type: 'pinTo', checkoutId: text('checkoutId') });
         break;
-      case 'createBranch':
-        actor.send({
-          type: 'branch',
-          event: {
-            type: 'create',
-            name: text('name'),
-            ...(optionalText(request, 'from') ? { from: optionalText(request, 'from') } : {}),
-          },
-        });
-        break;
+      case 'createBranch': {
+        /* Answered with the checkout the registry made, or its refusal (B7: an answer, never a bound). The branch
+         * child answers every `create` by its id, a busy one `REVISIONS_BUSY` (W5 RM-R11). */
+        if (branchChild === undefined) {
+          throw Object.assign(new Error('This project has no branch verbs running.'), {
+            code: 'REVISIONS_UNAVAILABLE',
+          });
+        }
+        const requestId = requestIdOf(request);
+        const name = text('name');
+        const from = optionalText(request, 'from');
+        const created = Promise.withResolvers<JsonValue>();
+        const subscriptions = [
+          branchChild.on('toast.branch', (toast) => {
+            if (toast.requestId === requestId) {
+              created.resolve({
+                branch: name,
+                ...(toast.checkoutId === undefined ? {} : { checkoutId: toast.checkoutId }),
+                ...(toast.checkoutRoot === undefined ? {} : { checkoutRoot: toast.checkoutRoot }),
+              });
+            }
+          }),
+          branchChild.on('toast.error', (toast) => {
+            if (toast.requestId === requestId) {
+              created.reject(
+                Object.assign(new Error(toast.message), toast.code === undefined ? {} : { code: toast.code }),
+              );
+            }
+          }),
+        ];
+        try {
+          actor.send({
+            type: 'branch',
+            event: { type: 'create', requestId, name, ...(from === undefined ? {} : { from }) },
+          });
+          return await created.promise;
+        } finally {
+          for (const subscription of subscriptions) {
+            subscription.unsubscribe();
+          }
+        }
+      }
       case 'discardBranch':
         actor.send({
           type: 'branch',
           event: {
             type: 'discard',
+            requestId: requestIdOf(request),
             branch: text('branch'),
             ...(optionalText(request, 'checkoutId') ? { checkoutId: optionalText(request, 'checkoutId') } : {}),
           },
@@ -1626,13 +1384,13 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       case 'mergeBranch':
         actor.send({
           type: 'branch',
-          event: { type: 'merge', branch: text('branch') },
+          event: { type: 'merge', requestId: requestIdOf(request), branch: text('branch') },
         });
         break;
       case 'renameBranch':
         actor.send({
           type: 'branch',
-          event: { type: 'rename', branch: text('branch'), name: text('name') },
+          event: { type: 'rename', requestId: requestIdOf(request), branch: text('branch'), name: text('name') },
         });
         break;
       case 'confirmBranch':
@@ -1680,6 +1438,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           type: 'publish',
           event: {
             type: 'publish',
+            requestId: requestIdOf(request),
             ...(optionalText(request, 'tag') ? { tag: optionalText(request, 'tag') } : {}),
             ...(optionalText(request, 'revisionId') ? { revisionId: optionalText(request, 'revisionId') } : {}),
           },
@@ -1765,6 +1524,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           const trigger = request['trigger'];
           actor.send({
             type: 'cut',
+            requestId: requestIdOf(request),
             trigger: trigger === 'hidden' || trigger === 'close' ? trigger : 'save',
             checkoutId,
             leaseIds: [],
@@ -1840,105 +1600,14 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       }),
       events: channelEvents,
     },
-    record: (launcher) => {
-      /* The launcher owns the chat's log writer: one appender per chat, so the
-       * record takes the next sequence rather than opening a second writer on
-       * one `events.jsonl`. */
-      appendToChatLog = async (chatId, event) => launcher.append(chatId, event);
-      const watching = new AbortController();
-      let watchFailure: unknown;
-      const watch = (async (): Promise<void> => {
-        try {
-          for await (const { event } of launcher.events(watching.signal)) {
-            if (event.type !== 'run.lifecycle' || !terminalStates.has(event.state)) {
-              continue;
-            }
-            const turnId = turns.get(event.runId);
-            if (turnId === undefined) {
-              continue;
-            }
-            /* Sent straight through: `turn.machine` buffers a completion that
-             * arrives while it is still `preparing` and replays it on
-             * `leased.held`, so the host holds nothing (W6). The turn's own
-             * last writes reach the checkout before its cut does (E1). */
-            // oxlint-disable-next-line no-await-in-loop -- each completion waits for the writes before it.
-            await settleWatch();
-            actor.send({ type: 'turnCompleted', turnId });
-          }
-        } catch (error) {
-          /* A durable subscription can *error* — the launcher's fan-out drops
-           * one that fell behind — and nothing awaits this promise until
-           * `close()`. An unhandled rejection ends the process on Node 24 long
-           * before that, so the failure is kept and re-raised where a caller
-           * sees it. */
-          watchFailure = error;
-        }
-      })();
-
-      return {
-        ...launcher,
-        execute: async (command) => {
-          if (command.type !== 'start' || turns.has(command.runId)) {
-            return launcher.execute(command);
-          }
-          const filesystem = await filesystems({
-            id: actor.getSnapshot().context.liveCheckoutId ?? 'live',
-            projectId,
-            root: options.workspaceRoot,
-            kind: 'live',
-            branch: undefined,
-            baseRevisionId: undefined,
-          });
-          const bytes = await readChatRecord(filesystem, command.chatId);
-          const chat = bytes === undefined ? undefined : chatRecordSchema.parse(JSON.parse(bytes));
-          if (chat !== undefined && chat.id !== command.chatId) {
-            throw new Error('The chat record does not match the admitted chat.');
-          }
-          const snapshot = actor.getSnapshot().context;
-          // The durable picker selection outranks a previous turn's cached placement.
-          const checkoutId = chat?.checkoutId ?? snapshot.chatCheckouts[command.chatId] ?? snapshot.selectedCheckoutId;
-          await admit({
-            runId: command.runId,
-            chatId: command.chatId,
-            /* The stable user-message id the client keys its own turn on: the
-             * settlement has to name the same turn the transcript does, or the
-             * graph node it becomes belongs to nothing on screen. */
-            turnId: command.message.id,
-            ...(checkoutId === undefined ? {} : { checkoutId }),
-          });
-          try {
-            return await launcher.execute(command);
-          } catch (error) {
-            /* `acknowledge` only throws when nothing of ours was admitted, so
-             * the turn never reached the tool loop and wrote nothing. The turn
-             * actor retires its lease and drops out; a refused admission must
-             * not hold one for the life of the host. */
-            const turnId = turns.get(command.runId);
-            if (turnId !== undefined) {
-              /* Named by run as well as by turn: an edit reuses the message id
-               * the previous run leased, so the verb must not end whichever run
-               * holds that turn id now. */
-              actor.send({ type: 'turnAbandoned', turnId, runId: command.runId });
-              turns.delete(command.runId);
-            }
-            options.checkouts?.delete(command.runId);
-            throw error;
-          }
-        },
-        close: async () => {
-          /* The launcher first: closing it drains every background run, so the
-           * terminal markers this wrapper settles on are published before the
-           * fan-out ends the watch. */
-          await launcher.close();
-          await watch;
-          await release();
-          if (watchFailure !== undefined) {
-            // oxlint-disable-next-line @typescript-eslint/only-throw-error -- re-raising exactly what the launcher's stream threw.
-            throw watchFailure;
-          }
-        },
-      };
-    },
+    placement: (openTools) =>
+      createTurnPlacementPort({
+        revisions: tree,
+        openTools,
+        root: (checkout) => (checkout.kind === 'live' ? options.workspaceRoot : checkout.root),
+        /* E1: the watcher catches up before an admission's dirty base and before a completion cut. */
+        settle: settleWatch,
+      }),
   };
   startWatching();
   return revisions;
@@ -2042,18 +1711,15 @@ export type RevisionSaveOutcome =
       line: string;
       /**
        * How the push that followed ended; `noRemote` when this project backs up
-       * nowhere, `timedOut` when the push did not answer in time (its outcome is
-       * unknown, not failed).
+       * nowhere. A hung push ends at the scheduler's own deadline (A12).
        */
-      backup: SyncPushOutcome | 'noRemote' | 'timedOut';
+      backup: SyncPushOutcome | 'noRemote';
       /** The scheduler's own sentence, when `backup` is neither `backedUp` nor `noRemote`. */
       reason?: string;
     }>
   /** The files already are the head's revision, or a turn is recording them. */
   | Readonly<{ status: 'unchanged'; line: string }>
-  | Readonly<{ status: 'refused'; reason: string }>
-  /** The cut did not answer in time: whether a revision was recorded is unknown, not refused. */
-  | Readonly<{ status: 'timedOut'; reason: string }>;
+  | Readonly<{ status: 'refused'; reason: string }>;
 
 /** What an `openFromRemote` did, or why it did not (W18 DEF-2). @public */
 export type RevisionOpenOutcome =
@@ -2104,13 +1770,6 @@ export type ProjectRevisionVerbs = {
   close(): Promise<void>;
 };
 
-/** How long a verb waits for the machines to answer. */
-const verbMilliseconds = 30_000;
-
-/* Publishing waits out `publish.machine`'s own push bound and then some, so the
- * verb reports the machine's error edge rather than pre-empting it. */
-const publishVerbMilliseconds = publishPushMilliseconds + verbMilliseconds;
-
 /**
  * Open one project's revision verbs on a disk host (S13, S28).
  *
@@ -2144,7 +1803,6 @@ export const openProjectRevisions = (
     workspaceRoot: string;
     projectId?: string | undefined;
     port?: RevisionPort | undefined;
-    authorityEpoch?: string | undefined;
     gitExecutable?: string | undefined;
     /**
      * The Tau Cloud API this project publishes to.
@@ -2163,7 +1821,8 @@ export const openProjectRevisions = (
     remoteUrl?: ((projectId: string) => string | undefined) | undefined;
     /** Creates or re-points the publication row. Only a signed-in host has it. */
     publishPublication?: ((input: PublishPublicationActorInput) => Promise<PublishPublicationActorOutput>) | undefined;
-  }>,
+  }> &
+    Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>,
 ): ProjectRevisionVerbs => {
   const projectId = resolveProjectId(options.workspaceRoot, options.projectId);
   const { apiBaseUrl, apiToken } = options;
@@ -2211,15 +1870,17 @@ export const openProjectRevisions = (
   let tree: ReturnType<typeof createProjectRevisionsActor> | undefined;
 
   /* Started on the first write verb only: `log`, `diff` and `describe` ask the
-   * store directly, and a read must never create a repository, sweep a lease or
+   * store directly, and a read must never create a repository, retire a lease or
    * mint anything. */
   const started = async (): Promise<NonNullable<typeof tree>> => {
     if (tree === undefined) {
       tree = createProjectRevisionsActor({
         port,
         projectId,
-        authorityEpoch: projectAuthorityEpoch(options.workspaceRoot, options.authorityEpoch ?? processAuthorityEpoch),
         filesystem: (checkout) => new NodeFsProvider(checkout.kind === 'live' ? options.workspaceRoot : checkout.root),
+        ...(options.clock === undefined ? {} : { clock: options.clock }),
+        ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
+        ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
         parameters: parameterCodec,
         /* The person this process runs for, as both other Node hosts record
          * (AC15): without it a terminal's save is authored by `tau-host`. */
@@ -2235,27 +1896,20 @@ export const openProjectRevisions = (
   };
 
   /**
-   * Resolve on the first answer, or give up rather than hold a terminal open.
+   * Resolve on the verb's own answer (B5, B6: answered, never bounded).
+   *
+   * Every request names its id and the machines answer it in every state, a busy one with `REVISIONS_BUSY` (W5
+   * RM-R11), so there is no timeout to report; a network edge keeps its own deadline inside the machine (A9, A12).
    *
    * @param listen - Subscribes, sends, and returns its own unsubscribe.
-   * @param timedOut - The answer a caller gets when nothing arrives in time.
-   * @param milliseconds - How long to wait; defaults to the ordinary verb bound.
-   * @returns The first answer, or `timedOut`.
+   * @returns The first answer.
    */
-  const answered = async <Answer>(
-    listen: (resolve: (answer: Answer) => void) => () => void,
-    timedOut: Answer,
-    milliseconds: number = verbMilliseconds,
-  ): Promise<Answer> => {
+  const answered = async <Answer>(listen: (resolve: (answer: Answer) => void) => () => void): Promise<Answer> => {
     const settled = Promise.withResolvers<Answer>();
     const stop = listen(settled.resolve);
-    const bound = setTimeout(() => {
-      settled.resolve(timedOut);
-    }, milliseconds);
     try {
       return await settled.promise;
     } finally {
-      clearTimeout(bound);
       stop();
     }
   };
@@ -2281,60 +1935,61 @@ export const openProjectRevisions = (
      * host re-implementing a machine (I20); now it only reports what the machine
      * settled on (W7 review R3).
      */
-    const outcome = await answered<RevisionSwitchOutcome>(
-      (resolve) => {
-        const refused = actor.on('switchRefused', (event) => {
+    /* Every answer names this request, so another verb's toast never settles this one (RM-R1). */
+    const requestId = randomUUID();
+    const outcome = await answered<RevisionSwitchOutcome>((resolve) => {
+      const refused = actor.on('switchRefused', (event) => {
+        if (event.requestId === requestId) {
           resolve(Object.freeze({ status: 'refused', branch, reason: event.reason }));
-        });
-        /* A re-root is finished the moment it is resolved: the branch already
-         * has a place of its own and no tree is rewritten. */
-        const rerooted = actor.on('switchResolved', (event) => {
-          if (event.mode === 'reroot') {
-            resolve(Object.freeze({ status: 'switched', branch, line: branch }));
-          }
-        });
-        const settled = child.on('toast.branch', () => {
+        }
+      });
+      /* A re-root is finished the moment it is resolved: the branch already
+       * has a place of its own and no tree is rewritten. */
+      const rerooted = actor.on('switchResolved', (event) => {
+        if (event.requestId === requestId && event.mode === 'reroot') {
           resolve(Object.freeze({ status: 'switched', branch, line: branch }));
-        });
-        const failed = child.on('toast.error', (event) => {
+        }
+      });
+      const settled = child.on('toast.branch', (event) => {
+        if (event.requestId === requestId) {
+          resolve(Object.freeze({ status: 'switched', branch, line: branch }));
+        }
+      });
+      const failed = child.on('toast.error', (event) => {
+        if (event.requestId === requestId) {
           resolve(Object.freeze({ status: 'refused', branch, reason: event.message }));
-        });
-        /* The machine parks in `confirming` when its own check says a person is
-         * needed; an unconfirmed switch cancels rather than waiting. */
-        const watching = child.subscribe((snapshot: SnapshotFrom<typeof branchMachine>) => {
-          if (!snapshot.matches('confirming')) {
-            return;
-          }
-          if (verb.confirm === true) {
-            child.send({ type: 'confirm' });
-            return;
-          }
-          child.send({ type: 'cancel' });
-          resolve(
-            Object.freeze({
-              status: 'needs-confirmation',
-              branch,
-              reason:
-                snapshot.context.question ??
-                'This project has changes that are not in a revision yet, and switching would overwrite them.',
-            }),
-          );
-        });
-        actor.send({ type: 'switch', branch });
-        return () => {
-          refused.unsubscribe();
-          rerooted.unsubscribe();
-          settled.unsubscribe();
-          failed.unsubscribe();
-          watching.unsubscribe();
-        };
-      },
-      Object.freeze({
-        status: 'refused',
-        branch,
-        reason: 'This project did not answer in time.',
-      }),
-    );
+        }
+      });
+      /* The machine parks in `confirming` when its own check says a person is
+       * needed; an unconfirmed switch cancels rather than waiting. */
+      const watching = child.subscribe((snapshot: SnapshotFrom<typeof branchMachine>) => {
+        if (!selectBranchNeedsConfirmation(snapshot) || snapshot.context.requestId !== requestId) {
+          return;
+        }
+        if (verb.confirm === true) {
+          child.send({ type: 'confirm' });
+          return;
+        }
+        child.send({ type: 'cancel' });
+        resolve(
+          Object.freeze({
+            status: 'needs-confirmation',
+            branch,
+            reason:
+              snapshot.context.question ??
+              'This project has changes that are not in a revision yet, and switching would overwrite them.',
+          }),
+        );
+      });
+      actor.send({ type: 'switch', requestId, branch });
+      return () => {
+        refused.unsubscribe();
+        rerooted.unsubscribe();
+        settled.unsubscribe();
+        failed.unsubscribe();
+        watching.unsubscribe();
+      };
+    });
     if (outcome.status !== 'switched') {
       return outcome;
     }
@@ -2372,28 +2027,24 @@ export const openProjectRevisions = (
         reason: 'This project has no checkout registry running.',
       });
     }
-    return answered<RevisionDiscardOutcome>(
-      (resolve) => {
-        const failed = actor.on('checkoutFailed', (event) => {
+    const requestId = randomUUID();
+    return answered<RevisionDiscardOutcome>((resolve) => {
+      const failed = actor.on('checkoutFailed', (event) => {
+        if (event.requestId === requestId) {
           resolve(Object.freeze({ status: 'refused', branch, reason: event.reason }));
-        });
-        const watching = actor.subscribe((snapshot) => {
-          if (!snapshot.context.checkouts.some((checkout) => checkout.id === record.id)) {
-            resolve(Object.freeze({ status: 'discarded', branch }));
-          }
-        });
-        checkouts.send({ type: 'removeCheckout', id: record.id });
-        return () => {
-          failed.unsubscribe();
-          watching.unsubscribe();
-        };
-      },
-      Object.freeze({
-        status: 'refused',
-        branch,
-        reason: 'This project did not answer in time.',
-      }),
-    );
+        }
+      });
+      const watching = actor.subscribe((snapshot) => {
+        if (!snapshot.context.checkouts.some((checkout) => checkout.id === record.id)) {
+          resolve(Object.freeze({ status: 'discarded', branch }));
+        }
+      });
+      checkouts.send({ type: 'removeCheckout', requestId, id: record.id });
+      return () => {
+        failed.unsubscribe();
+        watching.unsubscribe();
+      };
+    });
   };
 
   /*
@@ -2417,7 +2068,6 @@ export const openProjectRevisions = (
       | Readonly<{ status: 'minted'; revisionId: string }>
       | Readonly<{ status: 'unchanged' }>
       | Readonly<{ status: 'refused'; reason: string }>
-      | Readonly<{ status: 'timedOut'; reason: string }>
     >(
       (resolve) => {
         const subscriptions = [
@@ -2452,12 +2102,9 @@ export const openProjectRevisions = (
           }
         };
       },
-      Object.freeze({
-        status: 'timedOut',
-        reason: 'This project did not answer in time; the save may still be recorded.',
-      }),
+      /* Answered by its request id in every state (B3, RM-R11): no host bound of its own. */
     );
-    if (cut.status === 'refused' || cut.status === 'timedOut') {
+    if (cut.status === 'refused') {
       return cut;
     }
     if (cut.status === 'unchanged') {
@@ -2467,7 +2114,7 @@ export const openProjectRevisions = (
     /* A push already running when this asks was built before the mint, so the
      * scheduler answers with the next one (sync.machine row 65). */
     const pushId = randomUUID();
-    const pushed = await answered<SyncPushOutcome | 'timedOut'>(
+    const pushed = await answered<SyncPushOutcome>(
       (resolve) => {
         const settled = scheduler.on('pushSettled', (event) => {
           if (event.pushId === pushId) {
@@ -2479,8 +2126,7 @@ export const openProjectRevisions = (
           settled.unsubscribe();
         };
       },
-      'timedOut',
-      publishVerbMilliseconds,
+      /* Every correlated push is answered, a hung one at the scheduler's own deadline (A12, RM-R11). */
     );
     const { sync } = selectRevisionStatus(actor.getSnapshot());
     /* `noRemote` answers a correlated push with `failed`; nothing failed. */
@@ -2493,12 +2139,7 @@ export const openProjectRevisions = (
       backup,
       ...(backup === 'backedUp' || backup === 'noRemote'
         ? {}
-        : {
-            reason:
-              backup === 'timedOut'
-                ? 'The backup did not answer in time; whether it reached the remote is unknown.'
-                : (sync.error ?? 'This revision is saved here and was not backed up yet.'),
-          }),
+        : { reason: sync.error ?? 'This revision is saved here and was not backed up yet.' }),
     });
   };
 
@@ -2517,37 +2158,36 @@ export const openProjectRevisions = (
         reason: 'This project has no publish verbs running.',
       });
     }
-    return answered<RevisionPublishOutcome>(
-      (resolve) => {
-        const published = child.on('published', (event) => {
-          resolve(
-            Object.freeze({
-              status: 'published',
-              tag: event.tag,
-              publicationId: event.publicationId,
-              url: event.url,
-            }),
-          );
-        });
-        const failed = child.on('toast.error', (event) => {
+    const requestId = randomUUID();
+    return answered<RevisionPublishOutcome>((resolve) => {
+      const published = child.on('published', (event) => {
+        if (event.requestId !== requestId) {
+          return;
+        }
+        resolve(
+          Object.freeze({
+            status: 'published',
+            tag: event.tag,
+            publicationId: event.publicationId,
+            url: event.url,
+          }),
+        );
+      });
+      const failed = child.on('toast.error', (event) => {
+        if (event.requestId === requestId) {
           resolve(Object.freeze({ status: 'refused', reason: event.message }));
-        });
-        actor.send({
-          type: 'publish',
-          event: { type: 'publish', tag: draft.tag },
-        });
-        actor.send({ type: 'publish', event: { type: 'confirm', draft } });
-        return () => {
-          published.unsubscribe();
-          failed.unsubscribe();
-        };
-      },
-      Object.freeze({
-        status: 'refused',
-        reason: 'This project did not answer in time.',
-      }),
-      publishVerbMilliseconds,
-    );
+        }
+      });
+      actor.send({
+        type: 'publish',
+        event: { type: 'publish', requestId, tag: draft.tag },
+      });
+      actor.send({ type: 'publish', event: { type: 'confirm', draft } });
+      return () => {
+        published.unsubscribe();
+        failed.unsubscribe();
+      };
+    });
   };
 
   /*
@@ -2578,60 +2218,54 @@ export const openProjectRevisions = (
             revisionId: place.revisionId,
           });
     };
-    const outcome = await answered<RevisionOpenOutcome | undefined>(
-      (resolve) => {
-        const watching = actor.subscribe((snapshot) => {
-          const status = selectRevisionStatus(snapshot);
-          if (status.remote.phase === 'failed') {
-            resolve(
-              Object.freeze({
-                status: 'refused',
-                reason: status.remote.error ?? 'Tau Cloud refused this project.',
-              }),
-            );
-            return;
-          }
-          /* `queued` is an answer too: the pull was abandoned on its deadline or
+    const outcome = await answered<RevisionOpenOutcome | undefined>((resolve) => {
+      const watching = actor.subscribe((snapshot) => {
+        const status = selectRevisionStatus(snapshot);
+        if (status.remote.phase === 'failed') {
+          resolve(
+            Object.freeze({
+              status: 'refused',
+              reason: status.remote.error ?? 'Tau Cloud refused this project.',
+            }),
+          );
+          return;
+        }
+        /* `queued` is an answer too: the pull was abandoned on its deadline or
              this host is offline, and D28's durable queue owns what is left. */
-          if (status.sync.state === 'backedUp') {
-            resolve(undefined);
-          } else if (
-            status.sync.state === 'queued' ||
-            status.sync.state === 'failed' ||
-            status.sync.state === 'conflicted'
-          ) {
-            /* `conflicted` is a resting state with no exit this verb can take,
+        if (status.sync.state === 'backedUp') {
+          resolve(undefined);
+        } else if (
+          status.sync.state === 'queued' ||
+          status.sync.state === 'failed' ||
+          status.sync.state === 'conflicted'
+        ) {
+          /* `conflicted` is a resting state with no exit this verb can take,
                so leaving it out meant waiting out the bound and then reporting a
                timeout that had not happened (review R3). It is reached only when
                another device pushes between this one's connect and its pull —
                the ordinary diverged open is refused by the remote itself, one
                state earlier (`remote.phase: 'failed'`). */
-            resolve(
-              Object.freeze({
-                status: 'refused',
-                /* The scheduler's own reason, never a reachability story this
-                 * host invented over it (C2): 401, 403, 404 and 413 all reached
-                 * Tau Cloud and were refused, and `sync.machine` carries the
-                 * sentence that says which. The fallback names nothing it does
-                 * not know. */
-                reason:
-                  status.sync.state === 'conflicted'
-                    ? 'This project has work of its own that Tau Cloud does not have.'
-                    : (status.sync.error ?? 'Tau Cloud did not finish opening this project.'),
-              }),
-            );
-          }
-        });
-        actor.send({ type: 'remote', event: { type: 'connect', kind: 'tau' } });
-        return () => {
-          watching.unsubscribe();
-        };
-      },
-      Object.freeze({
-        status: 'refused',
-        reason: 'This project did not answer in time.',
-      }),
-    );
+          resolve(
+            Object.freeze({
+              status: 'refused',
+              /* The scheduler's own reason, never a reachability story this
+               * host invented over it (C2): 401, 403, 404 and 413 all reached
+               * Tau Cloud and were refused, and `sync.machine` carries the
+               * sentence that says which. The fallback names nothing it does
+               * not know. */
+              reason:
+                status.sync.state === 'conflicted'
+                  ? 'This project has work of its own that Tau Cloud does not have.'
+                  : (status.sync.error ?? 'Tau Cloud did not finish opening this project.'),
+            }),
+          );
+        }
+      });
+      actor.send({ type: 'remote', event: { type: 'connect', kind: 'tau' } });
+      return () => {
+        watching.unsubscribe();
+      };
+    });
     return outcome ?? settle();
   };
 

@@ -18,6 +18,15 @@ describe('toolInputSchemas registry', () => {
     }
   });
 
+  it('validates a workbench view and refuses an empty patch', () => {
+    const schema = requireSchema(`tool-${toolName.arrangeWorkbench}`);
+    expect(schema.safeParse({ views: [{ id: 'front', entryPath: 'main.ts', camera: { kind: 'preset', preset: 'front' } }] }).success).toBe(true);
+    expect(schema.safeParse({ basedOn: 'missing' }).success).toBe(false);
+    expect(schema.safeParse({ open: [{ kind: 'pane', pane: 'unknown' }] }).success).toBe(false);
+    expect(schema.safeParse({ views: [{ id: 'front', camera: { kind: 'pose', target: [0, 0, 0] } }] }).success).toBe(false);
+    expect(schema.safeParse({ viewer: { kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] } }).success).toBe(false);
+  });
+
   it('should validate a well-formed read_file input as the strict per-tool schema', () => {
     const result = requireSchema(`tool-${toolName.readFile}`).safeParse({
       targetFile: 'main.ts',

@@ -30,7 +30,7 @@ import { packager } from '@electron/packager';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { parseMacosPackageMode } from './macos-package-mode.mjs';
-// oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
+/* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import {
   copyGeoSpecNative,
   copyGeoSpecNativeAssembly,
@@ -38,6 +38,7 @@ import {
   copyRuntimeClosure,
   copyTree,
 } from './runtime-closure.mjs';
+/* oxlint-enable no-restricted-imports */
 
 type PackageMetadata = {
   readonly name: string;
@@ -121,13 +122,19 @@ const selectedGeoSpecAssembly = process.env['TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT'];
 if (selectedGeoSpecAssembly === '') {
   throw new Error('TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT must name a qualified native assembly.');
 }
-const geospecAssemblyInput = selectedGeoSpecAssembly ?? 'out/artifacts/geospec-native-engine/ci/assembly';
+let geospecAssemblyInput = selectedGeoSpecAssembly ?? 'out/artifacts/geospec-native-engine/ci/assembly';
 if (selectedGeoSpecAssembly === undefined) {
-  execFileSync(
+  const output = execFileSync(
     process.execPath,
-    [resolve(workspaceRoot, 'packages/geospec-engine-native/scripts/ci-artifacts.mjs'), 'ensure-delivery'],
-    { cwd: workspaceRoot, stdio: 'inherit' },
+    [resolve(workspaceRoot, 'packages/geospec-engine-native/scripts/ci-artifacts.mjs'), 'snapshot-delivery'],
+    { cwd: workspaceRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
   );
+  process.stdout.write(output);
+  const selections = [...output.matchAll(/^ASSEMBLY_ROOT=(.+)$/gmu)].map((match) => match[1]?.trim());
+  if (selections.length !== 1 || !selections[0]) {
+    throw new Error('GeoSpec delivery did not select one immutable assembly snapshot.');
+  }
+  geospecAssemblyInput = selections[0];
 }
 const geospecAssemblyRoot = await realpath(resolve(workspaceRoot, geospecAssemblyInput));
 if (geospecAssemblyRoot === outputRoot || geospecAssemblyRoot.startsWith(`${outputRoot}/`)) {
@@ -457,6 +464,9 @@ await Promise.all([
     copyTree(resolve(extensionRoot, extension), resolve(plugins, extension), excludesBuildDiagnostics),
   ),
 ]);
+if (selectedGeoSpecAssembly === undefined) {
+  await rm(geospecAssemblyRoot, { recursive: true, force: true });
+}
 console.log(`Removed Intel slices from ${String(await thinIntelSlices(appPath))} bundled Mach-O files`);
 
 const identity = release ? developerIdentity() : '-';

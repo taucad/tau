@@ -1350,18 +1350,17 @@ function KinematicsContent({
   readonly isShown: boolean;
   readonly reveal: KinematicsReveal | undefined;
 }): React.JSX.Element {
-  const { geometryUnits, mainEntryPath, viewGraphics, editorRef } = useProject();
-  const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
+  const { geometryUnits, mainEntryPath, viewGraphics, viewRecords } = useProject();
   // The unit posed here is the one a viewer shows: its graphics actor owns the kinematics actor.
   const entries = useMemo(
     () =>
       sortGeometryUnitEntries([...geometryUnits.entries()], mainEntryPath).map(
         ([entryPath, cadRef]): KinematicsEntry => {
-          const graphicsRef = [...viewGraphics].find(([viewId]) => viewSettings[viewId]?.entryPath === entryPath)?.[1];
+          const graphicsRef = [...viewGraphics].find(([viewId]) => viewRecords.get(viewId)?.entryPath === entryPath)?.[1];
           return [entryPath, cadRef, graphicsRef];
         },
       ),
-    [geometryUnits, mainEntryPath, viewGraphics, viewSettings],
+    [geometryUnits, mainEntryPath, viewGraphics, viewRecords],
   );
 
   if (entries.length === 0) {

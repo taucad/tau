@@ -12,6 +12,7 @@
 import type {
   CheckedFileWrite,
   CheckedFileWriteResult,
+  FileWritePrecondition,
   FileContentMetadata,
   FileProvenance,
   FileStat,
@@ -136,6 +137,8 @@ export type FileSystemProvider = {
   writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
   /** Atomically check current bytes and replace one file when this provider owns a real authority fence. */
   writeFileChecked?(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+  /** Atomically check current bytes and delete one file under the same authority fence. */
+  deleteFileChecked?(input: { path: string; preconditions: readonly FileWritePrecondition[] }): Promise<CheckedFileWriteResult>;
   /** Append bytes in enqueue order, creating the file and missing parent directories when absent. */
   appendFile?(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
   readdir(path: string): Promise<string[]>;

@@ -80,9 +80,9 @@ export function ProjectChatList({
     try {
       await deleteChat(chat.id);
       toast.success(`Moved ${chat.name} to Trash`);
-    } catch (cause) {
+    } catch (error) {
       toast.error(`Could not move ${chat.name} to Trash`);
-      console.error('Error trashing chat:', cause);
+      console.error('Error trashing chat:', error);
       return;
     }
     if (!isProjectActive || activeChatId !== chat.id || !project.slugs) {
@@ -103,9 +103,9 @@ export function ProjectChatList({
         return;
       }
       toast.success(`Restored ${chat.name}`);
-    } catch (cause) {
+    } catch (error) {
       toast.error(`Could not restore ${chat.name}`);
-      console.error('Error restoring chat:', cause);
+      console.error('Error restoring chat:', error);
     }
   };
 

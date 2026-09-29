@@ -7,6 +7,7 @@ import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { ENV } from '#environment.config.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 export function RootCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
   const { data: authData } = useSession(authClient);
@@ -54,7 +55,7 @@ export function RootCommandPaletteItems({ match }: { readonly match: UIMatch }):
         group: 'Developer',
         icon: <Code2 />,
         link: '/debug/geospec',
-        visible: ENV.TAU_DEBUG && !(import.meta.env.TAU_TARGET === 'desktop' && import.meta.env.PROD),
+        visible: ENV.TAU_DEBUG && !(isDesktopTarget() && import.meta.env.PROD),
       },
       {
         id: 'sign-in',

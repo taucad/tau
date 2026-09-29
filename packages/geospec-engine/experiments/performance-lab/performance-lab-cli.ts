@@ -2,7 +2,7 @@
 /**
  * Private diagnostic n=5 driver for the shared SIMD performance lab; not Q7 qualification.
  * Run with Node's native TypeScript support from any directory. No environment variables required.
- * Usage: node packages/geospec-engine-native/bench/performance-lab-cli.ts --native-module=/absolute/installed/node.mjs --output-dir=out/reports/benchmarks/performance-lab
+ * Usage: node packages/geospec-engine/experiments/performance-lab/performance-lab-cli.ts --native-module=/absolute/installed/node.mjs --output-dir=out/reports/benchmarks/performance-lab
  * Exit: 0 completed diagnostic (unsupported remains visible); 1 execution or expected-status mismatch.
  */
 import { spawn } from 'node:child_process';
@@ -14,10 +14,9 @@ import { availableParallelism, freemem, loadavg } from 'node:os';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-// oxlint-disable-next-line no-restricted-imports -- The private lab pins its independent source-authority receipt.
-import manifest from './fixtures/performance-lab/manifest.json' with { type: 'json' };
-// oxlint-disable-next-line no-restricted-imports -- Versioned current-source authority overlays the immutable historical manifest.
-import currentAuthority from './fixtures/performance-lab/current-source-authority-v5.json' with { type: 'json' };
+/* oxlint-disable no-restricted-imports -- Private lab reads the frozen native catalog and source receipts without publishing them. */
+import manifest from '../../../geospec-engine-native/bench/fixtures/performance-lab/manifest.json' with { type: 'json' };
+import currentAuthority from '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v5.json' with { type: 'json' };
 import {
   classifyPerformanceLabDifference,
   performanceLabCases,
@@ -25,21 +24,22 @@ import {
   performanceLabNativeQueries,
   performanceLabScaleCases,
   performanceLabScaleQueries,
-} from '#bench/performance-lab';
+} from '../../../geospec-engine-native/bench/performance-lab.ts';
 import type {
   LabFixture,
   PerformanceLabCase,
   PerformanceLabDifference,
   PerformanceLabQuery,
   PerformanceLabScaleQuery,
-} from '#bench/performance-lab';
-import type { Artifact } from '#bench/lib';
+} from '../../../geospec-engine-native/bench/performance-lab.ts';
+import type { Artifact } from '../../../geospec-engine-native/bench/lib.ts';
+/* oxlint-enable no-restricted-imports */
 import type {
   PerformanceLabEngineModule,
   PerformanceLabModules,
   PerformanceLabRunInput,
   PerformanceLabRunResult,
-} from '#bench/performance-lab-runner';
+} from '#experiments/performance-lab/performance-lab-runner.js';
 
 type Engine = PerformanceLabRunInput['engine'];
 type SelectedModule = { engine: Engine; path: string };
@@ -85,7 +85,7 @@ type ChildReport = {
 // oxlint-disable-next-line typescript/no-restricted-types -- Node exit receipts preserve explicit null for an absent exit code/signal.
 type WireNull = null;
 
-const root = resolvePath(import.meta.dirname, '../../..');
+const root = resolvePath(import.meta.dirname, '../../../..');
 const script = resolvePath(import.meta.dirname, 'performance-lab-cli.ts');
 const moduleFlags = [
   ['legacy-module', 'legacy-wasm'],
@@ -338,7 +338,7 @@ const hashPath = async (path: string): Promise<Artifact> => ({
     .digest('hex'),
 });
 export const verifySourceAuthority = async (observe: typeof hashPath = hashPath): Promise<void> => {
-  const manifestPath = resolvePath(import.meta.dirname, 'fixtures/performance-lab/manifest.json');
+  const manifestPath = resolvePath(root, 'packages/geospec-engine-native/bench/fixtures/performance-lab/manifest.json');
   const manifestHash = await observe(manifestPath);
   const native = manifest.analyticAuthority.sources.filter(({ id }) => id === 'native-contract');
   const affected = performanceLabCases
@@ -540,7 +540,7 @@ const runChild = async (options: Options): Promise<void> => {
       ...(input.engine === 'combined-wasm' ? { combined: async () => load(path) } : {}),
       ...(input.engine === 'native-desktop' ? { native: async () => load(path) } : {}),
     };
-    const { runPerformanceLabCell } = await import('#bench/performance-lab-runner');
+    const { runPerformanceLabCell } = await import('#experiments/performance-lab/performance-lab-runner.js');
     if (options.condition === 'warm') {
       await runPerformanceLabCell({ ...input, cache: 'cold' }, modules);
     }
@@ -646,12 +646,12 @@ const runParent = async (options: Options): Promise<void> => {
   const sourcePaths = [
     'performance-lab-cli.ts',
     'performance-lab-runner.ts',
-    'performance-lab.ts',
-    'fixtures/performance-lab/manifest.json',
-    'fixtures/performance-lab/authority-cases.json',
-    'fixtures/performance-lab/authority-queries.json',
-    'fixtures/performance-lab/analytic-cases.json',
-    'fixtures/performance-lab/current-source-authority-v5.json',
+    '../../../geospec-engine-native/bench/performance-lab.ts',
+    '../../../geospec-engine-native/bench/fixtures/performance-lab/manifest.json',
+    '../../../geospec-engine-native/bench/fixtures/performance-lab/authority-cases.json',
+    '../../../geospec-engine-native/bench/fixtures/performance-lab/authority-queries.json',
+    '../../../geospec-engine-native/bench/fixtures/performance-lab/analytic-cases.json',
+    '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v5.json',
   ];
   const sources = await Promise.all(sourcePaths.map(async (path) => hashPath(resolvePath(import.meta.dirname, path))));
   await mkdir(dirname(options.outputDir), { recursive: true });

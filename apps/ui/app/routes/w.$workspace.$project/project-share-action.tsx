@@ -72,13 +72,11 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
   const [navigationIntent] = useState(() => parseProjectShareNavigationIntent(location.search));
-  const { parameterService, projectId, projectRef, editorRef } = useProject();
+  const { parameterService, projectId, projectRef, entriesRecord } = useProject();
   const { recordFiles: fileClient } = useFileManager();
   const { projects } = useProjects();
   const project = useSelector(projectRef, (state) => state.context.project);
-  /* The entry's CAD actor owns its render timeout; a unit spawned for the thumbnail is seeded from
-   * the durable per-entry record rather than left on the default (E1). */
-  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
+  /* The entry's CAD actor is seeded from the live record when a thumbnail needs a fresh unit. */
   const projectUpdatedAt = projects.find((candidate) => candidate.id === projectId)?.lastActivityAt;
 
   useEffect(() => {
@@ -100,7 +98,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath,
-          renderTimeout: unitSettings[entryPath]?.renderTimeout,
+          renderTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
         });
         const projectState = await waitFor(
           projectRef,
@@ -172,7 +170,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
         })),
       };
     },
-    [fileClient, parameterService, project, projectId, projectRef, unitSettings],
+    [entriesRecord, fileClient, parameterService, project, projectId, projectRef],
   );
 
   const entryPath = project?.assets.main.entryPath ?? '';

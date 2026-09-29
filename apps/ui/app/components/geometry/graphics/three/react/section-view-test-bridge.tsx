@@ -6,6 +6,7 @@ import type { RenderFrame } from '@taucad/spatial';
 import { toThreeRenderPoint } from '@taucad/three/spatial';
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
+import { graphicsSettingsForView } from '#workbench-records/projection.js';
 import type { GraphicsViewSettings } from '#constants/editor.constants.js';
 import type { GraphicsContext } from '#machines/graphics.machine.js';
 import { areSectionCutsEqual, resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
@@ -544,7 +545,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         )?.[0];
         return viewId === undefined
           ? undefined
-          : project.editorRef.getSnapshot().context.viewSettings[viewId]?.graphicsSettings;
+          : project.viewRecords.get(viewId) ? graphicsSettingsForView(project.viewRecords.get(viewId)!) : undefined;
       },
       getGraphicsBackend() {
         const renderer = get().gl as unknown as { readonly backend?: { readonly isWebGPUBackend?: boolean } };

@@ -58,6 +58,7 @@ import { ChatMessageToolScreenshot } from '#routes/w.$workspace.$project/chat-me
 import { ChatMessageToolRevisions } from '#routes/w.$workspace.$project/chat-message-tool-revisions.js';
 import { ChatMessageToolExportGeometry } from '#routes/w.$workspace.$project/chat-message-tool-export-geometry.js';
 import { ChatMessageToolUpdateTodos } from '#routes/w.$workspace.$project/chat-message-tool-update-todos.js';
+import { ChatMessageToolArrangeWorkbench } from '#routes/w.$workspace.$project/chat-message-tool-arrange-workbench.js';
 import { ChatMessageToolRequestPrint } from '#routes/w.$workspace.$project/chat-message-tool-request-print.js';
 import { ChatMessagePartUnknown } from '#routes/w.$workspace.$project/chat-message-tool-unknown.js';
 import {
@@ -314,6 +315,19 @@ function renderAssistantPart(
       if (tau?.['presentation'] === 'tau-mcp') {
         const state = Reflect.get(part, 'preliminary') === true ? 'input-available' : part.state;
         switch (nativeName) {
+          case 'arrange_workbench': {
+            return (
+              <ChatMessageToolArrangeWorkbench
+                key={part.toolCallId}
+                part={
+                  { ...part, type: 'tool-arrange_workbench', state } as Extract<
+                    MyMessagePart,
+                    { type: 'tool-arrange_workbench' }
+                  >
+                }
+              />
+            );
+          }
           case 'get_kernel_result': {
             return (
               <ChatMessageToolGetKernelResult
@@ -467,6 +481,10 @@ function renderAssistantPart(
 
     case 'tool-update_todos': {
       return <ChatMessageToolUpdateTodos key={part.toolCallId} part={part} />;
+    }
+
+    case 'tool-arrange_workbench': {
+      return <ChatMessageToolArrangeWorkbench key={part.toolCallId} part={part} />;
     }
 
     case 'tool-request_print': {

@@ -15,6 +15,7 @@ const packageConfig: UserConfig = {
   ...baseConfig,
   format: 'esm',
   outDir: 'dist',
+  deps: { neverBundle: ['zod'] },
 };
 
 export default defineConfig(packageConfig);

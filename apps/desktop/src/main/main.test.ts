@@ -247,7 +247,7 @@ vi.mock('#main/navigation-policy.js', () => ({
   rendererOrigins: vi.fn(() => []),
 }));
 vi.mock('#main/services-broker.js', () => ({
-  rendererServicesConcerns: ['nodeFs', 'agentHost', 'geospecPerformance', 'machines'],
+  rendererServicesConcerns: ['nodeFs', 'agentHost', 'geospecPerformance', 'exactMeasurement', 'machines'],
   ServicesQuiescingError: class ServicesQuiescingError extends Error {},
   createServicesBroker: vi.fn((options: { utilityEntry: string }) => {
     state.servicesUtilityEntry = options.utilityEntry;
@@ -710,6 +710,32 @@ describe('desktop main deep links', () => {
         expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/s/direct#v=2&jwe=a.b.c.d.e');
       });
       expect(fakeWindow.focus).toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should keep an E2E window hidden when a deep link arrives',
+    async () => {
+      const previous = process.env['TAU_E2E_HIDE_WINDOW'];
+      process.env['TAU_E2E_HIDE_WINDOW'] = '1';
+      try {
+        await bootAndWait();
+        expect(fakeWindow.show).not.toHaveBeenCalled();
+
+        listener('open-url')({ preventDefault: vi.fn() }, 'tau://i/github.com/taucad/tau-examples');
+        await vi.waitFor(() => {
+          expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/import/github.com/taucad/tau-examples');
+        });
+        expect(fakeWindow.show).not.toHaveBeenCalled();
+        expect(fakeWindow.focus).not.toHaveBeenCalled();
+      } finally {
+        if (previous === undefined) {
+          delete process.env['TAU_E2E_HIDE_WINDOW'];
+        } else {
+          process.env['TAU_E2E_HIDE_WINDOW'] = previous;
+        }
+      }
     },
     bootMilliseconds,
   );

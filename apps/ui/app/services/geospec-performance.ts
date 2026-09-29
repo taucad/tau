@@ -20,7 +20,7 @@ import type {
   PerformanceLabRunInput,
   PerformanceLabRunResult,
   PerformanceLabWasmExecution,
-} from '../../../../packages/geospec-engine-native/bench/performance-lab-runner.js';
+} from '../../../../packages/geospec-engine/experiments/performance-lab/performance-lab-runner.js';
 /* oxlint-enable no-restricted-imports */
 
 declare const tauGeoSpecMtReceipts: Readonly<Record<number, string>>;

@@ -534,6 +534,7 @@ describe('compute capability contract', () => {
 
   it('M2: a durable engine pins what evaluate published, because publish writes through the session', async () => {
     const puts: ActionDigest[] = [];
+    const pins: CacheRetention[] = [];
     const stored = new Map<ActionDigest, ComputeStoreEntry>();
     let generation = 1 as ComputeGeneration;
     const engine: ComputeStoreEngine = {
@@ -564,12 +565,16 @@ describe('compute capability contract', () => {
           return { status: 'stale-generation', generation };
         },
         // A durable backend can only pin bytes it actually received.
-        pin: async ({ digests, generation: requested }) =>
-          requested === generation
-            ? digests.every((digest) => stored.has(digest))
-              ? { status: 'pinned', pinned: digests }
-              : { status: 'missing', digests }
-            : { status: 'stale-generation', generation },
+        pin: async ({ digests, retention, generation: requested }) => {
+          if (requested !== generation) {
+            return { status: 'stale-generation', generation };
+          }
+          if (!digests.every((digest) => stored.has(digest))) {
+            return { status: 'missing', digests };
+          }
+          pins.push(retention);
+          return { status: 'pinned', pinned: digests };
+        },
         release: async () => ({ status: 'released' }),
         close: async () => {
           // The fake engine holds no resources.
@@ -607,6 +612,62 @@ describe('compute capability contract', () => {
     });
     expect(result.value).toBe('durable-value');
     expect(puts, 'evaluate publishes through the one store session').toContain(digest);
+
+    const canceledOwner = _mintComputeRetention({ name: 'canceled' });
+    const survivingOwner = _mintComputeRetention({ name: 'surviving' });
+    const controller = new AbortController();
+    let markStarted!: () => void;
+    let release!: (value: string) => void;
+    let markAttached!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const attached = new Promise<void>((resolve) => {
+      markAttached = resolve;
+    });
+    const work = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+    const sharedCompute = vi.fn(async () => {
+      markStarted();
+      return work;
+    });
+    const canceled = capability.evaluate({
+      action: action(14),
+      codec: textCodec,
+      policy: 'required',
+      retention: canceledOwner,
+      signal: controller.signal,
+      compute: sharedCompute,
+    });
+    await started;
+    const surviving = capability.evaluate({
+      action: action(14),
+      codec: textCodec,
+      policy: 'required',
+      retention: survivingOwner,
+      get signal() {
+        markAttached();
+        return signal;
+      },
+      compute: sharedCompute,
+    });
+    await attached;
+    controller.abort();
+    await expect(canceled).rejects.toMatchObject({ name: 'AbortError' });
+    release('shared');
+    const survivingResult = await surviving;
+    expect(survivingResult.value).toBe('shared');
+    expect(
+      survivingResult.source === 'computed' && survivingResult.publication.status === 'stored'
+        ? survivingResult.publication.retention
+        : undefined,
+    ).toBe(survivingOwner);
+    expect(sharedCompute).toHaveBeenCalledOnce();
+    const sharedDigest = await digestAction({ action: action(14) });
+    expect(puts.filter((value) => value === sharedDigest)).toHaveLength(1);
+    expect(pins).toContain(survivingOwner);
+    expect(pins).not.toContain(canceledOwner);
 
     await control.clear({});
     let recomputes = 0;

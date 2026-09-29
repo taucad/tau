@@ -322,6 +322,14 @@ Full user and assistant message text is available for keyword search.
   });
 
   registry.register({
+    name: 'workbench',
+    cacheBreak: true,
+    compute: () => `<workbench>
+Use \`${toolName.arrangeWorkbench}\` when the person asks to arrange views, open panes or files, or change viewer settings. Read the workbench snapshot and pass its layout digest as \`basedOn\` when preserving the person's current arrangement. The tool writes project records; the window adopts them and the person can restore the previous arrangement.
+</workbench>`,
+  });
+
+  registry.register({
     name: 'task_tracking',
     cacheBreak: false,
     compute: () => `<task_tracking>

@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import type { MyUIMessage, SkillMetadata } from '@taucad/chat';
+import type { MyUIMessage, SkillMetadata, ToolInvocation } from '@taucad/chat';
+import type { toolName } from '@taucad/chat/constants';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
 
-const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog } = vi.hoisted(() => ({
+const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog, workbenchController } = vi.hoisted(() => ({
   mockMessagesById: new Map<string, MyUIMessage>(),
   mockMessageOrder: [] as string[],
   mockStatus: { value: 'ready' as 'ready' | 'streaming' | 'submitted' | 'error' },
   mockSkillsCatalog: [] as SkillMetadata[],
+  workbenchController: { snapshot: vi.fn(() => undefined), subscribe: vi.fn(() => () => undefined), restorePreviousArrangement: vi.fn() },
 }));
 
 const getMockChatSelectorState = (): {
@@ -72,6 +74,14 @@ vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
 
 vi.mock('#hooks/use-skills-catalog.js', () => ({
   useSkillsCatalog: () => mockSkillsCatalog,
+}));
+
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+  useWorkbenchLayoutController: () => workbenchController,
+}));
+
+vi.mock('#hooks/use-project.js', () => ({
+  useProject: () => ({ appliedWorkbenchRevisions: new Map(), appliedEntryRevisions: new Map() }),
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-message-planning.js', () => ({
@@ -192,12 +202,14 @@ vi.mock('#components/chat/chat-activity-group.js', () => ({
     children,
     summary,
     hasActiveRows,
+    isActive,
   }: {
     readonly children: React.ReactNode;
     readonly summary: string;
     readonly hasActiveRows?: boolean;
+    readonly isActive?: boolean;
   }) => (
-    <div data-testid='chat-activity-group' data-summary={summary} data-active-rows={String(hasActiveRows ?? false)}>
+    <div data-testid='chat-activity-group' data-summary={summary} data-active-rows={String(hasActiveRows ?? false)} hidden={!isActive}>
       {children}
     </div>
   ),
@@ -642,6 +654,42 @@ describe('ChatMessage ACP session state', () => {
 });
 
 describe('ChatMessage external Tau MCP porcelain', () => {
+  it.each(['direct', 'qualified MCP'] as const)('keeps the %s arrangement card and Restore visible at rest', (carrier) => {
+    const digest: `sha256:${string}` = `sha256:${'a'.repeat(64)}`;
+    const arrangement: Extract<ToolInvocation<typeof toolName.arrangeWorkbench>, { state: 'output-available' }> = {
+      toolCallId: 'arrange-1',
+      state: 'output-available',
+      input: { views: [{ id: 'front', name: 'Front' }] },
+      output: {
+        status: 'written',
+        revisions: [{ path: '.tau/workbench/layout.json', digest, previousDigest: 'missing' }],
+        visible: [{ kind: 'view', view: 'front' }],
+      },
+    };
+    const message: MyUIMessage = {
+      id: `msg-${carrier}`,
+      role: 'assistant',
+      parts: [
+        { type: 'tool-read_file', toolCallId: 'read-1', state: 'output-available',
+          input: { targetFile: 'main.scad' }, output: { content: '', size: 0, contentKind: 'text', totalLines: 0 } },
+        carrier === 'direct'
+          ? { type: 'tool-arrange_workbench', ...arrangement }
+          : { type: 'dynamic-tool', toolName: 'arrange_workbench', ...arrangement,
+              toolMetadata: { tau: { origin: 'external', nativeName: 'arrange_workbench', presentation: 'tau-mcp' } } },
+      ],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-summary', 'Read files');
+    expect(screen.getByText('Arranged:')).toBeVisible();
+    expect(screen.getByRole('status')).toHaveTextContent('Written · shown when the project opens');
+    const restore = screen.getByRole('button', { name: 'Restore' });
+    restore.focus();
+    expect(restore).toHaveFocus();
+  });
+
   it('renders a qualified dynamic call with the existing native card', () => {
     const message: MyUIMessage = {
       id: 'msg-acp-kernel',

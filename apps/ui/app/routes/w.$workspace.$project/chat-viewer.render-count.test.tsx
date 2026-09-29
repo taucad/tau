@@ -121,10 +121,16 @@ vi.mock('#hooks/use-project.js', () => ({
     projectRef: editorStub,
     editorRef: editorStub,
     viewGraphics: new Map([['view-1', actors.graphics]]),
+    viewRecords: new Map(),
+    entriesRecord: { version: 1, entries: {} },
+    setViewEntryPath: () => undefined,
     geometryUnits: new Map([[entryPath, actors.cad]]),
     mainEntryPath: entryPath,
   }),
 }));
+vi.mock('#workbench-records/view-actions.js', () => ({ useWorkbenchViewCommands: () => ({
+  edit: async () => true, remove: async () => true,
+}) }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));
 vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeSelector: <T,>(select: (tree: Map<string, unknown>) => T): T =>

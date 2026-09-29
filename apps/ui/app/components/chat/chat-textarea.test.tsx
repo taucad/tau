@@ -53,6 +53,7 @@ vi.mock('#hooks/use-project.js', () => ({
     mainEntryPath: 'main.ts',
     geometryUnits: new Map([['main.ts', mocks.cadRef]]),
     viewGraphics: new Map([['view', mocks.graphicsRef]]),
+    viewRecords: new Map([['view', { entryPath: 'main.ts' }]]),
     editorRef: { getSnapshot: () => ({ context: { viewSettings: { view: { entryPath: 'main.ts' } } } }) },
   }),
 }));

@@ -1,0 +1,36 @@
+---
+title: Machines API
+description: Discover and bind physical machines, read their directory, and preflight, transfer, or control prints.
+docType: reference
+wordBudgetOverride: 1200
+---
+
+# Machines API
+
+Import browser-safe contracts from `@taucad/runtime/machine`. `MachineClient` exposes the admitted machines route; its `MachinePrintRequestClient` facet manages requests that require approval. Discovery, binding, preparation, transfer, and start are distinct operations. A successful preparation or upload never means a physical print has started.
+
+## Discovery and directory
+
+`MachineListProvidersInput` lists registered `MachineProvider` descriptors. `MachineDiscoverInput` starts bounded discovery for a provider and configuration; the returned `MachineDiscoveryFrame` stream carries `MachineDiscoveryEvent` values. A `MachineCandidate` contains a transient `MachineCandidateEndpoint` and untrusted `MachineClaimedIdentity`. `MachineBeginBindingInput` starts a non-secret ceremony and returns `MachineBindingOutcome`; native code completes credentials and trust. `MachineRemoveBindingInput` produces `MachineBindingRemoval` when safe. `machineCredentialReference` creates the host-local reference to a saved credential, not a portable secret.
+
+The directory's `MachineListInput`, `MachineGetInput`, and `MachineWatchInput` yield `MachineDirectorySnapshot`, `MachineDirectoryEntry`, and streamed `MachineDirectoryFrame` values. `MachineDirectoryCursor` resumes observation; it is not a mutation authority. Each entry pairs a stable descriptor with observed state and freshness.
+
+Import `prepareMachineWebSocket`, `PrepareMachineWebSocketInput`, and `PreparedMachineWebSocket` from `@taucad/runtime/transport/websocket`. The helper probes an exact authenticated HTTP(S) endpoint. A `204` yields a `RuntimeTransportFacet` whose `connect()` opens a fresh channel; `403` returns `not-granted` and `404` returns `unsupported`. Redirects and URL credentials are refused. Wait for channel readiness after connecting.
+
+`MachineDescriptor` records physical identity and capabilities. `MachineEnvelope` uses canonical metres. `MachineToolCapability`, `MachineMaterialSystem`, and `MachineQuantityDeclaration` describe tool, slot, and native-unit facts needed for compatibility checks. `MachineSnapshot` holds connection/readiness and `MachineObservedSetup`; the latter includes `MachineObservedMaterial`. Live `MachineRunSnapshot`, `MachineTemperatureSnapshot`, `MachineFanSnapshot`, `MachineMaterialUnitSnapshot`, `MachineMaterialSystemSnapshot`, `MachineNetworkSnapshot`, `MachineLightSnapshot`, and `MachineAlertSnapshot` carry observations, not commands. `MachineObservation` is the provider's pull-stream item.
+
+## Physical operations
+
+`MachinePreparePrintInput` asks for read-only preflight of a `MachineArtifactReference` against observed setup; the `MachinePreparedPrint` result binds artifact, machine, configuration and setup digests with an expiry. `MachineUploadPrintInput` transfers exactly that preparation under a caller-retained operation id. `MachineStartPrintInput` also requires the accepted upload's transfer id and expected setup digest. `MachineControlRunInput` names `cancel`, `pause`, `resume`, or `urgent-stop` against the exact observed provider run. `MachineReconcileOperationInput` checks a prior uncertain effect. `MachineRunOperationKind` and `MachineOperationKind` distinguish run commands from upload.
+
+The resulting `MachineOperationReceipt` is `accepted`, `rejected`, or `unknown`. `MachineOperationSnapshot` is the durable projection, including planned and sending states; preserve the original operation id and reconcile an unknown outcome rather than issuing a new physical effect. `MachineCaptureStillClientInput` returns a short-lived `MachineStill` only when the provider declares `MachineStillCaptureCapability`.
+
+## Print requests
+
+`MachineRequestPrintInput` creates a `PrintRequest` for a `PrintRequester`. `PrintRequestState` distinguishes approval, transfer, start, and terminal outcomes; `PrintRequestSummary` is the list projection. `MachineListPrintRequestsInput` and `MachineWatchPrintRequestsInput` read and follow requests. `MachineResolvePrintRequestInput` supplies an approval decision; `MachineWithdrawPrintRequestInput` withdraws a pending request. These methods sit on `MachinePrintRequestClient`, not on a provider's raw session.
+
+## Related
+
+- [Machine provider API](./machine-providers)
+- [Host authority API](./host)
+- [Runtime architecture](../concepts/architecture)

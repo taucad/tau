@@ -71,6 +71,10 @@
   "taucad": {
     "hostTarget": "daemon"
   },
+  "tau": {
+    "skills": null,
+    "reason": "Machine plugin; no CAD authoring surface"
+  },
   "dependencies": {
     "@taucad/units": "workspace:*",
     "basic-ftp": "catalog:",

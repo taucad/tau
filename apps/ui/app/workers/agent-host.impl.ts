@@ -3,7 +3,7 @@ import { ResourceQueue } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
-import { createChatToolRegistry, createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
+import { createChatToolRegistry, createProviderRpcFileSystem, createRuntimeWorkbenchClient } from '@taucad/agent-tools/registry';
 import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -84,6 +84,7 @@ type ProjectFileSystemBridge = Pick<
   | 'readFile'
   | 'writeFile'
   | 'writeFileChecked'
+  | 'deleteFileChecked'
   | 'appendFile'
   | 'readdir'
   | 'stat'
@@ -181,6 +182,7 @@ type WorkerSession = {
   readonly tabId: string;
   readonly fileSystem: ProjectFileSystemBridge;
   readonly projectRoot: ProjectFileSystemBridge;
+  readonly workbenchRoot: ProjectFileSystemBridge;
   readonly durability: StorageDurabilityClass;
   /** Backend of the project's own storage — the only authority for log placement. */
   readonly storageBackend: string;
@@ -269,6 +271,8 @@ const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge): FileSy
     capabilities: payload.capabilities,
     readFile,
     writeFile: proxy.writeFile.bind(proxy),
+    writeFileChecked: proxy.writeFileChecked.bind(proxy),
+    deleteFileChecked: proxy.deleteFileChecked.bind(proxy),
     appendFile: proxy.appendFile.bind(proxy),
     readdir: proxy.readdir.bind(proxy),
     stat: proxy.stat.bind(proxy),
@@ -1535,19 +1539,24 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     : request.computeMode === 'off'
       ? ({ mode: 'off' } as const)
       : ({ mode: 'memory' } as const);
-  const [fileSystem, projectRoot] = await Promise.all([
+  const [fileSystem, projectRoot, workbenchRoot] = await Promise.all([
     createProjectFileSystemProxy(request.fileSystemPort),
     createProjectFileSystemProxy(request.projectRootPort),
+    createProjectFileSystemProxy(request.workbenchRootPort),
   ]);
   const projectRootCapabilities = projectRoot.hello.payload;
+  const workbenchRootCapabilities = workbenchRoot.hello.payload;
   if (
     projectRootCapabilities.state !== 'ready' ||
     !projectRootCapabilities.capabilities.writable ||
-    !projectRootCapabilities.capabilities.durability
+    !projectRootCapabilities.capabilities.durability ||
+    workbenchRootCapabilities.state !== 'ready' ||
+    !workbenchRootCapabilities.capabilities.writable
   ) {
     fileSystem.dispose();
     projectRoot.dispose();
-    throw Object.assign(new Error('The project filesystem bridge is not writable or did not declare durability.'), {
+    workbenchRoot.dispose();
+    throw Object.assign(new Error('The project or live workbench filesystem bridge is not writable or did not declare durability.'), {
       code: 'STORAGE_NOT_WRITABLE',
     });
   }
@@ -1581,6 +1590,10 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
   );
   const recordView = composeView({ filesystem: workspaceProvider }, { consumer: 'user', policy: tauPathPolicy });
+  const workbenchView = composeView(
+    { filesystem: createRelayedFileSystemProvider(workbenchRoot) },
+    { consumer: 'user', policy: tauPathPolicy },
+  );
   const runtimeClient: AppRuntimeClient = createRuntimeClient(
     createDefaultKernelOptions({
       fileSystem: fromFsLike(createRuntimeFsLike(agentView)),
@@ -1751,6 +1764,9 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
       createProviderRpcFileSystem({ provider: agentView, mutations: fileSystemMutations, signal }),
     recordFileSystemFor: (signal) =>
       createProviderRpcFileSystem({ provider: recordView, mutations: fileSystemMutations, signal }),
+    workbenchFileSystemFor: (signal) =>
+      createProviderRpcFileSystem({ provider: workbenchView, mutations: fileSystemMutations, signal }),
+    workbench: createRuntimeWorkbenchClient(async () => runtimeClient),
     skillResolver,
     ...runtimeRpc,
     parameters,
@@ -1854,6 +1870,7 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     tabId: sessionId,
     fileSystem,
     projectRoot,
+    workbenchRoot,
     durability,
     storageBackend,
     host,
@@ -1915,6 +1932,7 @@ const releaseSession = async (): Promise<void> => {
     active.computeDispose?.();
     active.fileSystem.dispose();
     active.projectRoot.dispose();
+    active.workbenchRoot.dispose();
     const states = [...leadership.values()];
     for (const state of states) {
       globalThis.clearInterval(state.heartbeatId);

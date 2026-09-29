@@ -146,6 +146,7 @@ const routes = [
   route('anthropic-claude-opus-5.5', 'Opus 5.5', 'anthropic', 1_000_000, 128_000, rates('4', '.2', '5', '20', '5m')),
   route('anthropic-claude-opus-5', 'Opus 5', 'anthropic', 1_000_000, 128_000, rates('5', '.5', '6.25', '25', '5m')),
   route('anthropic-claude-opus-4.8', 'Opus 4.8', 'anthropic', 1_000_000, 128_000, rates('5', '.5', '6.25', '25', '5m')),
+  route('anthropic-claude-sonnet-5.5', 'Sonnet 5.5', 'anthropic', 1_000_000, 128_000, rates('2', '.2', '2.5', '10', '5m')),
   route('anthropic-claude-sonnet-5', 'Sonnet 5', 'anthropic', 1_000_000, 128_000, rates('2', '.2', '2.5', '10', '5m')),
   route(
     'anthropic-claude-sonnet-4.6',

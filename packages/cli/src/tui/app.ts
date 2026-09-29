@@ -142,10 +142,21 @@ const applyEvent = (session: Session, event: AgentLogEvent): Session => {
    * next turn is an ordinary Tau one must not inherit the last agent, or the
    * keyboard would go on refusing to steer a run that steers perfectly well. */
   const sameRun = session.runId === event.runId;
+  const startsRun =
+    (event.type === 'message.appended' && event.message.role === 'user') ||
+    (event.type === 'run.lifecycle' && event.state === 'admitted');
+  /* A prior turn can settle after the next has been admitted. Its record is a
+   * transcript row, never a new keyboard target. The user marker precedes
+   * admission, so it must select the new run early enough to retain its agent. */
+  if (session.runId !== undefined && !sameRun && !startsRun) {
+    return { ...session, rows };
+  }
   const base = {
     ...session,
     rows,
     runId: event.runId,
+    state: sameRun ? session.state : undefined,
+    approval: sameRun ? session.approval : undefined,
     agent: externalAgentOf(event) ?? (sameRun ? session.agent : undefined),
     refusal: sameRun ? session.refusal : undefined,
   };
@@ -397,9 +408,20 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
       /* The first page of a new run is up to one poll away, and `c` in the
        * meantime must cancel the run this keystroke started — not report that
        * no run exists. The snapshot is the daemon's own, so this is its answer
-       * arriving early rather than an assumption. */
+      * arriving early rather than an assumption. */
       if (running === undefined) {
-        setSession((current) => ({ ...current, runId: started, state: answer.snapshot.state }));
+        setSession((current) =>
+          current.runId === started
+            ? { ...current, state: current.state ?? answer.snapshot.state }
+            : {
+                ...current,
+                runId: started,
+                state: answer.snapshot.state,
+                agent: undefined,
+                refusal: undefined,
+                approval: undefined,
+              },
+        );
       }
       return `${answer.operation}: ${answer.snapshot.state}`;
     });

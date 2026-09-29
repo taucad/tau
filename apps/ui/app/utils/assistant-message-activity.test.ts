@@ -107,6 +107,8 @@ describe('assistant message activity', () => {
   });
 
   it('uses the same semantic families for Tau-native and qualified ACP tools', () => {
+    expect(activityFamily(tool('tool-arrange_workbench'))).toBe('edit');
+    expect(activityFamily(dynamic({ nativeName: 'arrange_workbench' }))).toBe('edit');
     expect(activityFamily(tool('tool-get_kernel_result'))).toBe('render');
     expect(activityFamily(dynamic({ nativeName: 'get_kernel_result' }))).toBe('render');
     expect(activityFamily(dynamic({ nativeName: 'screenshot' }))).toBe('screenshot');
@@ -182,6 +184,19 @@ describe('assistant message activity', () => {
     const groups = groupAssistantParts([tool('tool-edit_file'), tool('tool-export_geometry'), tool('tool-read_file')]);
 
     expect(groups.map((group) => group.category)).toEqual(['research', 'write', 'research']);
+  });
+
+  it('keeps direct and qualified MCP arrangements standalone without promoting a foreign lookalike', () => {
+    const groups = groupAssistantParts([
+      tool('tool-edit_file'),
+      tool('tool-arrange_workbench'),
+      dynamic({ nativeName: 'arrange_workbench' }),
+      dynamic({ toolName: 'arrange_workbench', kind: 'edit' }),
+      tool('tool-read_file'),
+    ]);
+
+    expect(groups.map((group) => group.category)).toEqual(['research', 'write', 'write', 'research']);
+    expect(groups[3]).toMatchObject({ kind: 'aggregated', partIndices: [3, 4] });
   });
 });
 

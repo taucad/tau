@@ -96,6 +96,7 @@ export type AgentHostWorkerInitializeRequest = {
   readonly type: 'initialize';
   readonly fileSystemPort: MessagePort;
   readonly projectRootPort: MessagePort;
+  readonly workbenchRootPort: MessagePort;
   readonly computeMode?: 'off' | 'memory' | 'durable' | undefined;
   readonly computeStorePort?: MessagePort | undefined;
   readonly projectStorage: ProjectFileSystemConfig;
@@ -525,6 +526,7 @@ const initializeRequestSchema = z.strictObject({
   type: z.literal('initialize'),
   fileSystemPort: messagePortSchema,
   projectRootPort: messagePortSchema,
+  workbenchRootPort: messagePortSchema,
   computeMode: z.enum(['off', 'memory', 'durable']).optional(),
   computeStorePort: messagePortSchema.optional(),
   projectStorage: projectStorageSchema,

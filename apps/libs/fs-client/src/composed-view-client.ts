@@ -1,4 +1,4 @@
-import type { CheckedFileWrite, CheckedFileWriteResult, FileStat, FileStatEntry, FileProvenance } from '@taucad/types';
+import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition, FileStat, FileStatEntry, FileProvenance } from '@taucad/types';
 import { isWorkspaceMutationError, WorkspaceMutationError } from '@taucad/filesystem';
 import type { FileTreeNode } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
@@ -38,6 +38,7 @@ export type ComposedViewProxy = {
    */
   writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
   writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+  deleteFileChecked(input: { path: string; preconditions: readonly FileWritePrecondition[] }): Promise<CheckedFileWriteResult>;
   writeFiles(files: Record<string, { content: Uint8Array<ArrayBuffer> | string }>): Promise<void>;
   mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   unlink(path: string): Promise<void>;
@@ -143,6 +144,7 @@ const treeNode = (row: { name: string } & FileStat): FileTreeNode => {
 const guardedMutations = new Map<string, readonly number[]>([
   ['writeFile', [0]],
   ['writeFileChecked', []],
+  ['deleteFileChecked', []],
   ['mkdir', [0]],
   ['unlink', [0]],
   ['rmdir', [0]],
@@ -167,6 +169,7 @@ const guardedPreflights = new Map<string, readonly number[]>([
 const viewMutations = new Map<string, keyof ComposedViewProxy>([
   ['writeFile', 'writeFile'],
   ['writeFileChecked', 'writeFileChecked'],
+  ['deleteFileChecked', 'deleteFileChecked'],
   ['writeFiles', 'writeFiles'],
   ['mkdir', 'mkdir'],
   ['unlink', 'unlink'],
@@ -182,7 +185,7 @@ const viewMutations = new Map<string, keyof ComposedViewProxy>([
 
 /** The paths a guarded call would touch, whatever shape its arguments take. */
 const touchedPaths = (property: string, args: readonly unknown[]): readonly string[] => {
-  if (property === 'writeFileChecked') {
+  if (property === 'writeFileChecked' || property === 'deleteFileChecked') {
     const input = args[0] as { path?: unknown; preconditions?: ReadonlyArray<{ path?: unknown }> } | undefined;
     return [input?.path, ...(input?.preconditions?.map(({ path }) => path) ?? [])].filter(
       (value): value is string => typeof value === 'string',
@@ -223,8 +226,8 @@ const viewArgs = (
   args: readonly unknown[],
   relative: (absolutePath: string) => string | undefined,
 ): unknown[] | undefined => {
-  if (property === 'writeFileChecked') {
-    const input = args[0] as Omit<CheckedFileWrite, 'signal'>;
+  if (property === 'writeFileChecked' || property === 'deleteFileChecked') {
+    const input = args[0] as { path: string; preconditions: readonly FileWritePrecondition[] };
     const path = relative(input.path);
     const preconditions = input.preconditions.map((precondition) => ({
       ...precondition,

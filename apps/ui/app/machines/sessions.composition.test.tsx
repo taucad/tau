@@ -248,6 +248,7 @@ const projectContextOf = (projectId: string): unknown => {
     projectId: 'unused',
     parameterService,
     viewGraphics: viewGraphicsOf(projectId),
+    flushWorkbenchRecordProducers: async () => undefined,
     projectRef: {
       send: (event: { type: string }) => {
         serviceCalls.push(`project:${event.type}`);
@@ -282,6 +283,12 @@ vi.mock('#hooks/use-project.js', () => ({
   },
   useProject: () => projectContextOf(useContext(StubProjectContext)),
 }));
+vi.mock('#routes/w.$workspace.$project/workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
+vi.mock('#routes/w.$workspace.$project/view-settings-sync-host.js', () => ({ ViewSettingsSyncHost: () => {
+  const projectId = useContext(StubProjectContext);
+  return <span data-testid='view-settings-host' data-project-id={projectId} />;
+} }));
+vi.mock('#routes/w.$workspace.$project/entries-sync-host.js', () => ({ EntriesSyncHost: () => null }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
@@ -787,10 +794,9 @@ describe('sessions composition', () => {
     view.unmount();
   });
 
-  /* R6: the write-side host is mounted beside `ProjectPersistenceGuard`, above the `focused ?` gate.
-   * Move it into the gate -- or back into the viewer -- and a project the person navigated away from
-   * silently stops persisting what its own actors hold, with every other row still green. */
-  it('keeps writing the view settings of a live project that is not focused', async () => {
+  /* R6: the write-side host remains mounted beside ProjectPersistenceGuard above the focus gate.
+   * Its field-level writing is exercised by the dedicated view-store and owner suites. */
+  it('keeps the view record owner mounted for a live project that is not focused', async () => {
     const graphicsRef = createActor(
       graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
       { input: {} },
@@ -800,14 +806,7 @@ describe('sessions composition', () => {
     const view = await renderRoute('pin-unfocused-1');
     await view.rerender('pin-unfocused-2');
     expect(liveProjectIds()).toEqual(['pin-unfocused-1', 'pin-unfocused-2']);
-    serviceCalls.length = 0;
-
-    await act(async () => {
-      graphicsRef.send({ type: 'setGridVisibility', payload: false });
-      await Promise.resolve();
-    });
-
-    expect(serviceCalls).toContain('editor:updateViewSettings');
+    expect(screen.getAllByTestId('view-settings-host').some((element) => element.dataset['projectId'] === 'pin-unfocused-1')).toBe(true);
     graphicsRef.stop();
     view.unmount();
   });
@@ -1575,6 +1574,37 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     expect(view.queryByRole('status')).toBeNull();
 
     unregister();
+    view.unmount();
+  });
+
+  it('shows a failed producer flush, keeps sessions live, then retries before answering quit', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const asks: Array<() => void> = [];
+    const answers: string[] = [];
+    (globalThis as { tau?: unknown }).tau = {
+      quit: {
+        onAsk: (handler: () => void) => { asks.push(handler); return () => undefined; },
+        reportQuiesced: () => answers.push('quiesced'),
+      },
+    };
+    flushProducers.mockRejectedValueOnce(new Error('checked workbench write unavailable')).mockResolvedValueOnce(undefined);
+    vi.resetModules();
+    const freshSessions = await import('#hooks/use-sessions.js');
+    const freshStore = await import('#services/sessions-store.js');
+    const view = render(<QueryClientProvider client={queryClient}>
+      <freshSessions.SessionsProvider><span>app</span></freshSessions.SessionsProvider>
+    </QueryClientProvider>);
+    await settle();
+    await act(async () => { asks[0]?.(); await Promise.resolve(); });
+    await settle();
+    expect(view.getByRole('status').textContent).toContain('checked workbench write unavailable');
+    expect(freshStore.sessionsActor.getSnapshot().matches('ready')).toBe(true);
+    expect(answers).toEqual([]);
+    await act(async () => { view.getByRole('button', { name: 'Try again' }).click(); await Promise.resolve(); });
+    await settle();
+    expect(flushProducers).toHaveBeenCalledTimes(2);
+    expect(freshStore.sessionsActor.getSnapshot().matches('quiesced')).toBe(true);
+    expect(answers).toEqual(['quiesced']);
     view.unmount();
   });
 });

@@ -314,12 +314,12 @@ const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] =
      * builds from these arguments, and are detached by the postMessage. */
     return args;
   }
-  if (method === 'writeFileChecked' && args[0] !== null && typeof args[0] === 'object') {
+  if ((method === 'writeFileChecked' || method === 'deleteFileChecked') && args[0] !== null && typeof args[0] === 'object') {
     const input = args[0] as CheckedFileWrite;
     return [
       {
         path: input.path,
-        data: cloneWritePayloadForTransfer(input.data),
+        ...(method === 'writeFileChecked' ? { data: cloneWritePayloadForTransfer(input.data) } : {}),
         preconditions: input.preconditions.map((precondition) => ({
           path: precondition.path,
           expected: precondition.expected === null ? null : cloneWritePayloadForTransfer(precondition.expected),
@@ -367,6 +367,7 @@ const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] =
 type MutationMethodName =
   | 'writeFile'
   | 'writeFileChecked'
+  | 'deleteFileChecked'
   | 'appendFile'
   | 'writeFiles'
   | 'mkdir'
@@ -397,6 +398,7 @@ type MutationOverrideMap = {
 
 type WriteFileParameters = Parameters<MutatingMethods['writeFile']>;
 type WriteFileCheckedParameters = Parameters<MutatingMethods['writeFileChecked']>;
+type DeleteFileCheckedParameters = Parameters<MutatingMethods['deleteFileChecked']>;
 type AppendFileParameters = Parameters<MutatingMethods['appendFile']>;
 type WriteFilesParameters = Parameters<MutatingMethods['writeFiles']>;
 type CommitPendingProjectDirectoryParameters = Parameters<MutatingMethods['commitPendingProjectDirectory']>;
@@ -463,13 +465,13 @@ const withCheckedWriteApplicationState = (error: unknown, applicationState: Chec
   });
 };
 
-const checkedWritePreDeliveryError = (args: unknown[]): Error | undefined => {
-  const validation = fileSystemBridgeSchemas.calls.writeFileChecked.args.safeParse(args);
+const checkedWritePreDeliveryError = (method: 'writeFileChecked' | 'deleteFileChecked', args: unknown[]): Error | undefined => {
+  const validation = fileSystemBridgeSchemas.calls[method].args.safeParse(args);
   if (validation.success) {
     return undefined;
   }
   return withCheckedWriteApplicationState(
-    new TypeError(`Invalid writeFileChecked arguments: ${validation.error.message}`),
+    new TypeError(`Invalid ${method} arguments: ${validation.error.message}`),
     'known-not-applied',
   );
 };
@@ -582,6 +584,13 @@ export function bindMutationContextForPort<T extends StringKeyedObject>(
     writeFileChecked: async (input: WriteFileCheckedParameters[0]): Promise<CheckedFileWriteResult> => {
       try {
         return await mutatingService.writeFileChecked(input, context);
+      } catch (error) {
+        throw preserveCheckedWriteApplicationState(error);
+      }
+    },
+    deleteFileChecked: async (input: DeleteFileCheckedParameters[0]): Promise<CheckedFileWriteResult> => {
+      try {
+        return await mutatingService.deleteFileChecked(input, context);
       } catch (error) {
         throw preserveCheckedWriteApplicationState(error);
       }
@@ -1450,12 +1459,12 @@ export function createFileSystemBridgeProxy(
       if (property === 'then' || property === 'toJSON' || typeof property === 'symbol') {
         return undefined;
       }
-      if (isDisposed && property !== 'writeFileChecked') {
+      if (isDisposed && property !== 'writeFileChecked' && property !== 'deleteFileChecked') {
         throw new Error(`Filesystem bridge proxy has been disposed — cannot call '${property}'`);
       }
       return async (...args: unknown[]) => {
-        if (property === 'writeFileChecked') {
-          const preDeliveryError = checkedWritePreDeliveryError(args);
+        if (property === 'writeFileChecked' || property === 'deleteFileChecked') {
+          const preDeliveryError = checkedWritePreDeliveryError(property, args);
           if (preDeliveryError !== undefined) {
             throw preDeliveryError;
           }
@@ -1469,7 +1478,7 @@ export function createFileSystemBridgeProxy(
         try {
           return await call(property, args);
         } catch (error) {
-          if (property === 'writeFileChecked') {
+          if (property === 'writeFileChecked' || property === 'deleteFileChecked') {
             throw classifyCheckedWriteFailure(error);
           }
           throw error;

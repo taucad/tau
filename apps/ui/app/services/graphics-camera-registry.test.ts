@@ -74,11 +74,14 @@ describe('ViewCameraSession ownership', () => {
       camera: { cameraFovAngle: 42, cameraView },
     });
     session.framing.initialized = true;
+    session.framing.preserveOrientationOnFirstFrame = true;
+    session.framing.firstFrameView = cameraView;
     session.rig.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 33 });
 
     acquireViewCameraSession(graphicsRef, { identity: 'bracket.ts', camera: {} });
 
-    expect(session.framing).toEqual({ identity: 'bracket.ts', pendingView: undefined, initialized: false });
+    expect(session.framing).toEqual({ identity: 'bracket.ts', pendingView: undefined,
+      preserveOrientationOnFirstFrame: false, firstFrameView: undefined, initialized: false });
     expect(session.rig.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(33);
   });
 
@@ -91,7 +94,8 @@ describe('ViewCameraSession ownership', () => {
 
     acquireViewCameraSession(graphicsRef, { identity: undefined, camera: {} });
 
-    expect(session.framing).toEqual({ identity: 'part.ts', pendingView: cameraView, initialized: true });
+    expect(session.framing).toEqual({ identity: 'part.ts', pendingView: cameraView,
+      preserveOrientationOnFirstFrame: false, firstFrameView: undefined, initialized: true });
   });
 
   it('should release the session when its graphics actor completes', () => {

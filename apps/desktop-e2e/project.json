@@ -45,7 +45,30 @@
         "commands": [
           "pnpm --dir ../.. exec nx run ui:build",
           "./scripts/ensure-services.sh",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-in-project.spec.ts src/desktop-chat-replay.spec.ts src/desktop-chat-launcher-2.spec.ts src/desktop-mcp-fixture.spec.ts src/desktop-chat-attachments.spec.ts src/desktop-share-link-copy.spec.ts src/desktop-kernel-freshness.spec.ts src/desktop-quit-hold.spec.ts src/desktop-print-dry-run.spec.ts src/two-client.spec.ts src/sync-refusals.spec.ts; first=$?; TAU_FREE_TIER_SYNC_ENABLED=true ../../node_modules/.bin/vitest run --config vitest.config.ts src/sync-refusals.spec.ts; second=$?; exit $(( first || second ))"
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-in-project.spec.ts src/desktop-chat-replay.spec.ts src/desktop-chat-launcher-2.spec.ts src/desktop-mcp-fixture.spec.ts src/desktop-arrange-workbench.spec.ts src/desktop-chat-attachments.spec.ts src/desktop-share-link-copy.spec.ts src/desktop-kernel-freshness.spec.ts src/desktop-quit-hold.spec.ts src/desktop-print-dry-run.spec.ts src/two-client.spec.ts src/sync-refusals.spec.ts; first=$?; TAU_FREE_TIER_SYNC_ENABLED=true ../../node_modules/.bin/vitest run --config vitest.config.ts src/sync-refusals.spec.ts; second=$?; exit $(( first || second ))"
+        ],
+        "env": {
+          "TAU_E2E_API_URL": "http://localhost:4014",
+          "TAU_CLOUD_ENABLED": "true",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
+        }
+      }
+    },
+    "test:e2e:workbench": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": [
+        { "projects": ["desktop"], "target": "build" }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "parallel": false,
+        "commands": [
+          "pnpm --dir ../.. exec nx run ui:build",
+          "./scripts/ensure-services.sh",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-arrange-workbench.spec.ts"
         ],
         "env": {
           "TAU_E2E_API_URL": "http://localhost:4014",

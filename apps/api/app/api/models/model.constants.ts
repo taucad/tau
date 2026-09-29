@@ -14,8 +14,8 @@ const pdfInputModalities = { input: ['text', 'image', 'pdf'], output: ['text'] }
  * declares levels only when its codec forwards an effort — Anthropic adaptive
  * thinking, the Responses wire (OpenAI, xAI) and Vertex's thinking level; the
  * OpenAI-compatible completions providers carry none, so they get no menu.
- * `xhigh` is Anthropic Opus 4.7+ / Fable 5 and GPT-6 Astra only, and Vertex
- * refuses anything past `high`.
+ * `xhigh` is Anthropic Sonnet 5.5 / Opus 4.7+ / Fable 5 and GPT-6 Astra;
+ * Sonnet 5.5 also accepts `max`. Vertex refuses anything past `high`.
  */
 const lowToHighReasoning = { levels: ['low', 'medium', 'high'] } satisfies ModelReasoningSupport;
 const lowToExtraHighReasoning = { levels: ['low', 'medium', 'high', 'xhigh'] } satisfies ModelReasoningSupport;
@@ -265,12 +265,56 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         },
       },
     },
+    'claude-sonnet-5.5': {
+      id: 'anthropic-claude-sonnet-5.5',
+      providerKind: 'tau-hosted',
+      name: 'Sonnet 5.5',
+      slug: 'claude-sonnet-5.5',
+      recommended: true,
+      description: 'Fast Claude model for everyday CAD design iterations and focused multi-file edits.',
+      provider: {
+        id: 'anthropic',
+        name: 'Anthropic',
+      },
+      model: 'claude-sonnet-5-5',
+      support: {
+        reasoning: { levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+        toolChoice: false,
+        modalities: pdfInputModalities,
+      },
+      details: {
+        family: 'claude',
+        families: ['claude'],
+        contextWindow: 200_000, // Provider supports 1M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        cost: {
+          inputTokens: 2,
+          outputTokens: 10,
+          cacheReadTokens: 0.2,
+          cacheWriteTokens: 2.5,
+        },
+      },
+      configuration: {
+        streaming: true,
+        maxTokens: 120_000,
+        // @ts-expect-error: FIXME - some models use camelCase
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
+        max_tokens: 120_000,
+        thinking: {
+          type: 'adaptive',
+          display: 'summarized',
+        },
+        outputConfig: {
+          effort: 'high',
+        },
+      },
+    },
     'claude-sonnet-5': {
       id: 'anthropic-claude-sonnet-5',
       providerKind: 'tau-hosted',
       name: 'Sonnet 5',
       slug: 'claude-sonnet-5',
-      recommended: true,
+      recommended: false,
       description: 'Strong Claude model for complex CAD design iterations and long multi-file edits.',
       provider: {
         id: 'anthropic',

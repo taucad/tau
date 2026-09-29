@@ -199,6 +199,9 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({ chats: [] }),
 }));
+vi.mock('#hooks/use-chat-records.js', () => ({
+  useChatRecords: () => ({ chats: [], isLoading: false, error: undefined }),
+}));
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: 'project_test' }),

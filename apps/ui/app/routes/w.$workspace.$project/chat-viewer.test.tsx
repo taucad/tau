@@ -8,11 +8,15 @@ import type { ActorRefFrom } from 'xstate';
 import type { DockviewPanelApi } from 'dockview-react';
 import type { Geometry, GeometryComponentManifest } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime';
+import { workbenchRecords } from '@taucad/workbench';
 import { defaultGraphicsSettings, defaultRenderTimeout } from '#constants/editor.constants.js';
 import type { GraphicsViewSettings, PinnedMeasurement } from '#constants/editor.constants.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { ModelInteractionContext } from '#machines/model-interaction.machine.js';
+const mockViewActions = vi.hoisted(() => ({ edit: vi.fn<(...args: unknown[]) => Promise<boolean>>(async () => true),
+  remove: vi.fn<(...args: unknown[]) => Promise<boolean>>(async () => true) }));
+vi.mock('#workbench-records/view-actions.js', () => ({ useWorkbenchViewCommands: () => mockViewActions }));
 
 // =============================================================================
 // xstate/react: lightweight mock that mirrors selector(undefined) when actor is
@@ -256,6 +260,14 @@ vi.mock('#hooks/use-project.js', () => ({
       send: mockEditorSend,
     },
     viewGraphics: mockViewGraphics,
+    viewRecords: new Map(Object.entries(mockViewSettings).map(([id, settings]) => [id,
+      workbenchRecords.view.schema.parse({ version: 1, entryPath: settings.entryPath,
+        fieldOfView: settings.graphicsSettings.cameraFovAngle,
+        ...(settings.graphicsSettings.cameraView ? { camera: { kind: 'pose', ...settings.graphicsSettings.cameraView } } : {}),
+      }),
+    ])),
+    entriesRecord: { version: 1, entries: mockUnitSettings },
+    setViewEntryPath: vi.fn(),
     geometryUnits: mockGeometryUnits,
     mainEntryPath: mockMainEntryPath,
   }),
@@ -401,6 +413,8 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockProjectSend.mockClear();
     mockEditorSend.mockClear();
     mockGraphicsSend.mockClear();
+    mockViewActions.edit.mockClear();
+    mockViewActions.remove.mockClear();
     mockGeometryUnits = new Map();
     mockViewSettings = {};
     mockCameraSeed = undefined;
@@ -588,7 +602,8 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
-    expect(mockCameraSeed).toEqual({ identity: helperEntryPath, camera: { cameraFovAngle: 42, cameraView } });
+    expect(mockCameraSeed).toEqual({ identity: helperEntryPath, camera: { cameraFovAngle: 42,
+      cameraView: { kind: 'pose', ...cameraView } } });
   });
 
   /* R8: a branch with no canvas has nothing to drive a camera, and building one there would latch
@@ -635,21 +650,8 @@ describe('ChatViewer reopen-renderer overlay', () => {
     viewer.rerender(<ChatViewer viewId='view-1' entryPath='main.scad' panelApi={mockPanelApi} profile='shared' />);
 
     expect(mockProjectSend).toHaveBeenCalledWith({ type: 'createGeometryUnit', entryPath: 'bracket.scad' });
-    expect(mockEditorSend).toHaveBeenCalledWith({
-      type: 'setViewSettings',
-      viewId: 'view-1',
-      viewState: {
-        entryPath: 'bracket.scad',
-        graphicsSettings: {
-          ...defaultGraphicsSettings,
-          cameraView: undefined,
-          sectionView: undefined,
-          pinnedMeasurements: undefined,
-        },
-      },
-    });
     expect(mockPanelApi.updateParameters).toHaveBeenCalledWith({ entryPath: 'bracket.scad' });
-    expect(mockPanelApi.setTitle).toHaveBeenCalledWith('bracket.scad');
+    expect(mockPanelApi.setTitle).toHaveBeenCalledWith('Isometric · bracket.scad');
   });
 
   it('keeps a viewer on a user-selected file when the synced main file changes', () => {
@@ -754,20 +756,11 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Select another file' }));
 
-    expect(mockEditorSend).toHaveBeenCalledWith({
-      type: 'setViewSettings',
-      viewId: 'view-1',
-      viewState: {
-        entryPath: 'other.scad',
-        graphicsSettings: {
-          ...defaultGraphicsSettings,
-          cameraFovAngle: 42,
-          cameraView: undefined,
-          // The cut belongs to the file that was open (E2).
-          sectionView: undefined,
-          pinnedMeasurements: undefined,
-        },
-      },
+    expect(mockViewActions.edit).toHaveBeenCalledWith('view-1', expect.any(Function));
+    const change = mockViewActions.edit.mock.lastCall?.[1] as ((current: ReturnType<typeof workbenchRecords.view.schema.parse>) => unknown);
+    expect(change(workbenchRecords.view.schema.parse({ version: 1, entryPath: helperEntryPath }))).toMatchObject({
+      entryPath: 'other.scad', camera: { kind: 'preset', preset: 'isometric' },
+      section: { active: false, cuts: [] }, measurements: [],
     });
     /* The retained actor must drop the cuts and measurements too: Section off alone keeps the cuts, the
      * pinned measurement still draws, and the next persist writes both -- placed on geometry that is no

@@ -47,6 +47,9 @@ vi.mock('#hooks/use-keyboard.js', () => ({
 /* The tree reads the scheduler's facet for the open pull's first window (W13
  * P34); this suite is about provenance and renders outside a router. */
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));
+vi.mock('#workbench-records/view-actions.js', () => ({ useWorkbenchViewCommands: () => ({
+  edit: async () => true, remove: async () => true,
+}) }));
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectRef: actorStub, editorRef: { ...actorStub, send: editorSend } }),
 }));

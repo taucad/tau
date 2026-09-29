@@ -33,7 +33,7 @@ Nx Release with version plans provides native monorepo integration and decouples
 | `packages/plugins/*`      | Publishable runtime capability toolkits                   |
 | `packages/core/*`         | Publishable shared implementation packages                |
 
-The following internal libraries remain in the fixed Nx version group but are not published independently: `@taucad/events`, `@taucad/filesystem`, `@taucad/fs-bridge`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/rpc`, `@taucad/types`, and `@taucad/utils`. Runtime bundles all eight. The former `@taucad/vm` library is no longer one of them: its sources live inside `@taucad/esbuild`, which owns and publishes them directly. Public `@taucad/units`, plugin, and core packages remain external dependencies and publish in the same fixed train.
+The following internal libraries remain in the fixed Nx version group but are not published independently: `@taucad/events`, `@taucad/fs-bridge`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/rpc`, `@taucad/types`, and `@taucad/utils`. Runtime currently bundles these seven private libraries. The former `@taucad/vm` library is no longer one of them: its sources live inside `@taucad/esbuild`, which owns and publishes them directly. Published `@taucad/filesystem`, `@taucad/units`, plugin, and core packages remain external dependencies and publish in the same fixed train.
 
 `@taucad/runtime/types` is the public owner for runtime contract types. JSON Schema inference remains an implementation library with no public runtime veneer or subpath. `@taucad/units` owns the portable public units API.
 
@@ -45,7 +45,7 @@ The following internal libraries remain in the fixed Nx version group but are no
 
 All packages in the release group share a single version number. When any member changes, Nx aligns the group to the same version. This includes the versioned-but-not-published bundled libraries so their changes cannot ship without a corresponding runtime version.
 
-**Rationale**: The packages are tightly coupled, and `@taucad/runtime` bundles eight private implementation libraries. Independent versioning would create a combinatorial compatibility matrix that is difficult to test and communicate.
+**Rationale**: The packages are tightly coupled, and `@taucad/runtime` bundles seven private implementation libraries. Independent versioning would create a combinatorial compatibility matrix that is difficult to test and communicate.
 
 ### Semantic Versioning
 
@@ -114,7 +114,7 @@ The `pkgcheck` Nx plugin validates package.json structure before publish:
 - Identical development and publish export key sets
 - Every `files` entry exists in the staged package
 - ESM-only entry points resolve correctly
-- Bundled workspace modules have exactly one published owner
+- Each package's bundled workspace modules are permitted by its own manifest and tags; private libraries may have multiple published bundle owners
 - Published declarations contain no non-JSDoc specifier for a bundled workspace package
 - A strict consumer (`skipLibCheck: false`) resolves the runtime under both `bundler` and `nodenext`
 - publint, Are the Types Wrong, circular-dependency, and size-limit gates pass
@@ -202,7 +202,7 @@ This section specifies the operator-owned release procedure. It does not authori
 
 The closeout Decision Register has settled the former C1/C5/C6 and OQ2/OQ4/OQ7 branches:
 
-1. Runtime bundles exactly eight private implementation libraries: events, filesystem, fs-bridge, JSON Schema, memory, RPC, types, and utils. None publishes independently; `@taucad/units` publishes separately.
+1. Runtime bundles seven private implementation libraries: events, fs-bridge, JSON Schema, memory, RPC, types, and utils. `@taucad/filesystem` and `@taucad/units` publish separately and remain external.
 2. `@taucad/runtime/types` is the public runtime-contract type surface. JSON Schema inference has no public veneer or runtime subpath; `@taucad/units` owns portable unit parsing, conversion, and quantity semantics.
 3. Concrete backend dependencies are owned by their plugin packages; runtime does not depend on them.
 4. `@taucad/geospec-engine` publishes after runtime and `geospec`.

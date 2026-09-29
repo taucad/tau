@@ -344,9 +344,8 @@ const pendingCreate: Extract<PendingProjectOperation, { kind: 'create' }> = {
     activePaneId: undefined,
     focusedChatId: 'cht_create',
     panelState: defaultPanelState,
-    workbenchLayout: undefined,
-    viewerLayout: undefined,
-    viewSettings: {},
+    fileSidebars: {},
+    graphicsBackendPreferences: {},
     updatedAt: 10,
   },
 };
@@ -561,6 +560,13 @@ const seedHomeAttachment = async (bytes: Uint8Array<ArrayBuffer>, mediaType: str
 describe('useProjectManager.createProject', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => { storage.set(key, value); },
+      removeItem: (key: string) => { storage.delete(key); },
+      clear: () => { storage.clear(); },
+    });
     attachmentFiles.clear();
     phaseOrder.length = 0;
     manifestBytes = serializeProjectManifest(projectToManifest(fakeProject));
@@ -2281,7 +2287,7 @@ describe('useProjectManager.createProject', () => {
     ['a template', { kernel: 'openscad', projectName: 'Bracket' }],
   ];
   it.each(remotelessCreations)('should mark %s for backup by default', async (_label, options) => {
-    localStorage.clear();
+    globalThis.localStorage.clear();
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
     await act(async () => result.current.createProject({ ...options, location: { kind: 'home' } }));
@@ -2291,7 +2297,7 @@ describe('useProjectManager.createProject', () => {
   });
 
   it('should not mark a project whose id the caller supplies (Tau Cloud open, linked GitHub import)', async () => {
-    localStorage.clear();
+    globalThis.localStorage.clear();
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
     await act(async () =>

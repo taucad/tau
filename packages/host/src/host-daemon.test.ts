@@ -14,6 +14,7 @@ import { NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { acquireNodeAuthorityWriter } from '@taucad/filesystem/backend/node';
 import type { NodeFsWatchEvent } from '@taucad/filesystem/backend/node';
 import { tauRemoteUrl } from '@taucad/revisions';
+import workbenchBundles from '@taucad/workbench/agent/resources.js';
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { connectMachineChannel, defineMachine } from '@taucad/runtime/machine';
 import type { MachineArtifactReference } from '@taucad/runtime/machine';
@@ -383,6 +384,40 @@ const requireTerminableRuntimeClient = (client: agentTools.HostRuntimeClient): T
 };
 
 describe('startHostDaemon', () => {
+  it('forwards the published workbench skill into its real tool registry', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-workbench-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    registrySpy.mockClear();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+      agent: await agentOptionsIn(temporaryDirectory),
+      systemSkillBundles: workbenchBundles,
+    });
+    try {
+      await daemon.ready;
+      expect(registrySpy.mock.lastCall?.[0]?.systemSkillBundles).toEqual(workbenchBundles);
+      const { registry } = requiredDaemonComposition();
+      const activated = await registry.invoke({
+        toolCallId: 'workbench-skill',
+        toolName: 'use_skill',
+        input: { skillName: 'workbench' },
+        signal: new AbortController().signal,
+      });
+      expect(activated.isError).toBe(false);
+      expect(JSON.stringify(activated.content)).toContain('Read before you rearrange');
+    } finally {
+      await daemon.close();
+    }
+  });
+
   it('should bind the real runtime child to the daemon filesystem authority', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-runtime-authority-'));
     process.env['TAU_CONFIG_DIR'] = temporaryDirectory;

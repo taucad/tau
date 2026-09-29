@@ -48,6 +48,7 @@ export const tauToolKinds = new Map<string, string>([
   ['web_browser', 'fetch'],
   ['create_file', 'edit'],
   ['edit_file', 'edit'],
+  ['arrange_workbench', 'edit'],
   ['delete_file', 'delete'],
   ['get_kernel_result', 'execute'],
   ['get_parameters', 'read'],

@@ -269,6 +269,7 @@ function mockProjectForExplorer({
     mainEntryPath,
     editorRef,
     viewGraphics,
+    viewRecords: new Map(Object.entries(viewSettings)),
     geometryUnits: new Map(geometryUnitFiles.map((entryPath) => [entryPath, createStaticActor({})])),
   });
 }

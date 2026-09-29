@@ -352,6 +352,16 @@ export const bundleOwners: readonly BundleOwner[] = [
     corpus: bundledTypescriptCorpus('geospec/geospec.bundled.json', 'geospec', 'packages/geospec'),
     groupBy: byKind,
   },
+  {
+    slug: 'workbench',
+    packageDirectory: 'packages/workbench',
+    name: 'Workbench',
+    title: 'Workbench',
+    description:
+      "Arranges the Tau workbench for a person — opens viewer views from named viewpoints or any direction, sets a view's camera, section cuts, display, grid unit and measurements, hides components and sets render timeouts per file, opens files and utility panes in workbench tabs, closes tabs — by writing the .tau/workbench records through the arrange_workbench tool. Use when a task ends with something to show, when asked to open, arrange, compare, cut open or review views or panes, or when authoring a report the person should see.",
+    whenToUse:
+      'Use when asked to show, open, arrange, compare, cut open or review views or panes, or when a task ends with something to show.',
+  },
 ];
 
 /** What one owner's regeneration produced. @public */
@@ -388,7 +398,7 @@ export const generateBundles = async (
       description: owner.description,
       version: versionOf(join(workspaceRoot, owner.packageDirectory)),
       whenToUse: owner.whenToUse,
-      // oxlint-disable-next-line no-await-in-loop -- Sequential by design: one owner compiles 12 MB of declarations, so overlapping the nine would multiply peak memory for no wall-clock gain.
+      // oxlint-disable-next-line no-await-in-loop -- Sequential by design: one owner compiles 12 MB of declarations, so overlapping owners would multiply peak memory for no wall-clock gain.
       doctrine: await readDoctrine(join(sourceAgent, doctrineFile)),
     };
     const authoredFiles = Object.fromEntries(

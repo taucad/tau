@@ -78,13 +78,17 @@
     "@earendil-works/pi-agent-core": "0.84.4",
     "@earendil-works/pi-ai": "0.84.4",
     "@msgpack/msgpack": "catalog:",
-    "uint8array-extras": "catalog:",
-    "zod": "catalog:"
+    "nanoid": "catalog:",
+    "uint8array-extras": "catalog:"
   },
   "devDependencies": {
     "@taucad/nx": "workspace:*",
     "@taucad/rpc": "workspace:*",
     "@vitest/browser-playwright": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "zod": "^4.0.0"
   }
 }

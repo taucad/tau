@@ -244,31 +244,6 @@ export const bundlePattern = (workspaceValue: Workspace, projectName: string): R
     : new RegExp(`^(?:${libraries.map((library) => escapeForRegExp(library)).join('|')})(?:/|$)`);
 };
 
-/** Every bundled library mapped to the publishables that claim it. */
-const bundleOwners = (workspaceValue: Workspace): Map<string, string[]> => {
-  const owners = new Map<string, string[]>();
-
-  for (const project of publishable(workspaceValue)) {
-    for (const library of bundledLibraries(workspaceValue, project.name)) {
-      owners.set(library, [...(owners.get(library) ?? []), project.name]);
-    }
-  }
-
-  return owners;
-};
-
-/**
- * Zero owners cannot occur by construction, so this only reports multi-owner
- * libraries — the invariant is exactly one owner per bundled library.
- *
- * @public
- */
-export const bundleOwnershipIssues = (workspaceValue: Workspace): string[] =>
-  [...bundleOwners(workspaceValue)]
-    .filter(([, owners]) => owners.length !== 1)
-    .map(([library, owners]) => `${library} is bundled by ${owners.join(' and ')}`)
-    .sort();
-
 const publishableDependencies = (workspaceValue: Workspace): Map<string, string[]> => {
   const published = new Set(publishable(workspaceValue));
   const nameByPackage = new Map(

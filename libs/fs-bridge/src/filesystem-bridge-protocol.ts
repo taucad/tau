@@ -23,6 +23,7 @@ import type {
   ChangeEvent,
   CheckedFileWrite,
   CheckedFileWriteResult,
+  FileWritePrecondition,
   FileProvenance,
   FileStat,
   FileStatEntry,
@@ -242,6 +243,7 @@ export type FileSystemBridgeRootedCalls = Pick<RootedFileSystem, 'rename'> &
   Pick<ComposedView, 'provenance' | 'readdirWithStats'> & {
     readFile: FileSystemBridgeReadFile;
     writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+    deleteFileChecked(input: { path: string; preconditions: readonly FileWritePrecondition[] }): Promise<CheckedFileWriteResult>;
     archive(path: string, options?: ArchiveOptions): Promise<Blob>;
     contents(path: string, options?: ArchiveOptions): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
     search(query: string, options?: SearchOptions): Promise<FileStatEntry[]>;
@@ -709,6 +711,7 @@ const callSchemas = {
   },
   writeFile: { args: z.tuple([z.string(), writePayloadSchema]), result: voidResult },
   writeFileChecked: { args: z.tuple([checkedWriteInputSchema]), result: checkedWriteResultSchema },
+  deleteFileChecked: { args: z.tuple([z.object({ path: z.string(), preconditions: z.array(z.object({ path: z.string(), expected: writePayloadSchema.nullable() })) })]), result: checkedWriteResultSchema },
   appendFile: { args: z.tuple([z.string(), writePayloadSchema]), result: voidResult },
   writeFiles: {
     args: z.tuple([z.record(z.string(), z.looseObject({ content: writePayloadSchema }))]),

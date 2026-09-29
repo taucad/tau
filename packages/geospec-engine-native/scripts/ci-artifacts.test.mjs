@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import process from 'node:process';
 // oxlint-disable-next-line no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export.
-import { ensureDelivery, prepareArtifacts, verifyArtifacts, verifyDelivery } from './ci-artifacts.mjs';
+import { ensureDelivery, prepareArtifacts, snapshotDelivery, verifyArtifacts, verifyDelivery } from './ci-artifacts.mjs';
 
 /** @type {(context: import('node:test').TestContext, reusePrefixes: boolean) => void} */
 const checkTransport = (context, reusePrefixes) => {
@@ -27,6 +28,9 @@ const checkTransport = (context, reusePrefixes) => {
   const bindingPath = `${packagePath}/bindings/emscripten/src/lib.rs`;
   const generatedPath = `${packagePath}/bindings/node/generated`;
   const mixedPath = `${packagePath}/bindings/emscripten/generated`;
+  const trackedPath = `${packagePath}/bench/tracked-fixture.ts`;
+  const missingTrackedPath = `${packagePath}/bench/moved-fixture.ts`;
+  const addedPath = `${packagePath}/bench/new-fixture.ts`;
   const productPath = process.env.PATH;
   const nativePrefixPath = '/inert-native-node-26.7/bin:/inert-native-tools/bin';
   const wasmSimd = { rustFlags: ['-C', 'target-feature=+simd128'], cxxFlag: '-msimd128', linkFlag: '-msimd128' };
@@ -55,6 +59,7 @@ const checkTransport = (context, reusePrefixes) => {
   };
   put(join(producer, snapshotPath), 'fixture declaration\n');
   put(join(producer, bindingPath), 'fixture source\n');
+  put(join(producer, trackedPath), 'tracked fixture\n');
   put(join(producer, packagePath, 'scripts/ci-artifacts.mjs'), 'fixture inventory script');
   put(join(producer, packagePath, 'scripts/collect-native-proof.py'), 'inert collector source');
   put(join(producer, packagePath, 'scripts/test_native_proof.py'), 'inert positive fixture source');
@@ -70,8 +75,9 @@ const checkTransport = (context, reusePrefixes) => {
         return `${revision}\n`;
       }
       assert.ok(args.includes('--cached'));
-      assert.ok(!args.includes('--others'));
-      return `${snapshotPath}\0${bindingPath}\0`;
+      assert.ok(args.includes('--others'));
+      assert.ok(args.includes('--exclude-standard'));
+      return [snapshotPath, bindingPath, trackedPath, missingTrackedPath, addedPath].join('\0') + '\0';
     },
   );
   /** @type {string[]} */
@@ -328,9 +334,32 @@ const checkTransport = (context, reusePrefixes) => {
     'assemble-package',
   ]);
   assert.equal(inventory.artifacts.length, 5);
+  assert.ok(inventory.source.files.some((file) => file.path === trackedPath));
+  assert.ok(!inventory.source.files.some((file) => file.path === missingTrackedPath));
+  rmSync(join(producer, trackedPath));
+  assert.throws(() => verifyArtifacts(producer), /source revision\/inputs differ/);
+  put(join(producer, trackedPath), 'tracked fixture\n');
+  put(join(producer, addedPath), 'new source\n');
+  assert.throws(() => verifyArtifacts(producer), /source revision\/inputs differ/);
+  rmSync(join(producer, addedPath));
+  put(join(producer, trackedPath), 'changed source\n');
+  assert.throws(() => verifyArtifacts(producer), /source revision\/inputs differ/);
+  put(join(producer, trackedPath), 'tracked fixture\n');
+  assert.deepEqual(verifyArtifacts(producer), inventory);
   const builtTargets = [...targets];
   assert.deepEqual(ensureDelivery(producer), inventory);
   assert.deepEqual(targets, builtTargets, 'an unchanged delivery must not invoke a producer');
+  const snapshot = snapshotDelivery(producer);
+  assert.deepEqual(targets, builtTargets, 'a verified snapshot must not invoke a producer');
+  for (const name of ['root.tgz', 'darwin-arm64.tgz', 'geospec-engine-native-source-relink.tar.gz']) {
+    const canonical = join(producer, transportPath, 'assembly/tarballs', name);
+    const selected = join(snapshot, 'tarballs', name);
+    const bytes = readFileSync(canonical);
+    assert.deepEqual(readFileSync(selected), bytes);
+    put(canonical, 'next producer');
+    assert.deepEqual(readFileSync(selected), bytes, 'a package snapshot cannot change with canonical output');
+    put(canonical, bytes);
+  }
   for (const [name, original] of [
     ['mixed-inputs.json', join(mixedCache, 'mixed-inputs-simd128.json')],
     ['mixed-commands.json', join(buildCache, 'attempt-1/commands.json')],
@@ -541,4 +570,154 @@ await test('default cold preparation transports complete artifacts without loadi
 
 await test('independent retained prefixes transport complete artifacts without loading a product', (context) => {
   checkTransport(context, true);
+});
+
+/** @type {(context: import('node:test').TestContext) => {root: string, cli: string, lock: string, bin: string, marker: string}} */
+const isolatedLockFixture = (context) => {
+  const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
+  mkdirSync(scratch, { recursive: true });
+  const root = mkdtempSync(join(scratch, 'lock-cli-'));
+  context.after(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  const cli = join(root, 'packages/geospec-engine-native/scripts/ci-artifacts.mjs');
+  const lock = join(root, 'node_modules/.cache/geospec-engine-native/ci-artifacts.lock');
+  const bin = join(root, 'bin');
+  const marker = join(root, 'marker');
+  mkdirSync(dirname(cli), { recursive: true });
+  mkdirSync(dirname(lock), { recursive: true });
+  mkdirSync(bin);
+  copyFileSync(resolve(import.meta.dirname, 'ci-artifacts.mjs'), cli);
+  for (const name of ['collect-native-proof.py', 'test_native_proof.py']) {
+    writeFileSync(join(dirname(cli), name), 'fixture source');
+  }
+  return { root, cli, lock, bin, marker };
+};
+
+/** @type {(path: string, contents: string) => void} */
+const executable = (path, contents) => {
+  writeFileSync(path, contents);
+  chmodSync(path, 0o755);
+};
+
+/** @type {(path: string) => Promise<void>} */
+const waitForFile = async (path) => {
+  for (let attempt = 0; attempt < 250; attempt += 1) {
+    if (existsSync(path)) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- Each poll observes the active subprocess after the prior tick.
+    await delay(20);
+  }
+  assert.fail(`Timed out waiting for ${path}`);
+};
+
+await test('should let a nested verifier complete under the exact producer lock', { skip: process.platform !== 'darwin' }, async (context) => {
+  const { cli, lock, marker } = isolatedLockFixture(context);
+  const holder = childProcess.spawn('/bin/sh', [
+    '-c', 'set -e; exec 9>> "$1"; lockf /dev/fd/9; touch "$2"; sleep 3', 'lock-holder', lock, marker,
+  ], { stdio: 'ignore' });
+  context.after(() => {
+    holder.kill('SIGTERM');
+  });
+  await waitForFile(marker);
+  assert.notEqual(childProcess.spawnSync('lockf', ['-t', '0', lock, '/usr/bin/true']).status, 0);
+  const result = childProcess.spawnSync(process.execPath, [cli, 'verify'], { encoding: 'utf8', timeout: 1000 });
+  assert.equal(result.status, 1, `Verifier did not complete: ${result.error?.message ?? result.signal}`);
+  assert.match(result.stderr, /Missing GeoSpec artifact inventory/);
+  const absent = childProcess.spawnSync(process.execPath, [cli, 'prepare-locked'], {
+    encoding: 'utf8', env: { ...process.env, GEOSPEC_PRODUCER_LOCK_FD: '9' },
+  });
+  assert.equal(absent.status, 1);
+  assert.match(absent.stderr, /lock descriptor differs|bad file descriptor|ebadf/i);
+  const wrongFile = join(dirname(lock), 'wrong.lock');
+  const wrongFd = openSync(wrongFile, 'a+');
+  try {
+    const wrong = childProcess.spawnSync(process.execPath, [cli, 'prepare-locked'], {
+      encoding: 'utf8', env: { ...process.env, GEOSPEC_PRODUCER_LOCK_FD: '9' },
+      stdio: ['ignore', 'pipe', 'pipe', 'ignore', 'ignore', 'ignore', 'ignore', 'ignore', 'ignore', wrongFd],
+    });
+    assert.equal(wrong.status, 1);
+    assert.match(wrong.stderr, /lock descriptor differs/);
+  } finally {
+    closeSync(wrongFd);
+  }
+  const unlockedFd = openSync(lock, 'a+');
+  try {
+    const unavailable = childProcess.spawnSync(process.execPath, [cli, 'prepare-locked'], {
+      encoding: 'utf8', env: { ...process.env, GEOSPEC_PRODUCER_LOCK_FD: '9' },
+      stdio: ['ignore', 'pipe', 'pipe', 'ignore', 'ignore', 'ignore', 'ignore', 'ignore', 'ignore', unlockedFd],
+    });
+    assert.equal(unavailable.status, 1);
+    assert.match(unavailable.stderr, /producer lock unavailable/);
+  } finally {
+    closeSync(unlockedFd);
+  }
+});
+
+await test('should serialize two actual CLI producers', { skip: process.platform !== 'darwin' }, async (context) => {
+  const { root, cli, bin, marker } = isolatedLockFixture(context);
+  const events = join(root, 'events');
+  executable(join(bin, 'git'), `#!/bin/sh
+printf '%s-start\\n' "$LABEL" >> "$EVENTS"
+touch "$MARKER"
+sleep 0.3
+printf '%s-end\\n' "$LABEL" >> "$EVENTS"
+exit 1
+`);
+  /** @type {(label: string) => import('node:child_process').ChildProcess} */
+  const start = (label) => childProcess.spawn(process.execPath, [cli, 'prepare'], {
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, LABEL: label, EVENTS: events, MARKER: marker },
+    stdio: 'ignore',
+  });
+  const first = start('A');
+  const firstExit = new Promise((resolve) => {
+    first.once('exit', resolve);
+  });
+  await waitForFile(marker);
+  const second = start('B');
+  const secondExit = new Promise((resolve) => {
+    second.once('exit', resolve);
+  });
+  assert.deepEqual(await Promise.all([firstExit, secondExit]), [1, 1]);
+  assert.deepEqual(readFileSync(events, 'utf8').trim().split('\n'), ['A-start', 'A-end', 'B-start', 'B-end']);
+});
+
+await test('should retain the actual CLI lock in an active child after coordinator termination', { skip: process.platform !== 'darwin' }, async (context) => {
+  const { root, cli, lock, bin, marker } = isolatedLockFixture(context);
+  const done = join(root, 'done');
+  const producerPid = join(root, 'producer-pid');
+  executable(join(bin, 'git'), `#!/bin/sh
+case "$1" in
+  ls-files) exit 0 ;;
+  rev-parse) printf '%040d\\n' 0; exit 0 ;;
+esac
+exit 1
+`);
+  executable(join(bin, 'pnpm'), `#!/bin/sh
+printf '%s\\n' "$PPID" > "$PRODUCER_PID"
+touch "$MARKER"
+sleep 0.7
+touch "$DONE"
+exit 1
+`);
+  const coordinator = childProcess.spawn(process.execPath, [cli, 'prepare'], {
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, MARKER: marker, DONE: done, PRODUCER_PID: producerPid },
+    stdio: 'ignore',
+  });
+  context.after(() => {
+    if (coordinator.exitCode === null) {
+      coordinator.kill('SIGTERM');
+    }
+  });
+  await waitForFile(marker);
+  process.kill(Number(readFileSync(producerPid, 'utf8')), 'SIGTERM');
+  const contender = () => childProcess.spawnSync('lockf', ['-t', '0', lock, '/usr/bin/true']);
+  assert.notEqual(contender().status, 0, 'Active child lost the producer lock');
+  await waitForFile(done);
+  for (let attempt = 0; attempt < 250 && contender().status !== 0; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- Wait for the active child to close its inherited descriptor.
+    await delay(20);
+  }
+  assert.equal(contender().status, 0, 'Producer lock remained after the child exited');
 });

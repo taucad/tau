@@ -246,9 +246,13 @@ export function ProjectLibrary(): React.JSX.Element {
           }
           return true;
         }
-        if (announce) toast.error(`Could not move ${project.name} to Trash`);
+        if (announce) {
+          toast.error(`Could not move ${project.name} to Trash`);
+        }
       } catch (error) {
-        if (announce) toast.error(`Could not move ${project.name} to Trash`);
+        if (announce) {
+          toast.error(`Could not move ${project.name} to Trash`);
+        }
         console.error('Error trashing project:', error);
       }
       return false;
@@ -970,6 +974,7 @@ function BulkActions({ table, deleteProject }: BulkActionsProps) {
         if (isCloudOnly(project)) {
           continue;
         }
+        // oxlint-disable-next-line no-await-in-loop -- Each project close, worker trash and library write settles before the next selected row.
         if (await deleteProject(project, { announce: false })) {
           successCount++;
         } else {

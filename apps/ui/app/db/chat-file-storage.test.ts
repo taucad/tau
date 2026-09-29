@@ -6,6 +6,7 @@ import type { Chat, MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import { errorCategory } from '@taucad/types/constants';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
+import { mergeLogSegments } from '@taucad/agent-host';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import { createChatFileStore } from '#db/chat-file-storage.js';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
@@ -37,7 +38,7 @@ const nextProjectId = (): string => `proj_${String(projectSequence++).padStart(2
  */
 const createStoreWithFiles = (): {
   store: ReturnType<typeof createChatFileStore>;
-  write: (path: string, content: string) => Promise<void>;
+  write: (path: string, content: string | Uint8Array<ArrayBuffer>) => Promise<void>;
   exists: (path: string) => Promise<boolean>;
   reads: string[];
   directoriesRead: string[];
@@ -826,6 +827,57 @@ describe('chat file store — the transcript the log implies', () => {
     /* And the record on disk still holds no transcript: the derivation is the
      * only history, never a second copy beside it. */
     expect(record).not.toContain('messages');
+  });
+
+  it('uses a known project for modern and log-only chats, falling back if the hint is wrong', async () => {
+    const { store, write, reads, directoriesRead } = createStoreWithFiles();
+    const unrelatedProjectId = 'proj_unrelated';
+    await write(
+      `/projects/${unrelatedProjectId}/.tau/chats/other/chat.json`,
+      record.replaceAll(projectId, unrelatedProjectId).replaceAll(chatId, 'other'),
+    );
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, record);
+    await write(
+      `/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`,
+      logLine({ sequence: 0, role: 'user', text: 'Known project' }),
+    );
+
+    expect(texts(await store.getChat(chatId, projectId))).toEqual(['Known project']);
+    expect(reads.every((path) => path.includes(`/projects/${projectId}/`))).toBe(true);
+    expect(directoriesRead.every((path) => path.includes(`/projects/${projectId}/`))).toBe(true);
+
+    const logOnlyId = 'chat_log_only_hint';
+    await write(
+      `/projects/${projectId}/.tau/chats/${logOnlyId}/events.jsonl`,
+      logLine({ sequence: 0, role: 'user', text: 'Log only' }),
+    );
+    reads.length = 0;
+    directoriesRead.length = 0;
+    expect(texts(await store.getChat(logOnlyId, projectId))).toEqual(['Log only']);
+    expect(reads.every((path) => path.includes(`/projects/${projectId}/`))).toBe(true);
+    expect(directoriesRead.every((path) => path.includes(`/projects/${projectId}/`))).toBe(true);
+
+    reads.length = 0;
+    expect(texts(await store.getChat(chatId, unrelatedProjectId))).toEqual(['Known project']);
+    expect(reads.some((path) => path.includes(`/projects/${projectId}/`))).toBe(true);
+  });
+
+  it('should retain replacement decoding and discard a torn final line', async () => {
+    const { store, write } = createStoreWithFiles();
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, record);
+    const bytes = new TextEncoder().encode(logLine({ sequence: 0, role: 'user', text: 'Done' }));
+    bytes[bytes.indexOf(0x44)] = 0xff;
+    const torn = new TextEncoder().encode('{"version":1,"message":"');
+    const log = new Uint8Array(bytes.length + torn.length + 1);
+    log.set(bytes);
+    log.set(torn, bytes.length);
+    log[log.length - 1] = 0xff;
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`, log);
+
+    expect(texts(await store.getChat(chatId))).toEqual(['�one']);
+    expect(() => mergeLogSegments([{ deviceId: 'raw', bytes: log }])).toThrow(
+      expect.objectContaining({ name: 'EventLogError', code: 'LINE_INVALID' }),
+    );
   });
 
   /* Two devices: this one's log at `events.jsonl`, the other's projected in as

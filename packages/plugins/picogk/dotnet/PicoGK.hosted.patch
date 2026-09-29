@@ -141,10 +141,10 @@ index 0000000..6c0ed94
 +    }
 +}
 diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
-index fe3d87d..98e35eb 100644
+index fe3d87d..53325b8 100644
 --- a/Viewer/Viewer.cs
 +++ b/Viewer/Viewer.cs
-@@ -45,6 +45,45 @@ namespace PicoGK
+@@ -45,6 +45,51 @@ namespace PicoGK
      /// </summary>
      public partial class Viewer
      {
@@ -184,13 +184,19 @@ index fe3d87d..98e35eb 100644
 +            hThis = IntPtr.Zero;
 +        }
 +
++        /// <summary>Capture an application-defined mechanism on a hosted viewer.</summary>
++        public void SetMechanism(object source)
++        {
++            m_xBackend?.SetMechanism(source);
++        }
++
 +        /// <summary>True when viewer operations are delegated to an embedding backend.</summary>
 +        public bool bIsHosted => m_xBackend is not null;
 +
          /// <summary>
          /// Initialize a new Viewer
          /// </summary>
-@@ -195,6 +234,22 @@ namespace PicoGK
+@@ -195,6 +240,22 @@ namespace PicoGK
          /// </summary>
          public bool bPoll()
          {
@@ -213,7 +219,7 @@ index fe3d87d..98e35eb 100644
              Debug.Assert(m_iMainThreadID == Environment.CurrentManagedThreadId);
              // Call this function only from the main() thread of the application
  
-@@ -247,6 +302,11 @@ namespace PicoGK
+@@ -247,6 +308,11 @@ namespace PicoGK
          /// </summary>
          public void RequestUpdate()
          {
@@ -225,7 +231,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new RequestUpdateAction());
-@@ -307,6 +367,11 @@ namespace PicoGK
+@@ -307,13 +373,18 @@ namespace PicoGK
  
                      lock (m_oActions)
                      {
@@ -237,14 +243,27 @@ index fe3d87d..98e35eb 100644
                          m_oActions.Enqueue(new LoadLightSetupAction(    m_xLog,
                                                                          abyDiffuseData,
                                                                          abySpecularData));
-@@ -316,5 +381,5 @@ namespace PicoGK
+                     }
+                 }
  
 -                catch
 +                catch when (m_xBackend is null)
                  {
                      Console.WriteLine("Unable to load lights");
                  }
-@@ -326,6 +391,11 @@ namespace PicoGK
+@@ -323,9 +394,23 @@ namespace PicoGK
+         /// <summary>
+         /// Add the object to the viewer, using the specified viewer group
+         /// </summary>
++        /// <summary>Add a named object to the hosted viewer. Native viewers retain ordinary rendering.</summary>
++        public void Add(in Voxels vox, string name, int nGroupID = 0)
++        {
++            if (m_xBackend is not null)
++                m_xBackend.Add(vox, name, nGroupID);
++            else
++                Add(vox, nGroupID);
++        }
++
          public void Add(    in Voxels vox,
                              int nGroupID = 0)
          {
@@ -256,7 +275,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new AddVoxelsAction(vox, nGroupID));
-@@ -337,6 +407,11 @@ namespace PicoGK
+@@ -337,6 +422,11 @@ namespace PicoGK
          /// </summary>
          public void Remove(Voxels vox)
          {
@@ -268,7 +287,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new RemoveVoxelsAction(vox));
-@@ -349,6 +424,11 @@ namespace PicoGK
+@@ -349,6 +439,11 @@ namespace PicoGK
          public void SetObjectMatrix(    Voxels vox,
                                          in Matrix4x4 mat)
          {
@@ -280,7 +299,19 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new SetVoxelsMatrixAction(vox, mat));
-@@ -361,6 +441,11 @@ namespace PicoGK
+@@ -358,9 +453,23 @@ namespace PicoGK
+         /// <summary>
+         /// Add the object to the viewer, using the specified viewer group
+         /// </summary>
++        /// <summary>Add a named object to the hosted viewer. Native viewers retain ordinary rendering.</summary>
++        public void Add(Mesh msh, string name, int nGroupID = 0)
++        {
++            if (m_xBackend is not null)
++                m_xBackend.Add(msh, name, nGroupID);
++            else
++                Add(msh, nGroupID);
++        }
++
          public void Add(    Mesh msh,
                              int nGroupID = 0)
          {
@@ -292,7 +323,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new AddMeshAction(msh, nGroupID));
-@@ -372,6 +457,11 @@ namespace PicoGK
+@@ -372,6 +481,11 @@ namespace PicoGK
          /// </summary>
          public void Remove(Mesh msh)
          {
@@ -304,7 +335,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new RemoveMeshAction(msh));
-@@ -384,6 +474,11 @@ namespace PicoGK
+@@ -384,6 +498,11 @@ namespace PicoGK
          public void SetObjectMatrix(    Mesh msh,
                                          in Matrix4x4 mat)
          {
@@ -316,7 +347,19 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new SetMeshMatrixAction(msh, mat));
-@@ -396,6 +491,11 @@ namespace PicoGK
+@@ -393,9 +512,23 @@ namespace PicoGK
+         /// <summary>
+         /// Add the object to the viewer, using the specified viewer group
+         /// </summary>
++        /// <summary>Add a named object to the hosted viewer. Native viewers retain ordinary rendering.</summary>
++        public void Add(PolyLine oPoly, string name, int nGroupID = 0)
++        {
++            if (m_xBackend is not null)
++                m_xBackend.Add(oPoly, name, nGroupID);
++            else
++                Add(oPoly, nGroupID);
++        }
++
          public void Add(    PolyLine oPoly,
                              int nGroupID = 0)
          {
@@ -328,7 +371,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new AddPolyLineAction(oPoly, nGroupID));
-@@ -407,6 +507,11 @@ namespace PicoGK
+@@ -407,6 +540,11 @@ namespace PicoGK
          /// </summary>
          public void Remove(PolyLine oPoly)
          {
@@ -340,7 +383,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new RemovePolyLineAction(oPoly));
-@@ -419,6 +524,11 @@ namespace PicoGK
+@@ -419,6 +557,11 @@ namespace PicoGK
          public void SetObjectMatrix(    PolyLine poly,
                                          in Matrix4x4 mat)
          {
@@ -352,7 +395,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new SetPolyLineMatrixAction(poly, mat));
-@@ -430,6 +540,11 @@ namespace PicoGK
+@@ -430,6 +573,11 @@ namespace PicoGK
          /// </summary>
          public void RemoveAllObjects()
          {
@@ -364,7 +407,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new RemoveAllObjectsAction());
-@@ -442,6 +557,11 @@ namespace PicoGK
+@@ -442,6 +590,11 @@ namespace PicoGK
          /// </summary>
          public void RequestScreenShot(string strScreenShotPath)
          {
@@ -376,7 +419,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new RequestScreenShotAction(strScreenShotPath));
-@@ -453,6 +573,11 @@ namespace PicoGK
+@@ -453,6 +606,11 @@ namespace PicoGK
          /// </summary>
          public void EnableExperimental(bool bEnable)
          {
@@ -388,7 +431,7 @@ index fe3d87d..98e35eb 100644
              _EnableExperimental(hThis, bEnable);
          }
  
-@@ -462,6 +587,11 @@ namespace PicoGK
+@@ -462,6 +620,11 @@ namespace PicoGK
          public void SetGroupVisible(int nGroupID,
                                          bool bVisible)
          {
@@ -400,7 +443,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new SetGroupVisibleAction(nGroupID, bVisible));
-@@ -480,6 +610,11 @@ namespace PicoGK
+@@ -480,6 +643,11 @@ namespace PicoGK
                                          float       fMetallic,
                                          float       fRoughness)
          {
@@ -412,7 +455,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new SetGroupMaterialAction(  nGroupID,
-@@ -495,6 +630,11 @@ namespace PicoGK
+@@ -495,6 +663,11 @@ namespace PicoGK
          public void SetGroupMatrix( int nGroupID,
                                      Matrix4x4 mat)
          {
@@ -424,7 +467,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new SetGroupMatrixAction(    nGroupID,
-@@ -512,6 +652,11 @@ namespace PicoGK
+@@ -512,6 +685,11 @@ namespace PicoGK
                                              Overhang uWarning,
                                              Overhang uError)
          {
@@ -436,7 +479,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new EnableGroupOverhangWarningAction(    nGroupID, 
-@@ -542,6 +687,11 @@ namespace PicoGK
+@@ -542,6 +720,11 @@ namespace PicoGK
          /// </summary>
          public void DisableOverhangWarning(int nGroupID)
          {
@@ -448,7 +491,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new DisableGroupOverhangWarningAction(nGroupID));
-@@ -553,6 +703,8 @@ namespace PicoGK
+@@ -553,6 +736,8 @@ namespace PicoGK
          /// </summary>
          public BBox3 oBBox()
          {
@@ -457,7 +500,7 @@ index fe3d87d..98e35eb 100644
              BBox3 oBBox = new();
              _GetBoundingBox(hThis, ref oBBox);
              return oBBox;
-@@ -563,6 +715,11 @@ namespace PicoGK
+@@ -563,6 +748,11 @@ namespace PicoGK
          /// </summary>
          public void SetBackgroundColor(ColorFloat clr)
          {
@@ -469,7 +512,7 @@ index fe3d87d..98e35eb 100644
              m_clrBackground = clr;
              RequestUpdate();
          }
-@@ -572,6 +729,11 @@ namespace PicoGK
+@@ -572,6 +762,11 @@ namespace PicoGK
          /// </summary>
          public void ZoomToFit()
          {
@@ -481,7 +524,7 @@ index fe3d87d..98e35eb 100644
              m_bForceZoomToFit = true;
              RequestUpdate();
          }
-@@ -581,6 +743,11 @@ namespace PicoGK
+@@ -581,6 +776,11 @@ namespace PicoGK
          /// </summary>
          public void SetFov(float fAngle)
          {
@@ -493,7 +536,7 @@ index fe3d87d..98e35eb 100644
              m_oCamera.SetVerticalFov(fAngle);
              RequestUpdate();
          }
-@@ -590,9 +757,14 @@ namespace PicoGK
+@@ -590,9 +790,14 @@ namespace PicoGK
          /// </summary>
          public Quaternion qOrientation
          {
@@ -509,7 +552,7 @@ index fe3d87d..98e35eb 100644
                  m_oCamera.qOrientation = value; 
                  RequestUpdate();
              }
-@@ -614,6 +786,8 @@ namespace PicoGK
+@@ -614,6 +819,8 @@ namespace PicoGK
          /// false: Viewer actions still pending (busy)</returns>
          public bool bIsIdle()
          {
@@ -518,7 +561,7 @@ index fe3d87d..98e35eb 100644
              lock (m_oActions)
              {
                  if (m_oActions.Count() > 0)
-@@ -625,11 +799,13 @@ namespace PicoGK
+@@ -625,11 +832,13 @@ namespace PicoGK
  
          bool m_bIdle = false;
  
@@ -533,7 +576,7 @@ index fe3d87d..98e35eb 100644
                 void DoRemove(Mesh msh)
          {
              _RemoveMesh(    msh.lib.hThis,
-@@ -822,4 +998,3 @@ namespace PicoGK
+@@ -822,4 +1031,3 @@ namespace PicoGK
          }
      }
  }
@@ -541,10 +584,10 @@ index fe3d87d..98e35eb 100644
 \ No newline at end of file
 diff --git a/Viewer/ViewerBackend.cs b/Viewer/ViewerBackend.cs
 new file mode 100644
-index 0000000..08e158e
+index 0000000..e1fc632
 --- /dev/null
 +++ b/Viewer/ViewerBackend.cs
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,46 @@
 +//
 +// SPDX-License-Identifier: Apache-2.0
 +//
@@ -568,15 +611,19 @@ index 0000000..08e158e
 +        void ZoomToFit();
 +        Quaternion Orientation { get; set; }
 +        void Add(Voxels vox, int nGroupID);
++        void Add(Voxels vox, string name, int nGroupID);
 +        void Remove(Voxels vox);
 +        void SetObjectMatrix(Voxels vox, Matrix4x4 mat);
 +        void Add(Mesh msh, int nGroupID);
++        void Add(Mesh msh, string name, int nGroupID);
 +        void Remove(Mesh msh);
 +        void SetObjectMatrix(Mesh msh, Matrix4x4 mat);
 +        void Add(PolyLine poly, int nGroupID);
++        void Add(PolyLine poly, string name, int nGroupID);
 +        void Remove(PolyLine poly);
 +        void SetObjectMatrix(PolyLine poly, Matrix4x4 mat);
 +        void RemoveAllObjects();
++        void SetMechanism(object source);
 +        void RequestScreenShot(string strScreenShotPath);
 +        void EnableExperimental(bool bEnable);
 +        void SetGroupVisible(int nGroupID, bool bVisible);

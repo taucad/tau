@@ -1,13 +1,15 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Tau.PicoGK.Worker;
 
 internal sealed record ComponentRange(
     string Id,
     string Kind,
-    string Name,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Name,
     float[] Color,
     float Metallic,
     float Roughness,
@@ -23,6 +25,8 @@ internal sealed record BuildResult(
     long ByteLength,
     string Sha256,
     IReadOnlyList<ComponentRange> Components,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? Mechanism,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<Issue>? Warnings,
     bool RecycleAfterResponse,
     WorkerTimings Timings,
     WorkerMetrics Metrics);
@@ -60,6 +64,8 @@ internal static class MeshArtifactWriter
             artifact.ByteLength,
             artifact.Sha256,
             artifact.Components,
+            execution.Mechanism,
+            execution.Warnings.Count == 0 ? null : execution.Warnings,
             execution.RecycleAfterResponse,
             diagnostics.Timings,
             diagnostics.Metrics);

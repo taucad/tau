@@ -1,0 +1,4438 @@
+{
+  "name": "TF-2000",
+  "units": "mm",
+  "length": 3600,
+  "diameter": 2000,
+  "description": "Generic two-spool high-bypass turbofan geometric concept; terminal leaves are manufactured parts, not material grains.",
+  "parts": [
+    {
+      "id": "inlet/lip",
+      "kind": "ring",
+      "color": "d4e2eb",
+      "count": 1,
+      "profile": [
+        [0, 925],
+        [12, 966],
+        [45, 992],
+        [100, 1000],
+        [165, 985],
+        [180, 963],
+        [175, 945],
+        [140, 955],
+        [85, 970],
+        [45, 962],
+        [24, 942],
+        [20, 925]
+      ],
+      "cut": true
+    },
+    {
+      "id": "nacelle/forwardCowl",
+      "kind": "ring",
+      "color": "e4e9eb",
+      "count": 1,
+      "profile": [
+        [182, 963],
+        [400, 992],
+        [720, 987],
+        [1100, 951],
+        [1540, 888],
+        [1540, 876],
+        [1100, 939],
+        [720, 975],
+        [400, 980],
+        [182, 951]
+      ],
+      "cut": true
+    },
+    {
+      "id": "nacelle/aftCowl",
+      "kind": "ring",
+      "color": "cad6dc",
+      "count": 1,
+      "profile": [
+        [1560, 885],
+        [1920, 808],
+        [2220, 738],
+        [2400, 690],
+        [2420, 678],
+        [2420, 665],
+        [2400, 677],
+        [2220, 726],
+        [1920, 796],
+        [1560, 873]
+      ],
+      "cut": true
+    },
+    {
+      "id": "fan/containment",
+      "kind": "ring",
+      "color": "758992",
+      "count": 1,
+      "profile": [
+        [240, 950],
+        [465, 950],
+        [465, 925],
+        [240, 925]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fan/spinner",
+      "kind": "ring",
+      "color": "bdcbd3",
+      "count": 1,
+      "profile": [
+        [35, 0],
+        [70, 50],
+        [130, 130],
+        [210, 200],
+        [260, 225],
+        [260, 214],
+        [210, 189],
+        [130, 119],
+        [70, 39],
+        [46, 0]
+      ],
+      "cut": false,
+      "motion": "lp"
+    },
+    {
+      "id": "fan/disk",
+      "kind": "ring",
+      "color": "5f747f",
+      "count": 1,
+      "profile": [
+        [280, 246],
+        [395, 246],
+        [395, 82],
+        [280, 82]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "fan/blades",
+      "kind": "blade",
+      "color": "c1dbe5",
+      "count": 24,
+      "x": 290,
+      "root": 249,
+      "tip": 920,
+      "chord": 210,
+      "taper": 0.55,
+      "angle": 42,
+      "twist": -25,
+      "naca": "4412",
+      "sweep": 75,
+      "motion": "lp"
+    },
+    {
+      "id": "fan/frontRetainer",
+      "kind": "ring",
+      "color": "8b969a",
+      "count": 1,
+      "profile": [
+        [268, 230],
+        [278, 230],
+        [278, 85],
+        [268, 85]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "fan/rearRetainer",
+      "kind": "ring",
+      "color": "8b969a",
+      "count": 1,
+      "profile": [
+        [400, 244],
+        [410, 244],
+        [410, 85],
+        [400, 85]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "fan/hubBolts",
+      "kind": "ring",
+      "color": "d9dfe0",
+      "count": 24,
+      "profile": [
+        [260, 8],
+        [267, 8],
+        [267, 0],
+        [260, 0]
+      ],
+      "cut": false,
+      "pitch": 185,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "bypass/outletGuideVanes",
+      "kind": "blade",
+      "color": "8ba9b5",
+      "count": 36,
+      "x": 590,
+      "root": 444,
+      "tip": 917,
+      "chord": 155,
+      "taper": 0.75,
+      "angle": -20,
+      "twist": 14,
+      "naca": "2412",
+      "sweep": 25
+    },
+    {
+      "id": "bypass/splitter",
+      "kind": "ring",
+      "color": "7f969f",
+      "count": 1,
+      "profile": [
+        [510, 350],
+        [570, 394],
+        [760, 438],
+        [1050, 472],
+        [1390, 480],
+        [1760, 472],
+        [2180, 440],
+        [2430, 409],
+        [2460, 396],
+        [2460, 385],
+        [2430, 397],
+        [2180, 428],
+        [1760, 460],
+        [1390, 468],
+        [1050, 460],
+        [760, 426],
+        [570, 382]
+      ],
+      "cut": true
+    },
+    {
+      "id": "booster/stage1/disk",
+      "kind": "ring",
+      "color": "647e8a",
+      "count": 1,
+      "profile": [
+        [690, 174],
+        [759.5, 174],
+        [759.5, 84],
+        [690, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "booster/stage1/rotorBlades",
+      "kind": "blade",
+      "color": "9dbac9",
+      "count": 30,
+      "x": 700,
+      "root": 175,
+      "tip": 340,
+      "chord": 85,
+      "taper": 0.78,
+      "angle": 38,
+      "twist": -13,
+      "naca": "2412",
+      "sweep": 12,
+      "motion": "lp"
+    },
+    {
+      "id": "booster/stage1/statorVanes",
+      "kind": "blade",
+      "color": "789baa",
+      "count": 34,
+      "x": 803,
+      "root": 178,
+      "tip": 339,
+      "chord": 55.25,
+      "taper": 0.94,
+      "angle": -24,
+      "twist": 7,
+      "naca": "2410",
+      "sweep": 0
+    },
+    {
+      "id": "booster/stage1/statorShroud",
+      "kind": "ring",
+      "color": "617985",
+      "count": 1,
+      "profile": [
+        [795, 347],
+        [868.25, 347],
+        [868.25, 341],
+        [795, 341]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "booster/stage1/spacer",
+      "kind": "ring",
+      "color": "879199",
+      "count": 1,
+      "profile": [
+        [761.2, 167],
+        [797, 167],
+        [797, 84],
+        [761.2, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "booster/stage1/lockRing",
+      "kind": "ring",
+      "color": "bdc2c2",
+      "count": 1,
+      "profile": [
+        [683, 166],
+        [688, 166],
+        [688, 84],
+        [683, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "booster/stage2/disk",
+      "kind": "ring",
+      "color": "647e8a",
+      "count": 1,
+      "profile": [
+        [855, 184],
+        [918.2, 184],
+        [918.2, 84],
+        [855, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "booster/stage2/rotorBlades",
+      "kind": "blade",
+      "color": "9dbac9",
+      "count": 34,
+      "x": 865,
+      "root": 185,
+      "tip": 325,
+      "chord": 76,
+      "taper": 0.78,
+      "angle": 35,
+      "twist": -12,
+      "naca": "2412",
+      "sweep": 12,
+      "motion": "lp"
+    },
+    {
+      "id": "booster/stage2/statorVanes",
+      "kind": "blade",
+      "color": "789baa",
+      "count": 38,
+      "x": 959,
+      "root": 188,
+      "tip": 324,
+      "chord": 49.4,
+      "taper": 0.94,
+      "angle": -24,
+      "twist": 7,
+      "naca": "2410",
+      "sweep": 0
+    },
+    {
+      "id": "booster/stage2/statorShroud",
+      "kind": "ring",
+      "color": "617985",
+      "count": 1,
+      "profile": [
+        [951, 332],
+        [1018.4, 332],
+        [1018.4, 326],
+        [951, 326]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "booster/stage2/spacer",
+      "kind": "ring",
+      "color": "879199",
+      "count": 1,
+      "profile": [
+        [919.72, 177],
+        [953, 177],
+        [953, 84],
+        [919.72, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "booster/stage2/lockRing",
+      "kind": "ring",
+      "color": "bdc2c2",
+      "count": 1,
+      "profile": [
+        [848, 176],
+        [853, 176],
+        [853, 84],
+        [848, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "booster/stage3/disk",
+      "kind": "ring",
+      "color": "647e8a",
+      "count": 1,
+      "profile": [
+        [1010, 194],
+        [1067.6, 194],
+        [1067.6, 84],
+        [1010, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "booster/stage3/rotorBlades",
+      "kind": "blade",
+      "color": "9dbac9",
+      "count": 38,
+      "x": 1020,
+      "root": 195,
+      "tip": 310,
+      "chord": 68,
+      "taper": 0.78,
+      "angle": 33,
+      "twist": -11,
+      "naca": "2412",
+      "sweep": 12,
+      "motion": "lp"
+    },
+    {
+      "id": "booster/stage3/statorVanes",
+      "kind": "blade",
+      "color": "789baa",
+      "count": 42,
+      "x": 1106,
+      "root": 198,
+      "tip": 309,
+      "chord": 44.2,
+      "taper": 0.94,
+      "angle": -24,
+      "twist": 7,
+      "naca": "2410",
+      "sweep": 0
+    },
+    {
+      "id": "booster/stage3/statorShroud",
+      "kind": "ring",
+      "color": "617985",
+      "count": 1,
+      "profile": [
+        [1098, 317],
+        [1160.2, 317],
+        [1160.2, 311],
+        [1098, 311]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "booster/stage3/spacer",
+      "kind": "ring",
+      "color": "879199",
+      "count": 1,
+      "profile": [
+        [1068.96, 187],
+        [1100, 187],
+        [1100, 112],
+        [1068.96, 112]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "booster/stage3/lockRing",
+      "kind": "ring",
+      "color": "bdc2c2",
+      "count": 1,
+      "profile": [
+        [1003, 186],
+        [1008, 186],
+        [1008, 84],
+        [1003, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "compressor/stage1/disk",
+      "kind": "ring",
+      "color": "647e8a",
+      "count": 1,
+      "profile": [
+        [1170, 204],
+        [1222, 204],
+        [1222, 110],
+        [1170, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage1/rotorBlades",
+      "kind": "blade",
+      "color": "9dbac9",
+      "count": 40,
+      "x": 1180,
+      "root": 205,
+      "tip": 298,
+      "chord": 60,
+      "taper": 0.78,
+      "angle": 32,
+      "twist": -10,
+      "naca": "2410",
+      "sweep": 12,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage1/statorVanes",
+      "kind": "blade",
+      "color": "789baa",
+      "count": 44,
+      "x": 1258,
+      "root": 208,
+      "tip": 297,
+      "chord": 39,
+      "taper": 0.94,
+      "angle": -24,
+      "twist": 7,
+      "naca": "2410",
+      "sweep": 0
+    },
+    {
+      "id": "compressor/stage1/statorShroud",
+      "kind": "ring",
+      "color": "617985",
+      "count": 1,
+      "profile": [
+        [1250, 305],
+        [1307, 305],
+        [1307, 299],
+        [1250, 299]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "compressor/stage1/spacer",
+      "kind": "ring",
+      "color": "879199",
+      "count": 1,
+      "profile": [
+        [1223.2, 197],
+        [1252, 197],
+        [1252, 110],
+        [1223.2, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage1/lockRing",
+      "kind": "ring",
+      "color": "bdc2c2",
+      "count": 1,
+      "profile": [
+        [1163, 196],
+        [1168, 196],
+        [1168, 110],
+        [1163, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage2/disk",
+      "kind": "ring",
+      "color": "647e8a",
+      "count": 1,
+      "profile": [
+        [1310, 214],
+        [1357.8, 214],
+        [1357.8, 110],
+        [1310, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage2/rotorBlades",
+      "kind": "blade",
+      "color": "9dbac9",
+      "count": 44,
+      "x": 1320,
+      "root": 215,
+      "tip": 289,
+      "chord": 54,
+      "taper": 0.78,
+      "angle": 31,
+      "twist": -9,
+      "naca": "2410",
+      "sweep": 12,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage2/statorVanes",
+      "kind": "blade",
+      "color": "789baa",
+      "count": 48,
+      "x": 1392,
+      "root": 218,
+      "tip": 288,
+      "chord": 35.1,
+      "taper": 0.94,
+      "angle": -24,
+      "twist": 7,
+      "naca": "2410",
+      "sweep": 0
+    },
+    {
+      "id": "compressor/stage2/statorShroud",
+      "kind": "ring",
+      "color": "617985",
+      "count": 1,
+      "profile": [
+        [1384, 296],
+        [1437.1, 296],
+        [1437.1, 290],
+        [1384, 290]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "compressor/stage2/spacer",
+      "kind": "ring",
+      "color": "879199",
+      "count": 1,
+      "profile": [
+        [1358.88, 207],
+        [1386, 207],
+        [1386, 110],
+        [1358.88, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage2/lockRing",
+      "kind": "ring",
+      "color": "bdc2c2",
+      "count": 1,
+      "profile": [
+        [1303, 206],
+        [1308, 206],
+        [1308, 110],
+        [1303, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage3/disk",
+      "kind": "ring",
+      "color": "647e8a",
+      "count": 1,
+      "profile": [
+        [1440, 225],
+        [1483.6, 225],
+        [1483.6, 110],
+        [1440, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage3/rotorBlades",
+      "kind": "blade",
+      "color": "9dbac9",
+      "count": 48,
+      "x": 1450,
+      "root": 226,
+      "tip": 282,
+      "chord": 48,
+      "taper": 0.78,
+      "angle": 30,
+      "twist": -8,
+      "naca": "2410",
+      "sweep": 12,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage3/statorVanes",
+      "kind": "blade",
+      "color": "789baa",
+      "count": 52,
+      "x": 1516,
+      "root": 229,
+      "tip": 281,
+      "chord": 31.200000000000003,
+      "taper": 0.94,
+      "angle": -24,
+      "twist": 7,
+      "naca": "2410",
+      "sweep": 0
+    },
+    {
+      "id": "compressor/stage3/statorShroud",
+      "kind": "ring",
+      "color": "617985",
+      "count": 1,
+      "profile": [
+        [1508, 289],
+        [1557.2, 289],
+        [1557.2, 283],
+        [1508, 283]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "compressor/stage3/spacer",
+      "kind": "ring",
+      "color": "879199",
+      "count": 1,
+      "profile": [
+        [1484.56, 218],
+        [1510, 218],
+        [1510, 110],
+        [1484.56, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage3/lockRing",
+      "kind": "ring",
+      "color": "bdc2c2",
+      "count": 1,
+      "profile": [
+        [1433, 217],
+        [1438, 217],
+        [1438, 110],
+        [1433, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage4/disk",
+      "kind": "ring",
+      "color": "647e8a",
+      "count": 1,
+      "profile": [
+        [1560, 235],
+        [1600.1, 235],
+        [1600.1, 110],
+        [1560, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage4/rotorBlades",
+      "kind": "blade",
+      "color": "9dbac9",
+      "count": 52,
+      "x": 1570,
+      "root": 236,
+      "tip": 277,
+      "chord": 43,
+      "taper": 0.78,
+      "angle": 29,
+      "twist": -7,
+      "naca": "2410",
+      "sweep": 12,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage4/statorVanes",
+      "kind": "blade",
+      "color": "789baa",
+      "count": 56,
+      "x": 1631,
+      "root": 239,
+      "tip": 276,
+      "chord": 27.95,
+      "taper": 0.94,
+      "angle": -24,
+      "twist": 7,
+      "naca": "2410",
+      "sweep": 0
+    },
+    {
+      "id": "compressor/stage4/statorShroud",
+      "kind": "ring",
+      "color": "617985",
+      "count": 1,
+      "profile": [
+        [1623, 284],
+        [1668.95, 284],
+        [1668.95, 278],
+        [1623, 278]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "compressor/stage4/spacer",
+      "kind": "ring",
+      "color": "879199",
+      "count": 1,
+      "profile": [
+        [1600.96, 228],
+        [1625, 228],
+        [1625, 110],
+        [1600.96, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage4/lockRing",
+      "kind": "ring",
+      "color": "bdc2c2",
+      "count": 1,
+      "profile": [
+        [1553, 227],
+        [1558, 227],
+        [1558, 110],
+        [1553, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage5/disk",
+      "kind": "ring",
+      "color": "647e8a",
+      "count": 1,
+      "profile": [
+        [1670, 244],
+        [1706.6, 244],
+        [1706.6, 110],
+        [1670, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage5/rotorBlades",
+      "kind": "blade",
+      "color": "9dbac9",
+      "count": 56,
+      "x": 1680,
+      "root": 245,
+      "tip": 273,
+      "chord": 38,
+      "taper": 0.78,
+      "angle": 28,
+      "twist": -6,
+      "naca": "2410",
+      "sweep": 12,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage5/statorVanes",
+      "kind": "blade",
+      "color": "789baa",
+      "count": 60,
+      "x": 1736,
+      "root": 248,
+      "tip": 272,
+      "chord": 24.7,
+      "taper": 0.94,
+      "angle": -24,
+      "twist": 7,
+      "naca": "2410",
+      "sweep": 0
+    },
+    {
+      "id": "compressor/stage5/statorShroud",
+      "kind": "ring",
+      "color": "617985",
+      "count": 1,
+      "profile": [
+        [1728, 280],
+        [1770.7, 280],
+        [1770.7, 274],
+        [1728, 274]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "compressor/stage5/spacer",
+      "kind": "ring",
+      "color": "879199",
+      "count": 1,
+      "profile": [
+        [1707.36, 237],
+        [1730, 237],
+        [1730, 110],
+        [1707.36, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage5/lockRing",
+      "kind": "ring",
+      "color": "bdc2c2",
+      "count": 1,
+      "profile": [
+        [1663, 236],
+        [1668, 236],
+        [1668, 110],
+        [1663, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage6/disk",
+      "kind": "ring",
+      "color": "647e8a",
+      "count": 1,
+      "profile": [
+        [1770, 250],
+        [1803.8, 250],
+        [1803.8, 110],
+        [1770, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage6/rotorBlades",
+      "kind": "blade",
+      "color": "9dbac9",
+      "count": 60,
+      "x": 1780,
+      "root": 251,
+      "tip": 271,
+      "chord": 34,
+      "taper": 0.78,
+      "angle": 27,
+      "twist": -5,
+      "naca": "2410",
+      "sweep": 12,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage6/statorVanes",
+      "kind": "blade",
+      "color": "789baa",
+      "count": 64,
+      "x": 1832,
+      "root": 254,
+      "tip": 270,
+      "chord": 22.1,
+      "taper": 0.94,
+      "angle": -24,
+      "twist": 7,
+      "naca": "2410",
+      "sweep": 0
+    },
+    {
+      "id": "compressor/stage6/statorShroud",
+      "kind": "ring",
+      "color": "617985",
+      "count": 1,
+      "profile": [
+        [1824, 278],
+        [1864.1, 278],
+        [1864.1, 272],
+        [1824, 272]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "compressor/stage6/spacer",
+      "kind": "ring",
+      "color": "879199",
+      "count": 1,
+      "profile": [
+        [1804.48, 243],
+        [1826, 243],
+        [1826, 110],
+        [1804.48, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "compressor/stage6/lockRing",
+      "kind": "ring",
+      "color": "bdc2c2",
+      "count": 1,
+      "profile": [
+        [1763, 242],
+        [1768, 242],
+        [1768, 110],
+        [1763, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "highTurbine/stage1/disk",
+      "kind": "ring",
+      "color": "94745c",
+      "count": 1,
+      "profile": [
+        [2480, 220],
+        [2533.4, 220],
+        [2533.4, 110],
+        [2480, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "highTurbine/stage1/rotorBlades",
+      "kind": "blade",
+      "color": "d6a66f",
+      "count": 48,
+      "x": 2490,
+      "root": 221,
+      "tip": 307,
+      "chord": 62,
+      "taper": 0.78,
+      "angle": 44,
+      "twist": -16,
+      "naca": "4415",
+      "sweep": 6,
+      "motion": "hp"
+    },
+    {
+      "id": "highTurbine/stage1/statorVanes",
+      "kind": "blade",
+      "color": "af8661",
+      "count": 52,
+      "x": 2570,
+      "root": 224,
+      "tip": 306,
+      "chord": 40.300000000000004,
+      "taper": 0.94,
+      "angle": -24,
+      "twist": 7,
+      "naca": "4415",
+      "sweep": 0
+    },
+    {
+      "id": "highTurbine/stage1/statorShroud",
+      "kind": "ring",
+      "color": "7f6251",
+      "count": 1,
+      "profile": [
+        [2562, 314],
+        [2620.3, 314],
+        [2620.3, 308],
+        [2562, 308]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "highTurbine/stage1/spacer",
+      "kind": "ring",
+      "color": "879199",
+      "count": 1,
+      "profile": [
+        [2534.64, 213],
+        [2564, 213],
+        [2564, 110],
+        [2534.64, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "highTurbine/stage1/lockRing",
+      "kind": "ring",
+      "color": "bdc2c2",
+      "count": 1,
+      "profile": [
+        [2473, 212],
+        [2478, 212],
+        [2478, 110],
+        [2473, 110]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "lowTurbine/stage1/disk",
+      "kind": "ring",
+      "color": "94745c",
+      "count": 1,
+      "profile": [
+        [2680, 201],
+        [2747.4, 201],
+        [2747.4, 84],
+        [2680, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "lowTurbine/stage1/rotorBlades",
+      "kind": "blade",
+      "color": "d6a66f",
+      "count": 48,
+      "x": 2690,
+      "root": 202,
+      "tip": 330,
+      "chord": 82,
+      "taper": 0.78,
+      "angle": 40,
+      "twist": -14,
+      "naca": "4415",
+      "sweep": 6,
+      "motion": "lp"
+    },
+    {
+      "id": "lowTurbine/stage1/statorVanes",
+      "kind": "blade",
+      "color": "af8661",
+      "count": 52,
+      "x": 2790,
+      "root": 205,
+      "tip": 329,
+      "chord": 53.300000000000004,
+      "taper": 0.94,
+      "angle": -24,
+      "twist": 7,
+      "naca": "4415",
+      "sweep": 0
+    },
+    {
+      "id": "lowTurbine/stage1/statorShroud",
+      "kind": "ring",
+      "color": "7f6251",
+      "count": 1,
+      "profile": [
+        [2782, 337],
+        [2853.3, 337],
+        [2853.3, 331],
+        [2782, 331]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "lowTurbine/stage1/spacer",
+      "kind": "ring",
+      "color": "879199",
+      "count": 1,
+      "profile": [
+        [2749.04, 194],
+        [2784, 194],
+        [2784, 84],
+        [2749.04, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "lowTurbine/stage1/lockRing",
+      "kind": "ring",
+      "color": "bdc2c2",
+      "count": 1,
+      "profile": [
+        [2673, 193],
+        [2678, 193],
+        [2678, 84],
+        [2673, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "lowTurbine/stage2/disk",
+      "kind": "ring",
+      "color": "94745c",
+      "count": 1,
+      "profile": [
+        [2870, 183],
+        [2941.6, 183],
+        [2941.6, 84],
+        [2870, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "lowTurbine/stage2/rotorBlades",
+      "kind": "blade",
+      "color": "d6a66f",
+      "count": 52,
+      "x": 2880,
+      "root": 184,
+      "tip": 354,
+      "chord": 88,
+      "taper": 0.78,
+      "angle": 37,
+      "twist": -12,
+      "naca": "4415",
+      "sweep": 6,
+      "motion": "lp"
+    },
+    {
+      "id": "lowTurbine/stage2/statorVanes",
+      "kind": "blade",
+      "color": "af8661",
+      "count": 56,
+      "x": 2986,
+      "root": 187,
+      "tip": 353,
+      "chord": 57.2,
+      "taper": 0.94,
+      "angle": -24,
+      "twist": 7,
+      "naca": "4415",
+      "sweep": 0
+    },
+    {
+      "id": "lowTurbine/stage2/statorShroud",
+      "kind": "ring",
+      "color": "7f6251",
+      "count": 1,
+      "profile": [
+        [2978, 361],
+        [3053.2, 361],
+        [3053.2, 355],
+        [2978, 355]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "lowTurbine/stage2/spacer",
+      "kind": "ring",
+      "color": "879199",
+      "count": 1,
+      "profile": [
+        [2943.36, 176],
+        [2980, 176],
+        [2980, 84],
+        [2943.36, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "lowTurbine/stage2/lockRing",
+      "kind": "ring",
+      "color": "bdc2c2",
+      "count": 1,
+      "profile": [
+        [2863, 175],
+        [2868, 175],
+        [2868, 84],
+        [2863, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "lowTurbine/stage3/disk",
+      "kind": "ring",
+      "color": "94745c",
+      "count": 1,
+      "profile": [
+        [3070, 164],
+        [3146.5, 164],
+        [3146.5, 84],
+        [3070, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "lowTurbine/stage3/rotorBlades",
+      "kind": "blade",
+      "color": "d6a66f",
+      "count": 56,
+      "x": 3080,
+      "root": 165,
+      "tip": 375,
+      "chord": 95,
+      "taper": 0.78,
+      "angle": 34,
+      "twist": -10,
+      "naca": "4415",
+      "sweep": 6,
+      "motion": "lp"
+    },
+    {
+      "id": "lowTurbine/stage3/statorVanes",
+      "kind": "blade",
+      "color": "af8661",
+      "count": 60,
+      "x": 3193,
+      "root": 168,
+      "tip": 374,
+      "chord": 61.75,
+      "taper": 0.94,
+      "angle": -24,
+      "twist": 7,
+      "naca": "4415",
+      "sweep": 0
+    },
+    {
+      "id": "lowTurbine/stage3/statorShroud",
+      "kind": "ring",
+      "color": "7f6251",
+      "count": 1,
+      "profile": [
+        [3185, 382],
+        [3264.75, 382],
+        [3264.75, 376],
+        [3185, 376]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "lowTurbine/stage3/spacer",
+      "kind": "ring",
+      "color": "879199",
+      "count": 1,
+      "profile": [
+        [3148.4, 157],
+        [3187, 157],
+        [3187, 84],
+        [3148.4, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "lowTurbine/stage3/lockRing",
+      "kind": "ring",
+      "color": "bdc2c2",
+      "count": 1,
+      "profile": [
+        [3063, 156],
+        [3068, 156],
+        [3068, 84],
+        [3063, 84]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "compressor/case",
+      "kind": "ring",
+      "color": "718591",
+      "count": 1,
+      "profile": [
+        [650, 364],
+        [869, 364],
+        [870, 349],
+        [1019, 349],
+        [1020, 334],
+        [1160, 334],
+        [1161, 322],
+        [1309, 322],
+        [1310, 313],
+        [1440, 313],
+        [1441, 306],
+        [1565, 306],
+        [1566, 301],
+        [1670, 301],
+        [1671, 297],
+        [1772, 297],
+        [1773, 295],
+        [1860, 295],
+        [1860, 286],
+        [1773, 286],
+        [1772, 288],
+        [1671, 288],
+        [1670, 292],
+        [1566, 292],
+        [1565, 297],
+        [1441, 297],
+        [1440, 304],
+        [1310, 304],
+        [1309, 313],
+        [1161, 313],
+        [1160, 325],
+        [1020, 325],
+        [1019, 340],
+        [870, 340],
+        [869, 355],
+        [650, 355]
+      ],
+      "cut": true
+    },
+    {
+      "id": "combustor/diffuserOuter",
+      "kind": "ring",
+      "color": "a89379",
+      "count": 1,
+      "profile": [
+        [1880, 280],
+        [1960, 356],
+        [2005, 365],
+        [2008, 358],
+        [1968, 347],
+        [1880, 273]
+      ],
+      "cut": true
+    },
+    {
+      "id": "combustor/diffuserInner",
+      "kind": "ring",
+      "color": "ad9679",
+      "count": 1,
+      "profile": [
+        [1870, 250],
+        [1960, 191],
+        [2010, 181],
+        [2010, 172],
+        [1954, 182],
+        [1870, 241]
+      ],
+      "cut": true
+    },
+    {
+      "id": "combustor/pressureCase",
+      "kind": "ring",
+      "color": "927a63",
+      "count": 1,
+      "profile": [
+        [2010, 376],
+        [2430, 376],
+        [2430, 366],
+        [2010, 366]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "combustor/outerLiner",
+      "kind": "perforated",
+      "color": "c99860",
+      "count": 1,
+      "x": 2040,
+      "length": 345,
+      "radius": 335,
+      "thickness": 5,
+      "axial": 5,
+      "around": 32,
+      "hole": 7,
+      "cut": true
+    },
+    {
+      "id": "combustor/innerLiner",
+      "kind": "perforated",
+      "color": "c99860",
+      "count": 1,
+      "x": 2040,
+      "length": 345,
+      "radius": 190,
+      "thickness": 5,
+      "axial": 5,
+      "around": 32,
+      "hole": 5,
+      "cut": true
+    },
+    {
+      "id": "combustor/dome",
+      "kind": "ring",
+      "color": "ba945f",
+      "count": 1,
+      "profile": [
+        [2018, 339],
+        [2030, 339],
+        [2030, 197],
+        [2018, 197]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "holes": 20,
+      "holeRadius": 12
+    },
+    {
+      "id": "combustor/fuelManifold",
+      "kind": "ring",
+      "color": "bf8c42",
+      "count": 1,
+      "profile": [
+        [1990, 353],
+        [2000, 353],
+        [2000, 345],
+        [1990, 345]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "combustor/injectorBodies",
+      "kind": "ring",
+      "color": "d6af67",
+      "count": 20,
+      "profile": [
+        [1970, 10],
+        [2014, 10],
+        [2014, 4],
+        [1970, 4]
+      ],
+      "cut": false,
+      "pitch": 268,
+      "y": 0,
+      "z": 0,
+      "phase": 9
+    },
+    {
+      "id": "combustor/injectorTips",
+      "kind": "ring",
+      "color": "e1bf8b",
+      "count": 20,
+      "profile": [
+        [2015, 5],
+        [2048, 5],
+        [2048, 2],
+        [2015, 2]
+      ],
+      "cut": false,
+      "pitch": 268,
+      "y": 0,
+      "z": 0,
+      "phase": 9
+    },
+    {
+      "id": "combustor/swirlerVanes",
+      "kind": "blade",
+      "color": "d5b16c",
+      "count": 60,
+      "x": 2052,
+      "root": 258,
+      "tip": 278,
+      "chord": 22,
+      "taper": 0.9,
+      "angle": 40,
+      "twist": 0,
+      "naca": "2412",
+      "sweep": 0
+    },
+    {
+      "id": "combustor/igniterBodies",
+      "kind": "ring",
+      "color": "ded8c0",
+      "count": 2,
+      "profile": [
+        [2120, 9],
+        [2180, 9],
+        [2180, 3],
+        [2120, 3]
+      ],
+      "cut": false,
+      "pitch": 356,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "combustor/exitOuter",
+      "kind": "ring",
+      "color": "ad875b",
+      "count": 1,
+      "profile": [
+        [2390, 340],
+        [2450, 316],
+        [2470, 316],
+        [2470, 309],
+        [2450, 309],
+        [2390, 333]
+      ],
+      "cut": true
+    },
+    {
+      "id": "combustor/exitInner",
+      "kind": "ring",
+      "color": "ad875b",
+      "count": 1,
+      "profile": [
+        [2390, 185],
+        [2460, 214],
+        [2470, 214],
+        [2470, 207],
+        [2460, 207],
+        [2390, 178]
+      ],
+      "cut": true
+    },
+    {
+      "id": "highTurbine/nozzleGuideVanes",
+      "kind": "blade",
+      "color": "e0b27b",
+      "count": 52,
+      "x": 2410,
+      "root": 218,
+      "tip": 306,
+      "chord": 66,
+      "taper": 0.95,
+      "angle": -35,
+      "twist": 8,
+      "naca": "4415",
+      "sweep": 0
+    },
+    {
+      "id": "turbine/case",
+      "kind": "ring",
+      "color": "866c59",
+      "count": 1,
+      "profile": [
+        [2480, 323],
+        [2650, 342],
+        [2850, 365],
+        [3090, 392],
+        [3290, 400],
+        [3290, 390],
+        [3090, 382],
+        [2850, 355],
+        [2650, 332],
+        [2480, 313]
+      ],
+      "cut": true
+    },
+    {
+      "id": "exhaust/coreNozzle",
+      "kind": "ring",
+      "color": "99a4a7",
+      "count": 1,
+      "profile": [
+        [3300, 400],
+        [3430, 360],
+        [3550, 305],
+        [3600, 287],
+        [3600, 280],
+        [3550, 298],
+        [3430, 353],
+        [3300, 393]
+      ],
+      "cut": true
+    },
+    {
+      "id": "exhaust/plug",
+      "kind": "ring",
+      "color": "b5a297",
+      "count": 1,
+      "profile": [
+        [3230, 153],
+        [3320, 143],
+        [3450, 98],
+        [3570, 35],
+        [3590, 0],
+        [3578, 0],
+        [3560, 28],
+        [3440, 89],
+        [3318, 133],
+        [3230, 143]
+      ],
+      "cut": false
+    },
+    {
+      "id": "exhaust/struts",
+      "kind": "blade",
+      "color": "a6aaa5",
+      "count": 8,
+      "x": 3340,
+      "root": 145,
+      "tip": 355,
+      "chord": 40,
+      "taper": 0.7,
+      "angle": 0,
+      "twist": 0,
+      "naca": "0012",
+      "sweep": 0
+    },
+    {
+      "id": "shafts/lowPressure",
+      "kind": "ring",
+      "color": "c8d1d6",
+      "count": 1,
+      "profile": [
+        [260, 70],
+        [3280, 70],
+        [3280, 48],
+        [260, 48]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "lp"
+    },
+    {
+      "id": "shafts/highPressure",
+      "kind": "ring",
+      "color": "afbfc7",
+      "count": 1,
+      "profile": [
+        [1120, 104],
+        [2580, 104],
+        [2580, 78],
+        [1120, 78]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0,
+      "motion": "hp"
+    },
+    {
+      "id": "bearings/front/innerRace",
+      "kind": "ring",
+      "color": "d3dadb",
+      "count": 1,
+      "profile": [
+        [475, 80],
+        [501, 80],
+        [501, 71],
+        [475, 71]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/front/outerRace",
+      "kind": "ring",
+      "color": "c4cecf",
+      "count": 1,
+      "profile": [
+        [475, 109],
+        [501, 109],
+        [501, 98],
+        [475, 98]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/front/rollers",
+      "kind": "ring",
+      "color": "eceded",
+      "count": 18,
+      "profile": [
+        [478, 7],
+        [498, 7],
+        [498, 0],
+        [478, 0]
+      ],
+      "cut": false,
+      "pitch": 89,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/front/frontCage",
+      "kind": "ring",
+      "color": "b39b61",
+      "count": 1,
+      "profile": [
+        [475.5, 97],
+        [477, 97],
+        [477, 81],
+        [475.5, 81]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/front/rearCage",
+      "kind": "ring",
+      "color": "b39b61",
+      "count": 1,
+      "profile": [
+        [499, 97],
+        [500.5, 97],
+        [500.5, 81],
+        [499, 81]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/front/seal",
+      "kind": "ring",
+      "color": "4b626b",
+      "count": 1,
+      "profile": [
+        [503, 108],
+        [507, 108],
+        [507, 71],
+        [503, 71]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/intermediate/innerRace",
+      "kind": "ring",
+      "color": "d3dadb",
+      "count": 1,
+      "profile": [
+        [1070, 80],
+        [1096, 80],
+        [1096, 71],
+        [1070, 71]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/intermediate/outerRace",
+      "kind": "ring",
+      "color": "c4cecf",
+      "count": 1,
+      "profile": [
+        [1070, 109],
+        [1096, 109],
+        [1096, 98],
+        [1070, 98]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/intermediate/rollers",
+      "kind": "ring",
+      "color": "eceded",
+      "count": 18,
+      "profile": [
+        [1073, 7],
+        [1093, 7],
+        [1093, 0],
+        [1073, 0]
+      ],
+      "cut": false,
+      "pitch": 89,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/intermediate/frontCage",
+      "kind": "ring",
+      "color": "b39b61",
+      "count": 1,
+      "profile": [
+        [1070.5, 97],
+        [1072, 97],
+        [1072, 81],
+        [1070.5, 81]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/intermediate/rearCage",
+      "kind": "ring",
+      "color": "b39b61",
+      "count": 1,
+      "profile": [
+        [1094, 97],
+        [1095.5, 97],
+        [1095.5, 81],
+        [1094, 81]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/intermediate/seal",
+      "kind": "ring",
+      "color": "4b626b",
+      "count": 1,
+      "profile": [
+        [1098, 108],
+        [1102, 108],
+        [1102, 71],
+        [1098, 71]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/highFront/innerRace",
+      "kind": "ring",
+      "color": "d3dadb",
+      "count": 1,
+      "profile": [
+        [1125, 114],
+        [1151, 114],
+        [1151, 105],
+        [1125, 105]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/highFront/outerRace",
+      "kind": "ring",
+      "color": "c4cecf",
+      "count": 1,
+      "profile": [
+        [1125, 143],
+        [1151, 143],
+        [1151, 132],
+        [1125, 132]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/highFront/rollers",
+      "kind": "ring",
+      "color": "eceded",
+      "count": 18,
+      "profile": [
+        [1128, 7],
+        [1148, 7],
+        [1148, 0],
+        [1128, 0]
+      ],
+      "cut": false,
+      "pitch": 123,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/highFront/frontCage",
+      "kind": "ring",
+      "color": "b39b61",
+      "count": 1,
+      "profile": [
+        [1125.5, 131],
+        [1127, 131],
+        [1127, 115],
+        [1125.5, 115]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/highFront/rearCage",
+      "kind": "ring",
+      "color": "b39b61",
+      "count": 1,
+      "profile": [
+        [1149, 131],
+        [1150.5, 131],
+        [1150.5, 115],
+        [1149, 115]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/highFront/seal",
+      "kind": "ring",
+      "color": "4b626b",
+      "count": 1,
+      "profile": [
+        [1153, 142],
+        [1157, 142],
+        [1157, 105],
+        [1153, 105]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/highRear/innerRace",
+      "kind": "ring",
+      "color": "d3dadb",
+      "count": 1,
+      "profile": [
+        [2570, 114],
+        [2596, 114],
+        [2596, 105],
+        [2570, 105]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/highRear/outerRace",
+      "kind": "ring",
+      "color": "c4cecf",
+      "count": 1,
+      "profile": [
+        [2570, 143],
+        [2596, 143],
+        [2596, 132],
+        [2570, 132]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/highRear/rollers",
+      "kind": "ring",
+      "color": "eceded",
+      "count": 18,
+      "profile": [
+        [2573, 7],
+        [2593, 7],
+        [2593, 0],
+        [2573, 0]
+      ],
+      "cut": false,
+      "pitch": 123,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/highRear/frontCage",
+      "kind": "ring",
+      "color": "b39b61",
+      "count": 1,
+      "profile": [
+        [2570.5, 131],
+        [2572, 131],
+        [2572, 115],
+        [2570.5, 115]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/highRear/rearCage",
+      "kind": "ring",
+      "color": "b39b61",
+      "count": 1,
+      "profile": [
+        [2594, 131],
+        [2595.5, 131],
+        [2595.5, 115],
+        [2594, 115]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/highRear/seal",
+      "kind": "ring",
+      "color": "4b626b",
+      "count": 1,
+      "profile": [
+        [2598, 142],
+        [2602, 142],
+        [2602, 105],
+        [2598, 105]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/rear/innerRace",
+      "kind": "ring",
+      "color": "d3dadb",
+      "count": 1,
+      "profile": [
+        [3230, 80],
+        [3256, 80],
+        [3256, 71],
+        [3230, 71]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/rear/outerRace",
+      "kind": "ring",
+      "color": "c4cecf",
+      "count": 1,
+      "profile": [
+        [3230, 109],
+        [3256, 109],
+        [3256, 98],
+        [3230, 98]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/rear/rollers",
+      "kind": "ring",
+      "color": "eceded",
+      "count": 18,
+      "profile": [
+        [3233, 7],
+        [3253, 7],
+        [3253, 0],
+        [3233, 0]
+      ],
+      "cut": false,
+      "pitch": 89,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/rear/frontCage",
+      "kind": "ring",
+      "color": "b39b61",
+      "count": 1,
+      "profile": [
+        [3230.5, 97],
+        [3232, 97],
+        [3232, 81],
+        [3230.5, 81]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/rear/rearCage",
+      "kind": "ring",
+      "color": "b39b61",
+      "count": 1,
+      "profile": [
+        [3254, 97],
+        [3255.5, 97],
+        [3255.5, 81],
+        [3254, 81]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "bearings/rear/seal",
+      "kind": "ring",
+      "color": "4b626b",
+      "count": 1,
+      "profile": [
+        [3258, 108],
+        [3262, 108],
+        [3262, 71],
+        [3258, 71]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "structure/frontFrameStruts",
+      "kind": "blade",
+      "color": "8e9b9d",
+      "count": 8,
+      "x": 485,
+      "root": 115,
+      "tip": 337,
+      "chord": 75,
+      "taper": 0.8,
+      "angle": 0,
+      "twist": 0,
+      "naca": "0018",
+      "sweep": 0
+    },
+    {
+      "id": "structure/rearFrameStruts",
+      "kind": "blade",
+      "color": "a5957b",
+      "count": 8,
+      "x": 3270,
+      "root": 155,
+      "tip": 380,
+      "chord": 26,
+      "taper": 0.85,
+      "angle": 0,
+      "twist": 0,
+      "naca": "0018",
+      "sweep": 0
+    },
+    {
+      "id": "fasteners/flange0/ring",
+      "kind": "ring",
+      "color": "bcc5c7",
+      "count": 1,
+      "profile": [
+        [660, 387],
+        [668, 387],
+        [668, 366],
+        [660, 366]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange0/boltHeads",
+      "kind": "ring",
+      "color": "d9dddd",
+      "count": 24,
+      "profile": [
+        [653, 5],
+        [659, 5],
+        [659, 0],
+        [653, 0]
+      ],
+      "cut": false,
+      "pitch": 377,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange0/nuts",
+      "kind": "ring",
+      "color": "acb9bf",
+      "count": 24,
+      "profile": [
+        [669, 5.5],
+        [675, 5.5],
+        [675, 2.5],
+        [669, 2.5]
+      ],
+      "cut": false,
+      "pitch": 377,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange1/ring",
+      "kind": "ring",
+      "color": "bcc5c7",
+      "count": 1,
+      "profile": [
+        [1115, 357],
+        [1123, 357],
+        [1123, 336],
+        [1115, 336]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange1/boltHeads",
+      "kind": "ring",
+      "color": "d9dddd",
+      "count": 24,
+      "profile": [
+        [1108, 5],
+        [1114, 5],
+        [1114, 0],
+        [1108, 0]
+      ],
+      "cut": false,
+      "pitch": 347,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange1/nuts",
+      "kind": "ring",
+      "color": "acb9bf",
+      "count": 24,
+      "profile": [
+        [1124, 5.5],
+        [1130, 5.5],
+        [1130, 2.5],
+        [1124, 2.5]
+      ],
+      "cut": false,
+      "pitch": 347,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange2/ring",
+      "kind": "ring",
+      "color": "bcc5c7",
+      "count": 1,
+      "profile": [
+        [1864, 311],
+        [1872, 311],
+        [1872, 290],
+        [1864, 290]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange2/boltHeads",
+      "kind": "ring",
+      "color": "d9dddd",
+      "count": 24,
+      "profile": [
+        [1857, 5],
+        [1863, 5],
+        [1863, 0],
+        [1857, 0]
+      ],
+      "cut": false,
+      "pitch": 301,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange2/nuts",
+      "kind": "ring",
+      "color": "acb9bf",
+      "count": 24,
+      "profile": [
+        [1873, 5.5],
+        [1879, 5.5],
+        [1879, 2.5],
+        [1873, 2.5]
+      ],
+      "cut": false,
+      "pitch": 301,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange3/ring",
+      "kind": "ring",
+      "color": "bcc5c7",
+      "count": 1,
+      "profile": [
+        [2435, 389],
+        [2443, 389],
+        [2443, 375],
+        [2435, 375]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange3/boltHeads",
+      "kind": "ring",
+      "color": "d9dddd",
+      "count": 24,
+      "profile": [
+        [2428, 5],
+        [2434, 5],
+        [2434, 0],
+        [2428, 0]
+      ],
+      "cut": false,
+      "pitch": 382,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange3/nuts",
+      "kind": "ring",
+      "color": "acb9bf",
+      "count": 24,
+      "profile": [
+        [2444, 5.5],
+        [2450, 5.5],
+        [2450, 2.5],
+        [2444, 2.5]
+      ],
+      "cut": false,
+      "pitch": 382,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange4/ring",
+      "kind": "ring",
+      "color": "bcc5c7",
+      "count": 1,
+      "profile": [
+        [2650, 368],
+        [2658, 368],
+        [2658, 347],
+        [2650, 347]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange4/boltHeads",
+      "kind": "ring",
+      "color": "d9dddd",
+      "count": 24,
+      "profile": [
+        [2643, 5],
+        [2649, 5],
+        [2649, 0],
+        [2643, 0]
+      ],
+      "cut": false,
+      "pitch": 358,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange4/nuts",
+      "kind": "ring",
+      "color": "acb9bf",
+      "count": 24,
+      "profile": [
+        [2659, 5.5],
+        [2665, 5.5],
+        [2665, 2.5],
+        [2659, 2.5]
+      ],
+      "cut": false,
+      "pitch": 358,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange5/ring",
+      "kind": "ring",
+      "color": "bcc5c7",
+      "count": 1,
+      "profile": [
+        [3292, 425],
+        [3300, 425],
+        [3300, 404],
+        [3292, 404]
+      ],
+      "cut": true,
+      "pitch": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange5/boltHeads",
+      "kind": "ring",
+      "color": "d9dddd",
+      "count": 24,
+      "profile": [
+        [3285, 5],
+        [3291, 5],
+        [3291, 0],
+        [3285, 0]
+      ],
+      "cut": false,
+      "pitch": 415,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "fasteners/flange5/nuts",
+      "kind": "ring",
+      "color": "acb9bf",
+      "count": 24,
+      "profile": [
+        [3301, 5.5],
+        [3307, 5.5],
+        [3307, 2.5],
+        [3301, 2.5]
+      ],
+      "cut": false,
+      "pitch": 415,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "accessories/gearbox/housing",
+      "kind": "box",
+      "color": "546e7a",
+      "count": 1,
+      "x": 915,
+      "y": 0,
+      "z": -670,
+      "sx": 270,
+      "sy": 240,
+      "sz": 155,
+      "wall": 7
+    },
+    {
+      "id": "accessories/gearbox/cover",
+      "kind": "box",
+      "color": "81969d",
+      "count": 1,
+      "x": 915,
+      "y": 0,
+      "z": -753,
+      "sx": 250,
+      "sy": 225,
+      "sz": 9
+    },
+    {
+      "id": "accessories/gearbox/gear0",
+      "kind": "ring",
+      "color": "b7a97b",
+      "count": 1,
+      "profile": [
+        [835, 42],
+        [863, 42],
+        [863, 8],
+        [835, 8]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": -665
+    },
+    {
+      "id": "accessories/gearbox/shaft0",
+      "kind": "ring",
+      "color": "b7c3c8",
+      "count": 1,
+      "profile": [
+        [820, 7],
+        [880, 7],
+        [880, 0],
+        [820, 0]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": -665
+    },
+    {
+      "id": "accessories/gearbox/gear1",
+      "kind": "ring",
+      "color": "b7a97b",
+      "count": 1,
+      "profile": [
+        [915, 42],
+        [943, 42],
+        [943, 8],
+        [915, 8]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": -665
+    },
+    {
+      "id": "accessories/gearbox/shaft1",
+      "kind": "ring",
+      "color": "b7c3c8",
+      "count": 1,
+      "profile": [
+        [900, 7],
+        [960, 7],
+        [960, 0],
+        [900, 0]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": -665
+    },
+    {
+      "id": "accessories/gearbox/gear2",
+      "kind": "ring",
+      "color": "b7a97b",
+      "count": 1,
+      "profile": [
+        [995, 42],
+        [1023, 42],
+        [1023, 8],
+        [995, 8]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": -665
+    },
+    {
+      "id": "accessories/gearbox/shaft2",
+      "kind": "ring",
+      "color": "b7c3c8",
+      "count": 1,
+      "profile": [
+        [980, 7],
+        [1040, 7],
+        [1040, 0],
+        [980, 0]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 0,
+      "z": -665
+    },
+    {
+      "id": "accessories/starter/body",
+      "kind": "ring",
+      "color": "809ca7",
+      "count": 1,
+      "profile": [
+        [1060, 63],
+        [1280, 63],
+        [1280, 55],
+        [1060, 55]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 95,
+      "z": -635
+    },
+    {
+      "id": "accessories/generator/body",
+      "kind": "ring",
+      "color": "9bafb9",
+      "count": 1,
+      "profile": [
+        [1060, 70],
+        [1270, 70],
+        [1270, 63],
+        [1060, 63]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -280,
+      "z": -730
+    },
+    {
+      "id": "accessories/fuelPump/body",
+      "kind": "ring",
+      "color": "b28c56",
+      "count": 1,
+      "profile": [
+        [980, 44],
+        [1100, 44],
+        [1100, 36],
+        [980, 36]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -180,
+      "z": -670
+    },
+    {
+      "id": "accessories/oilPump/body",
+      "kind": "ring",
+      "color": "a7a188",
+      "count": 1,
+      "profile": [
+        [800, 36],
+        [940, 36],
+        [940, 30],
+        [800, 30]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 175,
+      "z": -690
+    },
+    {
+      "id": "accessories/oilTank/shell",
+      "kind": "box",
+      "color": "718d99",
+      "count": 1,
+      "x": 1410,
+      "y": -80,
+      "z": -670,
+      "sx": 170,
+      "sy": 160,
+      "sz": 190,
+      "wall": 6
+    },
+    {
+      "id": "accessories/oilTank/filler",
+      "kind": "ring",
+      "color": "b6c5c8",
+      "count": 1,
+      "profile": [
+        [1420, 18],
+        [1450, 18],
+        [1450, 6],
+        [1420, 6]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -80,
+      "z": -805
+    },
+    {
+      "id": "controls/fadec/enclosure",
+      "kind": "box",
+      "color": "586974",
+      "count": 1,
+      "x": 1620,
+      "y": 135,
+      "z": -680,
+      "sx": 170,
+      "sy": 100,
+      "sz": 70,
+      "wall": 5
+    },
+    {
+      "id": "controls/fadec/lid",
+      "kind": "box",
+      "color": "b7c3c8",
+      "count": 1,
+      "x": 1620,
+      "y": 135,
+      "z": -720,
+      "sx": 160,
+      "sy": 95,
+      "sz": 7
+    },
+    {
+      "id": "controls/fadec/connector0",
+      "kind": "ring",
+      "color": "c4ad73",
+      "count": 1,
+      "profile": [
+        [1520, 6],
+        [1530, 6],
+        [1530, 2],
+        [1520, 2]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 100,
+      "z": -680
+    },
+    {
+      "id": "controls/fadec/connector1",
+      "kind": "ring",
+      "color": "c4ad73",
+      "count": 1,
+      "profile": [
+        [1520, 6],
+        [1530, 6],
+        [1530, 2],
+        [1520, 2]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 114,
+      "z": -680
+    },
+    {
+      "id": "controls/fadec/connector2",
+      "kind": "ring",
+      "color": "c4ad73",
+      "count": 1,
+      "profile": [
+        [1520, 6],
+        [1530, 6],
+        [1530, 2],
+        [1520, 2]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 128,
+      "z": -680
+    },
+    {
+      "id": "controls/fadec/connector3",
+      "kind": "ring",
+      "color": "c4ad73",
+      "count": 1,
+      "profile": [
+        [1520, 6],
+        [1530, 6],
+        [1530, 2],
+        [1520, 2]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 142,
+      "z": -680
+    },
+    {
+      "id": "controls/fadec/connector4",
+      "kind": "ring",
+      "color": "c4ad73",
+      "count": 1,
+      "profile": [
+        [1520, 6],
+        [1530, 6],
+        [1530, 2],
+        [1520, 2]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 156,
+      "z": -680
+    },
+    {
+      "id": "controls/fadec/connector5",
+      "kind": "ring",
+      "color": "c4ad73",
+      "count": 1,
+      "profile": [
+        [1520, 6],
+        [1530, 6],
+        [1530, 2],
+        [1520, 2]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 170,
+      "z": -680
+    },
+    {
+      "id": "services/fuelSupply",
+      "kind": "ring",
+      "color": "cba360",
+      "count": 1,
+      "profile": [
+        [1250, 7],
+        [1950, 7],
+        [1950, 5],
+        [1250, 5]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -320,
+      "z": -470
+    },
+    {
+      "id": "services/fuelSupplyClamps0",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [1250, 11],
+        [1258, 11],
+        [1258, 8],
+        [1250, 8]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -320,
+      "z": -470
+    },
+    {
+      "id": "services/fuelSupplyClamps1",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [1425, 11],
+        [1433, 11],
+        [1433, 8],
+        [1425, 8]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -320,
+      "z": -470
+    },
+    {
+      "id": "services/fuelSupplyClamps2",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [1600, 11],
+        [1608, 11],
+        [1608, 8],
+        [1600, 8]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -320,
+      "z": -470
+    },
+    {
+      "id": "services/fuelSupplyClamps3",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [1775, 11],
+        [1783, 11],
+        [1783, 8],
+        [1775, 8]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -320,
+      "z": -470
+    },
+    {
+      "id": "services/oilSupply",
+      "kind": "ring",
+      "color": "b3b0a2",
+      "count": 1,
+      "profile": [
+        [820, 6],
+        [2720, 6],
+        [2720, 4],
+        [820, 4]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -320,
+      "z": -520
+    },
+    {
+      "id": "services/oilSupplyClamps0",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [820, 10],
+        [828, 10],
+        [828, 7],
+        [820, 7]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -320,
+      "z": -520
+    },
+    {
+      "id": "services/oilSupplyClamps1",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [1295, 10],
+        [1303, 10],
+        [1303, 7],
+        [1295, 7]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -320,
+      "z": -520
+    },
+    {
+      "id": "services/oilSupplyClamps2",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [1770, 10],
+        [1778, 10],
+        [1778, 7],
+        [1770, 7]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -320,
+      "z": -520
+    },
+    {
+      "id": "services/oilSupplyClamps3",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [2245, 10],
+        [2253, 10],
+        [2253, 7],
+        [2245, 7]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -320,
+      "z": -520
+    },
+    {
+      "id": "services/oilScavenge",
+      "kind": "ring",
+      "color": "9ca9aa",
+      "count": 1,
+      "profile": [
+        [820, 9],
+        [2920, 9],
+        [2920, 7],
+        [820, 7]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -350,
+      "z": -550
+    },
+    {
+      "id": "services/oilScavengeClamps0",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [820, 13],
+        [828, 13],
+        [828, 10],
+        [820, 10]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -350,
+      "z": -550
+    },
+    {
+      "id": "services/oilScavengeClamps1",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [1345, 13],
+        [1353, 13],
+        [1353, 10],
+        [1345, 10]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -350,
+      "z": -550
+    },
+    {
+      "id": "services/oilScavengeClamps2",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [1870, 13],
+        [1878, 13],
+        [1878, 10],
+        [1870, 10]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -350,
+      "z": -550
+    },
+    {
+      "id": "services/oilScavengeClamps3",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [2395, 13],
+        [2403, 13],
+        [2403, 10],
+        [2395, 10]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -350,
+      "z": -550
+    },
+    {
+      "id": "services/bleedAir",
+      "kind": "ring",
+      "color": "907d64",
+      "count": 1,
+      "profile": [
+        [1460, 20],
+        [1870, 20],
+        [1870, 18],
+        [1460, 18]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 300,
+      "z": -440
+    },
+    {
+      "id": "services/bleedAirClamps0",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [1460, 24],
+        [1468, 24],
+        [1468, 21],
+        [1460, 21]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 300,
+      "z": -440
+    },
+    {
+      "id": "services/bleedAirClamps1",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [1562.5, 24],
+        [1570.5, 24],
+        [1570.5, 21],
+        [1562.5, 21]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 300,
+      "z": -440
+    },
+    {
+      "id": "services/bleedAirClamps2",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [1665, 24],
+        [1673, 24],
+        [1673, 21],
+        [1665, 21]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 300,
+      "z": -440
+    },
+    {
+      "id": "services/bleedAirClamps3",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [1767.5, 24],
+        [1775.5, 24],
+        [1775.5, 21],
+        [1767.5, 21]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 300,
+      "z": -440
+    },
+    {
+      "id": "services/wiringHarness",
+      "kind": "ring",
+      "color": "445a66",
+      "count": 1,
+      "profile": [
+        [820, 5],
+        [2720, 5],
+        [2720, 3],
+        [820, 3]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 300,
+      "z": -530
+    },
+    {
+      "id": "services/wiringHarnessClamps0",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [820, 9],
+        [828, 9],
+        [828, 6],
+        [820, 6]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 300,
+      "z": -530
+    },
+    {
+      "id": "services/wiringHarnessClamps1",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [1295, 9],
+        [1303, 9],
+        [1303, 6],
+        [1295, 6]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 300,
+      "z": -530
+    },
+    {
+      "id": "services/wiringHarnessClamps2",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [1770, 9],
+        [1778, 9],
+        [1778, 6],
+        [1770, 6]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 300,
+      "z": -530
+    },
+    {
+      "id": "services/wiringHarnessClamps3",
+      "kind": "ring",
+      "color": "afbabd",
+      "count": 1,
+      "profile": [
+        [2245, 9],
+        [2253, 9],
+        [2253, 6],
+        [2245, 6]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 300,
+      "z": -530
+    },
+    {
+      "id": "mounts/frontLug",
+      "kind": "box",
+      "color": "748892",
+      "count": 1,
+      "x": 900,
+      "y": 0,
+      "z": -820,
+      "sx": 120,
+      "sy": 170,
+      "sz": 90
+    },
+    {
+      "id": "mounts/rearLug",
+      "kind": "box",
+      "color": "8f918c",
+      "count": 1,
+      "x": 2790,
+      "y": 0,
+      "z": -485,
+      "sx": 100,
+      "sy": 140,
+      "sz": 75
+    },
+    {
+      "id": "mounts/pylonFairing",
+      "kind": "blade",
+      "color": "a5b7bf",
+      "count": 1,
+      "x": 1010,
+      "root": 490,
+      "tip": 880,
+      "chord": 660,
+      "taper": 0.55,
+      "angle": 0,
+      "twist": 0,
+      "naca": "0018",
+      "sweep": 0
+    },
+    {
+      "id": "accessories/starter/statorCore",
+      "kind": "ring",
+      "color": "7c8c92",
+      "count": 1,
+      "profile": [
+        [1082, 52],
+        [1256, 52],
+        [1256, 47],
+        [1082, 47]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 95,
+      "z": -635
+    },
+    {
+      "id": "accessories/starter/fieldWinding",
+      "kind": "ring",
+      "color": "b87333",
+      "count": 1,
+      "profile": [
+        [1084, 46],
+        [1254, 46],
+        [1254, 43],
+        [1084, 43]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 95,
+      "z": -635
+    },
+    {
+      "id": "accessories/starter/armature",
+      "kind": "ring",
+      "color": "86979e",
+      "count": 1,
+      "profile": [
+        [1084, 38],
+        [1254, 38],
+        [1254, 12],
+        [1084, 12]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 95,
+      "z": -635
+    },
+    {
+      "id": "accessories/starter/shaft",
+      "kind": "ring",
+      "color": "ccd2d5",
+      "count": 1,
+      "profile": [
+        [1055, 10],
+        [1285, 10],
+        [1285, 0],
+        [1055, 0]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 95,
+      "z": -635
+    },
+    {
+      "id": "accessories/starter/frontEndBell",
+      "kind": "ring",
+      "color": "889da8",
+      "count": 1,
+      "profile": [
+        [1054, 52],
+        [1059, 52],
+        [1059, 11],
+        [1054, 11]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 95,
+      "z": -635
+    },
+    {
+      "id": "accessories/starter/rearEndBell",
+      "kind": "ring",
+      "color": "889da8",
+      "count": 1,
+      "profile": [
+        [1281, 52],
+        [1286, 52],
+        [1286, 11],
+        [1281, 11]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 95,
+      "z": -635
+    },
+    {
+      "id": "accessories/starter/frontBearing/innerRace",
+      "kind": "ring",
+      "color": "aebbc6",
+      "count": 1,
+      "profile": [
+        [1064, 15],
+        [1074, 15],
+        [1074, 11],
+        [1064, 11]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 95,
+      "z": -635
+    },
+    {
+      "id": "accessories/starter/frontBearing/outerRace",
+      "kind": "ring",
+      "color": "aebbc6",
+      "count": 1,
+      "profile": [
+        [1064, 28],
+        [1074, 28],
+        [1074, 23],
+        [1064, 23]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 95,
+      "z": -635
+    },
+    {
+      "id": "accessories/starter/frontBearing/rollers",
+      "kind": "ring",
+      "color": "dbdedf",
+      "count": 12,
+      "profile": [
+        [1065, 3],
+        [1073, 3],
+        [1073, 0],
+        [1065, 0]
+      ],
+      "cut": false,
+      "pitch": 19,
+      "y": 95,
+      "z": -635
+    },
+    {
+      "id": "accessories/starter/rearBearing/innerRace",
+      "kind": "ring",
+      "color": "aebbc6",
+      "count": 1,
+      "profile": [
+        [1263, 15],
+        [1273, 15],
+        [1273, 11],
+        [1263, 11]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 95,
+      "z": -635
+    },
+    {
+      "id": "accessories/starter/rearBearing/outerRace",
+      "kind": "ring",
+      "color": "aebbc6",
+      "count": 1,
+      "profile": [
+        [1263, 28],
+        [1273, 28],
+        [1273, 23],
+        [1263, 23]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 95,
+      "z": -635
+    },
+    {
+      "id": "accessories/starter/rearBearing/rollers",
+      "kind": "ring",
+      "color": "dbdedf",
+      "count": 12,
+      "profile": [
+        [1264, 3],
+        [1272, 3],
+        [1272, 0],
+        [1264, 0]
+      ],
+      "cut": false,
+      "pitch": 19,
+      "y": 95,
+      "z": -635
+    },
+    {
+      "id": "accessories/generator/statorCore",
+      "kind": "ring",
+      "color": "7c8c92",
+      "count": 1,
+      "profile": [
+        [1082, 60],
+        [1246, 60],
+        [1246, 50],
+        [1082, 50]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -280,
+      "z": -730
+    },
+    {
+      "id": "accessories/generator/fieldWinding",
+      "kind": "ring",
+      "color": "b87333",
+      "count": 1,
+      "profile": [
+        [1084, 49],
+        [1244, 49],
+        [1244, 46],
+        [1084, 46]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -280,
+      "z": -730
+    },
+    {
+      "id": "accessories/generator/armature",
+      "kind": "ring",
+      "color": "86979e",
+      "count": 1,
+      "profile": [
+        [1084, 41],
+        [1244, 41],
+        [1244, 12],
+        [1084, 12]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -280,
+      "z": -730
+    },
+    {
+      "id": "accessories/generator/shaft",
+      "kind": "ring",
+      "color": "ccd2d5",
+      "count": 1,
+      "profile": [
+        [1055, 10],
+        [1275, 10],
+        [1275, 0],
+        [1055, 0]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -280,
+      "z": -730
+    },
+    {
+      "id": "accessories/generator/frontEndBell",
+      "kind": "ring",
+      "color": "889da8",
+      "count": 1,
+      "profile": [
+        [1054, 60],
+        [1059, 60],
+        [1059, 11],
+        [1054, 11]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -280,
+      "z": -730
+    },
+    {
+      "id": "accessories/generator/rearEndBell",
+      "kind": "ring",
+      "color": "889da8",
+      "count": 1,
+      "profile": [
+        [1271, 60],
+        [1276, 60],
+        [1276, 11],
+        [1271, 11]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -280,
+      "z": -730
+    },
+    {
+      "id": "accessories/generator/frontBearing/innerRace",
+      "kind": "ring",
+      "color": "aebbc6",
+      "count": 1,
+      "profile": [
+        [1064, 15],
+        [1074, 15],
+        [1074, 11],
+        [1064, 11]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -280,
+      "z": -730
+    },
+    {
+      "id": "accessories/generator/frontBearing/outerRace",
+      "kind": "ring",
+      "color": "aebbc6",
+      "count": 1,
+      "profile": [
+        [1064, 28],
+        [1074, 28],
+        [1074, 23],
+        [1064, 23]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -280,
+      "z": -730
+    },
+    {
+      "id": "accessories/generator/frontBearing/rollers",
+      "kind": "ring",
+      "color": "dbdedf",
+      "count": 12,
+      "profile": [
+        [1065, 3],
+        [1073, 3],
+        [1073, 0],
+        [1065, 0]
+      ],
+      "cut": false,
+      "pitch": 19,
+      "y": -280,
+      "z": -730
+    },
+    {
+      "id": "accessories/generator/rearBearing/innerRace",
+      "kind": "ring",
+      "color": "aebbc6",
+      "count": 1,
+      "profile": [
+        [1253, 15],
+        [1263, 15],
+        [1263, 11],
+        [1253, 11]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -280,
+      "z": -730
+    },
+    {
+      "id": "accessories/generator/rearBearing/outerRace",
+      "kind": "ring",
+      "color": "aebbc6",
+      "count": 1,
+      "profile": [
+        [1253, 28],
+        [1263, 28],
+        [1263, 23],
+        [1253, 23]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -280,
+      "z": -730
+    },
+    {
+      "id": "accessories/generator/rearBearing/rollers",
+      "kind": "ring",
+      "color": "dbdedf",
+      "count": 12,
+      "profile": [
+        [1254, 3],
+        [1262, 3],
+        [1262, 0],
+        [1254, 0]
+      ],
+      "cut": false,
+      "pitch": 19,
+      "y": -280,
+      "z": -730
+    },
+    {
+      "id": "accessories/fuelPump/driveRotor",
+      "kind": "ring",
+      "color": "baa576",
+      "count": 1,
+      "profile": [
+        [1010, 14],
+        [1070, 14],
+        [1070, 5],
+        [1010, 5]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -196,
+      "z": -670
+    },
+    {
+      "id": "accessories/fuelPump/driveShaft",
+      "kind": "ring",
+      "color": "bbc6cb",
+      "count": 1,
+      "profile": [
+        [995, 4],
+        [1085, 4],
+        [1085, 0],
+        [995, 0]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -196,
+      "z": -670
+    },
+    {
+      "id": "accessories/fuelPump/driveFrontBush",
+      "kind": "ring",
+      "color": "c4a15a",
+      "count": 1,
+      "profile": [
+        [997, 7],
+        [1005, 7],
+        [1005, 4.5],
+        [997, 4.5]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -196,
+      "z": -670
+    },
+    {
+      "id": "accessories/fuelPump/driveRearBush",
+      "kind": "ring",
+      "color": "c4a15a",
+      "count": 1,
+      "profile": [
+        [1075, 7],
+        [1083, 7],
+        [1083, 4.5],
+        [1075, 4.5]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -196,
+      "z": -670
+    },
+    {
+      "id": "accessories/fuelPump/idlerRotor",
+      "kind": "ring",
+      "color": "baa576",
+      "count": 1,
+      "profile": [
+        [1010, 14],
+        [1070, 14],
+        [1070, 5],
+        [1010, 5]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -164,
+      "z": -670
+    },
+    {
+      "id": "accessories/fuelPump/idlerShaft",
+      "kind": "ring",
+      "color": "bbc6cb",
+      "count": 1,
+      "profile": [
+        [995, 4],
+        [1085, 4],
+        [1085, 0],
+        [995, 0]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -164,
+      "z": -670
+    },
+    {
+      "id": "accessories/fuelPump/idlerFrontBush",
+      "kind": "ring",
+      "color": "c4a15a",
+      "count": 1,
+      "profile": [
+        [997, 7],
+        [1005, 7],
+        [1005, 4.5],
+        [997, 4.5]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -164,
+      "z": -670
+    },
+    {
+      "id": "accessories/fuelPump/idlerRearBush",
+      "kind": "ring",
+      "color": "c4a15a",
+      "count": 1,
+      "profile": [
+        [1075, 7],
+        [1083, 7],
+        [1083, 4.5],
+        [1075, 4.5]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -164,
+      "z": -670
+    },
+    {
+      "id": "accessories/fuelPump/frontPlate",
+      "kind": "ring",
+      "color": "95a8af",
+      "count": 1,
+      "profile": [
+        [985, 34],
+        [990, 34],
+        [990, 0],
+        [985, 0]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -180,
+      "z": -670
+    },
+    {
+      "id": "accessories/fuelPump/rearPlate",
+      "kind": "ring",
+      "color": "95a8af",
+      "count": 1,
+      "profile": [
+        [1090, 34],
+        [1095, 34],
+        [1095, 0],
+        [1090, 0]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -180,
+      "z": -670
+    },
+    {
+      "id": "accessories/oilPump/driveRotor",
+      "kind": "ring",
+      "color": "baa576",
+      "count": 1,
+      "profile": [
+        [830, 11],
+        [910, 11],
+        [910, 5],
+        [830, 5]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 162,
+      "z": -690
+    },
+    {
+      "id": "accessories/oilPump/driveShaft",
+      "kind": "ring",
+      "color": "bbc6cb",
+      "count": 1,
+      "profile": [
+        [815, 4],
+        [925, 4],
+        [925, 0],
+        [815, 0]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 162,
+      "z": -690
+    },
+    {
+      "id": "accessories/oilPump/driveFrontBush",
+      "kind": "ring",
+      "color": "c4a15a",
+      "count": 1,
+      "profile": [
+        [817, 7],
+        [825, 7],
+        [825, 4.5],
+        [817, 4.5]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 162,
+      "z": -690
+    },
+    {
+      "id": "accessories/oilPump/driveRearBush",
+      "kind": "ring",
+      "color": "c4a15a",
+      "count": 1,
+      "profile": [
+        [915, 7],
+        [923, 7],
+        [923, 4.5],
+        [915, 4.5]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 162,
+      "z": -690
+    },
+    {
+      "id": "accessories/oilPump/idlerRotor",
+      "kind": "ring",
+      "color": "baa576",
+      "count": 1,
+      "profile": [
+        [830, 11],
+        [910, 11],
+        [910, 5],
+        [830, 5]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 188,
+      "z": -690
+    },
+    {
+      "id": "accessories/oilPump/idlerShaft",
+      "kind": "ring",
+      "color": "bbc6cb",
+      "count": 1,
+      "profile": [
+        [815, 4],
+        [925, 4],
+        [925, 0],
+        [815, 0]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 188,
+      "z": -690
+    },
+    {
+      "id": "accessories/oilPump/idlerFrontBush",
+      "kind": "ring",
+      "color": "c4a15a",
+      "count": 1,
+      "profile": [
+        [817, 7],
+        [825, 7],
+        [825, 4.5],
+        [817, 4.5]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 188,
+      "z": -690
+    },
+    {
+      "id": "accessories/oilPump/idlerRearBush",
+      "kind": "ring",
+      "color": "c4a15a",
+      "count": 1,
+      "profile": [
+        [915, 7],
+        [923, 7],
+        [923, 4.5],
+        [915, 4.5]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 188,
+      "z": -690
+    },
+    {
+      "id": "accessories/oilPump/frontPlate",
+      "kind": "ring",
+      "color": "95a8af",
+      "count": 1,
+      "profile": [
+        [805, 28],
+        [810, 28],
+        [810, 0],
+        [805, 0]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 175,
+      "z": -690
+    },
+    {
+      "id": "accessories/oilPump/rearPlate",
+      "kind": "ring",
+      "color": "95a8af",
+      "count": 1,
+      "profile": [
+        [930, 28],
+        [935, 28],
+        [935, 0],
+        [930, 0]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 175,
+      "z": -690
+    },
+    {
+      "id": "controls/fadec/circuitBoard",
+      "kind": "box",
+      "color": "275d51",
+      "count": 1,
+      "x": 1620,
+      "y": 135,
+      "z": -688,
+      "sx": 145,
+      "sy": 78,
+      "sz": 2
+    },
+    {
+      "id": "controls/fadec/processor0",
+      "kind": "box",
+      "color": "333b40",
+      "count": 1,
+      "x": 1572,
+      "y": 135,
+      "z": -681,
+      "sx": 12,
+      "sy": 14,
+      "sz": 6
+    },
+    {
+      "id": "controls/fadec/processor1",
+      "kind": "box",
+      "color": "333b40",
+      "count": 1,
+      "x": 1591,
+      "y": 135,
+      "z": -681,
+      "sx": 12,
+      "sy": 14,
+      "sz": 6
+    },
+    {
+      "id": "controls/fadec/processor2",
+      "kind": "box",
+      "color": "333b40",
+      "count": 1,
+      "x": 1610,
+      "y": 135,
+      "z": -681,
+      "sx": 12,
+      "sy": 14,
+      "sz": 6
+    },
+    {
+      "id": "controls/fadec/processor3",
+      "kind": "box",
+      "color": "333b40",
+      "count": 1,
+      "x": 1629,
+      "y": 135,
+      "z": -681,
+      "sx": 12,
+      "sy": 14,
+      "sz": 6
+    },
+    {
+      "id": "controls/fadec/processor4",
+      "kind": "box",
+      "color": "333b40",
+      "count": 1,
+      "x": 1648,
+      "y": 135,
+      "z": -681,
+      "sx": 12,
+      "sy": 14,
+      "sz": 6
+    },
+    {
+      "id": "controls/fadec/processor5",
+      "kind": "box",
+      "color": "333b40",
+      "count": 1,
+      "x": 1667,
+      "y": 135,
+      "z": -681,
+      "sx": 12,
+      "sy": 14,
+      "sz": 6
+    },
+    {
+      "id": "controls/fadec/capacitor0",
+      "kind": "box",
+      "color": "a78257",
+      "count": 1,
+      "x": 1565,
+      "y": 160,
+      "z": -681,
+      "sx": 6,
+      "sy": 8,
+      "sz": 6
+    },
+    {
+      "id": "controls/fadec/capacitor1",
+      "kind": "box",
+      "color": "a78257",
+      "count": 1,
+      "x": 1580,
+      "y": 160,
+      "z": -681,
+      "sx": 6,
+      "sy": 8,
+      "sz": 6
+    },
+    {
+      "id": "controls/fadec/capacitor2",
+      "kind": "box",
+      "color": "a78257",
+      "count": 1,
+      "x": 1595,
+      "y": 160,
+      "z": -681,
+      "sx": 6,
+      "sy": 8,
+      "sz": 6
+    },
+    {
+      "id": "controls/fadec/capacitor3",
+      "kind": "box",
+      "color": "a78257",
+      "count": 1,
+      "x": 1610,
+      "y": 160,
+      "z": -681,
+      "sx": 6,
+      "sy": 8,
+      "sz": 6
+    },
+    {
+      "id": "controls/fadec/capacitor4",
+      "kind": "box",
+      "color": "a78257",
+      "count": 1,
+      "x": 1625,
+      "y": 160,
+      "z": -681,
+      "sx": 6,
+      "sy": 8,
+      "sz": 6
+    },
+    {
+      "id": "controls/fadec/capacitor5",
+      "kind": "box",
+      "color": "a78257",
+      "count": 1,
+      "x": 1640,
+      "y": 160,
+      "z": -681,
+      "sx": 6,
+      "sy": 8,
+      "sz": 6
+    },
+    {
+      "id": "controls/fadec/capacitor6",
+      "kind": "box",
+      "color": "a78257",
+      "count": 1,
+      "x": 1655,
+      "y": 160,
+      "z": -681,
+      "sx": 6,
+      "sy": 8,
+      "sz": 6
+    },
+    {
+      "id": "controls/fadec/capacitor7",
+      "kind": "box",
+      "color": "a78257",
+      "count": 1,
+      "x": 1670,
+      "y": 160,
+      "z": -681,
+      "sx": 6,
+      "sy": 8,
+      "sz": 6
+    },
+    {
+      "id": "controls/fadec/boardStandoff0",
+      "kind": "ring",
+      "color": "bba676",
+      "count": 1,
+      "profile": [
+        [1550, 2],
+        [1557, 2],
+        [1557, 1],
+        [1550, 1]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 104,
+      "z": -692
+    },
+    {
+      "id": "controls/fadec/boardStandoff1",
+      "kind": "ring",
+      "color": "bba676",
+      "count": 1,
+      "profile": [
+        [1590, 2],
+        [1597, 2],
+        [1597, 1],
+        [1590, 1]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 104,
+      "z": -692
+    },
+    {
+      "id": "controls/fadec/boardStandoff2",
+      "kind": "ring",
+      "color": "bba676",
+      "count": 1,
+      "profile": [
+        [1630, 2],
+        [1637, 2],
+        [1637, 1],
+        [1630, 1]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 104,
+      "z": -692
+    },
+    {
+      "id": "controls/fadec/boardStandoff3",
+      "kind": "ring",
+      "color": "bba676",
+      "count": 1,
+      "profile": [
+        [1670, 2],
+        [1677, 2],
+        [1677, 1],
+        [1670, 1]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": 104,
+      "z": -692
+    },
+    {
+      "id": "accessories/oilTank/baffle",
+      "kind": "ring",
+      "color": "718d99",
+      "count": 1,
+      "profile": [
+        [1390, 43],
+        [1394, 43],
+        [1394, 0],
+        [1390, 0]
+      ],
+      "cut": false,
+      "pitch": 0,
+      "y": -80,
+      "z": -670
+    },
+    {
+      "id": "combustor/igniterElectrodes",
+      "kind": "ring",
+      "color": "ece4ce",
+      "count": 2,
+      "profile": [
+        [2124, 2],
+        [2183, 2],
+        [2183, 0],
+        [2124, 0]
+      ],
+      "cut": false,
+      "pitch": 356,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "id": "combustor/igniterInsulators",
+      "kind": "ring",
+      "color": "e9dec5",
+      "count": 2,
+      "profile": [
+        [2122, 2.7],
+        [2178, 2.7],
+        [2178, 2.2],
+        [2122, 2.2]
+      ],
+      "cut": false,
+      "pitch": 356,
+      "y": 0,
+      "z": 0
+    }
+  ]
+}

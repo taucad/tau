@@ -1,6 +1,6 @@
 # PicoGK API index
 
-PicoGK 2.3.0.0 · 2083 symbols · extracted by Roslyn 5.9.0.
+PicoGK 2.3.0.0 · 2085 symbols · extracted by Roslyn 5.9.0.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature.
 
@@ -185,7 +185,7 @@ ITraverseScalarField (interface) [1 members] — An interface used to traverse t
   ITraverseScalarField.InformActiveValue (method) — Called for every active value in the ScalarField object
 ITraverseVectorField (interface) [1 members] — An interface to allow traversal of all active values in…
   ITraverseVectorField.InformActiveValue (method) — Called for every active value in the VectorField object
-IViewerBackend (interface) [20 members] — Backend for embedding PicoGK's concrete PicoGK.Viewer API without a native…
+IViewerBackend (interface) [21 members] — Backend for embedding PicoGK's concrete PicoGK.Viewer API without a native…
   IViewerBackend.IsIdle (property)
   IViewerBackend.Orientation (property)
   IViewerBackend.Poll (method)
@@ -198,6 +198,7 @@ IViewerBackend (interface) [20 members] — Backend for embedding PicoGK's concr
   IViewerBackend.Remove (method)
   IViewerBackend.SetObjectMatrix (method)
   IViewerBackend.RemoveAllObjects (method)
+  IViewerBackend.SetMechanism (method)
   IViewerBackend.RequestScreenShot (method)
   IViewerBackend.EnableExperimental (method)
   IViewerBackend.SetGroupVisible (method)
@@ -552,7 +553,7 @@ VectorFieldMerge (class) [4 members]
   VectorFieldMerge.VectorFieldMerge (constructor)
   VectorFieldMerge.Run (method)
   VectorFieldMerge.InformActiveValue (method)
-Viewer (class) [61 members] — PicoGK viewer
+Viewer (class) [62 members] — PicoGK viewer
   Viewer.InfoCallback (type)
   Viewer.UpdateCallback (type)
   Viewer.KeyPressedCallback (type)
@@ -584,6 +585,7 @@ Viewer (class) [61 members] — PicoGK viewer
   Viewer._hCreate (method)
   Viewer.Dispose (method)
   Viewer.Viewer (constructor) — Initialize a hosted Viewer that delegates display operations without creating…
+  Viewer.SetMechanism (method) — Capture an application-defined mechanism on a hosted viewer
   Viewer.bPoll (method) — Run this function in your main thread while it returns…
   Viewer.RequestUpdate (method) — Request a refresh of the viewer
   Viewer.LoadLightSetup (method) — Load the IBL light setup from the specified ZIP file

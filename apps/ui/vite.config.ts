@@ -220,6 +220,14 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
       }
 
       const chunks = Object.values(bundle).filter((output) => output.type === 'chunk');
+      if (options.target !== 'desktop') {
+        const forbidden = chunks
+          .flatMap((chunk) => Object.keys(chunk.modules))
+          .find((moduleId) => /apps\/ui\/app\/.*\.desktop\.[jt]sx?(?:\?|$)/u.test(normalizeProvenancePath(moduleId)));
+        if (forbidden) {
+          this.error(`Desktop-only implementation in web bundle: ${normalizeProvenancePath(forbidden)}`);
+        }
+      }
       const assets = Object.values(bundle).filter((output) => output.type === 'asset');
       const emittedFileNames = new Set(Object.keys(bundle));
       graphAssets = assets.map((asset) => ({
@@ -234,9 +242,6 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
         name: 'tau-module-graph.json',
         source: JSON.stringify({
           chunks: chunks.map((chunk) => {
-            const renderedModuleIds = Object.entries(chunk.modules)
-              .filter(([moduleId, rendered]) => rendered.renderedLength > 0 || moduleId === chunk.facadeModuleId)
-              .map(([moduleId]) => moduleId);
             const importedChunks = chunk.imports
               .map((importPath) => {
                 const fromOutputRoot = path.posix.normalize(
@@ -257,13 +262,9 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
             );
             return {
               fileName: chunk.fileName,
-              // Rolldown reports renderedLength=0 for every module in some
-              // emitted wrapper chunks. Fall back only for that otherwise
-              // provenance-empty chunk; populated chunks keep the strict
-              // rendered/facade filter and exclude tree-shaken modules.
-              moduleIds: (renderedModuleIds.length > 0 ? renderedModuleIds : chunk.moduleIds).map((moduleId) =>
-                normalizeProvenancePath(moduleId),
-              ),
+              // Loaded modules still cross a target boundary when Rolldown inlines
+              // their exports and reports renderedLength=0.
+              moduleIds: chunk.moduleIds.map(normalizeProvenancePath),
               imports: importedChunks,
               forwardingOnly,
             };
@@ -314,15 +315,9 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
                   path.posix.normalize(path.posix.join(path.posix.dirname(chunk.fileName), importPath)),
                 )
                 .filter((fileName) => existsSync(path.resolve(outputRoot, fileName)));
-              const renderedModuleIds = Object.entries(chunk.modules)
-                .filter(([moduleId, rendered]) => rendered.renderedLength > 0 || moduleId === chunk.facadeModuleId)
-                .map(([moduleId]) => moduleId);
-
               return {
                 fileName: chunk.fileName,
-                moduleIds: (renderedModuleIds.length > 0 ? renderedModuleIds : chunk.moduleIds).map((moduleId) =>
-                  normalizeProvenancePath(moduleId),
-                ),
+                moduleIds: chunk.moduleIds.map(normalizeProvenancePath),
                 imports,
                 forwardingOnly: program.body.every(
                   (statement) =>

@@ -1,12 +1,32 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { once } from 'node:events';
+import fs, {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { createInterface } from 'node:readline';
 import { test } from 'node:test';
 import process from 'node:process';
-// oxlint-disable-next-line no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export.
-import { ensureDelivery, prepareArtifacts, verifyArtifacts, verifyDelivery } from './ci-artifacts.mjs';
+/* oxlint-disable no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export. */
+import {
+  ensureDelivery,
+  prepareArtifacts,
+  snapshotDelivery,
+  verifyArtifacts,
+  verifyDelivery,
+} from './ci-artifacts.mjs';
+/* oxlint-enable no-restricted-imports -- End co-located CLI import exception. */
 
 /** @type {(context: import('node:test').TestContext, reusePrefixes: boolean) => void} */
 const checkTransport = (context, reusePrefixes) => {
@@ -95,12 +115,13 @@ const checkTransport = (context, reusePrefixes) => {
   context.mock.method(
     childProcess,
     'spawnSync',
-    /** @type {(executable: string, args: string[], options: {cwd: string, env: {PATH?: string, CARGO_HOME: string, GEOSPEC_NODE_MANIFEST: string, GEOSPEC_OCCT_PREFIX: string, GEOSPEC_MIXED_INPUTS: string, GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_OCCT_PRODUCER_BUILDER?: string, GEOSPEC_OCCT_PRODUCER_RECIPE?: string, GIT_CEILING_DIRECTORIES?: string}}) => {status: number}} */ (
+    /** @type {(executable: string, args: string[], options: {cwd: string, stdio: unknown, env: {PATH?: string, CARGO_HOME: string, GEOSPEC_NODE_MANIFEST: string, GEOSPEC_OCCT_PREFIX: string, GEOSPEC_MIXED_INPUTS: string, GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_OCCT_PRODUCER_BUILDER?: string, GEOSPEC_OCCT_PRODUCER_RECIPE?: string, GIT_CEILING_DIRECTORIES?: string}}) => {status: number}} */ (
       executable,
       args,
       options,
     ) => {
       if (executable === 'rustup') {
+        assert.deepEqual(options.stdio, ['inherit', 'inherit', 'inherit', 9]);
         assert.equal(options.env.PATH, productPath);
         assert.deepEqual(args, [
           'run',
@@ -119,6 +140,7 @@ const checkTransport = (context, reusePrefixes) => {
         return { status: 0 };
       }
       if (executable === 'python3') {
+        assert.deepEqual(options.stdio, ['inherit', 'inherit', 'inherit', 9]);
         assert.equal(options.env.PATH, productPath);
         observations += 1;
         assert.equal(args[1], join(producer, packagePath, 'scripts/collect-native-proof.py'));
@@ -149,6 +171,12 @@ const checkTransport = (context, reusePrefixes) => {
       const command = args[2];
       assert.ok(command);
       const target = command.replace('geospec-engine-native:', '');
+      assert.deepEqual(
+        options.stdio,
+        target === 'build-node' || target === 'assemble-package'
+          ? ['inherit', 'pipe', 'pipe', 9]
+          : ['inherit', 'inherit', 'inherit', 9],
+      );
       targets.push(target);
       assert.equal(options.env.GEOSPEC_OCCT_PREFIX, join(nativeCache, 'occt-native/install'));
       if (target === 'prepare-delivery:reuse-native') {
@@ -310,6 +338,7 @@ const checkTransport = (context, reusePrefixes) => {
     GEOSPEC_OCCT_PRODUCER_RECIPE: reusePrefixes ? join(producer, 'mixed-producing-recipe.json') : undefined,
     GIT_CEILING_DIRECTORIES: undefined,
     CARGO_HOME: join(producer, 'assembly-cargo-home'),
+    GEOSPEC_PRODUCER_LOCK_FD: '9',
   };
   context.after(() => {
     process.env = previousEnvironment;
@@ -331,6 +360,30 @@ const checkTransport = (context, reusePrefixes) => {
   const builtTargets = [...targets];
   assert.deepEqual(ensureDelivery(producer), inventory);
   assert.deepEqual(targets, builtTargets, 'an unchanged delivery must not invoke a producer');
+  const snapshot = snapshotDelivery(producer);
+  assert.deepEqual(targets, builtTargets, 'a verified snapshot must not invoke a producer');
+  for (const name of ['root.tgz', 'darwin-arm64.tgz', 'geospec-engine-native-source-relink.tar.gz']) {
+    const canonical = join(producer, transportPath, 'assembly/tarballs', name);
+    const selected = join(snapshot, 'tarballs', name);
+    const bytes = readFileSync(canonical);
+    assert.deepEqual(readFileSync(selected), bytes);
+    put(canonical, 'next producer');
+    assert.deepEqual(readFileSync(selected), bytes, 'a package snapshot cannot change with canonical output');
+    put(canonical, bytes);
+  }
+  const existingSnapshots = readdirSync(dirname(snapshot));
+  const originalCopy = fs.copyFileSync;
+  fs.copyFileSync = () => {
+    throw new Error('fixture copy failure');
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => snapshotDelivery(producer), /fixture copy failure/);
+  } finally {
+    fs.copyFileSync = originalCopy;
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(readdirSync(dirname(snapshot)), existingSnapshots, 'failed snapshots must be removed');
   for (const [name, original] of [
     ['mixed-inputs.json', join(mixedCache, 'mixed-inputs-simd128.json')],
     ['mixed-commands.json', join(buildCache, 'attempt-1/commands.json')],
@@ -541,4 +594,134 @@ await test('default cold preparation transports complete artifacts without loadi
 
 await test('independent retained prefixes transport complete artifacts without loading a product', (context) => {
   checkTransport(context, true);
+});
+
+await test('CLI producers acquire the shared lock; nested verification does not', (context) => {
+  const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
+  mkdirSync(scratch, { recursive: true });
+  const temporary = mkdtempSync(join(scratch, 'producer-lock-'));
+  context.after(() => {
+    rmSync(temporary, { recursive: true, force: true });
+  });
+  const shim = join(temporary, 'lockf');
+  const argumentsPath = join(temporary, 'arguments');
+  writeFileSync(shim, '#!/bin/sh\nprintf "%s\\n" "$@" > "$LOCK_ARGS"\nexit 7\n');
+  chmodSync(shim, 0o755);
+  const script = resolve(import.meta.dirname, 'ci-artifacts.mjs');
+  const root = resolve(import.meta.dirname, '../../..');
+  for (const mode of ['prepare', 'ensure-delivery', 'snapshot-delivery']) {
+    const result = childProcess.spawnSync(process.execPath, [script, mode], {
+      cwd: root,
+      env: { ...process.env, PATH: `${temporary}:${process.env.PATH}`, LOCK_ARGS: argumentsPath },
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    assert.equal(result.status, 1);
+    assert.deepEqual(readFileSync(argumentsPath, 'utf8').trim().split('\n'), ['/dev/fd/9']);
+    assert.match(result.stderr, /GeoSpec producer lock\/command failed: 7/);
+  }
+  // A held producer lock must never gate Nx's nested verifier.
+  const result = childProcess.spawnSync(
+    '/bin/sh',
+    [
+      '-c',
+      'set -e; exec 9>> "$1"; lockf /dev/fd/9; shift; exec "$@"',
+      'geospec-lock',
+      join(root, 'out/artifacts/geospec-native-engine/producer.lock'),
+      process.execPath,
+      script,
+      'verify',
+    ],
+    { cwd: root, encoding: 'utf8', timeout: 5000 },
+  );
+  assert.equal(result.error, undefined);
+  assert.ok(result.status === 0 || result.status === 1, result.stderr);
+});
+
+await test('producer lock serializes, then releases after failure and termination', async (context) => {
+  const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
+  mkdirSync(scratch, { recursive: true });
+  const temporary = mkdtempSync(join(scratch, 'producer-lock-processes-'));
+  context.after(() => {
+    rmSync(temporary, { recursive: true, force: true });
+  });
+  const lock = join(temporary, 'producer.lock');
+  const log = join(temporary, 'order');
+  const lockShell = 'set -e; exec 9>> "$1"; lockf /dev/fd/9; shift; exec "$@"';
+  const script =
+    'const fs = require("node:fs"); const [log, id] = process.argv.slice(1);' +
+    String.raw`fs.appendFileSync(log, "begin " + id + "\n");` +
+    String.raw`setTimeout(() => { fs.appendFileSync(log, "end " + id + "\n"); }, 100);`;
+  const run = async (id) => {
+    const child = childProcess.spawn('/bin/sh', [
+      '-c',
+      lockShell,
+      'geospec-lock',
+      lock,
+      process.execPath,
+      '-e',
+      script,
+      log,
+      id,
+    ]);
+    const [status] = /** @type {[number | null]} */ (await once(child, 'close'));
+    assert.notEqual(status, null);
+    return status;
+  };
+  assert.deepEqual(await Promise.all([run('a'), run('b')]), [0, 0]);
+  const order = readFileSync(log, 'utf8').trim().split('\n');
+  assert.match(order[0], /^begin [ab]$/);
+  assert.equal(order[1], order[0].replace('begin', 'end'));
+  assert.match(order[2], /^begin [ab]$/);
+  assert.equal(order[3], order[2].replace('begin', 'end'));
+  assert.notEqual(order[0], order[2]);
+  for (const code of ['process.exit(7)', 'process.kill(process.pid, "SIGTERM")']) {
+    const failed = childProcess.spawnSync(
+      '/bin/sh',
+      ['-c', lockShell, 'geospec-lock', lock, process.execPath, '-e', code],
+      { timeout: 5000 },
+    );
+    assert.notEqual(failed.status, 0);
+    const acquired = childProcess.spawnSync('lockf', ['-k', '-t', '0', lock, '/usr/bin/true'], { timeout: 5000 });
+    assert.equal(acquired.status, 0, String(acquired.error));
+  }
+});
+
+await test('a live mutating child retains the lock after its coordinator is killed', async (context) => {
+  const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
+  mkdirSync(scratch, { recursive: true });
+  const temporary = mkdtempSync(join(scratch, 'producer-child-lock-'));
+  context.after(() => {
+    rmSync(temporary, { recursive: true, force: true });
+  });
+  const lock = join(temporary, 'producer.lock');
+  const coordinatorScript =
+    'const child = require("node:child_process").spawn(process.execPath,' +
+    '["-e", "setTimeout(() => {}, 4000)"], {stdio: ["ignore", "ignore", "ignore", 9]});' +
+    String.raw`process.stdout.write(String(child.pid) + "\n"); setTimeout(() => {}, 4000);`;
+  const coordinator = childProcess.spawn(
+    '/bin/sh',
+    [
+      '-c',
+      'set -e; exec 9>> "$1"; lockf /dev/fd/9; shift; exec "$@"',
+      'geospec-lock',
+      lock,
+      process.execPath,
+      '-e',
+      coordinatorScript,
+    ],
+    { stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  const lines = createInterface({ input: coordinator.stdout });
+  const [pidLine] = /** @type {[string]} */ (await once(lines, 'line', { signal: AbortSignal.timeout(5000) }));
+  lines.close();
+  const childPid = Number(pidLine);
+  assert.ok(Number.isSafeInteger(childPid) && childPid > 0, String(pidLine));
+  coordinator.kill('SIGTERM');
+  await once(coordinator, 'close', { signal: AbortSignal.timeout(5000) });
+  const blocked = childProcess.spawnSync('lockf', ['-k', '-t', '0', lock, '/usr/bin/true']);
+  assert.equal(blocked.status, 75, 'a later producer entered while the first child was still mutating');
+  process.kill(childPid, 'SIGTERM');
+  const released = childProcess.spawnSync('lockf', ['-k', '-t', '3', lock, '/usr/bin/true']);
+  assert.equal(released.status, 0, String(released.error));
 });

@@ -753,11 +753,17 @@ def _normal(a: tuple[float, float, float], b: tuple[float, float, float], c: tup
 
 def _mesh_shape(shape: Any, linear_tolerance: float, angular_tolerance: float) -> dict[str, Any]:
     from OCP.BRep import BRep_Tool
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.TopAbs import TopAbs_Orientation
     from OCP.TopLoc import TopLoc_Location
 
-    located = shape.moved(shape.location.inverse() * shape.global_location)
+    # OCCT stores triangulation on BRep faces. `moved` shares those faces, so
+    # copy geometry without mesh data before applying this render's tolerance.
+    copied = BRepBuilderAPI_Copy()
+    copied.Perform(shape.wrapped, True, False)
+    detached = _cast_shape(copied.Shape())
+    located = detached.moved(shape.location.inverse() * shape.global_location)
     BRepMesh_IncrementalMesh(located.wrapped, linear_tolerance, True, angular_tolerance, True)
     positions: list[float] = []
     normals: list[float] = []

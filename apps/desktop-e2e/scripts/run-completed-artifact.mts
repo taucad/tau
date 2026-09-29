@@ -209,6 +209,9 @@ const main = async (): Promise<void> => {
     if (![databaseAddress, redisAddress, storageAddress].every((address) => /^127\.0\.0\.1:\d+$/u.test(address))) {
       throw new Error('Disposable services did not bind exclusively to loopback.');
     }
+    if (databaseAddress.endsWith(':5432')) {
+      throw new Error('Disposable Postgres must not use the shared development database port.');
+    }
     const databaseIdentity = run(composeCommand, [
       ...composeArguments,
       'exec',
@@ -281,7 +284,11 @@ const main = async (): Promise<void> => {
       TAU_S3_REGION: 'us-east-1',
       TAU_S3_SECRET_ACCESS_KEY: storagePassword,
     };
-    run('pnpm', ['--config.verify-deps-before-run=warn', 'nx', 'run', 'api:db-migrate'], environment);
+    run('pnpm', ['--config.verify-deps-before-run=warn', 'nx', 'run', 'api:db-migrate'], {
+      ...environment,
+      BILLING_DATABASE_URL: environment.DATABASE_URL,
+      BILLING_ENVIRONMENT: 'development',
+    });
     const vitest = spawn(
       resolve(workspaceRoot, 'node_modules/.bin/vitest'),
       [

@@ -118,6 +118,8 @@ export type ChatStorage = {
   getAllChats(options?: { includeDeleted?: boolean }): Promise<Chat[]>;
   getChatsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]>;
   deleteChat(chatId: string): Promise<void>;
+  /** Irreversibly remove an archived chat from discovery, retaining its sync tombstone. */
+  purgeChat(chatId: string): Promise<void>;
   /** Write one chat record as given, for replaying a project creation. */
   putChatRecord(chat: Chat): Promise<void>;
 };

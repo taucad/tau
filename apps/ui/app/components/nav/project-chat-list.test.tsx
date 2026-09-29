@@ -201,7 +201,7 @@ describe('ProjectChatList', () => {
   it('observes all listed chats while collapsed without rendering chat rows', () => {
     render(<ProjectChatList project={project} isProjectActive={false} isExpanded={false} />);
     expect(mockObserve).toHaveBeenCalledTimes(12);
-    expect(mockUseChatRecords).toHaveBeenCalledWith('proj_one', { includeDeleted: true });
+    expect(mockUseChatRecords).toHaveBeenCalledWith('proj_one');
     expect(mockUseChats).toHaveBeenCalledWith('proj_one', { enabled: false });
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
@@ -268,24 +268,17 @@ describe('ProjectChatList', () => {
     });
   });
 
-  it('reveals trashed chats and restores one through the existing record', async () => {
-    const restoreChat = vi.fn().mockResolvedValue(chat(2));
+  it('keeps archived chats and restore controls out of the sidebar', () => {
     mockUseChatRecords.mockReturnValue({
       ...defaultChatsResult,
       chats: [chat(1), { ...chat(2), deletedAt: Date.now() }],
     });
-    mockUseChats.mockReturnValue({
-      ...defaultChatsResult,
-      restoreChat,
-    });
     render(<ProjectChatList project={project} isProjectActive />);
 
     expect(screen.queryByRole('link', { name: 'Chat 2' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Chat Trash (1)' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Restore Chat 2' }));
-    await vi.waitFor(() => {
-      expect(restoreChat).toHaveBeenCalledExactlyOnceWith('chat_2');
-    });
+    expect(screen.queryByRole('button', { name: /Chat Trash/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Restore/ })).not.toBeInTheDocument();
+    expect(mockUseChatRecords).toHaveBeenCalledWith('proj_one');
   });
 
   /* D1, D8, D16: one leading mark inside the rail; the sentence is the

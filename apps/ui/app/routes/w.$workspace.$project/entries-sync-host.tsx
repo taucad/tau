@@ -14,6 +14,7 @@ import {
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { createWorkbenchEntriesStore } from '#workbench-records/entries-store.js';
+import type { EntryRecordPatch } from '#workbench-records/entries-store.js';
 import { digestBytes } from '#utils/crypto.utils.js';
 
 type Entry = WorkbenchEntries['entries'][string];
@@ -36,9 +37,12 @@ export function EntriesSyncHost(): React.JSX.Element {
   const root = `/projects/${projectId}`;
   const [notice, setNotice] = useState<{ code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string }>();
   const [ioError, setIoError] = useState<string>();
-  const [, tick] = useState(0);
   const generationRef = useRef(0);
   const acknowledgedRef = useRef(new Set<string>());
+  const [published, setPublished] = useState<{
+    record: WorkbenchEntries | undefined;
+    patch: EntryRecordPatch | undefined;
+  }>();
   const [entriesDigest, setEntriesDigest] = useState<{
     bytes: Uint8Array<ArrayBuffer>;
     digest: `sha256:${string}`;
@@ -53,16 +57,17 @@ export function EntriesSyncHost(): React.JSX.Element {
   // oxlint-disable-next-line react/refs -- Store callbacks run after render.
   const store = useMemo(
     () =>
+      // oxlint-disable-next-line react/refs -- Store callbacks read generation after render, not during construction.
       createWorkbenchEntriesStore({
         root,
         files: parameterFiles,
         editDebounce: 500,
-        onChange: (state) => {
+        onChange: (state, _source, locallyAuthored) => {
           const generation = ++generationRef.current;
+          setPublished({ record: state.record, patch: locallyAuthored });
           setIoError(undefined);
           clearApplied();
           setEntriesDigest(undefined);
-          tick((value) => value + 1);
           setNotice(state.refusal);
           if (state.record) {
             setEntriesRecord(state.record);
@@ -80,6 +85,7 @@ export function EntriesSyncHost(): React.JSX.Element {
         },
         onError: (error) => {
           generationRef.current++;
+          setPublished(undefined);
           clearApplied();
           setEntriesDigest(undefined);
           setIoError(error instanceof Error ? error.message : 'Entry settings unavailable.');
@@ -148,6 +154,9 @@ export function EntriesSyncHost(): React.JSX.Element {
           cadRef={cadRef}
           modelInteractionRef={modelInteractionRef}
           entry={entriesRecord?.entries[path]}
+          localPatch={
+            published?.record === entriesRecord && published?.patch?.path === path ? published.patch.fields : undefined
+          }
           recordPresent={entriesRecord !== undefined}
           ready={ready}
           write={write}
@@ -183,6 +192,7 @@ export function EntryOwner({
   cadRef,
   modelInteractionRef,
   entry,
+  localPatch,
   recordPresent,
   ready,
   write,
@@ -193,6 +203,7 @@ export function EntryOwner({
   cadRef: ActorRefFrom<typeof cadMachine>;
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   entry: Entry | undefined;
+  localPatch?: EntryRecordPatch['fields'];
   recordPresent: boolean;
   ready: boolean;
   write: (path: string, next: Entry) => Promise<boolean>;
@@ -225,7 +236,8 @@ export function EntryOwner({
     appliedEntryRef.current = { entry };
     const targetTimeout = entry?.renderTimeout ?? defaultRenderTimeout;
     if (
-      (first || previous?.renderTimeout !== entry?.renderTimeout) &&
+      (first ||
+        (!Object.hasOwn(localPatch ?? {}, 'renderTimeout') && previous?.renderTimeout !== entry?.renderTimeout)) &&
       cadRef.getSnapshot().context.renderTimeout !== targetTimeout
     ) {
       cadRef.send({ type: 'setRenderTimeout', renderTimeout: targetTimeout });
@@ -248,9 +260,18 @@ export function EntryOwner({
     };
     const merged = {
       ...current,
-      hidden: first || !same(before.hidden, target.hidden) ? target.hidden : current.hidden,
-      isolated: first || !same(before.isolated, target.isolated) ? target.isolated : current.isolated,
-      opacity: first || !same(before.opacity, target.opacity) ? target.opacity : current.opacity,
+      hidden:
+        first || (!Object.hasOwn(localPatch?.components ?? {}, 'hidden') && !same(before.hidden, target.hidden))
+          ? target.hidden
+          : current.hidden,
+      isolated:
+        first || (!Object.hasOwn(localPatch?.components ?? {}, 'isolated') && !same(before.isolated, target.isolated))
+          ? target.isolated
+          : current.isolated,
+      opacity:
+        first || (!Object.hasOwn(localPatch?.components ?? {}, 'opacity') && !same(before.opacity, target.opacity))
+          ? target.opacity
+          : current.opacity,
     };
     if (same(current, merged)) {
       return;
@@ -262,7 +283,7 @@ export function EntryOwner({
       opacityByComponentId: Object.fromEntries(merged.opacity.map(({ id, opacity }) => [id, opacity])),
     };
     modelInteractionRef.send({ type: 'restoreComponentDisplay', componentDisplay: { schemaVersion: 1, unitsById } });
-  }, [cadRef, entry, modelInteractionRef, recordPresent, unitId]);
+  }, [cadRef, entry, localPatch, modelInteractionRef, recordPresent, unitId]);
   useEffect(() => {
     if (recordPresent && digest) {
       onApplied?.(path, digest);

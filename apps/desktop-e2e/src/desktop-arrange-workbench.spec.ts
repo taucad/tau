@@ -138,9 +138,9 @@ test('opens a named view through the desktop utility MCP endpoint and renders it
     const viewer = layout['viewer'] as { tabs: Array<{ kind: string; view?: string }> };
     expect(viewer.tabs.some((tab) => tab.kind === 'view' && tab.view === 'front')).toBe(true);
     expect(JSON.stringify(layout)).not.toContain('parameters');
-    const frontTab = page.locator('.dv-tab').filter({ hasText: 'Front · main.scad' });
+    const frontTab = page.locator('.dv-tab[data-tab-panel-id="front"]');
     await expectVisible(frontTab, 120_000);
-    expect(await frontTab.textContent()).toContain('Front · main.scad');
+    expect(await frontTab.locator('.dockview-tab-title').textContent()).toBe('main.scad');
     const arrangeCard = page
       .locator('[data-variant="minimal"][data-status="ready"]')
       .filter({ hasText: 'Arranged: front view' });

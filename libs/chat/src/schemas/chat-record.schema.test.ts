@@ -14,6 +14,15 @@ const chat: Chat = {
 };
 
 describe('chat record', () => {
+  it('round-trips irreversible deletion metadata and rejects invalid timestamps', () => {
+    expect(parseChatRecord(serializeChatRecord({ ...chat, deletedAt: 3, purgedAt: 4 }))).toMatchObject({
+      deletedAt: 3,
+      purgedAt: 4,
+    });
+    for (const purgedAt of [-1, 1.5, 'now']) {
+      expect(chatRecordSchema.safeParse({ ...chat, purgedAt }).success).toBe(false);
+    }
+  });
   it('round-trips a chat through its file bytes', () => {
     const parsed = parseChatRecord(serializeChatRecord(chat));
     expect(parsed).toEqual({

@@ -32,9 +32,7 @@ export const viewName = (record: WorkbenchView): string =>
     : 'Look');
 
 export const viewTabTitle = (record: WorkbenchView): string =>
-  record.entryPath === null
-    ? viewName(record)
-    : `${viewName(record)} · ${record.entryPath.split('/').at(-1) ?? record.entryPath}`;
+  record.entryPath === null ? viewName(record) : (record.entryPath.split('/').at(-1) ?? record.entryPath);
 
 /** Preserve the active viewer's display choices when a person opens another view. */
 export const newViewRecord = (entryPath: string | null, settings?: GraphicsViewSettings): WorkbenchView =>

@@ -6,6 +6,7 @@ import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
+import type { ViewRecordPatch, ViewRecordState } from '#workbench-records/view-store.js';
 
 const encoder = new TextEncoder();
 const seed = (): WorkbenchView => workbenchRecords.view.schema.parse({ version: 1, entryPath: 'a.ts' });
@@ -20,7 +21,9 @@ function memory() {
       preconditions,
     }: {
       data: string;
-      preconditions: ReadonlyArray<{ expected: Uint8Array<ArrayBuffer> | null }>;
+      preconditions: ReadonlyArray<{
+        expected: Uint8Array<ArrayBuffer> | null;
+      }>;
     }): Promise<CheckedFileWriteResult> => {
       const wait = gate;
       gate = undefined;
@@ -35,14 +38,21 @@ function memory() {
             expected?.length === bytes.length &&
             expected.every((value, index) => value === bytes?.[index]);
       if (!matches) {
-        return { status: 'conflict', conflicts: [{ path: 'view', actual: bytes }] };
+        return {
+          status: 'conflict',
+          conflicts: [{ path: 'view', actual: bytes }],
+        };
       }
       bytes = encoder.encode(data);
       return { status: 'applied', content: bytes };
     },
   );
   return {
-    files: { exists: async () => bytes !== null, readFile: async () => bytes!, writeFileChecked: writes },
+    files: {
+      exists: async () => bytes !== null,
+      readFile: async () => bytes!,
+      writeFileChecked: writes,
+    },
     writes,
     set: (value: WorkbenchView) => {
       bytes = encoder.encode(workbenchRecords.view.serialize(value));
@@ -72,6 +82,44 @@ const makeStore = (data: ReturnType<typeof memory>) =>
   });
 
 describe('workbench view checked store', () => {
+  it('should classify a watch of in-flight local write bytes as a local acknowledgement', async () => {
+    const data = memory();
+    const acknowledgement = Promise.withResolvers<void>();
+    const onChange = vi.fn<(state: ViewRecordState, source: 'read' | 'write', patch?: ViewRecordPatch) => void>();
+    const writeFileChecked = vi.fn(async ({ data: text }: { data: string }): Promise<CheckedFileWriteResult> => {
+      const content = encoder.encode(text);
+      data.setBytes(content);
+      await acknowledgement.promise;
+      return { status: 'applied', content };
+    });
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-abcd1234',
+      files: { ...data.files, writeFileChecked },
+      onChange,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    await store.read();
+    const edit = store.edit({
+      ...seed(),
+      name: 'Local',
+      camera: { kind: 'look', direction: [0, -1, 0] },
+    });
+    await vi.waitFor(() => {
+      expect(writeFileChecked).toHaveBeenCalledOnce();
+    });
+    await store.read();
+    expect(onChange.mock.lastCall?.[0].record?.name).toBe('Local');
+    expect(onChange.mock.lastCall?.[1]).toBe('write');
+    expect(onChange.mock.lastCall?.[2]?.camera).toEqual({ kind: 'look', direction: [0, -1, 0] });
+    acknowledgement.resolve();
+    expect(await edit).toBe(true);
+    expect(onChange).toHaveBeenCalledTimes(2);
+    store.dispose();
+  });
+
   it('ignores a superseded read failure and republishes unchanged bytes after a current error', async () => {
     const data = memory();
     let stale = Promise.withResolvers<void>();
@@ -143,7 +191,10 @@ describe('workbench view checked store', () => {
     const store = makeStore(data);
     await store.read();
     expect(await store.edit({ ...seed(), entryPath: null })).toBe(true);
-    expect(workbenchRecords.view.read(data.get()!)).toMatchObject({ status: 'current', record: { entryPath: null } });
+    expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
+      status: 'current',
+      record: { entryPath: null },
+    });
   });
 
   it('does not schedule a new retry when an in-flight owner write fails after disposal', async () => {
@@ -241,8 +292,19 @@ describe('workbench view checked store', () => {
       upDirection: 'y',
       display: { ...seed().display, axes: false, grid: false },
       grid: { unit: 'in' },
-      section: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 1, isFlipped: false }] },
-      measurements: [{ id: 'm1', frameId: 'f', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
+      section: {
+        active: true,
+        cuts: [{ kind: 'plane', plane: 'xz', offset: 1, isFlipped: false }],
+      },
+      measurements: [
+        {
+          id: 'm1',
+          frameId: 'f',
+          startPoint: [0, 0, 0],
+          endPoint: [1, 0, 0],
+          distance: 1,
+        },
+      ],
     });
     const foreign = workbenchRecords.view.schema.parse({
       ...seed(),
@@ -253,8 +315,19 @@ describe('workbench view checked store', () => {
       upDirection: 'x',
       display: { ...seed().display, lines: false, surfaces: false },
       grid: { unit: 'ft' },
-      section: { active: false, cuts: [{ kind: 'plane', plane: 'xy', offset: 2, isFlipped: false }] },
-      measurements: [{ id: 'm2', frameId: 'f', startPoint: [0, 0, 0], endPoint: [0, 1, 0], distance: 1 }],
+      section: {
+        active: false,
+        cuts: [{ kind: 'plane', plane: 'xy', offset: 2, isFlipped: false }],
+      },
+      measurements: [
+        {
+          id: 'm2',
+          frameId: 'f',
+          startPoint: [0, 0, 0],
+          endPoint: [0, 1, 0],
+          distance: 1,
+        },
+      ],
     });
     for (const field of [
       'entryPath',
@@ -279,7 +352,11 @@ describe('workbench view checked store', () => {
           continue;
         }
         if (field === 'display') {
-          expect(result.record.display).toEqual({ ...foreign.display, axes: false, grid: false });
+          expect(result.record.display).toEqual({
+            ...foreign.display,
+            axes: false,
+            grid: false,
+          });
         } else {
           expect(result.record[field]).toEqual(person[field]);
         }
@@ -330,24 +407,63 @@ describe('workbench view checked store', () => {
         value: (record: WorkbenchView) => unknown;
       }>
     > = [
-      { field: 'entryPath', edit: (v) => ({ ...v, entryPath: 'person.ts' }), value: (v) => v.entryPath },
-      { field: 'name', edit: (v) => ({ ...v, name: 'Person' }), value: (v) => v.name },
-      { field: 'camera', edit: (v) => ({ ...v, camera: { kind: 'preset', preset: 'front' } }), value: (v) => v.camera },
-      { field: 'fieldOfView', edit: (v) => ({ ...v, fieldOfView: 45 }), value: (v) => v.fieldOfView },
-      { field: 'upDirection', edit: (v) => ({ ...v, upDirection: 'y' }), value: (v) => v.upDirection },
-      { field: 'grid.unit', edit: (v) => ({ ...v, grid: { unit: 'in' } }), value: (v) => v.grid.unit },
-      { field: 'section', edit: (v) => ({ ...v, section: { active: true, cuts: [] } }), value: (v) => v.section },
+      {
+        field: 'entryPath',
+        edit: (v) => ({ ...v, entryPath: 'person.ts' }),
+        value: (v) => v.entryPath,
+      },
+      {
+        field: 'name',
+        edit: (v) => ({ ...v, name: 'Person' }),
+        value: (v) => v.name,
+      },
+      {
+        field: 'camera',
+        edit: (v) => ({ ...v, camera: { kind: 'preset', preset: 'front' } }),
+        value: (v) => v.camera,
+      },
+      {
+        field: 'fieldOfView',
+        edit: (v) => ({ ...v, fieldOfView: 45 }),
+        value: (v) => v.fieldOfView,
+      },
+      {
+        field: 'upDirection',
+        edit: (v) => ({ ...v, upDirection: 'y' }),
+        value: (v) => v.upDirection,
+      },
+      {
+        field: 'grid.unit',
+        edit: (v) => ({ ...v, grid: { unit: 'in' } }),
+        value: (v) => v.grid.unit,
+      },
+      {
+        field: 'section',
+        edit: (v) => ({ ...v, section: { active: true, cuts: [] } }),
+        value: (v) => v.section,
+      },
       {
         field: 'measurements',
         edit: (v) => ({
           ...v,
-          measurements: [{ id: 'm1', frameId: 'f', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
+          measurements: [
+            {
+              id: 'm1',
+              frameId: 'f',
+              startPoint: [0, 0, 0],
+              endPoint: [1, 0, 0],
+              distance: 1,
+            },
+          ],
         }),
         value: (v) => v.measurements,
       },
       ...(['surfaces', 'lines', 'gizmo', 'grid', 'axes', 'matcap', 'postProcessing'] as const).map((field) => ({
         field: `display.${field}`,
-        edit: (v: WorkbenchView) => ({ ...v, display: { ...v.display, [field]: !v.display[field] } }),
+        edit: (v: WorkbenchView) => ({
+          ...v,
+          display: { ...v.display, [field]: !v.display[field] },
+        }),
         value: (v: WorkbenchView) => v.display[field],
       })),
     ];
@@ -443,7 +559,10 @@ describe('workbench view checked store', () => {
         a: (v) => ({ ...v, section: { active: true, cuts: [] } }),
         b: (v) => ({
           ...v,
-          section: { active: false, cuts: [{ kind: 'plane', plane: 'xy', offset: 2, isFlipped: false }] },
+          section: {
+            active: false,
+            cuts: [{ kind: 'plane', plane: 'xy', offset: 2, isFlipped: false }],
+          },
         }),
         value: (v) => v.section,
       },
@@ -451,11 +570,27 @@ describe('workbench view checked store', () => {
         field: 'measurements',
         a: (v) => ({
           ...v,
-          measurements: [{ id: 'm1', frameId: 'f', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
+          measurements: [
+            {
+              id: 'm1',
+              frameId: 'f',
+              startPoint: [0, 0, 0],
+              endPoint: [1, 0, 0],
+              distance: 1,
+            },
+          ],
         }),
         b: (v) => ({
           ...v,
-          measurements: [{ id: 'm2', frameId: 'f', startPoint: [0, 0, 0], endPoint: [0, 1, 0], distance: 1 }],
+          measurements: [
+            {
+              id: 'm2',
+              frameId: 'f',
+              startPoint: [0, 0, 0],
+              endPoint: [0, 1, 0],
+              distance: 1,
+            },
+          ],
         }),
         value: (v) => v.measurements,
       },
@@ -559,7 +694,11 @@ describe('workbench view checked store', () => {
       });
       await store.read();
       const first = store.edit({ ...seed(), grid: { unit: 'in' } });
-      const second = store.edit({ ...seed(), grid: { unit: 'in' }, name: 'Front' });
+      const second = store.edit({
+        ...seed(),
+        grid: { unit: 'in' },
+        name: 'Front',
+      });
       expect(data.writes).not.toHaveBeenCalled();
       expect(await store.flush()).toBe(true);
       expect(await Promise.all([first, second])).toEqual([true, true]);

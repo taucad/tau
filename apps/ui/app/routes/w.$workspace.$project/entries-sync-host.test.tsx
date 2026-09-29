@@ -335,4 +335,91 @@ describe('entry owner reconciliation', () => {
     expect(hidden).toEqual(['part-a']);
     view.unmount();
   });
+
+  it('keeps newer local entry settings when an older checked write is received with a foreign sibling field', async () => {
+    let renderTimeout = 180_000;
+    let hidden: string[] = [];
+    let isolated: string[] = [];
+    const cad = {
+      getSnapshot: () => ({ context: { renderTimeout } }),
+      send: vi.fn((event: { type: string; renderTimeout: number }) => {
+        if (event.type === 'setRenderTimeout') {
+          renderTimeout = event.renderTimeout;
+        }
+      }),
+    } as unknown as ActorRefFrom<typeof cadMachine>;
+    const model = {
+      getSnapshot: () => ({
+        context: {
+          unitOrder: ['file:a.ts'],
+          unitsById: {
+            'file:a.ts': { hiddenComponentIds: hidden, isolatedComponentIds: isolated, opacityByComponentId: {} },
+          },
+        },
+      }),
+      send: vi.fn(
+        (event: {
+          type: string;
+          componentDisplay?: {
+            unitsById: Record<
+              string,
+              {
+                hiddenComponentIds: string[];
+                isolatedComponentIds: string[];
+              }
+            >;
+          };
+        }) => {
+          if (event.type === 'restoreComponentDisplay') {
+            const next = event.componentDisplay?.unitsById['file:a.ts'];
+            if (next) {
+              hidden = next.hiddenComponentIds;
+              isolated = next.isolatedComponentIds;
+            }
+          }
+        },
+      ),
+    } as unknown as ActorRefFrom<typeof modelInteractionMachine>;
+    type Entry = WorkbenchEntries['entries'][string];
+    const initial: Entry = { renderTimeout, components: { hidden: [], isolated: [], opacity: [] } };
+    const write = vi.fn(async (_path: string, _next: Entry) => true);
+    const draw = (entry: Entry, localPatch?: { renderTimeout?: number; components?: { hidden?: string[] } }) => (
+      <EntryOwner
+        path='a.ts'
+        cadRef={cad}
+        modelInteractionRef={model}
+        entry={entry}
+        localPatch={localPatch}
+        recordPresent
+        ready
+        write={write}
+      />
+    );
+    const view = render(draw(initial));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    hidden = ['part-a'];
+    renderTimeout = 200_000;
+    view.rerender(draw(initial));
+    await waitFor(() => {
+      expect(write).toHaveBeenCalled();
+    });
+    const olderLocal = write.mock.lastCall![1];
+    hidden = ['part-a', 'part-b'];
+    renderTimeout = 300_000;
+    view.rerender(draw(initial));
+    view.rerender(
+      draw(
+        { ...olderLocal, components: { ...olderLocal.components!, isolated: ['part-c'] } },
+        { renderTimeout: olderLocal.renderTimeout, components: { hidden: olderLocal.components!.hidden } },
+      ),
+    );
+    await waitFor(() => {
+      expect(isolated).toEqual(['part-c']);
+    });
+    expect(hidden).toEqual(['part-a', 'part-b']);
+    expect(renderTimeout).toBe(300_000);
+    view.unmount();
+  });
 });

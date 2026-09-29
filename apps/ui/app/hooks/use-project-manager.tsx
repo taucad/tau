@@ -276,6 +276,7 @@ type ProjectManagerContextType = {
   getChat: (chatId: string, projectId?: string) => Promise<Chat | undefined>;
   invalidateProjectedChats: (resourceId: string, chatIds: readonly string[]) => void;
   deleteChat: (chatId: string) => Promise<void>;
+  purgeChat: (chatId: string) => Promise<void>;
 };
 
 export type ProjectDiscoveryConflict =
@@ -2459,6 +2460,18 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [chatStore, invalidateProjectsList, touchProject],
   );
 
+  const purgeChat = useCallback(
+    async (chatId: string): Promise<void> => {
+      const chat = await chatStore.getChat(chatId);
+      await chatStore.purgeChat(chatId);
+      if (chat) {
+        await touchProject(chat.resourceId);
+      }
+      invalidateProjectsList();
+    },
+    [chatStore, invalidateProjectsList, touchProject],
+  );
+
   const value = useMemo<ProjectManagerContextType>(() => {
     return {
       isLoading,
@@ -2507,6 +2520,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       getChat,
       invalidateProjectedChats,
       deleteChat,
+      purgeChat,
     };
   }, [
     isLoading,
@@ -2555,6 +2569,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     getChat,
     invalidateProjectedChats,
     deleteChat,
+    purgeChat,
   ]);
 
   return <ProjectManagerContext.Provider value={value}>{children}</ProjectManagerContext.Provider>;

@@ -662,7 +662,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     expect(mockProjectSend).toHaveBeenCalledWith({ type: 'createGeometryUnit', entryPath: 'bracket.scad' });
     expect(mockPanelApi.updateParameters).toHaveBeenCalledWith({ entryPath: 'bracket.scad' });
-    expect(mockPanelApi.setTitle).toHaveBeenCalledWith('Isometric · bracket.scad');
+    expect(mockPanelApi.setTitle).toHaveBeenCalledWith('bracket.scad');
   });
 
   it('keeps a viewer on a user-selected file when the synced main file changes', () => {

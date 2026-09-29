@@ -1,7 +1,25 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 // oxlint-disable-next-line no-restricted-imports -- Standalone check consumes its co-located build script.
-import { pthreadPrefixIdentity, rustStdArchivePaths } from './build-mixed-wasm.mts';
+import { mixedProducerEnvironment, pthreadPrefixIdentity, rustStdArchivePaths } from './build-mixed-wasm.mts';
+
+await test('only the verified mixed ST route can claim an Emscripten producer identity', () => {
+  const bytes = new TextEncoder().encode('{"schema":"geospec-mixed-build-inputs-v3"}');
+  const input = { sourceRoot: '/src', manifestPath: '/prepared/inputs.json', manifestBytes: bytes };
+  const st = mixedProducerEnvironment({ ...input, variant: 'st' });
+  const mt = mixedProducerEnvironment({ ...input, variant: 'mt' });
+  assert.equal(st.GEOSPEC_PRODUCER_ROUTE, 'nx-build-mixed-st-release-v1');
+  assert.notEqual(mt.GEOSPEC_PRODUCER_ROUTE, st.GEOSPEC_PRODUCER_ROUTE);
+  assert.equal(st.GEOSPEC_PRODUCER_CARGO_CWD, '/src');
+  assert.equal(st.GEOSPEC_PRODUCER_MANIFEST, '/src/packages/geospec-engine-native/bindings/emscripten/Cargo.toml');
+  assert.equal(st.GEOSPEC_MIXED_INPUTS, '/prepared/inputs.json');
+  assert.match(st.GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256, /^[\da-f]{64}$/);
+  assert.notEqual(
+    mixedProducerEnvironment({ ...input, variant: 'st', manifestBytes: new Uint8Array() })
+      .GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256,
+    st.GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256,
+  );
+});
 
 const library = '/toolchain/lib/rustlib/src/rust/library';
 const target = '/cache/permits-2/target/wasm32-unknown-emscripten/release/build';

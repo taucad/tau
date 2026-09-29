@@ -698,8 +698,8 @@ cp -R "$GEOSPEC_RELINK_ROOT/materials/python/." \\
     }
 
 
-def mixed_environment(closure):
-    """The recorded build-mixed-wasm.mts environment, also used for metadata."""
+def mixed_environment(closure, inputs_path=None, inputs_copy=None):
+    """The ST recorded environment; no inputs path means a prospective unverified rebuild."""
     simd = closure.get('wasmSimd')
     require(simd is None or simd == {'rustFlags': ['-C', 'target-feature=+simd128'],
                                     'cxxFlag': '-msimd128', 'linkFlag': '-msimd128'},
@@ -707,7 +707,7 @@ def mixed_environment(closure):
     eh_flags = ['-fwasm-exceptions', '-sWASM_LEGACY_EXCEPTIONS=1', '-sSUPPORT_LONGJMP=wasm']
     require(closure.get('wasmEh') == {'compileFlags': eh_flags, 'linkFlags': eh_flags},
             'Unsupported mixed native WASM EH selection')
-    return {
+    environment = {
         **closure['environment'], 'RUSTC': closure['rustc'],
         'GEOSPEC_OCCT_PREFIX': closure['occtPrefix'], 'CARGO_INCREMENTAL': '0',
         'CC_wasm32_unknown_emscripten': closure['emcc'],
@@ -723,6 +723,18 @@ def mixed_environment(closure):
         ]),
             'GEOSPEC_WASM_SIMD_PROFILE': 'simd128-v1'} if simd else {}),
     }
+    if inputs_path is not None:
+        environment.update({
+            'GEOSPEC_PRODUCER_ROUTE': 'nx-build-mixed-st-release-v1',
+            'GEOSPEC_PRODUCER_CARGO_CWD': closure['sourceRoot'],
+            'GEOSPEC_PRODUCER_MANIFEST': str(Path(closure['sourceRoot']) /
+                                             'packages/geospec-engine-native/bindings/emscripten/Cargo.toml'),
+            'GEOSPEC_MIXED_INPUTS': str(inputs_path),
+            'GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256': digest(inputs_copy or inputs_path),
+        })
+    else:
+        environment['GEOSPEC_PRODUCER_ROUTE'] = 'mixed-relink-unverified'
+    return environment
 
 
 def file_record(path):
@@ -796,7 +808,8 @@ def select_mixed_build():
     require(selected['rust']['commit'] in receipt['rustVersion']
             and selected['emscripten']['commit'] in receipt['emVersion'], 'Mixed tool versions differ')
     if closure.get('wasmSimd'):
-        expected = mixed_environment(closure)
+        recorded_inputs = Path(closure['preparationCache']) / 'mixed-inputs-simd128.json'
+        expected = mixed_environment(closure, recorded_inputs, paths['inputs'])
         require(closure['wasmSimd'] == selected['wasmSimd'] == receipt.get('wasmSimd'),
                 'Mixed SIMD recipe/receipt differ')
         require(closure['wasmEh'] == selected['wasmEh'] == receipt.get('wasmEh'),
@@ -806,7 +819,12 @@ def select_mixed_build():
         require(receipt.get('buildEnvironment') == {
             key: expected[key] for key in ['CARGO_ENCODED_RUSTFLAGS',
                                            'CXXFLAGS_wasm32_unknown_emscripten',
-                                           'GEOSPEC_WASM_SIMD_PROFILE']},
+                                           'GEOSPEC_WASM_SIMD_PROFILE',
+                                           'GEOSPEC_PRODUCER_ROUTE',
+                                           'GEOSPEC_PRODUCER_CARGO_CWD',
+                                           'GEOSPEC_PRODUCER_MANIFEST',
+                                           'GEOSPEC_MIXED_INPUTS',
+                                           'GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256']},
             'Mixed SIMD build environment differs from receipt')
         require(closure['wasmSimd']['linkFlag'] in commands[3]['args'],
                 'Mixed link command omitted fixed SIMD')
@@ -904,6 +922,11 @@ def mixed_producer_recipe(mixed):
     def word(value):
         return ''.join('"${' + replacements[p] + '}"' if p in replacements else shlex.quote(p)
                        for p in pattern.split(value) if p) or "''"
+    recorded_inputs = Path(c['preparationCache']) / 'mixed-inputs-simd128.json'
+    transported_inputs = mixed.get('paths', {}).get('inputs')
+    recorded_environment = (mixed_environment(c, recorded_inputs, transported_inputs)
+                            if transported_inputs else mixed_environment(c))
+    # A relocated standalone recipe is not the observed verified producer run.
     environment = mixed_environment(c)
     # Successor invocation controls, not retroactive recorded producer evidence.
     job_keys = ['GEOSPEC_OCCT_JOBS', 'EMCC_CORES', 'CARGO_BUILD_JOBS', 'BINARYEN_CORES']
@@ -952,7 +975,7 @@ cp "$GEOSPEC_RELINK_ROOT/receipts/mixed-sdk-package-lock.json" "$GEOSPEC_MIXED_S
         'schema': 'geospec-current-mixed-reconstruction-v1',
         'claim': 'Standalone relocated reconstruction recipe, not an observed successor build or byte equality promise.',
         'producer': mixed['attribution'],
-        'recordedEnvironment': environment, 'recordedCommands': mixed['commands'],
+        'recordedEnvironment': recorded_environment, 'recordedCommands': mixed['commands'],
         'standaloneExecutionControls': {
             'jobs': 'GEOSPEC_OCCT_JOBS (default 2) selects outer OCCT, Emscripten, Cargo and Binaryen jobs.',
             'gitCeilings': 'Absolute GEOSPEC_RELINK_ROOT, GEOSPEC_MIXED_PREP and GEOSPEC_MIXED_BUILD; source must remain beneath the extracted kit root.',

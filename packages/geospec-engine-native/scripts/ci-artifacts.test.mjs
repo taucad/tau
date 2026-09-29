@@ -283,6 +283,11 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     CXXFLAGS_wasm32_unknown_emscripten:
       '-msimd128 -frtti -fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=1 -sSUPPORT_LONGJMP=wasm',
     GEOSPEC_WASM_SIMD_PROFILE: 'simd128-v1',
+    GEOSPEC_PRODUCER_ROUTE: 'nx-build-mixed-st-release-v1',
+    GEOSPEC_PRODUCER_CARGO_CWD: producer,
+    GEOSPEC_PRODUCER_MANIFEST: join(producer, 'packages/geospec-engine-native/bindings/emscripten/Cargo.toml'),
+    GEOSPEC_MIXED_INPUTS: join(mixedCache, 'mixed-inputs-simd128.json'),
+    GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256: '',
   };
   /** @type {(bytes: import('node:crypto').BinaryLike) => string} */
   const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -600,6 +605,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       }
       if (target === 'build-wasm' && !omitReceipt) {
         assert.ok(typeof options.env.GEOSPEC_MIXED_INPUTS === 'string');
+        buildEnvironment.GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256 = digest(readFileSync(options.env.GEOSPEC_MIXED_INPUTS));
         const artifacts = ['geospec_engine_native.mjs', 'geospec_engine_native.wasm'].map((name) => {
           const path = join(producer, mixedPath, name);
           const bytes = `inert fixture ${name}`;
@@ -1031,7 +1037,9 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     return /** @type {Record<string, unknown>} */ (value);
   };
   const validInputs = transportedRecord('mixed-inputs.json');
-  const validReceipt = transportedRecord('mixed-build-receipt.json');
+  const validReceipt = /** @type {{buildEnvironment: Record<string, string>} & Record<string, unknown>} */ (
+    transportedRecord('mixed-build-receipt.json')
+  );
   const validCommands = readFileSync(join(consumer, transportPath, 'mixed-commands.json'), 'utf8');
   // Recompute all transport joins so each failure checks actual build selection, not a stale hash.
   for (const selection of [
@@ -1067,6 +1075,16 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       receiptChanges: { buildEnvironment: { ...buildEnvironment, CXXFLAGS_wasm32_unknown_emscripten: '-fexceptions' } },
       message: /compile environment differs/,
     },
+    {
+      receiptChanges: { buildEnvironment: { ...buildEnvironment, GEOSPEC_PRODUCER_ROUTE: 'mixed-mt-unverified' } },
+      message: /compile environment differs/,
+    },
+    {
+      receiptChanges: {
+        buildEnvironment: { ...buildEnvironment, GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256: '0'.repeat(64) },
+      },
+      message: /compile environment differs/,
+    },
     { inputChanges: { occtPrefix: join(mixedCache, 'occt-mixed/install') }, message: /isolated fixed-SIMD prefix/ },
     { inputChanges: { cache: join(mixedCache, 'mixed-build') }, message: /isolated fixed-SIMD prefix/ },
     { commands: validCommands.replace('"-msimd128",', ''), message: /link profile\/output differs/ },
@@ -1082,7 +1100,16 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       ...selection,
     };
     const inputs = JSON.stringify({ ...validInputs, ...inputChanges });
-    const receipt = JSON.stringify({ ...validReceipt, ...receiptChanges, manifestSha256: digest(inputs) });
+    const receipt = JSON.stringify({
+      ...validReceipt,
+      ...receiptChanges,
+      manifestSha256: digest(inputs),
+      buildEnvironment: {
+        ...validReceipt.buildEnvironment,
+        GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256: digest(inputs),
+        ...receiptChanges.buildEnvironment,
+      },
+    });
     const changedInventory = { ...inventory };
     for (const [key, name, bytes] of [
       ['mixedInputs', 'mixed-inputs.json', inputs],

@@ -12,7 +12,9 @@ crate-type = ["staticlib"]
 
 [dependencies]
 geospec-engine-native-core = { path = "../../rust" }
-geospec-engine-native-runtime = { path = "../../native/runtime" }
+geospec-engine-native-runtime = { path = "../../native/runtime", default-features = false, features = [
+  "binding-emscripten",
+] }
 
 [profile.release]
 panic = "abort"

@@ -103,7 +103,20 @@ class DeploymentTargetTest(unittest.TestCase):
                         .startswith('-msimd128 '))
         self.assertIn('occt-mixed-simd128', simd_recipe['rebuildMixedPrefix'])
         self.assertIn('occt-mixed-simd128/install', simd_recipe['prepare'])
-        recipe = simd_recipe
+        with tempfile.TemporaryDirectory() as temporary:
+            inputs = Path(temporary) / 'transport-mixed-inputs.json'
+            inputs.write_text('{"schema":"geospec-mixed-build-inputs-v3"}')
+            mixed['paths'] = {'inputs': inputs}
+            with patch.object(Path, 'read_text', return_value='# mocked Emscripten config\n'):
+                recipe = materials.mixed_producer_recipe(mixed)
+            recorded = recipe['recordedEnvironment']
+            self.assertEqual(recorded['GEOSPEC_PRODUCER_ROUTE'], 'nx-build-mixed-st-release-v1')
+            self.assertEqual(recorded['GEOSPEC_MIXED_INPUTS'],
+                             '/recorded/prep/mixed-inputs-simd128.json')
+            self.assertNotEqual(recorded['GEOSPEC_MIXED_INPUTS'], str(inputs))
+            self.assertEqual(recorded['GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256'], materials.digest(inputs))
+            self.assertEqual(recorded['GEOSPEC_PRODUCER_CARGO_CWD'], str(materials.ROOT))
+            self.assertNotIn('nx-build-mixed-st-release-v1', recipe['buildAndLink'])
         exported = {name: '/owned path/' + name for name in recipe['requiredExportedVariables']}
         exported['GEOSPEC_SOURCE_ROOT'] = str(SCRIPTS)
         ceiling = ':'.join(exported[name] for name in
@@ -120,6 +133,8 @@ class DeploymentTargetTest(unittest.TestCase):
                     for name in ['GEOSPEC_OCCT_JOBS', 'EMCC_CORES', 'CARGO_BUILD_JOBS', 'BINARYEN_CORES']:
                         self.assertEqual(inner[name], jobs or '2')
                     self.assertEqual(inner['GIT_CEILING_DIRECTORIES'], ceiling)
+                    if key == 'buildAndLink':
+                        self.assertEqual(inner['GEOSPEC_PRODUCER_ROUTE'], 'mixed-relink-unverified')
 
     def contract(self, kind):
         context = {

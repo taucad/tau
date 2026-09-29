@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import { createMockFileSystem, createMockKernelRuntime } from '@taucad/runtime-testing';
+import { createMockFileSystem, createMockKernelRuntime, expectKernelProjectionOrder } from '@taucad/runtime-testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { picogkKernel } from '#picogk.kernel.js';
@@ -272,6 +272,26 @@ describe('PicoGK kernel', () => {
       value,
     );
     expect(exported).toMatchObject({ files: [{ name: 'model.glb' }] });
+    const render = async (valueHandle: typeof handle) => {
+      const projected = await definition.render!({ view: 'model', handle: valueHandle, options: {} }, runtime, value);
+      return projected.content;
+    };
+    const write = async (valueHandle: typeof handle) => {
+      const projected = await definition.write!(
+        { exportId: 'glb', handle: valueHandle, options: picogkExportSchemas.glb.parse({}) },
+        runtime,
+        value,
+      );
+      return projected.files[0].bytes;
+    };
+    const ordered = await expectKernelProjectionOrder({
+      renderA: async () => render(handle),
+      renderB: async () => write(handle),
+      freshB: async () => write(restored),
+      write: async () => render(restored),
+    });
+    expect(ordered.first).toEqual(artifact.content);
+    expect(ordered.intervening).toEqual(artifact.content);
   });
 
   it('recycles requested generations and returns structured build/export failures', async () => {

@@ -35,6 +35,14 @@ import { menuItemVariants, menuSeparatorVariants } from '@taucad/ui/components/m
 import { cn } from '@taucad/ui/utils/cn';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { MaterialSwatch, gltfDefaultBaseColorLabel } from '#components/geometry/cad/material-swatch.js';
+import {
+  appearanceLabel,
+  statusOf,
+  summaryLabel,
+  volumeLabel,
+  weightLabel,
+} from '#components/geometry/cad/part-quantities.js';
+import type { PartQuantity } from '#components/geometry/cad/part-quantities.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 
@@ -51,6 +59,7 @@ export type ModelComponentActionMenuData = {
   readonly hasHiddenComponents: boolean;
   readonly hasOpacityOverrides: boolean;
   readonly opacity: number;
+  readonly quantity?: PartQuantity;
 };
 
 type ModelComponentActionDropdownProperties = ModelComponentActionMenuData & {
@@ -161,7 +170,12 @@ export function ModelComponentActionDropdown({
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
-        <button type='button' className={actionButtonClassName} aria-label={`Actions for ${data.node.name}`}>
+        <button
+          type='button'
+          tabIndex={data.source === 'explorer' ? -1 : undefined}
+          className={actionButtonClassName}
+          aria-label={`Actions for ${data.node.name}`}
+        >
           <EllipsisVertical className='size-3.5' />
         </button>
       </DropdownMenuTrigger>
@@ -193,7 +207,7 @@ function ModelComponentDropdownItems(data: ModelComponentActionMenuData): React.
 
   return (
     <>
-      <ModelComponentMenuHeader node={data.node} Row={DropdownMenuDisclosureItem} />
+      <ModelComponentMenuHeader node={data.node} quantity={data.quantity} Row={DropdownMenuDisclosureItem} />
       {descriptors.map((descriptor) => renderDropdownActionDescriptor(descriptor))}
     </>
   );
@@ -204,7 +218,7 @@ function ModelComponentContextMenuItems(data: ModelComponentActionMenuData): Rea
 
   return (
     <>
-      <ModelComponentMenuHeader node={data.node} Row={ContextMenuDisclosureItem} />
+      <ModelComponentMenuHeader node={data.node} quantity={data.quantity} Row={ContextMenuDisclosureItem} />
       {descriptors.map((descriptor) => renderContextActionDescriptor(descriptor))}
     </>
   );
@@ -218,7 +232,7 @@ export function ModelComponentViewerMenuItems({
 
   return (
     <>
-      <ModelComponentMenuHeader node={data.node} Row={MenuDisclosureItem} />
+      <ModelComponentMenuHeader node={data.node} quantity={data.quantity} Row={MenuDisclosureItem} />
       {descriptors.map((descriptor) => renderViewerActionDescriptor(descriptor, onRequestClose))}
     </>
   );
@@ -260,21 +274,28 @@ function formatMaterialValues(materials: SurfaceMaterials, factor: 'color' | 'me
  */
 function ModelComponentMenuHeader({
   node,
+  quantity,
   Row,
 }: {
   readonly node: GeometryComponentNode;
+  readonly quantity?: PartQuantity;
   readonly Row: React.ComponentType<MenuDisclosureItemProperties>;
 }): React.JSX.Element {
   const materials = node.appearance?.materials;
+  const facts = quantity ?? {};
   return (
     <>
-      {materials?.length ? (
-        <Row label={node.name} trailing={<MaterialSwatch materials={materials} />}>
-          <ModelComponentMaterialSummary node={node} />
-        </Row>
-      ) : (
-        <Row label={node.name} />
-      )}
+      <Row
+        label={
+          <span className='flex min-w-0 flex-col'>
+            <span className='truncate'>{node.name}</span>
+            <span className='truncate text-xs font-normal text-muted-foreground'>{summaryLabel(node, facts)}</span>
+          </span>
+        }
+        trailing={materials?.length ? <MaterialSwatch materials={materials} /> : undefined}
+      >
+        <ModelComponentMaterialSummary node={node} quantity={facts} Row={Row} />
+      </Row>
       <div role='separator' className={menuSeparatorVariants()} />
     </>
   );
@@ -282,36 +303,67 @@ function ModelComponentMenuHeader({
 
 export function ModelComponentMaterialSummary({
   node,
+  quantity = {},
+  Row = MenuDisclosureItem,
 }: {
   readonly node: GeometryComponentNode;
-}): React.JSX.Element | undefined {
+  readonly quantity?: PartQuantity;
+  readonly Row?: React.ComponentType<MenuDisclosureItemProperties>;
+}): React.JSX.Element {
   const materials = node.appearance?.materials;
-  if (!materials?.length) {
-    return undefined;
-  }
+  const status = statusOf(quantity);
 
   return (
-    <div role='group' aria-label={`Material for ${node.name}`}>
+    <div role='group' aria-label={`Inspection for ${node.name}`}>
       <dl className='space-y-1 pt-1 pr-3 pb-2 pl-8.5 text-xs text-foreground'>
         <div className='flex justify-between gap-4'>
-          <dt className='text-muted-foreground'>Base color</dt>
-          <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
-            {formatMaterialValues(materials, 'color')}
-          </dd>
+          <dt className='text-muted-foreground'>Appearance</dt>
+          <dd className='max-w-48 text-right'>{appearanceLabel(node)}</dd>
         </div>
         <div className='flex justify-between gap-4'>
-          <dt className='text-muted-foreground'>Metalness</dt>
-          <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
-            {formatMaterialValues(materials, 'metalness')}
-          </dd>
+          <dt className='text-muted-foreground'>Material</dt>
+          <dd>Not specified</dd>
         </div>
         <div className='flex justify-between gap-4'>
-          <dt className='text-muted-foreground'>Roughness</dt>
-          <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
-            {formatMaterialValues(materials, 'roughness')}
-          </dd>
+          <dt className='text-muted-foreground'>Volume</dt>
+          <dd className='font-mono tabular-nums'>{volumeLabel(quantity)}</dd>
+        </div>
+        <div className='flex justify-between gap-4'>
+          <dt className='text-muted-foreground'>Weight</dt>
+          <dd className='font-mono tabular-nums'>{weightLabel(quantity)}</dd>
         </div>
       </dl>
+      <p
+        role={status.kind === 'failed' ? 'alert' : 'status'}
+        aria-label='Measurement status'
+        className='px-3 pb-2 pl-8.5 text-xs text-muted-foreground'
+      >
+        {status.sentence}
+      </p>
+      {materials?.length ? (
+        <Row label='Rendering' className='pl-8.5'>
+          <dl className='space-y-1 pt-1 pr-3 pb-2 pl-8.5 text-xs text-foreground'>
+            <div className='flex justify-between gap-4'>
+              <dt className='text-muted-foreground'>Base color</dt>
+              <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
+                {formatMaterialValues(materials, 'color')}
+              </dd>
+            </div>
+            <div className='flex justify-between gap-4'>
+              <dt className='text-muted-foreground'>Metalness</dt>
+              <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
+                {formatMaterialValues(materials, 'metalness')}
+              </dd>
+            </div>
+            <div className='flex justify-between gap-4'>
+              <dt className='text-muted-foreground'>Roughness</dt>
+              <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
+                {formatMaterialValues(materials, 'roughness')}
+              </dd>
+            </div>
+          </dl>
+        </Row>
+      ) : undefined}
     </div>
   );
 }

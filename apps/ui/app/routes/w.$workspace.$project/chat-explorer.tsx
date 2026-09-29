@@ -4,6 +4,7 @@ import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
 import { PaneviewReact } from 'dockview-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
@@ -25,6 +26,7 @@ import {
   ModelComponentActionDropdown,
 } from '#components/geometry/cad/model-component-action-menu.js';
 import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
+import { PartPropertiesPanel } from '#components/geometry/cad/part-properties-panel.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject } from '#hooks/use-project.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
@@ -259,7 +261,10 @@ type ModelPaneviewPanelParams = {
   graphicsRef?: GraphicsActorRef;
   query: string;
   revealTarget?: ModelComponentRevealTarget;
+  onSelectionChange?: (unitId: string, node: GeometryComponentNode | undefined, entryPath: string) => void;
 };
+
+type ModelPropertiesPanelParams = { selected?: { readonly node: GeometryComponentNode; readonly entryPath: string } };
 
 function ModelPaneview({
   entries,
@@ -273,6 +278,15 @@ function ModelPaneview({
   const { savedState, connectApi } = usePaneviewPersistence('modelPaneview');
   const paneviewApiRef = useRef<PaneviewApi | undefined>(undefined);
   const paneviewKey = useMemo(() => entries.map(([entryPath]) => entryPath).join('\0'), [entries]);
+  const [selected, setSelected] = useState<ModelPropertiesPanelParams['selected'] & { readonly unitId: string }>();
+  const visibleSelection =
+    selected && entries.some(([entryPath]) => entryPath === selected.entryPath) ? selected : undefined;
+  const onSelectionChange = useCallback(
+    (unitId: string, node: GeometryComponentNode | undefined, entryPath: string) => {
+      setSelected((current) => (node ? { unitId, node, entryPath } : current?.unitId === unitId ? undefined : current));
+    },
+    [],
+  );
 
   const handleReady = useCallback(
     ({ api }: { api: PaneviewApi }) => {
@@ -288,13 +302,25 @@ function ModelPaneview({
           headerComponent: 'modelHeader',
           headerSize: paneviewHeaderSize,
           isExpanded: initial.isExpanded,
-          minimumBodySize: 80,
+          minimumBodySize: 144,
           size: initial.size,
-          params: { entryPath, graphicsRef, query, revealTarget } satisfies ModelPaneviewPanelParams,
+          params: { entryPath, graphicsRef, query, revealTarget, onSelectionChange } satisfies ModelPaneviewPanelParams,
         });
       }
+      const initial = getInitialPanelOptions(savedState, 'properties', { isExpanded: true, size: 392 });
+      api.addPanel({
+        id: 'properties',
+        title: 'Properties',
+        component: 'propertiesPanel',
+        headerComponent: 'propertiesHeader',
+        headerSize: paneviewHeaderSize,
+        isExpanded: initial.isExpanded,
+        minimumBodySize: 160,
+        size: initial.size,
+        params: { selected: visibleSelection } satisfies ModelPropertiesPanelParams,
+      });
     },
-    [connectApi, entries, query, revealTarget, savedState],
+    [connectApi, entries, onSelectionChange, query, revealTarget, savedState, visibleSelection],
   );
 
   useEffect(() => {
@@ -309,9 +335,14 @@ function ModelPaneview({
         graphicsRef,
         query,
         revealTarget: revealTarget?.entryPath === entryPath ? revealTarget : undefined,
+        onSelectionChange,
       });
     }
-  }, [entries, query, revealTarget]);
+  }, [entries, onSelectionChange, query, revealTarget]);
+
+  useEffect(() => {
+    paneviewApiRef.current?.getPanel('properties')?.api.updateParameters({ selected: visibleSelection });
+  }, [visibleSelection]);
 
   useEffect(() => {
     if (!revealTarget) {
@@ -323,7 +354,11 @@ function ModelPaneview({
   return (
     <PaneviewReact
       key={paneviewKey}
-      className={paneviewAttachedSurfaceStyleOverrides}
+      className={cn(
+        paneviewAttachedSurfaceStyleOverrides,
+        // oxlint-disable-next-line tau-lint/no-arbitrary-pixel-size -- Paneview headerSize is a physical pixel API; rem scaling overlays its 40px body.
+        '[&_[data-slot=paneview-header]]:h-[32px]! [&_[data-slot=paneview-header]]:mt-[8px]!',
+      )}
       components={paneviewComponents}
       headerComponents={paneviewHeaderComponents}
       onReady={handleReady}
@@ -368,6 +403,7 @@ function LiveComponentTree({
   readonly modelRef: ModelInteractionRef;
 }): React.JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null);
+  const [activeRowId, setActiveRowId] = useState<string>();
   const unitId = deriveModelInteractionUnitId({ sourceFile: params.entryPath });
   const unitState = useSelector(modelRef, (state) => getModelInteractionUnitState(state.context, unitId));
   const {
@@ -383,6 +419,20 @@ function LiveComponentTree({
   const childCount = root?.childIds.length ?? 0;
   const normalizedQuery = params.query.trim().toLowerCase();
   const matchingChildCount = manifest && root ? countMatchingChildren({ manifest, node: root, normalizedQuery }) : 0;
+  const visibleIds = manifest && root ? visibleComponentIds(manifest, root, normalizedQuery) : [];
+  const currentSelection = selectedComponentIds.at(-1);
+  const focusableRowId = [activeRowId, currentSelection].find((id) => id && visibleIds.includes(id)) ?? visibleIds[0];
+  const leafPartIds =
+    manifest?.nodeOrder.filter((id) => {
+      const node = manifest.nodesById[id];
+      return node?.kind === 'part' && node.childIds.length === 0;
+    }) ?? [];
+  const project = useProject({ enableNoContext: true });
+
+  useEffect(() => {
+    const selectedId = selectedComponentIds.at(-1);
+    params.onSelectionChange?.(unitId, selectedId ? manifest?.nodesById[selectedId] : undefined, params.entryPath);
+  }, [manifest, params.entryPath, params.onSelectionChange, selectedComponentIds, unitId]);
 
   useEffect(() => {
     if (!params.revealTarget || params.revealTarget.unitId !== unitId) {
@@ -392,6 +442,7 @@ function LiveComponentTree({
       (candidate) => candidate.dataset['modelComponentId'] === params.revealTarget?.componentId,
     );
     row?.scrollIntoView({ block: 'center' });
+    row?.querySelector<HTMLElement>('[data-model-part-button]')?.focus();
   }, [params.revealTarget, unitId]);
 
   if (!manifest || !root || childCount === 0) {
@@ -399,7 +450,42 @@ function LiveComponentTree({
   }
 
   return (
-    <ModelPaneviewPanelSurface contentRef={contentRef}>
+    <ModelPaneviewPanelSurface
+      contentRef={contentRef}
+      footer={
+        <Collapsible>
+          <div className='flex min-w-0 items-center justify-between gap-2 border-t px-2 py-1 text-xs text-muted-foreground'>
+            <span className='truncate'>Weight · 0 of {leafPartIds.length} parts known</span>
+            <span className='shrink-0 font-mono'>Unknown</span>
+            {leafPartIds.length > 0 ? (
+              <CollapsibleTrigger className='shrink-0 rounded-sm underline-offset-2 hover:underline focus-visible:focus-outline'>
+                Missing
+              </CollapsibleTrigger>
+            ) : undefined}
+          </div>
+          <CollapsibleContent className='max-h-32 overflow-y-auto border-t p-1'>
+            {leafPartIds.map((id) => (
+              <button
+                key={id}
+                type='button'
+                className='block w-full truncate rounded-sm px-2 py-1 text-left text-xs hover:bg-sidebar-accent focus-visible:focus-outline'
+                onClick={() => {
+                  graphicsRef.send({ type: 'selectModelComponent', unitId, componentId: id, source: 'explorer' });
+                  project?.editorRef.send({
+                    type: 'revealModelComponentInExplorer',
+                    entryPath: params.entryPath,
+                    unitId,
+                    componentId: id,
+                  });
+                }}
+              >
+                {manifest.nodesById[id]?.name ?? id}
+              </button>
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
+      }
+    >
       {normalizedQuery && matchingChildCount === 0 ? (
         <ExplorerNoMatchesState />
       ) : (
@@ -418,6 +504,8 @@ function LiveComponentTree({
           focusedComponentId={focusedComponentId}
           opacityByComponentId={opacityByComponentId}
           rootDepth={root.depth}
+          activeRowId={focusableRowId}
+          onRowFocus={setActiveRowId}
         />
       )}
     </ModelPaneviewPanelSurface>
@@ -427,19 +515,22 @@ function LiveComponentTree({
 function ModelPaneviewPanelSurface({
   contentRef,
   children,
+  footer,
 }: {
   readonly contentRef?: React.Ref<HTMLDivElement>;
   readonly children?: React.ReactNode;
+  readonly footer?: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <div data-slot='model-unit-surface' className={cn('h-full', paneviewAttachedBodyClassName)}>
+    <div data-slot='model-unit-surface' className={cn('flex h-full flex-col', paneviewAttachedBodyClassName)}>
       <div
         ref={contentRef}
         data-slot='model-unit-scroller'
-        className='size-full scroll-shadows-y overflow-y-auto p-2 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'
+        className='min-h-0 flex-1 scroll-shadows-y overflow-y-auto p-2 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'
       >
         {children ?? <ExplorerUnavailableState />}
       </div>
+      {footer}
     </div>
   );
 }
@@ -538,8 +629,20 @@ function ModelPaneviewHeaderSurface({
   );
 }
 
-const paneviewComponents = { modelPanel: ModelPaneviewPanel };
-const paneviewHeaderComponents = { modelHeader: ModelPaneviewHeader };
+function ModelPropertiesPaneviewPanel({ params }: { readonly params: ModelPropertiesPanelParams }): React.JSX.Element {
+  return (
+    <div className={cn('h-full overflow-y-auto! scroll-shadows-y', paneviewAttachedBodyClassName)}>
+      <PartPropertiesPanel node={params.selected?.node} entryPath={params.selected?.entryPath} />
+    </div>
+  );
+}
+
+function ModelPropertiesPaneviewHeader({ api }: { readonly api: PaneviewPanelApi }): React.JSX.Element {
+  return <PaneviewHeader api={api} title='Properties' />;
+}
+
+const paneviewComponents = { modelPanel: ModelPaneviewPanel, propertiesPanel: ModelPropertiesPaneviewPanel };
+const paneviewHeaderComponents = { modelHeader: ModelPaneviewHeader, propertiesHeader: ModelPropertiesPaneviewHeader };
 
 function componentMatchesQuery({
   manifest,
@@ -554,6 +657,13 @@ function componentMatchesQuery({
     return true;
   }
   if (node.name.toLowerCase().includes(normalizedQuery)) {
+    return true;
+  }
+  if (
+    node.appearance?.materials?.some(
+      (material) => typeof material.name === 'string' && material.name.toLowerCase().includes(normalizedQuery),
+    )
+  ) {
     return true;
   }
   return node.childIds.some((childId) => {
@@ -577,6 +687,20 @@ function countMatchingChildren({
   }).length;
 }
 
+function visibleComponentIds(
+  manifest: GeometryComponentManifest,
+  node: GeometryComponentNode,
+  normalizedQuery: string,
+): string[] {
+  return node.childIds.flatMap((childId) => {
+    const child = manifest.nodesById[childId];
+    if (!child || !componentMatchesQuery({ manifest, node: child, normalizedQuery })) {
+      return [];
+    }
+    return [child.id, ...visibleComponentIds(manifest, child, normalizedQuery)];
+  });
+}
+
 function ComponentRows({
   ariaLabel,
   manifest,
@@ -592,6 +716,8 @@ function ComponentRows({
   focusedComponentId,
   opacityByComponentId,
   rootDepth,
+  activeRowId,
+  onRowFocus,
 }: {
   readonly ariaLabel?: string;
   readonly manifest: GeometryComponentManifest;
@@ -607,9 +733,33 @@ function ComponentRows({
   readonly focusedComponentId: string | undefined;
   readonly opacityByComponentId: Readonly<Record<string, number>>;
   readonly rootDepth: number;
+  readonly activeRowId?: string;
+  readonly onRowFocus?: (id: string) => void;
 }): React.JSX.Element {
   return (
-    <ul aria-label={ariaLabel} className='flex list-none flex-col gap-0.5'>
+    <ul
+      aria-label={ariaLabel}
+      className='flex list-none flex-col gap-0.5'
+      onKeyDown={
+        ariaLabel
+          ? (event) => {
+              if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+                return;
+              }
+              const rows = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-model-part-button]')];
+              const currentIndex = rows.indexOf(event.target as HTMLButtonElement);
+              const nextIndex =
+                event.key === 'Home'
+                  ? 0
+                  : event.key === 'End'
+                    ? rows.length - 1
+                    : Math.max(0, Math.min(rows.length - 1, currentIndex + (event.key === 'ArrowDown' ? 1 : -1)));
+              event.preventDefault();
+              rows[nextIndex]?.focus();
+            }
+          : undefined
+      }
+    >
       {node.childIds.map((childId) => {
         const child = manifest.nodesById[childId];
         if (!child) {
@@ -635,6 +785,8 @@ function ComponentRows({
               hasHiddenComponents={hiddenComponentIds.length > 0}
               hasOpacityOverrides={Object.keys(opacityByComponentId).length > 0}
               opacity={opacityByComponentId[child.id] ?? 1}
+              activeRowId={activeRowId}
+              onRowFocus={onRowFocus}
             />
             {child.childIds.length > 0 ? (
               <ComponentRows
@@ -651,6 +803,8 @@ function ComponentRows({
                 focusedComponentId={focusedComponentId}
                 opacityByComponentId={opacityByComponentId}
                 rootDepth={rootDepth}
+                activeRowId={activeRowId}
+                onRowFocus={onRowFocus}
               />
             ) : undefined}
           </li>
@@ -675,6 +829,8 @@ export function ComponentRow({
   hasHiddenComponents = false,
   hasOpacityOverrides = false,
   opacity,
+  activeRowId,
+  onRowFocus,
 }: {
   readonly manifest: GeometryComponentManifest;
   readonly node: GeometryComponentNode;
@@ -690,8 +846,17 @@ export function ComponentRow({
   readonly hasHiddenComponents?: boolean;
   readonly hasOpacityOverrides?: boolean;
   readonly opacity: number;
+  readonly activeRowId?: string;
+  readonly onRowFocus?: (id: string) => void;
 }): React.JSX.Element {
   const isHovered = hoveredComponentId === node.id;
+  const normalizedQuery = query.trim().toLowerCase();
+  const materialMatchName =
+    normalizedQuery && !node.name.toLowerCase().includes(normalizedQuery)
+      ? node.appearance?.materials?.find(
+          (material) => typeof material.name === 'string' && material.name.toLowerCase().includes(normalizedQuery),
+        )?.name
+      : undefined;
   const visibilityAction = getVisibilityAction({ isHidden, nodeName: node.name, unitId, componentId: node.id });
   const isolationAction = getIsolationAction({ isIsolated, nodeName: node.name, unitId, componentId: node.id });
   const VisibilityIcon = visibilityAction.Icon;
@@ -729,7 +894,7 @@ export function ComponentRow({
             // The sidebar row's lit states and inset: `pr-0.5` gives a 24 px action the 2 px it has above and below.
             'group/part relative flex h-7 w-full items-center justify-between rounded-md py-1 pr-0.5 pl-2 text-sm leading-5',
             'focus-within:bg-sidebar-accent focus-within:text-sidebar-accent-foreground has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
-            isSelected ? 'bg-primary/10 text-primary' : 'text-sidebar-foreground',
+            isSelected ? 'bg-primary/10 text-foreground' : 'text-sidebar-foreground',
             !isSelected && isFocused
               ? 'bg-sidebar-accent/70 text-foreground ring-1 ring-inset ring-primary/30'
               : undefined,
@@ -760,10 +925,33 @@ export function ComponentRow({
           ))}
           <button
             type='button'
+            data-model-part-button=''
+            data-model-component-id={node.id}
+            tabIndex={activeRowId === undefined || activeRowId === node.id ? 0 : -1}
             className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:focus-outline'
             aria-label={node.name}
             aria-pressed={isSelected}
             onClick={toggleSelection}
+            onFocus={() => {
+              onRowFocus?.(node.id);
+            }}
+            onKeyDown={(event) => {
+              if (event.shiftKey && event.key === 'F10') {
+                event.preventDefault();
+                const row = event.currentTarget.closest('[data-model-component-row]');
+                if (row) {
+                  const bounds = row.getBoundingClientRect();
+                  row.dispatchEvent(
+                    new MouseEvent('contextmenu', {
+                      bubbles: true,
+                      cancelable: true,
+                      clientX: bounds.left + bounds.width / 2,
+                      clientY: bounds.bottom,
+                    }),
+                  );
+                }
+              }
+            }}
           >
             {node.appearance?.materials?.length ? (
               <MaterialSwatch materials={node.appearance.materials} />
@@ -771,18 +959,22 @@ export function ComponentRow({
               <Box
                 aria-hidden='true'
                 data-testid='component-color-icon'
-                className='size-3.5 shrink-0'
+                className='size-4 shrink-0'
                 style={node.appearance?.color ? { fill: node.appearance.color } : undefined}
               />
             )}
             <span className='truncate'>
               <HighlightText text={node.name} searchTerm={query} />
             </span>
+            {materialMatchName ? (
+              <span className='truncate text-xs text-muted-foreground'>· {materialMatchName}</span>
+            ) : undefined}
           </button>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type='button'
+                tabIndex={-1}
                 className={actionButtonClassName}
                 aria-label={visibilityAction.ariaLabel}
                 onClick={() => {
@@ -798,6 +990,7 @@ export function ComponentRow({
             <TooltipTrigger asChild>
               <button
                 type='button'
+                tabIndex={-1}
                 className={cn(actionButtonClassName, isolationAction.className)}
                 aria-label={isolationAction.ariaLabel}
                 aria-pressed={isolationAction.pressed}

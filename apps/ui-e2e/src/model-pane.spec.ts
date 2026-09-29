@@ -23,15 +23,11 @@ const openCommand = async (name: string): Promise<void> => {
 const openSeededProject = async (): Promise<void> => {
   await target.navigate(seedRoute);
   try {
-    await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 10_000);
+    await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
   } catch {
     const project = selectors.getByRole('link', { name: seedProjectName }).first();
     await target.expectVisible(project, 60_000);
-    const href = await target.getAttribute(project, 'href');
-    if (!href) {
-      throw new Error('Seeded project link did not include an href.');
-    }
-    await target.navigate(href);
+    await target.click(project);
     await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
   }
 
@@ -56,7 +52,7 @@ const openSecondGeometryUnit = async (): Promise<void> => {
   await target.hover(treeItem(secondaryPath));
   await target.click(selectors.getByRole('button', { name: 'More actions for box-corner.js', exact: true }));
   await target.click(selectors.getByRole('menuitem', { name: 'Open in Viewer' }));
-  await target.expectVisible(selectors.getByCss(`.dv-tab[aria-label="${secondaryPath}"]`), 60_000);
+  await target.expectVisible(selectors.getByCss('.dv-tab').filter({ hasText: 'box-corner.js' }), 60_000);
 };
 
 type ModelSurfaceState = {
@@ -150,8 +146,13 @@ test('keeps the Model hierarchy filterable, accessible, and reorderable through 
   const hideMainPart = mainList.getByCss('button[aria-label^="Hide "]');
   await target.expectVisible(mainPart);
   await target.focus(mainPart);
+  await target.expectAttribute(mainPart, 'tabindex', '0');
+  await target.expectAttribute(hideMainPart, 'tabindex', '-1');
   await target.keyboardPress('Tab');
-  await target.expectFocused(hideMainPart);
+  expect(await target.evaluateLocator(hideMainPart, (element) => element === document.activeElement)).toBe(false);
+  await target.focus(mainPart);
+  await target.keyboardPress('Enter');
+  await target.expectVisible(selectors.getByText('Physical facts', { exact: true }));
   await expect
     .poll(async () => target.evaluateLocator(hideMainPart, (element) => getComputedStyle(element).opacity))
     .toBe('1');
@@ -210,5 +211,92 @@ test('keeps the Model hierarchy filterable, accessible, and reorderable through 
     return paneview ? paneview.scrollWidth - paneview.clientWidth : Number.POSITIVE_INFINITY;
   });
   expect(overflow).toBeLessThanOrEqual(0);
+  const rightBounds = await target.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>('[data-slot="model-panel-body"]');
+    const missing = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent.trim() === 'Missing',
+    );
+    return {
+      viewport: innerWidth,
+      panel: panel?.getBoundingClientRect().right,
+      missing: missing?.getBoundingClientRect().right,
+    };
+  });
+  expect(rightBounds.panel).toBeLessThanOrEqual(rightBounds.viewport);
+  expect(rightBounds.missing).toBeLessThanOrEqual(rightBounds.viewport);
   await target.screenshot(selectors.getByCss('body'), 'model-pane-dark-narrow.png');
+
+  await target.setViewport({ width: 1440, height: 900 });
+  await target.evaluate(() => {
+    document.documentElement.style.fontSize = '200%';
+  });
+  const scaledLayout = await target.evaluate(() => {
+    const paneHeaderOverlaps = [
+      ...document.querySelectorAll<HTMLElement>('[data-slot="model-panel-body"] .dv-pane'),
+    ].map((pane) => {
+      const header = pane.querySelector<HTMLElement>('[data-slot="paneview-header"]');
+      const body = pane.querySelector<HTMLElement>('.dv-pane-body');
+      return header && body ? header.getBoundingClientRect().bottom - body.getBoundingClientRect().top : 0;
+    });
+    const facts = document.querySelector<HTMLElement>(
+      '[data-slot="part-properties"] section[aria-label="Physical facts"] dl',
+    );
+    const label = facts?.querySelector('dt');
+    const value = facts?.querySelector('dd');
+    const modelContentBounds = [...document.querySelectorAll<HTMLElement>('[data-slot="model-unit-scroller"]')].map(
+      (scroller) => {
+        const row = scroller.querySelector<HTMLElement>('[data-model-component-row]');
+        const surface = scroller.closest<HTMLElement>('[data-slot="model-unit-surface"]');
+        const missing = [...(surface?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+          (button) => button.textContent.trim() === 'Missing',
+        );
+        const scrollBounds = scroller.getBoundingClientRect();
+        const rowBounds = row?.getBoundingClientRect();
+        const surfaceBounds = surface?.getBoundingClientRect();
+        const missingBounds = missing?.getBoundingClientRect();
+        return {
+          missingInside: Boolean(missingBounds && surfaceBounds && missingBounds.bottom <= surfaceBounds.bottom + 1),
+          rowInside: Boolean(
+            rowBounds && rowBounds.top >= scrollBounds.top - 1 && rowBounds.bottom <= scrollBounds.bottom + 1,
+          ),
+        };
+      },
+    );
+    return {
+      firstValueWidth: value?.getBoundingClientRect().width,
+      labelToValueGap:
+        label && value ? value.getBoundingClientRect().top - label.getBoundingClientRect().bottom : undefined,
+      modelContentBounds,
+      paneHeaderOverlaps,
+    };
+  });
+  expect(Math.max(...scaledLayout.paneHeaderOverlaps)).toBeLessThanOrEqual(1);
+  expect(scaledLayout.firstValueWidth).toBeGreaterThan(120);
+  expect(scaledLayout.labelToValueGap).toBeGreaterThanOrEqual(0);
+  expect(scaledLayout.modelContentBounds).toHaveLength(2);
+  expect(scaledLayout.modelContentBounds.every(({ rowInside, missingInside }) => rowInside && missingInside)).toBe(
+    true,
+  );
+  const details = selectors.getByRole('button', { name: 'Details', exact: true });
+  await target.scrollIntoView(details);
+  await target.focus(details);
+  const detailsState = await target.evaluateLocator(details, (element) => {
+    const wrapper = element.closest<HTMLElement>('[data-slot="part-properties"]')?.parentElement;
+    const bounds = element.getBoundingClientRect();
+    return {
+      bottom: bounds.bottom,
+      focused: element === document.activeElement,
+      overflowY: wrapper ? getComputedStyle(wrapper).overflowY : undefined,
+      top: bounds.top,
+      viewportHeight: innerHeight,
+    };
+  });
+  expect(detailsState.focused).toBe(true);
+  expect(detailsState.overflowY).toBe('auto');
+  expect(detailsState.top).toBeGreaterThanOrEqual(0);
+  expect(detailsState.bottom).toBeLessThanOrEqual(detailsState.viewportHeight);
+  await target.keyboardPress('Enter');
+  await target.expectVisible(selectors.getByText('Volume method', { exact: true }));
+  await target.scrollIntoView(selectors.getByText('Density source', { exact: true }));
+  await target.screenshot(selectors.getByCss('body'), 'model-pane-200pct-details.png');
 });

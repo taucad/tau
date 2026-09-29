@@ -295,7 +295,7 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
         <div
           role='status'
           aria-label='Invitation created'
-          className='flex flex-col gap-2 rounded-md border border-dashed p-2'
+          className='ph-no-capture flex flex-col gap-2 rounded-md border border-dashed p-2'
         >
           <Label htmlFor='collaborator-invitation-link' className='text-sm font-normal'>
             {`Invitation link for ${issued.email}`}

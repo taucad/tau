@@ -21,7 +21,9 @@
  * a disk reader for skills, and the engine's Node runner for GeoSpec.
  */
 
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, realpath, readdir, stat } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { ResourceQueue } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -212,30 +214,42 @@ export const createHostGeoSpecRunner = async (
   return loader ? Object.assign(runner, { sourceRevisions: loader.sourceRevisions }) : runner;
 };
 
-/**
- * The native engine every `test_model` call in this process shares: the subjects the
- * previous call admitted, and the tail of the queue that runs calls one at a time.
- */
+/** One serialized native engine retains subjects only within its canonical root. */
 type NativeGeoSpecSession = {
+  readonly root: string;
   readonly engine: NativeGeoSpecEngine;
   readonly carried: Map<string, unknown>;
-  tail: Promise<void>;
 };
 
-let nativeSession: Promise<NativeGeoSpecSession> | undefined;
+let nativeSession: NativeGeoSpecSession | undefined;
+let nativeTail: Promise<void> = Promise.resolve();
 
-const openNativeGeoSpecSession = async (): Promise<NativeGeoSpecSession> => {
-  nativeSession ??= (async () => {
-    const { Engine } = await import('@taucad/geospec-engine-native/node');
-    return { engine: new Engine(), carried: new Map<string, unknown>(), tail: Promise.resolve() };
-  })();
-  try {
-    return await nativeSession;
-  } catch (error) {
-    // A failed import or construction is not cached: the next call tries again.
-    nativeSession = undefined;
-    throw error;
+const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSession> => {
+  const canonicalRoot = await realpath(root);
+  if (nativeSession?.root === canonicalRoot) {
+    return nativeSession;
   }
+  const previous = nativeSession;
+  nativeSession = undefined;
+  previous?.carried.clear();
+  previous?.engine.close();
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the native package's constructor export.
+  const { Engine } = await import('@taucad/geospec-engine-native/node');
+  const cacheRoot = join(homedir() || tmpdir(), '.cache', 'geospec', 'evidence');
+  let engine: NativeGeoSpecEngine;
+  try {
+    engine = new Engine({ root: cacheRoot, projectRoot: canonicalRoot });
+  } catch (error) {
+    console.warn('GeoSpec native cache unavailable; using a resident engine:', error);
+    engine = new Engine();
+  }
+  const session = {
+    root: canonicalRoot,
+    engine,
+    carried: new Map<string, unknown>(),
+  };
+  nativeSession = session;
+  return session;
 };
 
 /**
@@ -255,18 +269,18 @@ export const createHostNativeGeoSpecRunner = async (
   workspaceRoot: string,
   runtime: HostGeoSpecRuntimeClient,
 ): Promise<HostGeoSpecRunner> => {
-  const [session, { createNativeGeoSpecRunner }, { createNodeVmFileSystem }] = await Promise.all([
-    openNativeGeoSpecSession(),
-    import('geospec/runner/native'),
-    import('@taucad/geospec-engine/node-filesystem'),
-  ]);
-  const previous = session.tail;
+  const previous = nativeTail;
   let endTurn = (): void => undefined;
-  session.tail = new Promise<void>((resolve) => {
+  nativeTail = new Promise<void>((resolve) => {
     endTurn = resolve;
   });
   await previous;
   try {
+    const [session, { createNativeGeoSpecRunner }, { createNodeVmFileSystem }] = await Promise.all([
+      openNativeGeoSpecSession(workspaceRoot),
+      import('geospec/runner/native'),
+      import('@taucad/geospec-engine/node-filesystem'),
+    ]);
     const revisions = new Map<string, SourceRevision>();
     const trackedRuntime = new Proxy(runtime, {
       get(target, property, receiver: unknown): unknown {
@@ -300,10 +314,15 @@ export const createHostNativeGeoSpecRunner = async (
         carried: session.carried,
       },
     });
+    let closed = false;
     return {
       ...runner,
       sourceRevisions: () => [...revisions.values()],
       async close() {
+        if (closed) {
+          return;
+        }
+        closed = true;
         try {
           await runner.close();
         } finally {

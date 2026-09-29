@@ -234,6 +234,7 @@ export const baseSliceSummary: SliceSummary = {
   isSlicerEstimate: false,
   producer: undefined,
   filamentLength: 3200,
+  filamentWeightGrams: undefined,
   // Every move: from home along the front-edge purge line to the end lift above the part.
   bounds: { min: [0, 0, 0], max: [236, 153, 35] },
   partBounds: { min: [103, 103, 0], max: [153, 153, 25] },
@@ -845,6 +846,7 @@ export const sliceFixture: SlicedArtifact = {
   mimeType: accepted.mediaType,
   optionsKey: '{}',
   geometry: {},
+  materialConfiguration: {},
   summary: baseSliceSummary,
   fit: { fits: true, message: 'The part fits the plate' },
   warnings: [],

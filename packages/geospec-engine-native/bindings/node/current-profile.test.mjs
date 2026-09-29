@@ -12,7 +12,7 @@ const successor = await readFile(
   new URL('../../rust/tests/fixtures/current-profile-v5/numeric-profile.txt', import.meta.url),
 );
 
-await it('should declare full backend presence while preserving every other frozen expectation and input', async () => {
+await it('should declare full backend and approved minimum capability while preserving all other frozen expectations', async () => {
   const before = [Buffer.from(original), Buffer.from(profile)];
   const core = await joinCurrentCorpus(original, profile);
   const full = await joinCurrentCorpus(original, profile, 'full-backend');
@@ -31,14 +31,19 @@ await it('should declare full backend presence while preserving every other froz
     changed += 1;
     assert.notEqual(row.expectedUtf8, undefined);
     assert.notEqual(baseline.expectedUtf8, undefined);
-    const expected = /** @type {{ result: { configuration: { backends: { brep: boolean, csg: boolean } } } }} */ (
+    const expected = /** @type {{ result: { capabilities: Array<{implementation: string, name: string, profile?: string, qualification: string, registryVersion: number, scope: string}>, configuration: { backends: { brep: boolean, csg: boolean } } } }} */ (
       JSON.parse(row.expectedUtf8)
     );
     assert.deepEqual(expected.result.configuration.backends, { brep: true, csg: true });
+    assert.deepEqual(expected.result.capabilities.at(-1), {
+      implementation: 'implemented', name: 'minimumDistance', profile: 'geospec-minimum-distance-v1',
+      qualification: 'unqualified', registryVersion: 5, scope: 'declared-subject-profile',
+    });
+    assert.equal(expected.result.capabilities.filter(({ name }) => name === 'minimumDistance').length, 1);
+    expected.result.capabilities.pop();
     expected.result.configuration.backends = { brep: false, csg: false };
     assert.deepEqual(expected, JSON.parse(baseline.expectedUtf8));
     assert.deepEqual({ ...row, expectedUtf8: baseline.expectedUtf8 }, baseline);
-    assert.equal(Buffer.byteLength(row.expectedUtf8), Buffer.byteLength(baseline.expectedUtf8) - 2);
   }
   assert.equal(changed, 1);
   assert.deepEqual([original, profile], before);

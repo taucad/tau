@@ -13,3 +13,6 @@ hmac = "=0.13.0"
 serde = { version = "=1.0.219", features = ["derive"] }
 serde_json = { version = "=1.0.143", features = ["float_roundtrip"] }
 sha2 = { version = "=0.11.0", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.189"

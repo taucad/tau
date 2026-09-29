@@ -33,6 +33,7 @@ pub enum Capability {
     ToSatisfyRationalPlate,
     ToSatisfyParallelPlaneDistance,
     QueryPmi,
+    MinimumDistance,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -43,7 +44,7 @@ pub enum ExpectedShape {
     True,
 }
 
-pub const CAPABILITIES: [&str; 31] = [
+pub const CAPABILITIES: [&str; 32] = [
     "toHaveBoundingBox",
     "toHaveConnectedComponents",
     "toBeWatertight",
@@ -75,10 +76,11 @@ pub const CAPABILITIES: [&str; 31] = [
     "toSatisfyRationalPlate",
     "toSatisfyParallelPlaneDistance",
     "queryPmi",
+    "minimumDistance",
 ];
 
 impl Capability {
-    pub const ALL: [Self; 31] = [
+    pub const ALL: [Self; 32] = [
         Self::ToHaveBoundingBox,
         Self::ToHaveConnectedComponents,
         Self::ToBeWatertight,
@@ -110,6 +112,7 @@ impl Capability {
         Self::ToSatisfyRationalPlate,
         Self::ToSatisfyParallelPlaneDistance,
         Self::QueryPmi,
+        Self::MinimumDistance,
     ];
 
     pub fn from_name(name: &str) -> Option<Self> {
@@ -149,6 +152,7 @@ impl Capability {
             Self::ToSatisfyRationalPlate => "toSatisfyRationalPlate",
             Self::ToSatisfyParallelPlaneDistance => "toSatisfyParallelPlaneDistance",
             Self::QueryPmi => "queryPmi",
+            Self::MinimumDistance => "minimumDistance",
         }
     }
 
@@ -160,6 +164,7 @@ impl Capability {
                 | Self::InspectGeometry
                 | Self::AnalyzeMeshOverlap
                 | Self::QueryPmi
+                | Self::MinimumDistance
         )
     }
 
@@ -212,6 +217,7 @@ impl Capability {
             Self::ToSatisfyRationalPlate => None,
             Self::ToSatisfyParallelPlaneDistance => None,
             Self::QueryPmi => None,
+            Self::MinimumDistance => None,
         }
     }
 
@@ -248,6 +254,7 @@ impl Capability {
             Self::ToSatisfyRationalPlate => ExpectedShape::First,
             Self::ToSatisfyParallelPlaneDistance => ExpectedShape::First,
             Self::QueryPmi => ExpectedShape::First,
+            Self::MinimumDistance => ExpectedShape::First,
         }
     }
 }

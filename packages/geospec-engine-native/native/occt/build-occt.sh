@@ -59,6 +59,12 @@ expected_no_cjk_source_hash="d69fa6c514111129c494ac54c2fd3d9b36d9d2d27faee7f17a8
 torus_patch_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/geombndlib-torus-closed-form.patch"
 expected_torus_patch_hash="fd61d98c80b96ac1c131c24c96e23cce6fb9a3c65b998b4b6d11d6f4db557fb6"
 expected_torus_source_hash="b4c1b40fb4513f333f1c03f402ed7500c68a324670ee29f19b497ce32195f249"
+prepared_face_patch_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/brepextrema-prepared-face-cf.patch"
+expected_prepared_face_patch_hash="e187b63ee9962e4d285d99cb0114b4f14643d6d7c385f417c9b3c164bb90f8e5"
+expected_extcf_header_hash="135f3a12f1cd314a30c50da1af199fa460b623e8a628063d1a9e5e28f751cf36"
+expected_extcf_source_hash="684ed21d657c155479c4a9f62db6379dd3a779dd3b576a2b1dd6cffcc921f629"
+expected_distancess_header_hash="c39b719bc3a8dc3a3daae08d6fe99ef0206d84158b55e2facc5a97dd224f3e24"
+expected_distancess_source_hash="e4f4a0afe95be5abb2a6f7ee090d3be93f8f417355a6ee085b2e949cf7d209fa"
 
 for tool in cmake diff find ninja patch shasum tar; do
   command -v "${tool}" >/dev/null || { printf 'ERROR: %s is required\n' "${tool}" >&2; exit 3; }
@@ -207,6 +213,32 @@ actual_torus_source_hash="$(shasum -a 256 "${torus_source}" | awk '{print $1}')"
 }
 printf '✓ GeomBndLib_Torus patch %s applied after Resource_Unicode to fresh verified source\n' "${expected_torus_patch_hash}"
 
+[[ -f "${prepared_face_patch_file}" ]] || {
+  printf 'ERROR: BRepExtrema prepared-face patch is missing: %s\n' "${prepared_face_patch_file}" >&2
+  exit 1
+}
+actual_prepared_face_patch_hash="$(shasum -a 256 "${prepared_face_patch_file}" | awk '{print $1}')"
+[[ "${actual_prepared_face_patch_hash}" == "${expected_prepared_face_patch_hash}" ]] || {
+  printf 'ERROR: BRepExtrema prepared-face patch hash mismatch: %s\n' "${actual_prepared_face_patch_hash}" >&2
+  exit 1
+}
+patch -t -F 0 -p1 -d "${build_source}" -i "${prepared_face_patch_file}"
+prepared_face_dir="${build_source}/src/ModelingAlgorithms/TKTopAlgo/BRepExtrema"
+actual_extcf_header_hash="$(shasum -a 256 "${prepared_face_dir}/BRepExtrema_ExtCF.hxx" | awk '{print $1}')"
+actual_extcf_source_hash="$(shasum -a 256 "${prepared_face_dir}/BRepExtrema_ExtCF.cxx" | awk '{print $1}')"
+actual_distancess_header_hash="$(shasum -a 256 "${prepared_face_dir}/BRepExtrema_DistanceSS.hxx" | awk '{print $1}')"
+actual_distancess_source_hash="$(shasum -a 256 "${prepared_face_dir}/BRepExtrema_DistanceSS.cxx" | awk '{print $1}')"
+[[ "${actual_extcf_header_hash}" == "${expected_extcf_header_hash}" &&
+   "${actual_extcf_source_hash}" == "${expected_extcf_source_hash}" &&
+   "${actual_distancess_header_hash}" == "${expected_distancess_header_hash}" &&
+   "${actual_distancess_source_hash}" == "${expected_distancess_source_hash}" ]] || {
+  printf 'ERROR: patched BRepExtrema source hash mismatch: %s %s %s %s\n' \
+    "${actual_extcf_header_hash}" "${actual_extcf_source_hash}" \
+    "${actual_distancess_header_hash}" "${actual_distancess_source_hash}" >&2
+  exit 1
+}
+printf '✓ BRepExtrema prepared-face patch %s applied to fresh verified source\n' "${expected_prepared_face_patch_hash}"
+
 # Objects name their sources relative to the pinned tree (occt/src/...), never the build cache, and the
 # caller's C and C++ flag sets (the mixed and pthread recipes) get the same mapping.
 prefix_map="-ffile-prefix-map=${build_source}=occt"
@@ -226,6 +258,7 @@ cmake -S "${build_source}" -B "${build_dir}" -G Ninja \
   -DGEOSPEC_OCCT_STEP_READ_ONLY_PATCH_SHA256:STRING="${expected_read_only_patch_hash}" \
   -DGEOSPEC_OCCT_RESOURCE_UNICODE_PATCH_SHA256:STRING="${expected_no_cjk_patch_hash}" \
   -DGEOSPEC_OCCT_TORUS_BOX_PATCH_SHA256:STRING="${expected_torus_patch_hash}" \
+  -DGEOSPEC_OCCT_PREPARED_FACE_PATCH_SHA256:STRING="${expected_prepared_face_patch_hash}" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="${install_dir}" \
   -DINSTALL_DIR="${install_dir}" \

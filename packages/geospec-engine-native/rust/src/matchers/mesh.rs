@@ -5,7 +5,7 @@ use crate::{
         batch::ExactClusters,
         interference::ComponentIdentity,
         mesh::{
-            exact::{ask, exact_clusters, ExactError},
+            exact::{ask, ask_traced, exact_clusters_traced, ChargeStage, ExactError},
             nearest_cluster_gaps, Aabb, BoundingBox, ClusterGap, ClusterReport,
             ConnectedComponents, DegenerateTriangle, DuplicateFace, IrregularEdgeCluster,
             IrregularEdgeKind, IrregularEdgeSample, MeshAnalysis, MeshQuality, NonFiniteVertex,
@@ -16,6 +16,7 @@ use crate::{
         brep::{ComponentBody, DocumentRows, OccurrenceFacts, SubshapeType},
         BackendError, BackendErrorKind,
     },
+    cache::exact_clusters as completed_clusters,
     codec::Json,
     prepared::{self, AnalysisDemand, NumericExpectation, DEFAULT_LINEAR_TOLERANCE},
     protocol::{field, invalid_claim, object, optional_field, require_fields},
@@ -24,7 +25,7 @@ use crate::{
     subject::{backend_refusal, EvaluationContext, Subject, SubjectFormat},
     ProtocolError,
 };
-use std::{collections::HashMap, rc::Rc};
+use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 const AXES: [&str; 3] = ["x", "y", "z"];
 const BOUNDS_FIELDS: [&str; 4] = ["min", "max", "size", "center"];
@@ -932,48 +933,78 @@ fn step_component_clusters(
     })?;
     let subject = context.subject();
     let budget = context.budget;
-    context.exact_clusters(tolerance_mm, || {
-        let occurrences = subject
-            .source_occurrence_structure()
-            .map_err(backend_refusal)?
-            .unwrap_or_default();
-        let leaves = crate::analysis::interference::leaf_components(&occurrences);
-        if leaves.is_empty() && !occurrences.is_empty() {
-            // Every leaf is faceless: no body and no component (ruling 32).
-            return Ok(Vec::new());
-        }
-        let identities =
-            crate::analysis::interference::component_labels(subject).map_err(backend_refusal)?;
-        let refusal = |error: ExactError, labels: &[String]| match error {
-            ExactError::Backend(error) => backend_refusal(error),
-            ExactError::Budget { exceeded, pair } => {
-                let mut refusal =
-                    Evaluation::budget_exceeded(Capability::ToHaveConnectedComponents, exceeded);
-                // Ruling 28: a narrow-phase refusal names the pair whose charge crossed.
-                if let (Some((left, right)), Evaluation::Refused { diagnostics }) =
-                    (pair, &mut refusal)
-                {
-                    if let Some(Json::Object(fields)) = &mut diagnostics[0].details {
-                        fields.push((
-                            "pair".into(),
-                            Json::Array(vec![
-                                Json::string(&labels[left]),
-                                Json::string(&labels[right]),
-                            ]),
-                        ));
-                    }
+    let cache = subject.overlap_cache.as_deref().and_then(|store| {
+        completed_clusters::address(subject, tolerance_mm).map(|address| (store, address))
+    });
+    let cold_built = Cell::new(false);
+    let result = context.exact_clusters(
+        tolerance_mm,
+        |trace| {
+            if let Some((store, address)) = &cache {
+                if let Some(completed) = completed_clusters::load(*store, address) {
+                    completed_clusters::replay(&completed, budget, trace).map_err(
+                        |(exceeded, pair)| {
+                            component_budget_refusal(exceeded, pair, &completed.labels)
+                        },
+                    )?;
+                    return Ok((completed.clusters, completed.labels));
                 }
-                refusal
             }
-        };
-        let bodies = ask(budget, None, |charge| {
-            brep.component_bodies(&leaves, charge)
-        })
-        .map_err(|error| refusal(error, &[]))?;
-        let labels = body_labels(bodies.bodies(), &identities);
-        exact_clusters(bodies.as_ref(), &labels, tolerance_mm, budget)
-            .map_err(|error| refusal(error, &labels))
-    })
+            let occurrences = subject
+                .source_occurrence_structure()
+                .map_err(backend_refusal)?
+                .unwrap_or_default();
+            let leaves = crate::analysis::interference::leaf_components(&occurrences);
+            if leaves.is_empty() && !occurrences.is_empty() {
+                // Every leaf is faceless: no body and no component (ruling 32).
+                return Ok((Vec::new(), Vec::new()));
+            }
+            let identities = crate::analysis::interference::component_labels(subject)
+                .map_err(backend_refusal)?;
+            let refusal = |error: ExactError, labels: &[String]| match error {
+                ExactError::Backend(error) => backend_refusal(error),
+                ExactError::Budget { exceeded, pair } => {
+                    component_budget_refusal(exceeded, pair, labels)
+                }
+            };
+            let bodies = ask_traced(budget, None, ChargeStage::BodySetup, trace, |charge| {
+                brep.component_bodies(&leaves, charge)
+            })
+            .map_err(|error| refusal(error, &[]))?;
+            let labels = body_labels(bodies.bodies(), &identities);
+            let clusters =
+                exact_clusters_traced(bodies.as_ref(), &labels, tolerance_mm, budget, trace)
+                    .map_err(|error| refusal(error, &labels))?;
+            cold_built.set(true);
+            Ok((clusters, labels))
+        },
+        component_budget_refusal,
+    )?;
+    if let Some((store, address)) = cache {
+        completed_clusters::publish_if_cold(store, &address, &result, cold_built.get());
+    }
+    Ok(result)
+}
+
+fn component_budget_refusal(
+    exceeded: crate::budget::BudgetExceeded,
+    pair: Option<(usize, usize)>,
+    labels: &[String],
+) -> Evaluation {
+    let mut refusal = Evaluation::budget_exceeded(Capability::ToHaveConnectedComponents, exceeded);
+    // Ruling 28: a narrow-phase refusal names the pair whose charge crossed.
+    if let (Some((left, right)), Evaluation::Refused { diagnostics }) = (pair, &mut refusal) {
+        if let Some(Json::Object(fields)) = &mut diagnostics[0].details {
+            fields.push((
+                "pair".into(),
+                Json::Array(vec![
+                    Json::string(&labels[left]),
+                    Json::string(&labels[right]),
+                ]),
+            ));
+        }
+    }
+    refusal
 }
 
 /// A body is named by its component label, or `step` for a whole-shape

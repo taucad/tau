@@ -294,6 +294,7 @@ const main = async (): Promise<void> => {
         'src/desktop-converter.spec.ts',
         'src/desktop-ephemeral-isolation.spec.ts',
         'src/desktop-image-geospec.spec.ts',
+        'src/desktop-geometry-host.spec.ts',
         'src/desktop-thumbnail-lifecycle.spec.ts',
         'src/desktop-native-payload.spec.ts',
         'src/desktop-community-preview.spec.ts',

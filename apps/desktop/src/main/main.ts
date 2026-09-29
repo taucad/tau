@@ -69,6 +69,7 @@ import {
 } from '#main/project-roots.js';
 import { createServicesBroker, rendererServicesConcerns, ServicesQuiescingError } from '#main/services-broker.js';
 import type { ServicesConcern } from '#main/services-broker.js';
+import { createGeometryBroker } from '#main/geometry-broker.js';
 import {
   bundledGitEnvironment,
   compileCacheEnvironment,
@@ -116,6 +117,7 @@ const clientRoot =
  * module lands in. */
 const kernelUtilityEntry = join(import.meta.dirname, 'kernel-host.js');
 const servicesUtilityEntry = join(import.meta.dirname, 'services-host.js');
+const geometryUtilityEntry = join(import.meta.dirname, 'geometry-host.js');
 const computeStoreWorkerEntry = join(import.meta.dirname, 'compute-store.worker.js');
 const applicationResource = (name: string): string =>
   app.isPackaged ? join(process.resourcesPath, 'branding', name) : join(import.meta.dirname, '../../resources', name);
@@ -541,6 +543,36 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * otherwise wait for with a project already on screen (W-L03-4). */
   runtimeMain.prewarm();
 
+  const geometry = createGeometryBroker({
+    utilityEntry: geometryUtilityEntry,
+    env: utilityEnvironment(environment, {
+      ...compileCacheEnvironment(app.getPath('userData')),
+      TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+    }),
+    fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
+    createChannel: () => new MessageChannelMain(),
+    connectRuntime: (context) => runtimeMain.connect({ purpose: 'main-process-client', context }),
+    sampleResidentBytes: (utility) => {
+      if (utility.pid === undefined) {
+        return undefined;
+      }
+      const metric = app.getAppMetrics().find((entry) => entry.pid === utility.pid);
+      const kibibytes = metric?.memory.workingSetSize;
+      // Electron ProcessMetric workingSetSize is KiB; the broker budget is bytes.
+      return kibibytes === undefined ? undefined : kibibytes * 1024;
+    },
+    runtimeConfig: {
+      tauApiUrl: environment['TAU_API_URL']!,
+      tauWebSocketUrl: environment['TAU_WEBSOCKET_URL']!,
+    },
+    onSpawn: (utility) => {
+      forwardUtilityDiagnostics('geometry', utility, log);
+    },
+    log: (event, detail) => {
+      log.log('warn', event, detail);
+    },
+  });
+
   const trustedComputeRoot = (event: IpcMainInvokeEvent, projectRoot: unknown): string => {
     if (!trusted(event.senderFrame) || typeof projectRoot !== 'string' || !roots.isTrusted(projectRoot)) {
       throw new Error('Desktop shell refused compute control.');
@@ -581,6 +613,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),
     connectRuntime: (context) => runtimeMain.connect({ purpose: 'main-process-client', context }),
+    connectGeometry: (input) => geometry.connectSuite(input),
+    revokeGeometry: () => {
+      geometry.revokeUnauthorized();
+    },
     onSpawn: (utility) => {
       forwardUtilityDiagnostics('services', utility, log);
     },
@@ -963,7 +999,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
         refuse('services.invalid-geospec-engine');
         return;
       }
-      const port = services.connect(concern as ServicesConcern, resolved);
+      const port =
+        concern === 'exactMeasurement'
+          ? geometry.connectMeasurement()
+          : concern === 'geospecPerformance'
+            ? geometry.connectPerformance()
+            : services.connect(concern as ServicesConcern, resolved);
       event.senderFrame?.postMessage(servicesPortRelayTag, { requestId }, [port]);
     } catch (error) {
       /* Quit and reload refuse new concerns by design: an expected answer the
@@ -1240,6 +1281,11 @@ const bootstrapElectronApp = async (): Promise<void> => {
         }
         try {
           await services.dispose();
+        } catch (error) {
+          log.log('error', 'main.shutdown', error);
+        }
+        try {
+          await geometry.dispose();
         } catch (error) {
           log.log('error', 'main.shutdown', error);
         }

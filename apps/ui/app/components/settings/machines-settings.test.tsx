@@ -100,6 +100,9 @@ const renderSettings = (): ReturnType<typeof render> =>
     </TooltipProvider>,
   );
 
+const bindingField = (name: string): HTMLElement =>
+  screen.getByRole('textbox', { name: new RegExp(`^Input for ${name.split(' ')[0]}`, 'u') });
+
 afterEach(() => {
   state.facet = undefined;
   state.completeBinding.mockClear();
@@ -185,8 +188,9 @@ describe('MachinesSettings', () => {
     await waitFor(() => {
       expect(bind).toBeEnabled();
     });
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'shop-x1c' } });
-    fireEvent.change(screen.getByLabelText('Address'), { target: { value: '10.0.0.5' } });
+    await screen.findByRole('textbox', { name: 'Input for Name' });
+    fireEvent.change(bindingField('Name'), { target: { value: 'shop-x1c' } });
+    fireEvent.change(bindingField('Address'), { target: { value: '10.0.0.5' } });
     const accessCode = screen.getByLabelText('Access code');
     fireEvent.change(accessCode, { target: { value: '12345678' } });
     /* Masked by default; the toggle reveals it for checking and masks it again. */
@@ -244,9 +248,11 @@ describe('MachinesSettings', () => {
 
     fireEvent.click(office);
 
-    expect(screen.getByLabelText('Name')).toHaveValue('Office X1C');
-    expect(screen.getByLabelText('Address')).toHaveValue('192.168.0.113');
-    expect(screen.getByLabelText('Serial (optional)')).toHaveValue('00M2');
+    await screen.findByRole('textbox', { name: 'Input for Name' });
+
+    expect(bindingField('Name')).toHaveValue('Office X1C');
+    expect(bindingField('Address')).toHaveValue('192.168.0.113');
+    expect(bindingField('Serial (optional)')).toHaveValue('00M2');
     expect(screen.getByLabelText('Access code')).toHaveFocus();
   });
 
@@ -276,9 +282,9 @@ describe('MachinesSettings', () => {
     fireEvent.click(find);
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Address')).toHaveValue('192.168.0.112');
+      expect(bindingField('Address')).toHaveValue('192.168.0.112');
     });
-    expect(screen.getByLabelText('Name')).toHaveValue('Workshop X1C');
+    expect(bindingField('Name')).toHaveValue('Workshop X1C');
     expect(screen.getByRole('status')).toHaveTextContent('Listening for more printers…');
     expect(find).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Bind' })).toBeEnabled();
@@ -381,6 +387,7 @@ describe('MachinesSettings', () => {
       await waitFor(() => {
         expect(find).toBeEnabled();
       });
+      await screen.findByRole('textbox', { name: 'Input for Name' });
       return facet;
     };
     const submit = (): void => {
@@ -394,7 +401,7 @@ describe('MachinesSettings', () => {
       expect(code).toHaveTextContent('Saved in your Keychain');
       /* The only thing named "Access code" is that line: no field asks for the code. */
       expect(screen.getByLabelText('Access code')).toBe(code);
-      expect(screen.getByLabelText('Serial (optional)')).toHaveValue('00M1');
+      expect(bindingField('Serial (optional)')).toHaveValue('00M1');
       expect(screen.getByRole('button', { name: 'Bind' })).toHaveFocus();
 
       submit();
@@ -419,8 +426,9 @@ describe('MachinesSettings', () => {
         expect(bind).toBeEnabled();
       });
       expect(screen.getByLabelText('Access code')).not.toBeRequired();
-      fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'shop-x1c' } });
-      fireEvent.change(screen.getByLabelText('Address'), { target: { value: '10.0.0.5' } });
+      await screen.findByRole('textbox', { name: 'Input for Name' });
+      fireEvent.change(bindingField('Name'), { target: { value: 'shop-x1c' } });
+      fireEvent.change(bindingField('Address'), { target: { value: '10.0.0.5' } });
 
       submit();
 
@@ -431,8 +439,8 @@ describe('MachinesSettings', () => {
       expect(facet.beginBinding).not.toHaveBeenCalled();
       expect(state.completeBinding).not.toHaveBeenCalled();
       /* Only the code is cleared, so the retry needs nothing but the code. */
-      expect(screen.getByLabelText('Name')).toHaveValue('shop-x1c');
-      expect(screen.getByLabelText('Address')).toHaveValue('10.0.0.5');
+      expect(bindingField('Name')).toHaveValue('shop-x1c');
+      expect(bindingField('Address')).toHaveValue('10.0.0.5');
     });
 
     it('should send a newly typed code over the saved one after "Use a different code"', async () => {
@@ -475,7 +483,7 @@ describe('MachinesSettings', () => {
       });
       expect(screen.getByLabelText('Access code')).toHaveAttribute('type', 'password');
       expect(screen.queryByText('Saved in your Keychain')).not.toBeInTheDocument();
-      expect(screen.getByLabelText('Name')).toHaveValue('Workshop X1C');
+      expect(bindingField('Name')).toHaveValue('Workshop X1C');
     });
   });
 

@@ -266,6 +266,7 @@ class PreparationContractTest(unittest.TestCase):
             self.stack.enter_context(patch.object(prepare, name, value))
         self.receipt_path = self.prefix / 'prefix-receipt.json'
         self.receipt = prepare.create_prefix_receipt(self.prefix, self.contract())
+        self.receipt['schema'] = prepare.PREFIX_RECEIPT_SCHEMA  # retained legacy fixture
         prepare.write_json(self.receipt_path, self.receipt)
 
     def contract(self, kind='mixed'):
@@ -312,7 +313,7 @@ class PreparationContractTest(unittest.TestCase):
                 prepare.prepare_prefixes(self.paths, self.env, build_prefix=selection)
                 room.assert_called_once_with('prefixes')
                 sources.assert_called_once_with()
-                context.assert_called_once_with(self.paths, self.env)
+                context.assert_called_once_with(self.paths, self.env, tuple(expected))
                 self.assertEqual(build.call_args_list,
                                  [call(kind, self.paths, self.env, self.context) for kind in expected])
 
@@ -323,6 +324,33 @@ class PreparationContractTest(unittest.TestCase):
                 prepare.prepare_prefixes(self.paths, self.env, build_prefix='mixed')
             sources.assert_not_called()
             build.assert_not_called()
+
+    def test_prefix_context_hashes_only_selected_support_kind(self):
+        for name in ['rustup', 'xcrun', 'cmake', 'ninja']:
+            self.paths[name] = self.root / name
+            self.paths[name].write_text('inert tool: ' + name)
+        self.builder.write_text('rustc 1.88.0 fixture')
+        def selected(command, *_args, **_kwargs):
+            if '-print-resource-dir' in command:
+                return str(self.root)
+            if '--show-sdk-path' in command:
+                return str(self.root)
+            if '--show-sdk-version' in command:
+                return '15.0'
+            if '--version' in command or '-vV' in command:
+                return 'rustc 1.88.0'
+            return str(self.builder)
+
+        with patch.object(prepare, 'run', side_effect=selected), \
+                patch.object(prepare, 'support_payload', return_value={'sha256': 'selected'}) as payload:
+            native = prepare.prefix_context(self.paths, self.env, ('native',))
+            self.assertEqual(set(native['supportPayloads']), {'native'})
+            payload.assert_called_once()
+            payload.reset_mock()
+            self.env['EM_CACHE'] = str(self.cache / 'em-cache')
+            mixed = prepare.prefix_context(self.paths, self.env, ('mixed',))
+            self.assertEqual(set(mixed['supportPayloads']), {'mixed'})
+            payload.assert_called_once()
 
     def test_should_reject_combining_build_and_reuse_prefix_selectors(self):
         with patch.object(prepare.sys, 'argv', ['prepare-delivery.py', 'prefixes',
@@ -379,6 +407,7 @@ class PreparationContractTest(unittest.TestCase):
         roots = {f'sdk/{name}': sdk / name for name in ['bin', 'lib', 'emscripten']}
         self.context['supportPayloads']['mixed'] = prepare.support_payload(roots)
         receipt = prepare.create_prefix_receipt(self.prefix, self.contract())
+        receipt['schema'] = prepare.PREFIX_RECEIPT_SCHEMA
         prepare.write_json(self.receipt_path, receipt)
         self.evidence_path = self.root / 'retained-mixed-inputs.json'
         rows = {path for root in roots.values() for path in prepare.files(root)}
@@ -576,6 +605,263 @@ class PreparationContractTest(unittest.TestCase):
                 contract[field] = value
                 with self.assertRaisesRegex(ValueError, f'Prefix receipt {field} changed'):
                     prepare.verify_prefix(self.prefix, contract)
+
+    def test_should_reuse_relocated_prefix_only_with_original_receipt_and_matching_occt_source(self):
+        original = self.root / 'original/packages/geospec-engine-native/native/occt/build-occt.sh'
+        original.parent.mkdir(parents=True)
+        original.write_bytes(self.builder.read_bytes())
+        patch_file = self.builder.parent / 'selected.patch'
+        original_patch = original.parent / patch_file.name
+        patch_file.write_text('inert patch bytes')
+        original_patch.write_bytes(patch_file.read_bytes())
+        self.receipt['command'][1] = str(original)
+        prepare.write_json(self.receipt_path, self.receipt)
+        receipt_bytes = self.receipt_path.read_bytes()
+        with patch.dict(os.environ, GEOSPEC_OCCT_PRODUCER_BUILDER=str(original)):
+            reused = self.verify()
+            self.assertEqual(self.receipt_path.read_bytes(), receipt_bytes, 'reuse never relabels the producer receipt')
+            self.assertEqual(reused['recovery']['originalReceiptSha256'], prepare.digest(self.receipt_path))
+            self.assertEqual(reused['recovery']['sourceFiles'], 2)
+            bridge = self.builder.parent / 'bridge/geospec_occt_bridge.cpp'
+            bridge.parent.mkdir(parents=True)
+            bridge.write_text('changed downstream bridge')
+            self.assertEqual(self.verify()['recovery']['sourceFiles'], 2,
+                             'bridge code is not consumed by the OCCT static prefix')
+            manifest = self.builder.parent / 'source-manifest.json'
+            original_manifest = original.parent / manifest.name
+            manifest.write_text('{"source":"pinned"}')
+            original_manifest.write_bytes(manifest.read_bytes())
+            self.assertEqual(self.verify()['recovery']['sourceFiles'], 3)
+            manifest.write_text('{"source":"changed"}')
+            with self.assertRaisesRegex(ValueError, 'OCCT source closure changed'):
+                self.verify()
+            manifest.write_bytes(original_manifest.read_bytes())
+            patch_file.write_text('changed patch')
+            with self.assertRaisesRegex(ValueError, 'OCCT source closure changed'):
+                self.verify()
+            patch_file.write_bytes(original_patch.read_bytes())
+            self.builder.write_text('changed builder')
+            with self.assertRaisesRegex(ValueError, 'builderSha256 changed'):
+                self.verify()
+            self.builder.write_bytes(original.read_bytes())
+            changed = self.contract()
+            changed['command'][2] = '-DCMAKE_C_COMPILER=/changed/compiler'
+            with self.assertRaisesRegex(ValueError, 'Prefix receipt command changed'):
+                prepare.verify_prefix(self.prefix, changed)
+            changed = self.contract()
+            changed['toolMetadata'] = {'changedTool': True}
+            with self.assertRaisesRegex(ValueError, 'Prefix receipt toolMetadata changed'):
+                prepare.verify_prefix(self.prefix, changed)
+            selected = self.recipe['occt']['sha256']
+            self.recipe['occt']['sha256'] = 'changed-source'
+            with self.assertRaisesRegex(ValueError, 'Prefix source selection changed'):
+                self.verify()
+            self.recipe['occt']['sha256'] = selected
+            self.assertEqual(self.receipt_path.read_bytes(), receipt_bytes)
+
+    def test_portable_receipt_survives_retired_checkout_and_binds_source_manifest(self):
+        source = self.builder.parent
+        (source / 'selected.patch').write_text('selected patch')
+        (source / 'source-manifest.json').write_text('{"archive":"selected"}')
+        original = self.root / 'retired/packages/geospec-engine-native/native/occt/build-occt.sh'
+        original.parent.mkdir(parents=True)
+        for path in [self.builder, source / 'selected.patch', source / 'source-manifest.json']:
+            (original.parent / path.name).write_bytes(path.read_bytes())
+        receipt = prepare.create_prefix_receipt(self.prefix, self.contract())
+        receipt['command'][1] = str(original)
+        prepare.write_json(self.receipt_path, receipt)
+        original.parent.rename(self.root / 'retired-source-hidden')
+        original_bytes = self.receipt_path.read_bytes()
+        self.assertEqual(self.verify()['schema'], prepare.PORTABLE_PREFIX_RECEIPT_SCHEMA)
+        self.assertEqual(self.receipt_path.read_bytes(), original_bytes)
+        for path in [self.builder, source / 'selected.patch', source / 'source-manifest.json']:
+            saved = path.read_bytes()
+            with self.subTest(path=path.name):
+                path.write_text('mutated')
+                with self.assertRaisesRegex(ValueError, 'builderSha256 changed|OCCT source closure changed'):
+                    self.verify()
+                path.write_bytes(saved)
+        extra = source / 'extra.patch'
+        extra.write_text('new patch')
+        with self.assertRaisesRegex(ValueError, 'OCCT source closure changed'):
+            self.verify()
+        extra.unlink()
+        selected_patch = source / 'selected.patch'
+        selected_patch.rename(source / 'withheld.patch.disabled')
+        with self.assertRaisesRegex(ValueError, 'OCCT source closure changed'):
+            self.verify()
+        (source / 'withheld.patch.disabled').rename(selected_patch)
+        receipt['schema'] = prepare.PREFIX_RECEIPT_SCHEMA
+        prepare.write_json(self.receipt_path, receipt)
+        with self.assertRaisesRegex(ValueError, 'Prefix receipt command changed'):
+            self.verify()
+
+    def test_generation_changes_for_selected_source_sdk_and_recipe(self):
+        def selected(command, *_args, **_kwargs):
+            self.assertTrue(_args and isinstance(_args[0], dict))
+            self.assertNotIn('/unselected/shell', _args[0]['PATH'])
+            if '--show-sdk-version' in command:
+                return '15.0'
+            if '--show-sdk-path' in command:
+                return str(self.root)
+            if '-print-resource-dir' in command:
+                return str(self.root)
+            if '-vV' in command:
+                return 'rustc 1.88.0'
+            return str(self.builder)
+
+        sources = {'build-occt.sh': 'a' * 64, 'selected.patch': 'b' * 64}
+        support = {'sha256': 'c' * 64}
+        with patch.dict(os.environ, PATH='/unselected/shell'), \
+                patch.object(prepare.shutil, 'which', return_value=str(self.builder)), \
+                patch.object(prepare, 'run', side_effect=selected), \
+                patch.object(prepare, 'builder_sources', side_effect=lambda _builder: sources.copy()), \
+                patch.object(prepare, 'support_payload', side_effect=lambda _roots: support.copy()):
+            base = prepare.delivery_generation()
+            self.assertEqual(prepare.delivery_generation(), base)
+            sources['selected.patch'] = 'd' * 64
+            self.assertNotEqual(prepare.delivery_generation(), base)
+            sources['selected.patch'] = 'b' * 64
+            support['sha256'] = 'e' * 64
+            self.assertNotEqual(prepare.delivery_generation(), base)
+            support['sha256'] = 'c' * 64
+            self.recipe['mixedOcctOptions'].append('-DUSE_TBB=ON')
+            self.assertNotEqual(prepare.delivery_generation(), base)
+            self.recipe['mixedOcctOptions'].pop()
+            selected_sha = self.recipe['rust']['archives'][0]['sha256']
+            self.recipe['rust']['archives'][0]['sha256'] = 'different-owned-rust-archive'
+            self.assertNotEqual(prepare.delivery_generation(), base)
+            self.recipe['rust']['archives'][0]['sha256'] = selected_sha
+            with patch.dict(os.environ, GIT_CEILING_DIRECTORIES='/strict-ceiling'):
+                self.assertNotEqual(prepare.delivery_generation(), base)
+
+    def test_generation_changes_for_external_sdk_and_rust_prefix_mutation(self):
+        sdk = self.root / 'external-sdk'
+        rust = self.root / 'external-rust'
+        selected_files = [sdk / 'bin/clang', sdk / 'emscripten/emcc',
+                          sdk / 'lib/libc.a', rust / 'bin/rustc']
+        for path in selected_files:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('selected bytes')
+
+        def selected(command, *_args, **_kwargs):
+            if '--show-sdk-version' in command:
+                return '15.0'
+            if '--show-sdk-path' in command or '-print-resource-dir' in command:
+                return str(self.root)
+            if '-vV' in command:
+                return 'rustc 1.88.0'
+            return str(self.builder)
+
+        original_support = prepare.support_payload
+        def support(roots, excluded=None):
+            return {'sha256': 'native-support'} if 'apple-sdk' in roots else original_support(roots, excluded)
+
+        with patch.dict(os.environ, GEOSPEC_DELIVERY_EMSDK_PREFIX=str(sdk),
+                        GEOSPEC_DELIVERY_RUST_PREFIX=str(rust)), \
+                patch.object(prepare, 'SDK', sdk), patch.object(prepare, 'RUST', rust), \
+                patch.object(prepare.shutil, 'which', return_value=str(self.builder)), \
+                patch.object(prepare, 'run', side_effect=selected), \
+                patch.object(prepare, 'support_payload', side_effect=support):
+            base = prepare.delivery_generation()
+            for path in [sdk / 'emscripten/emcc', rust / 'bin/rustc']:
+                saved = path.read_bytes()
+                with self.subTest(path=path):
+                    path.write_text('mutated bytes')
+                    self.assertNotEqual(prepare.delivery_generation(), base)
+                    path.write_bytes(saved)
+            self.assertEqual(prepare.delivery_generation(), base)
+
+    def test_generation_keeps_external_prefixes_and_strict_ceiling_under_legacy_cache(self):
+        legacy = self.root / 'legacy-cache'
+        selected = self.root / 'generation-cache'
+        sdk = legacy / 'external-sdk'
+        rust = legacy / 'external-rust'
+        (sdk / 'bin').mkdir(parents=True)
+        (sdk / 'bin/wasm-ld').write_text('selected linker')
+
+        def probe(command, *_args, **_kwargs):
+            if '--show-sdk-version' in command:
+                return '15.0'
+            if '--show-sdk-path' in command or '-print-resource-dir' in command:
+                return str(self.root)
+            if '-vV' in command:
+                return 'rustc 1.88.0'
+            return str(self.builder)
+
+        with patch.dict(os.environ, GEOSPEC_DELIVERY_EMSDK_PREFIX=str(sdk),
+                        GEOSPEC_DELIVERY_RUST_PREFIX=str(rust),
+                        GIT_CEILING_DIRECTORIES=str(legacy / 'strict')), \
+                patch.object(prepare, 'SDK', sdk), patch.object(prepare, 'RUST', rust), \
+                patch.object(prepare.shutil, 'which', return_value=str(self.builder)), \
+                patch.object(prepare, 'run', side_effect=probe), \
+                patch.object(prepare, 'support_payload', return_value={'sha256': 'same-support'}):
+            with patch.object(prepare, 'CACHE', legacy):
+                projected = prepare.delivery_generation()
+                projected_env = prepare.environment(prepare.tool_paths(), write_config=None)
+                identity_env = prepare.generation_environment(projected_env)
+                self.assertIn(str(sdk / 'emscripten'), identity_env['PATH'])
+                self.assertEqual(identity_env['RUSTC'], str(rust / 'bin/rustc'))
+                self.assertEqual(identity_env['GIT_CEILING_DIRECTORIES'], str(legacy / 'strict'))
+            with patch.object(prepare, 'CACHE', selected):
+                paths = prepare.tool_paths()
+                installed = prepare.delivery_generation(paths, prepare.environment(paths, write_config=None))
+                self.assertEqual(installed, projected)
+                with patch.dict(os.environ, GIT_CEILING_DIRECTORIES=str(legacy / 'changed')):
+                    self.assertNotEqual(prepare.delivery_generation(paths, prepare.environment(paths, write_config=None)),
+                                        projected)
+
+    def test_generation_ignores_stale_legacy_helper_and_checks_installed_selection(self):
+        host_bin = self.root / 'host-bin'
+        host_bin.mkdir()
+        selected_host = host_bin / 'host-tool'
+        selected_host.write_text('host executable')
+        selected_host.chmod(0o755)
+        for name in ['diff', 'find', 'patch', 'shasum', 'tar']:
+            helper = host_bin / name
+            helper.write_text('host ' + name)
+            helper.chmod(0o755)
+        host_paths = {name: selected_host for name in
+                      ['node', 'python3', 'cmake', 'ninja', 'xcrun', 'bash', 'git', 'rustup']}
+        legacy_sdk = self.cache / 'sdk/install'
+
+        def selected(command, *_args, **_kwargs):
+            if '--show-sdk-version' in command:
+                return '15.0'
+            if '--show-sdk-path' in command or '-print-resource-dir' in command:
+                return str(self.root)
+            if '-vV' in command:
+                return 'rustc 1.88.0'
+            return str(self.builder)
+
+        with patch.object(prepare, 'SDK', legacy_sdk), \
+                patch.object(prepare, 'host_tool_paths', return_value=host_paths), \
+                patch.object(prepare, 'run', side_effect=selected), \
+                patch.object(prepare, 'support_payload', return_value={'sha256': 'apple-support'}):
+            base = prepare.delivery_generation()
+            (legacy_sdk / 'bin').mkdir(parents=True)
+            wasm_linker = legacy_sdk / 'bin/wasm-ld'
+            wasm_linker.write_text('pinned SDK tool')
+            wasm_linker.chmod(0o755)
+            self.assertEqual(prepare.delivery_generation(), base)
+            paths = prepare.tool_paths()
+            self.assertEqual(prepare.delivery_generation(paths, prepare.environment(paths, write_config=None)), base)
+            stale = legacy_sdk / 'emscripten/diff'
+            stale.parent.mkdir(parents=True)
+            stale.write_text('stale legacy shadow')
+            stale.chmod(0o755)
+            self.assertEqual(prepare.delivery_generation(), base)
+            paths = prepare.tool_paths()
+            self.assertNotEqual(prepare.delivery_generation(paths, prepare.environment(paths, write_config=None)), base)
+
+    def test_prefix_preparation_refuses_generation_mismatch_before_sources(self):
+        with patch.dict(os.environ, GEOSPEC_DELIVERY_GENERATION='a' * 64), \
+                patch.object(prepare, 'room'), \
+                patch.object(prepare, 'delivery_generation', return_value='b' * 64), \
+                patch.object(prepare, 'prepare_sources') as sources:
+            with self.assertRaisesRegex(ValueError, 'Installed OCCT tools differ'):
+                prepare.prepare_prefixes(self.paths, self.env)
+            sources.assert_not_called()
 
     def test_should_refuse_changed_installed_outputs_and_cache(self):
         for path in [self.library, self.header, self.prefix / 'build/CMakeCache.txt']:

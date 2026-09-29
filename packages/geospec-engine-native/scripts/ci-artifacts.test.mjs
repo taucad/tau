@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { once } from 'node:events';
 import fs, {
-  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -15,18 +13,82 @@ import fs, {
 } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
-import { createInterface } from 'node:readline';
 import { test } from 'node:test';
 import process from 'node:process';
 /* oxlint-disable no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export. */
 import {
+  darwinGroupAlive,
   ensureDelivery,
   prepareArtifacts,
+  recoverExitedProducer,
   snapshotDelivery,
   verifyArtifacts,
   verifyDelivery,
+  withProducerMarker,
 } from './ci-artifacts.mjs';
 /* oxlint-enable no-restricted-imports -- End co-located CLI import exception. */
+
+void test('malformed process listings cannot prove a producer group exited', (context) => {
+  const listing = context.mock.method(childProcess, 'spawnSync', () => ({
+    status: 0,
+    stdout: '123 S\nmalformed row\n',
+  }));
+  assert.throws(() => darwinGroupAlive(123), /Malformed process listing/);
+  listing.mock.mockImplementation(() => ({ status: 0, stdout: undefined }));
+  assert.throws(() => darwinGroupAlive(123), /Could not prove GeoSpec producer group exit/);
+});
+
+void test('explicit delivery cache remains the exact selected path', (context) => {
+  const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
+  mkdirSync(scratch, { recursive: true });
+  const root = mkdtempSync(join(scratch, 'explicit-cache-'));
+  context.after(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  const packagePath = 'packages/geospec-engine-native/scripts';
+  for (const name of ['ci-artifacts.mjs', 'collect-native-proof.py', 'test_native_proof.py']) {
+    const path = join(root, packagePath, name);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, name);
+  }
+  context.mock.method(childProcess, 'execFileSync', (_executable, args) =>
+    args[0] === 'rev-parse' ? `${'a'.repeat(40)}\n` : '',
+  );
+  const selected = join(root, 'retained-cache');
+  const previous = process.env.GEOSPEC_DELIVERY_CACHE;
+  process.env.GEOSPEC_DELIVERY_CACHE = selected;
+  context.after(() => {
+    if (previous === undefined) {
+      delete process.env.GEOSPEC_DELIVERY_CACHE;
+    } else {
+      process.env.GEOSPEC_DELIVERY_CACHE = previous;
+    }
+  });
+  const producer = context.mock.method(childProcess, 'spawnSync', (executable, _args, options) => {
+    assert.equal(executable, 'pnpm');
+    assert.equal(options.env.GEOSPEC_DELIVERY_CACHE, selected);
+    assert.equal(options.env.GEOSPEC_DELIVERY_GENERATION, undefined);
+    return { status: 1 };
+  });
+  assert.throws(() => prepareArtifacts(root), /GeoSpec producer prepare-delivery:sources failed/);
+  assert.equal(producer.mock.callCount(), 1);
+});
+
+/** @type {(condition: () => boolean, label: string) => Promise<void>} */
+const waitForCondition = async (condition, label) =>
+  new Promise((resolve, reject) => {
+    const poll = setInterval(() => {
+      if (condition()) {
+        clearInterval(poll);
+        clearTimeout(deadline);
+        resolve();
+      }
+    }, 20);
+    const deadline = setTimeout(() => {
+      clearInterval(poll);
+      reject(new Error(`Timed out waiting for ${label}`));
+    }, 2000);
+  });
 
 /** @type {(context: import('node:test').TestContext, reusePrefixes: boolean) => void} */
 const checkTransport = (context, reusePrefixes) => {
@@ -38,13 +100,17 @@ const checkTransport = (context, reusePrefixes) => {
   });
   const producer = join(temporary, 'darwin-checkout');
   const consumer = join(temporary, 'ubuntu-checkout');
-  const mixedCache = join(producer, 'node_modules/.cache/geospec-engine-native/delivery-wasm-eh');
+  const legacyCache = join(producer, 'node_modules/.cache/geospec-engine-native/delivery-wasm-eh');
+  const generation = 'b'.repeat(64);
+  const mixedCache = join(legacyCache, 'generations', generation);
   const cargoHome = join(mixedCache, 'cargo');
   const rustPrefix = join(mixedCache, 'rust');
   const packagePath = 'packages/geospec-engine-native';
   const transportPath = 'out/artifacts/geospec-native-engine/ci';
   const snapshotPath = `${packagePath}/bindings/node/types/generated/index.d.ts`;
   const bindingPath = `${packagePath}/bindings/emscripten/src/lib.rs`;
+  const patchPath = `${packagePath}/native/occt/patches/fixture.patch`;
+  const toolchainPath = 'rust-toolchain.toml';
   const generatedPath = `${packagePath}/bindings/node/generated`;
   const mixedPath = `${packagePath}/bindings/emscripten/generated`;
   const productPath = process.env.PATH;
@@ -75,6 +141,8 @@ const checkTransport = (context, reusePrefixes) => {
   };
   put(join(producer, snapshotPath), 'fixture declaration\n');
   put(join(producer, bindingPath), 'fixture source\n');
+  put(join(producer, patchPath), 'fixture native patch\n');
+  put(join(producer, toolchainPath), 'fixture toolchain\n');
   put(join(producer, packagePath, 'scripts/ci-artifacts.mjs'), 'fixture inventory script');
   put(join(producer, packagePath, 'scripts/collect-native-proof.py'), 'inert collector source');
   put(join(producer, packagePath, 'scripts/test_native_proof.py'), 'inert positive fixture source');
@@ -90,8 +158,8 @@ const checkTransport = (context, reusePrefixes) => {
         return `${revision}\n`;
       }
       assert.ok(args.includes('--cached'));
-      assert.ok(!args.includes('--others'));
-      return `${snapshotPath}\0${bindingPath}\0`;
+      assert.ok(args.includes('--others'));
+      return `${snapshotPath}\0${bindingPath}\0${patchPath}\0${toolchainPath}\0`;
     },
   );
   /** @type {string[]} */
@@ -99,6 +167,7 @@ const checkTransport = (context, reusePrefixes) => {
   const buildCache = join(mixedCache, 'mixed-build-simd128');
   put(join(buildCache, 'attempt-0/commands.json'), 'old attempt must not be selected');
   put(join(mixedCache, 'mixed-inputs.json'), 'historical inputs must not be selected or overwritten');
+  put(join(legacyCache, 'occt-native/prefix-receipt.json'), 'retained legacy receipt');
   const nativeCache = reusePrefixes ? join(producer, 'retained-native-cache') : mixedCache;
   const nativeBuilder = join(
     producer,
@@ -121,7 +190,6 @@ const checkTransport = (context, reusePrefixes) => {
       options,
     ) => {
       if (executable === 'rustup') {
-        assert.deepEqual(options.stdio, ['inherit', 'inherit', 'inherit', 9]);
         assert.equal(options.env.PATH, productPath);
         assert.deepEqual(args, [
           'run',
@@ -140,7 +208,10 @@ const checkTransport = (context, reusePrefixes) => {
         return { status: 0 };
       }
       if (executable === 'python3') {
-        assert.deepEqual(options.stdio, ['inherit', 'inherit', 'inherit', 9]);
+        if (args[2] === 'generation') {
+          assert.equal(args[1], join(producer, packagePath, 'scripts/prepare-delivery.py'));
+          return { status: 0, stdout: `${generation}\n` };
+        }
         assert.equal(options.env.PATH, productPath);
         observations += 1;
         assert.equal(args[1], join(producer, packagePath, 'scripts/collect-native-proof.py'));
@@ -171,12 +242,11 @@ const checkTransport = (context, reusePrefixes) => {
       const command = args[2];
       assert.ok(command);
       const target = command.replace('geospec-engine-native:', '');
-      assert.deepEqual(
-        options.stdio,
-        target === 'build-node' || target === 'assemble-package'
-          ? ['inherit', 'pipe', 'pipe', 9]
-          : ['inherit', 'inherit', 'inherit', 9],
+      assert.equal(
+        options.env.GEOSPEC_DELIVERY_GENERATION,
+        target === 'prepare-delivery:reuse-native' ? undefined : generation,
       );
+      assert.equal(options.stdio, target === 'build-node' || target === 'assemble-package' ? 'pipe' : 'inherit');
       targets.push(target);
       assert.equal(options.env.GEOSPEC_OCCT_PREFIX, join(nativeCache, 'occt-native/install'));
       if (target === 'prepare-delivery:reuse-native') {
@@ -338,13 +408,13 @@ const checkTransport = (context, reusePrefixes) => {
     GEOSPEC_OCCT_PRODUCER_RECIPE: reusePrefixes ? join(producer, 'mixed-producing-recipe.json') : undefined,
     GIT_CEILING_DIRECTORIES: undefined,
     CARGO_HOME: join(producer, 'assembly-cargo-home'),
-    GEOSPEC_PRODUCER_LOCK_FD: '9',
   };
   context.after(() => {
     process.env = previousEnvironment;
   });
   assert.throws(() => verifyArtifacts(producer), /Missing GeoSpec artifact inventory/);
   const inventory = ensureDelivery(producer);
+  assert.equal(readFileSync(join(legacyCache, 'occt-native/prefix-receipt.json'), 'utf8'), 'retained legacy receipt');
   assert.deepEqual(targets, [
     'prepare-delivery:sources',
     'prepare-delivery:tools',
@@ -384,6 +454,21 @@ const checkTransport = (context, reusePrefixes) => {
     syncBuiltinESMExports();
   }
   assert.deepEqual(readdirSync(dirname(snapshot)), existingSnapshots, 'failed snapshots must be removed');
+  const sourceFile = join(producer, bindingPath);
+  const sourceBytes = readFileSync(sourceFile);
+  fs.copyFileSync = (from, to) => {
+    originalCopy(from, to);
+    writeFileSync(sourceFile, 'changed during snapshot');
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => snapshotDelivery(producer), /sources changed during snapshot/);
+  } finally {
+    writeFileSync(sourceFile, sourceBytes);
+    fs.copyFileSync = originalCopy;
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(readdirSync(dirname(snapshot)), existingSnapshots, 'source-raced snapshots must be removed');
   for (const [name, original] of [
     ['mixed-inputs.json', join(mixedCache, 'mixed-inputs-simd128.json')],
     ['mixed-commands.json', join(buildCache, 'attempt-1/commands.json')],
@@ -428,10 +513,29 @@ const checkTransport = (context, reusePrefixes) => {
   assert.throws(() => verifyArtifacts(consumer), /membership\/bytes\/hashes differ/);
   cpSync(join(producer, mixedPath), join(consumer, mixedPath), { recursive: true });
   put(join(consumer, bindingPath), 'changed input');
-  assert.throws(() => verifyArtifacts(consumer), /source revision\/inputs differ/);
+  assert.throws(() => verifyArtifacts(consumer), /source inputs differ/);
   put(join(consumer, bindingPath), 'fixture source\n');
+  put(join(consumer, patchPath), 'changed native patch');
+  assert.throws(() => verifyArtifacts(consumer), /source inputs differ/);
+  put(join(consumer, patchPath), 'fixture native patch\n');
+  put(join(consumer, toolchainPath), 'changed toolchain');
+  assert.throws(() => verifyArtifacts(consumer), /source inputs differ/);
+  put(join(consumer, toolchainPath), 'fixture toolchain\n');
   revision = 'b'.repeat(40);
-  assert.throws(() => verifyArtifacts(consumer), /source revision\/inputs differ/);
+  assert.deepEqual(
+    verifyArtifacts(consumer),
+    inventory,
+    'an unrelated HEAD change preserves the source-compatible product',
+  );
+  assert.deepEqual(verifyDelivery(consumer), inventory, 'the delivery keeps its original producer revision');
+  const revisionSnapshot = snapshotDelivery(consumer);
+  for (const name of ['root.tgz', 'darwin-arm64.tgz', 'geospec-engine-native-source-relink.tar.gz']) {
+    assert.deepEqual(
+      readFileSync(join(revisionSnapshot, 'tarballs', name)),
+      readFileSync(join(consumer, transportPath, 'assembly/tarballs', name)),
+    );
+  }
+  assert.deepEqual(targets, builtTargets, 'an unrelated HEAD change must not start a producer');
   revision = 'a'.repeat(40);
   const inventoryFile = join(consumer, transportPath, 'inventory.json');
   for (const name of ['mixed-inputs.json', 'mixed-commands.json']) {
@@ -596,132 +700,212 @@ await test('independent retained prefixes transport complete artifacts without l
   checkTransport(context, true);
 });
 
-await test('CLI producers acquire the shared lock; nested verification does not', (context) => {
-  const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
-  mkdirSync(scratch, { recursive: true });
-  const temporary = mkdtempSync(join(scratch, 'producer-lock-'));
+await test('a producer marker blocks a second waiter and clears only its unchanged successful owner', (context) => {
+  const root = mkdtempSync(join(resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts'), 'marker-'));
   context.after(() => {
-    rmSync(temporary, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
   });
-  const shim = join(temporary, 'lockf');
-  const argumentsPath = join(temporary, 'arguments');
-  writeFileSync(shim, '#!/bin/sh\nprintf "%s\\n" "$@" > "$LOCK_ARGS"\nexit 7\n');
-  chmodSync(shim, 0o755);
-  const script = resolve(import.meta.dirname, 'ci-artifacts.mjs');
-  const root = resolve(import.meta.dirname, '../../..');
-  for (const mode of ['prepare', 'ensure-delivery', 'snapshot-delivery']) {
-    const result = childProcess.spawnSync(process.execPath, [script, mode], {
-      cwd: root,
-      env: { ...process.env, PATH: `${temporary}:${process.env.PATH}`, LOCK_ARGS: argumentsPath },
-      encoding: 'utf8',
-      timeout: 5000,
+  assert.equal(
+    withProducerMarker(root, () => {
+      assert.throws(() => withProducerMarker(root, () => 'second'), /producer interrupted/);
+      return 'first';
+    }),
+    'first',
+  );
+  assert.equal(
+    withProducerMarker(root, () => 'second'),
+    'second',
+  );
+  const marker = join(root, 'node_modules/.cache/geospec-engine-native/ci-artifacts.active.json');
+  assert.throws(() => {
+    withProducerMarker(root, () => {
+      writeFileSync(marker, JSON.stringify({ owner: 'other' }));
     });
-    assert.equal(result.status, 1);
-    assert.deepEqual(readFileSync(argumentsPath, 'utf8').trim().split('\n'), ['/dev/fd/9']);
-    assert.match(result.stderr, /GeoSpec producer lock\/command failed: 7/);
-  }
-  // A held producer lock must never gate Nx's nested verifier.
-  const result = childProcess.spawnSync(
-    '/bin/sh',
-    [
-      '-c',
-      'set -e; exec 9>> "$1"; lockf /dev/fd/9; shift; exec "$@"',
-      'geospec-lock',
-      join(root, 'out/artifacts/geospec-native-engine/producer.lock'),
-      process.execPath,
-      script,
-      'verify',
-    ],
-    { cwd: root, encoding: 'utf8', timeout: 5000 },
-  );
-  assert.equal(result.error, undefined);
-  assert.ok(result.status === 0 || result.status === 1, result.stderr);
+  }, /marker changed/);
+  assert.ok(existsSync(marker), 'a conflicting marker must remain for inspection');
+  writeFileSync(marker, JSON.stringify({ owner: 'other', started: new Date(Date.now() - 61_000).toISOString() }));
+  assert.throws(() => withProducerMarker(root, () => 'age steal'), /producer interrupted/);
 });
 
-await test('producer lock serializes, then releases after failure and termination', async (context) => {
-  const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
-  mkdirSync(scratch, { recursive: true });
-  const temporary = mkdtempSync(join(scratch, 'producer-lock-processes-'));
+await test('a killed coordinator leaves a refusal while a nested Python writer survives', async (context) => {
+  const root = mkdtempSync(join(resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts'), 'nested-'));
   context.after(() => {
-    rmSync(temporary, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
   });
-  const lock = join(temporary, 'producer.lock');
-  const log = join(temporary, 'order');
-  const lockShell = 'set -e; exec 9>> "$1"; lockf /dev/fd/9; shift; exec "$@"';
-  const script =
-    'const fs = require("node:fs"); const [log, id] = process.argv.slice(1);' +
-    String.raw`fs.appendFileSync(log, "begin " + id + "\n");` +
-    String.raw`setTimeout(() => { fs.appendFileSync(log, "end " + id + "\n"); }, 100);`;
-  const run = async (id) => {
-    const child = childProcess.spawn('/bin/sh', [
-      '-c',
-      lockShell,
-      'geospec-lock',
-      lock,
-      process.execPath,
-      '-e',
-      script,
-      log,
-      id,
-    ]);
-    const [status] = /** @type {[number | null]} */ (await once(child, 'close'));
-    assert.notEqual(status, null);
-    return status;
+  const ready = join(root, 'ready');
+  const done = join(root, 'done');
+  const moduleUrl = new URL('ci-artifacts.mjs', import.meta.url).href;
+  const program = `
+    import { spawn } from 'node:child_process';
+    import { writeFileSync } from 'node:fs';
+    import { withProducerMarker } from ${JSON.stringify(moduleUrl)};
+    withProducerMarker(${JSON.stringify(root)}, () => {
+      spawn('python3', ['-c', ${JSON.stringify(`import time; time.sleep(0.6); open(${JSON.stringify(done)}, 'w').write('done')`)}], { stdio: 'ignore' });
+      writeFileSync(${JSON.stringify(ready)}, 'ready');
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);
+    });
+  `;
+  const coordinator = childProcess.spawn(process.execPath, ['--input-type=module', '-e', program], { stdio: 'ignore' });
+  /** @type {(path: string) => Promise<void>} */
+  const waitFor = async (path) => {
+    await new Promise((resolve, reject) => {
+      const pollTimer = setInterval(() => {
+        if (existsSync(path)) {
+          clearInterval(pollTimer);
+          clearTimeout(deadlineTimer);
+          resolve();
+        }
+      }, 20);
+      const deadlineTimer = setTimeout(() => {
+        clearInterval(pollTimer);
+        reject(new Error(`Timed out waiting for ${path}`));
+      }, 2000);
+    });
   };
-  assert.deepEqual(await Promise.all([run('a'), run('b')]), [0, 0]);
-  const order = readFileSync(log, 'utf8').trim().split('\n');
-  assert.match(order[0], /^begin [ab]$/);
-  assert.equal(order[1], order[0].replace('begin', 'end'));
-  assert.match(order[2], /^begin [ab]$/);
-  assert.equal(order[3], order[2].replace('begin', 'end'));
-  assert.notEqual(order[0], order[2]);
-  for (const code of ['process.exit(7)', 'process.kill(process.pid, "SIGTERM")']) {
-    const failed = childProcess.spawnSync(
-      '/bin/sh',
-      ['-c', lockShell, 'geospec-lock', lock, process.execPath, '-e', code],
-      { timeout: 5000 },
-    );
-    assert.notEqual(failed.status, 0);
-    const acquired = childProcess.spawnSync('lockf', ['-k', '-t', '0', lock, '/usr/bin/true'], { timeout: 5000 });
-    assert.equal(acquired.status, 0, String(acquired.error));
+  try {
+    await waitFor(ready);
+    coordinator.kill('SIGKILL');
+    await new Promise((resolve) => {
+      coordinator.once('exit', resolve);
+    });
+    assert.throws(() => withProducerMarker(root, () => 'unsafe second writer'), /producer interrupted/);
+    await waitFor(done);
+    assert.throws(() => withProducerMarker(root, () => 'late writer'), /producer interrupted/);
+  } finally {
+    coordinator.kill('SIGKILL');
   }
 });
 
-await test('a live mutating child retains the lock after its coordinator is killed', async (context) => {
-  const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
-  mkdirSync(scratch, { recursive: true });
-  const temporary = mkdtempSync(join(scratch, 'producer-child-lock-'));
+await test('an interrupted closed producer retries only after its process group exits', (context) => {
+  const root = mkdtempSync(join(resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts'), 'recovery-'));
   context.after(() => {
-    rmSync(temporary, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
   });
-  const lock = join(temporary, 'producer.lock');
-  const coordinatorScript =
-    'const child = require("node:child_process").spawn(process.execPath,' +
-    '["-e", "setTimeout(() => {}, 4000)"], {stdio: ["ignore", "ignore", "ignore", 9]});' +
-    String.raw`process.stdout.write(String(child.pid) + "\n"); setTimeout(() => {}, 4000);`;
-  const coordinator = childProcess.spawn(
-    '/bin/sh',
-    [
-      '-c',
-      'set -e; exec 9>> "$1"; lockf /dev/fd/9; shift; exec "$@"',
-      'geospec-lock',
-      lock,
-      process.execPath,
-      '-e',
-      coordinatorScript,
-    ],
-    { stdio: ['ignore', 'pipe', 'pipe'] },
+  const inventory = join(root, 'out/artifacts/geospec-native-engine/ci/inventory.json');
+  mkdirSync(dirname(inventory), { recursive: true });
+  writeFileSync(inventory, 'stale complete publication');
+  assert.throws(
+    () =>
+      withProducerMarker(
+        root,
+        () => {
+          throw new Error('interrupted');
+        },
+        { pgid: process.pid },
+      ),
+    /interrupted/,
   );
-  const lines = createInterface({ input: coordinator.stdout });
-  const [pidLine] = /** @type {[string]} */ (await once(lines, 'line', { signal: AbortSignal.timeout(5000) }));
-  lines.close();
-  const childPid = Number(pidLine);
-  assert.ok(Number.isSafeInteger(childPid) && childPid > 0, String(pidLine));
-  coordinator.kill('SIGTERM');
-  await once(coordinator, 'close', { signal: AbortSignal.timeout(5000) });
-  const blocked = childProcess.spawnSync('lockf', ['-k', '-t', '0', lock, '/usr/bin/true']);
-  assert.equal(blocked.status, 75, 'a later producer entered while the first child was still mutating');
-  process.kill(childPid, 'SIGTERM');
-  const released = childProcess.spawnSync('lockf', ['-k', '-t', '3', lock, '/usr/bin/true']);
-  assert.equal(released.status, 0, String(released.error));
+  assert.throws(() => recoverExitedProducer(root, () => false, 'changed recipe'), /not a recognized closed recipe/);
+  assert.throws(() => recoverExitedProducer(root, () => true), /possible writer/);
+  assert.ok(existsSync(inventory), 'a live group keeps its original evidence');
+  assert.equal(
+    recoverExitedProducer(root, () => false),
+    true,
+  );
+  assert.ok(!existsSync(inventory), 'recovery invalidates the old publication before retry');
+  assert.equal(
+    withProducerMarker(root, () => 'retry', { pgid: process.pid }),
+    'retry',
+  );
+  assert.equal(
+    recoverExitedProducer(root, () => false),
+    false,
+  );
 });
+
+await test(
+  'Darwin producer lock serializes two independent waiters',
+  { skip: process.platform !== 'darwin' },
+  async (context) => {
+    const root = mkdtempSync(join(resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts'), 'waiters-'));
+    context.after(() => {
+      rmSync(root, { recursive: true, force: true });
+    });
+    const moduleUrl = new URL('ci-artifacts.mjs', import.meta.url).href;
+    const program = `
+    import { spawnSync } from 'node:child_process';
+    import { closeSync, mkdirSync, openSync, writeFileSync } from 'node:fs';
+    import { join } from 'node:path';
+    import { withProducerMarker } from ${JSON.stringify(moduleUrl)};
+    const root = ${JSON.stringify(root)};
+    const name = process.argv[1];
+    mkdirSync(join(root, 'node_modules/.cache/geospec-engine-native'), { recursive: true });
+    const fd = openSync(join(root, 'node_modules/.cache/geospec-engine-native/ci-artifacts.lock'), 'a+');
+    const lock = spawnSync('lockf', ['3'], { stdio: ['ignore', 'ignore', 'inherit', fd] });
+    if (lock.status !== 0) process.exit(2);
+    withProducerMarker(root, () => {
+      writeFileSync(join(root, name + '.started'), 'started');
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, name === 'first' ? 250 : 1);
+      writeFileSync(join(root, name + '.done'), 'done');
+    });
+    closeSync(fd);
+  `;
+    const first = childProcess.spawn(process.execPath, ['--input-type=module', '-e', program, 'first'], {
+      stdio: 'ignore',
+    });
+    try {
+      await waitForCondition(() => existsSync(join(root, 'first.started')), 'first waiter');
+      const second = childProcess.spawn(process.execPath, ['--input-type=module', '-e', program, 'second'], {
+        stdio: 'ignore',
+      });
+      try {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 60);
+        });
+        assert.ok(!existsSync(join(root, 'second.started')), 'second waiter cannot enter during first writer');
+        await waitForCondition(() => existsSync(join(root, 'first.done')), 'first completion');
+        await waitForCondition(() => existsSync(join(root, 'second.done')), 'second completion');
+      } finally {
+        second.kill('SIGKILL');
+      }
+    } finally {
+      first.kill('SIGKILL');
+    }
+  },
+);
+
+await test(
+  'Darwin recovery waits for a nested writer in its owned group',
+  { skip: process.platform !== 'darwin' },
+  async (context) => {
+    const root = mkdtempSync(
+      join(resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts'), 'owned-group-'),
+    );
+    context.after(() => {
+      rmSync(root, { recursive: true, force: true });
+    });
+    const ready = join(root, 'ready');
+    const done = join(root, 'done');
+    const release = join(root, 'release');
+    const moduleUrl = new URL('ci-artifacts.mjs', import.meta.url).href;
+    const program = `
+    import { spawn } from 'node:child_process';
+    import { writeFileSync } from 'node:fs';
+    import { withProducerMarker } from ${JSON.stringify(moduleUrl)};
+    withProducerMarker(${JSON.stringify(root)}, () => {
+      spawn('python3', ['-c', ${JSON.stringify(`import os, time; deadline = time.monotonic() + 10; exec('while not os.path.exists(${JSON.stringify(release)}) and time.monotonic() < deadline: time.sleep(0.02)'); open(${JSON.stringify(done)}, 'w').write('done')`)}], { stdio: 'ignore' });
+      writeFileSync(${JSON.stringify(ready)}, 'ready');
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);
+    }, { pgid: process.pid });
+  `;
+    const coordinator = childProcess.spawn(process.execPath, ['--input-type=module', '-e', program], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    try {
+      await waitForCondition(() => existsSync(ready), 'owned group readiness');
+      coordinator.kill('SIGKILL');
+      await new Promise((resolve) => {
+        coordinator.once('exit', resolve);
+      });
+      assert.throws(() => recoverExitedProducer(root, darwinGroupAlive), /possible writer/);
+      writeFileSync(release, 'release');
+      await waitForCondition(() => existsSync(done), 'nested writer completion');
+      await waitForCondition(() => !darwinGroupAlive(coordinator.pid), 'owned group exit');
+      assert.equal(recoverExitedProducer(root, darwinGroupAlive), true, 'retry follows actual process-group exit');
+    } finally {
+      writeFileSync(release, 'release');
+      coordinator.kill('SIGKILL');
+    }
+  },
+);

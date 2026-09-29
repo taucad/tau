@@ -23,8 +23,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import {
   ModelComponentActionContextContent,
   ModelComponentActionDropdown,
-  MaterialSwatch,
 } from '#components/geometry/cad/model-component-action-menu.js';
+import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject } from '#hooks/use-project.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';

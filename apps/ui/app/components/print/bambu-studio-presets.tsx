@@ -1,112 +1,80 @@
-/**
- * Bambu Studio's preset pickers: printer, process and one filament per used
- * slot, as Bambu Studio offers them for the bound printer (blueprint U2, D9).
- * A pick the project's print intent holds is marked and resets like a parameter.
- *
- * @module
- */
-
-import { useId } from 'react';
+/** Bambu Studio's selected process and used filament presets, with the printer profile in More settings. */
 import type { BambuPresetSummary } from '@taucad/slicer/bambu-studio';
-import { cn } from '@taucad/ui/utils/cn';
+import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
+import type { ParameterSelectGroup } from '#components/geometry/parameters/parameter-select.js';
+import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import type { BambuStudioMode } from '#components/print/use-bambu-studio.js';
-import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
-
-const selectClass = 'h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm text-foreground';
 
 /** One used material slot as the printer reports it. @public */
 export type BambuTray = Readonly<{ slot: number; label: string; materialId?: string; color?: string }>;
 
-function PresetOptions({ presets }: { readonly presets: readonly BambuPresetSummary[] }): React.JSX.Element {
-  const own = presets.filter((preset) => preset.source === 'user');
-  const system = presets.filter((preset) => preset.source === 'system');
-  const options = (group: readonly BambuPresetSummary[]): React.JSX.Element[] =>
-    group.map((preset) => (
-      <option key={preset.name} value={preset.name}>
-        {preset.name}
-      </option>
-    ));
-  return own.length === 0 ? (
-    <>{options(system)}</>
-  ) : (
-    <>
-      <optgroup label='Your presets'>{options(own)}</optgroup>
-      <optgroup label='System presets'>{options(system)}</optgroup>
-    </>
-  );
-}
+const shortName = (name: string): string => name.replace(/ @BBL X1C$/u, '');
 
-function PresetSelect({
+const presetGroups = (presets: readonly BambuPresetSummary[], selected: string): readonly ParameterSelectGroup[] => {
+  const listed = presets.some(({ name }) => name === selected)
+    ? presets
+    : [{ name: selected, kind: 'process', source: 'system' } satisfies BambuPresetSummary, ...presets];
+  const options = (source: BambuPresetSummary['source']) =>
+    listed
+      .filter((preset) => preset.source === source)
+      .map((preset) => ({
+        value: preset.name,
+        label: shortName(preset.name),
+        ...(preset.layerHeight === undefined ? {} : { secondary: `${String(preset.layerHeight)} mm` }),
+      }));
+  const own = options('user');
+  const system = options('system');
+  return own.length === 0
+    ? [{ options: system }]
+    : [
+        { label: 'Your presets', options: own },
+        { label: 'System presets', options: system },
+      ];
+};
+
+function PresetRow({
   label,
   value,
   presets,
+  swatch,
+  description,
   isModified,
   onChange,
   onReset,
-  children,
 }: {
   readonly label: string;
   readonly value: string;
   readonly presets: readonly BambuPresetSummary[];
-  /** Whether the print intent holds this pick. */
+  readonly swatch?: string;
+  readonly description?: string;
   readonly isModified: boolean;
   readonly onChange: (name: string) => void;
   readonly onReset: () => void;
-  readonly children?: React.ReactNode;
 }): React.JSX.Element {
-  const id = useId();
-  // The selected preset stays listed even when the catalog narrows past it.
-  const listed = presets.some((preset) => preset.name === value)
-    ? presets
-    : [{ name: value, kind: 'process', source: 'system' } satisfies BambuPresetSummary, ...presets];
   return (
-    <div className='flex min-w-0 flex-col gap-1 text-xs text-muted-foreground'>
-      {/* The reset sits beside the label, never inside it: a label holds only the control it names. */}
-      <div className='flex min-w-0 items-center gap-1.5'>
-        <label
-          htmlFor={id}
-          className={cn('flex min-w-0 items-center gap-1.5', isModified && 'font-medium text-foreground')}
-        >
-          {children ?? label}
-        </label>
-        {isModified ? <ModifiedIndicator onReset={onReset} tooltip={`Reset ${label}`} /> : null}
-      </div>
-      <select
-        id={id}
-        aria-label={label}
-        className={selectClass}
-        value={value}
-        onChange={(event) => {
-          onChange(event.target.value);
-        }}
-      >
-        <PresetOptions presets={listed} />
-      </select>
-    </div>
+    <PrintSetupRow label={label} swatch={swatch} description={description} isModified={isModified} onReset={onReset}>
+      <ParameterSelect label={label} value={value} groups={presetGroups(presets, value)} onChange={onChange} />
+    </PrintSetupRow>
   );
 }
 
-/**
- * Printer, process and per-slot filament presets for Bambu Studio.
- *
- * @param properties - The Bambu Studio mode and the used trays in slot order.
- * @returns The pickers, or nothing until a selection has resolved.
- * @public
- */
+/** The selected presets are still written through the existing print-intent adapter. @public */
 export function BambuStudioPresets({
   studio,
   trays,
+  mode = 'primary',
 }: {
   readonly studio: BambuStudioMode;
   readonly trays: readonly BambuTray[];
+  readonly mode?: 'primary' | 'printer';
 }): React.JSX.Element | undefined {
   const { selection, chosen, resetChoice } = studio;
   if (!selection) {
     return undefined;
   }
-  return (
-    <div role='group' aria-label='Bambu Studio presets' className='flex min-w-0 flex-col gap-2'>
-      <PresetSelect
+  if (mode === 'printer') {
+    return (
+      <PresetRow
         label='Printer preset'
         value={selection.printer}
         presets={studio.printers}
@@ -116,11 +84,15 @@ export function BambuStudioPresets({
           resetChoice('printer');
         }}
       />
-      <PresetSelect
-        label='Process preset'
+    );
+  }
+  return (
+    <div role='group' aria-label='Bambu Studio presets' className='flex min-w-0 flex-col gap-1'>
+      <PresetRow
+        label='Process'
         value={selection.process}
         presets={studio.processes}
-        isModified={chosen.process !== undefined}
+        isModified={chosen.process !== undefined || chosen.preset !== undefined}
         onChange={studio.chooseProcess}
         onReset={() => {
           resetChoice('process');
@@ -132,11 +104,13 @@ export function BambuStudioPresets({
           return null;
         }
         return (
-          <PresetSelect
+          <PresetRow
             key={tray.slot}
-            label={`Filament preset for ${tray.label}`}
+            label={`Filament ${tray.label}`}
             value={filament}
             presets={studio.filaments}
+            swatch={tray.color}
+            description={chosen.filaments?.[tray.slot] === undefined ? 'Synced from the AMS.' : undefined}
             isModified={chosen.filaments?.[tray.slot] !== undefined}
             onChange={(name) => {
               studio.chooseFilament(tray.slot, name);
@@ -144,18 +118,7 @@ export function BambuStudioPresets({
             onReset={() => {
               studio.resetFilament(tray.slot);
             }}
-          >
-            {`Filament ${tray.label}`}
-            {tray.color ? (
-              <span
-                aria-hidden
-                className='size-2.5 rounded-full border border-border/70'
-                // Observed filament color is user data, not chrome (ui-policy §5).
-                style={{ backgroundColor: tray.color }}
-              />
-            ) : null}
-            {tray.materialId ? <span className='text-foreground'>{tray.materialId}</span> : null}
-          </PresetSelect>
+          />
         );
       })}
     </div>

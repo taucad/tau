@@ -32,7 +32,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { useTheme } from '#hooks/use-theme.js';
 import { digestBytes } from '#utils/crypto.utils.js';
 import { PaneButton } from '#components/ui/pane-button.js';
-import { MaterialSwatch } from '#components/geometry/cad/model-component-action-menu.js';
+import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import { printerAccent } from '#components/printer/printer-colors.constants.js';
 import type { PrinterFileKind } from '#components/printer/printer-file.js';
 import { derivePrinterGeometry } from '#components/printer/printer-geometry.js';

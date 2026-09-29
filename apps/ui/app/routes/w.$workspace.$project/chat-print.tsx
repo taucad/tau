@@ -1,15 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
-import {
-  CircleAlert,
-  CircleCheck,
-  LoaderCircle,
-  PauseCircle,
-  Printer,
-  RefreshCw,
-  ScanSearch,
-  Send,
-  Scissors,
-} from 'lucide-react';
+import { useCallback, useMemo, useState } from 'react';
+import { CircleAlert, CircleCheck, LoaderCircle, PauseCircle, Printer, RefreshCw } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type {
   MachineClient,
@@ -23,17 +13,17 @@ import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Progress } from '@taucad/ui/components/progress';
 import { cn } from '@taucad/ui/utils/cn';
+import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
 import { usePrintApprovalBridge } from '#hooks/use-machines-approvals.js';
 import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
-import { isOpenPrintRequest, useMachinesPrintRequests } from '#hooks/use-machines-print-requests.js';
+import { useMachinesPrintRequests } from '#hooks/use-machines-print-requests.js';
 import { useMachinesSelection } from '#hooks/use-machines-selection.js';
 import { useProject } from '#hooks/use-project.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import {
   ActivitySection,
-  ControlsSection,
   InspectSection,
   MonitorSection,
   describeRun,
@@ -41,7 +31,7 @@ import {
 import type { LedgerEntry } from '#routes/w.$workspace.$project/chat-print-monitor.js';
 import { PrepareSection, usePrintPrepare } from '#routes/w.$workspace.$project/chat-print-prepare.js';
 import type { PrintPrepare } from '#routes/w.$workspace.$project/chat-print-prepare.js';
-import { PrintNotice, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
+import { PrintDisclosure, PrintNotice, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
 import { SendSection } from '#routes/w.$workspace.$project/chat-print-send.js';
 import { formatAge } from '#routes/w.$workspace.$project/chat-print-summary.js';
 
@@ -182,50 +172,18 @@ export const nextAction = ({
   return { label: prepare.slice ? 'Slice again' : 'Slice and preview', kind: 'slice' };
 };
 
-const nextActionIcon: Record<NextAction['kind'], LucideIcon | undefined> = {
-  slice: Scissors,
-  send: Send,
-  review: ScanSearch,
-  none: undefined,
-};
-
 function MachineCard({
   entry,
-  openRequest,
   prepare,
-  onReview,
 }: {
   readonly entry: MachineDirectoryEntry;
-  readonly openRequest: PrintRequest | undefined;
   readonly prepare: PrintPrepare;
-  readonly onReview: () => void;
 }): React.JSX.Element {
   const presentation = presentMachine(entry);
-  const action = nextAction({ entry, openRequest, prepare });
   const { run } = entry.snapshot;
   const runLine = describeRun(entry);
   const model = run && (run.state === 'printing' || run.state === 'paused') ? (run.file ?? run.name) : undefined;
   const Icon = presentation.icon;
-  const ActionIcon = nextActionIcon[action.kind];
-  const act = (): void => {
-    switch (action.kind) {
-      case 'slice': {
-        void prepare.sliceNow();
-        break;
-      }
-      case 'send': {
-        prepare.confirmSend();
-        break;
-      }
-      case 'review': {
-        onReview();
-        break;
-      }
-      default: {
-        break;
-      }
-    }
-  };
 
   return (
     <article aria-label={`${entry.name}, ${presentation.label}`} className='flex min-w-0 flex-col gap-2'>
@@ -264,16 +222,6 @@ function MachineCard({
           <dd className='min-w-0 flex-1'>{presentation.nextAction}</dd>
         </div>
       </dl>
-      {action.kind === 'none' ? (
-        <p className='text-xs text-muted-foreground' role='status'>
-          {action.label}
-        </p>
-      ) : (
-        <Button type='button' size='sm' className='self-start' onClick={act}>
-          {ActionIcon ? <ActionIcon aria-hidden /> : null}
-          {action.label}
-        </Button>
-      )}
     </article>
   );
 }
@@ -340,7 +288,6 @@ function ConnectedPrintPanel({
   const manifest = provider?.manifest;
   /* This project's requests only (blueprint D5): the host filters by the id its artifacts carry. */
   const { requests, error: requestsError } = useMachinesPrintRequests(client, selected?.machineId, projectId);
-  const openRequest = requests.find((request) => isOpenPrintRequest(request));
   const [ledger, setLedger] = useState<readonly LedgerEntry[]>([]);
   const record = useCallback((next: LedgerEntry) => {
     setLedger((current) => [next, ...current].slice(0, 50));
@@ -357,41 +304,45 @@ function ConnectedPrintPanel({
     },
     [record],
   );
-  const sendRef = useRef<HTMLElement>(null);
-  const review = useCallback(() => {
-    sendRef.current?.scrollIntoView({ block: 'nearest' });
-    sendRef.current?.focus();
-  }, []);
   const prepare = usePrintPrepare({ client, entry: selected, provider, manifest, isShown });
   const latestReceipt = ledger.find((entry) => entry.kind === 'receipt');
+  const headerPresentation = selected ? presentMachine(selected) : undefined;
+  const HeaderIcon = headerPresentation?.icon ?? Printer;
+  const runActive = selected?.snapshot.run?.state === 'printing' || selected?.snapshot.run?.state === 'paused';
 
   return (
-    <div data-slot='print-panel-body' className='flex size-full min-h-0 min-w-0 flex-col overflow-hidden bg-sidebar'>
+    <div
+      data-slot='print-panel-body'
+      className='flex size-full min-h-0 min-w-0 flex-col overflow-hidden bg-sidebar'
+      style={
+        {
+          '--param-field-h': '1.5rem',
+          '--param-field-radius': 'var(--radius-md)',
+          '--param-field-color': 'var(--color-muted-foreground)',
+          '--param-field-color-focus': 'var(--color-foreground)',
+        } as React.CSSProperties
+      }
+    >
       <div className='flex min-h-10 shrink-0 items-center gap-2 border-b border-border/70 px-3 text-xs text-muted-foreground'>
-        <Printer aria-hidden className='size-3.5 shrink-0' />
-        {entries.length > 1 ? (
-          <label className='flex min-w-0 flex-1 items-center gap-2'>
-            <span className='sr-only'>Machine</span>
-            <select
-              aria-label='Machine'
-              className='h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground'
-              value={selected?.machineId ?? ''}
-              onChange={(event) => {
-                select(event.target.value);
-              }}
-            >
-              {entries.map((entry) => (
-                <option key={entry.machineId} value={entry.machineId}>
-                  {entry.name}
-                </option>
-              ))}
-            </select>
-          </label>
+        <HeaderIcon aria-hidden className={cn('size-3.5 shrink-0', headerPresentation?.iconClassName)} />
+        {entries.length > 0 ? (
+          <ParameterSelect
+            label='Machine'
+            value={selected?.machineId ?? ''}
+            groups={[
+              {
+                label: 'Printers on this computer',
+                options: entries.map((entry) => ({
+                  value: entry.machineId,
+                  label: entry.name,
+                  secondary: presentMachine(entry).label,
+                })),
+              },
+            ]}
+            onChange={select}
+          />
         ) : (
-          <span className='min-w-0 flex-1 truncate'>
-            <strong className='font-medium text-foreground'>{entries.length}</strong>{' '}
-            {entries.length === 1 ? 'machine' : 'machines'}
-          </span>
+          <span className='min-w-0 flex-1'>No printers</span>
         )}
         <Button type='button' size='xs' variant='ghost' onClick={refresh}>
           <RefreshCw aria-hidden />
@@ -416,9 +367,8 @@ function ConnectedPrintPanel({
         {snapshot && entries.length === 0 ? <NoMachines /> : null}
         {selected ? (
           <div className='flex min-w-0 flex-col gap-3'>
-            <MachineCard entry={selected} openRequest={openRequest} prepare={prepare} onReview={review} />
+            <MachineCard entry={selected} prepare={prepare} />
             <SendSection
-              ref={sendRef}
               client={client}
               entry={selected}
               manifest={manifest}
@@ -426,9 +376,14 @@ function ConnectedPrintPanel({
               bridge={bridge}
               onReconciled={recordReconciled}
             />
-            <PrepareSection entry={selected} provider={provider} manifest={manifest} prepare={prepare} />
-            <MonitorSection client={client} entry={selected} manifest={manifest} requests={requests} />
-            <ControlsSection
+            {runActive ? (
+              <PrintDisclosure title='Prepare the next print'>
+                <PrepareSection entry={selected} provider={provider} manifest={manifest} prepare={prepare} />
+              </PrintDisclosure>
+            ) : (
+              <PrepareSection entry={selected} provider={provider} manifest={manifest} prepare={prepare} />
+            )}
+            <MonitorSection
               client={client}
               entry={selected}
               manifest={manifest}

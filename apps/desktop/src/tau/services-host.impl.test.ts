@@ -1355,6 +1355,47 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     },
   );
 
+  it.each(['legacy', 'native'] as const)(
+    'routes the %s GeoSpec runner through the supervised geometry port',
+    async (geoSpecEngine) => {
+      const geometryChannel = new MessageChannel();
+      const requestGeometryPort = vi.fn(async () => geometryChannel.port1 as unknown as UtilityPort);
+      const requestRuntimePort = vi.fn(async () => {
+        throw new Error('GeoSpec must not request a runtime port from services.');
+      });
+      const { host, physicalRoot, workspaceRoot } = await configuredHost(
+        {},
+        { requestGeometryPort, requestRuntimePort },
+      );
+      const client = connect(host, workspaceRoot, 'proj_test', geoSpecEngine);
+      await expect(attachUnwritten(client, `chat-geospec-${geoSpecEngine}`)).resolves.toMatchObject(unwrittenAttach);
+      const runnerOption = projectHostCalls[0]!.host().geospecRunner;
+      if (!runnerOption) {
+        throw new Error('The desktop project host has no GeoSpec runner.');
+      }
+      const runner = await runnerOption(physicalRoot);
+      const received = vi.fn();
+      geometryChannel.port2.on('message', (message) => {
+        received(message);
+        geometryChannel.port2.postMessage({
+          type: 'result',
+          result: { success: true, passed: 1, failed: 0, selectedTests: 1, files: [] },
+          sourceRevisions: [],
+        });
+      });
+      try {
+        expect(requestGeometryPort).toHaveBeenCalledWith(physicalRoot, geoSpecEngine);
+        expect(requestRuntimePort).not.toHaveBeenCalled();
+        expect(runtimeClientCalls).toHaveLength(0);
+        await expect(runner.run({ files: ['model.test.ts'] })).resolves.toMatchObject({ success: true });
+        expect(received).toHaveBeenCalledWith({ type: 'run', options: { files: ['model.test.ts'] } });
+      } finally {
+        await runner.close();
+        geometryChannel.port2.close();
+      }
+    },
+  );
+
   it('should refuse an invalid GeoSpec engine before opening a project host', async () => {
     const { host, log, workspaceRoot } = await configuredHost();
     const port = stubPort();

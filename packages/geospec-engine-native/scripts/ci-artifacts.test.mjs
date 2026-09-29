@@ -258,8 +258,9 @@ const checkTransport = (context, reusePrefixes) => {
       assert.deepEqual(
         args.slice(3),
         target === 'build' || target === 'assemble-package' ? ['--excludeTaskDependencies'] : [],
-        'only the producer-owned build and assembly skip task dependencies',
+        'only the explicit facade build and assembly may omit recursive task dependencies',
       );
+      assert.notEqual(target, 'require-geospec-artifacts', 'producer must not recursively verify its own lock');
       assert.equal(
         options.env.GEOSPEC_DELIVERY_GENERATION,
         target === 'prepare-delivery:reuse-native' ? undefined : generation,
@@ -290,8 +291,11 @@ const checkTransport = (context, reusePrefixes) => {
         assert.equal(options.env.GIT_CEILING_DIRECTORIES, undefined);
       }
       if (target === 'assemble-package') {
-        assert.ok(targets.includes('build'), 'assembly must follow the producer-owned dist build');
+        // The explicit dependency-excluded build must have produced package facades first.
         verifyArtifacts(producer);
+        for (const name of ['index.mjs', 'node.mjs', 'wasm.mjs']) {
+          assert.ok(existsSync(join(producer, packagePath, 'dist', name)), `missing built facade: ${name}`);
+        }
         assert.equal(observations, 1);
         assert.equal(pythonFetches, 1);
         assert.equal(options.env.CARGO_HOME, join(producer, 'assembly-cargo-home'));
@@ -305,7 +309,11 @@ const checkTransport = (context, reusePrefixes) => {
       if (target === 'build') {
         assert.ok(targets.includes('build-wasm'), 'dist build must follow the mixed WASM producer');
         verifyArtifacts(producer);
-        assert.equal(observations, 0, 'dist build follows verified inventory before native proof collection');
+        assert.equal(observations, 1, 'native proof must precede facade build');
+        assert.equal(pythonFetches, 1, 'locked Python material must precede facade build');
+        for (const name of ['index.mjs', 'node.mjs', 'wasm.mjs']) {
+          put(join(producer, packagePath, 'dist', name), `inert fresh ${name}`);
+        }
       }
       if (target === 'build-node') {
         assert.equal(options.env.GEOSPEC_NODE_MANIFEST, 'bindings/node/Cargo.toml');

@@ -630,8 +630,6 @@ export const prepareArtifacts = (root) => {
   checkReceipt(root, inventory);
   publishInventory(root, inventory);
   verifyArtifacts(root);
-  // The producer owns the inventory lock; these internal tasks must not recurse into its verify dependency.
-  run('build');
   // The collector is a source-owned adaptation of the accepted ordinary identity observation.
   // It runs only on the real producer; pure tests replace this subprocess with inert metadata.
   const proofDirectory = resolve(root, transportPath, 'native-proof');
@@ -669,6 +667,9 @@ export const prepareArtifacts = (root) => {
     { cwd: root, stdio: producerStdio(), env: environment },
   );
   assert.ok(pythonSources.status === 0, 'Locked Python Cargo material fetch failed.');
+  // Build the JS facades from this attempt's fresh generated bindings without
+  // re-entering require-geospec-artifacts while this producer owns its lock.
+  run('build');
   const assemblyOutput = run('assemble-package');
   const selections = [...assemblyOutput.matchAll(/^ASSEMBLY_ROOT=(.+)$/gm)].map((match) => match[1]?.trim());
   assert.ok(

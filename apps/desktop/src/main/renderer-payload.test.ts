@@ -5,8 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createPackage } from '@electron/asar';
+import { build } from 'vite';
 // oxlint-disable-next-line no-restricted-imports -- the test directly owns this project-local operator script.
 import { inspectDesktopPayload } from '../../scripts/check-renderer-payload.mjs';
+/* eslint-disable @nx/enforce-module-boundaries -- this negative fixture must invoke the actual UI graph producer. */
+// oxlint-disable-next-line no-restricted-imports -- this fixture exercises the UI-owned graph producer against the desktop gate.
+import { createUiSourceAliasPlugin } from '../../../ui/vite.config.js';
+/* eslint-enable @nx/enforce-module-boundaries -- restore normal desktop import boundaries. */
 
 const roots: string[] = [];
 const require = createRequire(import.meta.url);
@@ -299,6 +304,41 @@ describe('Desktop renderer ownership', () => {
 
     const report = await inspectDesktopPayload(paths);
     expect(report.violations.filter((violation) => violation.startsWith('Forbidden web surface'))).toHaveLength(7);
+  });
+
+  it.each([
+    ['static import', "import { value } from 'virtual:web'; document.body.dataset.value = value;"],
+    ['dynamic import', "void import('virtual:web').then(({ value }) => { document.body.dataset.value = value; });"],
+    ['re-export', "import { value } from './bridge.js'; document.body.dataset.value = value;"],
+  ])('should reject a web consent module reached through %s in a real Vite graph', async (_kind, entry) => {
+    const paths = await fixture();
+    const source = join(paths.root, 'source');
+    await mkdir(source);
+    await writeFile(join(source, 'entry.js'), entry);
+    await writeFile(join(source, 'bridge.js'), "export { value } from 'virtual:web';");
+    await build({
+      configFile: false,
+      root: source,
+      logLevel: 'silent',
+      plugins: [
+        {
+          name: 'web-module-fixture',
+          resolveId(id) {
+            return id === 'virtual:web' ? '\0apps/ui/app/lib/posthog.lib.ts' : null;
+          },
+          load(id) {
+            return id === '\0apps/ui/app/lib/posthog.lib.ts'
+              ? "document.body.dataset.webLoaded = 'true'; export const value = 'web';"
+              : null;
+          },
+        },
+        createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop' }),
+      ],
+      build: { outDir: paths.renderer, emptyOutDir: true, rollupOptions: { input: join(source, 'entry.js') } },
+    });
+    const report = await inspectDesktopPayload(paths);
+    expect(report.violations).toContainEqual(expect.stringContaining('Forbidden web surface'));
+    expect(report.violations.join('\n')).toContain('apps/ui/app/lib/posthog.lib.ts');
   });
 
   it('should reject web-only metadata from desktop HTML', async () => {

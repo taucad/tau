@@ -270,3 +270,69 @@ describe('Replicad — STEP appearance', () => {
     expect(extractStepColours(stepText)).toEqual([colourKey([0.2, 0.4, 0.8])]);
   });
 });
+
+describe('Replicad — STEP physical density', () => {
+  it('should share one exact prototype when both occurrences declare the same density', async () => {
+    const stepText = await exportStepText(`
+      import { makeBox } from 'replicad';
+      export default function main() {
+        const box = makeBox([0, 0, 0], [10, 8, 6]);
+        return [
+          { shape: box.clone(), name: 'first', density: 1.55 },
+          { shape: box.clone().translate([20, 0, 0]), name: 'second', density: 1.55 },
+        ];
+      }
+    `);
+    expect(extractStepEvidence(stepText).products).toEqual(['assembly', 'first']);
+    expect([...stepText.matchAll(/NEXT_ASSEMBLY_USAGE_OCCURRENCE/g)]).toHaveLength(2);
+    expect([...stepText.matchAll(/POSITIVE_RATIO_MEASURE\(1\.55\)/g)]).toHaveLength(1);
+  });
+
+  it('should reject conflicting densities for occurrences sharing one exact prototype', async () => {
+    await expect(
+      exportStepText(`
+      import { makeBox } from 'replicad';
+      export default function main() {
+        const box = makeBox([0, 0, 0], [10, 8, 6]);
+        return [
+          { shape: box.clone(), name: 'aluminium', density: 1.55 },
+          { shape: box.clone().translate([20, 0, 0]), name: 'steel', density: 7.85 },
+        ];
+      }
+    `),
+    ).rejects.toThrow(/conflicting densities/);
+  });
+
+  it.each([
+    [undefined, 1.55],
+    [1.55, undefined],
+  ])('should reject missing and known density in either order: %s then %s', async (first, second) => {
+    const densityField = (value: number | undefined): string => (value === undefined ? '' : `, density: ${value}`);
+    await expect(
+      exportStepText(`
+      import { makeBox } from 'replicad';
+      export default function main() {
+        const box = makeBox([0, 0, 0], [10, 8, 6]);
+        return [
+          { shape: box.clone(), name: 'first'${densityField(first)} },
+          { shape: box.clone().translate([20, 0, 0]), name: 'second'${densityField(second)} },
+        ];
+      }
+    `),
+    ).rejects.toThrow(/conflicting densities/);
+  });
+
+  it.each(['-1', '0', 'Number.NaN', 'Number.POSITIVE_INFINITY'])(
+    'should reject invalid density %s instead of silently omitting it',
+    async (density) => {
+      await expect(
+        exportStepText(`
+        import { makeBox } from 'replicad';
+        export default function main() {
+          return { shape: makeBox([0, 0, 0], [10, 8, 6]), name: 'invalid', density: ${density} };
+        }
+      `),
+      ).rejects.toThrow(/finite positive density/);
+    },
+  );
+});

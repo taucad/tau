@@ -593,12 +593,9 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
    * @throws ElectronRuntimeUtilityLimitError When the broker is already at its cap.
    */
   const acquireUtility = (utilityEntry: string, env: ForkOptions['env'], key: string): LiveUtility => {
-    if (spare !== undefined && spare.key !== key) {
-      /* The pool follows the contexts this application actually forks: a spare
-       * no request can adopt is memory, not warmth. */
-      releaseSpare();
-    }
-    if (spare === undefined) {
+    if (spare === undefined || spare.key !== key) {
+      /* A different context (for example a thumbnail) forks independently;
+       * it must not evict the explicitly prewarmed project utility. */
       if (liveUtilities.size >= maxUtilities) {
         throw new ElectronRuntimeUtilityLimitError(maxUtilities);
       }

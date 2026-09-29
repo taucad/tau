@@ -12,7 +12,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import type { Chat } from '@ai-sdk/react';
-import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
+import type { CadAgentConfigInput, CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
@@ -85,9 +85,14 @@ vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: vi.fn(),
   useChatSelector: vi.fn(),
 }));
+const composerHarness = vi.hoisted((): { execution: CadAgentExecution } => ({
+  execution: { kind: 'tau', model: 'openai-gpt-5.5' },
+}));
+
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useActiveChatSession: vi.fn(),
   useChatComposer: () => ({
+    execution: { execution: composerHarness.execution },
     model: {
       model: {
         id: 'openai-gpt-5.5',
@@ -242,6 +247,7 @@ const buildActions = (): ActionsMock => ({
 });
 
 const mountAgentMock = (agent: CadAgentConfigInput): void => {
+  composerHarness.execution = agent.execution;
   useCadAgentConfigMock.mockReturnValue(agent);
 };
 
@@ -378,7 +384,14 @@ describe('admission against the placement book a real discovery pass filled', ()
     // No run this transport is driving: `getBrowserAgentHostRun` answers nothing.
     browserHostHarness.run = undefined;
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderHook(() => useCadChatClient(), {
+      wrapper: ({ children }) => (
+        <>
+          <ChatTurnHost />
+          {children}
+        </>
+      ),
+    });
     await act(async () => {
       await result.current.respondToToolApproval('approval-1', true);
     });

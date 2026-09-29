@@ -397,7 +397,7 @@ describe('Electron main runtime helpers', () => {
     liveUtilities.length = 0;
   });
 
-  it('should restore the warm spare after an ephemeral request spent it', async () => {
+  it('keeps the preferred spare warm across ephemeral requests', async () => {
     const { registerElectronRuntimeMain } = await import('#electron/main.js');
     liveUtilities.length = 0;
     const handle = registerElectronRuntimeMain({
@@ -407,17 +407,43 @@ describe('Electron main runtime helpers', () => {
     });
 
     handle.prewarm();
-    /* A thumbnail resolves its own environment, so the spare it cannot serve is
-     * killed and the request forks cold. */
+    /* Thumbnail contexts fork separately without evicting the project spare. */
     handle.connect({ purpose: 'main-process-client', context: { ephemeral: '1' } });
-    expect(liveUtilities[0]?.kill).toHaveBeenCalledOnce();
+    expect(liveUtilities[0]?.kill).not.toHaveBeenCalled();
+    expect(liveUtilities[0]?.postMessage).not.toHaveBeenCalled();
     expect(liveUtilities[1]?.postMessage).toHaveBeenCalledOnce();
-
-    /* The pool the application asked for outlives that request: the next project
-     * open is still served warm. */
+    handle.connect({ purpose: 'main-process-client', context: { ephemeral: '1' } });
     expect(liveUtilities).toHaveLength(3);
+    expect(liveUtilities[0]?.kill).not.toHaveBeenCalled();
+
+    /* The next project open still adopts the original prewarmed utility. */
     handle.connect({ purpose: 'main-process-client' });
-    expect(liveUtilities[2]?.postMessage).toHaveBeenCalledOnce();
+    expect(liveUtilities[0]?.postMessage).toHaveBeenCalledOnce();
+    expect(liveUtilities).toHaveLength(4);
+    expect(liveUtilities[3]?.postMessage).not.toHaveBeenCalled();
+
+    handle.dispose();
+    liveUtilities.length = 0;
+  });
+
+  it('refuses a mismatched fork at the live cap without evicting the preferred spare', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    liveUtilities.length = 0;
+    const handle = registerElectronRuntimeMain({
+      utilityEntry: '/dist/main/kernel-host.js',
+      maxUtilities: 1,
+      forkEnvAllowlist: [tauElectronDebugEnvName],
+      resolveFork: (context) => (context['ephemeral'] === '1' ? { env: { [tauElectronDebugEnvName]: '1' } } : {}),
+    });
+
+    handle.prewarm();
+    handle.connect({ purpose: 'main-process-client', context: { ephemeral: '1' } });
+    expect(() => handle.connect({ purpose: 'main-process-client', context: { ephemeral: '1' } })).toThrow(
+      /1 utility processes/u,
+    );
+    expect(liveUtilities).toHaveLength(2);
+    expect(liveUtilities[0]?.kill).not.toHaveBeenCalled();
+    expect(liveUtilities[0]?.postMessage).not.toHaveBeenCalled();
 
     handle.dispose();
     liveUtilities.length = 0;

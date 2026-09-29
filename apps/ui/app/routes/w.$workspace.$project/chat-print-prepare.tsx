@@ -32,6 +32,9 @@ import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { compileExportConfigurationManifest } from '#routes/w.$workspace.$project/chat-converter.js';
+import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { awaitFreshRender } from '#machines/await-fresh-render.js';
+import { selectCadFailureIssues } from '#machines/cad.machine.js';
 import {
   PrintDisclosure,
   PrintNotice,
@@ -385,19 +388,36 @@ export const usePrintPrepare = ({
   entry,
   provider,
   manifest,
+  isShown = true,
 }: {
   readonly client: MachineClient;
   readonly entry: MachineDirectoryEntry | undefined;
   readonly provider: MachineProvider | undefined;
   readonly manifest: MachineManifest | undefined;
+  readonly isShown?: boolean;
 }): PrintPrepare => {
-  const { projectId, geometryUnits, mainEntryPath, editorRef } = useProject();
+  const { projectId, projectRef, geometryUnits, mainEntryPath, editorRef } = useProject();
   const fileManager = useFileManager();
   const [chosenEntryPath, setEntryPath] = useState<string>();
+  const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
+  const entryPaths = useMemo(
+    () => listGeometryEntryPaths(geometryUnits, viewSettings, mainEntryPath),
+    [geometryUnits, viewSettings, mainEntryPath],
+  );
   const entryPath =
-    chosenEntryPath !== undefined && geometryUnits.has(chosenEntryPath) ? chosenEntryPath : mainEntryPath;
-  const entryPaths = useMemo(() => [...geometryUnits.keys()], [geometryUnits]);
-  const actor = geometryUnits.get(entryPath);
+    chosenEntryPath !== undefined && entryPaths.includes(chosenEntryPath) ? chosenEntryPath : mainEntryPath;
+  const renderTimeout = useSelector(editorRef, (state) => state.context.unitSettings[entryPath]?.renderTimeout);
+  useEffect(() => {
+    if (!isShown || !entryPath) {
+      return;
+    }
+    const claimId = randomUuid();
+    projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath, renderTimeout });
+    return () => {
+      projectRef.send({ type: 'releaseGeometryUnit', claimId });
+    };
+  }, [entryPath, isShown, projectRef, renderTimeout]);
+  const actor = useSelector(projectRef, (state) => state.context.geometryUnits.get(entryPath));
   const kernelClient = useSelector(actor, (state) => state?.context.kernelClient);
   const activeKernelId = useSelector(actor, (state) => state?.context.activeKernelId);
   const capabilities = useSelector(actor, (state) => state?.context.capabilities);
@@ -554,13 +574,35 @@ export const usePrintPrepare = ({
         : undefined;
 
   const sliceNow = useCallback(async (): Promise<void> => {
-    if (!kernelClient || !route || sliceOptions === undefined) {
+    if (!actor || !kernelClient || !route || sliceOptions === undefined) {
       return;
     }
+    const claimId = randomUuid();
+    projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath, renderTimeout });
     setIsSlicing(true);
     setFailedSlice(undefined);
+    let sliceGeometry = geometry;
     try {
-      const result = await exportWithRuntimeValidatedInput(kernelClient, route, { exportOptions: sliceOptions });
+      const settled = await awaitFreshRender(actor);
+      const failedIssues = selectCadFailureIssues(settled);
+      if (failedIssues) {
+        throw new Error(failedIssues.map((issue) => issue.message).join('; ') || 'The selected CAD render failed');
+      }
+      if (settled.context.latestGeometryOutcome !== 'success') {
+        throw new Error(`No current successful geometry is available for ${entryPath}`);
+      }
+      sliceGeometry = settled.context.geometry;
+      const freshKernelClient = settled.context.kernelClient;
+      const freshKernelId = settled.context.activeKernelId;
+      const freshRoute = freshKernelClient
+        ? bestRouteForActiveKernel(freshKernelClient, gcodeContainerFormat, freshKernelId)
+        : undefined;
+      if (!freshKernelClient || !freshRoute) {
+        throw new Error('The selected CAD runtime is unavailable');
+      }
+      const result = await exportWithRuntimeValidatedInput(freshKernelClient, freshRoute, {
+        exportOptions: sliceOptions,
+      });
       if (!result.success) {
         throw new Error(result.issues.map((issue) => issue.message).join('; ') || 'Slicing failed.');
       }
@@ -586,7 +628,7 @@ export const usePrintPrepare = ({
         digest,
         length: file.bytes.byteLength,
         mimeType: file.mimeType,
-        geometry,
+        geometry: sliceGeometry,
         optionsKey,
         summary,
         /* A plate too large to preview has no bounds to check; the printer checks its own. */
@@ -597,11 +639,24 @@ export const usePrintPrepare = ({
         warnings,
       });
     } catch (error) {
-      setFailedSlice({ message: error instanceof Error ? error.message : String(error), geometry });
+      setFailedSlice({ message: error instanceof Error ? error.message : String(error), geometry: sliceGeometry });
     } finally {
       setIsSlicing(false);
+      projectRef.send({ type: 'releaseGeometryUnit', claimId });
     }
-  }, [entryPath, fileManager, geometry, kernelClient, manifest, optionsKey, route, sliceOptions]);
+  }, [
+    actor,
+    entryPath,
+    fileManager,
+    geometry,
+    kernelClient,
+    manifest,
+    optionsKey,
+    projectRef,
+    renderTimeout,
+    route,
+    sliceOptions,
+  ]);
 
   const openPreview = useCallback((): void => {
     if (slice) {

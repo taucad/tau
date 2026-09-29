@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import type {
   DockviewApi,
@@ -59,9 +59,25 @@ function ViewerPanel({
 }: {
   readonly properties: IDockviewPanelProps<ViewerPanelParameters>;
   readonly profile: ViewerProfile;
-}): React.JSX.Element {
+}): React.JSX.Element | undefined {
   const { viewId, entryPath } = properties.params;
-  return <ChatViewer viewId={viewId} entryPath={entryPath} panelApi={properties.api} profile={profile} />;
+  const subscribeVisibility = useCallback(
+    (onChange: () => void) => {
+      const subscription = properties.api.onDidVisibilityChange(onChange);
+      return () => {
+        subscription.dispose();
+      };
+    },
+    [properties.api],
+  );
+  const isVisible = useSyncExternalStore(
+    subscribeVisibility,
+    () => properties.api.isVisible,
+    () => true,
+  );
+  return isVisible ? (
+    <ChatViewer viewId={viewId} entryPath={entryPath} panelApi={properties.api} profile={profile} />
+  ) : undefined;
 }
 
 export function createViewerNewTab({
@@ -509,22 +525,6 @@ export const ViewerDockview = memo(function ({
       return;
     }
 
-    const addDisposable = api.onDidAddPanel((event) => {
-      if (!isViewerPanelParameters(event.params)) {
-        return;
-      }
-      const viewId = event.id;
-      const existingSettings = viewSettings[viewId];
-      const settings = existingSettings?.graphicsSettings
-        ? parseGraphicsViewSettings(existingSettings.graphicsSettings)
-        : defaultGraphicsSettings;
-      projectRef.send({
-        type: 'createViewGraphics',
-        viewId,
-        settings,
-      });
-    });
-
     const removeDisposable = api.onDidRemovePanel((event) => {
       if (isViewerPanelParameters(event.params)) {
         const viewId = event.id;
@@ -539,10 +539,9 @@ export const ViewerDockview = memo(function ({
     });
 
     return () => {
-      addDisposable.dispose();
       removeDisposable.dispose();
     };
-  }, [api, projectRef, editorRef, viewSettings]);
+  }, [api, projectRef, editorRef]);
 
   // Follow filesystem renames/deletes routed into the editor machine's view state.
   useEffect(() => {
@@ -595,41 +594,55 @@ export const ViewerDockview = memo(function ({
     };
   }, [api]);
 
-  // Reconcile restored panels once the project machine reaches 'ready'.
-  // onReady fires while the project machine is still 'loading', so
-  // createViewGraphics events sent there are silently dropped. This effect
-  // waits for the project to be ready and then ensures every panel has its
-  // graphics actor and geometry unit. Both actions are idempotent.
+  // Reconcile visible panels once the project machine reaches 'ready'.
+  // Dockview retains hidden restored panels, but they have no render demand.
   //
   // It also assigns `mainEntryPath` to any panel that was seeded without an
   // entryPath (happens when onReady fires before the project loads and the
   // main file is unknown).
   const projectIsReady = useSelector(projectRef, (state) => state.matches('ready'));
-  const hasReconciled = useRef(false);
+  const admittedGraphics = useRef(new Set<string>());
+  const admittedGeometry = useRef(new Map<string, string>());
+  const visibleGeometryDemand = useRef(new Map<string, string>());
 
   useEffect(() => {
-    if (!api || !projectIsReady || hasReconciled.current) {
+    admittedGraphics.current.clear();
+    admittedGeometry.current.clear();
+    visibleGeometryDemand.current.clear();
+    return () => {
+      for (const viewId of visibleGeometryDemand.current.keys()) {
+        projectRef.send({ type: 'setViewerGeometryDemand', viewId });
+      }
+      visibleGeometryDemand.current.clear();
+    };
+  }, [projectRef]);
+
+  useEffect(() => {
+    if (!api || !projectIsReady) {
       return;
     }
 
-    hasReconciled.current = true;
-
-    for (const panel of api.panels) {
+    const admit = (panel: (typeof api.panels)[number]): void => {
       if (!isViewerPanelParameters(panel.params)) {
-        continue;
+        return;
       }
       const panelViewId = panel.id;
+      if (!panel.api.isVisible) {
+        if (visibleGeometryDemand.current.delete(panelViewId)) {
+          projectRef.send({ type: 'setViewerGeometryDemand', viewId: panelViewId });
+        }
+        return;
+      }
       const settings = viewSettings[panelViewId];
 
       const validatedSettings = settings?.graphicsSettings
         ? parseGraphicsViewSettings(settings.graphicsSettings)
         : defaultGraphicsSettings;
 
-      projectRef.send({
-        type: 'createViewGraphics',
-        viewId: panelViewId,
-        settings: validatedSettings,
-      });
+      if (!admittedGraphics.current.has(panelViewId)) {
+        admittedGraphics.current.add(panelViewId);
+        projectRef.send({ type: 'createViewGraphics', viewId: panelViewId, settings: validatedSettings });
+      }
 
       let panelEntryPath = (panel.params as ViewerPanelParameters | undefined)?.entryPath;
 
@@ -650,14 +663,53 @@ export const ViewerDockview = memo(function ({
         });
       }
 
-      if (panelEntryPath) {
+      if (panelEntryPath && admittedGeometry.current.get(panelViewId) !== panelEntryPath) {
+        admittedGeometry.current.set(panelViewId, panelEntryPath);
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath: panelEntryPath,
           renderTimeout: unitSettings[panelEntryPath]?.renderTimeout,
         });
       }
+      if (panelEntryPath && visibleGeometryDemand.current.get(panelViewId) !== panelEntryPath) {
+        visibleGeometryDemand.current.set(panelViewId, panelEntryPath);
+        projectRef.send({ type: 'setViewerGeometryDemand', viewId: panelViewId, entryPath: panelEntryPath });
+      }
+    };
+
+    const subscriptions = new Map<string, ReturnType<(typeof api.panels)[number]['api']['onDidVisibilityChange']>>();
+    const watch = (panel: (typeof api.panels)[number]): void => {
+      if (!isViewerPanelParameters(panel.params) || subscriptions.has(panel.id)) {
+        return;
+      }
+      subscriptions.set(
+        panel.id,
+        panel.api.onDidVisibilityChange(() => {
+          admit(panel);
+        }),
+      );
+      admit(panel);
+    };
+    for (const panel of api.panels) {
+      watch(panel);
     }
+    const addSubscription = api.onDidAddPanel(watch);
+    const removeSubscription = api.onDidRemovePanel((panel) => {
+      subscriptions.get(panel.id)?.dispose();
+      subscriptions.delete(panel.id);
+      admittedGraphics.current.delete(panel.id);
+      admittedGeometry.current.delete(panel.id);
+      if (visibleGeometryDemand.current.delete(panel.id)) {
+        projectRef.send({ type: 'setViewerGeometryDemand', viewId: panel.id });
+      }
+    });
+    return () => {
+      addSubscription.dispose();
+      removeSubscription.dispose();
+      for (const subscription of subscriptions.values()) {
+        subscription.dispose();
+      }
+    };
   }, [api, projectIsReady, projectRef, editorRef, mainEntryPath, viewSettings, unitSettings]);
 
   // Listen for "open in viewer" requests from file tree or editor tab context menus.

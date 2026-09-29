@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { render, renderHook, act, waitFor } from '@testing-library/react';
 import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
@@ -16,6 +16,7 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type { AgentHostClientOptions, AgentHostClient } from '#services/agent-host-client.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
+import type { CadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
 import {
   chatHostBinding,
@@ -92,6 +93,9 @@ const creditPreflightHarness = vi.hoisted(() => ({
 const placementHarness = vi.hoisted(() => ({
   localHostId: undefined as 'desktop' | undefined,
 }));
+const composerHarness = vi.hoisted((): { execution: CadAgentExecution } => ({
+  execution: { kind: 'tau', model: 'openai-gpt-5.5' },
+}));
 
 vi.mock('#hooks/use-cad-agent-config.js', () => ({
   useAgentHostPlacements: () => ({ targets: [], loading: false }),
@@ -108,6 +112,7 @@ vi.mock('#hooks/use-chat.js', () => ({
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useActiveChatSession: vi.fn(),
   useChatComposer: () => ({
+    execution: { execution: composerHarness.execution },
     model: {
       model: {
         id: 'openai-gpt-5.5',
@@ -340,6 +345,7 @@ const buildActions = (): ActionsMock => ({
 });
 
 const mountAgentMock = (agent: CadAgentConfigInput): void => {
+  composerHarness.execution = agent.execution;
   useCadAgentConfigMock.mockReturnValue(agent);
 };
 
@@ -537,10 +543,10 @@ describe('useCadChatClient', () => {
 
     const [transport] = browserHostHarness.createDaemonClient.mock.calls.at(-1) as [{ dial: () => Promise<unknown> }];
     await expect(transport.dial()).resolves.toEqual({ hostId: 'desktop' });
-    expect(browserHostHarness.openAgentHostChannel).toHaveBeenCalledWith('desktop', {
+    expect(browserHostHarness.openAgentHostChannel).toHaveBeenCalledWith('desktop', expect.objectContaining({
       projectId: 'proj_test',
       workspaceRoot: '/Users/test/Tau/home/proj_test',
-    });
+    }));
     expect(browserHostHarness.createClient).not.toHaveBeenCalled();
     expect(workspaceHarness.prepare).not.toHaveBeenCalled();
   });
@@ -1296,6 +1302,35 @@ describe('useCadChatClient', () => {
     const secondAgent = result.current.agent;
 
     expect(secondAgent).toBe(firstAgent);
+  });
+
+  it('should assemble one catalog and tree context for many mounted message actions', async () => {
+    useActiveChatInstanceMock.mockReturnValue(mock<Chat<MyUIMessage>>());
+    installActions(buildActions());
+
+    const clients: CadChatClient[] = [];
+    const Action = (): undefined => {
+      clients.push(useCadChatClient());
+      return undefined;
+    };
+    const Views = (): React.JSX.Element => (
+      <>
+        <ChatTurnHost />
+        {Array.from({ length: 12 }, (_, index) => <Action key={index} />)}
+      </>
+    );
+    const { rerender } = render(<Views />);
+
+    expect(useCadAgentConfigMock).toHaveBeenCalledTimes(1);
+    const changedAgent = buildAgent({ kernel: 'openscad', contextPayload: { memory: { '.tau/AGENTS.md': 'changed' } } });
+    mountAgentMock(changedAgent);
+    rerender(<Views />);
+
+    expect(useCadAgentConfigMock).toHaveBeenCalledTimes(2);
+    expect(clients.at(-1)!.agent).toBe(changedAgent);
+    await act(async () => clients.at(-1)!.submit({ text: 'use the changed project' }));
+    const body = await admittedBody();
+    expect(body['agent']).toBe(changedAgent);
   });
 
   it('should publish the chat admission and leave it owned by the session on view unmount', async () => {

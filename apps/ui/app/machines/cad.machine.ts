@@ -56,6 +56,8 @@ export type CadContext = {
   capabilities?: AppCapabilitiesManifest;
   activeKernelId?: string;
   eventCleanups: Array<() => void>;
+  /** A park requested during connection or rendering runs after the unit settles. */
+  parkWhenIdle: boolean;
   /**
    * Monotonically increasing render identifier. Bumped whenever the UI
    * issues a render-triggering event (`setEntryPath`, `initializeModel`).
@@ -526,10 +528,13 @@ const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch
 const renderRequest =
   (target?: string, options: Readonly<{ reenter?: boolean; destroy?: boolean }> = {}) =>
   ({ context, event }: Readonly<{ context: CadContext; event: RenderTrigger }>, enq: CadEnqueue) => {
-    const destroyed = options.destroy === true ? destroyKernel(context, enq) : {};
+    /* A hidden unit keeps the latest intent for reconnect, but may not restart
+     * an in-flight render just because a parameter sidecar settled. */
+    const parkPending = context.parkWhenIdle;
+    const destroyed = options.destroy === true && !parkPending ? destroyKernel(context, enq) : {};
     return {
-      ...(target === undefined ? {} : { target }),
-      ...(options.reenter === true ? { reenter: true } : {}),
+      ...(target === undefined || parkPending ? {} : { target }),
+      ...(options.reenter === true && !parkPending ? { reenter: true } : {}),
       context: { ...destroyed, ...renderRequestPatch({ ...context, ...destroyed }, event) },
     };
   };
@@ -684,13 +689,16 @@ export const cadMachine = setup({
     capabilities: undefined,
     activeKernelId: undefined,
     eventCleanups: [],
+    parkWhenIdle: false,
     lastRequestedRenderId: 0,
     lastSettledRenderId: 0,
   }),
   exit: ({ context }, enq) => ({ context: destroyKernel(context, enq) }),
   on: {
+    parkRuntime: { context: { parkWhenIdle: true } },
+    resumeRuntime: { context: { parkWhenIdle: false } },
     restoreParameters: ({ context }) => ({
-      target: '.rendering.submitting',
+      ...(context.parkWhenIdle ? {} : { target: '.rendering.submitting' }),
       context: {
         lastRequestedRenderId: context.lastRequestedRenderId + 1,
         parameterRender: undefined,
@@ -744,6 +752,15 @@ export const cadMachine = setup({
           enq(() => {
             client.setRenderTimeout(renderTimeout);
           });
+          if (context.parkWhenIdle) {
+            return {
+              target: 'parked',
+              context: {
+                ...destroyKernel({ ...context, kernelClient: client, eventCleanups: event.cleanups }, enq),
+                parkWhenIdle: false,
+              },
+            };
+          }
           return {
             target: context.entryPath ? '#cad.rendering.submitting' : 'idle',
             context: { kernelClient: event.client, eventCleanups: event.cleanups },
@@ -756,15 +773,17 @@ export const cadMachine = setup({
     },
 
     idle: {
+      always: ({ context }, enq) =>
+        context.parkWhenIdle
+          ? { target: 'parked', context: { ...destroyKernel(context, enq), parkWhenIdle: false } }
+          : undefined,
       on: {
-        /* R3: a hidden, idle project releases its kernel process — on the desktop an
-         * Electron utility — and keeps its session, editor and files. Only a settled
-         * unit parks: `connecting`, `buffering` and `rendering` do not handle this, so
-         * a render in flight is never lost. The refused park is re-offered when the
-         * session re-enters `live.idle`, which for a project that stays hidden is
-         * EQ15's 30-minute window — so such a unit can hold its utility for ~32
-         * minutes (V1-5). Bounding the common case is what R3 is for. */
-        parkRuntime: ({ context }, enq) => ({ target: 'parked', context: destroyKernel(context, enq) }),
+        /* R3: release the kernel process while retaining geometry, editor state and
+         * session. An in-flight render finishes before a pending park takes effect. */
+        parkRuntime: ({ context }, enq) => ({
+          target: 'parked',
+          context: { ...destroyKernel(context, enq), parkWhenIdle: false },
+        }),
         initializeModel: renderRequest('#cad.rendering.submitting'),
         setEntryPath: renderRequest('#cad.rendering.submitting'),
         commitParameters: renderRequest('#cad.rendering.submitting'),
@@ -854,9 +873,11 @@ export const cadMachine = setup({
      */
     parked: {
       on: {
-        resumeRuntime: { target: 'connecting' },
+        resumeRuntime: { target: 'connecting', context: { parkWhenIdle: false } },
         /* A rename while parked retargets the unit; the render happens on resume. */
         setEntryPath: renderRequest(),
+        commitParameters: renderRequest(),
+        scrubParameters: renderRequest(),
         /* The root's `restoreParameters` renders, and there is no client to render
          * with: take the intent (drop the staged values) and leave the render to
          * the reconnect, instead of failing into `error` (V1-4). */
@@ -873,12 +894,22 @@ export const cadMachine = setup({
 
     error: {
       tags: ['cad-runtime-error'],
+      always: ({ context }, enq) =>
+        context.parkWhenIdle
+          ? { target: 'parked', context: { ...destroyKernel(context, enq), parkWhenIdle: false } }
+          : undefined,
       on: {
-        parkRuntime: ({ context }, enq) => ({ target: 'parked', context: destroyKernel(context, enq) }),
+        parkRuntime: ({ context }, enq) => ({
+          target: 'parked',
+          context: { ...destroyKernel(context, enq), parkWhenIdle: false },
+        }),
         /* Every way a parked unit can fall into `error` ends here, so the session's
          * next resume has to be heard from `error` too, or the unit dead-ends
          * until an unrelated entry change arrives (V1-4). */
-        resumeRuntime: ({ context }, enq) => ({ target: 'connecting', context: destroyKernel(context, enq) }),
+        resumeRuntime: ({ context }, enq) => ({
+          target: 'connecting',
+          context: { ...destroyKernel(context, enq), parkWhenIdle: false },
+        }),
         initializeModel: renderRequest('connecting', { destroy: true }),
         setEntryPath: renderRequest('connecting', { destroy: true }),
         ...resultSignals,

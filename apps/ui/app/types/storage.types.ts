@@ -109,7 +109,7 @@ export type ChatStorage = {
    * Atomic soft-delete: sets `deletedAt` and bumps `updatedAt` in one txn.
    */
   softDeleteChat(chatId: string): Promise<Chat | undefined>;
-  getChat(chatId: string): Promise<Chat | undefined>;
+  getChat(chatId: string, projectHint?: string): Promise<Chat | undefined>;
   /** Navigation metadata without deriving a transcript for every chat. */
   getAllChatRecords(options?: { includeDeleted?: boolean }): Promise<ChatRecord[]>;
   getChatRecordsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<ChatRecord[]>;

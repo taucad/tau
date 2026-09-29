@@ -28,9 +28,11 @@ import {
   createFixture,
   desktopHost,
   entry,
+  failedCadSnapshot,
   gcodeRoute,
   later,
   mockEditorSend,
+  mockProjectSend,
   mockExport,
   mockWriteFiles,
   manifest,
@@ -38,6 +40,8 @@ import {
   projectId,
   provider,
   renderGeometry,
+  setRestoredPrintEntryPath,
+  settledCadSnapshot,
   sliceFixture,
   summarizeGcodeContainerMock,
   timestamp,
@@ -50,6 +54,9 @@ import {
   startBlocker,
 } from '#routes/w.$workspace.$project/chat-print-send.js';
 import { PrintPanel, nextAction, presentMachine } from '#routes/w.$workspace.$project/chat-print.js';
+import { awaitFreshRender } from '#machines/await-fresh-render.js';
+
+vi.mock('#machines/await-fresh-render.js', () => ({ awaitFreshRender: vi.fn() }));
 
 /* The real parser, which one test makes refuse a plate too large to preview. */
 vi.mock('@taucad/slicer/toolpath', async (importOriginal) => {
@@ -143,12 +150,122 @@ const expectPrintIntent = async (expected: Record<string, unknown>): Promise<voi
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(awaitFreshRender).mockImplementation(async (actor) => actor.getSnapshot());
   globalThis.localStorage.clear();
   desktopHost.bambuStudio = undefined;
   projectFiles.clear();
+  setRestoredPrintEntryPath(undefined);
 });
 
 describe('Print pane orientation', () => {
+  it('lists a restored secondary model without waking its parked CAD unit', async () => {
+    setRestoredPrintEntryPath('other.ts');
+    const { client } = createFixture();
+    const { bridge } = createBridge();
+    render(
+      <TooltipProvider>
+        <PrintPanel machines={{ available: true, ...client }} bridge={bridge} isShown={false} />
+      </TooltipProvider>,
+    );
+
+    expect(within(await screen.findByLabelText('Model')).getByRole('option', { name: 'other.ts' })).toBeInTheDocument();
+    expect(mockProjectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'claimGeometryUnit', entryPath: 'other.ts' }),
+    );
+  });
+
+  it('claims the selected geometry only while the Print panel is shown', async () => {
+    const { client } = createFixture();
+    const { bridge } = createBridge();
+    const view = render(
+      <TooltipProvider>
+        <PrintPanel machines={{ available: true, ...client }} bridge={bridge} isShown={false} />
+      </TooltipProvider>,
+    );
+    expect(mockProjectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'claimGeometryUnit' }));
+
+    view.rerender(
+      <TooltipProvider>
+        <PrintPanel machines={{ available: true, ...client }} bridge={bridge} isShown />
+      </TooltipProvider>,
+    );
+    await waitFor(() => {
+      expect(mockProjectSend).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'claimGeometryUnit', entryPath: 'main.ts', renderTimeout: undefined }),
+      );
+    });
+    const claim = mockProjectSend.mock.calls.find(([event]) => event.type === 'claimGeometryUnit')?.[0] as unknown as {
+      claimId: string;
+    };
+    expect(typeof claim.claimId).toBe('string');
+
+    view.rerender(
+      <TooltipProvider>
+        <PrintPanel machines={{ available: true, ...client }} bridge={bridge} isShown={false} />
+      </TooltipProvider>,
+    );
+    expect(mockProjectSend).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: claim.claimId });
+  });
+
+  it('holds a separate slice claim after hide and waits for the resumed render', async () => {
+    let resolveFresh: (snapshot: Awaited<ReturnType<typeof awaitFreshRender>>) => void = () => undefined;
+    vi.mocked(awaitFreshRender).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFresh = resolve;
+      }),
+    );
+    const { client } = createFixture();
+    const { bridge } = createBridge();
+    const view = render(
+      <TooltipProvider>
+        <PrintPanel machines={{ available: true, ...client }} bridge={bridge} isShown />
+      </TooltipProvider>,
+    );
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    fireEvent.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    const claims = mockProjectSend.mock.calls
+      .map(([event]) => event as { type: string; claimId: string })
+      .filter((event) => event.type === 'claimGeometryUnit');
+    expect(claims).toHaveLength(2);
+    expect(claims[1]?.claimId).not.toBe(claims[0]?.claimId);
+
+    view.rerender(
+      <TooltipProvider>
+        <PrintPanel machines={{ available: true, ...client }} bridge={bridge} isShown={false} />
+      </TooltipProvider>,
+    );
+    expect(mockProjectSend).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: claims[0]?.claimId });
+    expect(mockProjectSend).not.toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: claims[1]?.claimId });
+    expect(mockExport).not.toHaveBeenCalled();
+
+    // SAFETY: the fixture CAD snapshot intentionally implements only the state read by Print prepare.
+    resolveFresh(settledCadSnapshot() as unknown as Awaited<ReturnType<typeof awaitFreshRender>>);
+    await waitFor(() => {
+      expect(mockExport).toHaveBeenCalled();
+      expect(mockProjectSend).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: claims[1]?.claimId });
+    });
+  });
+
+  it('refuses to slice retained geometry after the latest CAD render fails', async () => {
+    // SAFETY: the fixture snapshot contains the CAD state read by Print prepare.
+    vi.mocked(awaitFreshRender).mockResolvedValueOnce(
+      failedCadSnapshot() as unknown as Awaited<ReturnType<typeof awaitFreshRender>>,
+    );
+    renderPane(createFixture().client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    const beforeSlice = mockProjectSend.mock.calls.length;
+    fireEvent.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+
+    expect(await within(prepareRegion()).findByText('radius must be positive')).toBeInTheDocument();
+    expect(mockExport).not.toHaveBeenCalled();
+    const operationClaim = mockProjectSend.mock.calls
+      .slice(beforeSlice)
+      .map(([event]) => event as { type: string; claimId: string })
+      .find((event) => event.type === 'claimGeometryUnit');
+    expect(operationClaim).toBeDefined();
+    expect(mockProjectSend).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: operationClaim?.claimId });
+  });
+
   it('confirms the numeric nozzle requested for this print', () => {
     expect(describeStartConfirmations({ expectedNozzleDiameter: 0.6 }, entry(), manifest)).toContainEqual({
       id: 'nozzle',

@@ -12,10 +12,10 @@
 import { z } from 'zod';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import { assertRootedPath } from '@taucad/utils/path';
-import type { FileMode, FileStat } from '#types.js';
+import type { FileMode, FileStat, HeadFileStat } from '#types.js';
 
 /** Wire version. Bump on any incompatible request/response shape change. @public */
-export const nodeFsProtocolVersion = 2;
+export const nodeFsProtocolVersion = 3;
 
 /**
  * Watch event as it crosses the port. A superset of the library's
@@ -103,6 +103,7 @@ export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   checkedWriteRequestSchema,
   z.object({ ...rooted, op: z.literal('readdir'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('readdirWithStats'), path: z.string() }),
+  z.object({ ...rooted, op: z.literal('readdirHeadWithStats'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('stat'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('getFileMode'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('setFileMode'), path: z.string(), mode: z.enum(['100644', '100755']) }),
@@ -134,6 +135,10 @@ const fileStatSchema = z.union([
   }),
 ]) as z.ZodType<FileStat>;
 const fileModeSchema = z.enum(['100644', '100755']) as z.ZodType<FileMode>;
+const headFileStatSchema = z.union([
+  z.object({ type: z.literal('dir'), size: z.number(), mtimeMs: z.number() }),
+  z.object({ type: z.literal('file'), size: z.number(), mtimeMs: z.number(), contentKind: z.enum(['text', 'binary']) }),
+]) as z.ZodType<HeadFileStat>;
 
 const watchEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('change'), path: z.string(), kind: z.enum(['file', 'dir']) }),
@@ -171,6 +176,7 @@ export const nodeFsResultSchemas = {
   writeFileChecked: checkedWriteResultSchema,
   readdir: z.array(z.string()),
   readdirWithStats: z.array(z.object({ name: z.string() }).and(fileStatSchema)),
+  readdirHeadWithStats: z.array(z.object({ name: z.string() }).and(headFileStatSchema)),
   stat: fileStatSchema,
   getFileMode: fileModeSchema,
   setFileMode: z.undefined(),

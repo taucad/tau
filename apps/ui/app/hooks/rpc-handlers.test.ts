@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ChatRpc from '@taucad/chat/rpc';
 import { rpcClientErrorCodeSchema } from '@taucad/chat';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import type { DirectoryStatRow } from '@taucad/filesystem';
 import type { FileEntry, FileExtension, FileStat } from '@taucad/types';
 import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
@@ -159,10 +160,23 @@ type FileManagerWriteCall = [string, Uint8Array<ArrayBuffer>, { source: string }
 
 function createMockTreeService(tree?: Map<string, FileEntry>) {
   const _tree = tree ?? new Map<string, FileEntry>();
+  const listDirectory = vi.fn(async (_path: string): Promise<readonly ListedDirectoryEntry[]> => []);
   return {
     getTreeSnapshot: () => _tree,
     exists: vi.fn(async (path: string) => _tree.has(path)),
-    listDirectory: vi.fn(async (_path: string): Promise<readonly ListedDirectoryEntry[]> => []),
+    listDirectory,
+    listDirectoryExact: vi.fn(async (path: string): Promise<DirectoryStatRow[]> => {
+      const entries = await listDirectory(path);
+      return entries.map((entry) => {
+        const common = { name: entry.name, size: entry.size, mtimeMs: entry.mtimeMs };
+        if (entry.isFolder) {
+          return { ...common, type: 'dir' };
+        }
+        return entry.contentKind === 'text'
+          ? { ...common, type: 'file', contentKind: 'text', lineCount: entry.lineCount ?? 1 }
+          : { ...common, type: 'file', contentKind: 'binary' };
+      });
+    }),
   };
 }
 
@@ -423,7 +437,7 @@ describe('rpc-handlers', () => {
     // ----- readdir -----
 
     describe('readdir', () => {
-      it('should surface real size and modifiedAt from the stat-aware tree call', async () => {
+      it('should surface exact size and modifiedAt from the composed listing', async () => {
         const writtenAt = Date.UTC(2026, 0, 15, 12, 30, 0);
         vi.mocked(lastTreeService!.listDirectory).mockResolvedValueOnce([
           textDirectoryEntry('main.ts', 'src/main.ts', { size: 1234, mtimeMs: writtenAt, lineCount: 12 }),
@@ -434,6 +448,7 @@ describe('rpc-handlers', () => {
         const entries = await fileSystem.readdir('src');
 
         expect(lastTreeService!.listDirectory).toHaveBeenCalledWith('src');
+        expect(lastTreeService!.listDirectoryExact).toHaveBeenCalledWith('src');
         expect(entries).toEqual([
           {
             name: 'main.ts',
@@ -465,6 +480,69 @@ describe('rpc-handlers', () => {
         expect(entries).toEqual([{ name: 'orphan.ts', type: 'file', size: 0, contentKind: 'text', lineCount: 1 }]);
       });
 
+      it('should use exact listing counts even when the UI cache appears known', async () => {
+        vi.mocked(lastTreeService!.listDirectory).mockResolvedValueOnce([
+          textDirectoryEntry('main.ts', 'src/main.ts', { size: 5, mtimeMs: 100, lineCount: 1 }),
+        ]);
+        vi.mocked(lastTreeService!.listDirectoryExact).mockResolvedValueOnce([
+          { name: 'main.ts', type: 'file', size: 5, mtimeMs: 100, contentKind: 'text', lineCount: 4 },
+        ]);
+
+        await expect(fileSystem.readdir('src')).resolves.toEqual([
+          {
+            name: 'main.ts',
+            type: 'file',
+            size: 5,
+            modifiedAt: new Date(100).toISOString(),
+            contentKind: 'text',
+            lineCount: 4,
+          },
+        ]);
+        expect(lastTreeService!.listDirectory).not.toHaveBeenCalled();
+      });
+
+      it('should report a cached binary file as text after an external replacement', async () => {
+        vi.mocked(lastTreeService!.listDirectory).mockResolvedValueOnce([
+          { name: 'part.dat', path: 'src/part.dat', isFolder: false, size: 5, mtimeMs: 100, contentKind: 'binary' },
+        ]);
+        vi.mocked(lastTreeService!.listDirectoryExact).mockResolvedValueOnce([
+          { name: 'part.dat', type: 'file', size: 5, mtimeMs: 100, contentKind: 'text', lineCount: 4 },
+        ]);
+
+        await expect(fileSystem.readdir('src')).resolves.toEqual([
+          {
+            name: 'part.dat',
+            type: 'file',
+            size: 5,
+            modifiedAt: new Date(100).toISOString(),
+            contentKind: 'text',
+            lineCount: 4,
+          },
+        ]);
+        expect(lastTreeService!.listDirectory).not.toHaveBeenCalled();
+      });
+
+      it('should use current membership after external addition and deletion', async () => {
+        vi.mocked(lastTreeService!.listDirectory).mockResolvedValueOnce([
+          textDirectoryEntry('deleted.ts', 'src/deleted.ts', { size: 5, mtimeMs: 100, lineCount: 1 }),
+        ]);
+        vi.mocked(lastTreeService!.listDirectoryExact).mockResolvedValueOnce([
+          { name: 'added.ts', type: 'file', size: 5, mtimeMs: 100, contentKind: 'text', lineCount: 4 },
+        ]);
+
+        await expect(fileSystem.readdir('src')).resolves.toEqual([
+          {
+            name: 'added.ts',
+            type: 'file',
+            size: 5,
+            modifiedAt: new Date(100).toISOString(),
+            contentKind: 'text',
+            lineCount: 4,
+          },
+        ]);
+        expect(lastTreeService!.listDirectory).not.toHaveBeenCalled();
+      });
+
       it('should return empty array when no entries exist', async () => {
         vi.mocked(lastTreeService!.listDirectory).mockResolvedValueOnce([]);
 
@@ -481,6 +559,26 @@ describe('rpc-handlers', () => {
         const entries = await fileSystem.readdir('src');
 
         expect(entries).toEqual([expect.objectContaining({ name: 'components', type: 'dir' })]);
+      });
+
+      it('should exclude composed source directories from implicit agent search', async () => {
+        const dependencyProvenance = { source: 'dependencies', versioned: false, agentAccess: 'read-only' } as const;
+        const projectProvenance = { source: 'project', versioned: true, agentAccess: 'read-write' } as const;
+        vi.mocked(lastTreeService!.listDirectoryExact).mockResolvedValueOnce([
+          { name: 'node_modules', type: 'dir', size: 0, mtimeMs: 0, provenance: dependencyProvenance },
+          { name: 'src', type: 'dir', size: 0, mtimeMs: 0, provenance: projectProvenance },
+        ]);
+
+        await expect(fileSystem.readdir('')).resolves.toEqual([
+          {
+            name: 'node_modules',
+            type: 'dir',
+            size: 0,
+            provenance: dependencyProvenance,
+            traverseOnImplicitSearch: false,
+          },
+          { name: 'src', type: 'dir', size: 0, provenance: projectProvenance },
+        ]);
       });
 
       it('should await whenServicesReady before listing directory entries', async () => {
@@ -508,6 +606,7 @@ describe('rpc-handlers', () => {
       });
 
       it('should traverse a root glob using only canonical project-relative paths', async () => {
+        mockFm.stat.mockResolvedValue(textFileStat(120, 0, 4));
         const treeService = createMockTreeService();
         treeService.listDirectory.mockImplementation(async (path) => {
           if (path === '') {

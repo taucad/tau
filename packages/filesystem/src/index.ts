@@ -5,6 +5,8 @@ export type {
   FileMode,
   FileStat,
   FileStatEntry,
+  HeadFileStat,
+  DirectoryStatRow,
   FileSystemProvider,
   FileReadStreamOptions,
   PathAgentAccess,

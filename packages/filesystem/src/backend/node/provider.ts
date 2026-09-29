@@ -30,6 +30,7 @@ import type {
   FileMode,
   FileReadStreamOptions,
   FileStat,
+  HeadFileStat,
   PathPolicy,
   ProviderCapabilities,
   WatchRequest,
@@ -86,6 +87,10 @@ const joinRooted = (base: string, child: string): string => (base === '' ? child
  * @public
  */
 export class NodeFsProvider extends AbstractFileSystemProvider {
+  /** @returns `true` for the supported head listing mode. */
+  public get supportsHeadListing(): true {
+    return true;
+  }
   public readonly capabilities: ProviderCapabilities = {
     persistent: true,
     writable: true,
@@ -197,11 +202,21 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
    * @param path_ - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
    */
-  public async readdirWithStats(path_: string): Promise<Array<{ name: string } & FileStat>> {
+  public readdirWithStats(path_: string): Promise<Array<{ name: string } & FileStat>>;
+  public readdirWithStats(
+    path_: string,
+    options: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & HeadFileStat>>;
+  public async readdirWithStats(
+    path_: string,
+    options?: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
     const names = await this.readdir(path_);
     return mapConcurrent(names, statConcurrency, async (name) => ({
       name,
-      ...(await this.stat(joinRooted(path_, name))),
+      ...(options?.content === 'head'
+        ? await this._headStat(joinRooted(path_, name))
+        : await this.stat(joinRooted(path_, name))),
     }));
   }
 
@@ -596,6 +611,35 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       }
       const bytes = size <= headSniffByteLength ? sniffed : new Uint8Array(await fs.readFile(absolute));
       return { contentKind: 'text', lineCount: countLineBytes(bytes) };
+    } finally {
+      await handle.close();
+    }
+  }
+
+  private async _headStat(path_: string): Promise<HeadFileStat> {
+    this._assertRootedPath(path_);
+    const target = await this._resolve(path_);
+    const stats = await fs.stat(target);
+    if (stats.isDirectory()) {
+      return { type: 'dir', size: stats.size, mtimeMs: stats.mtimeMs };
+    }
+    return {
+      type: 'file',
+      size: stats.size,
+      mtimeMs: stats.mtimeMs,
+      contentKind: await this._headContentKind(target, stats.size),
+    };
+  }
+
+  private async _headContentKind(absolute: string, size: number): Promise<'text' | 'binary'> {
+    if (size === 0) {
+      return 'text';
+    }
+    const handle = await fs.open(absolute, 'r');
+    try {
+      const head = new Uint8Array(Math.min(size, headSniffByteLength));
+      const { bytesRead } = await handle.read(head, 0, head.byteLength, 0);
+      return seemsBinary(head.subarray(0, bytesRead)) ? 'binary' : 'text';
     } finally {
       await handle.close();
     }

@@ -49,8 +49,12 @@ let heldLockFile;
 /** Keep the lock alive in an active producer even if this coordinator is killed. */
 const producerStdio = (capture = false) =>
   heldLockFile === undefined
-    ? capture ? 'pipe' : 'inherit'
-    : capture ? ['inherit', 'pipe', 'pipe', heldLockFile] : ['inherit', 'inherit', 'inherit', heldLockFile];
+    ? capture
+      ? 'pipe'
+      : 'inherit'
+    : capture
+      ? ['inherit', 'pipe', 'pipe', heldLockFile]
+      : ['inherit', 'inherit', 'inherit', heldLockFile];
 /** @type {() => {id: string | null, attempt: string | null}} */
 const workflowRun = () => ({ id: process.env.GITHUB_RUN_ID ?? null, attempt: process.env.GITHUB_RUN_ATTEMPT ?? null });
 const outputs = [
@@ -151,11 +155,14 @@ export const recoverExitedProducer = (root, groupAlive, recipeSha256 = producerR
 export const darwinGroupAlive = (pgid) => {
   const result = childProcess.spawnSync('ps', ['-axo', 'pgid=,state='], { encoding: 'utf8' });
   assert.ok(result.status === 0 && typeof result.stdout === 'string', 'Could not prove GeoSpec producer group exit.');
-  const members = result.stdout.split('\n').filter((line) => line.trim() !== '').map((line) => {
-    const match = /^\s*(\d+)\s+([^\s]+)\s*$/u.exec(line);
-    assert.ok(match, 'Malformed process listing cannot prove GeoSpec producer group exit.');
-    return { pgid: match[1], state: match[2] };
-  });
+  const members = result.stdout
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => {
+      const match = /^\s*(\d+)\s+([^\s]+)\s*$/u.exec(line);
+      assert.ok(match, 'Malformed process listing cannot prove GeoSpec producer group exit.');
+      return { pgid: match[1], state: match[2] };
+    });
   return members.some((member) => member.pgid === String(pgid) && !member.state?.startsWith('Z'));
 };
 /** @type {(root: string) => {revision: string, files: ReturnType<typeof fileRecord>[]}} */
@@ -184,11 +191,12 @@ const sourceIdentity = (root) => {
     'tools/tsdown.plugin.ts',
   ])
     .split('\0')
-    .filter((path) =>
-      path &&
-      !path.startsWith(`${packagePath}/bindings/node/generated/`) &&
-      !path.startsWith(`${packagePath}/bindings/emscripten/generated/`) &&
-      !path.split('/').some((part) => ['target', 'dist', 'out'].includes(part)),
+    .filter(
+      (path) =>
+        path &&
+        !path.startsWith(`${packagePath}/bindings/node/generated/`) &&
+        !path.startsWith(`${packagePath}/bindings/emscripten/generated/`) &&
+        !path.split('/').some((part) => ['target', 'dist', 'out'].includes(part)),
     );
   // Bind the source-kit package, including licenses; also cover owned helpers before their first commit.
   paths.push(`${packagePath}/scripts/ci-artifacts.mjs`);
@@ -439,7 +447,19 @@ export const prepareArtifacts = (root) => {
   rmSync(resolve(root, inventoryPath), { force: true });
   const source = sourceIdentity(root);
   const { GEOSPEC_DELIVERY_CACHE: deliveryCache } = process.env;
-  const cache = resolve(root, deliveryCache ?? 'node_modules/.cache/geospec-engine-native/delivery-wasm-eh');
+  let cache = resolve(root, deliveryCache ?? 'node_modules/.cache/geospec-engine-native/delivery-wasm-eh');
+  let generation;
+  if (deliveryCache === undefined) {
+    const selection = childProcess.spawnSync(
+      'python3',
+      ['-B', resolve(root, packagePath, 'scripts/prepare-delivery.py'), 'generation'],
+      { cwd: root, encoding: 'utf8', env: process.env },
+    );
+    assert.ok(selection.status === 0, `GeoSpec delivery generation failed: ${selection.stderr || selection.error}`);
+    generation = selection.stdout.trim();
+    assert.ok(/^[0-9a-f]{64}$/u.test(generation), 'Invalid GeoSpec delivery generation.');
+    cache = join(cache, 'generations', generation);
+  }
   const reusePrefixes = process.env.GEOSPEC_NATIVE_DELIVERY_CACHE !== undefined;
   const nativeCache = resolve(root, process.env.GEOSPEC_NATIVE_DELIVERY_CACHE ?? cache);
   const nativeBuilder = resolve(
@@ -456,6 +476,7 @@ export const prepareArtifacts = (root) => {
     CARGO_HOME: resolve(root, process.env.CARGO_HOME ?? join(homedir(), '.cargo')),
     pnpm_config_verify_deps_before_run: 'warn',
     GEOSPEC_DELIVERY_CACHE: cache,
+    GEOSPEC_DELIVERY_GENERATION: generation,
     GEOSPEC_NODE_MANIFEST: 'bindings/node/Cargo.toml',
     GEOSPEC_OCCT_PREFIX: join(nativeCache, 'occt-native/install'),
     GEOSPEC_MIXED_INPUTS: resolve(root, mixedInputsPath),
@@ -531,6 +552,7 @@ export const prepareArtifacts = (root) => {
     run('prepare-delivery:reuse-native', {
       PATH: process.env.GEOSPEC_NATIVE_PREFIX_PATH ?? process.env.PATH,
       GEOSPEC_DELIVERY_CACHE: nativeCache,
+      GEOSPEC_DELIVERY_GENERATION: undefined,
       GEOSPEC_OCCT_PRODUCER_BUILDER: nativeBuilder,
       GEOSPEC_OCCT_PRODUCER_RECIPE: process.env.GEOSPEC_NATIVE_OCCT_PRODUCER_RECIPE,
       GIT_CEILING_DIRECTORIES: process.env.GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES,
@@ -670,7 +692,10 @@ export const snapshotDelivery = (root) => {
         `Assembly snapshot changed: ${archive.path}`,
       );
     }
-    assert.ok(isDeepStrictEqual(inventory.source.files, sourceIdentity(root).files), 'GeoSpec sources changed during snapshot.');
+    assert.ok(
+      isDeepStrictEqual(inventory.source.files, sourceIdentity(root).files),
+      'GeoSpec sources changed during snapshot.',
+    );
     return snapshot;
   } catch (error) {
     rmSync(snapshot, { recursive: true, force: true });
@@ -689,7 +714,11 @@ if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(impo
     );
     const mode = process.argv[worker ? 3 : 2];
     assert.ok(
-      mode === 'prepare' || mode === 'verify' || mode === 'verify-delivery' || mode === 'ensure-delivery' || mode === 'snapshot-delivery',
+      mode === 'prepare' ||
+        mode === 'verify' ||
+        mode === 'verify-delivery' ||
+        mode === 'ensure-delivery' ||
+        mode === 'snapshot-delivery',
       'Usage: ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery|snapshot-delivery',
     );
     const produces = mode === 'prepare' || mode === 'ensure-delivery' || mode === 'snapshot-delivery';
@@ -711,7 +740,10 @@ if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(impo
       if (!worker && produces) {
         recoverExitedProducer(root, darwinGroupAlive, closedRecipe(root));
       } else if (!worker) {
-        assert.ok(!existsSync(resolve(root, activePath)), 'GeoSpec producer active or interrupted; read-only verification refused.');
+        assert.ok(
+          !existsSync(resolve(root, activePath)),
+          'GeoSpec producer active or interrupted; read-only verification refused.',
+        );
       }
       if (!worker && produces) {
         const child = childProcess.spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--producer', mode], {
@@ -721,13 +753,21 @@ if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(impo
         });
         assert.ok(child.status === 0, `GeoSpec producer failed: ${child.error?.message ?? child.status}`);
       } else if (mode === 'snapshot-delivery') {
-        console.log(`ASSEMBLY_ROOT=${withProducerMarker(root, () => snapshotDelivery(root), { pgid: process.pid, recipeSha256: closedRecipe(root) })}`);
+        console.log(
+          `ASSEMBLY_ROOT=${withProducerMarker(root, () => snapshotDelivery(root), { pgid: process.pid, recipeSha256: closedRecipe(root) })}`,
+        );
       } else {
         const inventory =
           mode === 'ensure-delivery'
-            ? withProducerMarker(root, () => ensureDelivery(root), { pgid: process.pid, recipeSha256: closedRecipe(root) })
+            ? withProducerMarker(root, () => ensureDelivery(root), {
+                pgid: process.pid,
+                recipeSha256: closedRecipe(root),
+              })
             : mode === 'prepare'
-              ? withProducerMarker(root, () => prepareArtifacts(root), { pgid: process.pid, recipeSha256: closedRecipe(root) })
+              ? withProducerMarker(root, () => prepareArtifacts(root), {
+                  pgid: process.pid,
+                  recipeSha256: closedRecipe(root),
+                })
               : mode === 'verify-delivery'
                 ? verifyDelivery(root)
                 : verifyArtifacts(root);

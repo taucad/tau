@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { ArrowUp, Square } from 'lucide-react';
+import { ArrowUp, Play, Square } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -56,6 +56,7 @@ export const ChatStreamingStopButton = memo(function ({
 
 type ChatTextareaSubmitButtonProperties = {
   readonly status: string;
+  readonly canResume?: boolean;
   readonly isSubmitting: boolean;
   /** Why Send refuses right now, or `undefined` when it would send. */
   readonly refusal: string | undefined;
@@ -67,13 +68,14 @@ type ChatTextareaSubmitButtonProperties = {
 };
 
 /**
- * Send, or Stop while a turn runs.
+ * Send a draft, Resume interrupted work, or Stop while a turn runs.
  *
  * A refusing Send stays focusable (F14): it is `aria-disabled`, not
  * `disabled`, so a keyboard reaches it and its tooltip says why.
  */
 export const ChatTextareaSubmitButton = memo(function ({
   status,
+  canResume = false,
   isSubmitting,
   refusal,
   describedBy,
@@ -87,19 +89,26 @@ export const ChatTextareaSubmitButton = memo(function ({
     );
   }
 
+  const label = canResume ? 'Resume' : 'Send';
+  const icon = canResume ? (
+    <Play aria-hidden='true' className='fill-current' />
+  ) : (
+    <ArrowUp aria-hidden='true' className='size-5' />
+  );
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
           type='button'
           variant='ghost'
-          size='icon'
-          aria-label='Send'
+          size={canResume ? 'sm' : 'icon-sm'}
+          aria-label={label}
           aria-keyshortcuts='Enter'
           aria-disabled={refusal !== undefined}
           className={cn(
             chatComposerActionButtonClassName,
-            'size-7 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-foreground',
+            'aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-foreground',
           )}
           // Only when set: an explicit `undefined` would replace the tooltip's own description.
           {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}
@@ -109,13 +118,14 @@ export const ChatTextareaSubmitButton = memo(function ({
             }
           }}
         >
-          {isSubmitting ? <Loader className='size-4' /> : <ArrowUp aria-hidden='true' className='size-5' />}
+          {isSubmitting ? <Loader className='size-4' /> : icon}
+          {canResume ? label : undefined}
         </Button>
       </TooltipTrigger>
       <TooltipContent className='flex items-center gap-2 align-baseline'>
         {refusal ?? (
           <>
-            Send <KeyShortcut variant='tooltip'>{formatKeyCombination({ key: 'Enter' })}</KeyShortcut>
+            {label} <KeyShortcut variant='tooltip'>{formatKeyCombination({ key: 'Enter' })}</KeyShortcut>
           </>
         )}
       </TooltipContent>

@@ -50,6 +50,7 @@ import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provid
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import type { ChatSession } from '#services/chat-session-store.js';
+import type { TurnGroup } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import type {
@@ -66,49 +67,6 @@ type ChatInstance = AiSdkChat<MyUIMessage>;
 type SendMessageInput = Parameters<ChatInstance['sendMessage']>[0];
 
 const emptyMessages: readonly MyUIMessage[] = Object.freeze([]);
-const emptyMessageOrder: readonly string[] = Object.freeze([]);
-const emptyMessagesById: ReadonlyMap<string, MyUIMessage> = new Map();
-
-const messagesByIdCache = new WeakMap<readonly MyUIMessage[], Map<string, MyUIMessage>>();
-const messageOrderCache = new WeakMap<
-  ChatInstance,
-  {
-    readonly length: number;
-    readonly order: readonly string[];
-  }
->();
-
-function getMessagesById(messages: readonly MyUIMessage[]): ReadonlyMap<string, MyUIMessage> {
-  if (messages === emptyMessages) {
-    return emptyMessagesById;
-  }
-  let cached = messagesByIdCache.get(messages);
-  if (!cached) {
-    cached = new Map<string, MyUIMessage>();
-    for (const message of messages) {
-      cached.set(message.id, message);
-    }
-    messagesByIdCache.set(messages, cached);
-  }
-  return cached;
-}
-
-function getMessageOrder(chat: ChatInstance | undefined, messages: readonly MyUIMessage[]): readonly string[] {
-  if (!chat || messages.length === 0) {
-    return emptyMessageOrder;
-  }
-  const cached = messageOrderCache.get(chat);
-  if (
-    cached &&
-    cached.length === messages.length &&
-    messages.every((message, index) => cached.order[index] === message.id)
-  ) {
-    return cached.order;
-  }
-  const order = messages.map((message) => message.id);
-  messageOrderCache.set(chat, { length: messages.length, order });
-  return order;
-}
 
 // ---------------------------------------------------------------------------
 // Context surface (session-required)
@@ -192,6 +150,8 @@ export type CombinedChatState = {
   messages: readonly MyUIMessage[];
   messagesById: ReadonlyMap<string, MyUIMessage>;
   messageOrder: readonly string[];
+  turnGroups: readonly TurnGroup[];
+  agentInvocations: string;
   status: ChatInstance['status'];
   error: Error | undefined;
   /** Persisted error survives reload (from the chat entity in IndexedDB). */
@@ -284,10 +244,16 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
     const state: CombinedChatState = {
       messages,
       get messagesById() {
-        return getMessagesById(messages);
+        return store.getMessagePresentation(activeChatId).messagesById;
       },
       get messageOrder() {
-        return getMessageOrder(chat, messages);
+        return store.getMessagePresentation(activeChatId).order;
+      },
+      get turnGroups() {
+        return store.getMessagePresentation(activeChatId).groups;
+      },
+      get agentInvocations() {
+        return store.getMessagePresentation(activeChatId).agentInvocations;
       },
       status,
       error: chat?.error,
@@ -597,7 +563,7 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!session) {
           return;
         }
-        session.chat.messages = messages;
+        store.replaceMessages(resolvedChatId, messages);
       },
 
       startEditingMessage(messageId: string, originalMessage?: MyUIMessage) {

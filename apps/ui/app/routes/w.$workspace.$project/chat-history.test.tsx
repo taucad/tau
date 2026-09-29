@@ -11,6 +11,7 @@ import type {
 } from '#components/chat/chat-textarea-types.js';
 import type { CadChatSubmitInput } from '#chat-clients/use-cad-chat-client.js';
 import { storedRef } from '#utils/attachment.test-utils.js';
+import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 
 // `useKernel` must NOT be called from chat-history anymore — guard with a
 // throwing mock so any regression is caught loudly.
@@ -68,6 +69,8 @@ vi.mock('#hooks/use-chat.js', () => ({
     return selector({
       messages,
       messageOrder: messages.map((m) => m.id),
+      turnGroups: buildTurnGroups(messages),
+      agentInvocations: '',
     });
   },
   useChatContext: () => ({ activeChatId: 'chat_test', persistenceActorRef: fakePersistenceActorRef }),

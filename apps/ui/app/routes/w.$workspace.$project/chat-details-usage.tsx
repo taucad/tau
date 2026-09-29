@@ -11,7 +11,8 @@ import {
 } from '@taucad/ui/components/table';
 import { formatCreditAtoms } from '@taucad/billing';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
-import { useChats } from '#hooks/use-chats.js';
+import { useProjectChatUsage } from '#hooks/use-chats.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useProject } from '#hooks/use-project.js';
 import { sumReceiptCredits, useReceiptCredits } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 
@@ -34,7 +35,9 @@ export function ChatDetailsUsage({ enabled = true }: { readonly enabled?: boolea
   | React.JSX.Element
   | undefined {
   const { projectId } = useProject();
-  const { chats } = useChats(projectId, { enabled });
+  const { chats } = useChatRecords(projectId, { enabled });
+  const chatIds = useMemo(() => chats.map((chat) => chat.id), [chats]);
+  const history = useProjectChatUsage(projectId, chatIds, enabled);
 
   const { tokens, operationIds } = useMemo(() => {
     const usage: UsageTokens = {
@@ -47,25 +50,22 @@ export function ChatDetailsUsage({ enabled = true }: { readonly enabled?: boolea
     const ids = new Set<string>();
 
     for (const chat of chats) {
-      for (const message of chat.messages) {
-        for (const part of message.parts) {
-          if (part.type !== 'data-usage') {
-            continue;
-          }
-          usage.parts += 1;
-          usage.inputTokens += part.data.inputTokens;
-          usage.outputTokens += part.data.outputTokens;
-          usage.cacheReadTokens += part.data.cacheReadTokens;
-          usage.cacheWriteTokens += part.data.cacheWriteTokens;
-          if (part.data.operationId !== undefined) {
-            ids.add(part.data.operationId);
-          }
-        }
+      const summary = history.get(chat.id);
+      if (summary === undefined) {
+        continue;
+      }
+      usage.parts += summary.parts;
+      usage.inputTokens += summary.inputTokens;
+      usage.outputTokens += summary.outputTokens;
+      usage.cacheReadTokens += summary.cacheReadTokens;
+      usage.cacheWriteTokens += summary.cacheWriteTokens;
+      for (const id of summary.operationIds) {
+        ids.add(id);
       }
     }
 
     return { tokens: usage, operationIds: [...ids].sort() };
-  }, [chats]);
+  }, [chats, history]);
 
   const credits = useReceiptCredits(operationIds);
   const total = sumReceiptCredits(operationIds, credits);

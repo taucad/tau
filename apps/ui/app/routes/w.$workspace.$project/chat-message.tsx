@@ -689,6 +689,7 @@ function selectLastUserMessageId(state: CombinedChatState): string | undefined {
 export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProperties): React.JSX.Element {
   const userMessageCollapseRowThreshold = 8;
   const userMessageCollapseCharacterThreshold = 900;
+  const userMessagePreviewCharacterLimit = 220 * (userMessageCollapseRowThreshold + 1);
 
   const message = useChatSelector((state) => state.messagesById.get(messageId));
   const displayMessage = useChatSelector((state) => state.messageEdits[messageId] ?? state.messagesById.get(messageId));
@@ -733,13 +734,19 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
     }
 
     const rows: string[] = [];
+    let remaining = userMessagePreviewCharacterLimit;
     for (const part of displayMessage.parts) {
-      if (part.type !== 'text') {
+      if (part.type !== 'text' || remaining === 0 || rows.length > userMessageCollapseRowThreshold) {
         continue;
       }
 
-      const normalizedText = part.text.replaceAll('\r\n', '\n');
+      const preview = part.text.slice(0, remaining);
+      remaining -= preview.length;
+      const normalizedText = preview.replaceAll('\r\n', '\n');
       for (const line of normalizedText.split('\n')) {
+        if (rows.length > userMessageCollapseRowThreshold) {
+          break;
+        }
         if (line.length === 0) {
           rows.push('');
           continue;
@@ -749,7 +756,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
       }
     }
 
-    return rows.length > 0 ? rows : [''];
+    return rows.length > 0 ? rows.slice(0, userMessageCollapseRowThreshold + 1) : [''];
   }, [displayMessage, fileParts.length, isCollapsedUserMessage]);
 
   const collapsedUserCharacterCount = useMemo(() => {

@@ -5,11 +5,12 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 /** Chat metadata for navigation surfaces that do not display transcripts. */
 export function useChatRecords(
   resourceId: string,
-  options?: { includeDeleted?: boolean },
+  options?: { includeDeleted?: boolean; enabled?: boolean },
 ): {
   readonly chats: ChatRecord[];
   readonly isLoading: boolean;
   readonly error: string | undefined;
+  readonly retry: () => Promise<unknown>;
 } {
   const { getChatRecordsForResource, isLoading: isWorkerLoading } = useProjectManager();
   const includeDeleted = options?.includeDeleted ?? false;
@@ -17,11 +18,17 @@ export function useChatRecords(
     data: chats = [],
     isLoading,
     error,
+    refetch,
   } = useQuery({
     queryKey: ['chats', resourceId, 'records', { includeDeleted }],
     queryFn: async () => getChatRecordsForResource(resourceId, { includeDeleted }),
-    enabled: !isWorkerLoading && Boolean(resourceId),
+    enabled: options?.enabled !== false && !isWorkerLoading && Boolean(resourceId),
   });
 
-  return { chats, isLoading: isWorkerLoading || isLoading, error: error instanceof Error ? error.message : undefined };
+  return {
+    chats,
+    isLoading: isWorkerLoading || isLoading,
+    error: error instanceof Error ? error.message : undefined,
+    retry: refetch,
+  };
 }

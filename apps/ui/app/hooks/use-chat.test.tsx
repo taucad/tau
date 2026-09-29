@@ -569,6 +569,32 @@ describe('hooks resolution rules', () => {
     expect(result.current.messagesById.has('assistant_2')).toBe(false);
   });
 
+  it('refreshes the middle-message index when actions replace a transcript without changing its ends', () => {
+    const { result } = renderHook(
+      () => ({
+        actions: useChatActions(),
+        order: useChatSelector((state) => state.messageOrder),
+        messagesById: useChatSelector((state) => state.messagesById),
+      }),
+      { wrapper: createWrapper('chat_middle_replace') },
+    );
+    const first = makeUserMessage('first', 'first');
+    const last = makeAssistantMessage('last', 'last');
+    act(() => {
+      result.current.actions.setMessages([first, makeAssistantMessage('middle-old', 'old'), last]);
+      getFake('chat_middle_replace').emitMessages();
+    });
+    expect(result.current.order).toEqual(['first', 'middle-old', 'last']);
+
+    act(() => {
+      result.current.actions.setMessages([first, makeAssistantMessage('middle-new', 'new'), last]);
+      getFake('chat_middle_replace').emitMessages();
+    });
+    expect(result.current.order).toEqual(['first', 'middle-new', 'last']);
+    expect(result.current.messagesById.has('middle-old')).toBe(false);
+    expect(result.current.messagesById.get('middle-new')?.parts[0]).toMatchObject({ text: 'new' });
+  });
+
   // =========================================================================
   // activeExecution / activeKernel surfaced through CombinedChatState so
   // chat-scoped consumers can read them without poking the persistence

@@ -1,5 +1,6 @@
 import { createCallbackLogic } from 'xstate';
 import type { EventObject } from 'xstate';
+import type { CadAgentConfigInput } from '@taucad/chat';
 import { Topic } from '@taucad/events';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { registerAgentHost } from '#chat-clients/_internal/browser-agent-host-transport.js';
@@ -28,6 +29,8 @@ export type ChatHostServices = Readonly<{
   placement: string;
   /** Builds this chat's registration for {@link ChatHostServices.placement}. */
   compose: () => BrowserAgentHostRegistration | undefined;
+  /** Read the turn host's current config when an action needs it. */
+  currentAgent: () => CadAgentConfigInput;
 }>;
 
 const servicesByChat = new Map<string, ChatHostServices>();

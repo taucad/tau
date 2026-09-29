@@ -8,9 +8,9 @@ import type {
 } from '#hooks/rpc-handlers.js';
 
 describe('EnsureGeometryUnitResult.errorCode (R1)', () => {
-  it('should match schema-pinned Extract for UNKNOWN and RENDER_TIMEOUT', () => {
+  it('should match schema-pinned Extract for UNKNOWN and OPERATION_TIMEOUT', () => {
     expectTypeOf<EnsureGeometryUnitErrorCode>().toEqualTypeOf<
-      Extract<RpcClientErrorCode, 'UNKNOWN' | 'RENDER_TIMEOUT'>
+      Extract<RpcClientErrorCode, 'UNKNOWN' | 'OPERATION_TIMEOUT'>
     >();
   });
 

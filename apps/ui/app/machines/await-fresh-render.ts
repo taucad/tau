@@ -8,12 +8,12 @@ import type { cadMachine } from '#machines/cad.machine.js';
  * Thrown when {@link awaitFreshRender} cannot observe a render result at-or-above
  * the captured baseline within the configured timeout window.
  *
- * RPC handlers map this to `RENDER_TIMEOUT` so the agent receives a typed
+ * RPC handlers map this to `OPERATION_TIMEOUT` so the agent receives a typed
  * outcome rather than a generic Promise rejection.
  */
 export class AwaitFreshRenderTimeoutError extends Error {
-  public get code(): 'RENDER_TIMEOUT' {
-    return 'RENDER_TIMEOUT';
+  public get code(): 'OPERATION_TIMEOUT' {
+    return 'OPERATION_TIMEOUT';
   }
 
   /**
@@ -98,7 +98,7 @@ export async function awaitFreshRender(
       //
       // ponytail: the watermark alone cannot gate this — `error` is the
       // runtime-death state and never advances `lastSettledRenderId`, so
-      // requiring it would turn every dead kernel into a RENDER_TIMEOUT.
+      // requiring it would turn every dead kernel into an OPERATION_TIMEOUT.
       // Provenance in the result (blueprint R4) is the upgrade path.
       if (state.value === 'error') {
         return (

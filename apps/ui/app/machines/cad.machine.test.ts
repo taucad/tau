@@ -614,7 +614,7 @@ describe('cadMachine', () => {
       expect(actor.getSnapshot().context.kernelIssues.get(stubEntryPath)).toEqual([
         {
           message: renderError.message,
-          code: 'RENDER_TIMEOUT',
+          code: 'OPERATION_TIMEOUT',
           type: 'runtime',
           severity: 'error',
         },

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { defaultFilamentSlots, machineSliceOptions } from '@taucad/agent-tools/registry';
 import type { RJSFSchema } from '@rjsf/utils';
@@ -17,13 +17,19 @@ import { printIntentPath, printIntentSchema } from '@taucad/slicer/print-intent'
 import type { PrintIntent } from '@taucad/slicer/print-intent';
 import type { FileExtension } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
-import { cn } from '@taucad/ui/utils/cn';
+import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { randomUuid } from '@taucad/utils/id';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
+import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
+import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
+import { ParameterGroupCard } from '#components/geometry/parameters/parameter-group-card.js';
 import { BambuStudioPresets } from '#components/print/bambu-studio-presets.js';
 import type { BambuTray } from '#components/print/bambu-studio-presets.js';
 import { FilamentSlots } from '#components/print/filament-slots.js';
+import { PrintSetupRow } from '#components/print/print-setup-row.js';
+import { SearchInput } from '#components/search-input.js';
 import { isRealBambuPrinter, useBambuStudio } from '#components/print/use-bambu-studio.js';
 import type { BambuQualityPreset, BambuStudioMode } from '#components/print/use-bambu-studio.js';
 import { usePrintIntent } from '#components/print/use-print-intent.js';
@@ -126,6 +132,8 @@ export type SlicedArtifact = Readonly<{
   optionsKey: string;
   /** The rendered geometry it was sliced from, compared by identity: a new render makes the slice stale. */
   geometry: unknown;
+  /** The material identity and slots approved by this slice, held across later telemetry frames. */
+  materialConfiguration: Readonly<Record<string, unknown>>;
   summary: SliceSummary;
   fit: PlateFit | undefined;
   /** What the slicer warned about a slice it still made, such as a model's colours printing as one. */
@@ -147,6 +155,9 @@ const prepareSubmissionFields = new Set([
   'expectedBedType',
   'expectedModel',
   'operatorConfirmedBedType',
+  'bedLeveling',
+  'flowCalibration',
+  'timelapse',
 ]);
 const observedDiameterFields = new Set(['expectedFilamentDiameter', 'expectedNozzleDiameter']);
 
@@ -359,6 +370,7 @@ export type PrintPrepare = Readonly<{
   submission: Record<string, unknown>;
   setSubmission: (submission: Record<string, unknown>) => void;
   effectiveSubmission: Record<string, unknown>;
+  sendConfiguration: Record<string, unknown>;
   slice: SlicedArtifact | undefined;
   isSliceStale: boolean;
   /** Why the slice no longer matches the model or its options, in the person's words. */
@@ -465,7 +477,28 @@ export const usePrintPrepare = ({
     new Map<string, { readonly uploadOperationId: string; readonly startOperationId: string }>(),
   );
 
-  const filamentColors = slice?.summary.filamentColors ?? noColors;
+  const modelColors = useMemo(() => {
+    if (
+      typeof geometry !== 'object' ||
+      geometry === null ||
+      !('format' in geometry) ||
+      geometry.format !== 'gltf' ||
+      !('content' in geometry) ||
+      !(geometry.content instanceof Uint8Array) ||
+      !(geometry.content.buffer instanceof ArrayBuffer)
+    ) {
+      return noColors;
+    }
+    try {
+      const components = buildGltfComponentManifest(geometry.content as Uint8Array<ArrayBuffer>);
+      const materials = components.nodesById[components.rootId]?.appearance?.materials ?? [];
+      return [...new Set(materials.flatMap(({ color }) => (color?.startsWith('#') ? [color.toUpperCase()] : [])))];
+    } catch {
+      return noColors;
+    }
+  }, [geometry]);
+  const filamentColors =
+    slice !== undefined && slice.geometry === geometry ? slice.summary.filamentColors : modelColors;
   const effectiveSubmission = useMemo(() => {
     if (!provider || !entry) {
       return submission;
@@ -473,8 +506,14 @@ export const usePrintPrepare = ({
     /* A mapping made for another number of filaments (a material picked before the slice showed several colours)
      * gives way to the defaults for this slice's filaments. */
     const { amsMapping: ownMapping, expectedMaterials: _ownMaterials, ...own } = submission;
+    const colorsConfirmed =
+      slice?.geometry !== geometry ||
+      modelColors.length === 0 ||
+      (modelColors.length === filamentColors.length &&
+        modelColors.every((color, index) => color === filamentColors[index]));
     const isOwnMapping =
-      filamentColors.length < 2 || !Array.isArray(ownMapping) || ownMapping.length === filamentColors.length;
+      (filamentColors.length < 2 || !Array.isArray(ownMapping) || ownMapping.length === filamentColors.length) &&
+      colorsConfirmed;
     const effective: Record<string, unknown> = {
       ...submissionDefaults(provider, entry, { manifest, filamentColors }),
       ...(intent?.plate === undefined ? {} : { expectedBedType: intent.plate }),
@@ -485,7 +524,7 @@ export const usePrintPrepare = ({
       effective['operatorConfirmedBedType'] = effective['expectedBedType'];
     }
     return effective;
-  }, [entry, filamentColors, intent, manifest, provider, submission]);
+  }, [entry, filamentColors, intent, manifest, modelColors, provider, slice?.geometry, submission]);
   const plate =
     typeof effectiveSubmission['expectedBedType'] === 'string' ? effectiveSubmission['expectedBedType'] : undefined;
   const slotsKey = mappingOf(effectiveSubmission).join(',');
@@ -551,7 +590,7 @@ export const usePrintPrepare = ({
     () => (isBambuStudio ? bambuExportOptions : { ...machineOptions, ...options }),
     [bambuExportOptions, isBambuStudio, machineOptions, options],
   );
-  const optionsKey = JSON.stringify(sliceOptions ?? null);
+  const optionsKey = JSON.stringify([sliceOptions ?? null, submission]);
   const sliceBlocker = ((): string | undefined => {
     if (!isBambuStudio || sliceOptions !== undefined) {
       return undefined;
@@ -627,6 +666,24 @@ export const usePrintPrepare = ({
       }
       const summary = summarizeGcodeContainer(file.bytes);
       const warnings = result.issues.filter(({ severity }) => severity === 'warning').map(({ message }) => message);
+      const defaults =
+        provider && entry
+          ? submissionDefaults(provider, entry, { manifest, filamentColors: summary.filamentColors })
+          : {};
+      const ownMapping = mappingOf(submission);
+      const colorsMatch =
+        modelColors.length === 0 ||
+        (modelColors.length === summary.filamentColors.length &&
+          modelColors.every((color, index) => color === summary.filamentColors[index]));
+      const mapping =
+        Array.isArray(submission['amsMapping']) &&
+        ownMapping.length === Math.max(1, summary.filamentColors.length) &&
+        colorsMatch
+          ? ownMapping
+          : mappingOf(defaults);
+      const submissionProperties = (
+        provider?.submissionConfiguration.legacyProjection.inputSchema as JSONSchema7 | undefined
+      )?.properties;
       setSlice({
         path,
         fileName,
@@ -634,6 +691,15 @@ export const usePrintPrepare = ({
         length: file.bytes.byteLength,
         mimeType: file.mimeType,
         geometry: sliceGeometry,
+        materialConfiguration:
+          entry === undefined
+            ? {}
+            : {
+                ...('amsMapping' in (submissionProperties ?? {}) ? { amsMapping: mapping } : {}),
+                ...('expectedMaterials' in (submissionProperties ?? {})
+                  ? { expectedMaterials: expectedMaterialsFor(mapping, entry) }
+                  : {}),
+              },
         optionsKey,
         summary,
         /* A plate too large to preview has no bounds to check; the printer checks its own. */
@@ -651,16 +717,20 @@ export const usePrintPrepare = ({
     }
   }, [
     actor,
+    entry,
     entryPath,
     fileManager,
     geometry,
     kernelClient,
     manifest,
+    modelColors,
     optionsKey,
+    provider,
     projectRef,
     renderTimeout,
     route,
     sliceOptions,
+    submission,
   ]);
 
   const openPreview = useCallback((): void => {
@@ -668,6 +738,8 @@ export const usePrintPrepare = ({
       editorRef.send({ type: 'openFile', path: slice.path, source: 'user' });
     }
   }, [editorRef, slice]);
+
+  const sendConfiguration = slice ? { ...effectiveSubmission, ...slice.materialConfiguration } : effectiveSubmission;
 
   const sendBlocker = ((): string | undefined => {
     if (!entry || !provider) {
@@ -690,7 +762,7 @@ export const usePrintPrepare = ({
     if (unmapped >= 0) {
       return `Filament ${String(unmapped + 1)} has no slot. Choose a loaded slot for it before sending.`;
     }
-    return startBlocker(effectiveSubmission, entry, manifest);
+    return startBlocker(sendConfiguration, entry, manifest);
   })();
 
   const send = useCallback(async (): Promise<void> => {
@@ -721,7 +793,7 @@ export const usePrintPrepare = ({
       const record = await client.requestPrint({
         machineId: entry.machineId,
         artifact,
-        configuration: effectiveSubmission as MachineRequestPrintInput['configuration'],
+        configuration: sendConfiguration as MachineRequestPrintInput['configuration'],
         requestedBy: operator,
         summary: {
           fileName: slice.fileName,
@@ -751,7 +823,7 @@ export const usePrintPrepare = ({
     } finally {
       setIsSending(false);
     }
-  }, [client, effectiveSubmission, entry, projectId, provider, sendBlocker, slice]);
+  }, [client, entry, projectId, provider, sendBlocker, sendConfiguration, slice]);
 
   const confirmSend = useCallback(() => {
     setSendError(undefined);
@@ -780,6 +852,7 @@ export const usePrintPrepare = ({
     submission,
     setSubmission,
     effectiveSubmission,
+    sendConfiguration,
     slice,
     staleReason,
     isSliceStale,
@@ -797,10 +870,7 @@ export const usePrintPrepare = ({
   };
 };
 
-const chipClass = (isSelected: boolean): string =>
-  cn('justify-start', isSelected && 'border-border bg-accent text-accent-foreground hover:bg-accent');
-
-function PresetChips({
+function QualityChoice({
   presets,
   options,
   isModified,
@@ -815,45 +885,53 @@ function PresetChips({
   readonly onReset: () => void;
 }): React.JSX.Element {
   const active = options['preset'] ?? options['layerHeight'];
+  const selected = presets.find((preset) => active === preset.id || active === preset.layerHeight.value)?.id ?? '';
   return (
-    <div className='flex min-w-0 items-center gap-1.5'>
-      <div role='group' aria-label='Quality preset' className='flex flex-wrap gap-1.5'>
-        {presets.map((preset) => {
-          const isSelected = active === preset.id || active === preset.layerHeight.value;
-          return (
-            <Button
-              key={preset.id}
-              type='button'
-              size='xs'
-              variant='outline'
-              aria-pressed={isSelected}
-              className={chipClass(isSelected)}
-              onClick={() => {
-                onSelect(preset);
-              }}
-            >
-              {isSelected ? <Check aria-hidden className='size-3' /> : null}
-              {preset.label}
-              <span className='text-muted-foreground'>{formatQuantity(preset.layerHeight)}</span>
-            </Button>
-          );
-        })}
-      </div>
-      {isModified ? <ModifiedIndicator onReset={onReset} tooltip='Reset Quality preset' /> : null}
-    </div>
+    <PrintSetupRow label='Quality' isModified={isModified} onReset={onReset}>
+      <ToggleGroup
+        type='single'
+        variant='outline'
+        size='sm'
+        aria-label='Quality'
+        className='h-(--param-field-h) rounded-(--param-field-radius) border border-border/50 bg-muted p-0'
+        value={selected}
+        onValueChange={(value) => {
+          const preset = presets.find((candidate) => candidate.id === value);
+          if (preset) {
+            onSelect(preset);
+          }
+        }}
+      >
+        {presets.map((preset) => (
+          <ToggleGroupItem
+            key={preset.id}
+            value={preset.id}
+            aria-label={`${preset.label} ${formatQuantity(preset.layerHeight)}`}
+            className='h-full min-w-0 rounded-(--param-field-radius) px-2 text-xs font-normal text-(--param-field-color) data-[state=on]:bg-background data-[state=on]:text-foreground'
+          >
+            {preset.label}
+            <span className='text-muted-foreground'>{formatQuantity(preset.layerHeight)}</span>
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+    </PrintSetupRow>
   );
 }
 
-function MaterialChips({
+function MaterialSelect({
   entry,
   manifest,
   submission,
   onSelect,
+  isModified,
+  onReset,
 }: {
   readonly entry: MachineDirectoryEntry;
   readonly manifest: MachineManifest | undefined;
   readonly submission: Record<string, unknown>;
   readonly onSelect: (slot: number, materialId: string) => void;
+  readonly isModified: boolean;
+  readonly onReset: () => void;
 }): React.JSX.Element {
   const mapping = submission['amsMapping'];
   const selectedSlot: unknown = Array.isArray(mapping) ? mapping[0] : undefined;
@@ -862,40 +940,31 @@ function MaterialChips({
     return <p className='text-xs text-muted-foreground'>No material slots observed.</p>;
   }
   return (
-    <div role='group' aria-label='Material' className='flex flex-wrap gap-1.5'>
-      {materials.map((material) => {
-        const label = materialSlotLabel(material.slot, manifest);
-        const isLoaded = material.state === 'loaded' && material.materialId !== undefined;
-        const isSelected = selectedSlot === material.slot;
-        return (
-          <Button
-            key={material.slot}
-            type='button'
-            size='xs'
-            variant='outline'
-            aria-pressed={isSelected}
-            disabled={!isLoaded}
-            className={chipClass(isSelected)}
-            onClick={() => {
-              if (material.materialId !== undefined) {
-                onSelect(material.slot, material.materialId);
-              }
-            }}
-          >
-            <span className='font-mono'>{label}</span>
-            {isLoaded ? material.materialId : material.state === 'empty' ? 'Empty' : 'Unknown'}
-            {material.color ? (
-              <span
-                aria-hidden
-                className='size-2.5 rounded-full border border-border/70'
-                // Observed filament color is user data, not chrome (ui-policy §5).
-                style={{ backgroundColor: material.color }}
-              />
-            ) : null}
-          </Button>
-        );
-      })}
-    </div>
+    <PrintSetupRow label='Material' isModified={isModified} onReset={onReset}>
+      <ParameterSelect
+        label='Material'
+        value={typeof selectedSlot === 'number' ? String(selectedSlot) : ''}
+        groups={[
+          {
+            options: materials.map((material) => ({
+              value: String(material.slot),
+              label: `${materialSlotLabel(material.slot, manifest)} · ${material.materialId ?? (material.state === 'empty' ? 'Empty' : 'Unknown')}`,
+              ...(material.remainingPercent === undefined
+                ? {}
+                : { secondary: `${String(material.remainingPercent)} %` }),
+              ...(material.color === undefined ? {} : { swatch: material.color }),
+              disabled: material.state !== 'loaded' || material.materialId === undefined,
+            })),
+          },
+        ]}
+        onChange={(value) => {
+          const material = materials.find((candidate) => candidate.slot === Number(value));
+          if (material?.materialId) {
+            onSelect(material.slot, material.materialId);
+          }
+        }}
+      />
+    </PrintSetupRow>
   );
 }
 
@@ -905,18 +974,33 @@ function MaterialChoice({
   manifest,
   filamentColors,
   submission,
+  ownSubmission,
   onSelectMaterial,
   onSelectFilamentSlot,
+  onResetMaterial,
 }: {
   readonly entry: MachineDirectoryEntry;
   readonly manifest: MachineManifest | undefined;
   readonly filamentColors: readonly string[];
   readonly submission: Record<string, unknown>;
+  readonly ownSubmission: Record<string, unknown>;
   readonly onSelectMaterial: (slot: number, materialId: string) => void;
   readonly onSelectFilamentSlot: (filament: number, slot: number) => void;
+  readonly onResetMaterial: () => void;
 }): React.JSX.Element {
   if (filamentColors.length < 2) {
-    return <MaterialChips entry={entry} manifest={manifest} submission={submission} onSelect={onSelectMaterial} />;
+    return (
+      <div role='group' aria-label='Material'>
+        <MaterialSelect
+          entry={entry}
+          manifest={manifest}
+          submission={submission}
+          isModified={Object.hasOwn(ownSubmission, 'amsMapping')}
+          onReset={onResetMaterial}
+          onSelect={onSelectMaterial}
+        />
+      </div>
+    );
   }
   const externalSpoolSlot = manifest?.materialSystem.externalSpoolSlot;
   // Only the AMS changes filament mid-print; the external spool feeds one-filament prints.
@@ -994,6 +1078,12 @@ function SliceResult({
         </dd>
         <dt className='text-muted-foreground'>Filament</dt>
         <dd className='tabular-nums'>{formatFilament(summary.filamentLength)}</dd>
+        <dt className='text-muted-foreground'>Weight</dt>
+        <dd className='tabular-nums'>
+          {summary.filamentWeightGrams === undefined
+            ? 'Unknown'
+            : `${String(Math.round(summary.filamentWeightGrams * 10) / 10)} g (slicer estimate)`}
+        </dd>
         {summary.bounds === undefined ? null : (
           <>
             <dt className='text-muted-foreground'>Part</dt>
@@ -1040,7 +1130,7 @@ function SliceResult({
       {isConfirmingSend ? (
         <StartConfirmationCard
           digest={slice.digest}
-          confirmations={describeStartConfirmations(prepare.effectiveSubmission, entry, manifest)}
+          confirmations={describeStartConfirmations(prepare.sendConfiguration, entry, manifest)}
           machineName={machineName}
           blocker={sendBlocker}
           isBusy={isSending}
@@ -1093,22 +1183,14 @@ function ModelSelect({
     return undefined;
   }
   return (
-    <label className='flex min-w-0 flex-col gap-1 text-xs text-muted-foreground'>
-      Model
-      <select
-        className='h-8 min-w-0 rounded-md border border-input bg-background px-2 text-sm text-foreground'
+    <PrintSetupRow label='Model'>
+      <ParameterSelect
+        label='Model'
         value={entryPath}
-        onChange={(event) => {
-          onChange(event.target.value);
-        }}
-      >
-        {entryPaths.map((candidate) => (
-          <option key={candidate} value={candidate}>
-            {candidate}
-          </option>
-        ))}
-      </select>
-    </label>
+        groups={[{ options: entryPaths.map((candidate) => ({ value: candidate, label: candidate })) }]}
+        onChange={onChange}
+      />
+    </PrintSetupRow>
   );
 }
 
@@ -1123,33 +1205,21 @@ function PlateSelect({
   readonly selected: unknown;
   /** Whether the print intent holds a plate. */
   readonly isModified: boolean;
-  readonly onChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  readonly onChange: (plate: string) => void;
   readonly onReset: () => void;
 }): React.JSX.Element | undefined {
-  const id = useId();
   if (plates.length === 0) {
     return undefined;
   }
   return (
-    <div className='flex min-w-0 items-center gap-2 text-xs text-muted-foreground'>
-      <label htmlFor={id} className={cn(isModified && 'font-medium text-foreground')}>
-        Plate
-      </label>
-      {isModified ? <ModifiedIndicator onReset={onReset} tooltip='Reset Plate' /> : null}
-      <select
-        id={id}
-        aria-label='Plate'
-        className='h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm text-foreground'
+    <PrintSetupRow label='Plate' isModified={isModified} onReset={onReset}>
+      <ParameterSelect
+        label='Plate'
         value={typeof selected === 'string' ? selected : ''}
+        groups={[{ options: plates.map((plate) => ({ value: plate.id, label: plate.label })) }]}
         onChange={onChange}
-      >
-        {plates.map((plate) => (
-          <option key={plate.id} value={plate.id}>
-            {plate.label}
-          </option>
-        ))}
-      </select>
-    </div>
+      />
+    </PrintSetupRow>
   );
 }
 
@@ -1158,10 +1228,12 @@ function BambuStudioChoices({
   studio,
   entry,
   manifest,
+  mode = 'primary',
 }: {
   readonly studio: BambuStudioMode;
   readonly entry: MachineDirectoryEntry;
   readonly manifest: MachineManifest | undefined;
+  readonly mode?: 'primary' | 'printer';
 }): React.JSX.Element {
   const trays = studio.slots.map((slot): BambuTray => {
     const tray = entry.snapshot.setup.materials.find((material) => material.slot === slot);
@@ -1174,15 +1246,17 @@ function BambuStudioChoices({
   });
   return (
     <>
-      <BambuStudioPresets studio={studio} trays={trays} />
-      {studio.dropped > 0 ? (
+      <BambuStudioPresets studio={studio} trays={trays} mode={mode} />
+      {mode === 'primary' && studio.dropped > 0 ? (
         <PrintNotice tone='neutral' role='status'>
           {studio.dropped === 1
             ? '1 changed setting does not exist in these presets and was dropped.'
             : `${String(studio.dropped)} changed settings do not exist in these presets and were dropped.`}
         </PrintNotice>
       ) : null}
-      {studio.error === undefined ? null : <PrintNotice tone='destructive'>{studio.error}</PrintNotice>}
+      {mode === 'printer' || studio.error === undefined ? null : (
+        <PrintNotice tone='destructive'>{studio.error}</PrintNotice>
+      )}
     </>
   );
 }
@@ -1226,6 +1300,61 @@ function SliceControls({ prepare }: { readonly prepare: PrintPrepare }): React.J
   );
 }
 
+/** The host's prestart defaults, visible before Slice and preserved in the submission projection. */
+function BeforeStarting({ prepare }: { readonly prepare: PrintPrepare }): React.JSX.Element | undefined {
+  const [isOpen, setIsOpen] = useState(true);
+  const rows = [
+    { key: 'bedLeveling', label: 'Bed levelling', description: 'Probe the plate before the first layer.' },
+    {
+      key: 'flowCalibration',
+      label: 'Flow calibration',
+      description: 'Calibrate flow dynamics for the loaded filament.',
+    },
+    { key: 'timelapse', label: 'Timelapse', description: 'Record a frame every layer.' },
+  ] as const;
+  const declared = rows.filter(({ key }) => Object.hasOwn(prepare.submissionSchema?.schema.properties ?? {}, key));
+  if (declared.length === 0) {
+    return undefined;
+  }
+  const changed = declared.filter(({ key }) => Object.hasOwn(prepare.submission, key)).length;
+  return (
+    <ParameterGroupCard
+      title='Before starting'
+      isOpen={isOpen}
+      trailing={
+        <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>
+          {changed === 0 ? `(${String(declared.length)})` : `(${String(changed)} changed)`}
+        </span>
+      }
+      onOpenChange={setIsOpen}
+    >
+      {declared.map(({ key, label, description }) => (
+        <PrintSetupRow
+          key={key}
+          label={label}
+          description={description}
+          className='px-2.5'
+          isModified={Object.hasOwn(prepare.submission, key)}
+          onReset={() => {
+            prepare.setSubmission(
+              Object.fromEntries(Object.entries(prepare.submission).filter(([name]) => name !== key)),
+            );
+          }}
+        >
+          <ParametersBoolean
+            id={`print-${key}`}
+            aria-label={`Toggle for ${label}`}
+            value={prepare.effectiveSubmission[key] === true}
+            onChange={(value) => {
+              prepare.setSubmission({ ...prepare.submission, [key]: value });
+            }}
+          />
+        </PrintSetupRow>
+      ))}
+    </ParameterGroupCard>
+  );
+}
+
 type BambuSettings = NonNullable<BambuStudioMode['settings']>;
 
 const asSchema = (value: unknown): JSONSchema7 | undefined =>
@@ -1260,7 +1389,13 @@ const bambuSettingsForm = (settings: BambuSettings): BambuSettingsFormModel => {
 };
 
 /** Bambu Studio's settings for the selected presets, once they have loaded. */
-function BambuStudioSettings({ studio }: { readonly studio: BambuStudioMode }): React.JSX.Element {
+function BambuStudioSettings({
+  studio,
+  filterTerm,
+}: {
+  readonly studio: BambuStudioMode;
+  readonly filterTerm: string;
+}): React.JSX.Element {
   const { settings, overrides, setSettings } = studio;
   const form = useMemo(() => (settings ? bambuSettingsForm(settings) : undefined), [settings]);
   const manifest = useCompiledConfigurationManifest('bambu-studio', 'print/settings', form?.resolved);
@@ -1296,16 +1431,15 @@ function BambuStudioSettings({ studio }: { readonly studio: BambuStudioMode }): 
     [shown, setSettings],
   );
   return shown ? (
-    <div
-      role='group'
-      aria-label='Bambu Studio settings'
-      className='overflow-hidden rounded-lg border border-border/70 bg-card'
-    >
+    <div role='group' aria-label='Bambu Studio settings' className='min-w-0'>
       <Parameters
         parameters={parameters}
         defaultParameters={shown.form.resolved.defaults}
         jsonSchema={shown.form.resolved.schema as RJSFSchema}
         searchPlaceholder='Filter settings'
+        filterTerm={filterTerm}
+        enableSearch={false}
+        presentation='embedded'
         isInitialExpanded={false}
         units={printUnits}
         parameterManifest={shown.manifest}
@@ -1421,6 +1555,7 @@ export function PrepareSection({
   readonly manifest: MachineManifest | undefined;
   readonly prepare: PrintPrepare;
 }): React.JSX.Element {
+  const [moreSettingsFilter, setMoreSettingsFilter] = useState('');
   const {
     entryPath,
     entryPaths,
@@ -1483,8 +1618,7 @@ export function PrepareSection({
     [setSubmission, submission],
   );
   const selectPlate = useCallback(
-    (event: React.ChangeEvent<HTMLSelectElement>) => {
-      const { value } = event.target;
+    (value: string) => {
       // The plate picked here replaces one set under Advanced, which would otherwise keep winning.
       const { expectedBedType: _advanced, ...rest } = submission;
       setSubmission(rest);
@@ -1518,23 +1652,6 @@ export function PrepareSection({
       <ModelSelect entryPath={entryPath} entryPaths={entryPaths} onChange={setEntryPath} />
       <EngineStatus studio={studio} provider={provider} />
       <PrintIntentNotice printIntent={printIntent} model={manifest?.identity.model} machineName={entry.name} />
-      {manifest ? (
-        <PresetChips
-          presets={manifest.slicing.presets}
-          options={presetState}
-          isModified={intent?.preset !== undefined}
-          onSelect={selectPreset}
-          onReset={resetPreset}
-        />
-      ) : null}
-      <MaterialChoice
-        entry={entry}
-        manifest={manifest}
-        filamentColors={filamentColors}
-        submission={effectiveSubmission}
-        onSelectMaterial={selectMaterial}
-        onSelectFilamentSlot={selectFilamentSlot}
-      />
       <PlateSelect
         plates={plates}
         selected={selectedPlate}
@@ -1542,14 +1659,53 @@ export function PrepareSection({
         onChange={selectPlate}
         onReset={resetPlate}
       />
+      <MaterialChoice
+        entry={entry}
+        manifest={manifest}
+        filamentColors={filamentColors}
+        submission={effectiveSubmission}
+        ownSubmission={submission}
+        onResetMaterial={() => {
+          setSubmission(
+            Object.fromEntries(
+              Object.entries(submission).filter(([key]) => key !== 'amsMapping' && key !== 'expectedMaterials'),
+            ),
+          );
+        }}
+        onSelectMaterial={selectMaterial}
+        onSelectFilamentSlot={selectFilamentSlot}
+      />
+      {!isBambuStudio && manifest ? (
+        <QualityChoice
+          presets={manifest.slicing.presets}
+          options={presetState}
+          isModified={intent?.preset !== undefined}
+          onSelect={selectPreset}
+          onReset={resetPreset}
+        />
+      ) : null}
       {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} /> : null}
+      <BeforeStarting prepare={prepare} />
       <SliceControls prepare={prepare} />
       <SliceResult prepare={prepare} entry={entry} manifest={manifest} />
-      <PrintDisclosure title='Advanced'>
+      <PrintDisclosure title='More settings'>
+        <SearchInput
+          aria-label='Filter settings'
+          placeholder='Filter settings'
+          value={moreSettingsFilter}
+          className='h-6 w-full bg-background text-sm'
+          onChange={(event) => {
+            setMoreSettingsFilter(event.target.value);
+          }}
+          onClear={() => {
+            setMoreSettingsFilter('');
+          }}
+        />
+        {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} mode='printer' /> : null}
         {isBambuStudio ? (
-          <BambuStudioSettings studio={studio} />
+          <BambuStudioSettings studio={studio} filterTerm={moreSettingsFilter} />
         ) : optionsSchema ? (
-          <div className='overflow-hidden rounded-lg border border-border/70 bg-card' aria-label='Slicer options'>
+          <div className='min-w-0' role='group' aria-label='Slicer options'>
             {optionsManifest ? (
               <Parameters
                 parameters={options}
@@ -1557,6 +1713,8 @@ export function PrepareSection({
                 jsonSchema={optionsSchema.schema as RJSFSchema}
                 onParametersChange={setOptions}
                 enableSearch={false}
+                filterTerm={moreSettingsFilter}
+                presentation='embedded'
                 units={printUnits}
                 parameterManifest={optionsManifest}
                 parameterEdit={{ kind: 'transient' }}
@@ -1572,7 +1730,7 @@ export function PrepareSection({
           <p className='text-xs text-muted-foreground'>The slicer declares no options.</p>
         )}
         {submissionSchema && provider ? (
-          <div className='overflow-hidden rounded-lg border border-border/70 bg-card' aria-label='Machine mapping'>
+          <div className='min-w-0' role='group' aria-label='Machine mapping'>
             {submissionManifest ? (
               <Parameters
                 parameters={advancedSubmissionValues(submission)}
@@ -1589,6 +1747,8 @@ export function PrepareSection({
                   });
                 }}
                 enableSearch={false}
+                filterTerm={moreSettingsFilter}
+                presentation='embedded'
                 units={printUnits}
                 parameterManifest={submissionManifest}
                 parameterEdit={{ kind: 'transient' }}

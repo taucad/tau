@@ -34,6 +34,7 @@ import type { MenuDisclosureItemProperties } from '#components/ui/menu-disclosur
 import { menuItemVariants, menuSeparatorVariants } from '@taucad/ui/components/menu.variants';
 import { cn } from '@taucad/ui/utils/cn';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { MaterialSwatch, gltfDefaultBaseColorLabel } from '#components/geometry/cad/material-swatch.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 
@@ -225,7 +226,6 @@ export function ModelComponentViewerMenuItems({
 
 type SurfaceMaterials = NonNullable<GeometryComponentAppearance['materials']>;
 // oxlint-disable-next-line tau-lint/no-hardcoded-color -- This text reports the glTF format's material default; it is not a UI palette or style.
-const gltfDefaultBaseColorLabel = '#ffffff';
 
 function formatMaterialValues(materials: SurfaceMaterials, factor: 'color' | 'metalness' | 'roughness'): string {
   const values = new Map<string, { explicit: number; defaulted: number }>();
@@ -252,41 +252,6 @@ function formatMaterialValues(materials: SurfaceMaterials, factor: 'color' | 'me
     return `${value} (${counts.explicit > 0 ? 'includes glTF default' : 'glTF default'})`;
   });
   return labels.length === 1 ? labels[0]! : `Mixed: ${labels.join(', ')}`;
-}
-
-const numericFactor = (value: number | 'unavailable' | undefined): number => (typeof value === 'number' ? value : 1);
-
-/**
- * A small lit sphere of a part's surface materials, so the menu row reads as that part at a glance:
- * the base colour (a pie of colours when the surfaces differ), a highlight that tightens as
- * roughness drops, and a darker rim as metalness rises.
- */
-export function MaterialSwatch({ materials }: { readonly materials: SurfaceMaterials }): React.JSX.Element {
-  const colors = [
-    ...new Set(
-      materials.map(({ color }) =>
-        color === undefined || color === 'unavailable' ? gltfDefaultBaseColorLabel : color,
-      ),
-    ),
-  ];
-  const fill =
-    colors.length === 1
-      ? colors[0]!
-      : `conic-gradient(${colors.map((color, index) => `${color} ${(index * 100) / colors.length}% ${((index + 1) * 100) / colors.length}%`).join(', ')})`;
-  const roughness = numericFactor(materials[0]?.roughness);
-  const metalness = numericFactor(materials[0]?.metalness);
-  // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Light and shadow on a rendered material preview, not UI palette colours.
-  const highlight = `radial-gradient(circle at 32% 30%, rgb(255 255 255 / ${0.85 * (1 - roughness)}) 0, transparent ${35 + 35 * roughness}%)`;
-  // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Light and shadow on a rendered material preview, not UI palette colours.
-  const rim = `radial-gradient(circle, transparent 50%, rgb(0 0 0 / ${0.1 + 0.3 * metalness}) 100%)`;
-  return (
-    <span
-      aria-hidden
-      data-slot='material-swatch'
-      className='size-4 shrink-0 rounded-full ring-1 ring-border'
-      style={{ background: `${highlight}, ${rim}, ${fill}` }}
-    />
-  );
 }
 
 /**

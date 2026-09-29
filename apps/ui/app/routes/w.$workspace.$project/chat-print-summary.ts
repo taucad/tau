@@ -23,6 +23,8 @@ export type SliceSummary = Readonly<{
   producer: BambuContainerProducer | undefined;
   /** Millimetres of filament. */
   filamentLength: number;
+  /** Grams stated by the slicer header; absent when the artifact supplies no weight. */
+  filamentWeightGrams: number | undefined;
   /**
    * Every move the nozzle makes, from home through the printer's start routine to the end lift; the plate-fit
    * check reads these only when the G-code labels no part. Absent when the toolpath is too large to preview.
@@ -53,6 +55,17 @@ const tooLargeToPreview: ReadonlySet<string> = new Set(['TOOLPATH_SOURCE_TOO_LAR
 const headerBytes = 65_536;
 const durationSeconds: Readonly<Record<string, number>> = { d: 86_400, h: 3600, m: 60, s: 1 };
 
+const filamentWeight = (gcode: Uint8Array<ArrayBuffer>): number | undefined => {
+  const header = new TextDecoder().decode(gcode.subarray(0, headerBytes));
+  const values = /^;\s*total filament weight \[g\]\s*:\s*([\d.,\s]+)$/mu
+    .exec(header)?.[1]
+    ?.split(',')
+    .map((value) => Number(value.trim()));
+  return values?.length && values.every((value) => Number.isFinite(value) && value >= 0)
+    ? values.reduce((total, value) => total + value, 0)
+    : undefined;
+};
+
 /**
  * What a plate too large to preview says about itself: Bambu Studio's header states its layers, time and
  * filament (`; total layer number: 50`, `; total estimated time: 1h 46m 51s`, `; total filament length [mm] :
@@ -75,6 +88,7 @@ const summarizeHeader = (
     isSlicerEstimate: time !== undefined,
     producer,
     filamentLength: lengths.split(',').reduce((total, length) => total + (Number(length) || 0), 0),
+    filamentWeightGrams: filamentWeight(container.gcode),
     bounds: undefined,
     partBounds: undefined,
     coverageComplete: false,
@@ -108,6 +122,7 @@ export const summarizeGcodeContainer = (bytes: Uint8Array<ArrayBuffer>): SliceSu
     isSlicerEstimate: program.headerEstimate !== undefined,
     producer: readBambuContainerProducer(bytes),
     filamentLength: program.filamentLength,
+    filamentWeightGrams: filamentWeight(container.gcode),
     bounds: program.bounds,
     partBounds: partBounds(program),
     coverageComplete: program.coverage.complete,

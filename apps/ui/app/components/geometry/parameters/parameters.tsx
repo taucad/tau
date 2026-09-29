@@ -39,6 +39,8 @@ type ParametersProperties = {
   readonly parameterManifest: ParameterManifest;
   readonly parameterGroup?: ParameterGroup;
   readonly parameterEdit: ParameterEdit;
+  /** Render the root rows without the standalone catalog card. */
+  readonly presentation?: 'catalog' | 'embedded';
 };
 
 /* oxlint-disable react/set-state-in-effect -- The `use no memo` boundary preserves the existing controlled search reset and focus timing. */
@@ -59,6 +61,7 @@ export function Parameters({
   parameterManifest,
   parameterGroup,
   parameterEdit,
+  presentation = 'catalog',
 }: ParametersProperties): React.JSX.Element {
   'use no memo';
 
@@ -129,7 +132,7 @@ export function Parameters({
   const formContext = useMemo<RJSFContext>(
     () => ({
       idPrefix: rjsfIdPrefix,
-      rootPresentation: 'catalog',
+      rootPresentation: presentation,
       allExpanded,
       searchTerm: deferredFilterTerm,
       resetSingleParameter,
@@ -145,6 +148,7 @@ export function Parameters({
       parameterManifest,
       parameterGroup,
       parameterEdit,
+      presentation,
     }),
     [
       allExpanded,
@@ -185,7 +189,7 @@ export function Parameters({
   return (
     <div
       data-slot='parameters'
-      className={cn('group flex h-full w-full flex-col', className)}
+      className={cn('group flex w-full flex-col', presentation === 'catalog' && 'h-full', className)}
       style={
         {
           '--param-field-h': '1.5rem',

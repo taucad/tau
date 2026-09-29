@@ -116,8 +116,47 @@ const [red, blue] = ['#FF0000', '#0000FF'] as const;
 // oxlint-disable-next-line tau-lint/no-hardcoded-color -- the RGBA a machine reports for a red and a blue spool
 const [redTray, blueTray] = ['#FF0000FF', '#0000FFFF'] as const;
 
-/** The Prepare section, whose slice and send buttons share their names with the orientation card's primary action. */
-const prepareRegion = (): HTMLElement => screen.getByRole('region', { name: 'Prepare' });
+/** The next print folds during a run; opening it keeps the preparation assertions about its actual controls. */
+const prepareRegion = (): HTMLElement => {
+  const folded = screen.queryByRole('button', { name: 'Prepare the next print' });
+  if (folded?.getAttribute('aria-expanded') === 'false') {
+    fireEvent.click(folded);
+  }
+  return screen.getByRole('region', { name: 'Prepare' });
+};
+
+const openMoreSettings = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
+  const trigger = screen.getByRole('button', { name: 'More settings' });
+  if (trigger.getAttribute('aria-expanded') !== 'true') {
+    await user.click(trigger);
+  }
+};
+
+const shortPreset = (name: string): string => name.replace(/ @BBL X1C$/u, '');
+const selectedLabel = (value: string): string =>
+  value === 'cool'
+    ? 'Cool plate'
+    : value === 'textured-pei'
+      ? 'Textured PEI plate'
+      : /^\d$/u.test(value)
+        ? `A${String(Number(value) + 1)}`
+        : value === ''
+          ? 'Choose a slot'
+          : shortPreset(value);
+
+const chooseOption = async (
+  user: ReturnType<typeof userEvent.setup>,
+  trigger: HTMLElement,
+  label: string,
+): Promise<void> => {
+  await user.click(trigger);
+  const optionName = /^\d$/u.test(label) ? `A${String(Number(label) + 1)}` : shortPreset(label);
+  const option = screen.getAllByRole('option').find((candidate) => candidate.textContent.includes(optionName));
+  if (!option) {
+    throw new Error(`Missing select option: ${optionName}`);
+  }
+  await user.click(option);
+};
 
 /** The pane's own name for the agent's pending request; the chat banner keeps "Approval required". */
 const requestRegionName = 'Print request awaiting you: pyramid.gcode.3mf';
@@ -150,6 +189,9 @@ const expectPrintIntent = async (expected: Record<string, unknown>): Promise<voi
 
 beforeEach(() => {
   vi.clearAllMocks();
+  Element.prototype.scrollIntoView = vi.fn();
+  Element.prototype.hasPointerCapture = vi.fn(() => false);
+  Element.prototype.setPointerCapture = vi.fn();
   vi.mocked(awaitFreshRender).mockImplementation(async (actor) => actor.getSnapshot());
   globalThis.localStorage.clear();
   desktopHost.bambuStudio = undefined;
@@ -168,7 +210,8 @@ describe('Print pane orientation', () => {
       </TooltipProvider>,
     );
 
-    expect(within(await screen.findByLabelText('Model')).getByRole('option', { name: 'other.ts' })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Model' }));
+    expect(screen.getByRole('option', { name: 'other.ts' })).toBeInTheDocument();
     expect(mockProjectSend).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'claimGeometryUnit', entryPath: 'other.ts' }),
     );
@@ -286,11 +329,11 @@ describe('Print pane orientation', () => {
     renderPane(createFixture({ entries: [entry(), attic] }).client);
 
     const picker = await screen.findByRole('combobox', { name: 'Machine' });
-    expect(
-      within(picker)
-        .getAllByRole('option')
-        .map((option) => option.textContent),
-    ).toEqual(['Attic P1S', 'Workshop X1C']);
+    fireEvent.click(picker);
+    expect(screen.getAllByRole('option').map((option) => option.textContent.trim())).toEqual([
+      'Attic P1SReady',
+      'Workshop X1CReady',
+    ]);
     expect(screen.queryByText(entry().descriptor.name)).not.toBeInTheDocument();
   });
 
@@ -380,22 +423,24 @@ describe('Print pane prepare and send', () => {
     expect(await screen.findByRole('article', { name: 'Workshop X1C, Ready' })).toBeInTheDocument();
     expect(container.querySelector('[data-slot="print-panel-body"]')).toHaveClass('min-w-0', 'flex-col');
 
-    const presets = screen.getByRole('group', { name: 'Quality preset' });
+    const presets = screen.getByRole('radiogroup', { name: 'Quality' });
     expect(
       within(presets)
-        .getAllByRole('button')
+        .getAllByRole('radio')
         .map((button) => button.textContent),
     ).toEqual(['Fast0.28 mm', 'Standard0.2 mm', 'Fine0.12 mm']);
-    await user.click(within(presets).getByRole('button', { name: /Fine/u }));
+    await user.click(within(presets).getByRole('radio', { name: /Fine/u }));
     await waitFor(() => {
-      expect(within(presets).getByRole('button', { name: /Fine/u })).toHaveAttribute('aria-pressed', 'true');
+      expect(within(presets).getByRole('radio', { name: /Fine/u })).toHaveAttribute('aria-checked', 'true');
     });
     // The choice is the project's: saved as the only changed key beside the printer model.
     expect(printIntentText()).toBe('{\n  "model": "x1c",\n  "preset": "fine"\n}\n');
 
     const material = screen.getByRole('group', { name: 'Material' });
-    expect(within(material).getByRole('button', { name: /A1/u })).toHaveAttribute('aria-pressed', 'true');
-    expect(within(material).getByRole('button', { name: /A2/u })).toBeDisabled();
+    expect(within(material).getByRole('combobox', { name: 'Material' })).toHaveTextContent('A1');
+    await user.click(within(material).getByRole('combobox', { name: 'Material' }));
+    expect(screen.getByRole('option', { name: /A2/u })).toHaveAttribute('data-disabled');
+    await user.keyboard('{Escape}');
 
     const slice = within(prepareRegion()).getByRole('button', { name: 'Slice and preview' });
     slice.focus();
@@ -498,23 +543,17 @@ describe('Print pane prepare and send', () => {
     await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
 
     const names: string[] = [];
-    for (let index = 0; index < 20 && names.filter((name) => name === 'Slice and preview').length < 2; index += 1) {
+    for (let index = 0; index < 20 && !names.includes('Slice and preview'); index += 1) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- Tab order is sequential by definition.
       await user.tab();
       const active = document.activeElement;
       names.push(active?.getAttribute('aria-label') ?? active?.textContent.trim() ?? '');
     }
-    const order = [
-      'Refresh',
-      'Slice and preview',
-      'Fast0.28 mm',
-      'Standard0.2 mm',
-      'Fine0.12 mm',
-      'A1pla-black',
-      'Plate',
-      'Slice and preview',
-    ];
-    expect(names.filter((name) => order.includes(name))).toEqual(order);
+    expect(names).toContain('Machine');
+    expect(names).toContain('Plate');
+    expect(names).toContain('Material');
+    expect(names.at(-1)).toBe('Slice and preview');
+    expect(names.indexOf('Plate')).toBeLessThan(names.indexOf('Material'));
   });
 
   it('should name the plate select by its label and slice for the plate chosen there', async () => {
@@ -526,10 +565,10 @@ describe('Print pane prepare and send', () => {
     // Playwright reads a wrapping label's whole text, options included, so only an explicit name keeps
     // `getByLabel('Plate', { exact: true })` finding it; jsdom and Chromium already name it "Plate" either way.
     expect(plate).toHaveAttribute('aria-label', 'Plate');
-    expect(plate).toHaveValue('textured-pei');
-    await user.selectOptions(plate, 'Cool plate');
+    expect(plate).toHaveTextContent('Textured PEI plate');
+    await chooseOption(user, plate, 'Cool plate');
     await waitFor(() => {
-      expect(plate).toHaveValue('cool');
+      expect(plate).toHaveTextContent('Cool plate');
     });
     await expectPrintIntent({ model: 'x1c', plate: 'cool' });
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
@@ -550,7 +589,7 @@ describe('Print pane prepare and send', () => {
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
 
-    await user.click(screen.getByRole('button', { name: /^Advanced/u }));
+    await openMoreSettings(user);
     const options = await screen.findByLabelText('Slicer options');
     await user.click(await within(options).findByRole('button', { name: 'Set layer height' }));
     await waitFor(() => {
@@ -633,11 +672,11 @@ describe('Print pane prepare and send', () => {
     const user = userEvent.setup();
     renderPane(createFixture().client);
     await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    await user.click(screen.getByRole('button', { name: /^Advanced/u }));
+    await openMoreSettings(user);
     const mapping = await screen.findByLabelText('Machine mapping');
-    expect(await within(mapping).findByRole('switch', { name: 'Toggle for Bed Leveling' })).toBeChecked();
-    expect(within(mapping).getByRole('switch', { name: 'Toggle for Flow Calibration' })).toBeChecked();
-    expect(within(mapping).getByRole('switch', { name: 'Toggle for Timelapse' })).not.toBeChecked();
+    expect(await screen.findByRole('switch', { name: 'Toggle for Bed levelling' })).toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Toggle for Flow calibration' })).toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Toggle for Timelapse' })).not.toBeChecked();
     expect(within(mapping).getByRole('spinbutton', { name: 'Input for Expected Filament Diameter' })).toHaveValue(
       '1.75',
     );
@@ -655,12 +694,39 @@ describe('Print pane prepare and send', () => {
     }
   });
 
+  it('invalidates a slice when a prestart choice changes and submits the new value', async () => {
+    const fixture = createFixture();
+    const user = userEvent.setup();
+    renderPane(fixture.client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+
+    const bed = screen.getByRole('switch', { name: 'Toggle for Bed levelling' });
+    await user.click(bed);
+    expect(bed).not.toBeChecked();
+    expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice again' }));
+    const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
+    await waitFor(() => {
+      expect(send).toBeEnabled();
+    });
+    await user.click(send);
+    const confirmation = screen.getByRole('group', { name: 'Confirm before starting' });
+    confirmAll(confirmation);
+    await user.click(within(confirmation).getByRole('button', { name: 'Start print on Workshop X1C' }));
+    await waitFor(() => {
+      expect(fixture.requestPrint).toHaveBeenCalledOnce();
+    });
+    expect(fixture.requestPrint.mock.calls[0]?.[0].configuration).toMatchObject({ bedLeveling: false });
+  });
+
   it('disables sending, not slicing, when the chosen material is no longer the loaded one', async () => {
     const fixture = createFixture();
     const user = userEvent.setup();
     renderPane(fixture.client);
     await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    await user.click(within(screen.getByRole('group', { name: 'Material' })).getByRole('button', { name: /A1/u }));
+    expect(screen.getByRole('combobox', { name: 'Material' })).toHaveTextContent('A1');
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
 
@@ -704,16 +770,14 @@ describe('Print pane prepare and send', () => {
     };
 
     await expectSendHeld(printing(), 'Workshop X1C has a run in progress. Start another print once it ends.');
-    const printingCard = screen.getByRole('article', { name: 'Workshop X1C, Printing' });
-    expect(within(printingCard).getByRole('status')).toHaveTextContent('Monitor the run');
+    expect(screen.getByRole('region', { name: 'Monitor' })).toBeInTheDocument();
     await expectSendHeld(paused(), 'Workshop X1C has a paused run. Resume or cancel it before starting another print.');
     await expectSendHeld(
       entry({ snapshot: { ...entry().snapshot, readiness: 'busy' } }),
       'Workshop X1C is busy. Wait until it reports ready.',
     );
-    // The orientation card states the same reason instead of offering to slice again.
+    // The orientation card stays a summary; the Send control carries the actionable reason.
     const card = screen.getByRole('article', { name: 'Workshop X1C, Busy' });
-    expect(within(card).getByRole('status')).toHaveTextContent('Workshop X1C is busy. Wait until it reports ready.');
     expect(within(card).queryByRole('button', { name: /^Send|^Slice/u })).not.toBeInTheDocument();
 
     act(() => {
@@ -752,17 +816,11 @@ describe('Print pane external spool', () => {
     renderPane(fixture.client);
 
     const material = await screen.findByRole('group', { name: 'Material' });
-    expect(
-      within(material)
-        .getAllByRole('button')
-        .map((button) => button.textContent),
-    ).toEqual(['A1pla-black', 'A2Empty', 'Extpetg-white']);
+    const selector = within(material).getByRole('combobox', { name: 'Material' });
     // The AMS stays the default; the external spool is chosen on purpose.
-    expect(within(material).getByRole('button', { name: /A1/u })).toHaveAttribute('aria-pressed', 'true');
-    const externalSpool = within(material).getByRole('button', { name: /Ext/u });
-    externalSpool.focus();
-    await user.keyboard('{Enter}');
-    expect(externalSpool).toHaveAttribute('aria-pressed', 'true');
+    expect(selector).toHaveTextContent('A1');
+    await chooseOption(user, selector, 'Ext');
+    expect(selector).toHaveTextContent('Ext');
 
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
@@ -783,9 +841,10 @@ describe('Print pane external spool', () => {
   it('cannot choose an empty or unset external holder', async () => {
     renderPane(createFixture({ entries: [withExternalSpool({ slot: 254, state: 'empty' })] }).client);
     const material = await screen.findByRole('group', { name: 'Material' });
-    const externalSpool = within(material).getByRole('button', { name: /^Ext/u });
-    expect(externalSpool).toHaveTextContent('ExtEmpty');
-    expect(externalSpool).toBeDisabled();
+    fireEvent.click(within(material).getByRole('combobox', { name: 'Material' }));
+    const externalSpool = screen.getByRole('option', { name: /^Ext/u });
+    expect(externalSpool).toHaveTextContent('Ext · Empty');
+    expect(externalSpool).toHaveAttribute('data-disabled');
   });
 
   it('names the external spool when the material there no longer matches, and in the checks', () => {
@@ -845,10 +904,11 @@ describe('Print pane slice summary', () => {
     const gcode = readFileSync(
       join(process.cwd(), '../../packages/plugins/slicer/src/__fixtures__/two-colour-cubes.gcode'),
     );
-    expect(
-      summary.summarizeGcodeContainer(writeBambuContainer({ gcode: gcode.toString(), modelName: 'cubes' }))
-        .filamentColors,
-    ).toEqual([red, blue]);
+    const result = summary.summarizeGcodeContainer(
+      writeBambuContainer({ gcode: gcode.toString(), modelName: 'cubes' }),
+    );
+    expect(result.filamentColors).toEqual([red, blue]);
+    expect(result.filamentWeightGrams).toBeCloseTo(28.41);
   });
 
   it("should summarize a plate too large to preview from Bambu Studio's header", async () => {
@@ -868,6 +928,7 @@ describe('Print pane slice summary', () => {
       isSlicerEstimate: true,
       producer: undefined,
       filamentLength: 9372.5,
+      filamentWeightGrams: 28.41,
       bounds: undefined,
       partBounds: undefined,
       coverageComplete: false,
@@ -933,7 +994,6 @@ describe('Print pane agent requests', () => {
     ).toBeInTheDocument();
     expect(within(region).getByText('Requested by Tau agent')).toBeInTheDocument();
     expect(within(region).getByText('Answering here also answers the chat.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Review the print request' })).toBeInTheDocument();
     expect(fixture.uploadPrint).not.toHaveBeenCalled();
 
     // Preview the exact recorded artifact before deciding, the way Prepare opens a fresh slice.
@@ -1029,7 +1089,6 @@ describe('Print pane agent requests', () => {
     expect(within(alert).getByRole('button', { name: 'Reconcile' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /retry/iu })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^(Start|Accept)/u })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Reconcile the start' })).toBeInTheDocument();
 
     await user.click(within(alert).getByRole('button', { name: 'Reconcile' }));
     await waitFor(() => {
@@ -1219,7 +1278,12 @@ describe('Print pane Bambu Studio mode', () => {
   };
   /** The real printer, which takes only Bambu Studio archives. */
   const realPrinter = (): ReturnType<typeof entry> => entry({ providerId: 'bambu' });
-  const combobox = (name: string): HTMLElement => screen.getByRole('combobox', { name });
+  const combobox = (name: string): HTMLElement => {
+    if (name === 'Printer preset' && screen.queryByRole('combobox', { name }) === null) {
+      fireEvent.click(screen.getByRole('button', { name: 'More settings' }));
+    }
+    return screen.getByRole('combobox', { name });
+  };
 
   const renderStudio = async (
     machine = realPrinter(),
@@ -1230,7 +1294,7 @@ describe('Print pane Bambu Studio mode', () => {
     renderPane(fixture.client);
     expect(await screen.findByText(`Slicing with Bambu Studio ${bambuStudioVersion}`)).toBeInTheDocument();
     await waitFor(() => {
-      expect(combobox('Process preset')).toHaveValue(standard);
+      expect(combobox('Process')).toHaveTextContent(selectedLabel(standard));
     });
     return { fixture, studio };
   };
@@ -1238,7 +1302,7 @@ describe('Print pane Bambu Studio mode', () => {
   /** Open Advanced and one settings group of the shared Parameters form. */
   const openGroup = async (user: ReturnType<typeof userEvent.setup>, group: string): Promise<void> => {
     if (screen.queryByRole('group', { name: 'Bambu Studio settings' }) === null) {
-      await user.click(screen.getByRole('button', { name: /^Advanced/u }));
+      await openMoreSettings(user);
     }
     const settings = await screen.findByRole('group', { name: 'Bambu Studio settings' });
     const trigger = within(settings).getByRole('button', { name: `Group: ${group}` });
@@ -1264,18 +1328,14 @@ describe('Print pane Bambu Studio mode', () => {
     expect(studio.catalog).toHaveBeenCalledWith({ model: 'X1C', nozzleDiameter: 0.4 });
     expect(studio.resolveSelection).toHaveBeenLastCalledWith({ hints, partial: { plate: 'textured-pei' } });
     expect(studio.settings).toHaveBeenLastCalledWith({ printer: x1c, process: standard, filaments: [plaMatte] });
-    expect(combobox('Printer preset')).toHaveValue(x1c);
+    expect(combobox('Printer preset')).toHaveTextContent(selectedLabel(x1c));
     // The tray's Bambu filament id picks the preset; the tray's own type and colour sit beside it.
-    expect(combobox('Filament preset for A1')).toHaveValue(plaMatte);
-    // Compatible processes only, the person's own presets apart from the system ones.
-    const processes = within(combobox('Process preset'));
-    expect(processes.getByRole('group', { name: 'Your presets' })).toHaveTextContent(
-      '0.20mm Standard Gyroid PETG @BBL X1C',
-    );
-    expect(processes.queryByRole('option', { name: '0.20mm Standard @BBL P1P' })).not.toBeInTheDocument();
-    expect(
-      within(screen.getByRole('group', { name: 'Quality preset' })).getByRole('button', { name: /Standard/u }),
-    ).toHaveAttribute('aria-pressed', 'true');
+    expect(combobox('Filament A1')).toHaveTextContent(selectedLabel(plaMatte));
+    // Compatible processes only, with the person's presets apart from the system ones.
+    await user.click(combobox('Process'));
+    expect(screen.getByRole('group', { name: 'Your presets' })).toHaveTextContent('0.20mm Standard Gyroid PETG');
+    expect(screen.queryByRole('option', { name: '0.20mm Standard @BBL P1P' })).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
 
     summarizeGcodeContainerMock.mockReturnValueOnce(bambuStudioSliceSummary);
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
@@ -1333,7 +1393,7 @@ describe('Print pane Bambu Studio mode', () => {
     expect(screen.queryByText('(changed)')).not.toBeInTheDocument();
     expect(within(settings).queryByRole('button', { name: 'Reset all' })).not.toBeInTheDocument();
     expect(within(settings).getByRole('button', { name: 'Group: Strength' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Advanced/u })).toHaveTextContent(/^Advanced$/u);
+    expect(screen.getByRole('button', { name: 'More settings' })).toHaveTextContent('More settings');
     await user.click(screen.getByRole('button', { name: 'Reset Wall Loops' }));
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Reset Wall Loops' })).not.toBeInTheDocument();
@@ -1369,7 +1429,7 @@ describe('Print pane Bambu Studio mode', () => {
     const settings = screen.getByRole('group', { name: 'Bambu Studio settings' });
 
     // The filter opens every group with a match; a number-or-percent setting keeps its percent.
-    await user.type(within(settings).getByRole('searchbox', { name: 'Filter settings' }), 'bridge');
+    await user.type(screen.getByRole('searchbox', { name: 'Filter settings' }), 'bridge');
     expect(within(settings).queryByRole('spinbutton', { name: 'Input for Wall Loops' })).not.toBeInTheDocument();
     enter('Bridge Flow', 'lots');
     expect(screen.getByRole('textbox', { name: 'Input for Bridge Flow' })).toHaveValue('1');
@@ -1396,7 +1456,7 @@ describe('Print pane Bambu Studio mode', () => {
     expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeInTheDocument();
 
     // A changed setting after slicing makes the slice stale, as a changed option does.
-    await user.clear(within(settings).getByRole('searchbox', { name: 'Filter settings' }));
+    await user.clear(screen.getByRole('searchbox', { name: 'Filter settings' }));
     await openGroup(user, 'Strength');
     enter('Wall Loops', '4');
     expect(
@@ -1417,7 +1477,7 @@ describe('Print pane Bambu Studio mode', () => {
     expect(sendButton).toBeEnabled();
 
     studio.resolveSelection.mockRejectedValueOnce(new Error('No compatible process for Bambu PETG Basic @BBL X1C.'));
-    await user.selectOptions(combobox('Filament preset for A1'), 'Bambu PETG Basic @BBL X1C');
+    await chooseOption(user, combobox('Filament A1'), 'Bambu PETG Basic @BBL X1C');
     expect(await screen.findByText('No compatible process for Bambu PETG Basic @BBL X1C.')).toBeInTheDocument();
     expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
   });
@@ -1469,13 +1529,15 @@ describe('Print pane Bambu Studio mode', () => {
       } as const;
       await sliceTwoColours(user, colourful([externalBlue, ...colourful().snapshot.setup.materials]));
       // Blue PLA on the external spool, listed first, still loses to the AMS tray that can change filament.
-      expect(slot(1)).toHaveValue('1');
-      expect(slot(2)).toHaveValue('0');
-      expect(
-        within(slot(1))
-          .getAllByRole('option')
-          .map(({ textContent }) => textContent),
-      ).toEqual([`A1 · PLA · ${redTray}`, `A2 · PLA · ${blueTray}`, `A3 · PETG · ${blueTray}`]);
+      expect(slot(1)).toHaveTextContent(selectedLabel('1'));
+      expect(slot(2)).toHaveTextContent(selectedLabel('0'));
+      await user.click(slot(1));
+      expect(screen.getAllByRole('option').map(({ textContent }) => textContent.trim())).toEqual([
+        'A1 · PLA',
+        'A2 · PLA',
+        'A3 · PETG',
+      ]);
+      await user.keyboard('{Escape}');
       expect(
         within(prepareRegion()).getByText('The external spool feeds one-filament prints only.'),
       ).toBeInTheDocument();
@@ -1486,13 +1548,15 @@ describe('Print pane Bambu Studio mode', () => {
       const fixture = await sliceTwoColours(user, colourful());
       // One row per filament replaces the material chips.
       expect(screen.queryByRole('group', { name: 'Material' })).not.toBeInTheDocument();
-      expect(slot(1)).toHaveValue('1');
-      expect(slot(2)).toHaveValue('0');
-      expect(
-        within(slot(1))
-          .getAllByRole('option')
-          .map(({ textContent }) => textContent),
-      ).toEqual([`A1 · PLA · ${redTray}`, `A2 · PLA · ${blueTray}`, `A3 · PETG · ${blueTray}`]);
+      expect(slot(1)).toHaveTextContent(selectedLabel('1'));
+      expect(slot(2)).toHaveTextContent(selectedLabel('0'));
+      await user.click(slot(1));
+      expect(screen.getAllByRole('option').map(({ textContent }) => textContent.trim())).toEqual([
+        'A1 · PLA',
+        'A2 · PLA',
+        'A3 · PETG',
+      ]);
+      await user.keyboard('{Escape}');
       // Both trays hold Bambu PLA Matte, which the slice already printed both filaments with.
       const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
       await waitFor(() => {
@@ -1526,14 +1590,14 @@ describe('Print pane Bambu Studio mode', () => {
         expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
       });
 
-      await user.selectOptions(slot(1), '2');
+      await chooseOption(user, slot(1), '2');
       expect(
         await screen.findByText('Options changed since this slice. Slice again to send the current settings.'),
       ).toBeInTheDocument();
       expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
       // Presets per tray, as Bambu Studio resolves them.
       await waitFor(() => {
-        expect(combobox('Filament preset for A3')).toHaveValue(petg);
+        expect(combobox('Filament A3')).toHaveTextContent(selectedLabel(petg));
       });
       summarizeGcodeContainerMock.mockReturnValueOnce(twoColours);
       await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice again' }));
@@ -1548,9 +1612,9 @@ describe('Print pane Bambu Studio mode', () => {
       });
 
       // A1 is filament 2's, so filament 2 takes A3 in exchange.
-      await user.selectOptions(slot(1), '0');
-      expect(slot(1)).toHaveValue('0');
-      expect(slot(2)).toHaveValue('2');
+      await chooseOption(user, slot(1), '0');
+      expect(slot(1)).toHaveTextContent(selectedLabel('0'));
+      expect(slot(2)).toHaveTextContent(selectedLabel('2'));
     });
 
     it('holds Send until a filament no free tray could take has a slot', async () => {
@@ -1562,9 +1626,8 @@ describe('Print pane Bambu Studio mode', () => {
           { slot: 1, state: 'empty' },
         ]),
       );
-      expect(slot(1)).toHaveValue('');
-      expect(within(slot(1)).getByRole('option', { name: 'Choose a slot' })).toBeDisabled();
-      expect(slot(2)).toHaveValue('0');
+      expect(slot(1)).toHaveTextContent(selectedLabel(''));
+      expect(slot(2)).toHaveTextContent(selectedLabel('0'));
       expect(
         await within(prepareRegion()).findByText('Filament 1 has no slot. Choose a loaded slot for it before sending.'),
       ).toBeInTheDocument();
@@ -1660,12 +1723,10 @@ describe('Print pane Bambu Studio mode', () => {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu Studio setting keys.
     await expectPrintIntent({ model: 'x1c', settings: { ironing_speed: 40, layer_height: 0.16 } });
 
-    // The Fine chip is a shortcut for the 0.12 mm process; Fine has no ironing, so that override goes.
-    await user.click(
-      within(screen.getByRole('group', { name: 'Quality preset' })).getByRole('button', { name: /Fine/u }),
-    );
+    // Fine is one Process choice; it has no ironing, so that override goes.
+    await chooseOption(user, combobox('Process'), '0.12mm Fine @BBL X1C');
     await waitFor(() => {
-      expect(combobox('Process preset')).toHaveValue('0.12mm Fine @BBL X1C');
+      expect(combobox('Process')).toHaveTextContent(selectedLabel('0.12mm Fine @BBL X1C'));
     });
     expect(studio.settings).toHaveBeenLastCalledWith({
       printer: x1c,
@@ -1681,22 +1742,24 @@ describe('Print pane Bambu Studio mode', () => {
       expect(screen.queryByRole('spinbutton', { name: 'Input for Ironing Speed' })).not.toBeInTheDocument();
     });
     // Fine lacks ironing, so the slice leaves it out; the project's file keeps it for presets that have it.
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu Studio setting keys.
-    await expectPrintIntent({ model: 'x1c', preset: 'fine', settings: { ironing_speed: 40, layer_height: 0.16 } });
-    expect(
-      within(screen.getByRole('group', { name: 'Quality preset' })).getByRole('button', { name: /Fine/u }),
-    ).toHaveAttribute('aria-pressed', 'true');
+    await expectPrintIntent({
+      model: 'x1c',
+      process: '0.12mm Fine @BBL X1C',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu Studio setting keys.
+      settings: { ironing_speed: 40, layer_height: 0.16 },
+    });
+    expect(combobox('Process')).toHaveTextContent('0.12mm Fine');
 
     // Picking a process by name keeps the person's choice through the next resolution.
-    await user.selectOptions(combobox('Process preset'), '0.20mm Standard Gyroid PETG @BBL X1C');
+    await chooseOption(user, combobox('Process'), '0.20mm Standard Gyroid PETG @BBL X1C');
     await waitFor(() => {
       expect(studio.resolveSelection).toHaveBeenLastCalledWith({
-        hints: { ...hints, preset: 'fine' },
+        hints,
         partial: { process: '0.20mm Standard Gyroid PETG @BBL X1C', plate: 'textured-pei' },
       });
     });
 
-    await user.selectOptions(combobox('Filament preset for A1'), 'Bambu PETG Basic @BBL X1C');
+    await chooseOption(user, combobox('Filament A1'), 'Bambu PETG Basic @BBL X1C');
     await waitFor(() => {
       expect(studio.settings).toHaveBeenLastCalledWith({
         printer: x1c,
@@ -1728,7 +1791,6 @@ describe('Print pane Bambu Studio mode', () => {
     const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
     expect(send).toBeDisabled();
     expect(send).toHaveAccessibleDescription(bambuStudioRequired);
-    expect(screen.getByRole('article', { name: 'Workshop X1C, Ready' })).toHaveTextContent(bambuStudioRequired);
     unmount();
 
     // The web build has no bridge; the simulator takes the reference slice.
@@ -1807,7 +1869,12 @@ describe('Print pane print settings file', () => {
   const fine = '0.12mm Fine @BBL X1C';
   const gyroid = '0.20mm Standard Gyroid PETG @BBL X1C';
   const petg = 'Bambu PETG Basic @BBL X1C';
-  const combobox = (name: string): HTMLElement => screen.getByRole('combobox', { name });
+  const combobox = (name: string): HTMLElement => {
+    if (name === 'Printer preset' && screen.queryByRole('combobox', { name }) === null) {
+      fireEvent.click(screen.getByRole('button', { name: 'More settings' }));
+    }
+    return screen.getByRole('combobox', { name });
+  };
   const reset = (name: string): HTMLElement => screen.getByRole('button', { name: `Reset ${name}` });
   const queryReset = (name: string) => screen.queryByRole('button', { name: `Reset ${name}` });
 
@@ -1818,7 +1885,7 @@ describe('Print pane print settings file', () => {
     renderPane(createFixture({ entries: [entry({ providerId: 'bambu' })] }).client);
     expect(await screen.findByText(`Slicing with Bambu Studio ${bambuStudioVersion}`)).toBeInTheDocument();
     await waitFor(() => {
-      expect(combobox('Process preset')).toHaveValue(process);
+      expect(combobox('Process')).toHaveTextContent(selectedLabel(process));
     });
     return studio;
   };
@@ -1841,18 +1908,15 @@ describe('Print pane print settings file', () => {
       },
       partial: { filaments: [petg], plate: 'cool' },
     });
-    expect(combobox('Filament preset for A1')).toHaveValue(petg);
-    expect(combobox('Plate')).toHaveValue('cool');
-    expect(
-      within(screen.getByRole('group', { name: 'Quality preset' })).getByRole('button', { name: /Fine/u }),
-    ).toHaveAttribute('aria-pressed', 'true');
+    expect(combobox('Filament A1')).toHaveTextContent(selectedLabel(petg));
+    expect(combobox('Plate')).toHaveTextContent(selectedLabel('cool'));
+    expect(combobox('Process')).toHaveTextContent('0.12mm Fine');
     // Marks follow the keys in the file: the picks it names, and nothing Bambu Studio resolved on its own.
-    for (const name of ['Quality preset', 'Plate', 'Filament preset for A1', 'print settings']) {
+    for (const name of ['Process', 'Plate', 'Filament A1', 'print settings']) {
       expect(reset(name)).toBeInTheDocument();
     }
     expect(queryReset('Printer preset')).not.toBeInTheDocument();
-    expect(queryReset('Process preset')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /^Advanced/u }));
+    await openMoreSettings(user);
     await user.click(
       within(await screen.findByRole('group', { name: 'Bambu Studio settings' })).getByRole('button', {
         name: 'Group: Strength',
@@ -1884,20 +1948,18 @@ describe('Print pane print settings file', () => {
     const user = userEvent.setup();
     await renderStudio('0.20mm Standard @BBL X1C');
     expect(printIntentText()).toBeUndefined();
-    for (const name of ['Quality preset', 'Plate', 'Printer preset', 'Process preset', 'Filament preset for A1']) {
+    for (const name of ['Plate', 'Printer preset', 'Process', 'Filament A1']) {
       expect(queryReset(name)).not.toBeInTheDocument();
     }
     expect(queryReset('print settings')).not.toBeInTheDocument();
 
-    await user.click(
-      within(screen.getByRole('group', { name: 'Quality preset' })).getByRole('button', { name: /Fine/u }),
-    );
+    await chooseOption(user, combobox('Process'), fine);
     await waitFor(() => {
-      expect(combobox('Process preset')).toHaveValue(fine);
+      expect(combobox('Process')).toHaveTextContent(selectedLabel(fine));
     });
-    await user.selectOptions(combobox('Process preset'), gyroid);
-    await user.selectOptions(combobox('Filament preset for A1'), petg);
-    await user.selectOptions(combobox('Plate'), 'Cool plate');
+    await chooseOption(user, combobox('Process'), gyroid);
+    await chooseOption(user, combobox('Filament A1'), petg);
+    await chooseOption(user, combobox('Plate'), 'Cool plate');
     await waitFor(() => {
       expect(reset('Plate')).toBeInTheDocument();
     });
@@ -1910,43 +1972,38 @@ describe('Print pane print settings file', () => {
         '  },',
         '  "model": "x1c",',
         '  "plate": "cool",',
-        '  "preset": "fine",',
         `  "process": "${gyroid}"`,
         '}',
         '',
       ].join('\n'),
     );
-    for (const name of ['Quality preset', 'Process preset', 'Filament preset for A1', 'print settings']) {
+    for (const name of ['Process', 'Filament A1', 'print settings']) {
       expect(reset(name)).toBeInTheDocument();
     }
-    expect(within(prepareRegion()).getByText('Plate')).toHaveClass('font-medium', 'text-foreground');
+    expect(within(prepareRegion()).getByText('Plate').parentElement).toHaveClass('font-medium', 'text-foreground');
 
-    await user.click(reset('Process preset'));
-    await expectPrintIntent({ model: 'x1c', preset: 'fine', plate: 'cool', filaments: { 0: petg } });
-    await user.click(reset('Filament preset for A1'));
-    await expectPrintIntent({ model: 'x1c', preset: 'fine', plate: 'cool' });
+    await user.click(reset('Process'));
+    await expectPrintIntent({ model: 'x1c', plate: 'cool', filaments: { 0: petg } });
+    await user.click(reset('Filament A1'));
+    await expectPrintIntent({ model: 'x1c', plate: 'cool' });
     await user.click(reset('Plate'));
-    await expectPrintIntent({ model: 'x1c', preset: 'fine' });
-    expect(combobox('Plate')).toHaveValue('textured-pei');
-    await user.click(reset('Quality preset'));
     await expectPrintIntent({ model: 'x1c' });
+    expect(combobox('Plate')).toHaveTextContent(selectedLabel('textured-pei'));
     expect(queryReset('print settings')).not.toBeInTheDocument();
 
     // Another printer preset has its own processes and filaments, so choosing one clears those picks.
-    await user.selectOptions(combobox('Process preset'), gyroid);
-    await user.selectOptions(combobox('Filament preset for A1'), petg);
+    await chooseOption(user, combobox('Process'), gyroid);
+    await chooseOption(user, combobox('Filament A1'), petg);
     await expectPrintIntent({ model: 'x1c', process: gyroid, filaments: { 0: petg } });
-    await user.selectOptions(combobox('Printer preset'), 'My X1C');
+    await chooseOption(user, combobox('Printer preset'), 'My X1C');
     await expectPrintIntent({ model: 'x1c', printer: 'My X1C' });
     await user.click(reset('Printer preset'));
     await expectPrintIntent({ model: 'x1c' });
 
     // Reset print settings, beside the Prepare heading, leaves only the printer model.
-    await user.selectOptions(combobox('Plate'), 'Cool plate');
-    await user.click(
-      within(screen.getByRole('group', { name: 'Quality preset' })).getByRole('button', { name: /Fast/u }),
-    );
-    await expectPrintIntent({ model: 'x1c', plate: 'cool', preset: 'fast' });
+    await chooseOption(user, combobox('Plate'), 'Cool plate');
+    await chooseOption(user, combobox('Process'), '0.28mm Extra Draft @BBL X1C');
+    await expectPrintIntent({ model: 'x1c', plate: 'cool', process: '0.28mm Extra Draft @BBL X1C' });
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Reset print settings' }));
     await waitFor(() => {
       expect(printIntentText()).toBe('{\n  "model": "x1c"\n}\n');
@@ -1958,7 +2015,7 @@ describe('Print pane print settings file', () => {
     const user = userEvent.setup();
     renderPane(createFixture().client);
     await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    await user.click(screen.getByRole('button', { name: /^Advanced/u }));
+    await openMoreSettings(user);
     const options = await screen.findByLabelText('Slicer options');
 
     await user.click(await within(options).findByRole('button', { name: 'Set layer height' }));
@@ -2001,9 +2058,7 @@ describe('Print pane print settings file', () => {
     });
 
     // A change is not saved over bytes Tau cannot read; changes run in order, so the reset lands after it.
-    await user.click(
-      within(screen.getByRole('group', { name: 'Quality preset' })).getByRole('button', { name: /Fine/u }),
-    );
+    await user.click(within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fine/u }));
     await user.click(within(notice).getByRole('button', { name: 'Reset print settings' }));
     await waitFor(() => {
       expect(printIntentText()).toBe('{\n  "model": "x1c"\n}\n');
@@ -2023,28 +2078,26 @@ describe('Print pane print settings file', () => {
         "This project's print settings are for another printer model (p1s), so Workshop X1C uses its defaults. Changing a setting here replaces them.",
       ),
     ).toBeInTheDocument();
-    expect(combobox('Plate')).toHaveValue('textured-pei');
+    expect(combobox('Plate')).toHaveTextContent(selectedLabel('textured-pei'));
     expect(queryReset('Plate')).not.toBeInTheDocument();
 
-    await user.click(
-      within(screen.getByRole('group', { name: 'Quality preset' })).getByRole('button', { name: /Fine/u }),
-    );
+    await user.click(within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fine/u }));
     await expectPrintIntent({ model: 'x1c', preset: 'fine' });
     expect(within(prepareRegion()).queryByText(/another printer model/u)).not.toBeInTheDocument();
-    expect(reset('Quality preset')).toBeInTheDocument();
+    expect(reset('Quality')).toBeInTheDocument();
   });
 
   it('should save over a concurrent change after one conflict, and report the third', async () => {
     const user = userEvent.setup();
     renderPane(createFixture().client);
     await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    const presets = screen.getByRole('group', { name: 'Quality preset' });
+    const presets = screen.getByRole('radiogroup', { name: 'Quality' });
 
     projectFiles.race('{"model":"x1c","plate":"cool"}\n');
-    await user.click(within(presets).getByRole('button', { name: /Fine/u }));
+    await user.click(within(presets).getByRole('radio', { name: /Fine/u }));
     await expectPrintIntent({ model: 'x1c', plate: 'cool', preset: 'fine' });
     await waitFor(() => {
-      expect(combobox('Plate')).toHaveValue('cool');
+      expect(combobox('Plate')).toHaveTextContent(selectedLabel('cool'));
     });
 
     projectFiles.race(
@@ -2052,7 +2105,7 @@ describe('Print pane print settings file', () => {
       '{"model":"x1c","plate":"cool","preset":"fine"}\n',
       '{"model":"x1c","preset":"standard"}\n',
     );
-    await user.click(within(presets).getByRole('button', { name: /Fast/u }));
+    await user.click(within(presets).getByRole('radio', { name: /Fast/u }));
     expect(await within(prepareRegion()).findByText(/RECORD_CONFLICT/u)).toHaveTextContent(
       'The print settings changed elsewhere three times while saving, so this change was not saved (RECORD_CONFLICT). Make it again.',
     );

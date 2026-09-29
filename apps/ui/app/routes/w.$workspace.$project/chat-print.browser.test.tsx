@@ -1,9 +1,8 @@
 import '#styles/global.css';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { page } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import type * as PrintSummary from '#routes/w.$workspace.$project/chat-print-summary.js';
 import {
   agentRequest,
   bambuStudioVersion,
@@ -13,8 +12,13 @@ import {
   desktopHost,
   entry,
   printing,
+  projectMock,
+  fileManagerMock,
+  converterMock,
+  parametersMock,
+  summarizeGcodeContainerMock,
+  desktopBridgeMock,
 } from '#routes/w.$workspace.$project/chat-print.fixture.js';
-import { PrintPanel } from '#routes/w.$workspace.$project/chat-print.js';
 
 /**
  * Screenshot evidence for the reviewed styling: the Print pane at a workbench
@@ -24,45 +28,39 @@ import { PrintPanel } from '#routes/w.$workspace.$project/chat-print.js';
  * PNGs land under `out/research/.../K/` (Lane D's first pass wrote `.../D/`).
  */
 
-vi.mock('#hooks/use-project.js', async () => {
-  const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
-  return fixtures.projectMock;
-});
-vi.mock('#hooks/use-file-manager.js', async () => {
-  const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
-  return fixtures.fileManagerMock;
-});
-vi.mock('#routes/w.$workspace.$project/chat-converter.js', async (importOriginal) => {
-  const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
-  return fixtures.converterMock(await importOriginal());
-});
-vi.mock('#components/geometry/parameters/parameters.js', async (importOriginal) => {
-  const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
-  return fixtures.parametersMock(await importOriginal());
-});
-vi.mock('#routes/w.$workspace.$project/chat-print-summary.js', async (importOriginal) => {
-  const [actual, fixtures] = await Promise.all([
-    importOriginal<typeof PrintSummary>(),
-    import('#routes/w.$workspace.$project/chat-print.fixture.js'),
-  ]);
-  return { ...actual, summarizeGcodeContainer: fixtures.summarizeGcodeContainerMock };
-});
-vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => {
-  const [actual, fixtures] = await Promise.all([
-    importOriginal<Record<string, unknown>>(),
-    import('#routes/w.$workspace.$project/chat-print.fixture.js'),
-  ]);
-  return { ...actual, ...fixtures.desktopBridgeMock };
-});
+vi.doMock('#hooks/use-project.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ...projectMock,
+}));
+vi.doMock('#hooks/use-file-manager.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ...fileManagerMock,
+}));
+vi.doMock('#routes/w.$workspace.$project/chat-converter.js', async (importOriginal) =>
+  converterMock(await importOriginal()),
+);
+vi.doMock('#components/geometry/parameters/parameters.js', async (importOriginal) =>
+  parametersMock(await importOriginal()),
+);
+vi.doMock('#routes/w.$workspace.$project/chat-print-summary.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  summarizeGcodeContainer: summarizeGcodeContainerMock,
+}));
+vi.doMock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ...desktopBridgeMock,
+}));
 // The chat stack behind the approval bridge is not under test here; the pane receives a bridge directly.
-vi.mock('#hooks/use-machines-approvals.js', () => ({
+vi.doMock('#hooks/use-machines-approvals.js', () => ({
   usePrintApprovalBridge: () => ({ pendingFor: () => undefined, respond: async () => undefined }),
 }));
+vi.doMock('#machines/await-fresh-render.js', () => ({
+  awaitFreshRender: async (actor: { getSnapshot: () => unknown }) => actor.getSnapshot(),
+}));
 
-const outputDirectory = '../../../../../out/research/design-to-print-workbench-blueprint/2026-09-24-implementation/K';
-/** Bambu Studio mode evidence (Bambu Studio slicing engine blueprint, lane G). */
-const studioOutputDirectory =
-  '../../../../../out/research/bambu-studio-slicing-engine-blueprint/2026-09-25-implementation/G';
+const { PrintPanel } = await import('#routes/w.$workspace.$project/chat-print.js');
+
+const outputDirectory = '../../../../../out/research/print-pane-polish/2026-09-29-implementation/browser';
 const widths = { desktop: 480, narrow: 320 } as const;
 const themes = ['light', 'dark'] as const;
 
@@ -95,10 +93,10 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
     // The real printer with Bambu Studio: presets, then the Quality settings open with one change.
     await screen.findByText(`Slicing with Bambu Studio ${bambuStudioVersion}`);
     await screen.findByRole('group', { name: 'Bambu Studio presets' });
-    await page.getByRole('button', { name: /^Advanced/u }).click();
+    await page.getByRole('button', { name: 'More settings' }).click();
     await page.getByRole('button', { name: 'Group: Quality' }).click();
     await page.getByRole('spinbutton', { name: 'Input for Layer Height' }).fill('0.16');
-    await page.getByRole('spinbutton', { name: 'Input for Ironing Speed' }).click();
+    fireEvent.blur(screen.getByRole('spinbutton', { name: 'Input for Layer Height' }));
     await screen.findByRole('button', { name: 'Reset Layer Height' });
   } else if (scenario === 'prepare') {
     await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
@@ -137,7 +135,7 @@ describe('Print pane screenshots', () => {
           expect(frame.scrollWidth).toBeLessThanOrEqual(width);
           const path = await page.screenshot({
             element: frame,
-            path: `${scenario === 'studio' ? studioOutputDirectory : outputDirectory}/print-${scenario}-${size}-${theme}.png`,
+            path: `${outputDirectory}/print-${scenario}-${size}-${theme}.png`,
           });
           expect(path).toContain(`print-${scenario}-${size}-${theme}.png`);
         });

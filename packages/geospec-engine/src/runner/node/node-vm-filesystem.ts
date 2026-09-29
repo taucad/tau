@@ -112,8 +112,18 @@ export const createNodeVmFileSystem = (root: string): VmFileSystem => {
   return {
     exists: async (path: string) => {
       try {
-        await readFile(await at(path));
-        return true;
+        const handle = await open(await at(path), 'r');
+        try {
+          // Ordinary source files need only a readable handle, not their entire contents.
+          // Retain readFile's error behavior for directories and unusual file kinds.
+          const stat = await handle.stat();
+          if (!stat.isFile()) {
+            await handle.readFile();
+          }
+          return true;
+        } finally {
+          await handle.close();
+        }
       } catch (error) {
         const { code } = error as NodeJS.ErrnoException;
         if (code === 'ENOENT' || code === 'ENOTDIR') {

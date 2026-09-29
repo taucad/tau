@@ -7,8 +7,9 @@ describe('rpcClientErrorCodeSchema', () => {
     expect(rpcClientErrorCodeSchema.parse('FILE_NOT_FOUND')).toBe('FILE_NOT_FOUND');
   });
 
-  it('should parse RENDER_TIMEOUT for runtime render-timeout failures', () => {
-    expect(rpcClientErrorCodeSchema.parse('RENDER_TIMEOUT')).toBe('RENDER_TIMEOUT');
+  it('should parse OPERATION_TIMEOUT for runtime render-timeout failures', () => {
+    expect(rpcClientErrorCodeSchema.parse('OPERATION_TIMEOUT')).toBe('OPERATION_TIMEOUT');
+    expect(rpcClientErrorCodeSchema.safeParse('RENDER_TIMEOUT').success).toBe(false);
   });
 
   it('should parse AUTHENTICATION_ERROR for runtime authentication failures', () => {

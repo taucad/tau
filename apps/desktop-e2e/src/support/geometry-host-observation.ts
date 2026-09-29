@@ -10,6 +10,7 @@ export type GeometryHostEvent = Readonly<{
   pid: number;
   at: number;
   root?: string;
+  engine?: 'native' | 'legacy';
   eventType?: string;
   capability?: string;
   held?: boolean;
@@ -89,7 +90,10 @@ export const observeGeometryHost = async (
   session: DesktopSession,
   options?: { readonly holdSecondMinimumDistance?: boolean },
 ): Promise<void> => {
-  preloadPath = await writeNativeEntryPreload();
+  const holdSecondMinimumDistance = options?.holdSecondMinimumDistance ?? false;
+  if (holdSecondMinimumDistance) {
+    preloadPath = await writeNativeEntryPreload();
+  }
   await session.application.evaluate(
     ({ utilityProcess }, { entryPreload, holdSecondMinimumDistance }) => {
       const state = globalThis as typeof globalThis & {
@@ -98,6 +102,7 @@ export const observeGeometryHost = async (
           pid: number;
           at: number;
           root?: string;
+          engine?: 'native' | 'legacy';
           eventType?: string;
           capability?: string;
           held?: boolean;
@@ -114,12 +119,10 @@ export const observeGeometryHost = async (
       utilityProcess.fork = ((...args: Parameters<typeof originalFork>) => {
         const options = args[2];
         const geometry = options?.serviceName === 'tau-geometry-host';
-        if (geometry) {
+        if (geometry && holdSecondMinimumDistance && entryPreload) {
           const environment: Record<string, string | undefined> = { ...options.env };
           environment['TAU_E2E_GEOMETRY_ENTRY'] = args[0];
-          if (holdSecondMinimumDistance) {
-            environment['TAU_E2E_HOLD_SECOND_MINIMUM_DISTANCE'] = '1';
-          }
+          environment['TAU_E2E_HOLD_SECOND_MINIMUM_DISTANCE'] = '1';
           args[0] = entryPreload;
           args[2] = {
             ...options,
@@ -147,9 +150,9 @@ export const observeGeometryHost = async (
           }
           const originalPost = child.postMessage.bind(child);
           child.postMessage = ((message: unknown, transfer?: Parameters<typeof originalPost>[1]) => {
-            const frame = message as { type?: string; root?: string } | undefined;
+            const frame = message as { type?: string; root?: string; engine?: 'native' | 'legacy' } | undefined;
             if (frame?.type === 'geometry-run') {
-              record('run', { root: frame.root });
+              record('run', { root: frame.root, engine: frame.engine });
             }
             if (frame?.type === 'geometry-cancel') {
               record('cancel');
@@ -193,9 +196,23 @@ export const observeGeometryHost = async (
         delete state.tauE2eRestoreGeometryFork;
       };
     },
-    { entryPreload: preloadPath, holdSecondMinimumDistance: options?.holdSecondMinimumDistance ?? false },
+    { entryPreload: preloadPath, holdSecondMinimumDistance },
   );
 };
+
+/** Cumulative CPU seconds and creation identity for one actual geometry utility. */
+export const geometryHostCpuSeconds = async (
+  session: DesktopSession,
+  pid: number,
+): Promise<Readonly<{ seconds: number; creationTime: number }>> =>
+  session.application.evaluate(({ app }, expectedPid) => {
+    const metric = app.getAppMetrics().find((entry) => entry.pid === expectedPid);
+    const seconds = metric?.cpu.cumulativeCPUUsage;
+    if (metric?.type !== 'Utility' || seconds === undefined || !Number.isFinite(seconds)) {
+      throw new Error(`No cumulative CPU observation for geometry utility ${String(expectedPid)}.`);
+    }
+    return { seconds, creationTime: metric.creationTime };
+  }, pid);
 
 /** Snapshot retained by packaged main, not inferred from a separate miniapp. */
 export const geometryHostEvents = async (session: DesktopSession): Promise<readonly GeometryHostEvent[]> =>

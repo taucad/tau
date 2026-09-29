@@ -1,32 +1,26 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 
 import { afterEach, expect, test } from 'vitest';
 import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import {
-  gatewayFixtureFinalText,
-  gatewayFixtureModelName,
-  gatewayToolResults,
-  startGatewayFixture,
-} from '#support/gateway-fixture.js';
+import { durableMessages, latestCompletedRun, toolResult } from '#support/acp-evidence.js';
+import { gatewayFixtureFinalText, gatewayFixtureModelName, startGatewayFixture } from '#support/gateway-fixture.js';
 import type { GatewayFixture, GatewayFixtureToolCall } from '#support/gateway-fixture.js';
 import {
   geometryHostEvents,
+  geometryHostCpuSeconds,
   observeGeometryHost,
   probeServicesHost,
   restoreGeometryHost,
-  writeNativeEntryPreload,
 } from '#support/geometry-host-observation.js';
 import type { GeometryHostEvent } from '#support/geometry-host-observation.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
+  activeChatId,
   connectPickedFolder,
   expectVisible,
   selectChatModel,
@@ -79,16 +73,19 @@ const expectProjectRun = async (run: GeometryHostEvent | undefined, projectRoot:
   expect(run?.kind).toBe('run');
   expect(run?.root).toBeTypeOf('string');
   const manifest = JSON.parse(await readFile(join(projectRoot, 'tau.json'), 'utf8')) as { id: string };
-  const checkoutRoot = join(dirname(projectRoot), '.tau', 'checkouts', manifest.id);
+  const canonicalProjectRoot = await realpath(projectRoot);
+  const checkoutRoot = join(dirname(canonicalProjectRoot), '.tau', 'checkouts', manifest.id);
   const within = (parent: string): boolean => {
     const child = relative(parent, resolve(run!.root!));
     return child === '' || (child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child));
   };
-  expect(within(projectRoot) || within(checkoutRoot), `unowned geometry root ${String(run?.root)}`).toBe(true);
+  expect(within(canonicalProjectRoot) || within(checkoutRoot), `unowned geometry root ${String(run?.root)}`).toBe(true);
 };
 
-/** A completed quick claim reached and returned from the real native addon. */
+/** A quick claim completed through the packaged native-engine route. */
 const expectNativeQuick = async (desktop: DesktopSession, runIndex: number): Promise<void> => {
+  const initial = await geometryHostEvents(desktop);
+  expect(initial[runIndex]?.engine).toBe('native');
   await expect
     .poll(
       async () => {
@@ -96,9 +93,7 @@ const expectNativeQuick = async (desktop: DesktopSession, runIndex: number): Pro
         const run = events[runIndex];
         return events
           .slice(runIndex + 1)
-          .some(
-            (event) => event.pid === run?.pid && event.kind === 'native-entry' && event.capability === 'toBeWatertight',
-          );
+          .some((event) => event.pid === run?.pid && event.kind === 'event' && event.eventType === 'file-complete');
       },
       { timeout: 90_000 },
     )
@@ -108,41 +103,77 @@ const expectNativeQuick = async (desktop: DesktopSession, runIndex: number): Pro
       async () => {
         const events = await geometryHostEvents(desktop);
         const run = events[runIndex];
-        return events.slice(runIndex + 1).some((event) => event.pid === run?.pid && event.kind === 'native-return');
+        return events.slice(runIndex + 1).some((event) => event.pid === run?.pid && event.kind === 'result');
       },
       { timeout: 90_000 },
     )
     .toBe(true);
 };
 
-/** Only tool results following this exact user turn, never prior/cancelled transcript history. */
-const resultsForPrompt = (gateway: GatewayFixture, prompt: string) => {
-  const request = gateway.gatewayRequests.at(-1) as
-    | {
-        readonly messages?: ReadonlyArray<{ readonly role?: string; readonly content?: unknown }>;
-      }
-    | undefined;
-  const messages = request?.messages ?? [];
-  const promptIndex = messages.findLastIndex(
-    (message) => message.role === 'user' && String(JSON.stringify(message.content)).includes(prompt),
-  );
-  expect(promptIndex).toBeGreaterThanOrEqual(0);
-  return gatewayToolResults([{ messages: messages.slice(promptIndex) }]);
-};
-
 /** A specific turn completed the quick native GeoSpec assertion, not merely tool dispatch. */
-const expectQuickResult = (gateway: GatewayFixture, prompt: string): void => {
-  const toolResults = resultsForPrompt(gateway, prompt);
+const expectQuickResult = async (desktop: DesktopSession, projectRoot: string, prompt: string): Promise<void> => {
+  const ledgerPath = join(projectRoot, '.tau/chats', activeChatId(desktop.page), 'events.jsonl');
+  await expect
+    .poll(
+      async () => {
+        const snapshot = await readFile(ledgerPath, 'utf8');
+        try {
+          const currentRunId = latestCompletedRun(snapshot);
+          return snapshot
+            .split('\n')
+            .filter(Boolean)
+            .some((line) => {
+              const event = JSON.parse(line) as {
+                type?: string;
+                runId?: string;
+                state?: string;
+                admission?: { message?: { role?: string; content?: unknown } };
+              };
+              return (
+                event.type === 'run.lifecycle' &&
+                event.state === 'admitted' &&
+                event.runId === currentRunId &&
+                event.admission?.message?.role === 'user' &&
+                event.admission.message.content === prompt
+              );
+            });
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 120_000 },
+    )
+    .toBe(true);
+  const events = await readFile(ledgerPath, 'utf8');
+  const messages = durableMessages(events);
+  const runId = latestCompletedRun(events);
+  const admission = events
+    .split('\n')
+    .filter(Boolean)
+    .map(
+      (line) =>
+        JSON.parse(line) as {
+          type?: string;
+          runId?: string;
+          state?: string;
+          admission?: { message?: { role?: string; content?: unknown } };
+        },
+    )
+    .find((event) => event.type === 'run.lifecycle' && event.state === 'admitted' && event.runId === runId);
+  expect(admission?.admission?.message).toMatchObject({ role: 'user', content: prompt });
+  const toolResults = messages.filter((message) => message.runId === runId && message.role === 'tool-output');
   expect(toolResults).toHaveLength(3);
-  expect(toolResults.map((result) => result.name)).toEqual(['create_file', 'create_file', 'test_model']);
+  expect(toolResults.map((result) => result.toolName)).toEqual(['create_file', 'create_file', 'test_model']);
   expect(toolResults.some((result) => result.isError)).toBe(false);
-  const outputs = toolResults.flatMap(({ text }) => {
-    const parsed = testModelOutputSchema.safeParse(JSON.parse(text));
-    return parsed.success ? [parsed.data] : [];
-  });
-  expect(outputs).toHaveLength(1);
-  expect(outputs[0]).toMatchObject({ passed: 1, total: 1 });
-  expect(outputs[0]?.passes.map((row) => row.requirement)).toEqual(['checks the product Runtime mesh']);
+  const result = testModelOutputSchema.parse(
+    toolResult(events, {
+      runId,
+      toolName: 'test_model',
+      targetFile: 'quick.geospec.ts',
+    }),
+  );
+  expect(result).toMatchObject({ passed: 1, total: 1 });
+  expect(result.passes.map((row) => row.requirement)).toEqual(['checks the product Runtime mesh']);
 };
 
 let session: DesktopSession | undefined;
@@ -166,54 +197,7 @@ afterEach(async () => {
   }
 });
 
-test('[native-geospec] the test-only preload observes the real addon without changing its call', async () => {
-  const preload = await writeNativeEntryPreload();
-  try {
-    const addon = fileURLToPath(
-      new URL(
-        '../../../packages/geospec-engine-native/bindings/node/generated/geospec-engine-native.darwin-arm64.node',
-        import.meta.url,
-      ),
-    );
-    const child = spawnSync(
-      process.execPath,
-      [
-        '--require',
-        preload,
-        '-e',
-        `
-      process.parentPort = { postMessage: (frame) => process.stdout.write(JSON.stringify(frame) + '\\n') };
-      const { Engine } = require(process.argv[1]);
-      const engine = new Engine();
-      try {
-        engine.evaluateClaim(Buffer.from(JSON.stringify({
-          method: 'submitClaims', plan: { claims: [{
-            capability: 'toHaveConnectedComponents',
-            payload: { arguments: [{ count: 5, toleranceMm: 0.001 }] },
-          }] },
-        })));
-      } catch { /* This intentionally incomplete request must reject before geometry. */ }
-      finally { engine.close(); }
-    `,
-        addon,
-      ],
-      { encoding: 'utf8', timeout: 10_000 },
-    );
-    expect(child.status, child.stderr).toBe(0);
-    const frames = child.stdout
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(frames).toEqual([
-      { type: 'tau-e2e-native-entry', capability: 'toHaveConnectedComponents', count: 5, toleranceMm: 0.001 },
-      { type: 'tau-e2e-native-return' },
-    ]);
-  } finally {
-    await unlink(preload);
-  }
-});
-
-/** Actual packaged-product gate; the test-only preload marks the native call boundary. */
+/** Actual packaged-product gate with broker/PID evidence, not a direct addon-entry timestamp. */
 test('[native-geospec] keeps services responsive and exits the actual geometry utility before restart', async () => {
   const account = tauTestAccount('geometry-host');
   seededEmail = account.email;
@@ -239,10 +223,8 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
   await selectChatModel(page, gatewayFixtureModelName);
   const slug = await submitPrompt(page, 'Create a product mesh and verify it with native GeoSpec.');
   await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 600_000);
-  const initialTools = gatewayToolResults(fixture.gatewayRequests.slice(-1));
-  expect(initialTools).toHaveLength(3);
-  expect(initialTools.some((result) => result.isError)).toBe(false);
   const rootA = join(session.pickedDirectory, slug);
+  await expectQuickResult(session, rootA, 'Create a product mesh and verify it with native GeoSpec.');
   const firstProjectUrl = page.url();
   const fixtureBytes = await readFile(stepFixture);
   expect(createHash('sha256').update(fixtureBytes).digest('hex')).toBe(stepSha256);
@@ -272,27 +254,41 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
   const activePid = beforeProbe[slowRunIndex]?.pid;
   expect(activePid).toBeTypeOf('number');
   expect(activePid).toBeGreaterThan(0);
+  expect(beforeProbe[slowRunIndex]?.engine).toBe('native');
   await expectProjectRun(beforeProbe[slowRunIndex], rootA);
 
-  /* The test-only preload emits immediately before the real synchronous addon call. */
+  /* The packaged utility must be actively computing this exact native-engine run,
+   * not merely spawned or still bundling, before we probe the other host. */
   await expect
     .poll(
       async () => {
         const events = await geometryHostEvents(session!);
         return events
           .slice(slowRunIndex + 1)
-          .some(
-            (event) =>
-              event.pid === activePid &&
-              event.kind === 'native-entry' &&
-              event.capability === 'toHaveConnectedComponents' &&
-              event.count === 5 &&
-              event.toleranceMm === 0.001,
-          );
+          .some((event) => event.pid === activePid && event.kind === 'event' && event.eventType === 'file-start');
       },
       { timeout: 90_000 },
     )
     .toBe(true);
+  const cpuAtFileStart = await geometryHostCpuSeconds(session, activePid!);
+  await expect
+    .poll(
+      async () => {
+        const events = await geometryHostEvents(session!);
+        if (
+          events
+            .slice(slowRunIndex + 1)
+            .some((event) => event.pid === activePid && (event.kind === 'result' || event.kind === 'exit'))
+        ) {
+          return -1;
+        }
+        const sample = await geometryHostCpuSeconds(session!, activePid!);
+        expect(sample.creationTime).toBe(cpuAtFileStart.creationTime);
+        return sample.seconds - cpuAtFileStart.seconds;
+      },
+      { timeout: 90_000 },
+    )
+    .toBeGreaterThan(5);
 
   /* This is an independent services-utility answer, not a main-process heartbeat. */
   const mainStarted = Date.now();
@@ -303,11 +299,7 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
   expect(
     duringProbe
       .slice(slowRunIndex + 1)
-      .some(
-        (event) =>
-          event.pid === activePid &&
-          (event.kind === 'native-return' || event.kind === 'result' || event.kind === 'exit'),
-      ),
+      .some((event) => event.pid === activePid && (event.kind === 'result' || event.kind === 'exit')),
   ).toBe(false);
 
   await expectVisible(stopButtonOf(page), 15_000);
@@ -329,7 +321,7 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
   await expect
     .poll(() => fixture!.gatewayRequests.length, { timeout: 600_000 })
     .toBeGreaterThanOrEqual(requestsBeforeRestart + 4);
-  expectQuickResult(fixture, restartPrompt);
+  await expectQuickResult(session, rootA, restartPrompt);
   await expect
     .poll(
       async () => {
@@ -344,12 +336,18 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
   const replacementSpawn = lifecycle.findIndex((event) => event.kind === 'spawn' && event.pid !== activePid);
   expect(firstExit).toBeGreaterThanOrEqual(0);
   expect(replacementSpawn).toBeGreaterThan(firstExit);
-  const replacementRun = lifecycle.findIndex((event, index) => index > replacementSpawn && event.kind === 'run');
-  expect(replacementRun).toBeGreaterThan(replacementSpawn);
-  await expectProjectRun(lifecycle[replacementRun], rootA);
-  await expectNativeQuick(session, replacementRun);
+  const replacementPid = lifecycle[replacementSpawn]!.pid;
+  expect(
+    lifecycle
+      .slice(replacementSpawn + 1)
+      .some((event) => event.pid === replacementPid && event.kind === 'event' && event.eventType === 'file-complete'),
+  ).toBe(true);
+  expect(
+    lifecycle.slice(replacementSpawn + 1).some((event) => event.pid === replacementPid && event.kind === 'result'),
+  ).toBe(true);
 
   /* The packaged geometry utility path serves B and then A through distinct rooted turns. */
+  const runsBeforeB = lifecycle.filter((event) => event.kind === 'run').length;
   await page
     .getByRole('button', { name: /Search/u })
     .first()
@@ -359,8 +357,8 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
   await selectChatModel(page, gatewayFixtureModelName);
   const slugB = await submitPrompt(page, secondProjectPrompt);
   await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 600_000);
-  expectQuickResult(fixture, secondProjectPrompt);
   const rootB = join(session.pickedDirectory, slugB);
+  await expectQuickResult(session, rootB, secondProjectPrompt);
   await expect
     .poll(
       async () => {
@@ -369,7 +367,7 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
       },
       { timeout: 120_000 },
     )
-    .toBeGreaterThanOrEqual(4);
+    .toBeGreaterThan(runsBeforeB);
   const afterB = await geometryHostEvents(session);
   const runB = afterB.findLastIndex((event) => event.kind === 'run');
   await expectProjectRun(afterB[runB], rootB);
@@ -377,6 +375,7 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
 
   await page.goto(firstProjectUrl, { waitUntil: 'domcontentloaded' });
   await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+  const runsBeforeReturn = afterB.filter((event) => event.kind === 'run').length;
   const requestsBeforeReturn = fixture.gatewayRequests.length;
   await sendPrompt(page, returnPrompt);
   await expect
@@ -390,11 +389,11 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
       },
       { timeout: 120_000 },
     )
-    .toBeGreaterThanOrEqual(5);
+    .toBeGreaterThan(runsBeforeReturn);
   const afterReturn = await geometryHostEvents(session);
   const returnRun = afterReturn.findLastIndex((event) => event.kind === 'run');
   expect(returnRun).toBeGreaterThan(runB);
   await expectProjectRun(afterReturn[returnRun], rootA);
   await expectNativeQuick(session, returnRun);
-  expectQuickResult(fixture, returnPrompt);
+  await expectQuickResult(session, rootA, returnPrompt);
 });

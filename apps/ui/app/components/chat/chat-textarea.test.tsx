@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => {
     secondaryCadRef,
     geometryUnits: new Map([['main.ts', cadRef]]),
     viewSettings,
+    viewRecords: new Map(Object.entries(viewSettings)),
     graphicsRef: { id: 'graphics' },
     handleAddImage: vi.fn(),
     onScreenshotAction: undefined as ((item: ContextSuggestionItem) => void) | undefined,
@@ -72,6 +73,7 @@ vi.mock('#hooks/use-project.js', () => ({
     mainEntryPath: 'main.ts',
     geometryUnits: mocks.geometryUnits,
     viewGraphics: new Map([['view', mocks.graphicsRef]]),
+    viewRecords: mocks.viewRecords,
     editorRef: { getSnapshot: () => ({ context: { viewSettings: mocks.viewSettings } }) },
     projectRef,
   }),
@@ -123,6 +125,7 @@ describe('ChatTextarea screenshots', () => {
     vi.clearAllMocks();
     mocks.geometryUnits.delete('other.ts');
     delete mocks.viewSettings['parked'];
+    mocks.viewRecords.delete('parked');
   });
 
   it('should say when a screenshot it adds leaves a section cut out', async () => {
@@ -142,6 +145,7 @@ describe('ChatTextarea screenshots', () => {
 
   it('discovers a restored parked entry and captures only after claiming its actor', async () => {
     mocks.viewSettings['parked'] = { entryPath: 'other.ts' };
+    mocks.viewRecords.set('parked', { entryPath: 'other.ts' });
     vi.mocked(captureCadImages).mockResolvedValue({ files: [], omittedSectionCutIds: [] });
     render(<ChatTextarea onSubmit={vi.fn()} />);
     const item = mocks.actionItems.find((action) => action.id === 'screenshot-view:other.ts');

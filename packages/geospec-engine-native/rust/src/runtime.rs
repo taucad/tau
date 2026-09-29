@@ -269,21 +269,48 @@ impl Engine {
         } else {
             None
         };
-        let response = |identity: &SubjectIdentity| {
-            encode(&Json::object([
+        let response = |identity: &SubjectIdentity, subject: Option<&Subject>| {
+            let mut subject_fields = vec![
+                ("subjectHash".into(), Json::string(identity.hash())),
+                ("format".into(), Json::string(format)),
+                ("descriptor".into(), identity.descriptor().clone()),
+            ];
+            if let Some(subject) = subject.filter(|subject| subject.step_source_frame == "y-up") {
+                let rows = subject
+                    .source_occurrence_structure()
+                    .map_err(backend)?
+                    .ok_or_else(|| invalid("AP242 occurrence structure is unavailable."))?;
+                subject_fields.push((
+                    "occurrences".into(),
+                    Json::Array(
+                        rows.iter()
+                            .map(|row| {
+                                Json::object([
+                                    ("occurrencePath", Json::string(&row.path)),
+                                    (
+                                        "instanceName",
+                                        row.instance_name
+                                            .as_deref()
+                                            .map(Json::string)
+                                            .unwrap_or(Json::Null),
+                                    ),
+                                ])
+                            })
+                            .collect(),
+                    ),
+                ));
+            }
+            let bytes = encode(&Json::object([
                 ("requestId", Json::string(request_id)),
                 (
                     "result",
-                    Json::object([(
-                        "subject",
-                        Json::object([
-                            ("subjectHash", Json::string(identity.hash())),
-                            ("format", Json::string(format)),
-                            ("descriptor", identity.descriptor().clone()),
-                        ]),
-                    )]),
+                    Json::object([("subject", Json::Object(subject_fields))]),
                 ),
-            ]))
+            ]))?;
+            if subject.is_some() && bytes.len() > 1024 * 1024 {
+                return Err(limit("AP242 occurrence identity table exceeds one MiB."));
+            }
+            Ok(bytes)
         };
         let mut bundle = ResourceBundle::default();
         for (metadata, bytes) in metadata.iter().zip(resources) {
@@ -348,7 +375,7 @@ impl Engine {
                         ));
                     }
                     let identity = subject.semantic_identity.get().expect("admitted identity");
-                    let response = response(identity)?;
+                    let response = response(identity, None)?;
                     self.observations.add(WorkCounter::Admissions, 1);
                     return Ok(response);
                 }
@@ -409,12 +436,13 @@ impl Engine {
                         "Byte-only STEP admission does not support external resources.",
                     ));
                 }
-                if string_field(frame, "coordinateSystem")? != "z-up"
+                let source_frame = string_field(frame, "coordinateSystem")?;
+                if !matches!(source_frame, "z-up" | "y-up")
                     || string_field(frame, "sourceUnit")? != "auto"
                     || string_field(frame, "outputUnit")? != "mm"
                 {
                     return Err(invalid(
-                        "STEP entry requires z-up, sourceUnit auto and outputUnit mm.",
+                        "STEP entry requires declared z-up or y-up, sourceUnit auto and outputUnit mm.",
                     ));
                 }
                 let connector = self
@@ -439,6 +467,10 @@ impl Engine {
                     let retained_primary =
                         object(field(descriptor, "primary")?, "retained primary")?;
                     if number_field(retained_primary, "byteLength")? == primary.len() as f64
+                        && string_field(
+                            object(field(descriptor, "frame")?, "retained frame")?,
+                            "coordinateSystem",
+                        )? == source_frame
                         && field(descriptor, "ingestOptions")?
                             == &Json::Object(
                                 step_name
@@ -448,7 +480,7 @@ impl Engine {
                         && string_field(descriptor, "ingestProfile")? == profile.ingest_profile
                         && string_field(descriptor, "backendProfile")? == profile.backend_profile
                     {
-                        let response = response(identity)?;
+                        let response = response(identity, Some(subject))?;
                         self.observations.add(WorkCounter::Admissions, 1);
                         return Ok(response);
                     }
@@ -469,6 +501,7 @@ impl Engine {
                     facts.source_unit_to_millimeters,
                     profile,
                     step_name,
+                    source_frame,
                 )
                 .map_err(backend)?;
                 let mut retained = Subject::new(
@@ -477,6 +510,7 @@ impl Engine {
                     "mm".into(),
                 );
                 retained.step_admission_facts = Some(facts);
+                retained.step_source_frame = source_frame.into();
                 let _ = retained.semantic_identity.set(identity);
                 retained.display_name = step_name.unwrap_or("step").into();
                 retained.brep = Some(document);
@@ -506,7 +540,7 @@ impl Engine {
             .semantic_identity
             .get()
             .expect("Full-format admission constructs identity");
-        let response = response(identity)?;
+        let response = response(identity, Some(&retained))?;
         self.admit_retained(retained)?;
         if let Some((closure_key, subject_key)) = pending_mesh_index {
             self.mesh_sources.insert(closure_key, subject_key);

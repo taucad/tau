@@ -273,6 +273,7 @@ impl SubjectIdentity {
             scale,
             profile,
             name,
+            "z-up",
         )
     }
 
@@ -285,6 +286,7 @@ impl SubjectIdentity {
         scale: f64,
         profile: crate::backend::brep::BrepIdentityProfile,
         name: Option<&str>,
+        source_frame: &str,
     ) -> Result<Self, BackendError> {
         if !scale.is_finite() || scale <= 0.0 {
             return Err(invalid("STEP source unit scale is invalid."));
@@ -302,12 +304,18 @@ impl SubjectIdentity {
             ("format", Json::string("step")),
             (
                 "frame",
-                Json::object([
-                    ("coordinateSystem", Json::string("z-up")),
-                    ("sourceUnit", Json::string(source_unit)),
-                    ("outputUnit", Json::string("mm")),
-                    ("uniformScale", Json::Number(scale)),
-                ]),
+                Json::Object({
+                    let mut frame = vec![
+                        ("coordinateSystem".into(), Json::string(source_frame)),
+                        ("sourceUnit".into(), Json::string(source_unit)),
+                        ("outputUnit".into(), Json::string("mm")),
+                        ("uniformScale".into(), Json::Number(scale)),
+                    ];
+                    if source_frame == "y-up" {
+                        frame.push(("outputCoordinateSystem".into(), Json::string("z-up")));
+                    }
+                    frame
+                }),
             ),
             (
                 "ingestOptions",

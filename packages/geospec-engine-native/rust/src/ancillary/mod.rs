@@ -1,6 +1,7 @@
 //! Engine-owned observation operations; positive-only query polarity.
 
 pub(crate) mod inspection;
+mod minimum_distance;
 pub(crate) mod pmi;
 
 use crate::{
@@ -25,11 +26,16 @@ pub(crate) enum PreparedQuery {
     Pmi(pmi::PreparedPmi),
     Inspection(PreparedInspection),
     Overlap(PreparedFamily),
+    MinimumDistance(minimum_distance::PreparedMinimumDistance),
 }
 
 impl PreparedQuery {
     pub(crate) fn prepare(capability: Capability, payload: &Json) -> Result<Self, ProtocolError> {
         match capability {
+            Capability::MinimumDistance => {
+                minimum_distance::PreparedMinimumDistance::prepare(payload)
+                    .map(Self::MinimumDistance)
+            }
             Capability::QueryPmi => pmi::PreparedPmi::prepare(payload).map(Self::Pmi),
             Capability::AnalyzeMesh | Capability::AnalyzeBrep => {
                 if *payload != Json::Null {
@@ -83,6 +89,7 @@ impl PreparedQuery {
                     .find_map(|(key, value)| (key == "expected").then_some(value))
                     .expect("typed matcher payload has expected")
             }
+            Self::MinimumDistance(value) => value.normalized_payload(),
         }
     }
 
@@ -94,6 +101,7 @@ impl PreparedQuery {
                 ..AnalysisDemand::default()
             },
             Self::Overlap(value) => value.demand(),
+            Self::MinimumDistance(_) => AnalysisDemand::default(),
         }
     }
 
@@ -104,7 +112,7 @@ impl PreparedQuery {
         match self {
             Self::Inspection(value) => value.validate_regexes(regex),
             Self::Overlap(value) => value.validate_regexes(regex),
-            Self::Mesh | Self::Brep | Self::Pmi(_) => Ok(()),
+            Self::Mesh | Self::Brep | Self::Pmi(_) | Self::MinimumDistance(_) => Ok(()),
         }
     }
 
@@ -115,6 +123,7 @@ impl PreparedQuery {
         budget: &crate::budget::Budget,
     ) -> Result<(), Evaluation> {
         match self {
+            Self::MinimumDistance(value) => value.resolve(subject, budget),
             Self::Inspection(value) => {
                 let index = subject.selector_index().map_err(backend_refusal)?;
                 value.resolve(index.as_deref(), regex, subject.brep.as_deref(), budget);
@@ -138,6 +147,7 @@ impl PreparedQuery {
 
     pub(crate) fn evaluate(&self, context: &mut EvaluationContext<'_>) -> Evaluation {
         match self {
+            Self::MinimumDistance(value) => value.evaluate(context),
             Self::Pmi(value) => value.evaluate(context),
             Self::Mesh => mesh::analyze_mesh(context),
             Self::Brep => brep::evaluate_brep(context),

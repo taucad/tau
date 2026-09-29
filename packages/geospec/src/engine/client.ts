@@ -112,10 +112,11 @@ const geoSpecQueryCapabilities = [
   'inspectGeometry',
   'analyzeMeshOverlap',
   'queryPmi',
+  'minimumDistance',
 ] as const;
 
 /** Existing positive-only ancillary operations owned by the native core. @public */
-export type GeoSpecQueryCapability = (typeof geoSpecQueryCapabilities)[number];
+export type GeoSpecQueryCapability = Exclude<(typeof geoSpecQueryCapabilities)[number], 'minimumDistance'>;
 
 /**
  * Flat native query transport options. Payloads use the existing authoring
@@ -127,7 +128,7 @@ export type GeoSpecNativeQueryOptions = Omit<
   GeoSpecNativeClaimOptions,
   'arguments' | 'capability' | 'kind' | 'polarity'
 > & {
-  readonly capability: GeoSpecQueryCapability;
+  readonly capability: GeoSpecQueryCapability | 'minimumDistance';
   readonly payload?: unknown;
 };
 
@@ -146,6 +147,7 @@ const nativeInitializeRequest = new TextEncoder().encode(
   '{"canonicalProfile":"geospec-jcs-v1","method":"initialize","protocolVersion":3,"registryVersion":5,"requestId":"configuration"}',
 );
 const nativeDefaultWorkUnitLimits = new WeakMap<GeoSpecNativeEngine, number>();
+const nativeMinimumDistanceSupport = new WeakMap<GeoSpecNativeEngine, boolean>();
 
 const jsonRecord = (value: JSONValue, label: string): Record<string, JSONValue> => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -215,6 +217,15 @@ export const resolveGeoSpecNativeWorkUnitLimit = (engine: GeoSpecNativeEngine, o
     throw new TypeError('GeoSpec engine returned an initialize response for an incompatible protocol profile.');
   }
   const configuration = jsonRecord(result['configuration']!, 'initialize configuration');
+  const { capabilities } = result;
+  const advertised = Array.isArray(capabilities)
+    ? capabilities.filter((entry): entry is Record<string, JSONValue> => entry !== null && typeof entry === 'object' && !Array.isArray(entry) && entry['name'] === 'minimumDistance')
+    : [];
+  nativeMinimumDistanceSupport.set(
+    engine,
+    advertised.length === 1 && advertised.every((entry) => entry['profile'] === 'geospec-minimum-distance-v1' &&
+      entry['implementation'] === 'implemented' && entry['registryVersion'] === nativeRegistryVersion),
+  );
   if (configuration['configurationProfile'] !== 'geospec-entry-config-v1') {
     throw new TypeError('GeoSpec engine returned an unsupported configuration profile.');
   }
@@ -225,6 +236,12 @@ export const resolveGeoSpecNativeWorkUnitLimit = (engine: GeoSpecNativeEngine, o
   assertNativeWorkUnitLimit(defaultWorkUnitLimit);
   nativeDefaultWorkUnitLimits.set(engine, defaultWorkUnitLimit);
   return defaultWorkUnitLimit;
+};
+
+/** Whether this engine explicitly advertises the complete minimum/witness profile. @public */
+export const supportsGeoSpecNativeMinimumDistance = (engine: GeoSpecNativeEngine): boolean => {
+  resolveGeoSpecNativeWorkUnitLimit(engine);
+  return nativeMinimumDistanceSupport.get(engine) === true;
 };
 
 /**

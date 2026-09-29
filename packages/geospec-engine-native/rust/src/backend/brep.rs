@@ -154,6 +154,16 @@ pub struct BrepAdmissionFacts {
     /// Located faces admitted without a surface: tessellated-only products
     /// under the `OnNoBRep` read profile, whose exact claims refuse (ruling 32).
     pub surfaceless_faces: usize,
+    /// Every parsed STEP representation length context is exactly millimetres.
+    pub all_source_length_contexts_mm: bool,
+}
+
+/// Complete serial OCCT minimum and its first ordered witness pair.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BrepMinimumDistance {
+    pub distance: f64,
+    pub point_a: [f64; 3],
+    pub point_b: [f64; 3],
 }
 
 /// Bounded public-subject metadata captured by the same successful STEP read.
@@ -1036,6 +1046,18 @@ fn no_report() -> BackendError {
 }
 
 pub trait BrepSubject {
+    /// Whole placed occurrences only. A refused charge returns no fact.
+    fn occurrence_minimum_distance(
+        &self,
+        _a: u32,
+        _b: u32,
+        _charge: &mut Charge<'_>,
+    ) -> Result<Option<BrepMinimumDistance>, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The BRep connector has no whole-occurrence minimum with witnesses.".into(),
+        })
+    }
     /// Complete bounded plane region or source-attached circular rim evidence.
     fn finite_contact_face(&self, _face: BrepEntity) -> Result<FiniteContactFace, BackendError> {
         Err(BackendError {

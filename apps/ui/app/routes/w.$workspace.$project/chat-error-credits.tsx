@@ -80,14 +80,13 @@ export const ChatErrorCredits = memo(function ({
           {resumable ? undefined : <p>Add credits, then send your message.</p>}
         </>
       }
-      actionsRowFrom='sm'
       actions={
         <>
           {entitlements.hasPaymentMethod ? (
             // Flow A (U7): a card is on file — top up in place, no settings detour.
             <Button
               variant='outline'
-              size='sm'
+              size='xs'
               onClick={() => {
                 setIsTopupOpen(true);
               }}
@@ -99,7 +98,7 @@ export const ChatErrorCredits = memo(function ({
             // Flow B: no payment method yet — route through the Billing settings tab.
             <Button
               variant='outline'
-              size='sm'
+              size='xs'
               onClick={() => {
                 openSettings('billing');
               }}
@@ -112,14 +111,14 @@ export const ChatErrorCredits = memo(function ({
            * picker is the owner, opened here without claiming its shortcut. */}
           <ChatModelSelector popoverProperties={{ align: 'end' }}>
             {() => (
-              <Button variant='outline' size='sm'>
+              <Button variant='outline' size='xs'>
                 <Repeat className='size-3.5' />
                 Switch model
               </Button>
             )}
           </ChatModelSelector>
           {resumable ? (
-            <Button variant='outline' size='sm' onClick={continueChat}>
+            <Button variant='outline' size='xs' onClick={continueChat}>
               <Play className='size-3.5' />
               Resume
             </Button>

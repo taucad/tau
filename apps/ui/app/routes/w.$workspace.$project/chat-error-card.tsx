@@ -12,16 +12,9 @@ type ChatErrorCardTone = 'neutral' | 'warning' | 'destructive' | 'notice';
  */
 export const turnSavedSentence = 'Everything up to here is saved.';
 
-const toneClassName: Record<ChatErrorCardTone, string> = {
-  neutral: 'bg-muted',
-  warning: 'border-warning/20 bg-warning/10',
-  destructive: 'border-destructive/20 bg-destructive/10',
-  notice: 'bg-background',
-};
-
 const iconClassName: Record<ChatErrorCardTone, string> = {
   neutral: 'text-muted-foreground',
-  warning: 'text-warning',
+  warning: 'text-feature',
   destructive: 'text-destructive',
   notice: 'text-feature',
 };
@@ -33,20 +26,14 @@ type ChatErrorCardProps = Omit<React.ComponentProps<'section'>, 'title'> & {
   readonly description?: React.ReactNode;
   /** Buttons, the action that resolves the stop first. */
   readonly actions?: React.ReactNode;
-  /**
-   * Card width at which the actions leave their stack for one row: 20 rem, or
-   * 24 rem for a card with three actions.
-   */
-  readonly actionsRowFrom?: 'xs' | 'sm';
 };
 
 /**
- * The notice card of the chat error slot.
+ * A compact recovery row in the chat error slot.
  *
- * The card sizes its actions by its own width, not the window's, because the
- * chat panel is usually far narrower than the viewport: below `actionsRowFrom`
- * they stack at full width, above it they share one row at equal widths.
- * Labels may wrap so large text never pushes a button out of the card.
+ * The summary and content-sized actions share a neutral surface. Actions stay
+ * right-aligned and wrap below the summary when the pane cannot fit both.
+ * Diagnostic content, when mounted, follows the recovery row.
  *
  * @param properties - Tone, optional icon, copy, actions and any trailing content.
  * @returns The card.
@@ -61,7 +48,6 @@ export function ChatErrorCard({
   title,
   description,
   actions,
-  actionsRowFrom = 'xs',
   className,
   children,
   ...properties
@@ -69,31 +55,26 @@ export function ChatErrorCard({
   return (
     <section
       data-slot='chat-error-card'
-      className={cn(
-        '@container flex min-w-0 flex-col gap-3 rounded-md border p-3 text-sm',
-        toneClassName[tone],
-        className,
-      )}
+      className={cn('flex min-w-0 flex-col gap-2 rounded-md border bg-muted/40 p-2 text-sm', className)}
       {...properties}
     >
-      <div className='flex min-w-0 items-start gap-2'>
-        {Icon ? <Icon aria-hidden className={cn('mt-0.5 size-4 shrink-0', iconClassName[tone])} /> : null}
-        <div className='min-w-0 flex-1 space-y-1'>
-          <p className='font-medium text-foreground'>{title}</p>
-          {description ? <div className='text-xs break-words text-muted-foreground'>{description}</div> : null}
+      <div className='flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2'>
+        <div className='flex min-w-0 flex-1 basis-48 items-start gap-2'>
+          {Icon ? <Icon aria-hidden className={cn('mt-0.5 size-4 shrink-0', iconClassName[tone])} /> : null}
+          <div className='min-w-0 flex-1 space-y-1'>
+            <p className='font-medium break-words text-foreground'>{title}</p>
+            {description ? <div className='text-xs break-words text-muted-foreground'>{description}</div> : null}
+          </div>
         </div>
+        {actions ? (
+          <div
+            data-slot='chat-error-card-actions'
+            className='ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1.5'
+          >
+            {actions}
+          </div>
+        ) : null}
       </div>
-      {actions ? (
-        <div
-          data-slot='chat-error-card-actions'
-          className={cn(
-            'flex flex-col gap-2 *:h-auto *:min-h-8 *:whitespace-normal',
-            actionsRowFrom === 'xs' ? '@xs:flex-row @xs:*:flex-1' : '@sm:flex-row @sm:*:flex-1',
-          )}
-        >
-          {actions}
-        </div>
-      ) : null}
       {children}
     </section>
   );

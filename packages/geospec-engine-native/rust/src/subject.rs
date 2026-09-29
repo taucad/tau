@@ -178,8 +178,12 @@ mod exact_candidate_control_tests {
     }
 
     fn compare(engine: &Engine, candidate: serde_json::Value) -> serde_json::Value {
+        compare_for(engine, &public_hash(engine), candidate)
+    }
+
+    fn compare_for(engine: &Engine, hash: &str, candidate: serde_json::Value) -> serde_json::Value {
         let control = serde_json::json!({"_tauNativeExactClusterCandidateV1": {
-            "operation":"compare", "subjectHash":"admitted", "toleranceMm":0.01,
+            "operation":"compare", "subjectHash":hash, "toleranceMm":0.01,
             "candidate":candidate,
         }});
         let bytes = crate::canonicalize(&serde_json::to_vec(&control).unwrap()).unwrap();
@@ -192,8 +196,12 @@ mod exact_candidate_control_tests {
     }
 
     fn export(engine: &Engine) -> serde_json::Value {
+        export_for(engine, &public_hash(engine))
+    }
+
+    fn export_for(engine: &Engine, hash: &str) -> serde_json::Value {
         let control = serde_json::json!({"_tauNativeExactClusterCandidateV1": {
-            "operation":"export", "subjectHash":"admitted", "toleranceMm":0.01,
+            "operation":"export", "subjectHash":hash, "toleranceMm":0.01,
         }});
         let bytes = crate::canonicalize(&serde_json::to_vec(&control).unwrap()).unwrap();
         serde_json::from_slice(
@@ -204,6 +212,25 @@ mod exact_candidate_control_tests {
         .unwrap()
     }
 
+    fn public_hash(engine: &Engine) -> String {
+        engine
+            .subjects
+            .values()
+            .next()
+            .unwrap()
+            .semantic_identity
+            .get()
+            .unwrap()
+            .hash()
+            .into()
+    }
+
+    fn admit(engine: &mut Engine, subject: Subject) {
+        let key = subject.cache_identity().unwrap();
+        assert_ne!(key, subject.semantic_identity.get().unwrap().hash());
+        engine.subjects.insert(key, Rc::new(subject));
+    }
+
     #[test]
     fn private_compare_uses_owned_fact_or_recomputes_without_installing_foreign_fact() {
         let calls = Rc::new(Cell::new(0));
@@ -211,7 +238,7 @@ mod exact_candidate_control_tests {
         let bytes = exact_clusters::export_candidate(&fresh, 0.01, &completed()).unwrap();
         let candidate = serde_json::from_slice(&bytes).unwrap();
         let mut engine = Engine::new();
-        engine.subjects.insert("admitted".into(), Rc::new(fresh));
+        admit(&mut engine, fresh);
         assert!(export(&engine)["candidate"].is_null());
         let first = compare(&engine, candidate);
         assert_eq!(first["matched"], true);
@@ -232,7 +259,7 @@ mod exact_candidate_control_tests {
             &exact_clusters::export_candidate(&resident, 0.01, &completed()).unwrap(),
         )
         .unwrap();
-        engine.subjects.insert("admitted".into(), Rc::new(resident));
+        admit(&mut engine, resident);
         assert_eq!(export(&engine)["candidate"], candidate);
         let response = compare(&engine, candidate);
         assert_eq!(response["matched"], true);
@@ -253,12 +280,35 @@ mod exact_candidate_control_tests {
         )
         .unwrap();
         let mut engine = Engine::new();
-        engine.subjects.insert("admitted".into(), Rc::new(fresh));
+        admit(&mut engine, fresh);
         let response = compare(&engine, candidate);
         assert_eq!(response["matched"], false);
         // A refused first charge does not count as accepted work.
         assert_eq!(response["recomputedUnits"], "0");
         assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn private_control_resolves_only_the_admitted_step_public_hash() {
+        let calls = Rc::new(Cell::new(0));
+        let resident = subject(Rc::clone(&calls), true);
+        let content_hash = resident.content_hash.clone();
+        let mut engine = Engine::new();
+        admit(&mut engine, resident);
+        let public = public_hash(&engine);
+        let internal = engine.subjects.keys().next().unwrap().clone();
+        assert_ne!(public, content_hash);
+        let candidate = export(&engine)["candidate"].clone();
+        assert_eq!(candidate["schema"], "geospec-exact-cluster-candidate-v1");
+        assert_eq!(compare(&engine, candidate.clone())["matched"], true);
+        assert_eq!(compare(&engine, candidate.clone())["recomputedUnits"], "0");
+        for wrong in [&"0".repeat(64), &content_hash, &internal] {
+            assert!(export_for(&engine, wrong)["candidate"].is_null());
+            let result = compare_for(&engine, wrong, candidate.clone());
+            assert_eq!(result["matched"], false);
+            assert_eq!(result["recomputedUnits"], "0");
+        }
+        assert_eq!(calls.get(), 0);
     }
 
     #[test]
@@ -270,14 +320,14 @@ mod exact_candidate_control_tests {
         )
         .unwrap();
         let mut engine = Engine::new();
-        engine.subjects.insert("admitted".into(), Rc::new(fresh));
+        admit(&mut engine, fresh);
 
         candidate["address"]["producerProfileSha256"] = serde_json::json!("00".repeat(32));
         assert_eq!(compare(&engine, candidate.clone())["matched"], false);
         assert_eq!(calls.get(), 0);
 
         candidate["address"]["producerProfileSha256"] = serde_json::json!(
-            exact_clusters::address(engine.subjects.get("admitted").unwrap(), 0.01)
+            exact_clusters::address(engine.subjects.values().next().unwrap(), 0.01)
                 .unwrap()
                 .producer_profile_sha256
         );
@@ -307,7 +357,7 @@ mod exact_candidate_control_tests {
     }
 
     fn first_candidate(engine: &Engine) -> serde_json::Value {
-        let subject = engine.subjects.get("admitted").unwrap();
+        let subject = engine.subjects.values().next().unwrap();
         serde_json::from_slice(
             &exact_clusters::export_candidate(subject, 0.01, &completed()).unwrap(),
         )

@@ -50,7 +50,12 @@ describe('fileProvenanceLabel', () => {
     const records = fileProvenanceLabel(provenance({ versioned: false, agentAccess: 'read-only' }), '.tau/chats');
     const cache = fileProvenanceLabel(provenance({ versioned: false }), '.tau/cache');
 
-    expect(records).toEqual({ description: 'Tau records · not saved in revisions', dimmed: true, readOnly: false });
+    expect(records).toEqual({
+      breadcrumbBadge: 'Artifact',
+      description: 'Supporting data used by Tau. Not included in revisions.',
+      dimmed: true,
+      readOnly: false,
+    });
     expect(cache).toEqual({ description: 'Cache · not saved in revisions', dimmed: true, readOnly: false });
   });
 

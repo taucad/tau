@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { PaneVirtualList } from '#components/panes/pane-virtual-list.js';
-import { Box, ChevronDown, CircleHelp } from 'lucide-react';
+import { Box, ChevronDown, CircleAlert, CircleHelp, LoaderCircle } from 'lucide-react';
 import type { GeometryComponentNode } from '@taucad/types';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
@@ -10,12 +10,16 @@ import { appearanceLabel, statusOf, volumeLabel, weightLabel } from '#components
 import type { PartQuantity } from '#components/geometry/cad/part-quantities.js';
 import { DetailsToggle, disclosureMotion } from '#components/revisions/revision-actions.js';
 import { PartPreviewImage } from '#components/geometry/cad/part-preview-image.js';
+import type { PartThumbnailState } from '#services/part-thumbnail.service.js';
 
 type PartPropertiesPanelProps = {
   readonly node?: GeometryComponentNode;
   readonly entryPath?: string;
   readonly quantity?: PartQuantity;
-  readonly previewBytes?: Uint8Array<ArrayBuffer>;
+  readonly preview?: PartThumbnailState;
+  readonly onRetryPreview?: () => void;
+  readonly onPreviewDecodeError?: () => void;
+  readonly onPreviewDecoded?: () => void;
 };
 
 function Fact({ label, value }: { readonly label: string; readonly value: string }): React.JSX.Element {
@@ -49,7 +53,10 @@ export function PartPropertiesPanel({
   node,
   entryPath,
   quantity = {},
-  previewBytes,
+  preview,
+  onRetryPreview,
+  onPreviewDecodeError,
+  onPreviewDecoded,
 }: PartPropertiesPanelProps): React.JSX.Element {
   if (!node) {
     return <PanelEmptyState icon={Box} title='No part selected' className='min-h-40' />;
@@ -60,16 +67,21 @@ export function PartPropertiesPanel({
   return (
     <div data-slot='part-properties' className='@container/properties space-y-3 p-3 text-sm'>
       <div className='flex items-center gap-3'>
-        <div
-          className='flex size-10 shrink-0 items-center justify-center rounded-sm bg-muted ring-1 ring-border'
-          aria-hidden='true'
-        >
-          {previewBytes ? (
-            <PartPreviewImage bytes={previewBytes} className='size-10 rounded-sm object-contain' />
+        <div className='flex size-10 shrink-0 items-center justify-center rounded-sm bg-muted ring-1 ring-border'>
+          {preview?.bytes ? (
+            <PartPreviewImage
+              bytes={preview.bytes}
+              alt={`Rendered ${node.name}`}
+              className='size-10 rounded-sm object-contain'
+              onError={onPreviewDecodeError}
+              onLoad={onPreviewDecoded}
+            />
           ) : materials.length > 0 ? (
-            <MaterialSwatch materials={materials} />
+            <span aria-hidden='true'>
+              <MaterialSwatch materials={materials} />
+            </span>
           ) : (
-            <Box className='size-4' />
+            <Box aria-hidden='true' className='size-4' />
           )}
         </div>
         <div className='min-w-0'>
@@ -79,6 +91,29 @@ export function PartPropertiesPanel({
           </div>
         </div>
       </div>
+
+      {preview?.status === 'pending' || preview?.status === 'failed' ? (
+        <div
+          role={preview.status === 'failed' ? 'alert' : 'status'}
+          aria-label='Preview status'
+          aria-busy={preview.status === 'pending' || undefined}
+          className='flex items-center justify-between gap-2 text-xs text-muted-foreground'
+        >
+          <span className='flex items-center gap-1.5'>
+            {preview.status === 'pending' ? (
+              <LoaderCircle aria-hidden='true' className='size-3.5 motion-safe:animate-spin' />
+            ) : (
+              <CircleAlert aria-hidden='true' className='size-3.5' />
+            )}
+            {preview.status === 'pending' ? 'Preview loading' : 'Preview unavailable'}
+          </span>
+          {preview.status === 'failed' && onRetryPreview ? (
+            <button type='button' className='rounded-sm underline focus-visible:focus-outline' onClick={onRetryPreview}>
+              Retry preview
+            </button>
+          ) : undefined}
+        </div>
+      ) : undefined}
 
       <section aria-label='Appearance'>
         <h3 className='mb-1 text-xs font-medium text-muted-foreground'>Appearance</h3>

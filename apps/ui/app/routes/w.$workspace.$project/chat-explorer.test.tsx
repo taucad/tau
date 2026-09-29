@@ -376,10 +376,12 @@ describe('ChatExplorerTree', () => {
       viewGraphics: new Map([['mainView', graphicsRef]]),
     });
     renderExplorerTree({ strictMode: true });
-    await waitFor(() => expect(exportImage).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(exportImage).toHaveBeenCalled();
+    });
+    expect(exportImage.mock.calls[0]?.[0].geometryHash).toMatch(/^sha256:/u);
     expect(exportImage.mock.calls[0]?.[0]).toMatchObject({
       sourcePath: 'src/main.ts',
-      geometryHash: 'presented-glb',
       exportOptions: {
         mode: 'batch',
         views: [{ visiblePrimitives: part.primitiveRefs }],
@@ -396,7 +398,7 @@ describe('ChatExplorerTree', () => {
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
     const first = Promise.withResolvers<Array<{ name: string; mimeType: string; bytes: Uint8Array<ArrayBuffer> }>>();
     const second = Promise.withResolvers<Array<{ name: string; mimeType: string; bytes: Uint8Array<ArrayBuffer> }>>();
-    const exportImage = vi.fn((job: { sourcePath: string }) =>
+    const exportImage = vi.fn(async (job: { sourcePath: string }) =>
       job.sourcePath === 'src/main.ts' ? first.promise : second.promise,
     );
     mocks.imageService = { export: exportImage };
@@ -429,19 +431,25 @@ describe('ChatExplorerTree', () => {
       ]),
     });
     renderExplorerTree();
-    await waitFor(() => expect(exportImage).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect(exportImage).toHaveBeenCalledTimes(2);
+    });
     const properties = screen.getByTestId('model-pane-properties');
     expect(properties).toHaveTextContent('helper_part');
     await act(async () => {
       second.resolve([{ name: 'render-part-0.webp', mimeType: 'image/webp', bytes: new Uint8Array([2]) }]);
     });
-    await waitFor(() => expect(properties.querySelector('[data-slot="part-properties"] img')).toBeTruthy());
-    const selectedSrc = properties.querySelector('[data-slot="part-properties"] img')?.getAttribute('src');
+    await waitFor(() => {
+      expect(properties.querySelector('[data-slot="part-properties"] img')).toBeTruthy();
+    });
+    const selectedSource = properties.querySelector('[data-slot="part-properties"] img')?.getAttribute('src');
     await act(async () => {
       first.resolve([{ name: 'render-part-0.webp', mimeType: 'image/webp', bytes: new Uint8Array([1]) }]);
     });
-    await waitFor(() => expect(screen.getByTestId('model-pane-src/main.ts').querySelector('img')).toBeTruthy());
-    expect(properties.querySelector('[data-slot="part-properties"] img')?.getAttribute('src')).toBe(selectedSrc);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-pane-src/main.ts').querySelector('img')).toBeTruthy();
+    });
+    expect(properties.querySelector('[data-slot="part-properties"] img')?.getAttribute('src')).toBe(selectedSource);
   });
 
   it('keeps a restored hidden viewer file in the model list before its CAD unit starts', () => {

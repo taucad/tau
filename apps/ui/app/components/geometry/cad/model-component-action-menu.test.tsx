@@ -150,6 +150,33 @@ function renderViewerModelComponentActionMenu({
 }
 
 describe('model component action menu', () => {
+  it('offers retry only for a failed Explorer preview', async () => {
+    const node = createNode();
+    const retry = vi.fn();
+    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
+    render(
+      <ModelComponentActionDropdown
+        manifest={createManifest(node)}
+        node={node}
+        graphicsRef={graphicsRef}
+        unitId={unitId}
+        source='explorer'
+        isFocused={false}
+        isIsolated={false}
+        hasHiddenComponents={false}
+        hasOpacityOverrides={false}
+        opacity={1}
+        actionButtonClassName=''
+        preview={{ status: 'failed' }}
+        onRetryPreview={retry}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Retry preview' }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
   it.each(['explorer', 'viewer'] as const)(
     'should expose source material factors as read-only text in the %s menu',
     async (source) => {

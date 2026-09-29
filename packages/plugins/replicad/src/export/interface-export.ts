@@ -347,9 +347,12 @@ const prepareStepProducts = (oc: OpenCascadeInstance, shapes: StepShapeEntry[]):
   const productsByHash = new Map<string, PrototypeStepProduct>();
 
   for (const [index, shapeConfig] of shapes.entries()) {
-    const { shape, name, resolvedInterfaces } = shapeConfig;
+    const { shape, name, resolvedInterfaces, density } = shapeConfig;
     if (resolvedInterfaces && !name) {
       throw new Error(`GeoSpec: entry ${index} declares interfaces but has no name`);
+    }
+    if (density !== undefined && (typeof density !== 'number' || !Number.isFinite(density) || density <= 0)) {
+      throw new TypeError(`GeoSpec: entry ${index} must declare a finite positive density in g/cm3`);
     }
 
     const identity = inspectReplicadShapeIdentity({ openCascade: oc, shape: shape as Meshable });
@@ -370,6 +373,11 @@ const prepareStepProducts = (oc: OpenCascadeInstance, shapes: StepShapeEntry[]):
       if (existing.interfaceSignature !== signature) {
         throw new Error(
           `GeoSpec: prototypeHash ${prototypeHash} is shared by occurrences '${existing.firstOccurrence.occurrenceName}' and '${occurrence.occurrenceName}' but their resolved interface sets differ`,
+        );
+      }
+      if (existing.firstOccurrence.density !== density) {
+        throw new Error(
+          `GeoSpec: prototypeHash ${prototypeHash} is shared by occurrences '${existing.firstOccurrence.occurrenceName}' and '${occurrence.occurrenceName}' with conflicting densities`,
         );
       }
       existing.occurrences.push(occurrence);

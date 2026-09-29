@@ -11,7 +11,6 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { Topic } from '@taucad/events';
-import { sessionEpoch } from '#services/sessions-store.js';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import type {
   GitRemoteCredential,
@@ -23,7 +22,6 @@ import type {
   RevisionStatusProjection,
   RevisionTag,
 } from '@taucad/revisions';
-import { branchRegistryMilliseconds } from '@taucad/revisions/branch-machine';
 import type { EditorConflictInput, EditorConflictOutcome } from '@taucad/revisions/revision-effects';
 import type {
   RevisionToast,
@@ -34,7 +32,6 @@ import type {
   WorkerRevisionResponse,
   WorkerRevisionResult,
   BranchCreated,
-  WorkerTurnPlacement,
 } from '#machines/file-manager.worker.revisions.js';
 import { isGithubRemoteUrl, tauRemoteUrl } from '@taucad/revisions';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
@@ -101,13 +98,6 @@ export type RevisionClient = Readonly<{
     path: string,
     options?: Readonly<{ from?: string; against?: 'checkout' }>,
   ) => Promise<RevisionFileComparison>;
-  /** Place a turn and wait for its lease. Rejects when it cannot be placed. */
-  admitTurn: (input: {
-    readonly turnId: string;
-    readonly chatId: string;
-    readonly runId: string;
-    readonly checkoutId?: string;
-  }) => Promise<WorkerTurnPlacement>;
   send: (command: WorkerRevisionCommand) => void;
   /**
    * Record what is on disk and wait for the answer (C16, contract §6).
@@ -182,60 +172,22 @@ type ClientState = {
 const clients = new Map<string, ClientState>();
 
 /**
- * Wait for the `branch` child's settlement of one *New branch* (P4).
+ * Read the host's answer to one *New branch* (P4): the checkout the registry made for it.
  *
- * Name-matched on the toast channel, because that is the only correlation the
- * host leg publishes: the child runs one verb at a time and the name is what
- * the person typed. The refusal is matched the same way, and the whole wait is
- * bounded, because the child takes `create` in `idle` only: a dropped one used
- * to leave the chat's send path waiting for a settlement nothing would send,
- * and an unrelated verb's refusal used to settle it instead (finding 1).
- *
- * @param toasts - The client's own toast topic.
+ * @param answer - What the host's `createBranch` answered.
  * @param name - The branch being made.
- * @param ask - Sends the verb, once the listeners are attached.
- * @returns The checkout the registry made for it.
+ * @returns The branch and its checkout.
  */
-const awaitBranchCreated = async (
-  toasts: Topic<RevisionToast>,
-  name: string,
-  ask: () => void,
-): Promise<BranchCreated> => {
-  const created = Promise.withResolvers<BranchCreated>();
-  const unsubscribe = toasts.subscribe((toast) => {
-    if (toast.type === 'branch' && toast.operation === 'create' && toast.branch === name) {
-      if (toast.checkoutId === undefined || toast.checkoutRoot === undefined) {
-        /* A branch with no checkout named is no placement: `''` used to reach
-         * `Chat.checkoutId` and leave the chat nothing to run on (finding 5). */
-        created.reject(
-          Object.assign(new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', { branch: name }).description), {
-            code: 'BRANCH_UNPLACED',
-          }),
-        );
-        return;
-      }
-      created.resolve({ branch: name, checkoutId: toast.checkoutId, checkoutRoot: toast.checkoutRoot });
-      return;
-    }
-    /* A host that names neither verb nor branch on its refusal is uncorrelated,
-     * and the bound is what protects this wait from it: reading the absent
-     * fields as this create's own settled it in another verb's words. */
-    if (toast.type === 'error' && toast.subject === 'branch' && toast.operation === 'create' && toast.branch === name) {
-      created.reject(
-        Object.assign(new Error(toast.message), ...(toast.code === undefined ? [] : [{ code: toast.code }])),
-      );
-    }
-  });
-  const bound = globalThis.setTimeout(() => {
-    created.reject(Object.assign(new Error('This project did not answer in time.'), { code: 'BRANCH_UNANSWERED' }));
-  }, branchRegistryMilliseconds * 2);
-  try {
-    ask();
-    return await created.promise;
-  } finally {
-    globalThis.clearTimeout(bound);
-    unsubscribe();
+const branchCreatedOf = (answer: unknown, name: string): BranchCreated => {
+  const { checkoutId, checkoutRoot } = (answer ?? {}) as { checkoutId?: unknown; checkoutRoot?: unknown };
+  if (typeof checkoutId !== 'string' || typeof checkoutRoot !== 'string') {
+    /* A branch with no checkout named is no placement: `''` used to reach
+     * `Chat.checkoutId` and leave the chat nothing to run on (finding 5). */
+    throw Object.assign(new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', { branch: name }).description), {
+      code: 'BRANCH_UNPLACED',
+    });
   }
+  return { branch: name, checkoutId, checkoutRoot };
 };
 
 /** Build the renderer half of a host-owned native revision root. */
@@ -299,24 +251,15 @@ export const createHostRevisionClient = (input: {
         throw staleConnection();
       }
       channel = next;
-      const initial = await next.execute({
-        type: 'revision',
-        request: { command: 'status' },
-      });
+      const initial = await next.revision({ command: 'status' });
       if (generation !== connectionGeneration) {
         throw staleConnection();
-      }
-      if (initial.type !== 'revision') {
-        throw new Error('The host answered a revision request with an agent response.');
       }
       applyStatus(initial.status);
       /* The desktop host keeps this project's root alive across renderer
        * reloads. Reattaching is therefore the open signal that makes the
        * retained scheduler fetch again before the client reads remote work. */
-      await next.execute({
-        type: 'revision',
-        request: { command: 'open' },
-      });
+      await next.revision({ command: 'open' });
       const abort = new AbortController();
       streamAbort = abort;
       // async-iife: bootstrap -- the stream lives for the connection and reports through Topics.
@@ -363,19 +306,11 @@ export const createHostRevisionClient = (input: {
   };
   const ask = async (request: JsonValue): Promise<JsonValue> => {
     const connected = await opened();
-    const response = await connected.execute({ type: 'revision', request });
-    if (response.type !== 'revision') {
-      throw new Error('The host answered a revision request with an agent response.');
-    }
+    const response = await connected.revision(request);
     applyStatus(response.status);
     return response.result;
   };
   const send = (request: WorkerRevisionCommand): void => {
-    // Only a browser-owned replica adopts host settlements. This client already
-    // reads that host's authoritative revision stream; never echo its heads back.
-    if (request.command === 'adoptHostFinalized') {
-      return;
-    }
     // async-iife: bootstrap -- a machine verb reports its settled state on the revision stream.
     void (async (): Promise<void> => {
       try {
@@ -437,7 +372,6 @@ export const createHostRevisionClient = (input: {
       return unsubscribe;
     },
     subscribeToasts: (listener) => toasts.subscribe(listener),
-    admitTurn: async () => ({ checkoutId: '', root: '', baseRevisionId: '' }),
     log: async (request) =>
       (await ask({
         command: 'log',
@@ -471,12 +405,9 @@ export const createHostRevisionClient = (input: {
     },
     recordEditorConflict: async (conflict) =>
       (await ask({ command: 'recordEditorConflict', ...conflict })) as unknown as EditorConflictOutcome,
-    /* The host answers this verb with its projection, not with the checkout, so
-     * the settlement is taken off the same toast stream the pane reads (P4). */
+    /* The host answers the verb with the checkout the registry made, or its refusal (B7: an answer, never a bound). */
     createBranch: async (name, from) =>
-      awaitBranchCreated(toasts, name, () => {
-        send({ command: 'createBranch', name, ...(from === undefined ? {} : { from }) });
-      }),
+      branchCreatedOf(await ask({ command: 'createBranch', name, ...(from === undefined ? {} : { from }) }), name),
     open: () => {
       // async-iife: bootstrap -- project lifecycle owns this connection and errors surface as toasts.
       void (async (): Promise<void> => {
@@ -811,16 +742,13 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       receive(generation, event);
     });
     opened.port2.start();
-    /* W19/R5: the frame carries who serves this project's revisions and which
-     * client session is asking (P31, W3c-R4). Both fields had no sender, so
-     * the worker's gate and its per-project authority epoch were inert. */
+    /* W19/R5: the frame carries who serves this project's revisions (P31). */
     input.worker.postMessage(
       {
         type: 'revisionsConnect',
         projectId: input.projectId,
         port: opened.port1,
         hostServesRevisions: isDesktopTarget,
-        sessionEpoch,
       },
       [opened.port1],
     );
@@ -892,20 +820,6 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       return unsubscribe;
     },
     subscribeToasts: (listener) => toasts.subscribe(listener),
-    admitTurn: async (placement) => {
-      const result = await ask({ command: 'admitTurn', ...placement });
-      if (result.kind !== 'placement') {
-        /* An empty root used to be manufactured here, and a binding rooted at
-         * `''` ran the turn on the workspace's files instead of the
-         * checkout's (P2). A turn with no placement is refused — in the words
-         * the authority refuses an unrooted one with, because this is the same
-         * refusal one layer down (finding 8). */
-        throw Object.assign(new Error(describeRevisionFailure('turn', 'PLACEMENT_UNROOTED').description), {
-          code: 'PLACEMENT_UNROOTED',
-        });
-      }
-      return result.placement;
-    },
     log: async (request) => {
       const result = await ask({
         command: 'log',

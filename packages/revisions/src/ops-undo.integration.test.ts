@@ -148,7 +148,6 @@ const startTree = async (
   const { actor } = createProjectRevisionsActor({
     port: target.port,
     projectId: 'project-1',
-    authorityEpoch: 'epoch-1',
     filesystem: async () => target.filesystem,
     actor: () => ada,
     ...extra,
@@ -172,7 +171,7 @@ const startTree = async (
     save: async () => {
       const from = await target.port.readRef('main');
       const checkoutId = actor.getSnapshot().context.selectedCheckoutId ?? 'live';
-      actor.send({ type: 'cut', trigger: 'save', checkoutId, leaseIds: [] });
+      actor.send({ type: 'cut', requestId: `save:${String(from)}`, trigger: 'save', checkoutId, leaseIds: [] });
       await expect.poll(async () => target.port.readRef('main'), { timeout: 20_000 }).not.toBe(from);
       return String(await target.port.readRef('main'));
     },
@@ -249,7 +248,6 @@ describe('Undo through the tree (D15)', () => {
     const actors = createRevisionActors({
       port: target.port,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: async () => target.filesystem,
       deviceId: () => 'laptop-7',
       actor: () => current,
@@ -402,7 +400,6 @@ describe.runIf(gitToolchainOnPath)('the operation log over git http-backend (D15
       const options = {
         port: target.port,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: async () => target.filesystem,
         actor: () => ada,
       } satisfies RevisionActorsOptions;
@@ -434,7 +431,6 @@ describe.runIf(gitToolchainOnPath)('the operation log over git http-backend (D15
       const actors = createRevisionActors({
         port: target.port,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: async () => target.filesystem,
         actor: () => ada,
       });
@@ -466,7 +462,6 @@ describe.runIf(gitToolchainOnPath)('the operation log over git http-backend (D15
       const actors = createRevisionActors({
         port: target.port,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: async () => target.filesystem,
         actor: () => ada,
       });

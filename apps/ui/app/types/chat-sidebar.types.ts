@@ -15,7 +15,6 @@ export type ChatSidebarState =
   | 'approval'
   | 'question'
   | 'reconnecting'
-  | 'finishing'
   | 'done'
   | 'failed'
   | 'stopped';

@@ -73,6 +73,8 @@ export type AuthServiceOptions = {
 export type AuthService = {
   /** Current bearer token, or `undefined` while signed out. */
   token(): string | undefined;
+  /** The signed-in account's user id, once a `get-session` named it; `undefined` while signed out or unknown. */
+  principal(): string | undefined;
   /** Load any persisted credential. Call once at startup. */
   restore(): Promise<void>;
   /** Open the system browser and settle when a session arrives (or the attempt fails). */
@@ -81,7 +83,7 @@ export type AuthService = {
   handleCallback(callback: AuthCallback): Promise<void>;
   /** Drop the stored credential. */
   signOut(): Promise<void>;
-  /** Re-validate the session, re-persisting a refreshed token and dropping on 401. */
+  /** Re-validate the session, re-persisting a refreshed token, learning its user id, and dropping on 401. */
   refresh(): Promise<void>;
   /** Subscribe to sign-in, sign-out, and refresh. Returns an unsubscribe function. */
   onChange(listener: () => void): () => void;
@@ -126,6 +128,7 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
    * to disk — an e2e run must not leave a credential behind in userData. */
   const seeded = options.packaged ? undefined : options.seededToken;
   let token: string | undefined = seeded;
+  let principal: string | undefined;
   let pending: PendingSignIn | undefined;
   let timer: NodeJS.Timeout | undefined;
 
@@ -160,6 +163,7 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
 
   const drop = async (): Promise<void> => {
     token = undefined;
+    principal = undefined;
     try {
       await unlink(credentialPath);
     } catch (error) {
@@ -179,6 +183,18 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
     }
     await persist(refreshed);
     return true;
+  };
+
+  /* Better-auth's `get-session` answers `{ session, user }`; the user's id is the account a run is funded by. */
+  const sessionUser = async (response: Response): Promise<string | undefined> => {
+    try {
+      const body: unknown = await response.json();
+      const user: unknown = typeof body === 'object' && body !== null ? Reflect.get(body, 'user') : undefined;
+      const id: unknown = typeof user === 'object' && user !== null ? Reflect.get(user, 'id') : undefined;
+      return typeof id === 'string' ? id : undefined;
+    } catch {
+      return undefined;
+    }
   };
 
   const exchange = async (oneTimeToken: string): Promise<void> => {
@@ -224,8 +240,16 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
       notify();
       return;
     }
-    if (await adoptRefreshedToken(response)) {
+    const refreshed = await adoptRefreshedToken(response);
+    const user = response.ok ? await sessionUser(response) : undefined;
+    const learned = user !== undefined && user !== principal;
+    if (learned) {
+      principal = user;
+    }
+    if (refreshed) {
       log('info', 'auth.token-refreshed');
+    }
+    if (refreshed || learned) {
       notify();
     }
   };
@@ -250,6 +274,7 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
 
   return {
     token: () => token,
+    principal: () => principal,
     refresh,
 
     async restore() {

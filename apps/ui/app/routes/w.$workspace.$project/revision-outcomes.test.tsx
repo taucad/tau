@@ -130,22 +130,22 @@ describe('RevisionOutcomes', () => {
       runId: 'run-4',
       chatId: 'chat-1',
       checkoutId: 'live',
-      reason: 'The checkout did not settle the cut in time.',
-      code: 'CUT_TIMED_OUT',
+      reason: 'The checkout could not record its earlier edits before the turn.',
+      code: 'BASE_CUT_FAILED',
     });
 
     expect(errors).toEqual([
       {
         title: 'Nothing was saved for that change',
-        description: 'Tau took too long to record that change. Try sending it again.',
+        description: 'Tau could not save this project’s earlier edits first. Try sending that again.',
       },
     ]);
     expect(`${errors[0]?.title ?? ''} ${errors[0]?.description ?? ''}`).not.toMatch(/checkout/iu);
     expect(logged).toHaveBeenCalledWith(
       '[revisions]',
       'turn',
-      'CUT_TIMED_OUT',
-      'The checkout did not settle the cut in time.',
+      'BASE_CUT_FAILED',
+      'The checkout could not record its earlier edits before the turn.',
     );
     logged.mockRestore();
   });

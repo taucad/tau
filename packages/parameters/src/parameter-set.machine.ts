@@ -1,8 +1,11 @@
-import { createCallbackLogic, createAsyncLogic, setup, types } from 'xstate';
+import { createActor, createCallbackLogic, createAsyncLogic, setup, types } from 'xstate';
 import type { ActorRefFrom, EnqueueObject } from 'xstate';
-import type { CheckedFileWriteResult } from '@taucad/types';
+import { parameterEntryPath } from '@taucad/types';
+import type { CheckedFileWrite, CheckedFileWriteResult } from '@taucad/types';
+import { commitParameterChange, loadParameterSnapshot } from '#authority.js';
+import type { ParameterAuthority } from '#authority.js';
 import { eventSchemas } from '#machine-schemas.js';
-import type { ParameterResolutionOptions } from '#manifest.js';
+import type { ParameterManifest, ParameterResolutionOptions } from '#manifest.js';
 import { planParameterChange } from '#planning.js';
 import type { ParameterChange } from '#planning.js';
 import { sameRecordBytes } from '#record.js';
@@ -44,10 +47,13 @@ export type ParameterSetMachineEvent =
   | Readonly<{ type: 'submit'; request: ParameterSetRequest }>
   | Readonly<{ type: 'resolve'; resolution?: ParameterResolutionOptions }>
   | Readonly<{ type: 'watch.changed' }>
-  | Readonly<{ type: 'watch.error'; message: string }>
+  /** `code` names why observation ended; without one the diagnostic is `WATCH_FAILED`. */
+  | Readonly<{ type: 'watch.error'; message: string; code?: WatchFailureCode }>
   | Readonly<{ type: 'confirm'; requestId: string; fingerprint: string }>
   | Readonly<{ type: 'cancel'; requestId: string }>
   | Readonly<{ type: 'close'; invalidDrafts?: readonly string[] }>;
+/** Why a host's observation of the sidecar failed. @public */
+export type WatchFailureCode = 'WATCH_FAILED' | 'WATCH_RESET' | 'WATCH_CLOSED';
 /** Native command results remain observable even across immediate state transitions. @public */
 export type ParameterSetEmission =
   | Readonly<{
@@ -196,6 +202,7 @@ type Submit = Extract<ParameterSetMachineEvent, { type: 'submit' }>;
 type Close = Extract<ParameterSetMachineEvent, { type: 'close' }>;
 type Resolve = Extract<ParameterSetMachineEvent, { type: 'resolve' }>;
 type Cancel = Extract<ParameterSetMachineEvent, { type: 'cancel' }>;
+type WatchError = Extract<ParameterSetMachineEvent, { type: 'watch.error' }>;
 
 const isUncertain = (context: ParameterSetMachineContext): boolean =>
   context.outcome?.status === 'indeterminate' && context.outcome.code === 'RECOVERY_FAILED';
@@ -364,7 +371,18 @@ const closeTo =
     return { target, context: closing(context, enq) };
   };
 
-const watchFailed = (message: string) => ({ code: 'WATCH_FAILED', message });
+const watchFailed = ({
+  message,
+  code = 'WATCH_FAILED',
+}: WatchError): Readonly<{ code: WatchFailureCode; message: string }> => ({
+  code,
+  message,
+});
+const watchFailureCodes: ReadonlySet<string> = new Set<WatchFailureCode>([
+  'WATCH_FAILED',
+  'WATCH_RESET',
+  'WATCH_CLOSED',
+]);
 
 /* A command not yet written, overtaken by a new semantic context. */
 const staleManifest = (context: ParameterSetMachineContext): ParameterSetPatch => ({
@@ -372,8 +390,8 @@ const staleManifest = (context: ParameterSetMachineContext): ParameterSetPatch =
 });
 
 /* A command not yet written, overtaken by a failed observation. */
-const disconnectedBeforeCommit = (context: ParameterSetMachineContext, message: string): ParameterSetPatch => ({
-  diagnostic: watchFailed(message),
+const disconnectedBeforeCommit = (context: ParameterSetMachineContext, event: WatchError): ParameterSetPatch => ({
+  diagnostic: watchFailed(event),
   outcome: rejected(context.active!.requestId, 'DISCONNECTED', 'Authority observation failed before commit.'),
 });
 
@@ -413,7 +431,7 @@ const unwrittenCommandHandlers = {
     event: Extract<ParameterSetMachineEvent, { type: 'watch.error' }>;
   }>) => ({
     target: 'settled',
-    context: { ...refresh(context), ...disconnectedBeforeCommit(context, event.message) },
+    context: { ...refresh(context), ...disconnectedBeforeCommit(context, event) },
   }),
 };
 
@@ -470,7 +488,7 @@ const parameterSetMachineDefinition = setup({
           isSameResolution(context, event) ? { context: refresh(context) } : { context: resolve(event) },
         'watch.changed': { context: ({ context }) => refresh(context) },
         'watch.error': {
-          context: ({ event }) => ({ diagnostic: watchFailed(event.message), refresh: 'manifest' }),
+          context: ({ event }) => ({ diagnostic: watchFailed(event), refresh: 'manifest' }),
         },
         close: ({ context, event }, enq) => {
           if (isInvalidClose(event)) {
@@ -511,7 +529,7 @@ const parameterSetMachineDefinition = setup({
           on: {
             'watch.error': {
               target: 'disconnected',
-              context: ({ event }) => ({ diagnostic: watchFailed(event.message) }),
+              context: ({ event }) => ({ diagnostic: watchFailed(event) }),
             },
             resolve: ({ context, event }) =>
               isSameResolution(context, event) ? {} : { target: 'loading', reenter: true, context: resolve(event) },
@@ -546,7 +564,7 @@ const parameterSetMachineDefinition = setup({
           on: {
             'watch.error': {
               target: 'disconnected',
-              context: ({ event }) => ({ diagnostic: watchFailed(event.message) }),
+              context: ({ event }) => ({ diagnostic: watchFailed(event) }),
             },
             resolve: ({ context, event }) =>
               isSameResolution(context, event) ? {} : { target: 'loading', context: resolve(event) },
@@ -561,7 +579,7 @@ const parameterSetMachineDefinition = setup({
             if (context.closing) {
               return { target: '#parameter-set.closed' };
             }
-            if (context.diagnostic?.code === 'WATCH_FAILED') {
+            if (watchFailureCodes.has(context.diagnostic?.code ?? '')) {
               return { target: 'disconnected' };
             }
             if (context.refresh === 'manifest') {
@@ -597,7 +615,7 @@ const parameterSetMachineDefinition = setup({
             'watch.changed': { target: 'refreshing' },
             'watch.error': {
               target: 'disconnected',
-              context: ({ event }) => ({ diagnostic: watchFailed(event.message) }),
+              context: ({ event }) => ({ diagnostic: watchFailed(event) }),
             },
             close: closeTo('#parameter-set.closed'),
           },
@@ -866,4 +884,183 @@ export const submitParameterRequest = async (
  */
 export type ParameterSetActors = {
   [K in keyof ParameterSetActorMap]: ParameterSetActorMap[K];
+};
+
+/**
+ * One watch on a sidecar, as {@link ParameterFiles.watchReady} returns it.
+ *
+ * @public
+ */
+export type ParameterWatch = Readonly<{
+  /** Settles once events flow; rejects when the watch cannot open. */
+  ready: Promise<void>;
+  /**
+   * Settles when the watch ends without `unsubscribe`, which fails the actor `WATCH_CLOSED`. A watch that cannot end
+   * on its own returns one that never settles.
+   */
+  closed: Promise<void>;
+  unsubscribe(): void;
+}>;
+
+/**
+ * Byte and watch access over one root's view. Every path is the target's root-relative sidecar path.
+ *
+ * @public
+ */
+export type ParameterFiles = Readonly<{
+  /** Watch the sidecar. An event of type `reset` means events were lost; any other type is a change. */
+  watchReady(
+    request: Readonly<{ paths: string[] }>,
+    onEvent: (event: Readonly<{ type: string }>) => void,
+  ): ParameterWatch;
+  exists(path: string): Promise<boolean>;
+  readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+  writeFileChecked(write: CheckedFileWrite): Promise<CheckedFileWriteResult>;
+}>;
+
+/**
+ * What {@link createParameterSetActor} needs for one target.
+ *
+ * @public
+ */
+export type ParameterSetActorInput = ParameterSetMachineInput &
+  Readonly<{
+    files: ParameterFiles;
+    /**
+     * The manifest each load reads against. An agent host re-resolves, because the agent edits
+     * sources between reads; a host that already holds the current manifest returns it.
+     */
+    resolve(
+      target: ParameterSetTarget,
+      signal: AbortSignal,
+      resolution?: ParameterResolutionOptions,
+    ): Promise<ParameterManifest>;
+  }>;
+
+/**
+ * A started {@link parameterSetMachine} actor.
+ *
+ * @public
+ */
+export type ParameterSetActor = ActorRefFrom<ParameterSetMachine>;
+
+// A watch whose open threw is one whose `ready` rejects, so both reach the actor the same way.
+const openWatch = (
+  files: ParameterFiles,
+  path: string,
+  onEvent: (event: Readonly<{ type: string }>) => void,
+): ParameterWatch => {
+  try {
+    return files.watchReady({ paths: [path] }, onEvent);
+  } catch (error) {
+    return {
+      ready: Promise.reject(error instanceof Error ? error : new Error(String(error))),
+      /* It never opened, so `ready` reports it; it cannot also close. */
+      closed: new Promise<void>(() => {
+        /* Never settles. */
+      }),
+      unsubscribe: () => undefined,
+    };
+  }
+};
+
+/**
+ * Start the one parameter-set actor for a target over a host's files. The sidecar watch opens
+ * before the first read, and every read waits for it, so no change between arming and reading is
+ * lost. A watch reset fails the actor with `WATCH_RESET` and an unexpected close with
+ * `WATCH_CLOSED`; the next `resolve` re-arms and reloads.
+ *
+ * @param input - The target, the host's files over its root, and the manifest resolver.
+ * @returns The started actor.
+ * @public
+ * @example <caption>A host that re-resolves on every load</caption>
+ * ```typescript
+ * import { createParameterSetActor } from '@taucad/parameters/set-machine';
+ * import type { ParameterFiles } from '@taucad/parameters/set-machine';
+ * import type { ParameterManifest } from '@taucad/parameters';
+ *
+ * declare const files: ParameterFiles;
+ * declare const resolveManifest: (entry: string, signal: AbortSignal) => Promise<ParameterManifest>;
+ *
+ * const actor = createParameterSetActor({
+ *   target: { authority: 'local', root: '/project', entry: 'main.ts' },
+ *   files,
+ *   resolve: async ({ entry }, signal) => resolveManifest(entry, signal),
+ * });
+ * actor.send({ type: 'resolve' });
+ * ```
+ */
+export const createParameterSetActor = (input: ParameterSetActorInput): ParameterSetActor => {
+  const { files, resolve, ...machineInput } = input;
+  const sidecar = parameterEntryPath(input.target.entry);
+  let observer: ((event: ParameterSetMachineEvent) => void) | undefined;
+  const onEvent = (event: Readonly<{ type: string }>): void => {
+    observer?.(
+      event.type === 'reset'
+        ? { type: 'watch.error', code: 'WATCH_RESET', message: 'Parameter watch reset.' }
+        : { type: 'watch.changed' },
+    );
+  };
+  let prearmed: ParameterWatch | undefined = openWatch(files, sidecar, onEvent);
+  let armed = prearmed.ready;
+  const authority: ParameterAuthority = {
+    path: () => sidecar,
+    read: async (_target, signal) => {
+      await armed;
+      signal.throwIfAborted();
+      return (await files.exists(sidecar)) ? files.readFile(sidecar) : null;
+    },
+    writeChecked: async ({ signal, ...write }) => {
+      signal?.throwIfAborted();
+      return files.writeFileChecked(write);
+    },
+  };
+  const actors: Pick<ParameterSetActors, 'loadParameterSet' | 'commitParameterSet' | 'observeParameterSet'> = {
+    loadParameterSet: createAsyncLogic({
+      run: async ({ input: load, signal }) =>
+        loadParameterSnapshot({
+          target: load.target,
+          authority,
+          manifest: resolve,
+          ...(load.resolution === undefined ? {} : { resolution: load.resolution }),
+          signal,
+        }),
+    }),
+    commitParameterSet: createAsyncLogic({
+      run: async ({ input: change, signal }) => commitParameterChange({ change, authority, signal }),
+    }),
+    observeParameterSet: createCallbackLogic(({ sendBack }) => {
+      let active = true;
+      const fail = (event: Omit<WatchError, 'type'>): void => {
+        if (active) {
+          sendBack({ type: 'watch.error', ...event });
+        }
+      };
+      observer = sendBack;
+      const watch = prearmed ?? openWatch(files, sidecar, onEvent);
+      prearmed = undefined;
+      armed = watch.ready;
+      const reportReady = async (): Promise<void> => {
+        try {
+          await watch.ready;
+        } catch (error) {
+          fail({ message: errorMessage(error) });
+        }
+      };
+      // async-iife: report a watch that cannot open to the actor.
+      void reportReady();
+      const reportClosed = async (): Promise<void> => {
+        await watch.closed;
+        fail({ code: 'WATCH_CLOSED', message: 'Parameter watch closed.' });
+      };
+      // async-iife: a live authority treats a watch that ends on its own as a failure.
+      void reportClosed();
+      return () => {
+        active = false;
+        observer = undefined;
+        watch.unsubscribe();
+      };
+    }),
+  };
+  return createActor(parameterSetMachine.provide({ actors }), { input: machineInput }).start();
 };

@@ -16,7 +16,7 @@ import { metaConfig } from '#constants/meta.constants.js';
 import { formatExportDate } from '#utils/date.utils.js';
 import { getRpcOutcome } from '#services/rpc-ledger.js';
 import { attachmentKind, attachmentUrl } from '#utils/attachment.utils.js';
-import type { AttachmentName, AttachmentReference } from '#utils/attachment.utils.js';
+import type { AttachmentName, StoredAttachmentRef } from '#utils/attachment.utils.js';
 import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 
@@ -673,7 +673,7 @@ export function stampMessageCreatedAt(messages: MyUIMessage[]): MyUIMessage[] {
  */
 export function buildUserMessage(input: {
   readonly text: string;
-  readonly attachments?: readonly AttachmentReference[];
+  readonly attachments?: readonly StoredAttachmentRef[];
 }): MyUIMessage {
   const text = input.text.trim();
   return {

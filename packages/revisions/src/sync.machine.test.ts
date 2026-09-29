@@ -73,10 +73,13 @@
  * | 66 | `pushing --syncNow { pushId }, open--> opening → pushing` + one `pushSettled` | **RV-W15**: a request parked behind a push that `open` abandons is not stranded |
  * | 67 | `pushing --syncNow { pushId }, remoteDisconnected--> noRemote` + one `pushSettled { failed }` | **RV-W15**: the disconnect answers a parked request exactly once |
  * | 68 | `pushing --syncNow { pushId }--> onError → recording → queued → opening → pushing` + one `pushSettled` | **RV-W15**: a push that throws hands its parked request to the retry, answered once |
+ * | 69 | `syncNow` in every state, answered once by the push that carries it | **RM-R11**: while pulling, while pushing (the next push), and `failed` with no remote |
+ * | 70 | `pushing --after pushDeadline--> recording → queued` | **A12**: a hung push ends, keeps what it owed and answers every carried requester |
+ * | 71 | a mint on another branch is pushed but is not this branch's head | **RM-S3**: `revisionMinted` names its branch |
  */
 
 import { createActor, createAsyncLogic } from 'xstate';
-import type { Actor } from 'xstate';
+import type { Actor, AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it, vi } from 'vitest';
 
 import * as machineModule from '#sync.machine.js';
@@ -85,20 +88,24 @@ import type {
   SyncActors,
   SyncFetchActorOutput,
   SyncMachineEmitted,
+  SyncMachineEvent,
   SyncMergeActorOutput,
   SyncPushActorOutput,
   SyncReadRemoteActorOutput,
 } from '#sync.machine.js';
 import type { SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
 import { RevisionPortError } from '#revision-port.js';
 import {
   createFakeCallbackActors,
   createFakeParent,
   createFakePromiseActors,
-  createManualClock,
   recordEmitted,
-} from '#test/fake-actors.js';
-import type { FakeCallbackActors, FakeParent, FakePromiseActors, ManualClock } from '#test/fake-actors.js';
+} from '@taucad/xstate-testing/fakes';
+import type { FakeCallbackActors, FakeParent, FakePromiseActors } from '@taucad/xstate-testing/fakes';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import type { ActorGuard } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
@@ -121,13 +128,14 @@ type Harness = Readonly<{
   effects: FakePromiseActors;
   holds: FakeCallbackActors;
   parent: FakeParent;
-  clock: ManualClock;
+  clock: StepClock;
+  guard: ActorGuard;
   emitted: ReadonlyArray<Record<string, unknown>>;
   stop: () => void;
 }>;
 
 /**
- * Start one scheduler over scripted effects and a manual clock.
+ * Start one scheduler over scripted effects and a step clock.
  *
  * @param options - What the record and git's remotes list answer at start.
  * @returns The running actor and everything the suite asserts against.
@@ -143,7 +151,8 @@ const start = (
   const effects = createFakePromiseActors();
   const holds = createFakeCallbackActors();
   const parent = createFakeParent();
-  const clock = createManualClock();
+  const guard = guardActors();
+  const clock = new StepClock();
   effects.script(
     'readPending',
     options.queueError === undefined ? { output: options.pending ?? emptyQueue } : { error: options.queueError },
@@ -162,6 +171,7 @@ const start = (
   };
   const actor = createActor(syncMachine.provide({ actors }), {
     clock,
+    inspect: guard.inspect,
     input: {
       projectId: 'p1',
       parentRef: parent.ref,
@@ -176,6 +186,7 @@ const start = (
     holds,
     parent,
     clock,
+    guard,
     emitted,
     stop: () => {
       actor.stop();
@@ -307,11 +318,29 @@ describe('syncMachine', () => {
     const harness = start();
     await openCleanly(harness);
 
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r1' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r1',
+      branch: 'main',
+    });
     harness.clock.advance(1000);
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r2' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r2',
+      branch: 'main',
+    });
     harness.clock.advance(1000);
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r3' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r3',
+      branch: 'main',
+    });
     expect(harness.effects.running('push')).toBe(0);
 
     harness.clock.advance(2000);
@@ -338,7 +367,13 @@ describe('syncMachine', () => {
       // eslint-disable-next-line no-await-in-loop -- two independent schedulers, asserted in order.
       await openCleanly(harness);
 
-      harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger, revisionId: 'close-1' });
+      harness.actor.send({
+        type: 'revisionMinted',
+        checkoutId: 'live',
+        trigger,
+        revisionId: 'close-1',
+        branch: 'main',
+      });
 
       expect(harness.actor.getSnapshot().matches('pushing')).toBe(true);
       harness.stop();
@@ -708,7 +743,13 @@ describe('syncMachine', () => {
     expect(harness.effects.inputsFor('push')).toHaveLength(1);
 
     /* Rule 19: a save (the file removed) waits for the person's *Sync now*, as every terminal class does. */
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r-without-part' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r-without-part',
+      branch: 'main',
+    });
     expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
     harness.actor.send({ type: 'syncNow' });
     expect(harness.actor.getSnapshot().matches('failed')).toBe(false);
@@ -742,7 +783,13 @@ describe('syncMachine', () => {
     await vi.waitFor(() => {
       expect(harness.effects.running('push')).toBe(1);
     });
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r-close' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'close',
+      revisionId: 'r-close',
+      branch: 'main',
+    });
     harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'h1' }) });
     await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
 
@@ -1073,7 +1120,7 @@ describe('syncMachine', () => {
     expect(harness.emitted.filter((event) => event['type'] === 'pushSettled')).toEqual([
       { type: 'pushSettled', pushId: 'publish-1', outcome: 'backedUp' } satisfies SyncMachineEmitted,
     ]);
-    expect(harness.actor.getSnapshot().context.pushId).toBeUndefined();
+    expect(harness.actor.getSnapshot().context.pushIds).toEqual([]);
 
     harness.stop();
   });
@@ -1213,7 +1260,8 @@ describe('syncMachine', () => {
     const recorded: SyncQueueRecord[] = [];
     const effects = createFakePromiseActors();
     const holds = createFakeCallbackActors();
-    const clock = createManualClock();
+    const guard = guardActors();
+    const clock = new StepClock();
     /* One durable record shared by the two lives of the scheduler: a restart
      * reads what the first life wrote, and nothing else (D29). */
     const store = { current: emptyQueue };
@@ -1247,6 +1295,7 @@ describe('syncMachine', () => {
 
     const first = createActor(syncMachine.provide({ actors: actors() }), {
       clock,
+      inspect: guard.inspect,
       input: { projectId: 'p1', online: true },
     });
     first.start();
@@ -1259,7 +1308,7 @@ describe('syncMachine', () => {
     });
 
     holds.sendBack('connectivity', { type: 'offline' });
-    first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'close-1' });
+    first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'close-1', branch: 'main' });
     await vi.waitFor(() => {
       expect(effects.running('push')).toBe(1);
     });
@@ -1273,6 +1322,7 @@ describe('syncMachine', () => {
 
     const second = createActor(syncMachine.provide({ actors: actors() }), {
       clock,
+      inspect: guard.inspect,
       input: { projectId: 'p1', online: false },
     });
     second.start();
@@ -1288,13 +1338,25 @@ describe('syncMachine', () => {
     const harness = start();
     await openCleanly(harness);
 
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r1' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r1',
+      branch: 'main',
+    });
     harness.clock.advance(2000);
     await vi.waitFor(() => {
       expect(harness.effects.running('push')).toBe(1);
     });
     /* Minted *during* the push: the pack on the wire was built before it. */
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r2' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r2',
+      branch: 'main',
+    });
     harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'r1' }) });
     await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
 
@@ -1459,7 +1521,13 @@ describe('syncMachine', () => {
     const harness = start();
     await openCleanly(harness);
 
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'close',
+      revisionId: 'r1',
+      branch: 'main',
+    });
     await settleWhenRunning(harness.effects, 'push', {
       output: pushResult({ name: mainRef, status: 'rejected', head: undefined, reason: 'leaseLost' }),
     });
@@ -1477,7 +1545,13 @@ describe('syncMachine', () => {
     const harness = start();
     await openCleanly(harness);
 
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'close',
+      revisionId: 'r1',
+      branch: 'main',
+    });
     await settleWhenRunning(harness.effects, 'push', {
       output: pushResult(
         { name: mainRef, status: 'updated', head: 'r1' },
@@ -1498,8 +1572,15 @@ describe('syncMachine', () => {
     const harness = start();
     await openCleanly(harness);
 
-    /* One refused chat ref, so the queue holds that ref. */
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    /* One refused chat ref, so the queue holds that ref and the next offer is
+     * narrowed to it. */
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'close',
+      revisionId: 'r1',
+      branch: 'main',
+    });
     await settleWhenRunning(harness.effects, 'push', {
       output: pushResult(
         { name: mainRef, status: 'updated', head: 'r1' },
@@ -1512,7 +1593,13 @@ describe('syncMachine', () => {
     });
 
     /* A revision minted while the chat ref is still owed. */
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r2' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r2',
+      branch: 'main',
+    });
     harness.clock.advance(5000);
     await settleWhenRunning(harness.effects, 'fetch', {
       output: { leases: { [mainRef]: 'r1' }, integration: 'ahead' } satisfies SyncFetchActorOutput,
@@ -1542,7 +1629,13 @@ describe('syncMachine', () => {
     const harness = start();
     await openCleanly(harness);
 
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'close',
+      revisionId: 'r1',
+      branch: 'main',
+    });
     await settleWhenRunning(harness.effects, 'push', {
       output: pushResult(
         { name: mainRef, status: 'updated', head: 'r1' },
@@ -1556,7 +1649,13 @@ describe('syncMachine', () => {
 
     /* The chat is still refused, but `r2` has never been offered: the push
      * must carry both sets, not only the chat ref it is retrying. */
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r2' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'close',
+      revisionId: 'r2',
+      branch: 'main',
+    });
     await vi.waitFor(() => {
       expect(harness.effects.running('push')).toBe(1);
     });
@@ -1605,7 +1704,13 @@ describe('syncMachine', () => {
     expect(selectSyncFacet(harness.actor.getSnapshot()).online).toBe(true);
     expect(harness.actor.getSnapshot().context.remote).toBe('tau');
 
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r1' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r1',
+      branch: 'main',
+    });
 
     /* Nothing at the debounce's last instant: the window is the whole of the
        wait, and a push before it would defeat the coalescing row 5 pins. */
@@ -1627,7 +1732,13 @@ describe('syncMachine', () => {
 
   it('B2: an offline or unconnected project issues nothing, which is what makes the row about the debounce', async () => {
     const offline = start({ online: false });
-    offline.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r1' });
+    offline.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r1',
+      branch: 'main',
+    });
     offline.clock.advance(2100);
     expect(offline.effects.running('push')).toBe(0);
     offline.stop();
@@ -1636,10 +1747,219 @@ describe('syncMachine', () => {
     await vi.waitFor(() => {
       expect(unconnected.actor.getSnapshot().matches('noRemote')).toBe(true);
     });
-    unconnected.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r1' });
+    unconnected.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r1',
+      branch: 'main',
+    });
     unconnected.clock.advance(2100);
     expect(unconnected.effects.running('push')).toBe(0);
     unconnected.stop();
+  });
+
+  /* L7 F3, RM-R11: sync dropped `syncNow` in four states, and publish waited out its 60 s bound. */
+  it('should answer every syncNow including one that arrives while pulling', async () => {
+    const harness = start();
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+
+    harness.actor.send({ type: 'syncNow', pushId: 'while-pulling' });
+    harness.effects.settle('fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'ahead' } satisfies SyncFetchActorOutput,
+    });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.actor.send({ type: 'syncNow', pushId: 'while-pushing' });
+    harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'h1' }) });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'h1' }) });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(harness.parent.events.filter((event) => event.type === 'pushSettled')).toEqual([
+        { type: 'pushSettled', pushId: 'while-pulling', outcome: 'backedUp' },
+        { type: 'pushSettled', pushId: 'while-pushing', outcome: 'backedUp' },
+      ]);
+    });
+
+    harness.stop();
+  });
+
+  it('answers a syncNow on a project with no remote at once', async () => {
+    const harness = start({ remote: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('noRemote')).toBe(true);
+    });
+
+    harness.actor.send({ type: 'syncNow', pushId: 'publish-1' });
+
+    expect(harness.parent.events).toContainEqual({ type: 'pushSettled', pushId: 'publish-1', outcome: 'failed' });
+    expect(harness.actor.getSnapshot().matches('noRemote')).toBe(true);
+
+    harness.stop();
+  });
+
+  /* A12, RM-R3: `pushing` had no deadline, so publish kept its own 60 s bound on a peer. */
+  it('should fail a push that exceeds its network deadline and answer every carried requester', async () => {
+    const harness = start();
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+    harness.actor.send({ type: 'syncNow', pushId: 'publish-1' });
+    harness.actor.send({ type: 'syncNow', pushId: 'publish-2' });
+    harness.effects.settle('fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'ahead' } satisfies SyncFetchActorOutput,
+    });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+
+    harness.clock.advance(60_000);
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+    expect(harness.parent.events.filter((event) => event.type === 'pushSettled')).toEqual([
+      { type: 'pushSettled', pushId: 'publish-1', outcome: 'queued' },
+      { type: 'pushSettled', pushId: 'publish-2', outcome: 'queued' },
+    ]);
+    expect(harness.actor.getSnapshot().context).toMatchObject({ failure: 'retry', reason: 'offline' });
+    expect(harness.actor.getSnapshot().context.pending.map((entry) => entry.ref)).toEqual([mainRef]);
+
+    harness.stop();
+  });
+
+  it('pushes a mint on another branch without taking it for this branch’s head', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'linked',
+      trigger: 'turn',
+      revisionId: 'r-b',
+      branch: 'agent/b',
+    });
+
+    expect(harness.actor.getSnapshot().context.localHead).toBeUndefined();
+    expect(harness.actor.getSnapshot().matches('pending')).toBe(true);
+
+    harness.stop();
+  });
+
+  it('should answer every public event in every reachable state', () => {
+    const invokeOf = (path: string): string => syncMachine.getStateNodeById(`sync.${path}`).invoke[0]?.id ?? '';
+    const [
+      queueInvoke,
+      remoteInvoke,
+      fetchInvoke,
+      fastForwardInvoke,
+      mergeInvoke,
+      pushInvoke,
+      recordInvoke,
+      offerInvoke,
+    ] = [
+      'reading.queue',
+      'reading.remote',
+      'opening.fetching',
+      'opening.fastForwarding',
+      'opening.merging',
+      'pushing',
+      'recording',
+      'conflicted.offering',
+    ].map((path) => invokeOf(path));
+    const publicEvents: readonly SyncMachineEvent[] = [
+      { type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r1', branch: 'main' },
+      { type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r2', branch: 'main' },
+      { type: 'recordsChanged' },
+      { type: 'syncNow', pushId: 'push-1', remote: 'tau' },
+      { type: 'open' },
+      { type: 'close' },
+      { type: 'remoteConnected', remote: 'tau' },
+      { type: 'remoteDisconnected' },
+      { type: 'online' },
+      { type: 'offline' },
+      { type: 'pushAcknowledged', refs: [{ name: mainRef, status: 'updated', head: 'r1' }] },
+      { type: 'pushFailed', reason: 'the network is unreachable' },
+      { type: 'conflictResolved', ref: syncRef, revisionId: 'r3' },
+      { type: 'leaseRetired', runId: 'run-1' },
+      { type: 'remoteMoved', generation: 1, refs: [mainRef] },
+      { type: 'remoteRefused', code: 'NOT_FOUND', message: 'not a member' },
+      { type: 'branchChanged', branch: 'feature' },
+      /* The root's answers to this machine's own merge cut (`sync-<n>`, D12). */
+      {
+        type: 'revisionMinted',
+        checkoutId: 'live',
+        trigger: 'merge',
+        revisionId: 'r4',
+        branch: 'main',
+        requestId: 'sync-1',
+      },
+      { type: 'nothingToSave', checkoutId: 'live', trigger: 'merge', requestId: 'sync-1' },
+      { type: 'cutFailed', checkoutId: 'live', trigger: 'merge', requestId: 'sync-1', reason: 'disk full' },
+      { type: 'casLost', checkoutId: 'live', trigger: 'merge', requestId: 'sync-1' },
+    ];
+    const options = {
+      input: { projectId: 'p1' },
+      /* Effect outcomes reach the states behind each invoke; they are not public. */
+      events: [
+        ...publicEvents,
+        { type: `xstate.done.actor.${queueInvoke}`, output: emptyQueue },
+        { type: `xstate.done.actor.${remoteInvoke}`, output: { remote: 'tau' } },
+        { type: `xstate.done.actor.${remoteInvoke}`, output: { remote: undefined } },
+        ...(['upToDate', 'ahead', 'fastForward', 'diverged'] as const).map((integration) => ({
+          type: `xstate.done.actor.${fetchInvoke}`,
+          output: { leases: { [mainRef]: 'remote-head' }, integration } satisfies SyncFetchActorOutput,
+        })),
+        { type: `xstate.error.actor.${fetchInvoke}`, error: new Error('offline') },
+        {
+          type: `xstate.done.actor.${fastForwardInvoke}`,
+          output: { checkoutId: 'live', revisionId: 'remote-head', treeId: 'remote-tree' },
+        },
+        ...(['leased', 'dirty'] as const).map((hold) => ({
+          type: `xstate.done.actor.${fastForwardInvoke}`,
+          output: { status: 'held', hold, checkoutId: 'live', revisionId: 'remote-head' },
+        })),
+        { type: `xstate.done.actor.${mergeInvoke}`, output: mergeConflict },
+        { type: `xstate.done.actor.${mergeInvoke}`, output: { status: 'merged' } },
+        {
+          type: `xstate.done.actor.${offerInvoke}`,
+          output: pushResult({ name: syncRef, status: 'updated', head: 'r3' }),
+        },
+        {
+          type: `xstate.done.actor.${offerInvoke}`,
+          output: pushResult({ name: syncRef, status: 'rejected', head: 'r3', reason: 'pre-receive hook declined' }),
+        },
+        { type: `xstate.error.actor.${offerInvoke}`, error: new Error('offline') },
+        {
+          type: `xstate.done.actor.${pushInvoke}`,
+          output: pushResult({ name: mainRef, status: 'updated', head: 'r1' }),
+        },
+        {
+          type: `xstate.done.actor.${pushInvoke}`,
+          output: pushResult({ name: mainRef, status: 'rejected', head: 'r1', reason: 'leaseLost' }),
+        },
+        {
+          type: `xstate.error.actor.${pushInvoke}`,
+          error: Object.assign(new Error('paid plan feature'), { code: 'REMOTE_NOT_ENTITLED' }),
+        },
+        { type: `xstate.done.actor.${recordInvoke}`, output: undefined },
+        { type: `xstate.error.actor.${recordInvoke}`, error: new Error('read-only store') },
+      ],
+      limit: 5000,
+      serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
+    };
+
+    expect(unansweredEvents(syncMachine, options)).toEqual([]);
+    expect(unreachedStates(syncMachine, options)).toEqual([]);
   });
 
   const settledPushes = (harness: Harness): ReadonlyArray<Record<string, unknown>> =>
@@ -1649,7 +1969,13 @@ describe('syncMachine', () => {
     const harness = start();
     await openCleanly(harness);
 
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'close',
+      revisionId: 'r1',
+      branch: 'main',
+    });
     expect(harness.actor.getSnapshot().matches('pushing')).toBe(true);
     harness.actor.send({ type: 'syncNow', pushId: 'publish-1', remote: 'tau' });
     harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'r1' }) });
@@ -1672,13 +1998,25 @@ describe('syncMachine', () => {
     const harness = start();
     await openCleanly(harness);
 
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r1' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r1',
+      branch: 'main',
+    });
     harness.clock.advance(2000);
     await vi.waitFor(() => {
       expect(harness.effects.running('push')).toBe(1);
     });
     /* The requester mints, then asks: the pack on the wire was built before r2. */
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r2' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r2',
+      branch: 'main',
+    });
     harness.actor.send({ type: 'syncNow', pushId: 'save-1' });
     harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'r1' }) });
     await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
@@ -1701,7 +2039,13 @@ describe('syncMachine', () => {
     await vi.waitFor(() => {
       expect(harness.effects.running('writePending')).toBe(1);
     });
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r3' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r3',
+      branch: 'main',
+    });
     harness.actor.send({ type: 'syncNow', pushId: 'save-2' });
     harness.effects.settle('writePending', { output: undefined });
     await settleWhenRunning(harness.effects, 'push', {
@@ -1722,7 +2066,13 @@ describe('syncMachine', () => {
   /** Park a correlated request behind a running, uncorrelated push. */
   const parkBehindPush = async (harness: Harness): Promise<void> => {
     await openCleanly(harness);
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'close',
+      revisionId: 'r1',
+      branch: 'main',
+    });
     await vi.waitFor(() => {
       expect(harness.effects.running('push')).toBe(1);
     });
@@ -1762,7 +2112,7 @@ describe('syncMachine', () => {
       expect(settledPushes(harness)).toEqual([{ type: 'pushSettled', pushId: 'save-1', outcome: 'failed' }]);
     });
     expect(harness.actor.getSnapshot().matches('noRemote')).toBe(true);
-    expect(harness.actor.getSnapshot().context.nextPushId).toBeUndefined();
+    expect(harness.actor.getSnapshot().context.nextPushIds).toEqual([]);
 
     harness.stop();
   });
@@ -1863,7 +2213,13 @@ describe('syncMachine', () => {
       expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
     });
 
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r2' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r2',
+      branch: 'main',
+    });
     harness.clock.advance(600_000);
 
     expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
@@ -1890,7 +2246,13 @@ describe('syncMachine', () => {
     await vi.waitFor(() => {
       expect(harness.effects.running('push')).toBe(1);
     });
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r2' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r2',
+      branch: 'main',
+    });
     harness.effects.settle('push', { error: new Error('Failed to fetch') });
     await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
     await vi.waitFor(() => {
@@ -1898,7 +2260,13 @@ describe('syncMachine', () => {
     });
 
     /* A later save waits too: `queued` is left by its backoff, not by work. */
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r3' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r3',
+      branch: 'main',
+    });
     harness.clock.advance(4999);
     expect(harness.effects.inputsFor('push')).toHaveLength(1);
     expect(harness.effects.running('fetch')).toBe(0);
@@ -2113,6 +2481,7 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
       trigger: 'merge',
       requestId: 'sync-1',
       revisionId: 'minted-1',
+      branch: 'main',
     });
     await vi.waitFor(() => {
       expect(harness.effects.inputsFor('fetch')).toHaveLength(3);
@@ -2230,6 +2599,7 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
         checkoutId: 'live',
         trigger: 'save',
         revisionId: `r${String(tick)}`,
+        branch: 'main',
       });
       harness.clock.advance(500);
       // oxlint-disable-next-line no-await-in-loop -- the machine's own invocations start on the next task.

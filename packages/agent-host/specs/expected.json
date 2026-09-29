@@ -1,0 +1,1310 @@
+{
+  "configs": {
+    "ChatRunSlot.gate-only.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "I8: the append gate alone suffices (HoldUntilRows FALSE)"
+    },
+    "ChatRunSlot.hold-only.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "I8: the held reservation alone suffices (BoundaryExclusive FALSE)"
+    },
+    "ChatRunSlot.liveness-close.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "I35, I15 behind the close barrier, with tools and the stop bound"
+    },
+    "ChatRunSlot.liveness-gateway.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "L4 P-L2 (ResumeAnswered), I35, I15 with the abstract gateway"
+    },
+    "ChatRunSlot.liveness-interrupt.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "I35 (CancelEnds, WaitersSettle), I11, I15 with cancel, native interrupt, resume and steer"
+    },
+    "ChatRunSlot.liveness-placement.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "I35, I11, I15 while commands wait for settlement (CHAT_RUN_LIVE{settling})"
+    },
+    "ChatRunSlot.liveness-recovery.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "I35, I15 with the lazy claim, a stale writer, relinquish and an orphaned external pause"
+    },
+    "ChatRunSlot.liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "I35, I11, I15; L4 P-L1, P-L2; L5 D4; L2a F8: every liveness property under weak fairness of live processes (none on a person, a crash or close), the draft's scope (external, resume, steer)"
+    },
+    "ChatRunSlot.no-AckAfterRow.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AckAfterDurable"
+      },
+      "kind": "witness",
+      "ref": "AckAfterRow (I18)"
+    },
+    "ChatRunSlot.no-AtomicAbandon.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AbandonOnlyOrphans"
+      },
+      "kind": "witness",
+      "ref": "AtomicAbandon (L2a D4)"
+    },
+    "ChatRunSlot.no-HoldUntilRows.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AbandonOnlyOrphans"
+      },
+      "kind": "witness",
+      "ref": "HoldUntilRows (L2a D2): the draft attach abandons an external run released before it registers"
+    },
+    "ChatRunSlot.no-KeyedCommands.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOnceEffect"
+      },
+      "kind": "witness",
+      "ref": "KeyedCommands (D15, I14)"
+    },
+    "ChatRunSlot.no-PayloadFirst.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "PayloadDurable"
+      },
+      "kind": "witness",
+      "ref": "PayloadFirst (L2a D5, I12)"
+    },
+    "ChatRunSlot.no-ReleaseOnFailure.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ReservationHasHolder"
+      },
+      "kind": "witness",
+      "ref": "ReleaseOnFailure (L2a D1)"
+    },
+    "ChatRunSlot.no-StopFence.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoRowAfterEnding"
+      },
+      "kind": "witness",
+      "ref": "StopFence (D13; L2a D16): cancel neither awaits early-started tools nor revokes the tool port, so a tool row lands after `cancelled`"
+    },
+    "ChatRunSlot.no-gate-no-hold.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ChatSingleRun"
+      },
+      "kind": "witness",
+      "ref": "I8: with neither the gate nor the hold two runs open"
+    },
+    "ChatRunSlot.target-2crashes.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7 RA-S1: M1 over the draft's scope (external, resume, steer), two crashes"
+    },
+    "ChatRunSlot.target-close.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7: M1 behind the close barrier (L2a D14)"
+    },
+    "ChatRunSlot.target-extpause.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7: M1 with an external pause orphaned by a restart and resolved at opening (W10)"
+    },
+    "ChatRunSlot.target-fence.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7: M1 with the lazy claim at opening, a frozen leader's stale append, relinquish and W6's reread on LOG_FENCED"
+    },
+    "ChatRunSlot.target-gateway.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7: M1 with an abstract gateway, charge and proceed (EQ1), lostReplyRetries 1"
+    },
+    "ChatRunSlot.target-interrupt.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7: M1 with cancel, native interrupt, resolveInterrupt and resume; I18 covers cancel and resolve-interrupt"
+    },
+    "ChatRunSlot.target-placement.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7: M1 with W8 placement and settlement per attempt, a native pause settling, and I19's host half"
+    },
+    "ChatRunSlot.target-stop.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7: M1 with early-started tools and abandon at the stop bound (D13)"
+    },
+    "ChatRunSlot.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7 RA-S1: M1 (every switch TRUE) over the draft's scope (external, resume, steer), one crash; every safety property"
+    },
+    "ChatRunSlot.today-AbandonIsClaim.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AbandonIsClaim"
+      },
+      "kind": "defect",
+      "ref": "I13; L2a D4; L2b F10: a second host abandons a frozen leader's live run with no conditional claim, then the stale writer appends",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-AbandonOnlyOrphans.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AbandonOnlyOrphans"
+      },
+      "kind": "defect",
+      "ref": "L2a D2, D4: attach checks, then abandons a run that is being admitted",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-AckAfterDurable.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AckAfterDurable"
+      },
+      "kind": "defect",
+      "ref": "L4 D-104: steer is answered before its row (cancel of a paused run also answers with no row, L2a D9)",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-AckBeforeNextAttempt.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AckBeforeNextAttempt"
+      },
+      "kind": "defect",
+      "ref": "D9, TS-R10: a resume opens attempt 2 while attempt 1's lease is held, since settlement is not ordered before it",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-AtMostOnceEffect.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOnceEffect"
+      },
+      "kind": "defect",
+      "ref": "S4 finding 2; L4 D-100: a resume applied, the host crashes before the answer, the re-sent resume applies again",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-CancelEnds.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "CancelEnds"
+      },
+      "kind": "defect",
+      "ref": "L2a D9 (at the base cancel of any paused native run is a no-op); today = W0.5 and W0.6 landed (ReleaseOnFailure and HoldUntilRows TRUE), the other switches FALSE",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-ChargeAfterRecordedLoss.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ChargeAfterRecordedLoss"
+      },
+      "kind": "defect",
+      "ref": "EQ1; W11 current system 8; L4 D-086: Resume re-sends after a charged lost reply without recording the charge",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-ChatSingleRun.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ChatSingleRun"
+      },
+      "kind": "witness",
+      "ref": "L2a D2, D3: the external path releases before it registers and no gate checks the chat; W0.6 landed the hold, W7 adds the gate (RA-R6)"
+    },
+    "ChatRunSlot.today-CutIffExecuted.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CutIffExecuted"
+      },
+      "kind": "defect",
+      "ref": "D10, TS-R11: only a completed attempt is cut; one that executed and failed is not",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-EveryCommandAnswered.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "EveryCommandAnswered"
+      },
+      "kind": "defect",
+      "ref": "I15; L2a D10: the re-armed resume waits on a person; today = W0.5 and W0.6 landed (ReleaseOnFailure and HoldUntilRows TRUE), the other switches FALSE",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-FencedAttempt.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "FencedAttempt"
+      },
+      "kind": "defect",
+      "ref": "L2a D12: after an in-place assumeLeadership an external run's terminal row takes the current epoch",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-NeverResendKnownAttempt.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NeverResendKnownAttempt"
+      },
+      "kind": "defect",
+      "ref": "I16; W11 current system 8: a failure message counts as completion, so Resume prepares a new attempt while the gateway still holds the old one pending",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-NoRowAfterEnding.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoRowAfterEnding"
+      },
+      "kind": "defect",
+      "ref": "D13, RA-R6: no gate after the ending row; the shortest trace is attach abandoning a run whose session then writes its commit row (L2a D4, D5); no-StopFence shows the stop-bound path",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-NoTransientTerminal.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoTransientTerminal"
+      },
+      "kind": "defect",
+      "ref": "L2a D8; S5 D4: interrupt aborts, the session records `cancelled`, then the host writes `paused`",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-NothingAfterClose.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NothingAfterClose"
+      },
+      "kind": "defect",
+      "ref": "L2a D14: close has no barrier; an admission in flight appends after the log closed",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-OrphanApprovalCoded.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OrphanApprovalCoded"
+      },
+      "kind": "defect",
+      "ref": "W10; L2a D9; L4 D-112: an external pause orphaned by a restart stays pending with no driver",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-PayloadDurable.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "PayloadDurable"
+      },
+      "kind": "defect",
+      "ref": "L2a D5: `admitted` carries no payload and the message rides the commit row",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-QuiescentAfterAck.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "QuiescentAfterAck"
+      },
+      "kind": "defect",
+      "ref": "EQ4: the host is quiescent once the run ends, before the lease retires",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-ReservationEnds.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "ReservationEnds"
+      },
+      "kind": "defect",
+      "ref": "I11; L2a D10: resume of a pending pause holds the reservation across the person's decision; today = W0.5 and W0.6 landed (ReleaseOnFailure and HoldUntilRows TRUE), the other switches FALSE",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-ReservationHasHolder.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ReservationHasHolder"
+      },
+      "kind": "witness",
+      "ref": "L2a D1: a failed construction keeps the reservation; W0.5 landed the release"
+    },
+    "ChatRunSlot.today-ResumeAnswered.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "ResumeAnswered"
+      },
+      "kind": "defect",
+      "ref": "L4 P-L2, D-086: an in-doubt Resume throws \"has no durable result\"; today = W0.5 and W0.6 landed (ReleaseOnFailure and HoldUntilRows TRUE), the other switches FALSE",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-WaitersSettle.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "WaitersSettle"
+      },
+      "kind": "defect",
+      "ref": "L2a D9, D11: after a restart resolveInterrupt refuses INTERRUPT_NOT_PENDING and records nothing; today = W0.5 and W0.6 landed (ReleaseOnFailure and HoldUntilRows TRUE), the other switches FALSE",
+      "fixedBy": "W7"
+    },
+    "CrossDevice.ledger-OneLiveRunMerged.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "OneLiveRunMerged"
+      },
+      "kind": "limit",
+      "ref": "EQ3 I8: both devices admit while partitioned; limit until a blueprint adopts a repair rule (RV3-F5)"
+    },
+    "CrossDevice.ledger-SettledOnceMerged.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "SettledOnceMerged"
+      },
+      "kind": "limit",
+      "ref": "EQ3 I9: both devices settle one run while partitioned; limit until a blueprint adopts a repair rule (RV3-F5)"
+    },
+    "CrossDevice.liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "EQ3: EventuallyConverged under weak fairness on Sync, W3's merge, at MaxRows 2 and MaxSyncs 4 (27 s)"
+    },
+    "CrossDevice.merge-MergedPrefixStable.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "MergedPrefixStable"
+      },
+      "kind": "limit",
+      "ref": "EQ3; S5 t7_merge_not_prefix_stable: cursors index segments, never a merged view"
+    },
+    "CrossDevice.merge.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "EQ3: ViewsConverge and OwnFileOrder under W3's merge, at MaxRows 3 and MaxSyncs 2 against the blueprint's 6 and 3: this run takes 218 s (590,815 states) of the 5-minute budget"
+    },
+    "CrossDevice.repair.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "EQ3: the candidate read-side rule keeps I8 and I9, agrees across devices and drops no settlement"
+    },
+    "CrossDevice.today-EventuallyConverged.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "EventuallyConverged"
+      },
+      "kind": "witness",
+      "ref": "EQ3; S5 D5: views never converge under today's merge; MergeFixed = FALSE is the knob for today's merge, and W3's TypeScript merge (mergeLogSegments, CL-R14) implements FixedView",
+      "fixedBy": "W3"
+    },
+    "CrossDevice.today-OwnFileOrder.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "OwnFileOrder"
+      },
+      "kind": "witness",
+      "ref": "EQ3; S5 D5 (Lean T7): a device's own terms reorder after a clock step; MergeFixed = FALSE is the knob for today's merge, and W3's TypeScript merge (mergeLogSegments, CL-R14) implements FixedView",
+      "fixedBy": "W3"
+    },
+    "CrossDevice.today-ViewsConverge.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "ViewsConverge"
+      },
+      "kind": "witness",
+      "ref": "EQ3; S5 D5 at protocol level: a segment read twice undoes holdFileOrder; MergeFixed = FALSE is the knob for today's merge, and W3's TypeScript merge (mergeLogSegments, CL-R14) implements FixedView",
+      "fixedBy": "W3"
+    },
+    "LogLeadership.abandon-unconditional-AbandonAfterFence.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AbandonAfterFence"
+      },
+      "kind": "witness",
+      "ref": "W6 RH-S1, RH-A7 (I13): per-run scope with unconditional appends (lazynocas); a thawed holder admits and the stealer abandons in the same epoch (11-state trace)"
+    },
+    "LogLeadership.fence-handle-liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W3 CL-S13: EveryCommandAnswered under the OPFS handle, S4 target constants"
+    },
+    "LogLeadership.fence-handle.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W3 CL-S13: OPFS exclusive sync handle, S4 target constants"
+    },
+    "LogLeadership.fence-lazy-liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W3 CL-S13: EveryCommandAnswered under the lazy fence, S4 target constants"
+    },
+    "LogLeadership.fence-lazy-nocas-OneWriterPerEpoch.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OneWriterPerEpoch"
+      },
+      "kind": "witness",
+      "ref": "W3 CL-S13: the lazy claim without the conditional append; two writers mint one epoch (2 sends)"
+    },
+    "LogLeadership.fence-lazy-refines.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W3 CL-S13, FM-Q12: the lazy fence refines LogFence (FenceRefined) and LogFence!IndInv holds in every reachable state; W6 reviews"
+    },
+    "LogLeadership.fence-lazy.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W3 CL-S13: lazy claim with a conditional append (CL-R11), S4 target constants"
+    },
+    "LogLeadership.fence-mint-EpochsMonotone.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EpochsMonotone"
+      },
+      "kind": "witness",
+      "ref": "W3 CL-S13: an eager claim row without the conditional append; a stale claim appends a lower epoch (2 sends)"
+    },
+    "LogLeadership.scope-life-Served.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "Served"
+      },
+      "kind": "witness",
+      "ref": "W6 RH-S1, RH-A7 (EQ4): the lock held for life with two builds; an idle holder of the other build wedges a writer (O3; 12-state lasso)"
+    },
+    "LogLeadership.scope-notice.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W6 RH-S1 (RV7-F4): rereads on belief, Read split so Notice cancels it, a notice queued while frozen runs first (RH-Q10); safety, NoZombieAbandon and Served"
+    },
+    "LogLeadership.scope-opfs.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W6 RH-S1 (RV7-F3, RH-R12, RH-R17): OPFS handle without a steal, frozen tabs thaw; safety, NoAbandonWithoutCrash and Served"
+    },
+    "LogLeadership.scope-queue.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W6 RH-S1 (RV7-F2, RH-R16, RH-R12): queued reconcile requests kept only while visible, the heard rule with a heartbeat in the grant callback; safety and Served"
+    },
+    "LogLeadership.scope-run.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W6 RH-S1, RH-A7 (EQ4, RH-R8): the lock held per run with two builds, steal only from a silent holder; safety, FenceRefined and Served"
+    },
+    "LogLeadership.scope-timer-NoAbandonWithoutFault.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoAbandonWithoutFault"
+      },
+      "kind": "limit",
+      "ref": "W6 RH-S1 (RV7-F1): a steal guarded by the follower's heartbeat timer abandons a healthy run; bounded by W4 T9's frozen-time rule (9-state trace)"
+    },
+    "LogLeadership.scope-zombie-NoZombieAbandon.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoZombieAbandon"
+      },
+      "kind": "witness",
+      "ref": "W6 RH-S1 (RV7-F4): NoticeFirst = FALSE; a thawed ex-holder reads and abandons the stealer's live run before its notice (13-state trace)"
+    },
+    "LogLeadership.steal-first-append-AtMostOnceEffect.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOnceEffect"
+      },
+      "kind": "witness",
+      "ref": "S4 3.5 (steal, firstAppend fence)"
+    },
+    "LogLeadership.steal-first-append.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "S4 3.5 (steal, firstAppend fence; 11 s)"
+    },
+    "LogLeadership.steal-local-AtMostOnceEffect.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOnceEffect"
+      },
+      "kind": "witness",
+      "ref": "S4 3.5 (steal, local fence)"
+    },
+    "LogLeadership.steal-local-EpochsMonotone.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EpochsMonotone"
+      },
+      "kind": "witness",
+      "ref": "S4 3.5 (steal, local fence)"
+    },
+    "LogLeadership.target-RowEpochIsLockEpoch.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "RowEpochIsLockEpoch"
+      },
+      "kind": "limit",
+      "ref": "S4 3.5 (target); D5: the store fences, not the lock"
+    },
+    "LogLeadership.target-any-heartbeat-EveryCommandAnswered.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryCommandAnswered"
+      },
+      "kind": "witness",
+      "ref": "S4 3.5 (target, any-heartbeat wait)"
+    },
+    "LogLeadership.target-drop-stale.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "S4 3.5 (target, stale frames dropped; 23 s)"
+    },
+    "LogLeadership.target-liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "S4 3.5 (target; 141 s)"
+    },
+    "LogLeadership.target-unkeyed-AtMostOnceEffect.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOnceEffect"
+      },
+      "kind": "witness",
+      "ref": "S4 3.5 (target, unkeyed)"
+    },
+    "LogLeadership.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "S4 3.5 (target; 12-13 s)"
+    },
+    "LogLeadership.today-EveryCommandAnswered.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryCommandAnswered"
+      },
+      "kind": "witness",
+      "ref": "S4 3.5 (today; W0.14 lands first, RV6-F3)"
+    },
+    "LogLeadership.today-unkeyed-AtMostOnceEffect.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOnceEffect"
+      },
+      "kind": "witness",
+      "ref": "S4 3.5 (today, unkeyed)"
+    },
+    "LogLeadership.today.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "S4 3.5 (today)"
+    },
+    "PageBridgeRelease.aligned.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W6 RH-A26 (RV3-F1), aligned by W6.f1 to the implemented protocol: page-minted hostId, synchronous replaced, release and rebridge by incarnation, serial worker calls; NoLiveHostHoldsDeadBridge, ReleaseClosesOnlyItsHost, NoOrphanHost and NoLeak hold (76,412 states)"
+    },
+    "PageBridgeRelease.unchecked-ReleaseClosesOnlyItsHost.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ReleaseClosesOnlyItsHost"
+      },
+      "kind": "witness",
+      "ref": "W6.r1 finding 4 (CheckHost = FALSE): the page forgets h1, a new client's provide of h2 overtakes release{h1}, and the release closes h2 (9-state trace)"
+    },
+    "PageBridgeRelease.no-restore-NoOrphanHost.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoOrphanHost"
+      },
+      "kind": "witness",
+      "ref": "W6.r1 finding 8 (Restore = FALSE): a failed open unregisters the previous host, which stays open with nothing to close it (6-state trace)"
+    },
+    "SeamDelivery.clamp-ProjectionIsPrefix.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ProjectionIsPrefix"
+      },
+      "kind": "witness",
+      "ref": "SC T13 (CheckCursor = FALSE): a reconnect to a zombie with an empty view clamps the cursor to 0 and row 1 is applied again (L2a D24; L2b HD-1); 16-state trace"
+    },
+    "SeamDelivery.no-floor-Resolved.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "Resolved"
+      },
+      "kind": "witness",
+      "ref": "SC T13 (Floor = FALSE): a zombie answers fenced and the client addresses it again, forever (SC-R10); 9-state lasso"
+    },
+    "SeamDelivery.target-live.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "SC T13 (target, 1 key): the invariants, AnsweredOrPeerDead and Resolved (3,042 states, 1 s)"
+    },
+    "SeamDelivery.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "SC T13 (target, 2 keys, 2 generations): AtMostOneEffectPerKey, AnswerAfterDurable, ProjectionIsPrefix (531,158 states, 9 s)"
+    },
+    "SeamDelivery.today-answered.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "SC T13 (today, daemon non-start verbs): AnsweredOrPeerDead holds"
+    },
+    "SeamDelivery.unkeyed-AtMostOneEffectPerKey.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOneEffectPerKey"
+      },
+      "kind": "witness",
+      "ref": "SC T13 (Keyed = FALSE): after a false suspicion a re-send to the same generation appends k1 twice, so keys land before replay (SC-S5 before SC-S6); 6-state trace"
+    },
+    "TurnSettlement.daemon.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W8 TS-S1: the daemon leg (SplitAnchor=FALSE), eight invariants, IndInv and four liveness properties"
+    },
+    "TurnSettlement.drop-on-fence-two-turns.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W8 TS-S1: the drop-on-fence alternative, two turns, eight invariants"
+    },
+    "TurnSettlement.drop-on-fence.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W8 TS-S1: the drop-on-fence alternative (DropOnFence=TRUE), one turn, twelve properties"
+    },
+    "TurnSettlement.lease-first-EveryMintedTurnHasSettlementRow.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryMintedTurnHasSettlementRow"
+      },
+      "kind": "witness",
+      "ref": "S4 3.3 (IntentFirst=FALSE), kept in W8's model"
+    },
+    "TurnSettlement.lease-first-NoLeaseLeak.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoLeaseLeak"
+      },
+      "kind": "witness",
+      "ref": "S4 3.3 (IntentFirst=FALSE): a lease with no intent row is never reconciled (S4 IndInv conjunct 36); AtMostOneRevisionPerTurn no longer fails in W8's model"
+    },
+    "TurnSettlement.liveness-CompletedRunEventuallySettled.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W8 TS-S1 (one turn, MaxEdits = 1 for the pull-request budget), I21"
+    },
+    "TurnSettlement.liveness-EveryMintedTurnHasSettlementRow.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W8 TS-S1 (one turn, MaxEdits = 1 for the pull-request budget), I21"
+    },
+    "TurnSettlement.liveness-ExecutedRunEventuallySettled.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W8 TS-S1 (one turn, MaxEdits = 1 for the pull-request budget), I21"
+    },
+    "TurnSettlement.liveness-LeasesEventuallyRetired.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W8 TS-S1 (one turn, MaxEdits = 1 for the pull-request budget), I22, I30"
+    },
+    "TurnSettlement.liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W8 TS-S1 (one turn, MaxEdits = 2): four liveness properties"
+    },
+    "TurnSettlement.no-cut-AgentBytesAttributedToTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AgentBytesAttributedToTurn"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-S1: the browser's discard (CutEveryTerminal=FALSE)"
+    },
+    "TurnSettlement.no-cut-ExecutedAttemptIsCut.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ExecutedAttemptIsCut"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-S1: the browser's discard (CutEveryTerminal=FALSE)"
+    },
+    "TurnSettlement.no-fence-LeasesEventuallyRetired.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LeasesEventuallyRetired"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-S1: no session fence (FenceOldSession=FALSE)"
+    },
+    "TurnSettlement.no-rebroker-LeasesEventuallyRetired.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LeasesEventuallyRetired"
+      },
+      "kind": "witness",
+      "ref": "RV1-F1: a root that dies alone is never re-brokered (Rebroker=FALSE)"
+    },
+    "TurnSettlement.on-view-CompletedRunEventuallySettled.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CompletedRunEventuallySettled"
+      },
+      "kind": "witness",
+      "ref": "S4 3.3 (ReconcileOnView=TRUE), kept in W8's model"
+    },
+    "TurnSettlement.on-view-EveryMintedTurnHasSettlementRow.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryMintedTurnHasSettlementRow"
+      },
+      "kind": "witness",
+      "ref": "S4 3.3 (ReconcileOnView=TRUE), kept in W8's model"
+    },
+    "TurnSettlement.on-view-LeasesEventuallyRetired.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LeasesEventuallyRetired"
+      },
+      "kind": "witness",
+      "ref": "S4 3.3 (ReconcileOnView=TRUE), kept in W8's model"
+    },
+    "TurnSettlement.premint-first-EveryMintedTurnHasSettlementRow.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryMintedTurnHasSettlementRow"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-S1: the pre-mint before the lease (LeaseBeforeMint=FALSE)"
+    },
+    "TurnSettlement.premint-first-LeaseOutlivesRowlessAttempt.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LeaseOutlivesRowlessAttempt"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-S1: the pre-mint before the lease (LeaseBeforeMint=FALSE)"
+    },
+    "TurnSettlement.retire-at-cut-CompletedRunEventuallySettled.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CompletedRunEventuallySettled"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-S1: retire at the cut (AckBeforeRetire=FALSE; S4's LeaseUntilRow=FALSE re-pointed)"
+    },
+    "TurnSettlement.retire-at-cut-LeaseOutlivesRowlessAttempt.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LeaseOutlivesRowlessAttempt"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-S1: retire at the cut (AckBeforeRetire=FALSE; S4's LeaseUntilRow=FALSE re-pointed)"
+    },
+    "TurnSettlement.s4-order.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W8 TS-S1: S4's order (pre-mint first) with every chat's log reconciled, eleven properties"
+    },
+    "TurnSettlement.safety.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W8 TS-S1 (one turn): eight invariants and IndInv (RV1-F1 root death included)"
+    },
+    "TurnSettlement.two-turns-liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W8 TS-S1 (two turns, MaxCrashes = 1, MaxEdits = 1: at MaxCrashes = 2, MaxEdits = 2 TLC does not finish within the 900 s watchdog)"
+    },
+    "TurnSettlement.two-turns.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W8 TS-S1 (two turns): eight invariants and IndInv"
+    },
+    "TurnSettlementSteal.hostdeath-asis-LiveHolderNotRetired.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LiveHolderNotRetired"
+      },
+      "kind": "witness",
+      "ref": "RV2-F1: without HolderMark (the code before W8.a2 round 2 H1), a lone agent-host worker death lets another root retire a live holder's lease"
+    },
+    "TurnSettlementSteal.hostdeath-asis-NoMintAfterRow.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoMintAfterRow"
+      },
+      "kind": "witness",
+      "ref": "RV2-F1: without HolderMark (the code before W8.a2 round 2 H1), the new leader fails the intent and the holder root mints after the row"
+    },
+    "TurnSettlementSteal.hostdeath-mark-liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "RV2-F1: with HolderMark, lone host death, three liveness properties"
+    },
+    "TurnSettlementSteal.mark-safety.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "RV2-F1: with HolderMark, steal, freeze, tab and host death, seven invariants"
+    },
+    "TurnSettlementSteal.steal-asis-AgentBytesAttributedToTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AgentBytesAttributedToTurn"
+      },
+      "kind": "witness",
+      "ref": "RV2-F1: without HolderMark (the code before W8.a2 round 2 H1), a stealing tab adopts and settles while the thawed holder's driver writes"
+    },
+    "TurnSettlementSteal.steal-mark-liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "RV2-F1: with HolderMark, steal and freeze, three liveness properties"
+    },
+    "TurnSettlementTabs.attach-only-SaveEventuallyUnfenced.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SaveEventuallyUnfenced"
+      },
+      "kind": "witness",
+      "ref": "W8 I25: queue at attach only (QueueOnFence=FALSE)"
+    },
+    "TurnSettlementTabs.cached-fence-AgentBytesAttributedToTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AgentBytesAttributedToTurn"
+      },
+      "kind": "witness",
+      "ref": "W8 I25: the cached fence before W8 TS-S7 (FreshFence=FALSE); the fresh fence is load-bearing"
+    },
+    "TurnSettlementTabs.no-queue-SaveEventuallyUnfenced.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SaveEventuallyUnfenced"
+      },
+      "kind": "witness",
+      "ref": "W8 I25: no queue (QueueOnAttach=FALSE, QueueOnFence=FALSE)"
+    },
+    "TurnSettlementTabs.queue-on-fence.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W8 I25: queue on leaseHeld only (QueueOnAttach=FALSE)"
+    },
+    "TurnSettlementTabs.target-LeaseRetiredWhileATabIsOpen.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LeaseRetiredWhileATabIsOpen"
+      },
+      "kind": "limit",
+      "ref": "W8 I25: a lease no open tab observes waits for the next attach"
+    },
+    "TurnSettlementTabs.target-reopen.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W8 I25: the target under SpecReopen"
+    },
+    "TurnSettlementTabs.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W8 I25: queue at attach and on leaseHeld; fresh fence"
+    },
+    "ChatRunSlotGraph.export.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7 RA-S15 graph export (graphs.ChatRunSlotGraph): M1's native run with cancel and steer"
+    },
+    "LogLeadershipGraph.export.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W6.r1 finding 13 graph export (graphs.LogLeadershipGraph): M2 on two tabs of one build, the lock per run, one run, one queued reconciliation and one freeze, no steal or crash (191 states)"
+    }
+  },
+  "apalache": [
+    {
+      "tier": "nightly",
+      "expect": "NoError",
+      "ref": "S4 3.4, W8 TS-S1 (IndInv holds initially)",
+      "args": ["check", "--cinit=ConstInit", "--init=Init", "--inv=IndInv", "--length=0", "MC_TurnSettlement.tla"]
+    },
+    {
+      "tier": "nightly",
+      "expect": "NoError",
+      "ref": "S4 3.4, W8 TS-S1 (IndInv is inductive: two chats with turns, root death alone)",
+      "args": ["check", "--cinit=ConstInit", "--init=IndInv", "--inv=IndInv", "--length=1", "MC_TurnSettlement.tla"]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "S4 3.4, W8 TS-S1 (IntentFirst=FALSE breaks IndInv)",
+      "args": [
+        "check",
+        "--cinit=ConstInitLeaseFirst",
+        "--init=IndInv",
+        "--inv=IndInv",
+        "--length=1",
+        "MC_TurnSettlement.tla"
+      ]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "S4 3.4, W8 TS-S1 (retire at the cut: AckBeforeRetire=FALSE breaks IndInv)",
+      "args": [
+        "check",
+        "--cinit=ConstInitRetireFirst",
+        "--init=IndInv",
+        "--inv=IndInv",
+        "--length=1",
+        "MC_TurnSettlement.tla"
+      ]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "W8 TS-S1 (LeaseBeforeMint=FALSE breaks IndInv)",
+      "args": [
+        "check",
+        "--cinit=ConstInitPremintFirst",
+        "--init=IndInv",
+        "--inv=IndInv",
+        "--length=1",
+        "MC_TurnSettlement.tla"
+      ]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "W8 TS-S1 (CutEveryTerminal=FALSE breaks IndInv)",
+      "args": [
+        "check",
+        "--cinit=ConstInitNoCut",
+        "--init=IndInv",
+        "--inv=IndInv",
+        "--length=1",
+        "MC_TurnSettlement.tla"
+      ]
+    },
+    {
+      "tier": "nightly",
+      "expect": "NoError",
+      "ref": "W3 CL-S13, FM-Q12: LogFence IndInv holds initially",
+      "args": ["check", "--cinit=ConstInit", "--init=Init", "--inv=IndInv", "--length=0", "MC_LogFence.tla"]
+    },
+    {
+      "tier": "nightly",
+      "expect": "NoError",
+      "ref": "W3 CL-S13, FM-Q12: LogFence IndInv is inductive (three writers, logs of up to six rows, unbounded epochs and view lengths)",
+      "args": ["check", "--cinit=ConstInit", "--init=IndInit", "--inv=IndInv", "--length=1", "MC_LogFence.tla"]
+    },
+    {
+      "tier": "nightly",
+      "expect": "NoError",
+      "ref": "W3 CL-S13, FM-Q12: IndInv implies EpochsMonotone and OneWriterPerEpoch (I1, I2)",
+      "args": ["check", "--cinit=ConstInit", "--init=IndInit", "--inv=Safety", "--length=0", "MC_LogFence.tla"]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "W3 CL-S13: without the conditional append IndInv is not inductive (a stale writer appends a lower epoch)",
+      "args": ["check", "--cinit=ConstInitNoCheck", "--init=IndInit", "--inv=IndInv", "--length=1", "MC_LogFence.tla"]
+    }
+  ],
+  "logs": {
+    "ChatLog": {
+      "ChatLog/recorded/in-project-ping-pong-turn.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "apps/ui fixture (S6)"
+      },
+      "ChatLog/recorded/daemon-reattach-hexnut.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "apps/ui fixture (S6)"
+      },
+      "ChatLog/recorded/daemon-reattach-hexnut-4runs.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "apps/ui fixture (S6)"
+      },
+      "ChatLog/seeded/sequence-gap.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 3,
+            "rules": ["SequenceContiguous"]
+          }
+        },
+        "kind": "witness",
+        "ref": "SequenceContiguous: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/epoch-not-from-zero.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 3,
+            "rules": ["EpochStartsAtZero"]
+          }
+        },
+        "kind": "witness",
+        "ref": "EpochStartsAtZero: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/epoch-reopened.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 4,
+            "rules": ["EpochNotReopened"]
+          }
+        },
+        "kind": "witness",
+        "ref": "EpochNotReopened: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/admitted-twice.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 4,
+            "rules": ["AdmittedOnce"]
+          }
+        },
+        "kind": "witness",
+        "ref": "AdmittedOnce: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/second-run-while-live.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 2,
+            "rules": ["OneRunAtATime"]
+          }
+        },
+        "kind": "witness",
+        "ref": "OneRunAtATime: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/reopen-not-running.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 5,
+            "rules": ["ReopenOnlyByRunning"]
+          }
+        },
+        "kind": "witness",
+        "ref": "ReopenOnlyByRunning: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/settlement-without-run.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 2,
+            "rules": ["SettlementNeedsRun"]
+          }
+        },
+        "kind": "witness",
+        "ref": "SettlementNeedsRun: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/settled-twice.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 5,
+            "rules": ["SettledOnce"]
+          }
+        },
+        "kind": "witness",
+        "ref": "SettledOnce: one seeded log per rule (FM-A6); a legacy settlement without attempt belongs to the current attempt"
+      },
+      "ChatLog/seeded/interrupt-resolved-twice.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 4,
+            "rules": ["InterruptResolvedOnce"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3-F1: a second resolved row for one requested interrupt"
+      },
+      "ChatLog/seeded/row-without-run.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 2,
+            "rules": ["RowsNeedRun"]
+          }
+        },
+        "kind": "witness",
+        "ref": "RowsNeedRun: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/legal-attempts.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "W3 CL-S9: integer epochs, a voided invocation, a resumable failure reopened as attempt 2, a resolved interrupt continuing a paused attempt, a compaction closed by history.compacted, shown replies"
+      },
+      "ChatLog/seeded/opaque-rows.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "W3 CL-S9 OpaqueSkipped (CL-R1): a version-2 admitted row, an unknown type and an unknown lifecycle state are consumed without effect"
+      },
+      "ChatLog/seeded/epochs-decrease.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 3,
+            "rules": ["EpochsIncrease"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 EpochsIncrease (CL-R5, CL-R11): a new term claims epoch 1 after epoch 2"
+      },
+      "ChatLog/seeded/reopen-not-resumable.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 5,
+            "rules": ["ReopenOnlyByRunning"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 ReopenOnlyByRunning (CL-R9, run-lifecycle.legality.json): a settled attempt that failed with a code outside the resume class is not reopenable"
+      },
+      "ChatLog/seeded/cancel-after-settled-pause.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "W8.a2 round 3 (coordinator ruling, V8): a native pause settled with its request pending, then denied: [resolved, cancelled] ends the paused attempt (paused-reopenable admits cancelled)"
+      },
+      "ChatLog/seeded/cancelled-after-settled-failure.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 5,
+            "rules": ["ReopenOnlyByRunning"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W8.a2 round 3: a settled resumable failure stays ended; reopenable admits only running, so cancelled is RUN_ID_TAKEN"
+      },
+      "ChatLog/seeded/reopen-while-another-runs.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 7,
+            "rules": ["OneRunAtATime"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 OneRunAtATime widened (RV1-F4): r1 reopens attempt 2 while r2 is admitted and running"
+      },
+      "ChatLog/seeded/settled-twice-attempt.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 8,
+            "rules": ["SettledOnce"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 SettledOnce per (runId, attempt): attempt 2 settles after attempt 1, then attempt 1 settles again"
+      },
+      "ChatLog/seeded/invocation-settled-orphan.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 2,
+            "rules": ["InvocationSettledOnce"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 InvocationSettledOnce (W11, CL-R17): a settled row with no prepared row"
+      },
+      "ChatLog/seeded/invocation-settled-twice.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 4,
+            "rules": ["InvocationSettledOnce"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 InvocationSettledOnce (W11, CL-R17): a second settled row for one attempt id"
+      },
+      "ChatLog/seeded/command-opens-twice.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 4,
+            "rules": ["CommandOpensOnce"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 CommandOpensOnce (FM-Q11, CL-Q14 draft set): one command id admits two runs (W9 double send)"
+      },
+      "ChatLog/seeded/prepare-after-released.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "W3 CL-S9 PrepareOnlyWhenResolved (RV1-F3): an overflow re-prepare after a zero-charge released settled row"
+      },
+      "ChatLog/seeded/prepare-while-unresolved.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 4,
+            "rules": ["PrepareOnlyWhenResolved"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 PrepareOnlyWhenResolved (RV1-F3): an overflow re-prepare while the run's invocation is unresolved"
+      },
+      "ChatLog/seeded/prepare-new-attempt-while-chat-unresolved.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 8,
+            "rules": ["PrepareOnlyWhenResolved"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 PrepareOnlyWhenResolved (RV1-F3, GI-R10): r2's first generation while r1's invocation is unresolved"
+      },
+      "ChatLog/seeded/prepare-compaction-while-open.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 6,
+            "rules": ["PrepareOnlyWhenResolved"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 PrepareOnlyWhenResolved (gateCode, EQ1, RV1-F3): the compaction prepare is exempt and history.compacted closes it, but the generation it interrupted is still unresolved, so the next generation prepare is refused"
+      }
+    },
+    "SeamDeliveryTrace": {
+      "SeamDelivery/seeded/crash-after-append.ndjson": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "SC T15 C1: the owner dies after the append and before answering; generation 2 claims, the re-send by key answers replayed, one row"
+      },
+      "SeamDelivery/seeded/duplicate-append.ndjson": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 5,
+            "rules": []
+          }
+        },
+        "kind": "witness",
+        "ref": "SC T15 N1 control: a re-send after a false suspicion appends k1 a second time (AtMostOneEffectPerKey)"
+      }
+    }
+  },
+  "graphs": {
+    "ChatRunSlotGraph": {
+      "config": "ChatRunSlotGraph.export.cfg",
+      "phase": "pc"
+    },
+    "LogLeadershipGraph": {
+      "config": "LogLeadershipGraph.export.cfg",
+      "phase": "m2"
+    }
+  }
+}

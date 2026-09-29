@@ -33,18 +33,15 @@ import type { CheckoutRecord } from '#revision-port.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { createProjectRevisionsActor } from '#revision-effects.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
 import type { TurnPlacement } from '#revision-effects.js';
 import { publishMachine, selectPublishFacet } from '#publish.machine.js';
 import { syncMachine } from '#sync.machine.js';
 import { turnMachine } from '#turn.machine.js';
 import type { TurnLeaseActorInput } from '#turn.machine.js';
-import {
-  createFakeCallbackActors,
-  createFakePromiseActors,
-  createManualClock,
-  recordEmitted,
-} from '#test/fake-actors.js';
-import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/fake-actors.js';
+import type { TurnAttemptKey } from '#turn.types.js';
+import { createFakeCallbackActors, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
+import type { FakeCallbackActors, FakePromiseActors } from '@taucad/xstate-testing/fakes';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 /** Let every queued microtask and the actors' promise handlers run. */
@@ -69,7 +66,7 @@ type Tree = Readonly<{
   promises: FakePromiseActors;
   callbacks: FakeCallbackActors;
   emitted: ReturnType<typeof recordEmitted>;
-  clock: ManualClock;
+  clock: StepClock;
 }>;
 
 /**
@@ -85,7 +82,7 @@ type Tree = Readonly<{
 const startTree = (options: Readonly<{ scheduler?: boolean }> = {}): Tree => {
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
-  const clock = createManualClock();
+  const clock = new StepClock();
   const actor = createActor(
     projectRevisionsMachine.provide({
       actors: {
@@ -94,7 +91,6 @@ const startTree = (options: Readonly<{ scheduler?: boolean }> = {}): Tree => {
             listCheckouts: promises.actor('listCheckouts'),
             addCheckout: promises.actor('addCheckout'),
             removeCheckout: promises.actor('removeCheckout'),
-            sweepLeases: promises.actor('sweepLeases'),
             retireLease: promises.actor('retireRegistryLease'),
           },
         }),
@@ -175,11 +171,18 @@ const startTree = (options: Readonly<{ scheduler?: boolean }> = {}): Tree => {
 
 /** Bring the registry to `ready` over one live checkout. */
 const openRegistry = async (tree: Tree, checkouts: readonly CheckoutRecord[] = [live]): Promise<void> => {
-  tree.promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
   await flush();
   tree.promises.settle('listCheckouts', { output: { checkouts, conflicts: [] } });
   await flush();
 };
+
+/** The attempt key today's hosts send: the turn's run, first attempt (RM-S10's interim). */
+const keyOf = (turnId: string, chatId = 'chat-1', runId = 'run-1'): TurnAttemptKey => ({
+  chatId,
+  turnId,
+  runId,
+  attempt: 0,
+});
 
 /** Admit one turn and lease the live checkout for it. */
 const leaseTurn = async (
@@ -187,19 +190,26 @@ const leaseTurn = async (
   turn: Readonly<{ turnId: string; chatId: string; runId: string; leaseIds: readonly string[] }>,
 ): Promise<void> => {
   const { turnId, chatId, runId, leaseIds } = turn;
-  tree.actor.send({ type: 'admitTurn', turnId, chatId, runId });
+  const key = keyOf(turnId, chatId, runId);
+  tree.actor.send({ type: 'admitTurn', key });
   tree.promises.settle('prepare', {
-    output: { checkoutId: 'checkout-live', branch: 'main', baseRevisionId: 'rev-1', dirty: false, staleRunIds: [] },
+    output: { checkoutId: 'checkout-live', branch: 'main', baseRevisionId: 'rev-1', dirty: false },
   });
   await flush();
-  tree.promises.settle('writeLease', { output: { leaseIds } });
+  tree.promises.settle('writeLease', {
+    output: {
+      lease: { ...key, checkoutId: 'checkout-live', startedAt: 1 },
+      leaseIds,
+      held: [],
+    },
+  });
   await flush();
   tree.callbacks.sendBack('lease', { type: 'leaseGranted' });
 };
 
 /** Drive one leased turn from completion to its cut request. */
-const completeTurn = async (tree: Tree, turnId: string): Promise<void> => {
-  tree.actor.send({ type: 'turnCompleted', turnId });
+const completeTurn = async (tree: Tree, turnId: string, key: TurnAttemptKey = keyOf(turnId)): Promise<void> => {
+  tree.actor.send({ type: 'turnCompleted', key });
   tree.promises.settle('capture', { output: { captureId: `capture-${turnId}` } });
   await flush();
   tree.promises.settle('merge', { output: { status: 'recorded' } });
@@ -211,12 +221,18 @@ const mint = async (tree: Tree, revisionId: string): Promise<void> => {
   tree.callbacks.sendBack('fence', { type: 'fenceGranted' });
   tree.promises.settle('cut', { output: { treeId: `tree-${revisionId}`, cutId: `cut-${revisionId}` } });
   await flush();
-  tree.promises.settle('writeRevision', { output: { revisionId } });
+  tree.promises.settle('writeRevision', { output: { status: 'written', revisionId } });
   await flush();
   tree.promises.settle('casHead', { output: { status: 'updated', head: revisionId } });
   await flush();
-  /* The turn retires its own lease before it attests the settlement: the fact
-   * a reader sees is only published once nothing is holding the tree. */
+  /* RM-R10: the settlement is announced first; the host acknowledges it, and
+   * only then does the turn retire its lease. */
+  for (const fact of Object.values(tree.actor.getSnapshot().context.turnFacts)) {
+    if (fact.settled) {
+      tree.actor.send({ type: 'acknowledge', key: fact.key });
+    }
+  }
+  await flush();
   if (tree.promises.running('retireTurnLease') > 0) {
     tree.promises.settle('retireTurnLease', { output: undefined });
     await flush();
@@ -257,10 +273,9 @@ describe('revision machine composition (S48 Node set)', () => {
       /* XState v6 starts invoked children after the root's entry effects, so
        * the registry's `open` reaches it before `remote` and `sync` start; v5
        * started every child first. The three startup reads are independent. */
-      'sweepLeases',
+      'listCheckouts',
       'readRemote',
       'readPending',
-      'listCheckouts',
       'syncReadRemote',
       'syncFetch',
       'prepare',
@@ -277,7 +292,8 @@ describe('revision machine composition (S48 Node set)', () => {
       'syncPush',
       'writePending',
     ]);
-    expect(types(tree.emitted)).toEqual(['revisionMinted', 'turnFinalized']);
+    /* Placement, the mint and its settlement, then the retirement the root acknowledged (RM-S14, RM-R10). */
+    expect(types(tree.emitted)).toEqual(['turnPlaced', 'revisionMinted', 'turnFinalized', 'turnRetired']);
     expect(tree.promises.inputsFor('writeRevision')).toHaveLength(1);
     expect(tree.promises.inputsFor('syncPush')).toEqual([
       { remote: 'tau', branch: 'main', leases: { 'refs/heads/main': 'rev-1' } },
@@ -292,14 +308,18 @@ describe('revision machine composition (S48 Node set)', () => {
     await openRegistry(tree);
     await leaseTurn(tree, { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1', leaseIds: ['run-1'] });
     await leaseTurn(tree, { turnId: 'turn-2', chatId: 'chat-2', runId: 'run-2', leaseIds: ['run-1', 'run-2'] });
-    await completeTurn(tree, 'turn-2');
+    await completeTurn(tree, 'turn-2', keyOf('turn-2', 'chat-2', 'run-2'));
     await mint(tree, 'rev-2');
     await flush();
 
     /* One cut, one revision — and no branch was created to hold the second
      * chat: `addCheckout` was never asked for one (S6, D11). */
     expect(tree.promises.inputsFor('writeRevision')).toEqual([
-      expect.objectContaining({ checkoutId: 'checkout-live', turnId: 'turn-2', leaseIds: ['run-1', 'run-2'] }),
+      expect.objectContaining({
+        checkoutId: 'checkout-live',
+        turn: { key: keyOf('turn-2', 'chat-2', 'run-2'), turnCut: 'result' },
+        leaseIds: ['run-1', 'run-2'],
+      }),
     ]);
     expect(tree.promises.inputsFor('addCheckout')).toEqual([]);
 
@@ -315,11 +335,11 @@ describe('revision machine composition (S48 Node set)', () => {
     tree.callbacks.sendBack('fence', { type: 'fenceGranted' });
     tree.promises.settle('cut', { output: { treeId: 'tree-2', cutId: 'cut-2' } });
     await flush();
-    tree.promises.settle('writeRevision', { output: { revisionId: 'rev-2' } });
+    tree.promises.settle('writeRevision', { output: { status: 'written', revisionId: 'rev-2' } });
     await flush();
     tree.promises.settle('casHead', { output: { status: 'conflicted', head: 'rev-9' } });
     await flush();
-    tree.promises.settle('readHead', { output: { revisionId: 'rev-9', treeId: 'tree-9' } });
+    tree.promises.settle('readHead', { output: { revisionId: 'rev-9', treeId: 'tree-9', branch: 'main' } });
     await flush();
 
     expect(tree.promises.inputsFor('writeRevision')).toHaveLength(1);
@@ -340,7 +360,8 @@ describe('revision machine composition (S48 Node set)', () => {
     await flush();
 
     expect(tree.callbacks.active('lease')).toBe(0);
-    expect(tree.callbacks.releases('lease')).toBe(1);
+    /* One live-tree lease while acquiring and one while held, each released. */
+    expect(tree.callbacks.releases('lease')).toBe(2);
     expect(tree.callbacks.active('fence')).toBe(0);
     /* A close is not a settlement: nothing was minted behind the user's back. */
     expect(tree.promises.inputsFor('writeRevision')).toEqual([]);
@@ -367,7 +388,7 @@ describe('revision machine composition (S48 Node set)', () => {
     };
     await openRegistry(tree, [live, branched]);
 
-    tree.actor.send({ type: 'branch', event: { type: 'merge', branch: 'bracket-fillet' } });
+    tree.actor.send({ type: 'branch', event: { type: 'merge', requestId: 'merge-1', branch: 'bracket-fillet' } });
     await flush();
     tree.promises.settle('checkBranch', { output: { needsConfirmation: false } });
     await flush();
@@ -458,7 +479,7 @@ describe('revision machine composition (S48 Node set)', () => {
     await openRegistry(tree, [live, branched]);
     expect(selectRevisionStatus(tree.actor.getSnapshot()).checkoutRoot).toBe('/projects/project-1');
 
-    tree.actor.send({ type: 'switch', branch: 'bracket-fillet' });
+    tree.actor.send({ type: 'switch', requestId: 'switch-1', branch: 'bracket-fillet' });
     await flush();
 
     const status = selectRevisionStatus(tree.actor.getSnapshot());
@@ -494,7 +515,7 @@ describe('revision machine composition (S48 Node set)', () => {
     await flush();
 
     /* The dialog, through to the push it waits for the settlement of. */
-    publish?.send({ type: 'publish' });
+    publish?.send({ type: 'publish', requestId: 'publish-1' });
     tree.promises.settle('listVersions', {
       output: { tags: [], revisionId: 'rev-2', expected: 'rev-1', remoteTags: {} },
     });
@@ -511,7 +532,7 @@ describe('revision machine composition (S48 Node set)', () => {
     if (!sync) {
       throw new Error('the sync machine is not composed under the root');
     }
-    expect(sync.getSnapshot().context.pushId).toBe('push-1');
+    expect(sync.getSnapshot().context.pushIds).toEqual(['push-1']);
     expect(tree.promises.inputsFor('syncPush')).toEqual([{ remote: 'tau', branch: 'main', leases: {} }]);
     tree.promises.settle('syncPush', { error: new Error('Failed to fetch') });
     await flush();
@@ -642,13 +663,18 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
   const createdAt = Date.UTC(2026, 8, 13, 0, 0, 0);
   const placements: TurnPlacement[] = [];
   const facts: unknown[] = [];
+  /* Each root takes its own clock (MC-R4), stopped at the fixed time. */
+  const stoppedClock = (): StepClock => {
+    const clock = new StepClock();
+    clock.set(createdAt);
+    return clock;
+  };
   const startActor = () =>
     createProjectRevisionsActor({
       port,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => filesystem,
-      clock: () => createdAt,
+      clock: stoppedClock(),
       actorId: 'actor-1',
       actor: () => ({ kind: 'agent', id: 'model-1', runId: 'run-1' }),
       deviceId: () => 'device-1',
@@ -665,7 +691,8 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
   actor.start();
 
   await until(() => actor.getSnapshot().context.registrySettled, `${set}: the registry to settle`);
-  const admit = { type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' } as const;
+  const key = keyOf('turn-1');
+  const admit = { type: 'admitTurn', key } as const;
   facts.push({ sent: admit });
   actor.send(admit);
   await until(() => placements.some((placement) => placement.status === 'leased'), `${set}: the turn to be placed`);
@@ -673,9 +700,14 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
    * before the completion that records it. */
   await filesystem.writeFile('main.ts', 'export const size = 2;\n');
   facts.push({ effect: 'write', path: 'main.ts' });
-  const completed = { type: 'turnCompleted', turnId: 'turn-1' } as const;
+  const completed = { type: 'turnCompleted', key } as const;
   facts.push({ sent: completed });
   actor.send(completed);
+  /* RM-R10: the host acknowledges the announced settlement; only then does the turn retire its lease. */
+  await until(() => emitted.some((event) => event.type === 'turnFinalized'), `${set}: the turn to settle`);
+  const acknowledged = { type: 'acknowledge', key } as const;
+  facts.push({ sent: acknowledged });
+  actor.send(acknowledged);
   /* `leaseRetired`, not `turnFinalized`: a trigger-only cut that lands while the
    * turn still holds the checkout is answered `nothingToSave` by design
    * (`project-revisions.machine.ts:747`, a2 R1), so the close below has to wait
@@ -695,6 +727,7 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
   });
   const close = {
     type: 'cut',
+    requestId: 'close-1',
     trigger: 'close',
     checkoutId: selectRevisionStatus(actor.getSnapshot()).checkoutId,
     leaseIds: [],
@@ -776,6 +809,85 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
     storedJson: storedJsonUnder(root),
   };
 };
+
+describe('composition root options (MC-R4)', () => {
+  it('should forward the injected clock, inspector and rejection hook to the tree', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-root-options-'));
+    temporaryRoots.push(root);
+    const filesystem: RootedFileSystem = new NodeFsProvider(root);
+    const port = createIsomorphicGitRevisionPort({
+      filesystem,
+      checkouts: { projectId: 'project-1', root: () => filesystem },
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const clock = new StepClock();
+    const actorIds: string[] = [];
+    const rejections: string[] = [];
+    const { actor, settled } = createProjectRevisionsActor({
+      port,
+      projectId: 'project-1',
+      filesystem: () => filesystem,
+      clock,
+      inspect: (event) => {
+        if (event.type === '@xstate.actor') {
+          actorIds.push(event.id);
+        }
+      },
+      onRejectedEvent: (rejection) => {
+        rejections.push(`${rejection.event.type}:${rejection.reason}`);
+      },
+    });
+
+    expect(actor.clock).toBe(clock);
+    actor.start();
+    expect(actorIds).toContain(actor.id);
+    expect(actorIds).toContain('checkouts');
+
+    actor.stop();
+    await settled();
+    actor.send({ type: 'turnCompleted', key: keyOf('turn-1') });
+
+    expect(rejections).toEqual(['turnCompleted:stopped']);
+  });
+});
+
+describe('placement over a real port (RM-R12)', () => {
+  /* The host lets the agent write once it hears `leased`, so that fact waits for the dirty base (RM-S14). */
+  it('should report the placement to the host only after the base is minted', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-placement-'));
+    temporaryRoots.push(root);
+    const filesystem: RootedFileSystem = new NodeFsProvider(root);
+    const port = createIsomorphicGitRevisionPort({
+      filesystem,
+      checkouts: { projectId: 'project-1', root: () => filesystem },
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    /* Unsaved edits the person made before sending: the base the turn builds on. */
+    await filesystem.writeFile('main.ts', 'export const size = 1;\n');
+    const order: string[] = [];
+    const { actor, settled } = createProjectRevisionsActor({
+      port,
+      projectId: 'project-1',
+      filesystem: () => filesystem,
+      onPlacement: (placement) => {
+        order.push(placement.status);
+      },
+    });
+    actor.on('revisionMinted', () => {
+      order.push('minted');
+    });
+    actor.start();
+    await until(() => actor.getSnapshot().context.registrySettled, 'the registry to settle');
+
+    actor.send({ type: 'admitTurn', key: keyOf('turn-1') });
+    await until(() => order.includes('leased'), 'the turn to be placed');
+
+    expect(order).toEqual(['placed', 'minted', 'leased']);
+
+    actor.stop();
+    await settled();
+  });
+});
 
 describe.runIf(gitToolchainOnPath)(
   'S48(8) — identical sequences over the browser and native actor sets (AC28, I4)',

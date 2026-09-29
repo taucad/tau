@@ -1,0 +1,94 @@
+[
+  {
+    "id": "M1",
+    "drift": "a second, different settlement for an attempt is kept (T3)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "if p.body = e.arg then L else L.note .conflict e.key",
+    "replace": "if p.body = e.arg then L else L.put e.run (en.addSettlement ⟨en.attemptOf e.attempt, e.key, e.arg⟩)"
+  },
+  {
+    "id": "M2",
+    "drift": "reopens a run whose failure is not resumable (T4: the reopen predicate loses its resumable clause)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "def reopenable (en : Entry) : Bool := attemptEnded en && rests en",
+    "replace": "def reopenable (en : Entry) : Bool := attemptEnded en"
+  },
+  {
+    "id": "M3",
+    "drift": "a new term may start above sequence 0 (T2)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "else if e.seq = 0 ∧ claims S.maxEpoch e.epoch = true then .fresh else .order",
+    "replace": "else if claims S.maxEpoch e.epoch = true then .fresh else .order"
+  },
+  {
+    "id": "M4",
+    "drift": "no per-device clamp (holdFileOrder) in the merge (T7)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "let floor := match acc.1 with | some f => max f p.1.started | none => p.1.started",
+    "replace": "let floor := p.1.started"
+  },
+  {
+    "id": "M5",
+    "drift": "readBatch clamps a cursor past the end instead of refusing it (T5)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "if cursor > view.length then .refused true view.length none",
+    "replace": "if False then .refused true view.length none"
+  },
+  {
+    "id": "M6",
+    "drift": "the tables refuse running on a reopenable run (T8)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .reopenable, .running => .ok\n",
+    "replace": "  | .reopenable, .running => .runIdTaken\n"
+  },
+  {
+    "id": "M7",
+    "drift": "the byte budget can exclude the first row",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "if total + size i > budget ∧ taken ≠ [] then taken",
+    "replace": "if total + size i > budget then taken"
+  },
+  {
+    "id": "M8",
+    "drift": "an identical row is a duplicate only at the term's tail (T1)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "| some f => if f.fp = e.fp then .dup else .mutated",
+    "replace": "| some f => if f.fp = e.fp ∧ S.last = e.seq then .dup else .mutated"
+  },
+  {
+    "id": "M9",
+    "drift": "the guarded append never repairs the torn tail it saw at open (T9)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "decide (F.lines.length = A.lines) && (decide (F.torn = 0) || decide (F.torn = A.torn))",
+    "replace": "decide (F.lines.length = A.lines) && decide (F.torn = 0)"
+  },
+  {
+    "id": "M10",
+    "drift": "the fold refolds a redelivered row (T6: no per-term lastSequence skip)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "if e.seq ≤ ls then none",
+    "replace": "if False then none"
+  },
+  {
+    "id": "M11",
+    "drift": "the merge keeps the smallest copy of any device, not the term device's own (T7)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "(keySort copyKey (if own.isEmpty then copies else own)).headD default",
+    "replace": "(keySort copyKey copies).headD default"
+  },
+  {
+    "id": "M12",
+    "drift": "a later prepare of an attempt is blocked by the run's open invocation, not by any unresolved generation invocation of the run (T8)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "else L.invs.any (fun (_, i) => !i.shown && i.settled.isNone && decide (i.run = e.run) && i.generation)",
+    "replace": "else en.openInv.isSome"
+  },
+  {
+    "id": "undefined-key-skip",
+    "drift": "S5 D1 (RV6-F2): the canonical form keeps undefined-valued keys again (W0.1 reverted; CL-S1 moved it to log/canonical-json.ts)",
+    "file": "src/log/canonical-json.ts",
+    "test": "src/log/chat-ledger.differential.test.ts",
+    "find": "            .map((key) => [key, visit(record[key])]),\n",
+    "replace": "            .map((key) => [key, record[key] === undefined ? 'undefined' : visit(record[key])]),\n"
+  }
+]

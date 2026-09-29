@@ -298,6 +298,7 @@
     "@taucad/agent-host": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/filesystem": "workspace:*",
+    "@taucad/formal": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/geospec-engine-native": "workspace:*",
     "@taucad/nx": "workspace:*",

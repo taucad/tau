@@ -17,8 +17,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { SessionUpdate } from '@agentclientprotocol/sdk';
 import { materializeAttachments, reduceEventLog } from '@taucad/agent-host';
-import type { AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
-import type { ExternalAgentLogEvent } from '@taucad/agent-host/node-launcher';
+import type { AgentLogEvent, ExternalAgentLogEvent, ProviderMessage } from '@taucad/agent-host';
 import { createNodeAttachmentReader } from '@taucad/agent-host/node';
 
 import { createAcpMediaStore } from '#acp/media.js';

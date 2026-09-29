@@ -28,7 +28,7 @@ export const machineManifestFixture = parseMachineManifest({
   },
   bed: { maximumTemperature: { value: 100, unit: 'Cel' }, plates: [{ id: 'smooth', label: 'Smooth plate' }] },
   chamber: { enclosed: false, heated: false, light: false, fans: [] },
-  materialSystem: { units: 0, slotsPerUnit: 0, externalSpool: true, drying: false },
+  materialSystem: { units: 0, slotsPerUnit: 0, externalSpool: true, externalSpoolSlot: 254, drying: false },
   camera: { stills: false },
   storage: { removable: false },
   network: { lanMode: true, cloud: false },

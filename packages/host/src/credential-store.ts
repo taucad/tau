@@ -9,6 +9,8 @@ const credentialSchema = z.object({
   v: z.literal(1),
   deviceId: z.string().min(1),
   credential: z.string().min(32),
+  /* The paired account, when the API named it; a credential written before it did has none. */
+  accountId: z.string().min(1).optional(),
 });
 
 /** Durable device credential stored only by the daemon parent. @public */

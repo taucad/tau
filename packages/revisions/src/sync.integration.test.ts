@@ -158,7 +158,6 @@ const device = async (
   const actors = createRevisionActors({
     port,
     projectId: 'project-1',
-    authorityEpoch: `epoch-${label}`,
     filesystem: () => input.wrapFilesystem?.(filesystem) ?? filesystem,
     deviceId: () => `device-${label}`,
     ...(input.onChatsProjected === undefined ? {} : { onChatsProjected: input.onChatsProjected }),
@@ -277,7 +276,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
 
       const scheduler = one.scheduler();
       scheduler.start();
-      scheduler.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      scheduler.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(scheduler.getSnapshot()).state).toBe('queued');
@@ -331,7 +330,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
 
       const scheduler = one.scheduler();
       scheduler.start();
-      scheduler.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      scheduler.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(scheduler.getSnapshot()).state).toBe('failed');
@@ -376,7 +375,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
 
     const first = one.scheduler();
     first.start();
-    first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: head });
+    first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: head, branch: 'main' });
     await vi.waitFor(
       async () => {
         const queued = await queueOf(one);
@@ -456,7 +455,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       const head = await record({ device: one, files, summary: 'Device A' });
       const first = one.scheduler();
       first.start();
-      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
@@ -540,7 +539,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       });
       const first = one.scheduler();
       first.start();
-      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
@@ -627,7 +626,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       });
       const source = one.scheduler();
       source.start();
-      source.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      source.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(source.getSnapshot()).state).toBe('backedUp');
@@ -828,7 +827,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
 
     const offline = one.scheduler();
     offline.start();
-    offline.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: ahead });
+    offline.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: ahead, branch: 'main' });
     await vi.waitFor(
       async () => {
         const queued = await queueOf(one);
@@ -915,7 +914,13 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       /* A changes one file and backs it up; B, meanwhile, saved another. */
       await one.filesystem.writeFile('a.scad', 'cube(2);\n');
       const aHead = await save(one, 'A edits a', base);
-      schedulers[0].send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: aHead });
+      schedulers[0].send({
+        type: 'revisionMinted',
+        checkoutId: 'live',
+        trigger: 'save',
+        revisionId: aHead,
+        branch: 'main',
+      });
       await vi.waitFor(
         async () => {
           expect(await remote.git(['rev-parse', mainRef])).toBe(aHead);
@@ -1013,7 +1018,13 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
     /* Both change the same line of the same file; A's reaches the remote first. */
     await one.filesystem.writeFile('a.scad', 'cube(2);\n');
     const aHead = await save(one, 'A edits a', base);
-    schedulers[0].send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: aHead });
+    schedulers[0].send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: aHead,
+      branch: 'main',
+    });
     await vi.waitFor(
       async () => {
         expect(await remote.git(['rev-parse', mainRef])).toBe(aHead);
@@ -1308,7 +1319,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       const head = await record({ device: one, files: { 'bracket.scad': 'cube([3, 3, 3]);\n' }, summary: 'A' });
       const first = one.scheduler();
       first.start();
-      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
@@ -1333,7 +1344,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
         summary: 'B',
         parent: head,
       });
-      second.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: next });
+      second.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: next, branch: 'main' });
       await vi.waitFor(
         async () => {
           expect(await remote.git(['rev-parse', mainRef])).toBe(next);
@@ -1548,7 +1559,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
         summary: 'Device B',
         parent: head,
       });
-      second.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: mine });
+      second.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: mine, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(second.getSnapshot())).toMatchObject({ state: 'backedUp', error: undefined });

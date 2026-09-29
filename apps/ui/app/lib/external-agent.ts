@@ -6,7 +6,7 @@
  * parses one schema (VSC1, VI9); this module only owns the copy.
  */
 
-import type { ExternalAgentRefusalCode } from '@taucad/agent-host';
+import type { ExternalAgentRefusalCode } from '@taucad/agent-host/wire';
 
 /** Why a refused agent cannot run, in the words the user reads. @public */
 /* eslint-disable @typescript-eslint/naming-convention -- keys are the wire's own refusal codes */

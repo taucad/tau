@@ -3,17 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
 import type { DraftAttachment } from '#hooks/draft.machine.js';
+import { storedRef } from '#utils/attachment.test-utils.js';
 
 const directory = '/.tau/composers/chats/p1/c1/attachments';
-const stored = (digit: string): DraftAttachment => ({ hash: digit.repeat(64), mediaType: 'image/png', byteLength: 4 });
+const stored = (digit: string): DraftAttachment =>
+  storedRef({ hash: digit.repeat(64), mediaType: 'image/png', byteLength: 4 });
 const images = ['1', '2', '3'].map((digit) => stored(digit));
 const fiveImages = [...images, stored('4'), stored('5')];
-const pdf: DraftAttachment = {
+const pdf: DraftAttachment = storedRef({
   hash: 'f'.repeat(64),
   mediaType: 'application/pdf',
   byteLength: 3 * 1024 * 1024,
   filename: 'bracket-spec.pdf',
-};
+});
 
 // Every stored file reads back as bytes of its declared size, named by its path.
 const readFile = vi.fn(async (path: string) => new Uint8Array(path.endsWith('.pdf') ? 3 * 1024 * 1024 : 4));

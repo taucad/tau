@@ -18,11 +18,12 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import type { SessionUpdate } from '@agentclientprotocol/sdk';
-import type { ExternalAgentLogEvent } from '@taucad/agent-host/node-launcher';
+import type { ExternalAgentLogEvent } from '@taucad/agent-host/launcher';
 import { reduceEventLog } from '@taucad/agent-host';
 import type { AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
 
-import { chooseOption, createTurnProjection, openAcpSession } from '#acp/session.js';
+import { openAcpSession } from '#acp/acp-session.js';
+import { chooseOption, createTurnProjection } from '#acp/session.js';
 import type { AcpPromptTurn } from '#acp/session.js';
 import type { AcpAdapter } from '#acp/registry.js';
 

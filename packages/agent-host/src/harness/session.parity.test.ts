@@ -6,14 +6,17 @@ import { reduceEventLog } from '#log/reducer.js';
 import type {
   AgentLiveEvent,
   HostToolInvocation,
+  InvocationFunding,
   ModelStreamEvent,
   ModelStreamRequest,
   ModelTransport,
   ToolRegistry,
 } from '#waist/ports.js';
-import { createMemoryEventLog, createMemoryEventLogFile, stubModel } from '#harness/harness.fixture.js';
+import { createMemoryEventLog, createMemoryEventLogFile, fundedFacet, stubModel } from '#harness/harness.fixture.js';
+import type { InvocationResolution } from '#wire/gateway.js';
 import { MessageIdentities, piMessageToProvider, providerMessageToPi } from '#harness/session-record.js';
 import { createAgentSession, createTransportStreamFunction } from '#harness/session.js';
+import type { AgentRunOutcome } from '#harness/session.js';
 import {
   createCachedSystemPromptBlocks,
   createGatewayModelTransport,
@@ -91,18 +94,14 @@ const seedHistory = (): AgentLogEvent[] => {
 };
 
 class DeterministicToolCallingTransport implements ModelTransport {
+  public readonly funding = fundedFacet();
   public readonly requests: ModelStreamRequest[] = [];
   private primaryCalls = 0;
-
-  public readonly usesBillingAttempt = (): boolean => true;
-
-  public readonly lookupAttempt = async (): Promise<undefined> => undefined;
 
   public async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
     this.requests.push(request);
     await request.onInvocationBound?.({
       operationId: `operation-${request.attemptId}`,
-      status: 'pending',
     });
     if (request.systemPrompt.startsWith('You are a context summarization assistant')) {
       yield { type: 'text-delta', text: 'Earlier reads all targeted main.ts.' };
@@ -130,7 +129,8 @@ class DeterministicToolCallingTransport implements ModelTransport {
 }
 
 describe('pi full-turn parity fixture', () => {
-  it('never redispatches a bound invocation whose durable assistant result was lost', async () => {
+  // EQ1: a terminal receipt continues the step under a new key (tau-agent-host.test.ts); a pending one never does.
+  it('should end MODEL_ATTEMPT_PENDING and never redispatch a bound attempt the gateway has not finished', async () => {
     const log = await createMemoryEventLog([
       {
         version: 1,
@@ -158,13 +158,8 @@ describe('pi full-turn parity fixture', () => {
     const stream = vi.fn(async function* () {
       yield { type: 'completed', stopReason: 'stop' } as const;
     });
-    const lookupAttempt = vi.fn(
-      async (): Promise<{ operationId: string; status: 'terminal' }> => ({
-        operationId: 'operation-lost-result',
-        status: 'terminal',
-      }),
-    );
-    const resume = async (resumedLog: typeof log, suffix: string): Promise<void> => {
+    const resolveInvocation = vi.fn(async (): Promise<InvocationResolution> => ({ status: 'pending' }));
+    const resume = async (resumedLog: typeof log, suffix: string): Promise<AgentRunOutcome> => {
       const session = await createAgentSession({
         chatId: 'chat-lost-result',
         runId: 'run-lost-result',
@@ -175,33 +170,32 @@ describe('pi full-turn parity fixture', () => {
           contextWindow: 8192,
           providerKind: 'openai',
         },
-        modelTransport: {
-          usesBillingAttempt: () => true,
-          lookupAttempt,
-          stream,
-        },
+        modelTransport: { funding: fundedFacet(resolveInvocation), stream },
         toolRegistry: { list: () => [], invoke: vi.fn() },
         eventLog: resumedLog,
       });
 
-      await session.prompt({
+      return session.prompt({
         id: `user-lost-result-${suffix}`,
         role: 'user',
         content: 'continue',
       });
     };
-    await resume(log, 'first');
+    await expect(resume(log, 'first')).resolves.toMatchObject({
+      outcome: 'failed',
+      failure: { code: 'MODEL_ATTEMPT_PENDING', details: { attemptId: 'attempt-lost-result' } },
+    });
     const firstEvents = await log.read();
     await resume(await createMemoryEventLog(firstEvents.slice(0, 2)), 'second');
 
-    expect(lookupAttempt).toHaveBeenCalledTimes(2);
+    expect(resolveInvocation).toHaveBeenCalledTimes(2);
     expect(stream).not.toHaveBeenCalled();
     const events = await log.read();
     expect(events.filter((event) => event.type === 'model.invocation-prepared')).toHaveLength(1);
   });
 
   it.each(['generation', 'compaction'] as const)(
-    'mints a fresh attempt when admission refused the prepared %s attempt (resume after a top-up)',
+    'should record a void and prepare the next key when admission refused the prepared %s attempt',
     async (purpose) => {
       const log = await createMemoryEventLog([
         {
@@ -217,7 +211,7 @@ describe('pi full-turn parity fixture', () => {
         },
       ]);
       const attempts: string[] = [];
-      const lookupAttempt = vi.fn(async (): Promise<undefined> => undefined);
+      const resolveInvocation = vi.fn(async (): Promise<InvocationResolution> => ({ status: 'voided' }));
       const session = await createAgentSession({
         chatId: 'chat-refused',
         runId: 'run-refused',
@@ -225,11 +219,10 @@ describe('pi full-turn parity fixture', () => {
         systemPrompt: 'system',
         model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
         modelTransport: {
-          usesBillingAttempt: () => true,
-          lookupAttempt,
+          funding: fundedFacet(resolveInvocation),
           async *stream(request) {
             attempts.push(request.attemptId);
-            await request.onInvocationBound?.({ operationId: 'operation-funded', status: 'pending' });
+            await request.onInvocationBound?.({ operationId: 'operation-funded' });
             yield { type: 'text-delta', text: 'resumed' };
             yield { type: 'completed', stopReason: 'stop' };
           },
@@ -240,11 +233,15 @@ describe('pi full-turn parity fixture', () => {
 
       await session.prompt({ id: 'user-refused', role: 'user', content: 'continue' });
 
-      expect(lookupAttempt).toHaveBeenCalledWith('attempt-refused', expect.any(AbortSignal));
-      expect(attempts).toHaveLength(1);
-      expect(attempts[0]).not.toBe('attempt-refused');
+      expect(resolveInvocation).toHaveBeenCalledWith('attempt-refused');
+      /* The next key is deterministic: `${runId}:${attempt}:${position}` (RA-R11). */
+      expect(attempts).toEqual(['run-refused:1:0']);
       const events = await log.read();
       expect(events.filter((event) => event.type === 'model.invocation-prepared')).toHaveLength(2);
+      /* The void is recorded before the next prepared row (ChargeAfterRecordedLoss). */
+      const settled = events.findIndex((event) => event.type === 'model.invocation-settled');
+      expect(events[settled]).toMatchObject({ attemptId: 'attempt-refused', outcome: 'voided' });
+      expect(settled).toBeLessThan(events.findLastIndex((event) => event.type === 'model.invocation-prepared'));
       expect(events.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(1);
     },
   );
@@ -270,8 +267,7 @@ describe('pi full-turn parity fixture', () => {
       systemPrompt: 'system',
       model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
       modelTransport: {
-        usesBillingAttempt: () => true,
-        lookupAttempt: async () => undefined,
+        funding: fundedFacet(),
         stream,
       },
       toolRegistry: { list: () => [], invoke: vi.fn() },
@@ -294,14 +290,12 @@ describe('pi full-turn parity fixture', () => {
     const attempts: string[] = [];
     let calls = 0;
     const funded: ModelTransport = {
-      usesBillingAttempt: () => true,
-      lookupAttempt: async () => undefined,
+      funding: fundedFacet(),
       async *stream(request) {
         attempts.push(request.attemptId);
         calls++;
         await request.onInvocationBound?.({
           operationId: `operation-${calls}`,
-          status: 'pending',
         });
         if (calls === 1) {
           yield {
@@ -354,7 +348,7 @@ describe('pi full-turn parity fixture', () => {
       systemPrompt: 'system',
       model: { id: 'local-model', contextWindow: 8192, providerKind: 'ollama' },
       modelTransport: {
-        usesBillingAttempt: (providerKind) => providerKind !== 'ollama',
+        funding: fundedFacet(undefined, (providerKind) => providerKind !== 'ollama'),
         async *stream(request) {
           localRequests.push(request);
           yield { type: 'text-delta', text: 'local' };
@@ -390,6 +384,7 @@ describe('pi full-turn parity fixture', () => {
       systemPrompt: 'system',
       model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
       modelTransport: {
+        funding: { type: 'unfunded' },
         async *stream(): AsyncGenerator<ModelStreamEvent> {
           calls++;
           if (calls > 1) {
@@ -472,6 +467,7 @@ describe('pi full-turn parity fixture', () => {
       systemPrompt: 'system',
       model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
       modelTransport: {
+        funding: { type: 'unfunded' },
         async *stream() {
           calls++;
           if (calls === 1) {
@@ -550,6 +546,7 @@ describe('pi full-turn parity fixture', () => {
         systemPrompt: 'system',
         model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
         modelTransport: {
+          funding: { type: 'unfunded' },
           async *stream() {
             calls++;
             if (calls === 1) {
@@ -698,11 +695,8 @@ describe('pi full-turn parity fixture', () => {
         (message) => message.role === 'tool-output' && message.content === '[Old tool result content cleared]',
       ),
     ).toBe(true);
-    expect(events.filter((event) => event.type === 'run.lifecycle').map((event) => event.state)).toEqual([
-      'admitted',
-      'running',
-      'completed',
-    ]);
+    /* The session never writes `run.lifecycle`: M1 maps its outcome to the ending row (RA-S4). */
+    expect(events.filter((event) => event.type === 'run.lifecycle')).toEqual([]);
     expect(snapshot.messages.some((message) => message.role === 'tool-input')).toBe(true);
     expect(snapshot.messages.some((message) => message.role === 'tool-output')).toBe(true);
     expect(JSON.stringify(replay)).toBe(JSON.stringify(snapshot.messages));
@@ -719,6 +713,7 @@ describe('pi full-turn parity fixture', () => {
     const file = createMemoryEventLogFile();
     const requests: ModelStreamRequest[] = [];
     const transport = (text: string): ModelTransport => ({
+      funding: { type: 'unfunded' },
       async *stream(request): AsyncGenerator<ModelStreamEvent> {
         requests.push(request);
         yield { type: 'text-delta', text };
@@ -805,13 +800,13 @@ describe('pi full-turn parity fixture', () => {
     await second.close();
     const reopened = await file.open();
     const events = await reopened.read();
-    expect(
-      events.flatMap((event) => (event.runId === 'run-2' && event.type === 'run.lifecycle' ? [event.state] : [])),
-    ).toEqual(['admitted', 'running', 'completed']);
+    expect(events.some((event) => event.runId === 'run-2' && event.type === 'turn.history-projection-committed')).toBe(
+      true,
+    );
     await reopened.close();
   });
 
-  it('should record the typed gateway reason on the failed lifecycle marker', async () => {
+  it('should report the typed gateway reason in its failed outcome', async () => {
     const log = await createMemoryEventLog();
     const failure = new GatewayModelTransportError({
       code: 'PROVIDER_UNAVAILABLE',
@@ -825,6 +820,7 @@ describe('pi full-turn parity fixture', () => {
       systemPrompt: 'You are a CAD agent.',
       model: { id: 'stub', contextWindow: 200_000 },
       modelTransport: {
+        funding: { type: 'unfunded' },
         // oxlint-disable-next-line require-yield -- The transport rejects before emitting a provider event.
         async *stream(): AsyncGenerator<ModelStreamEvent> {
           throw failure;
@@ -839,18 +835,20 @@ describe('pi full-turn parity fixture', () => {
       now: () => new Date('2026-09-01T00:00:00.000Z'),
     });
 
-    await session.prompt({
+    const outcome = await session.prompt({
       id: 'turn-failed',
       role: 'user',
       content: 'build a drone',
     });
     const events = await log.read();
-    const terminal = events.findLast((event) => event.type === 'run.lifecycle' && event.state === 'failed');
 
-    expect(terminal?.type === 'run.lifecycle' && terminal.detail).toEqual({
-      code: 'PROVIDER_UNAVAILABLE',
-      message: 'Tau model gateway returned HTTP 503 Service Unavailable.',
-      status: 503,
+    expect(outcome).toEqual({
+      outcome: 'failed',
+      failure: {
+        code: 'PROVIDER_UNAVAILABLE',
+        message: 'Tau model gateway returned HTTP 503 Service Unavailable.',
+        status: 503,
+      },
     });
     const assistant = events.findLast((event) => event.type === 'message.appended');
     expect(assistant?.type === 'message.appended' && assistant.message.metadata?.stopReason).toBe('error');
@@ -858,7 +856,7 @@ describe('pi full-turn parity fixture', () => {
     await session.close();
   });
 
-  it('should record a cancellation reason-free detail so the UI keeps its own abort copy', async () => {
+  it('should report an abort with no failure detail so the UI keeps its own abort copy', async () => {
     const log = await createMemoryEventLog();
     const session = await createAgentSession({
       chatId: 'chat-cancelled',
@@ -867,6 +865,7 @@ describe('pi full-turn parity fixture', () => {
       systemPrompt: 'You are a CAD agent.',
       model: { id: 'stub', contextWindow: 200_000 },
       modelTransport: {
+        funding: { type: 'unfunded' },
         async *stream(request): AsyncGenerator<ModelStreamEvent> {
           yield { type: 'text-delta', text: 'partial' };
           await new Promise((resolve) => {
@@ -894,15 +893,12 @@ describe('pi full-turn parity fixture', () => {
       setTimeout(resolve, 0);
     });
     session.abort();
-    await pending;
 
-    const events = await log.read();
-    const terminal = events.findLast((event) => event.type === 'run.lifecycle' && event.state === 'cancelled');
-    expect(terminal?.type === 'run.lifecycle' && terminal.detail).toBeUndefined();
+    expect(await pending).toEqual({ outcome: 'aborted' });
     await session.close();
   });
 
-  it('should commit the user and exact client context before marking a run running', async () => {
+  it('should commit the user and exact client context before the first model call', async () => {
     const log = await createMemoryEventLog();
     const requests: ModelStreamRequest[] = [];
     const session = await createAgentSession({
@@ -916,6 +912,7 @@ describe('pi full-turn parity fixture', () => {
       }),
       model: { id: 'stub', contextWindow: 200_000 },
       modelTransport: {
+        funding: { type: 'unfunded' },
         async *stream(request): AsyncGenerator<ModelStreamEvent> {
           requests.push(request);
           yield { type: 'completed', stopReason: 'stop' };
@@ -956,9 +953,8 @@ describe('pi full-turn parity fixture', () => {
 
     const events = await log.read();
     const projectionIndex = events.findIndex((event) => event.type === 'turn.history-projection-committed');
-    const runningIndex = events.findIndex((event) => event.type === 'run.lifecycle' && event.state === 'running');
     expect(projectionIndex).toBeGreaterThanOrEqual(0);
-    expect(projectionIndex).toBeLessThan(runningIndex);
+    expect(events.findIndex((event) => event.type === 'message.appended')).toBeGreaterThan(projectionIndex);
     const projection = events[projectionIndex];
     if (projection?.type !== 'turn.history-projection-committed') {
       throw new Error('The committed turn projection is missing.');
@@ -1045,6 +1041,7 @@ describe('pi full-turn parity fixture', () => {
       clientContext: { memory: { 'AGENTS.md': 'ambient replacement memory' } },
       model: { id: 'stub', contextWindow: 200_000 },
       modelTransport: {
+        funding: { type: 'unfunded' },
         async *stream(request): AsyncGenerator<ModelStreamEvent> {
           requests.push(request);
           yield { type: 'completed', stopReason: 'stop' };
@@ -1069,6 +1066,70 @@ describe('pi full-turn parity fixture', () => {
       },
     ]);
     expect(JSON.stringify(requests[0])).not.toContain('ambient replacement');
+    await session.close();
+  });
+
+  /* RA-S10: whether the projection holds a summary is a fold over the history, not a session latch, so a resumed
+   * session sends the committed post-compaction context. */
+  it('should send the post-compaction context when a resumed history already holds a summary', async () => {
+    const context = (text: string): ProviderMessage => ({
+      id: 'tau:client-memory',
+      role: 'user',
+      content: `<system-reminder>${text}</system-reminder>`,
+      metadata: { tauInternal: { kind: 'client-memory', pruning: 'replace-by-id' } },
+    });
+    const eventBase = {
+      version: 1,
+      leaderEpoch: 'epoch-1',
+      recordedAt: '2026-09-01T00:00:00.000Z',
+      runId: 'run-1',
+    } as const;
+    const seeded = [
+      { ...eventBase, type: 'run.lifecycle', sequence: 0, state: 'admitted' },
+      {
+        ...eventBase,
+        type: 'turn.history-projection-committed',
+        sequence: 1,
+        retainedMessageIds: [],
+        message: { id: 'committed-turn', role: 'user', content: 'continue committed turn' },
+        context: {
+          version: 1,
+          systemPrompt: 'committed system',
+          initialMessages: [context('initial context')],
+          postCompactionMessages: [context('post-compaction context')],
+        },
+      },
+      { ...eventBase, type: 'run.lifecycle', sequence: 2, state: 'running' },
+      {
+        ...eventBase,
+        type: 'history.compacted',
+        sequence: 3,
+        evictedMessageIds: ['committed-turn'],
+        summary: { id: 'summary-1', role: 'user', content: '<summary>\nEarlier work.\n</summary>' },
+      },
+    ] as AgentLogEvent[];
+    const requests: ModelStreamRequest[] = [];
+    const session = await createAgentSession({
+      chatId: 'chat-1',
+      runId: 'run-1',
+      leaderEpoch: 'epoch-1',
+      systemPrompt: 'ambient system',
+      model: { id: 'stub', contextWindow: 200_000 },
+      modelTransport: {
+        funding: { type: 'unfunded' },
+        async *stream(request): AsyncGenerator<ModelStreamEvent> {
+          requests.push(request);
+          yield { type: 'completed', stopReason: 'stop' };
+        },
+      },
+      toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      eventLog: await createMemoryEventLog(seeded),
+    });
+
+    await session.agent.continue();
+
+    expect(JSON.stringify(requests[0]?.messages)).toContain('post-compaction context');
+    expect(JSON.stringify(requests[0]?.messages)).not.toContain('initial context');
     await session.close();
   });
 
@@ -1144,6 +1205,7 @@ describe('pi full-turn parity fixture', () => {
         reasoning: { effort: 'low', summary: 'concise' },
       },
       modelTransport: {
+        funding: { type: 'unfunded' },
         async *stream(request): AsyncGenerator<ModelStreamEvent> {
           requests.push(request);
           if (request.systemPrompt.startsWith('You are a context summarization assistant')) {
@@ -1210,13 +1272,11 @@ describe('pi full-turn parity fixture', () => {
       systemPrompt: 'system',
       model: { id: 'stub', contextWindow: 8192 },
       modelTransport: {
-        usesBillingAttempt: () => true,
-        lookupAttempt: async () => undefined,
+        funding: fundedFacet(),
         async *stream(request): AsyncGenerator<ModelStreamEvent> {
           requests.push(request);
           await request.onInvocationBound?.({
             operationId: `operation-${request.attemptId}`,
-            status: 'pending',
           });
           if (request.systemPrompt.startsWith('You are a context summarization assistant')) {
             yield { type: 'text-delta', text: 'partial summary' };
@@ -1243,8 +1303,7 @@ describe('pi full-turn parity fixture', () => {
     // A truncated summary is not trustworthy, so compaction persists the same
     // deterministic placeholder used for every summarizer failure and lets the
     // provider turn proceed.
-    const terminal = events.findLast((event) => event.type === 'run.lifecycle');
-    expect(terminal?.type === 'run.lifecycle' && terminal.state).toBe('completed');
+    expect(snapshot.state).toBe('completed');
     expect(JSON.stringify(snapshot.messages)).not.toContain('partial summary');
     expect(JSON.stringify(snapshot.messages)).toContain(
       'The project files are the source of truth for the current work.',
@@ -1261,15 +1320,173 @@ describe('pi full-turn parity fixture', () => {
     expect(events.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(2);
     await session.close();
   });
+
+  it('should cancel funded compaction before its first model request', async () => {
+    const initial: AgentLogEvent[] = Array.from({ length: 8 }, (_, sequence) => ({
+      version: 1,
+      leaderEpoch: 'history-epoch',
+      sequence,
+      recordedAt: '2026-09-01T00:00:00.000Z',
+      runId: 'history-run',
+      type: 'message.appended',
+      message: { id: `history-${sequence}`, role: 'user', content: String(sequence).repeat(4000) },
+    }));
+    const stored = await createMemoryEventLog(initial);
+    const preparing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const stream = vi.fn(async function* (request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+      await request.onInvocationBound?.({ operationId: 'should-not-charge' });
+      yield { type: 'text-delta', text: 'Should not summarize.' };
+      yield { type: 'completed', stopReason: 'stop' };
+    });
+    const session = await createAgentSession({
+      chatId: 'chat-cancel-compaction',
+      runId: 'run-cancel-compaction',
+      leaderEpoch: 'cancel-epoch',
+      systemPrompt: 'system',
+      model: { id: 'stub', contextWindow: 8192, providerKind: 'openai' },
+      modelTransport: { funding: fundedFacet(), stream },
+      toolRegistry: { list: () => [], invoke: vi.fn() },
+      eventLog: {
+        ...stored,
+        append: async (event: AgentLogEvent) => {
+          if (event.type === 'model.invocation-prepared' && event.purpose === 'compaction') {
+            preparing.resolve();
+            await release.promise;
+          }
+          return stored.append(event);
+        },
+      },
+    });
+
+    const running = session.prompt({ id: 'cancel-turn', role: 'user', content: 'Stop.' });
+    await preparing.promise;
+    session.abort();
+    release.resolve();
+    await expect(running).resolves.toMatchObject({ outcome: 'aborted' });
+    expect(stream).not.toHaveBeenCalled();
+    const events = await stored.read();
+    expect(events.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(0);
+    expect(events.filter((event) => event.type === 'history.compacted')).toHaveLength(0);
+    await session.close();
+  });
+});
+
+/* W7.r1 finding 11 (RV5-F2): the funding account is read, and checked against every open attempt, before any lookup. */
+describe('model attempts another account funded', () => {
+  const prepared = (sequence: number, attemptId: string, principal: string): AgentLogEvent => ({
+    version: 1,
+    leaderEpoch: 'epoch-1',
+    sequence,
+    recordedAt: '2026-09-01T00:00:00.000Z',
+    runId: 'run-accounts',
+    type: 'model.invocation-prepared',
+    attemptId,
+    purpose: 'generation',
+    modelId: 'stub-model',
+    principal,
+  });
+  const prompt = async (log: Awaited<ReturnType<typeof createMemoryEventLog>>, principal: () => Promise<string>) => {
+    const resolveInvocation = vi.fn(
+      async (): Promise<InvocationResolution> => ({
+        status: 'terminal',
+        operationId: 'operation-own',
+        outcome: 'settled',
+        chargedCreditAtoms: '10',
+      }),
+    );
+    const stream = vi.fn(async function* () {
+      yield { type: 'completed', stopReason: 'stop' } as const;
+    });
+    const funding: InvocationFunding = {
+      type: 'funded',
+      usesBillingAttempt: () => true,
+      principal,
+      resolveInvocation: async () => resolveInvocation(),
+    };
+    const session = await createAgentSession({
+      chatId: 'chat-accounts',
+      runId: 'run-accounts',
+      leaderEpoch: 'epoch-1',
+      systemPrompt: 'system',
+      model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
+      modelTransport: { funding, stream },
+      toolRegistry: { list: () => [], invoke: vi.fn() },
+      eventLog: log,
+    });
+    const outcome = await session.prompt({ id: 'user-accounts', role: 'user', content: 'continue' });
+    return { outcome, resolveInvocation, stream };
+  };
+
+  it('should refuse MODEL_ATTEMPT_OTHER_ACCOUNT before recording an earlier attempt of its own', async () => {
+    const log = await createMemoryEventLog([
+      prepared(0, 'attempt-own', 'account-a'),
+      prepared(1, 'attempt-other', 'account-b'),
+    ]);
+
+    const { outcome, resolveInvocation, stream } = await prompt(log, async () => 'account-a');
+
+    expect(outcome).toMatchObject({
+      outcome: 'failed',
+      failure: { code: 'MODEL_ATTEMPT_OTHER_ACCOUNT', details: { attemptId: 'attempt-other' } },
+    });
+    expect(resolveInvocation).not.toHaveBeenCalled();
+    expect(stream).not.toHaveBeenCalled();
+    const events = await log.read();
+    expect(events.filter((event) => event.type === 'model.invocation-settled')).toEqual([]);
+  });
+
+  it('should refuse UNAUTHENTICATED when the funding account cannot be read', async () => {
+    const log = await createMemoryEventLog([prepared(0, 'attempt-own', 'account-a')]);
+
+    const { outcome, resolveInvocation } = await prompt(log, async () => {
+      throw new Error('The session expired.');
+    });
+
+    expect(outcome).toMatchObject({ outcome: 'failed', failure: { code: 'UNAUTHENTICATED' } });
+    expect(resolveInvocation).not.toHaveBeenCalled();
+  });
 });
 
 describe('transport stream state', () => {
+  it('should stop before requesting a model when cancellation lands during invocation preparation', async () => {
+    const preparing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<string>();
+    const controller = new AbortController();
+    const stream = vi.fn(async function* (): AsyncGenerator<ModelStreamEvent> {
+      yield { type: 'completed', stopReason: 'stop' };
+    });
+    const output = await createTransportStreamFunction({
+      transport: { funding: fundedFacet(), stream },
+      providerKind: 'openai',
+      identities: new MessageIdentities(() => 'cancel-message'),
+      toolInputIds: new Map(),
+      createId: () => 'cancel-id',
+      prepareInvocation: async () => {
+        preparing.resolve();
+        return release.promise;
+      },
+    })(stubModel, { messages: [] }, { signal: controller.signal });
+    const reading = (async (): Promise<void> => {
+      for await (const event of output) {
+        void event;
+      }
+    })();
+
+    await preparing.promise;
+    controller.abort();
+    release.resolve('attempt-cancelled');
+    await reading;
+    expect(stream).not.toHaveBeenCalled();
+  });
+
   const streamFor = async (
     events: readonly ModelStreamEvent[],
     onLiveDelta?: Parameters<typeof createTransportStreamFunction>[0]['onLiveDelta'],
   ) =>
     createTransportStreamFunction({
       transport: {
+        funding: { type: 'unfunded' },
         async *stream(): AsyncGenerator<ModelStreamEvent> {
           yield* events;
         },

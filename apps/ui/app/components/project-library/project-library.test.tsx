@@ -37,6 +37,7 @@ const createUseProjectsResult = () => ({
   error: undefined as Error | undefined,
   retry: vi.fn(),
   deleteProject: vi.fn(async () => true),
+  verifyProjectQuiescent: vi.fn(async () => undefined),
   duplicateProject: vi.fn(),
   restoreProject: vi.fn(),
   permanentlyDeleteProject: vi.fn(),
@@ -137,15 +138,22 @@ vi.mock('#components/project-library/project-action-dropdown.js', () => ({
     actions,
   }: {
     readonly project: ProjectListItem;
-    readonly actions: { readonly handleDelete: (project: ProjectListItem) => void };
+    readonly actions: {
+      readonly handleDelete: (project: ProjectListItem) => void;
+      readonly handlePermanentlyDelete: (project: ProjectListItem) => void;
+    };
   }) => (
     <button
       type='button'
       onClick={() => {
-        actions.handleDelete(project);
+        if (project.deletedAt === undefined) {
+          actions.handleDelete(project);
+        } else {
+          actions.handlePermanentlyDelete(project);
+        }
       }}
     >
-      {`Trash ${project.name}`}
+      {`${project.deletedAt === undefined ? 'Trash' : 'Delete permanently'} ${project.name}`}
     </button>
   ),
 }));
@@ -830,6 +838,25 @@ describe('ProjectLibrary', () => {
       renderAt('/projects?trash=1');
 
       expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: true });
+    });
+
+    it('does not offer permanent deletion while a run cannot be verified quiescent', async () => {
+      mockTrashedProjects = [{ ...mockProjects[0]!, deletedAt: 1 }];
+      const verifyProjectQuiescent = vi.fn(async () => {
+        throw new Error('Restore and open this project to verify its chats before deleting it.');
+      });
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [mockProjects[1]!], verifyProjectQuiescent };
+      renderAt('/projects?trash=1');
+      screen.getByRole('button', { name: `Delete permanently ${mockProjects[0]!.name}` }).click();
+      await waitFor(() => {
+        expect(verifyProjectQuiescent).toHaveBeenCalledWith(mockProjects[0]!.id);
+        expect(mockToastError).toHaveBeenCalledWith(
+          `Could not delete ${mockProjects[0]!.name} permanently`,
+          expect.objectContaining({ description: expect.stringMatching(/Restore and open/u) }),
+        );
+      });
+      expect(screen.queryByRole('heading', { name: 'Delete this project permanently?' })).not.toBeInTheDocument();
+      expect(mockUseProjectsResult.permanentlyDeleteProject).not.toHaveBeenCalled();
     });
 
     it('hides trashed projects at /projects', () => {

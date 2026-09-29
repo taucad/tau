@@ -1335,10 +1335,10 @@ describe('projectTurnFinalized', () => {
       turnId: 'user-turn-4',
       runId: 'run-5',
       chatId: 'chat-1',
-      reason: 'The checkout did not settle the cut in time.',
-      code: 'CUT_TIMED_OUT',
+      reason: 'The checkout could not record its earlier edits before the turn.',
+      code: 'BASE_CUT_FAILED',
     });
-    expect(projectTurnSettlement(failed)).toMatchObject({ type: 'turn.failed', code: 'CUT_TIMED_OUT' });
+    expect(projectTurnSettlement(failed)).toMatchObject({ type: 'turn.failed', code: 'BASE_CUT_FAILED' });
   });
 });
 

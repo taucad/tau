@@ -1,202 +1,477 @@
 /**
- * The first-party client half of the T0 agent channel.
+ * The first-party client half of the agent channel.
  *
  * R3: `@taucad/rpc` is a dependency of *packages*, never of apps. A page that
  * wants to drive a daemon imports this, not a channel factory — so the
  * transport substrate stays swappable underneath every consumer at once.
  *
+ * The client dials, so its outbox survives a redial: every unanswered command is
+ * re-sent with its key, and the owner's applied set answers a re-send of a
+ * command that already landed `replayed` (SC-R6, SC-R7).
+ *
  * Browser-safe by construction: no `node:` import may reach this file.
  */
 
-import { createChannelClient } from '@taucad/rpc';
-import type { Channel } from '@taucad/rpc';
+import { ChannelClosedError, createChannelClient } from '@taucad/rpc';
+import type { Channel, CloseInfo } from '@taucad/rpc';
 
 import { agentChannelPort } from '#channel/endpoint.js';
 import type { AgentChannelEndpoint } from '#channel/endpoint.js';
-import { agentChannelProtocolSchemas } from '#launchers/node/agent-wire.js';
-import type {
-  AgentChannelEvent,
-  AgentChannelLiveEvent,
-  AgentChannelProtocol,
-  AgentChannelRequest,
-  AgentChannelRevisionEvent,
-  AgentChannelResponse,
-} from '#launchers/node/agent-wire.js';
-
-/**
- * Why the channel ended, as a typed reason rather than a silent hang.
- *
- * `remote` covers both a peer that said goodbye and a wire that died under an
- * in-flight command; `timeout` is the close handshake giving up.
- *
- * @public
- */
-export type AgentChannelCloseReason = {
-  readonly origin: 'local' | 'remote' | 'timeout';
-  /**
-   * The channel's own bye reason, verbatim — `@taucad/rpc` reports a dead port
-   * as `port-closed`. Absent when neither side named one.
-   */
-  readonly reason?: string | undefined;
-  /** The same fact, phrased for a human. */
-  readonly message: string;
-};
-
-/** A command that could not be delivered, carrying why. @public */
-export class AgentChannelError extends Error {
-  public readonly code: string;
-
-  public readonly closeReason: AgentChannelCloseReason | undefined;
-
-  public constructor(code: string, message: string, closeReason?: AgentChannelCloseReason) {
-    super(message);
-    this.name = 'AgentChannelError';
-    this.code = code;
-    this.closeReason = closeReason;
-  }
-}
+import type { JsonValue } from '#log/event-types.js';
+import type { AgentLiveEvent } from '#waist/ports.js';
+import type { AgentChannelRevisionEvent, ReadAnswer, ReadInput } from '#wire/frames.schema.js';
+import { agentWireCompatSchemas, helloWire, v1RequestFor } from '#channel/wire-v1.js';
+import type { AgentWireCompatProtocol, V1Response } from '#channel/wire-v1.js';
+import type { CommandAnswer, CommandInput, CommandVerb, HostCommand } from '#wire/commands.schema.js';
+import type { RefusalCode } from '#wire/refusals.js';
 
 /** Options for {@link createAgentChannelClient}. @public */
-export type AgentChannelClientOptions = {
+export type AgentChannelClientOptions = Readonly<{
+  /**
+   * Opens one transport to the owner; called again for every redial. May be asynchronous, as the desktop bridge's
+   * port is. A rejection before any connection opened reaches the caller as it is.
+   */
+  connect: () => AgentChannelEndpoint | Promise<AgentChannelEndpoint>;
+  /** Close with `PEER_UNRESPONSIVE` after this much silence from an owner that sends keepalives (T9 E4). Milliseconds. */
+  livenessTimeout?: number | undefined;
   /** Context label carried on every dispatch; defaults to `tau-agent`. */
-  readonly sessionKey?: string | undefined;
-};
+  sessionKey?: string | undefined;
+}>;
 
-/** One connection to a daemon speaking the T0 vocabulary. @public */
+/** One connection to an agent owner, redialled while commands are unanswered. @public */
 export type AgentChannelClient = {
   /**
-   * Issue one command and await its projection.
-   *
-   * `signal` is the caller's deadline: aborting it cancels the request on the
-   * far side and rejects here, so a host that stops answering surfaces as a
-   * typed failure instead of a pending promise.
+   * Send one keyed command and await its answer. A re-send of the same key joins the entry already outstanding.
+   * `signal` only stops this wait (D17): the outbox keeps the entry and re-sends it after a redial. Rejects with
+   * {@link ChannelClosedError} (effect unknown) once the redial budget is spent.
    */
-  execute(command: AgentChannelRequest, signal?: AbortSignal): Promise<AgentChannelResponse>;
-  /** Durable events for every chat this daemon owns. */
-  events(signal?: AbortSignal): AsyncIterable<AgentChannelEvent>;
-  /** Ephemeral model deltas for every chat this daemon owns. */
-  liveEvents(signal?: AbortSignal): AsyncIterable<AgentChannelLiveEvent>;
+  execute(input: CommandInput): Promise<CommandAnswer>;
+  /** One long-poll read of a chat's durable rows; a batch, or a refusal the reader resets on (SC-R12). */
+  read(input: ReadInput): Promise<ReadAnswer>;
+  /** Ephemeral model deltas for one chat. */
+  liveEvents(input: Readonly<{ chatId: string; signal?: AbortSignal | undefined }>): AsyncIterable<AgentLiveEvent>;
+  /** One request to the owner's revision root. */
+  revision(request: JsonValue, signal?: AbortSignal): Promise<Readonly<{ result: JsonValue; status: JsonValue }>>;
   /** Host-authoritative revision projections and outcomes for this workspace. */
   revisionEvents(signal?: AbortSignal): AsyncIterable<AgentChannelRevisionEvent>;
-  /** Subscribe to the typed close reason. Fires once; returns an unsubscribe. */
-  onClose(handler: (reason: AgentChannelCloseReason) => void): () => void;
-  /** Say goodbye and tear down this connection. Idempotent. */
+  /** Subscribe to every connection's close, with its code. Returns an unsubscribe. */
+  onClose(handler: (info: CloseInfo) => void): () => void;
+  /** Say goodbye and stop redialling; unanswered commands reject with `CHANNEL_CLOSED`. Idempotent. */
   close(reason?: string): void;
 };
 
-const closeMessages = {
-  local: 'This connection to the agent host was closed.',
-  remote: 'The agent host closed this connection.',
-  timeout: 'The agent host stopped answering this connection.',
-} as const;
+/** Redials after a connection is lost before an unanswered command gives up, and the second one's backoff, doubling (T9 E7). Milliseconds. */
+const redialAttempts = 5;
+const redialBackoff = 250;
+
+/** The rpc errors that mean the owner never acted on the command: answered as a refusal, not re-sent (SC T5). */
+const unreadByOwner: ReadonlySet<string> = new Set([
+  'FRAME_UNREADABLE',
+  'WIRE_VALIDATION_FAILED',
+  'WIRE_VERSION_UNSUPPORTED',
+] satisfies RefusalCode[]);
+
+type Pending = {
+  readonly command: HostCommand;
+  readonly settle: PromiseWithResolvers<CommandAnswer>;
+};
+
+const codeOf = (error: unknown): string | undefined => {
+  const code = error instanceof Error && 'code' in error ? error.code : undefined;
+  return typeof code === 'string' ? code : undefined;
+};
+
+const aborted = async (signal: AbortSignal): Promise<never> =>
+  new Promise((_resolve, reject) => {
+    const fail = (): void => {
+      reject(signal.reason instanceof Error ? signal.reason : new DOMException('The wait was aborted.', 'AbortError'));
+    };
+    if (signal.aborted) {
+      fail();
+    } else {
+      signal.addEventListener('abort', fail, { once: true });
+    }
+  });
+
+/** One open connection and the wire its owner's hello named (I32). */
+type Connection = Readonly<{ channel: Channel<AgentWireCompatProtocol>; wire: 1 | 2 }>;
+
+const unexpected = (answer: V1Response): never => {
+  throw Object.assign(new Error(`The v1 agent host answered with ${answer.type}.`), {
+    code: 'COMMAND_UNREADABLE' satisfies RefusalCode,
+  });
+};
+
+/** A stream that ends quietly when its own signal ends it. */
+const guarded = async function* <Event>(
+  signal: AbortSignal | undefined,
+  stream: () => AsyncGenerator<Event>,
+): AsyncGenerator<Event> {
+  try {
+    yield* stream();
+  } catch (error) {
+    if (signal?.aborted) {
+      return;
+    }
+    throw error;
+  }
+};
+
+/** One v1 replay window: `tail` answers at once, and clamps a cursor past the end. */
+const v1Tail = async (
+  channel: Channel<AgentWireCompatProtocol>,
+  input: Readonly<{ chatId: string; cursor: number; limit: number; maxBytes?: number | undefined }>,
+  signal?: AbortSignal,
+) => {
+  const answer = await channel.call('request', { type: 'tail', ...input }, signal);
+  return answer.type === 'tail' ? answer.batch : unexpected(answer);
+};
 
 /**
- * Open one T0 agent channel over any supported endpoint.
+ * A keyed command, sent to a v1 owner in its own vocabulary. The v1 owner has no applied set, so the answer is the
+ * position the log had before the command, which is where its first row lands on a single-writer daemon.
+ */
+const v1Execute = async (channel: Channel<AgentWireCompatProtocol>, command: HostCommand): Promise<CommandAnswer> => {
+  const { chatId } = command.payload;
+  if (command.type === 'attach') {
+    const answer = await channel.call('request', v1RequestFor(command));
+    if (answer.type !== 'attach') {
+      return unexpected(answer);
+    }
+    return {
+      commandId: command.commandId,
+      generation: 0,
+      status: 'applied',
+      effect: 'not-applied',
+      details: {
+        ...(answer.snapshot === undefined ? {} : { snapshot: answer.snapshot }),
+        takeover: answer.takeover,
+        endCursor: answer.batch.endCursor,
+      },
+    };
+  }
+  const before = await v1Tail(channel, { chatId, cursor: Number.MAX_SAFE_INTEGER, limit: 1 });
+  await channel.call('request', v1RequestFor(command));
+  return {
+    commandId: command.commandId,
+    generation: 0,
+    status: 'applied',
+    effect: 'durable',
+    cursor: before.endCursor,
+  };
+};
+
+/**
+ * The long-poll `read`, over a v1 owner: `tail`, and when it holds nothing new, wait for the chat's next row on the v1
+ * `events` stream, then `tail` again. The stream is opened before the `tail`, so a row that lands between them wakes it.
+ */
+const v1Read = async (
+  channel: Channel<AgentWireCompatProtocol>,
+  request: Omit<ReadInput, 'signal'>,
+  signal: AbortSignal | undefined,
+): Promise<ReadAnswer> => {
+  const { chatId, cursor, limit, maxBytes } = request;
+  for (;;) {
+    const watching = new AbortController();
+    const stop = (): void => {
+      watching.abort();
+    };
+    signal?.addEventListener('abort', stop, { once: true });
+    const rows = channel.listen('events', null, watching.signal)[Symbol.asyncIterator]();
+    const nextRow = (async (): Promise<void> => {
+      try {
+        for (;;) {
+          // oxlint-disable-next-line no-await-in-loop -- rows arrive one at a time.
+          const next = await rows.next();
+          if (next.done === true || next.value.chatId === chatId) {
+            return;
+          }
+        }
+      } catch {
+        // The wait ended with its signal or its connection; the loop re-reads or returns.
+      }
+    })();
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a long poll re-reads after each wake.
+      const batch = await v1Tail(channel, { chatId, cursor, limit, maxBytes });
+      if (batch.events.length > 0 || batch.cursor !== cursor || signal?.aborted === true) {
+        return { status: 'batch', chatId, ...batch, events: [...batch.events] };
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one wait per empty read.
+      await nextRow;
+    } finally {
+      stop();
+      signal?.removeEventListener('abort', stop);
+    }
+  }
+};
+
+/**
+ * Open an agent channel that dials through `connect`, redials while commands are unanswered, and re-sends each with
+ * its key.
  *
  * A socket endpoint must be handed over *before* `open`: the server posts its
  * hello the instant the upgrade completes, and a listener attached later never
  * sees it. `agentChannelPort` buffers in both directions from the moment it is
- * called, so passing an unopened socket straight in is the correct usage.
+ * called, so returning an unopened socket from `connect` is the correct usage.
  *
- * @param endpoint - Socket, message port, or already-wrapped port.
- * @param options - Optional context label.
- * @returns A client bound to this one connection.
+ * @param options - How to dial, the liveness bound and the context label.
+ * @returns A client whose outbox outlives each connection.
  * @public
  *
  * @example <caption>Dial a daemon from a page</caption>
  * ```typescript
  * import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
  *
- * const client = createAgentChannelClient(new WebSocket('wss://host.example/agent'));
- * client.onClose((reason) => {
- *   console.warn(reason.origin, reason.message);
+ * const client = createAgentChannelClient({
+ *   connect: () => new WebSocket('wss://host.example/agent'),
+ *   livenessTimeout: 10_000,
  * });
- * const answer = await client.execute({ type: 'resume', chatId: 'chat-1' });
+ * const answer = await client.execute({
+ *   type: 'cancel',
+ *   commandId: 'req_1',
+ *   payload: { chatId: 'chat-1', runId: 'run-1' },
+ * });
  * ```
  */
-export const createAgentChannelClient = (
-  endpoint: AgentChannelEndpoint,
-  options: AgentChannelClientOptions = {},
-): AgentChannelClient => {
-  const port = agentChannelPort(endpoint, 'agent-channel-client');
-  const channel: Channel<AgentChannelProtocol> = createChannelClient<AgentChannelProtocol>({
-    port,
-    sessionKey: options.sessionKey ?? 'tau-agent',
-    protocolSchemas: agentChannelProtocolSchemas,
-  });
+export const createAgentChannelClient = (options: AgentChannelClientOptions): AgentChannelClient => {
+  const outbox = new Map<string, Pending>();
+  const closeHandlers = new Set<(info: CloseInfo) => void>();
+  let channel: Promise<Connection> | undefined;
+  /** Redials since a connection last opened; the budget is T9 E7's. */
+  let redials = 0;
+  let everOpened = false;
+  let redialTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastFailure: unknown;
+  let fatal: Error | undefined;
+  let closedHere = false;
 
-  /* Recorded before any consumer handler runs (this subscription is the first
-   * one registered), so a command rejected by the close teardown can already
-   * name the reason it died of. */
-  let closed: AgentChannelCloseReason | undefined;
-  channel.onClose((info) => {
-    closed = {
-      origin: info.origin,
-      ...(info.reason === undefined ? {} : { reason: info.reason }),
-      message: closeMessages[info.origin],
-    };
-    /* The channel's own close only stops dispatch; the wire underneath is this
-     * client's to release. */
-    try {
-      port.close();
-    } catch {
-      // A port that is already gone is the outcome we wanted.
+  const rejectAll = (error: unknown): void => {
+    for (const [commandId, pending] of outbox) {
+      outbox.delete(commandId);
+      pending.settle.reject(error);
     }
-  });
+  };
 
-  const deliveryFailure = (error: unknown): AgentChannelError => {
-    if (error instanceof AgentChannelError) {
-      return error;
+  /** A dial failed or a connection closed: re-send the outbox on a new one, or give up once the budget is spent. */
+  const redial = (): void => {
+    if (redialTimer !== undefined || closedHere || fatal !== undefined || outbox.size === 0) {
+      return;
     }
-    if (closed) {
-      return new AgentChannelError('CHANNEL_CLOSED', closed.message, closed);
+    if (redials >= redialAttempts) {
+      rejectAll(lastFailure ?? new ChannelClosedError({ origin: 'remote', code: 'PEER_GONE' }));
+      return;
     }
-    const code = error instanceof Error && 'code' in error ? error.code : undefined;
-    return new AgentChannelError(
-      typeof code === 'string' ? code : 'AGENT_COMMAND_FAILED',
-      error instanceof Error ? error.message : String(error),
+    redials += 1;
+    /* The first redial waits for nothing: a relayed wire dies mid-session while the run carries on. Later ones
+     * back off, doubling. */
+    redialTimer = setTimeout(
+      () => {
+        redialTimer = undefined;
+        for (const pending of outbox.values()) {
+          send(pending);
+        }
+      },
+      redials === 1 ? 0 : redialBackoff * 2 ** (redials - 2),
     );
   };
 
-  const listen = async function* listenStream<Name extends 'events' | 'liveEvents' | 'revisionEvents'>(
-    name: Name,
-    signal?: AbortSignal,
-  ): AsyncGenerator<AgentChannelProtocol['listens'][Name]['event']> {
+  const open = async (): Promise<Connection> => {
+    const port = agentChannelPort(await options.connect(), 'agent-channel-client');
+    const opened: Channel<AgentWireCompatProtocol> = createChannelClient<AgentWireCompatProtocol>({
+      port,
+      sessionKey: options.sessionKey ?? 'tau-agent',
+      protocolSchemas: agentWireCompatSchemas,
+      ...(options.livenessTimeout === undefined ? {} : { livenessTimeout: options.livenessTimeout }),
+    });
+    let closedWith: CloseInfo | undefined;
+    opened.onClose((info) => {
+      closedWith = info;
+      channel = undefined;
+      lastFailure = new ChannelClosedError(info);
+      /* The channel's own close only stops dispatch; the wire underneath is this
+       * client's to release. */
+      try {
+        port.close();
+      } catch {
+        // A port that is already gone is the outcome we wanted.
+      }
+      for (const handler of closeHandlers) {
+        handler(info);
+      }
+      redial();
+    });
     try {
-      yield* channel.listen(name, undefined, signal);
-    } catch (error) {
-      if (signal?.aborted) {
+      await opened.ready;
+    } catch {
+      // A connection that closed before its hello is a lost connection, whatever the rpc said about it.
+      throw new ChannelClosedError(closedWith ?? { origin: 'remote', code: 'PEER_GONE' });
+    }
+    redials = 0;
+    everOpened = true;
+    const wire = helloWire(opened.hello.payload);
+    if (wire === 'unsupported') {
+      /* I32: an owner whose hello names another wire speaks another protocol; redialling cannot help. */
+      fatal = Object.assign(new Error('The agent owner speaks another wire version; update Tau on that host.'), {
+        code: 'WIRE_VERSION_UNSUPPORTED' satisfies RefusalCode,
+      });
+      rejectAll(fatal);
+      opened.close('wire version unsupported');
+      throw fatal;
+    }
+    return { channel: opened, wire };
+  };
+
+  /** The live connection, dialled once for every caller at once. */
+  const connection = async (): Promise<Connection> => {
+    if (fatal !== undefined) {
+      throw fatal;
+    }
+    if (closedHere) {
+      throw new ChannelClosedError({ origin: 'local', code: 'CHANNEL_CLOSED' });
+    }
+    channel ??= (async () => {
+      try {
+        return await open();
+      } catch (error) {
+        channel = undefined;
+        throw error;
+      }
+    })();
+    return channel;
+  };
+
+  const send = (pending: Pending): void => {
+    const { type, commandId, payload } = pending.command;
+    const settle = (answer: CommandAnswer): void => {
+      outbox.delete(commandId);
+      pending.settle.resolve(answer);
+    };
+    const fail = (error: unknown): void => {
+      outbox.delete(commandId);
+      pending.settle.reject(error);
+    };
+    const deliver = async (): Promise<void> => {
+      let current: Connection;
+      try {
+        current = await connection();
+      } catch (error) {
+        /* A dial that throws before any connection opened is the caller's (offline, unpaired): verbatim, at once. A
+         * connection that closed before its hello is a lost connection, and spends the redial budget. */
+        if ((!everOpened && !(error instanceof ChannelClosedError)) || fatal !== undefined || closedHere) {
+          fail(error);
+          return;
+        }
+        lastFailure = error;
+        redial();
         return;
       }
-      throw deliveryFailure(error);
-    }
+      try {
+        if (current.wire === 1) {
+          settle(await v1Execute(current.channel, pending.command));
+          return;
+        }
+        const call = current.channel.call as (
+          name: CommandVerb,
+          args: Readonly<{ commandId: string; payload: unknown }>,
+        ) => Promise<CommandAnswer>;
+        settle(await call(type, { commandId, payload }));
+      } catch (error) {
+        /* ponytail: kept; the redial re-sends it with the same key (SC-R6). A v1 owner has no applied set, so a
+         * command lost with its connection is not re-sent: it rejects, effect unknown, and only reads replay. */
+        if (error instanceof ChannelClosedError && current.wire === 2 && fatal === undefined && !closedHere) {
+          return;
+        }
+        const code = codeOf(error);
+        if (
+          code !== undefined &&
+          (current.wire === 1 || unreadByOwner.has(code)) &&
+          !(error instanceof ChannelClosedError)
+        ) {
+          settle({
+            commandId,
+            generation: 0,
+            status: 'refused',
+            effect: 'not-applied',
+            code,
+            message: error instanceof Error ? error.message : String(error),
+          });
+          return;
+        }
+        fail(error);
+      }
+    };
+    void deliver();
   };
 
   return {
-    execute: async (command, signal) => {
-      if (closed) {
-        throw new AgentChannelError('CHANNEL_CLOSED', closed.message, closed);
+    execute: async ({ signal, ...command }) => {
+      if (closedHere) {
+        throw new ChannelClosedError({ origin: 'local', code: 'CHANNEL_CLOSED' });
       }
-      try {
-        return await channel.call('request', command, signal);
-      } catch (error) {
-        throw deliveryFailure(error);
+      let pending = outbox.get(command.commandId);
+      if (pending === undefined) {
+        pending = { command: command as HostCommand, settle: Promise.withResolvers<CommandAnswer>() };
+        outbox.set(command.commandId, pending);
+        send(pending);
       }
+      return signal === undefined ? pending.settle.promise : Promise.race([pending.settle.promise, aborted(signal)]);
     },
-    events: (signal) => listen('events', signal),
-    liveEvents: (signal) => listen('liveEvents', signal),
-    revisionEvents: (signal) => listen('revisionEvents', signal),
-    onClose: (handler) =>
-      channel.onClose((info) => {
-        handler(
-          closed ?? {
-            origin: info.origin,
-            message: closeMessages[info.origin],
-          },
-        );
+    read: async ({ signal, ...request }) => {
+      const current = await connection();
+      return current.wire === 1
+        ? v1Read(current.channel, request, signal)
+        : current.channel.call('read', request, signal);
+    },
+    liveEvents: ({ chatId, signal }) =>
+      guarded(signal, async function* () {
+        const current = await connection();
+        if (current.wire === 2) {
+          yield* current.channel.listen('liveEvents', { chatId }, signal) as AsyncIterable<AgentLiveEvent>;
+          return;
+        }
+        for await (const frame of current.channel.listen('liveEvents', null, signal)) {
+          if ('event' in frame && frame.chatId === chatId) {
+            yield frame.event;
+          }
+        }
       }),
+    revision: async (request, signal) => {
+      const current = await connection();
+      if (current.wire === 2) {
+        return current.channel.call('revision', { request }, signal);
+      }
+      const answer = await current.channel.call('request', { type: 'revision', request }, signal);
+      return answer.type === 'revision' ? { result: answer.result, status: answer.status } : unexpected(answer);
+    },
+    revisionEvents: (signal) =>
+      guarded(signal, async function* () {
+        const current = await connection();
+        yield* current.channel.listen('revisionEvents', undefined, signal);
+      }),
+    onClose: (handler) => {
+      closeHandlers.add(handler);
+      return () => {
+        closeHandlers.delete(handler);
+      };
+    },
     close: (reason) => {
-      channel.close(reason);
+      if (closedHere) {
+        return;
+      }
+      closedHere = true;
+      clearTimeout(redialTimer);
+      const closing = channel;
+      const say = async (): Promise<void> => {
+        try {
+          const current = await closing;
+          current?.channel.close(reason);
+        } catch {
+          // A connection that never opened has nothing to say goodbye on.
+        }
+      };
+      void say();
+      rejectAll(new ChannelClosedError({ origin: 'local', code: 'CHANNEL_CLOSED' }));
     },
   };
 };

@@ -1,0 +1,12 @@
+{
+  "domain": {
+    "state": ["unadmitted", "open", "terminal", "settled"],
+    "op": ["settle"]
+  },
+  "table": {
+    "unadmitted": { "settle": "SETTLEMENT_WITHOUT_RUN" },
+    "open": { "settle": "ok" },
+    "terminal": { "settle": "ok" },
+    "settled": { "settle": "SETTLEMENT_CONFLICT" }
+  }
+}

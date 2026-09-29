@@ -5,6 +5,8 @@
   "projectType": "application",
   "tags": ["scope:api", "type:app"],
   "targets": {
+    "formal": {},
+    "formal:nightly": {},
     "setup-env": {
       "command": "if [ ! -f \"./apps/api/.env\" ]; then cp ./apps/api/.env.example ./apps/api/.env; fi"
     },

@@ -18,7 +18,7 @@ import type {
 import { createAssistantMessageEventStream, isContextOverflow } from '@earendil-works/pi-ai';
 import type { Api, AssistantMessage, Model, Models, Usage, UserMessage } from '@earendil-works/pi-ai';
 import { createTransportFailureDiagnostic, piMessageToProvider } from '#harness/session-record.js';
-import type { SessionRecord } from '#harness/session-record.js';
+import type { SessionLogEvent, SessionRecord } from '#harness/session-record.js';
 import type { CompactionTrace } from '#log/event-types.js';
 
 const clearedToolResultContent = '[Old tool result content cleared]';
@@ -205,6 +205,16 @@ const summaryText = (message: AgentMessage): string | undefined => {
   return match?.[1];
 };
 
+/**
+ * Whether a message is a compaction summary: a history holding one sends the committed post-compaction context
+ * (RA-S10), a fold over the history rather than a session's latch.
+ *
+ * @param message - One projected message.
+ * @returns `true` for a summary.
+ * @internal
+ */
+export const isCompactionSummary = (message: AgentMessage): boolean => summaryText(message) !== undefined;
+
 const summaryFiles = (summary: string, tag: 'read-files' | 'modified-files'): string[] => {
   const match = new RegExp(`<${tag}>\\n([\\s\\S]*?)\\n</${tag}>`, 'u').exec(summary);
   return match?.[1]?.split('\n').filter(Boolean) ?? [];
@@ -368,6 +378,60 @@ const placeholderSummary = (messages: readonly AgentMessage[]): string => {
   return `Compaction could not summarize ${messages.length} message${messages.length === 1 ? '' : 's'} spanning ${turns} turn${turns === 1 ? '' : 's'}. The project files are the source of truth for the current work.`;
 };
 
+/** Compaction refusals: each resets the breaker, as a refused pass is not an over-budget summary. */
+const compactionRefusals: ReadonlySet<string> = new Set([
+  'SUMMARY_REQUIRED',
+  'NO_EVICTABLE_HISTORY',
+  'SESSION_LOG_INTEGRITY',
+]);
+
+/** What the durable log says about a chat's compaction (RA-S10, L2a D15). @internal */
+export type CompactionFold = Readonly<{
+  /** Consecutive over-budget generated summaries, across runs: the breaker opens on the third. */
+  strikes: number;
+  /** The last pass's measured overhead, until a later usage-bearing assistant re-measures it. */
+  anchor?: NonNullable<CompactionTrace['anchor']>;
+}>;
+
+/**
+ * Fold a chat's compaction state from its rows, so every admission and resume starts where the chat is, not from zero.
+ *
+ * A strike is an over-budget generated summary. A healthy summary, a placeholder, a tier-one clearing and a compaction
+ * refusal reset the count; `CIRCUIT_BREAKER_OPEN` does not, so each gesture after the breaker opened costs at most one
+ * summary (RA-Q6). The anchor is the last trace's measured overhead; a later assistant that reports usage retires it.
+ *
+ * @param events - The chat's rows, in log order.
+ * @returns The fold.
+ * @internal
+ */
+export const compactionFoldOf = (events: readonly SessionLogEvent[]): CompactionFold => {
+  let strikes = 0;
+  let anchor: CompactionFold['anchor'];
+  for (const event of events) {
+    if ((event.type === 'history.compacted' || event.type === 'message.envelope-replaced') && event.details) {
+      anchor = event.details.anchor ?? anchor;
+    } else if (
+      event.type === 'message.appended' &&
+      event.message.role === 'assistant' &&
+      event.message.metadata?.usage !== undefined
+    ) {
+      anchor = undefined;
+    }
+    if (event.type === 'history.compacted') {
+      strikes = event.details?.overBudget === true && event.details.summary !== 'placeholder' ? strikes + 1 : 0;
+    } else if (event.type === 'message.envelope-replaced' && event.details?.tier === 'tool_result_clearing') {
+      strikes = 0;
+    } else if (
+      event.type === 'run.lifecycle' &&
+      event.state === 'failed' &&
+      compactionRefusals.has(event.detail?.code ?? '')
+    ) {
+      strikes = 0;
+    }
+  }
+  return { strikes, ...(anchor === undefined ? {} : { anchor }) };
+};
+
 /** Install two-tier compaction on pi's durable turn and overflow seams. @public */
 export const installCompaction = (
   options: CreateCompactionOptions,
@@ -379,7 +443,6 @@ export const installCompaction = (
   const priorPrepare = agent.prepareNextTurn;
   const now = options.now ?? Date.now;
   let strikes = 0;
-  let anchorOverhead: { readonly anchor: string | AgentMessage; readonly tokens: number } | undefined;
   let pendingFailure: HostCompactionError | undefined;
 
   /*
@@ -394,40 +457,43 @@ export const installCompaction = (
    * exists: tier one could never report success, and the post-summary strike
    * landed on 2 so the same turn's next attempt opened the circuit breaker.
    *
-   * Split the anchor instead, the first time it is seen, into the overhead it
-   * implies and the messages it measured, then project every later candidate as
-   * that overhead plus the candidate's own message estimate. On the array the
-   * anchor measured this is pi's own number, eviction and tool-result clearing
-   * move it by exactly what they removed, a fresh assistant re-measures the
-   * overhead by itself, and nothing is counted twice.
+   * Split the anchor instead into the overhead it implies and the messages it
+   * measured, then project every candidate as that overhead plus the
+   * candidate's own message estimate. On the array the anchor measured this is
+   * pi's own number, eviction and tool-result clearing move it by exactly what
+   * they removed, a fresh assistant re-measures the overhead by itself, and
+   * nothing is counted twice.
    *
-   * A session reloaded from the durable log replays assistants whose usage
-   * predates its summary and whose overhead this process never measured. pi
-   * treats such pre-summary usage as no anchor at all (`_checkCompaction` in
-   * its coding agent); so does this, falling back to the message estimate until
-   * the next model call re-anchors it.
+   * Once a summary is newer than the anchor, the anchor's usage no longer
+   * measures these messages. pi treats such pre-summary usage as no anchor at
+   * all (`_checkCompaction` in its coding agent). The overhead the compacting
+   * pass measured is durable instead (`CompactionTrace.anchor`), so every later
+   * admission carries it (RA-S10); a log without one falls back to the message
+   * estimate until the next model call re-anchors it.
    */
   const contextTokens = (
     messages: readonly AgentMessage[],
-  ): { readonly tokens: number; readonly anchored: boolean } => {
+    carried?: CompactionFold['anchor'],
+  ): { readonly tokens: number; readonly anchored: boolean; readonly anchor?: CompactionFold['anchor'] } => {
     const estimate = estimateContextTokens([...messages]);
     if (estimate.lastUsageIndex === null) {
       return { tokens: estimate.tokens, anchored: false };
     }
     const anchor = messages[estimate.lastUsageIndex]!;
-    // The durable id survives the per-turn rehydration that gives every message
-    // a new object identity; a message the log has never seen has only itself.
-    const key = options.record.messages.get(anchor) ?? anchor;
-    if (anchorOverhead?.anchor !== key) {
-      if (messages.some((message) => summaryText(message) !== undefined && message.timestamp >= anchor.timestamp)) {
-        return { tokens: messageTokens(messages), anchored: false };
-      }
-      anchorOverhead = {
-        anchor: key,
-        tokens: Math.max(0, estimate.usageTokens - messageTokens(messages.slice(0, estimate.lastUsageIndex + 1))),
-      };
+    // The durable id survives the per-turn rehydration that gives every message a new object identity.
+    const messageId = options.record.messages.get(anchor);
+    if (carried !== undefined && carried.messageId === messageId) {
+      return { tokens: carried.tokens + messageTokens(messages), anchored: true, anchor: carried };
     }
-    return { tokens: anchorOverhead.tokens + messageTokens(messages), anchored: true };
+    if (messages.some((message) => summaryText(message) !== undefined && message.timestamp >= anchor.timestamp)) {
+      return { tokens: messageTokens(messages), anchored: false };
+    }
+    const tokens = Math.max(0, estimate.usageTokens - messageTokens(messages.slice(0, estimate.lastUsageIndex + 1)));
+    return {
+      tokens: tokens + messageTokens(messages),
+      anchored: true,
+      ...(messageId === undefined ? {} : { anchor: { messageId, tokens } }),
+    };
   };
 
   const projectionId = (message: AgentMessage): string => {
@@ -475,6 +541,9 @@ export const installCompaction = (
     readonly force?: boolean | undefined;
     readonly discardedOverflowError?: string | undefined;
   }): Promise<CompactionOutcome> => {
+    /* The chat's strikes, not this session's: a fold over the log, so a new admission does not reset the breaker. */
+    const fold = compactionFoldOf(await options.record.events());
+    strikes = fold.strikes;
     /*
      * Measure the anchor against the untouched input, even when the overflow
      * lane forces the pass: tier one's candidate has already had tool-result
@@ -482,7 +551,7 @@ export const installCompaction = (
      * per-call overhead the provider reported.
      */
     const settings = compactionSettings(options.contextWindow);
-    const trigger = contextTokens(input);
+    const trigger = contextTokens(input, fold.anchor);
     const fixedOverhead = Math.max(0, trigger.tokens - messageTokens(input));
     let summarizerAttempts = 0;
     let summarizerUsage: CompactionTrace['summarizerUsage'] = null;
@@ -504,6 +573,7 @@ export const installCompaction = (
       ...(summaryKind === undefined ? {} : { summary: summaryKind }),
       ...(overBudget ? { overBudget: true } : {}),
       ...(discardedOverflowError === undefined ? {} : { discardedOverflowError }),
+      ...(trigger.anchor === undefined ? {} : { anchor: trigger.anchor }),
     });
     const refuse = ({
       code,
@@ -868,7 +938,10 @@ export const installCompaction = (
       }
       const first = await base(model, context, streamOptions);
       const message = await first.result();
-      if (!isContextOverflow(message, options.contextWindow)) {
+      /* Only a refused call is sent again. Without the window, pi checks only its
+       * provider-error case: a completed reply whose input exceeds Tau's capped
+       * window was charged, and is the step's reply (RV5-F1). */
+      if (!isContextOverflow(message)) {
         return first;
       }
       const discardedOverflowError = message.errorMessage;

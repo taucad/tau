@@ -1,0 +1,7 @@
+{"version":1,"leaderEpoch":"epoch-a","sequence":0,"recordedAt":"2026-09-27T00:00:00.000Z","runId":"r1","type":"run.lifecycle","state":"admitted","attempt":1,"commandId":"c1"}
+{"version":1,"leaderEpoch":"epoch-a","sequence":1,"recordedAt":"2026-09-27T00:00:00.000Z","runId":"r1","type":"run.lifecycle","state":"running","attempt":1,"commandId":"c1"}
+{"version":1,"leaderEpoch":"epoch-a","sequence":2,"recordedAt":"2026-09-27T00:00:00.000Z","runId":"r1","type":"interrupt.recorded","interruptId":"i1","phase":"requested","reason":"approval"}
+{"version":1,"leaderEpoch":"epoch-a","sequence":3,"recordedAt":"2026-09-27T00:00:00.000Z","runId":"r1","type":"run.lifecycle","state":"paused","attempt":1}
+{"version":1,"leaderEpoch":"epoch-a","sequence":4,"recordedAt":"2026-09-27T00:00:00.000Z","runId":"r1","type":"turn.finalized","turnId":"t1","chatId":"c","projectId":"p","changedPaths":[],"trigger":"turn","runIds":["r1"],"attempt":1}
+{"version":1,"leaderEpoch":"epoch-a","sequence":5,"recordedAt":"2026-09-27T00:00:00.000Z","runId":"r1","type":"interrupt.recorded","interruptId":"i1","phase":"resolved","reason":"approval","payload":{"outcome":"cancelled","code":"USER_CANCELLED"},"commandId":"c2"}
+{"version":1,"leaderEpoch":"epoch-a","sequence":6,"recordedAt":"2026-09-27T00:00:00.000Z","runId":"r1","type":"run.lifecycle","state":"cancelled","attempt":1,"commandId":"c2"}

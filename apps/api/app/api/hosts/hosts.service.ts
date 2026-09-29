@@ -304,7 +304,9 @@ export class HostsService implements OnModuleDestroy {
     }
   }
 
-  public async exchangePairing(deviceCode: string): Promise<{ deviceId: string; credential: string } | undefined> {
+  public async exchangePairing(
+    deviceCode: string,
+  ): Promise<{ deviceId: string; credential: string; accountId: string } | undefined> {
     const deviceCodeHash = hashSecret(deviceCode);
     const raw = await this.redisService.client.get(pairingKey(deviceCodeHash));
     if (!raw) {
@@ -340,7 +342,8 @@ export class HostsService implements OnModuleDestroy {
       label: approved.deviceLabel,
       credentialHash: hashSecret(credential),
     });
-    return { deviceId, credential };
+    /* The account the device acts for: the daemon names it as its funded principal (GI-Q6, W6 RH-S6). */
+    return { deviceId, credential, accountId: approved.approvedUserId };
   }
 
   /**

@@ -1,0 +1,15 @@
+{
+  "name": "formal",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "tools/formal",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:tool"],
+  "targets": {
+    "formal": {},
+    "setup": {
+      "executor": "nx:run-commands",
+      "options": { "command": "node tools/formal/src/cli.ts setup" },
+      "cache": false
+    }
+  }
+}

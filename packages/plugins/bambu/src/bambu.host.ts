@@ -24,6 +24,7 @@ import type { MqttClient as MqttClientConstructor } from 'mqtt';
 
 import type { BambuCommandResult, BambuStatus } from '#bambu.protocol.js';
 import {
+  bambuExternalSpoolSlot,
   bambuRemoteName,
   bambuStage,
   bambuTopic,
@@ -76,6 +77,17 @@ const filamentDiameter = createQuantity({
 if (filamentDiameter.status !== 'success') {
   throw new Error('BAMBU_PROVIDER_UNITS_INVALID');
 }
+
+/**
+ * Every tray the printer reports, by its flat tray id: the AMS trays, then the external spool.
+ *
+ * @param facts - The merged status.
+ * @returns The snapshot's materials.
+ */
+const observedMaterials = (facts: BambuStatus): NonNullable<BambuStatus['materials']> => [
+  ...(facts.materials ?? []),
+  ...(facts.externalMaterial ? [facts.externalMaterial] : []),
+];
 
 const sameQuantity = (observed: Quantity | undefined, declared: number): boolean => {
   if (!observed) {
@@ -434,7 +446,7 @@ export const connectBambuMachine = async (
         setup: Object.freeze({
           toolId: 'tool-0',
           ...definedFields({ bedType: facts.bedType }),
-          materials: facts.materials ?? [],
+          materials: observedMaterials(facts),
         }),
         run: Object.freeze({
           state,
@@ -785,6 +797,14 @@ export const connectBambuMachine = async (
         const observedStatus = status;
         const actualModel = observedStatus?.model ?? input.candidate.claimedIdentity.model;
         const actualBedType = observedStatus?.bedType ?? configuration.operatorConfirmedBedType;
+        if (configuration.amsMapping.includes(bambuExternalSpoolSlot) && configuration.amsMapping.length > 1) {
+          return {
+            status: 'rejected',
+            code: 'SETUP_UNQUALIFIED',
+            message: 'The external spool can only feed a one-filament print. Map every filament to an AMS tray.',
+            observedAt: runtime.clock.now(),
+          };
+        }
         const setupQualified =
           observedStatus !== undefined &&
           actualModel === configuration.expectedModel &&
@@ -795,11 +815,11 @@ export const connectBambuMachine = async (
           configuration.expectedMaterials.every(
             (expected, index) =>
               configuration.amsMapping[index] === expected.slot &&
-              observedStatus.materials?.some(
+              observedMaterials(observedStatus).some(
                 (observed) =>
                   observed.slot === expected.slot &&
                   observed.materialId?.toLowerCase() === expected.materialId.toLowerCase(),
-              ) === true,
+              ),
           );
         if (!setupQualified) {
           return {
@@ -950,10 +970,13 @@ export const connectBambuMachine = async (
         const runName = submitInput.remoteName.replace('.gcode.3mf', '');
         startRunNames.set(submitInput.operationId, runName);
         /* eslint-disable @typescript-eslint/naming-convention -- Bambu wire field names are fixed. */
-        const amsMapping2 = configuration.amsMapping.map((slot) => ({
-          ams_id: Math.floor(slot / 4),
-          slot_id: slot % 4,
-        }));
+        // The external spool prints with the AMS off: firmware takes -1 in `ams_mapping` and holder 255 in
+        // `ams_mapping2` for a single-nozzle printer; preflight keeps it to one-filament prints.
+        const external = configuration.amsMapping.includes(bambuExternalSpoolSlot);
+        const amsMapping = external ? configuration.amsMapping.map(() => -1) : configuration.amsMapping;
+        const amsMapping2 = configuration.amsMapping.map((slot) =>
+          external ? { ams_id: 255, slot_id: 0 } : { ams_id: Math.floor(slot / 4), slot_id: slot % 4 },
+        );
         return sendCommand({
           operationId: submitInput.operationId,
           command: 'project_file',
@@ -976,8 +999,8 @@ export const connectBambuMachine = async (
               layer_inspect: true,
               nozzle_offset_cali: 0,
               bed_type: 'auto',
-              use_ams: configuration.amsMapping.length > 0,
-              ams_mapping: configuration.amsMapping,
+              use_ams: configuration.amsMapping.length > 0 && !external,
+              ams_mapping: amsMapping,
               ams_mapping2: amsMapping2,
               cfg: '0',
               profile_id: '0',

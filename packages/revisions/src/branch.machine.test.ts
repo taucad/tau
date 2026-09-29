@@ -1,11 +1,16 @@
 import { createActor } from 'xstate';
+import type { AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#branch.machine.js';
-import { branchMachine, branchRegistryMilliseconds, selectBranchFacet } from '#branch.machine.js';
+import { branchMachine, selectBranchFacet } from '#branch.machine.js';
+import type { BranchMachineEvent } from '#branch.machine.js';
 import { RevisionPortError } from '#revision-port.js';
-import { createFakeParent, createFakePromiseActors, createManualClock, recordEmitted } from '#test/fake-actors.js';
-import type { FakePromiseActors, ManualClock } from '#test/fake-actors.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { createFakeParent, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
+import type { FakePromiseActors } from '@taucad/xstate-testing/fakes';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 /*
  * Path table — `branch.machine` (S47).
@@ -17,11 +22,11 @@ import type { FakePromiseActors, ManualClock } from '#test/fake-actors.js';
  *  4  `checkBranch` failure → `failed` → `toast.error` → `idle`
  *  5  `applySwitch` failure → `failed` → `toast.error` → `idle`
  *  6  `create` delegates `addCheckout` to the parent and settles on the
- *     registry's own `branchesChanged`
+ *     registry's `checkoutAdded` for its own request id
  *  7  `create` settles on `operationFailed` with the registry's reason
- *  8  `create` that is never answered fails on the bound (manual clock)
- *  9  `discard` asks first, delegates `removeCheckout`, and settles when the
- *     branch leaves the registry
+ *  8  `create` waits for the registry however long it is busy, with no bound (RM-S8)
+ *  9  `discard` asks first, delegates `removeCheckout`, and settles on the
+ *     registry's `checkoutRemoved` for its own request id
  * 10  `discard` refused by the registry → `failed` with its reason
  * 11  `merge` that settles emits `branchMerged`
  * 12  `merge` that conflicts emits `mergeConflicted` with the paths and keeps
@@ -30,7 +35,7 @@ import type { FakePromiseActors, ManualClock } from '#test/fake-actors.js';
  * 14  `rename` applies and reports the new name
  * 15  `rename` failure → `failed`
  * 16  `selectBranch` moves the branch a merge lands on
- * 17  a second verb while one is in flight is ignored
+ * 17  a second verb while one is in flight is refused `REVISIONS_BUSY` by its id (RM-R11)
  * 18  with no host check provided, a verb still reaches its effect
  * 19  `create` with no base records the selected tree first and branches from
  *     the revision that cut minted (P3)
@@ -42,6 +47,7 @@ import type { FakePromiseActors, ManualClock } from '#test/fake-actors.js';
  * 24  a recording cut the head moved under is `CAS_LOST`
  * 25  an ambient cut's answer does not settle a recording `create`
  * 26  a `checkBranch` refusal carries its code out, as an applied verb does
+ * 27  a rename that moved a checkout's HEAD sends `checkoutChanged` for it (RM-R5)
  * --  start and stop with no child left running, serializable snapshot, no
  *     function in context, one exported machine value
  */
@@ -58,13 +64,14 @@ type Harness = Readonly<{
   promises: FakePromiseActors;
   parent: ReturnType<typeof createFakeParent>;
   emitted: ReturnType<typeof recordEmitted>;
-  clock: ManualClock;
+  clock: StepClock;
 }>;
 
 const start = (): Harness => {
+  const guard = guardActors();
   const promises = createFakePromiseActors();
   const parent = createFakeParent();
-  const clock = createManualClock();
+  const clock = new StepClock();
   const actor = createActor(
     branchMachine.provide({
       actors: {
@@ -77,6 +84,7 @@ const start = (): Harness => {
     {
       input: { projectId: 'project-1', currentBranch: 'main', parentRef: parent.ref },
       clock,
+      inspect: guard.inspect,
     },
   );
   const emitted = recordEmitted(actor);
@@ -100,7 +108,7 @@ describe('branchMachine', () => {
     promises.script('checkBranch', cleanCheck);
     promises.script('applySwitch', switched);
 
-    actor.send({ type: 'switch', branch: 'bracket-fillet', mode: 'applyToLive' });
+    actor.send({ type: 'switch', requestId: 'req-1', branch: 'bracket-fillet', mode: 'applyToLive' });
     expect(actor.getSnapshot().matches('checking')).toBe(true);
     await flush();
 
@@ -128,7 +136,7 @@ describe('branchMachine', () => {
     promises.script('checkBranch', riskyCheck);
     promises.script('applySwitch', switched);
 
-    actor.send({ type: 'switch', branch: 'bracket-fillet' });
+    actor.send({ type: 'switch', requestId: 'req-1', branch: 'bracket-fillet' });
     await flush();
 
     expect(actor.getSnapshot().matches('confirming')).toBe(true);
@@ -151,7 +159,7 @@ describe('branchMachine', () => {
     const { actor, promises, emitted } = start();
     promises.script('checkBranch', riskyCheck);
 
-    actor.send({ type: 'switch', branch: 'bracket-fillet' });
+    actor.send({ type: 'switch', requestId: 'req-1', branch: 'bracket-fillet' });
     await flush();
     actor.send({ type: 'cancel' });
 
@@ -166,11 +174,17 @@ describe('branchMachine', () => {
     const { actor, promises, emitted } = start();
     promises.script('checkBranch', { error: new Error('That branch has no revisions yet.') });
 
-    actor.send({ type: 'switch', branch: 'ghost' });
+    actor.send({ type: 'switch', requestId: 'req-1', branch: 'ghost' });
     await flush();
 
     expect(emitted).toEqual([
-      { type: 'toast.error', operation: 'switch', branch: 'ghost', message: 'That branch has no revisions yet.' },
+      {
+        type: 'toast.error',
+        requestId: 'req-1',
+        operation: 'switch',
+        branch: 'ghost',
+        message: 'That branch has no revisions yet.',
+      },
     ]);
     expect(actor.getSnapshot().matches('idle')).toBe(true);
     actor.stop();
@@ -181,12 +195,13 @@ describe('branchMachine', () => {
     promises.script('checkBranch', cleanCheck);
     promises.script('applySwitch', { error: new Error('The store holds no tree for that revision.') });
 
-    actor.send({ type: 'switch', branch: 'bracket-fillet' });
+    actor.send({ type: 'switch', requestId: 'req-1', branch: 'bracket-fillet' });
     await flush();
 
     expect(emitted).toEqual([
       {
         type: 'toast.error',
+        requestId: 'req-1',
         operation: 'switch',
         branch: 'bracket-fillet',
         message: 'The store holds no tree for that revision.',
@@ -200,16 +215,35 @@ describe('branchMachine', () => {
     const { actor, promises, parent, emitted } = start();
     promises.script('checkBranch', cleanCheck);
 
-    actor.send({ type: 'create', name: 'enclosure-v2', from: 'rev-12' });
+    actor.send({ type: 'create', requestId: 'req-1', name: 'enclosure-v2', from: 'rev-12' });
     await flush();
 
     /* A caller that named a base has already chosen one, so nothing is cut (P3). */
-    expect(parent.events).toContainEqual({ type: 'addCheckout', branch: 'enclosure-v2', from: 'rev-12' });
+    expect(parent.events).toContainEqual({
+      type: 'addCheckout',
+      requestId: 'req-1/add',
+      branch: 'enclosure-v2',
+      from: 'rev-12',
+    });
     expect(types(parent.events)).not.toContain('cut');
     expect(actor.getSnapshot().matches({ applying: { creating: 'adding' } })).toBe(true);
 
-    actor.send({ type: 'branchesChanged', branches: ['main', 'enclosure-v2'] });
-    expect(emitted).toEqual([{ type: 'toast.branch', operation: 'create', branch: 'enclosure-v2' }]);
+    actor.send({
+      type: 'checkoutAdded',
+      requestId: 'req-1/add',
+      checkoutId: 'checkout-c',
+      checkoutRoot: '/checkouts/checkout-c',
+    });
+    expect(emitted).toEqual([
+      {
+        type: 'toast.branch',
+        requestId: 'req-1',
+        operation: 'create',
+        branch: 'enclosure-v2',
+        checkoutId: 'checkout-c',
+        checkoutRoot: '/checkouts/checkout-c',
+      },
+    ]);
     expect(actor.getSnapshot().matches('idle')).toBe(true);
     actor.stop();
     parent.stop();
@@ -221,12 +255,18 @@ describe('branchMachine', () => {
 
     /* With a base named the verb goes straight to the registry; without one it
      * records the selected tree first, which rows 19-20 cover. */
-    actor.send({ type: 'create', name: 'main', from: 'rev-12' });
+    actor.send({ type: 'create', requestId: 'req-1', name: 'main', from: 'rev-12' });
     await flush();
-    actor.send({ type: 'operationFailed', reason: 'That branch already has a checkout.' });
+    actor.send({ type: 'operationFailed', requestId: 'req-1/add', reason: 'That branch already has a checkout.' });
 
     expect(emitted).toEqual([
-      { type: 'toast.error', operation: 'create', branch: 'main', message: 'That branch already has a checkout.' },
+      {
+        type: 'toast.error',
+        requestId: 'req-1',
+        operation: 'create',
+        branch: 'main',
+        message: 'That branch already has a checkout.',
+      },
     ]);
     actor.stop();
   });
@@ -235,17 +275,17 @@ describe('branchMachine', () => {
     const { actor, promises, parent, emitted } = start();
     promises.script('checkBranch', cleanCheck);
 
-    actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live' });
+    actor.send({ type: 'create', requestId: 'req-1', name: 'isolated-run', checkoutId: 'checkout-live' });
     await flush();
 
     /* The checkout is the sole minter (F2), so the verb asks the root to cut
      * and nothing reaches the registry until that answers. */
     expect(parent.events).toContainEqual({
       type: 'cut',
+      requestId: 'req-1/cut',
       trigger: 'switch',
       checkoutId: 'checkout-live',
       leaseIds: [],
-      requestId: 'branch-1',
     });
     expect(types(parent.events)).not.toContain('addCheckout');
     expect(actor.getSnapshot().matches({ applying: { creating: 'recording' } })).toBe(true);
@@ -254,13 +294,23 @@ describe('branchMachine', () => {
       type: 'revisionMinted',
       checkoutId: 'checkout-live',
       trigger: 'switch',
-      requestId: 'branch-1',
+      requestId: 'req-1/cut',
       revisionId: 'rev-2',
     });
 
-    expect(parent.events).toContainEqual({ type: 'addCheckout', branch: 'isolated-run', from: 'rev-2' });
-    actor.send({ type: 'branchesChanged', branches: ['main', 'isolated-run'] });
-    expect(emitted).toEqual([{ type: 'toast.branch', operation: 'create', branch: 'isolated-run' }]);
+    expect(parent.events).toContainEqual({
+      type: 'addCheckout',
+      requestId: 'req-1/add',
+      branch: 'isolated-run',
+      from: 'rev-2',
+    });
+    actor.send({
+      type: 'checkoutAdded',
+      requestId: 'req-1/add',
+      checkoutId: 'checkout-d',
+      checkoutRoot: '/checkouts/checkout-d',
+    });
+    expect(types(emitted)).toEqual(['toast.branch']);
     actor.stop();
     parent.stop();
   });
@@ -269,11 +319,22 @@ describe('branchMachine', () => {
     const { actor, promises, parent } = start();
     promises.script('checkBranch', cleanCheck);
 
-    actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live', head: 'rev-1' });
+    actor.send({
+      type: 'create',
+      requestId: 'req-1',
+      name: 'isolated-run',
+      checkoutId: 'checkout-live',
+      head: 'rev-1',
+    });
     await flush();
-    actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch', requestId: 'branch-1' });
+    actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch', requestId: 'req-1/cut' });
 
-    expect(parent.events).toContainEqual({ type: 'addCheckout', branch: 'isolated-run', from: 'rev-1' });
+    expect(parent.events).toContainEqual({
+      type: 'addCheckout',
+      requestId: 'req-1/add',
+      branch: 'isolated-run',
+      from: 'rev-1',
+    });
     actor.stop();
     parent.stop();
   });
@@ -282,14 +343,15 @@ describe('branchMachine', () => {
     const { actor, promises, parent, emitted } = start();
     promises.script('checkBranch', cleanCheck);
 
-    actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live' });
+    actor.send({ type: 'create', requestId: 'req-1', name: 'isolated-run', checkoutId: 'checkout-live' });
     await flush();
-    actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch', requestId: 'branch-1' });
+    actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch', requestId: 'req-1/cut' });
 
     expect(types(parent.events)).not.toContain('addCheckout');
     expect(emitted).toEqual([
       {
         type: 'toast.error',
+        requestId: 'req-1',
         operation: 'create',
         branch: 'isolated-run',
         message: 'This project has nothing to branch from yet.',
@@ -305,10 +367,11 @@ describe('branchMachine', () => {
     const { actor, promises, emitted } = start();
     promises.script('checkBranch', cleanCheck);
 
-    actor.send({ type: 'create', name: 'main', from: 'rev-12' });
+    actor.send({ type: 'create', requestId: 'req-1', name: 'main', from: 'rev-12' });
     await flush();
     actor.send({
       type: 'operationFailed',
+      requestId: 'req-1/add',
       reason: 'That branch already has a checkout.',
       code: 'CHECKOUT_CONFLICT',
     });
@@ -317,6 +380,7 @@ describe('branchMachine', () => {
     expect(emitted).toEqual([
       {
         type: 'toast.error',
+        requestId: 'req-1',
         operation: 'create',
         branch: 'main',
         message: 'That branch already has a checkout.',
@@ -335,13 +399,13 @@ describe('branchMachine', () => {
     const { actor, promises, emitted } = start();
     promises.script('checkBranch', cleanCheck);
 
-    actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live' });
+    actor.send({ type: 'create', requestId: 'req-1', name: 'isolated-run', checkoutId: 'checkout-live' });
     await flush();
     actor.send({
       type: 'cutFailed',
       checkoutId: 'checkout-live',
       trigger: 'switch',
-      requestId: 'branch-1',
+      requestId: 'req-1/cut',
       reason: 'This project has no files open to record.',
       code: 'CHECKOUT_CONFLICT',
     });
@@ -349,6 +413,7 @@ describe('branchMachine', () => {
     expect(emitted).toEqual([
       {
         type: 'toast.error',
+        requestId: 'req-1',
         operation: 'create',
         branch: 'isolated-run',
         message: 'This project has no files open to record.',
@@ -367,7 +432,7 @@ describe('branchMachine', () => {
     const { actor, promises, parent } = start();
     promises.script('checkBranch', cleanCheck);
 
-    actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live' });
+    actor.send({ type: 'create', requestId: 'req-1', name: 'isolated-run', checkoutId: 'checkout-live' });
     await flush();
     actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'save', revisionId: 'rev-save' });
 
@@ -378,11 +443,16 @@ describe('branchMachine', () => {
       type: 'revisionMinted',
       checkoutId: 'checkout-live',
       trigger: 'switch',
-      requestId: 'branch-1',
+      requestId: 'req-1/cut',
       revisionId: 'rev-2',
     });
 
-    expect(parent.events).toContainEqual({ type: 'addCheckout', branch: 'isolated-run', from: 'rev-2' });
+    expect(parent.events).toContainEqual({
+      type: 'addCheckout',
+      requestId: 'req-1/add',
+      branch: 'isolated-run',
+      from: 'rev-2',
+    });
     actor.stop();
     parent.stop();
   });
@@ -393,9 +463,15 @@ describe('branchMachine', () => {
     const { actor, promises, parent } = start();
     promises.script('checkBranch', cleanCheck);
 
-    actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live' });
+    actor.send({ type: 'create', requestId: 'req-2', name: 'isolated-run', checkoutId: 'checkout-live' });
     await flush();
-    actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-late' });
+    actor.send({
+      type: 'revisionMinted',
+      requestId: 'req-1/cut',
+      checkoutId: 'checkout-live',
+      trigger: 'switch',
+      revisionId: 'rev-late',
+    });
 
     expect(actor.getSnapshot().matches({ applying: { creating: 'recording' } })).toBe(true);
     expect(types(parent.events)).not.toContain('addCheckout');
@@ -409,12 +485,13 @@ describe('branchMachine', () => {
       error: new RevisionPortError('ENGINE_UNAVAILABLE', 'This project could not be reached.'),
     });
 
-    actor.send({ type: 'switch', branch: 'bracket-fillet' });
+    actor.send({ type: 'switch', requestId: 'req-1', branch: 'bracket-fillet' });
     await flush();
 
     expect(emitted).toEqual([
       {
         type: 'toast.error',
+        requestId: 'req-1',
         operation: 'switch',
         branch: 'bracket-fillet',
         message: 'This project could not be reached.',
@@ -428,13 +505,14 @@ describe('branchMachine', () => {
     const { actor, promises, emitted } = start();
     promises.script('checkBranch', cleanCheck);
 
-    actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live' });
+    actor.send({ type: 'create', requestId: 'req-1', name: 'isolated-run', checkoutId: 'checkout-live' });
     await flush();
-    actor.send({ type: 'casLost', checkoutId: 'checkout-live', trigger: 'switch', requestId: 'branch-1' });
+    actor.send({ type: 'casLost', checkoutId: 'checkout-live', trigger: 'switch', requestId: 'req-1/cut' });
 
     expect(emitted).toEqual([
       {
         type: 'toast.error',
+        requestId: 'req-1',
         operation: 'create',
         branch: 'isolated-run',
         message: 'Something else changed this project first. Try again.',
@@ -448,20 +526,27 @@ describe('branchMachine', () => {
     const { actor, promises, parent, emitted } = start();
     promises.script('checkBranch', cleanCheck);
 
-    actor.send({ type: 'create', name: 'enclosure-v2', from: 'rev-12' });
+    actor.send({ type: 'create', requestId: 'req-1', name: 'enclosure-v2', from: 'rev-12' });
     await flush();
+    /* An answer to another request is not this verb's (RM-R1). */
     actor.send({
-      type: 'branchesChanged',
-      branches: ['main', 'enclosure-v2'],
-      checkouts: [
-        { branch: 'main', checkoutId: 'checkout-live', checkoutRoot: '/projects/project-1' },
-        { branch: 'enclosure-v2', checkoutId: 'checkout-c', checkoutRoot: '/checkouts/checkout-c' },
-      ],
+      type: 'checkoutAdded',
+      requestId: 'req-0/add',
+      checkoutId: 'checkout-x',
+      checkoutRoot: '/checkouts/x',
+    });
+    expect(emitted).toEqual([]);
+    actor.send({
+      type: 'checkoutAdded',
+      requestId: 'req-1/add',
+      checkoutId: 'checkout-c',
+      checkoutRoot: '/checkouts/checkout-c',
     });
 
     expect(emitted).toEqual([
       {
         type: 'toast.branch',
+        requestId: 'req-1',
         operation: 'create',
         branch: 'enclosure-v2',
         checkoutId: 'checkout-c',
@@ -474,26 +559,29 @@ describe('branchMachine', () => {
     parent.stop();
   });
 
-  it('fails a create the registry never answers, on the bound', async () => {
-    const { actor, promises, emitted, clock } = start();
+  /* RM-S8: the registry answers by id whenever it gets to the add, so no bound fails a slow one. */
+  it('should answer a create that arrives while the registry is busy', async () => {
+    const { actor, promises, parent, emitted, clock } = start();
     promises.script('checkBranch', cleanCheck);
 
-    actor.send({ type: 'create', name: 'enclosure-v2' });
+    actor.send({ type: 'create', requestId: 'req-1', name: 'enclosure-v2', from: 'rev-12' });
     await flush();
+    /* Twice the deleted 30 s registry bound. */
+    clock.advance(60_000);
     expect(emitted).toEqual([]);
+    expect(actor.getSnapshot().matches({ applying: { creating: 'adding' } })).toBe(true);
 
-    clock.advance(branchRegistryMilliseconds);
+    actor.send({
+      type: 'checkoutAdded',
+      requestId: 'req-1/add',
+      checkoutId: 'checkout-c',
+      checkoutRoot: '/checkouts/checkout-c',
+    });
 
-    expect(emitted).toEqual([
-      {
-        type: 'toast.error',
-        operation: 'create',
-        branch: 'enclosure-v2',
-        message: 'This project did not answer in time.',
-      },
-    ]);
+    expect(types(emitted)).toEqual(['toast.branch']);
     expect(actor.getSnapshot().matches('idle')).toBe(true);
     actor.stop();
+    parent.stop();
   });
 
   it('asks before a discard, then removes the checkout through the registry', async () => {
@@ -502,15 +590,17 @@ describe('branchMachine', () => {
       output: { needsConfirmation: true, question: 'Discarding this branch deletes its files.', checkoutId: 'co-2' },
     });
 
-    actor.send({ type: 'discard', branch: 'bracket-fillet' });
+    actor.send({ type: 'discard', requestId: 'req-1', branch: 'bracket-fillet' });
     await flush();
     expect(actor.getSnapshot().matches('confirming')).toBe(true);
 
     actor.send({ type: 'confirm' });
-    expect(parent.events).toContainEqual({ type: 'removeCheckout', id: 'co-2' });
+    expect(parent.events).toContainEqual({ type: 'removeCheckout', requestId: 'req-1/remove', id: 'co-2' });
 
-    actor.send({ type: 'branchesChanged', branches: ['main'] });
-    expect(emitted).toEqual([{ type: 'toast.branch', operation: 'discard', branch: 'bracket-fillet' }]);
+    actor.send({ type: 'checkoutRemoved', requestId: 'req-1/remove' });
+    expect(emitted).toEqual([
+      { type: 'toast.branch', requestId: 'req-1', operation: 'discard', branch: 'bracket-fillet' },
+    ]);
     actor.stop();
     parent.stop();
   });
@@ -519,13 +609,14 @@ describe('branchMachine', () => {
     const { actor, promises, emitted } = start();
     promises.script('checkBranch', { output: { needsConfirmation: false, checkoutId: 'co-2' } });
 
-    actor.send({ type: 'discard', branch: 'bracket-fillet' });
+    actor.send({ type: 'discard', requestId: 'req-1', branch: 'bracket-fillet' });
     await flush();
-    actor.send({ type: 'operationFailed', reason: 'An agent is working in feature.' });
+    actor.send({ type: 'operationFailed', requestId: 'req-1/remove', reason: 'An agent is working in feature.' });
 
     expect(emitted).toEqual([
       {
         type: 'toast.error',
+        requestId: 'req-1',
         operation: 'discard',
         branch: 'bracket-fillet',
         message: 'An agent is working in feature.',
@@ -539,13 +630,13 @@ describe('branchMachine', () => {
     promises.script('checkBranch', cleanCheck);
     promises.script('merge', { output: { status: 'merged', revisionId: 'rev-13' } });
 
-    actor.send({ type: 'merge', branch: 'bracket-fillet' });
+    actor.send({ type: 'merge', requestId: 'req-1', branch: 'bracket-fillet' });
     await flush();
 
     expect(promises.inputsFor('merge')).toEqual([{ projectId: 'project-1', branch: 'bracket-fillet', into: 'main' }]);
     expect(emitted).toEqual([
       { type: 'branchMerged', branch: 'bracket-fillet', into: 'main', revisionId: 'rev-13' },
-      { type: 'toast.branch', operation: 'merge', branch: 'bracket-fillet' },
+      { type: 'toast.branch', requestId: 'req-1', operation: 'merge', branch: 'bracket-fillet' },
     ]);
     expect(parent.events).toContainEqual({
       type: 'branchMerged',
@@ -562,7 +653,7 @@ describe('branchMachine', () => {
     promises.script('checkBranch', cleanCheck);
     promises.script('merge', { output: { status: 'conflicted', paths: ['bracket.scad'] } });
 
-    actor.send({ type: 'merge', branch: 'bracket-fillet' });
+    actor.send({ type: 'merge', requestId: 'req-1', branch: 'bracket-fillet' });
     await flush();
 
     expect(emitted).toEqual([
@@ -578,11 +669,17 @@ describe('branchMachine', () => {
     promises.script('checkBranch', cleanCheck);
     promises.script('merge', { error: new Error('This project cannot merge yet.') });
 
-    actor.send({ type: 'merge', branch: 'bracket-fillet' });
+    actor.send({ type: 'merge', requestId: 'req-1', branch: 'bracket-fillet' });
     await flush();
 
     expect(emitted).toEqual([
-      { type: 'toast.error', operation: 'merge', branch: 'bracket-fillet', message: 'This project cannot merge yet.' },
+      {
+        type: 'toast.error',
+        requestId: 'req-1',
+        operation: 'merge',
+        branch: 'bracket-fillet',
+        message: 'This project cannot merge yet.',
+      },
     ]);
     actor.stop();
   });
@@ -592,13 +689,15 @@ describe('branchMachine', () => {
     promises.script('checkBranch', cleanCheck);
     promises.script('rename', { output: { branch: 'bracket-fillet-r3' } });
 
-    actor.send({ type: 'rename', branch: 'bracket-fillet', name: 'bracket-fillet-r3' });
+    actor.send({ type: 'rename', requestId: 'req-1', branch: 'bracket-fillet', name: 'bracket-fillet-r3' });
     await flush();
 
     expect(promises.inputsFor('rename')).toEqual([
       { projectId: 'project-1', branch: 'bracket-fillet', name: 'bracket-fillet-r3' },
     ]);
-    expect(emitted).toEqual([{ type: 'toast.branch', operation: 'rename', branch: 'bracket-fillet-r3' }]);
+    expect(emitted).toEqual([
+      { type: 'toast.branch', requestId: 'req-1', operation: 'rename', branch: 'bracket-fillet-r3' },
+    ]);
     actor.stop();
   });
 
@@ -607,11 +706,17 @@ describe('branchMachine', () => {
     promises.script('checkBranch', cleanCheck);
     promises.script('rename', { error: new Error('That name is already taken.') });
 
-    actor.send({ type: 'rename', branch: 'bracket-fillet', name: 'main' });
+    actor.send({ type: 'rename', requestId: 'req-1', branch: 'bracket-fillet', name: 'main' });
     await flush();
 
     expect(emitted).toEqual([
-      { type: 'toast.error', operation: 'rename', branch: 'bracket-fillet', message: 'That name is already taken.' },
+      {
+        type: 'toast.error',
+        requestId: 'req-1',
+        operation: 'rename',
+        branch: 'bracket-fillet',
+        message: 'That name is already taken.',
+      },
     ]);
     actor.stop();
   });
@@ -622,7 +727,7 @@ describe('branchMachine', () => {
     promises.script('merge', { output: { status: 'merged', revisionId: 'rev-13' } });
 
     actor.send({ type: 'selectBranch', branch: 'release' });
-    actor.send({ type: 'merge', branch: 'bracket-fillet' });
+    actor.send({ type: 'merge', requestId: 'req-1', branch: 'bracket-fillet' });
     await flush();
 
     expect(promises.inputsFor('merge')).toEqual([
@@ -631,30 +736,74 @@ describe('branchMachine', () => {
     actor.stop();
   });
 
-  it('ignores a second verb while one is in flight', async () => {
-    const { actor, promises } = start();
+  it('should refuse a verb while busy with REVISIONS_BUSY', async () => {
+    const { actor, promises, emitted } = start();
+    promises.script('checkBranch', riskyCheck);
 
-    actor.send({ type: 'switch', branch: 'bracket-fillet' });
-    actor.send({ type: 'merge', branch: 'enclosure-v2' });
+    actor.send({ type: 'switch', requestId: 'req-1', branch: 'bracket-fillet' });
+    actor.send({ type: 'merge', requestId: 'req-2', branch: 'enclosure-v2' });
     await flush();
+    actor.send({ type: 'create', requestId: 'req-3', name: 'enclosure-v3' });
 
     expect(promises.inputsFor('checkBranch')).toEqual([
       { projectId: 'project-1', operation: 'switch', branch: 'bracket-fillet', into: 'main' },
     ]);
+    expect(emitted).toEqual([
+      {
+        type: 'toast.error',
+        requestId: 'req-2',
+        operation: 'merge',
+        branch: 'enclosure-v2',
+        message: 'Another branch change is still running.',
+        code: 'REVISIONS_BUSY',
+      },
+      {
+        type: 'toast.error',
+        requestId: 'req-3',
+        operation: 'create',
+        branch: 'enclosure-v3',
+        message: 'Another branch change is still running.',
+        code: 'REVISIONS_BUSY',
+      },
+    ]);
+    expect(actor.getSnapshot().matches('confirming')).toBe(true);
     actor.stop();
+  });
+
+  it('should tell the parent which checkout a rename moved', async () => {
+    const { actor, promises, parent } = start();
+    promises.script('checkBranch', cleanCheck);
+    promises.script('rename', { output: { branch: 'bracket-fillet-r3', checkoutId: 'checkout-b' } });
+
+    actor.send({ type: 'rename', requestId: 'req-1', branch: 'bracket-fillet', name: 'bracket-fillet-r3' });
+    await flush();
+
+    expect(parent.events).toContainEqual({ type: 'checkoutChanged', checkoutId: 'checkout-b' });
+    actor.stop();
+    parent.stop();
   });
 
   it('still reaches the registry when no host check is provided', async () => {
     const parent = createFakeParent();
-    const actor = createActor(branchMachine, { input: { projectId: 'project-1', parentRef: parent.ref } });
+    const guard = guardActors();
+    const actor = createActor(branchMachine, {
+      input: { projectId: 'project-1', parentRef: parent.ref },
+      clock: new StepClock(),
+      inspect: guard.inspect,
+    });
     actor.start();
 
-    actor.send({ type: 'create', name: 'enclosure-v2', from: 'rev-12' });
+    actor.send({ type: 'create', requestId: 'req-1', name: 'enclosure-v2', from: 'rev-12' });
     await flush();
 
     /* With a base named the effect is still the registry verb; a base-less
      * create now records first, which rows 19-20 cover. */
-    expect(parent.events).toContainEqual({ type: 'addCheckout', branch: 'enclosure-v2', from: 'rev-12' });
+    expect(parent.events).toContainEqual({
+      type: 'addCheckout',
+      requestId: 'req-1/add',
+      branch: 'enclosure-v2',
+      from: 'rev-12',
+    });
     actor.stop();
     parent.stop();
   });
@@ -678,5 +827,69 @@ describe('branchMachine', () => {
 
     actor.stop();
     expect(actor.getSnapshot().status).toBe('stopped');
+  });
+
+  it('should answer every public event in every reachable state', () => {
+    const parent = createFakeParent();
+    const outputs: Readonly<Record<string, unknown>> = {
+      checkBranch: { needsConfirmation: true, question: 'This overwrites changes that are not in a revision yet.' },
+      applySwitch: switched.output,
+      merge: { status: 'conflicted', paths: ['enclosure.ts'] },
+      rename: { branch: 'enclosure-v4' },
+    };
+    /* Effect outcomes reach the states behind each invoke; they are not public. */
+    const invokes = [
+      branchMachine.getStateNodeById('branch.checking'),
+      branchMachine.getStateNodeById('branch.applying.switching'),
+      branchMachine.getStateNodeById('branch.applying.merging'),
+      branchMachine.getStateNodeById('branch.applying.renaming'),
+    ].flatMap((node) => node.invoke);
+    const outcomes = invokes.flatMap((invoke) => [
+      { type: `xstate.done.actor.${invoke.id}`, output: outputs[typeof invoke.src === 'string' ? invoke.src : ''] },
+      { type: `xstate.error.actor.${invoke.id}`, error: new Error('failed') },
+    ]);
+    const publicEvents: readonly BranchMachineEvent[] = [
+      { type: 'switch', requestId: 'req-1', branch: 'bracket-fillet', mode: 'applyToLive' },
+      { type: 'merge', requestId: 'req-1', branch: 'enclosure-v2' },
+      { type: 'discard', requestId: 'req-1', branch: 'enclosure-v2' },
+      { type: 'create', requestId: 'req-1', name: 'enclosure-v2', from: 'rev-12' },
+      { type: 'create', requestId: 'req-1', name: 'enclosure-v3', checkoutId: 'checkout-live', head: 'rev-1' },
+      { type: 'rename', requestId: 'req-1', branch: 'enclosure-v2', name: 'enclosure-v4' },
+      { type: 'confirm' },
+      { type: 'cancel' },
+      { type: 'selectBranch', branch: 'main' },
+      { type: 'checkoutAdded', requestId: 'req-1/add', checkoutId: 'checkout-c', checkoutRoot: '/checkouts/c' },
+      { type: 'checkoutRemoved', requestId: 'req-1/remove' },
+      { type: 'operationFailed', requestId: 'req-1/add', reason: 'That branch already has a checkout.' },
+      {
+        type: 'revisionMinted',
+        checkoutId: 'checkout-live',
+        trigger: 'switch',
+        requestId: 'req-1/cut',
+        revisionId: 'rev-2',
+      },
+      { type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch', requestId: 'req-1/cut' },
+      {
+        type: 'cutFailed',
+        checkoutId: 'checkout-live',
+        trigger: 'switch',
+        requestId: 'req-1/cut',
+        reason: 'The cut failed.',
+      },
+      { type: 'casLost', checkoutId: 'checkout-live', trigger: 'switch', requestId: 'req-1/cut' },
+    ];
+    const options = {
+      input: { projectId: 'project-1', currentBranch: 'main', parentRef: parent.ref },
+      events: [...publicEvents, ...outcomes],
+      limit: 20_000,
+      /* The verb and its base pick the `applying` branch, so the projection keeps both. */
+      serializeState: (snapshot: AnyMachineSnapshot) =>
+        JSON.stringify([snapshot.value, snapshot.context.operation, snapshot.context.from]),
+    };
+
+    expect(unansweredEvents(branchMachine, options)).toEqual([]);
+    // W5: `creating.routing` is a transient `always` node; a total `choice` state is never listed.
+    expect(unreachedStates(branchMachine, options)).toEqual(['branch.applying.creating.routing']);
+    parent.stop();
   });
 });

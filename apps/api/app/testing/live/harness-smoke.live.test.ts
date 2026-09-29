@@ -60,7 +60,7 @@ describe.skipIf(!hasLiveCredential(modelId))(
           systemPrompt: 'Answer in one short sentence. Do not call a tool.',
           model: liveSessionModel(modelId),
           toolRegistry,
-          eventLog: await createNodeEventLog({ filePath: join(root, nonce, 'events.jsonl') }),
+          eventLog: await createNodeEventLog({ filePath: join(root, nonce, 'events.jsonl'), access: 'write' }),
         });
         try {
           await session.prompt({

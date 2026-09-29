@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createSessionRecord } from '#harness/session-record.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
-import type { EventLogStorage } from '#log/event-log-appender.js';
+import { memoryEventLogStorage, withLength } from '#log/event-log-storage.fixture.js';
+import type { BareEventLogStorage } from '#log/event-log-storage.fixture.js';
 import { invalidHistoryFixtures } from '#log/invalid-history.fixture.js';
 import { parseLogEvent } from '#log/event-schema.js';
 import { parseEventLog, serializeLogEvent } from '#log/serialization.js';
@@ -14,6 +15,13 @@ const base = (sequence: number): LogEventBase => ({
   sequence,
   recordedAt: '2026-08-31T00:00:00.000Z',
   runId: 'run-a',
+});
+
+/** A lifecycle row of run `run-a`: `admitted` at 0, `running` after. */
+const lifecycleRow = (sequence: number): AgentLogEvent => ({
+  ...base(sequence),
+  type: 'run.lifecycle',
+  state: sequence === 0 ? 'admitted' : 'running',
 });
 
 const messageFor = (index: number): ProviderMessage => {
@@ -108,10 +116,14 @@ describe('event-log reducer properties', () => {
     const text = events.map((event) => serializeLogEvent(event)).join('');
 
     expect(parseEventLog(`${text}{"version":1`)).toEqual(events);
-    expect(() => parseEventLog(`${text}not-json\n`)).toThrow(
-      expect.objectContaining({ name: 'EventLogError', code: 'LINE_INVALID' }),
-    );
-    expect(() => parseEventLog(`${serializeLogEvent(events[0]!)}not-json\n${serializeLogEvent(events[1]!)}`)).toThrow();
+  });
+
+  // CL-A2: a terminated line with no row envelope is quarantined wherever it is; the rows around it stay readable.
+  it('should quarantine an invalid line in the middle of a log and keep the rows around it', () => {
+    const events = appendEvents(2);
+
+    expect(parseEventLog(`${events.map((event) => serializeLogEvent(event)).join('')}not-json\n`)).toEqual(events);
+    expect(parseEventLog(`${serializeLogEvent(events[0]!)}not-json\n${serializeLogEvent(events[1]!)}`)).toEqual(events);
   });
 
   it('keeps a committed projection prefix byte-stable', () => {
@@ -195,26 +207,134 @@ describe('event-log reducer properties', () => {
 });
 
 describe('event-log appender durability', () => {
+  // CL-A8, T9: the torn-tail repair truncates only the torn bytes it read; a same-length write by another writer is
+  // not a torn tail, so the stale writer is fenced and the other writer's bytes survive.
+  it('should fence a stale writer whose torn tail another writer replaced with bytes of the same length', async () => {
+    const encoder = new TextEncoder();
+    const row = `${serializeLogEvent(appendEvents(1)[0]!)}`;
+    const torn = '{"version":';
+    const file = memoryEventLogStorage(encoder.encode(`${row}${torn}`));
+    const stale = await createEventLogAppender(file.storage);
+
+    // Another writer repairs the tail and writes a line exactly as long as the torn bytes.
+    const other = encoder.encode(`${'x'.repeat(torn.length - 1)}\n`);
+    await file.storage.truncate(encoder.encode(row).byteLength);
+    await file.storage.append(other);
+
+    await expect(stale.append({ ...base(1), type: 'message.appended', message: messageFor(1) })).rejects.toMatchObject({
+      code: 'LOG_FENCED',
+    });
+    expect(new TextDecoder().decode(file.bytes())).toBe(`${row}${'x'.repeat(torn.length - 1)}\n`);
+  });
+
+  // CL-A3, I3: the appender itself enforces the term rules, whoever writes (S6 `EpochStartsAtZero`).
+  it('should refuse a new term that does not start at sequence 0', async () => {
+    const log = await createEventLogAppender(memoryEventLogStorage().storage);
+    await log.append({ ...lifecycleRow(0), epoch: 1 });
+
+    await expect(log.append({ ...lifecycleRow(1), leaderEpoch: 'epoch-b', epoch: 2 })).rejects.toMatchObject({
+      code: 'EVENT_OUT_OF_ORDER',
+    });
+    await expect(log.append({ ...lifecycleRow(0), leaderEpoch: 'epoch-b', epoch: 2 })).resolves.toMatchObject({
+      appended: true,
+    });
+  });
+
+  it('should refuse a claiming epoch that does not exceed every earlier epoch', async () => {
+    const log = await createEventLogAppender(memoryEventLogStorage().storage);
+    await log.append({ ...lifecycleRow(0), epoch: 3 });
+
+    for (const epoch of [1, 3]) {
+      // oxlint-disable-next-line no-await-in-loop -- one claim at a time.
+      await expect(log.append({ ...lifecycleRow(0), leaderEpoch: `epoch-${epoch}`, epoch })).rejects.toMatchObject({
+        code: 'EVENT_OUT_OF_ORDER',
+      });
+    }
+    // A legacy term is admitted only while the whole log is legacy.
+    await expect(log.append({ ...lifecycleRow(0), leaderEpoch: 'epoch-legacy' })).rejects.toMatchObject({
+      code: 'EVENT_OUT_OF_ORDER',
+    });
+    await expect(log.append({ ...lifecycleRow(1), epoch: 4 })).rejects.toMatchObject({ code: 'EVENT_OUT_OF_ORDER' });
+  });
+
+  // CL-A8, I1, I2, T9: S3 F1's race. Another writer appended after this one read the log.
+  it('should refuse a stale writer without writing and leave the log readable', async () => {
+    const file = memoryEventLogStorage();
+    const stale = await createEventLogAppender(file.storage);
+    const current = await createEventLogAppender(file.storage);
+    await current.append({ ...lifecycleRow(0), leaderEpoch: 'epoch-current', epoch: 1 });
+    const bytes = file.bytes();
+
+    await expect(stale.append({ ...lifecycleRow(0), leaderEpoch: 'epoch-stale', epoch: 1 })).rejects.toMatchObject({
+      code: 'LOG_FENCED',
+    });
+    // Fenced for good: the next append is refused too, even one that would fit the bytes.
+    await expect(stale.append({ ...lifecycleRow(0), leaderEpoch: 'epoch-stale', epoch: 1 })).rejects.toMatchObject({
+      code: 'LOG_FENCED',
+    });
+    expect(file.bytes()).toEqual(bytes);
+    const reader = await createEventLogAppender(file.storage);
+    await expect(reader.read()).resolves.toEqual([{ ...lifecycleRow(0), leaderEpoch: 'epoch-current', epoch: 1 }]);
+    await expect(reader.anomalies()).resolves.toEqual([]);
+  });
+
+  // CL-A1, T1 (S5 D1, W0.1): S5's minimal trace `E 0 0 3 L 5 1`, then the same row carrying an undefined-valued key.
+  // The bytes on disk drop that key, so after a reload the row is a duplicate, never EVENT_MUTATED.
+  it('should treat a reloaded identical row with an undefined key as a duplicate', async () => {
+    let bytes = new Uint8Array(new ArrayBuffer(0));
+    const storage: BareEventLogStorage = {
+      read: async () => bytes,
+      append: async (next) => {
+        const combined = new Uint8Array(bytes.byteLength + next.byteLength);
+        combined.set(bytes);
+        combined.set(next, bytes.byteLength);
+        bytes = combined;
+      },
+      truncate: async (size) => {
+        bytes = bytes.slice(0, size);
+      },
+      close: async () => undefined,
+    };
+    const row: AgentLogEvent = {
+      version: 1,
+      leaderEpoch: 'e00',
+      sequence: 0,
+      recordedAt: '2026-09-01T00:00:00.001Z',
+      runId: 'r3',
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { message: 'rate', code: 'RATE_LIMITED' },
+    };
+    const first = await createEventLogAppender(withLength(storage));
+    await expect(first.append(row)).resolves.toMatchObject({ appended: true });
+    await first.close();
+
+    const reloaded = await createEventLogAppender(withLength(storage));
+
+    await expect(reloaded.append({ ...row, storageDurability: undefined })).resolves.toMatchObject({ appended: false });
+    await reloaded.close();
+  });
+
   it.each([
     ['invalid JSON', new TextEncoder().encode('not-json\n')],
     ['invalid schema', new TextEncoder().encode('{"version":1}\n')],
     ['invalid UTF-8', new Uint8Array([0xff, 0x0a])],
-  ])('should fail closed without truncating a terminated %s record', async (_name, initialBytes) => {
+  ])('should quarantine a terminated %s line without truncating it', async (_name, initialBytes) => {
     let bytes = new Uint8Array(initialBytes);
     const truncate = vi.fn(async (size: number) => {
       bytes = bytes.slice(0, size);
     });
-    const storage: EventLogStorage = {
+    const storage: BareEventLogStorage = {
       read: async () => bytes,
       append: async () => undefined,
       truncate,
       close: async () => undefined,
     };
 
-    await expect(createEventLogAppender(storage)).rejects.toMatchObject({
-      name: 'EventLogError',
-      code: 'LINE_INVALID',
-    });
+    const log = await createEventLogAppender(withLength(storage));
+
+    await expect(log.read()).resolves.toEqual([]);
+    await expect(log.anomalies()).resolves.toEqual([expect.objectContaining({ kind: 'quarantined', byteOffset: 0 })]);
     expect(truncate).not.toHaveBeenCalled();
     expect(bytes).toEqual(initialBytes);
   });
@@ -222,7 +342,7 @@ describe('event-log appender durability', () => {
   it('should roll back a partial append and remain usable when truncation succeeds', async () => {
     let bytes = new Uint8Array(new ArrayBuffer(0));
     let failNextAppend = true;
-    const storage: EventLogStorage = {
+    const storage: BareEventLogStorage = {
       read: async () => bytes,
       append: async (next) => {
         if (failNextAppend) {
@@ -237,18 +357,18 @@ describe('event-log appender durability', () => {
       },
       close: async () => undefined,
     };
-    const log = await createEventLogAppender(storage);
+    const log = await createEventLogAppender(withLength(storage));
 
     await expect(log.append(appendEvents(1)[0]!)).rejects.toThrow('injected partial write');
     expect(bytes).toHaveLength(0);
-    await expect(log.append(appendEvents(1)[0]!)).resolves.toEqual({ appended: true });
+    await expect(log.append(appendEvents(1)[0]!)).resolves.toMatchObject({ appended: true });
     expect(parseEventLog(new TextDecoder().decode(bytes))).toEqual(appendEvents(1));
     await log.close();
   });
 
   it('should poison the appender when a failed append cannot be rolled back', async () => {
     let bytes = new Uint8Array(new ArrayBuffer(0));
-    const storage: EventLogStorage = {
+    const storage: BareEventLogStorage = {
       read: async () => bytes,
       append: async (next) => {
         bytes = next.slice(0, 1);
@@ -259,7 +379,7 @@ describe('event-log appender durability', () => {
       },
       close: async () => undefined,
     };
-    const log = await createEventLogAppender(storage);
+    const log = await createEventLogAppender(withLength(storage));
 
     await expect(log.append(appendEvents(1)[0]!)).rejects.toMatchObject({
       name: 'EventLogError',
@@ -271,13 +391,13 @@ describe('event-log appender durability', () => {
 
   it('should reject an invalid reducer transition before writing it', async () => {
     const append = vi.fn(async () => undefined);
-    const storage: EventLogStorage = {
+    const storage: BareEventLogStorage = {
       read: async () => new Uint8Array(new ArrayBuffer(0)),
       append,
       truncate: async () => undefined,
       close: async () => undefined,
     };
-    const log = await createEventLogAppender(storage);
+    const log = await createEventLogAppender(withLength(storage));
     await log.append(appendEvents(1)[0]!);
     append.mockClear();
 
@@ -295,7 +415,7 @@ describe('event-log appender durability', () => {
 
   it('should serialize concurrent session cursor allocation with its physical append', async () => {
     let bytes = new Uint8Array(new ArrayBuffer(0));
-    const storage: EventLogStorage = {
+    const storage: BareEventLogStorage = {
       read: async () => bytes,
       append: async (next) => {
         const combined = new Uint8Array(bytes.byteLength + next.byteLength);
@@ -308,7 +428,7 @@ describe('event-log appender durability', () => {
       },
       close: async () => undefined,
     };
-    const log = await createEventLogAppender(storage);
+    const log = await createEventLogAppender(withLength(storage));
     const record = await createSessionRecord({
       log,
       runId: 'run-concurrent',
@@ -350,7 +470,7 @@ describe('event-log appender durability', () => {
       .map((line) => `${line}\n`)
       .join('');
     let bytes = new TextEncoder().encode(seeded);
-    const storage: EventLogStorage = {
+    const storage: BareEventLogStorage = {
       read: async () => bytes,
       append: async (next) => {
         const combined = new Uint8Array(bytes.byteLength + next.byteLength);
@@ -363,7 +483,7 @@ describe('event-log appender durability', () => {
       },
       close: async () => undefined,
     };
-    const log = await createEventLogAppender(storage);
+    const log = await createEventLogAppender(withLength(storage));
 
     const events = await log.read();
     expect(events).toHaveLength(2);
@@ -376,7 +496,7 @@ describe('event-log appender durability', () => {
     expect(reduceEventLog(events)).toEqual([]);
 
     // The log stays writable behind a record this reader does not understand.
-    await expect(log.append({ ...base(2), type: 'message.appended', message: messageFor(0) })).resolves.toEqual({
+    await expect(log.append({ ...base(2), type: 'message.appended', message: messageFor(0) })).resolves.toMatchObject({
       appended: true,
     });
     expect(new TextDecoder().decode(bytes).startsWith(seeded)).toBe(true);
@@ -417,19 +537,20 @@ describe('event-log appender durability', () => {
   });
 
   it('reads replay through bounded cursor batches without returning the full log', async () => {
-    const storage: EventLogStorage = {
+    const storage: BareEventLogStorage = {
       read: async () => new Uint8Array(new ArrayBuffer(0)),
       append: async () => undefined,
       truncate: async () => undefined,
       close: async () => undefined,
     };
-    const log = await createEventLogAppender(storage);
+    const log = await createEventLogAppender(withLength(storage));
     for (const event of appendEvents(5)) {
       // oxlint-disable-next-line no-await-in-loop -- the fixture preserves physical append order.
       await log.append(event);
     }
 
     await expect(log.readBatch({ cursor: 1, limit: 2 })).resolves.toEqual({
+      status: 'batch',
       cursor: 1,
       nextCursor: 3,
       endCursor: 5,
@@ -444,13 +565,13 @@ describe('event-log appender durability', () => {
    * same serializer the page is sent with.
    */
   it('bounds a batch by serialized bytes and still advances past an oversized record', async () => {
-    const storage: EventLogStorage = {
+    const storage: BareEventLogStorage = {
       read: async () => new Uint8Array(new ArrayBuffer(0)),
       append: async () => undefined,
       truncate: async () => undefined,
       close: async () => undefined,
     };
-    const log = await createEventLogAppender(storage);
+    const log = await createEventLogAppender(withLength(storage));
     const large = (sequence: number): AgentLogEvent => ({
       ...base(sequence),
       type: 'message.appended',

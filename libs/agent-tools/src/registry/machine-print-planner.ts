@@ -384,22 +384,24 @@ const colorsOf = (bytes: Uint8Array<ArrayBuffer>): readonly string[] => {
  *
  * @param colors - The printed filaments' colours.
  * @param machine - The machine as observed.
- * @param loaded - The slot a one-filament print uses; its material is the print's.
+ * @param print - The print's material, and the manifest's external spool, which cannot change filament mid-print
+ *   and so feeds one-filament prints only.
  * @returns Each filament's slot, and the material the machine reports in it.
  * @throws When a filament has no free slot of the print's material, naming its colour.
  */
 const mapFilaments = (
   colors: readonly string[],
   machine: MachineDirectoryEntry,
-  loaded: Readonly<{ materialId: string }>,
+  print: Readonly<{ materialId: string; externalSpoolSlot: number | undefined }>,
 ): ReadonlyArray<Readonly<{ slot: number; materialId: string }>> => {
   const { materials } = machine.snapshot.setup;
-  const slots = defaultFilamentSlots(colors, materials, loaded.materialId);
+  const trays = materials.filter((tray) => tray.slot !== print.externalSpoolSlot);
+  const slots = defaultFilamentSlots(colors, trays, print.materialId);
   const missing = colors.filter((_color, index) => slots[index] === undefined);
   if (missing.length > 0) {
     const named = `${missing.length === 1 ? 'colour' : 'colours'} ${missing.join(' and ')}`;
     throw new Error(
-      `No free ${loaded.materialId} slot in ${machine.descriptor.name} for the model's ${named}; load one for each, then ask again.`,
+      `No free ${print.materialId} slot in ${machine.descriptor.name} for the model's ${named}; load one for each, then ask again.`,
     );
   }
   return slots
@@ -407,7 +409,7 @@ const mapFilaments = (
     .map((slot) => ({
       slot,
       /* The tray's own spelling, which the machine compares. */
-      materialId: materials.find((tray) => tray.slot === slot)?.materialId ?? loaded.materialId,
+      materialId: materials.find((tray) => tray.slot === slot)?.materialId ?? print.materialId,
     }));
 };
 
@@ -535,7 +537,13 @@ export const createMachinePrintPlanner =
       });
     const first = await slice(choices.profiles, intent.printIntent);
     const colors = colorsOf(first.bytes);
-    const filaments = colors.length > 1 ? mapFilaments(colors, machine, loaded) : undefined;
+    const filaments =
+      colors.length > 1
+        ? mapFilaments(colors, machine, {
+            materialId: loaded.materialId,
+            externalSpoolSlot: provider.manifest.materialSystem.externalSpoolSlot,
+          })
+        : undefined;
     /* A call naming its own filaments keeps them, as it does for one filament. */
     const presets =
       filaments !== undefined && install !== undefined && input.profiles?.filaments === undefined

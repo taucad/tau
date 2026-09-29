@@ -12,7 +12,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import type { Chat } from '@ai-sdk/react';
-import type { CadAgentConfigInput, CadAgentExecution, MyUIMessage } from '@taucad/chat';
+import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
@@ -22,6 +22,7 @@ import type { ActiveChatSessionContextValue } from '#hooks/active-chat-provider.
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type { AgentHostClientOptions, AgentHostClient } from '#services/agent-host-client.js';
+import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
 import { chatTurnAdmit, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
@@ -40,9 +41,7 @@ const workspaceHarness = vi.hoisted(() => ({
   prepare: vi.fn(),
 }));
 const browserHostHarness = vi.hoisted(() => ({
-  registration: undefined as
-    | { createClient: () => Promise<unknown>; markRunId: (runId: string) => Promise<void> }
-    | undefined,
+  registration: undefined as { createClient: () => Promise<unknown> } | undefined,
   run: undefined as { runId: string; state: 'paused'; eventCount: number } | undefined,
   createClient: vi.fn((_options: AgentHostClientOptions): AgentHostClient => {
     const client = Object.create(null) as AgentHostClient;
@@ -85,14 +84,9 @@ vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: vi.fn(),
   useChatSelector: vi.fn(),
 }));
-const composerHarness = vi.hoisted((): { execution: CadAgentExecution } => ({
-  execution: { kind: 'tau', model: 'openai-gpt-5.5' },
-}));
-
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useActiveChatSession: vi.fn(),
   useChatComposer: () => ({
-    execution: { execution: composerHarness.execution },
     model: {
       model: {
         id: 'openai-gpt-5.5',
@@ -166,9 +160,11 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
     };
   },
   getBrowserAgentHostRun: () => browserHostHarness.run,
+  resumableBrowserAgentHostRunId: () => undefined,
   resolveBrowserAgentHostInterrupt: browserHostHarness.resolveInterrupt,
 }));
-vi.mock('#services/agent-host-client.js', () => ({
+vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof AgentHostClientModule>()),
   createAgentHostClient: browserHostHarness.createDaemonClient,
   createBrowserAgentHostClient: browserHostHarness.createClient,
   isBrowserAgentHostProviderKind: (providerKind: string) => providerKind !== 'tau' && providerKind !== 'ollama',
@@ -195,25 +191,9 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
       durability: 'transactional-rewrite',
     };
   },
-  useOptionalChatWorkspaceAuthority: () => ({
-    ready: true,
-    get: () => workspaceHarness.current,
-    prepare: workspaceHarness.prepare,
-    attachment: async () => workspaceHarness.current,
-    finalize: async () => undefined,
-    discard: async () => undefined,
-    markAdmitted: async () => {
-      await workspaceHarness.admissionGate;
-      workspaceHarness.current = { ...workspaceHarness.current!, admitted: true };
-    },
-    markCancelled: async () => undefined,
-    markRunId: async () => undefined,
-    subscribe: (listener: () => void) => {
-      workspaceHarness.listeners.add(listener);
-      return () => workspaceHarness.listeners.delete(listener);
-    },
-  }),
 }));
+/* ChatTurnHost composes a registration only once the project's revision root is connected (W8 TS-S5). */
+vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionClient: () => ({}) }));
 
 const useCadAgentConfigMock = vi.mocked(useCadAgentConfig);
 const useActiveChatInstanceMock = vi.mocked(useActiveChatInstance);
@@ -247,7 +227,6 @@ const buildActions = (): ActionsMock => ({
 });
 
 const mountAgentMock = (agent: CadAgentConfigInput): void => {
-  composerHarness.execution = agent.execution;
   useCadAgentConfigMock.mockReturnValue(agent);
 };
 
@@ -269,18 +248,17 @@ const sessionWithPersistedErrors = ((): ChatSessionStore['get'] =>
   })) as unknown as ChatSessionStore['get'])();
 
 const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
-  /* Merged, not replaced: the chat's turn host mounts beside the view these
-   * rows render, and it calls the store's placement and reattach seams. */
+  /* The turn host reads the current projection before composing a command. */
   vi.mocked(useChatSessionStore).mockReturnValue({
     requestTurn: vi.fn(),
-    setTurnPlacement: vi.fn(),
-    reattachHostChat,
+    startPendingSeed: vi.fn(),
+    getProjection: () => undefined,
+    respondToProjectedApproval,
     ...partial,
-  } as ChatSessionStore);
+  } as unknown as ChatSessionStore);
 };
 
-/** The store's host-log reattach, re-armed per test. */
-let reattachHostChat = vi.fn();
+const respondToProjectedApproval = vi.fn(async () => undefined);
 
 const installActiveSession = (activeChatId: string): void => {
   vi.mocked(useActiveChatSession).mockReturnValue({
@@ -313,11 +291,8 @@ beforeEach(() => {
   useChatSelectorMock.mockReturnValue('ready');
   installActiveSession('chat_test');
   persistedErrors.length = 0;
-  reattachHostChat = vi.fn();
+  respondToProjectedApproval.mockClear();
   installSessionStore({
-    startRun: vi.fn((_chatId: string, body: Readonly<Record<string, unknown>>) => body),
-    endRun: vi.fn(),
-    reattachHostChat,
     get: sessionWithPersistedErrors,
   });
 });
@@ -363,17 +338,19 @@ describe('admission against the placement book a real discovery pass filled', ()
       expect(chatTurnAdmit('chat_test')).toBeDefined();
     });
     const turn = await chatTurnAdmit('chat_test')!({ kind: 'send', message: { id: 'm', role: 'user', parts: [] } });
-    const body = turn.request.body as Record<string, unknown>;
-    expect(body['execution']).toEqual({ hostId: 'origin' });
+    expect(turn.request.command).toMatchObject({
+      type: 'start',
+      payload: { chatId: 'chat_test', runId: turn.runId, trigger: 'submit' },
+    });
+    expect(workspaceHarness.prepare).not.toHaveBeenCalled();
     expect(persistedErrors).toEqual([]);
   });
 
-  /* A daemon-placed chat holds no browser workspace claim, which is the whole
-     reason `ProjectChatRunSettlement` settles nothing for one — and therefore
-     the reason the host's own `revision.finalized` record is the turn's only
-     graph node. Answering an approval must not be the one path that mints one:
-     with no live host run to answer (a reload before the reattach), the stale
-     affordance is dropped rather than turned into a claim (5-review N5). */
+  /* A daemon-placed chat is placed and settled by the daemon, so the host's
+     own `revision.finalized` record is the turn's only graph node. Answering
+     an approval must not be the one path that mints one: with no live host
+     run to answer (a reload before the reattach), the stale affordance is
+     dropped (5-review N5). */
   it('claims no browser workspace when an approval is answered on a daemon-placed chat', async () => {
     await discoverHost(['direct']);
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));
@@ -384,20 +361,17 @@ describe('admission against the placement book a real discovery pass filled', ()
     // No run this transport is driving: `getBrowserAgentHostRun` answers nothing.
     browserHostHarness.run = undefined;
 
-    const { result } = renderHook(() => useCadChatClient(), {
-      wrapper: ({ children }) => (
-        <>
-          <ChatTurnHost />
-          {children}
-        </>
-      ),
-    });
+    const { result } = renderHook(() => useCadChatClient());
     await act(async () => {
       await result.current.respondToToolApproval('approval-1', true);
     });
 
     expect(workspaceHarness.prepare).not.toHaveBeenCalled();
     expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
-    expect(browserHostHarness.resolveInterrupt).not.toHaveBeenCalled();
+    expect(respondToProjectedApproval).toHaveBeenCalledWith('chat_test', 'approval-1', {
+      approved: true,
+      reason: undefined,
+      optionId: undefined,
+    });
   });
 });

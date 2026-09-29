@@ -136,6 +136,8 @@
     "tau-lint/plugin-capability-filename": "error",
     "tau-lint/no-authored-pointer-cursor": "error",
     "tau-lint/no-inline-actor-selector": "error",
+    // Agent substrate contract (docs/policy/xstate-policy.md, MC-R1–MC-R30). No options, so no override can replace them.
+    "tau-lint/xstate-contract": "error",
     "unicorn/no-accessor-recursion": "error",
     "unicorn/no-anonymous-default-export": "error",
     "unicorn/no-array-callback-reference": "error",
@@ -1722,6 +1724,76 @@
       "files": ["packages/runtime/src/**/*.{ts,tsx}"],
       "rules": {
         "tau-lint/static-import-meta-url": "error"
+      }
+    },
+    {
+      // Agent substrate owner machines in published packages (docs/policy/xstate-policy.md, MC-R1–MC-R30).
+      // `portable`: MC-R2 import boundary. `spec`: the owner has a TLA+ spec, so MC-R27 (`transitionMeta`) applies.
+      "files": [
+        "packages/revisions/src/*.machine.ts",
+        "packages/agent-host/src/**/*.machine.ts",
+        "packages/agent-host/src/**/*.logic.ts",
+        "packages/host/src/**/*.machine.ts"
+      ],
+      "rules": {
+        "tau-lint/xstate-owner-machine": ["error", { "portable": true, "spec": true }]
+      }
+    },
+    {
+      // Agent substrate owner machines in the UI (MC-Q5: owner mode, not portable; no spec yet, so no MC-R27).
+      "files": [
+        "apps/ui/app/machines/{chat-session,project-session,sessions,composer-record}.machine.ts",
+        "apps/ui/app/machines/*.logic.ts",
+        "apps/ui/app/hooks/{chat-persistence,draft}.machine.ts"
+      ],
+      "rules": {
+        "tau-lint/xstate-owner-machine": "error"
+      }
+    },
+    /*
+     * Ratchet (MC-S6). Each entry lists exactly the message ids its files violate today; overrides replace
+     * options, so each restates the full options. The owning change deletes its entry. Keep these after the
+     * owner globs above: the last matching override wins.
+     */
+    {
+      // Ratchet, W5 (revisions machines).
+      "files": ["packages/revisions/src/*.machine.ts"],
+      "rules": {
+        "tau-lint/xstate-owner-machine": [
+          "error",
+          { "portable": true, "spec": true, "pending": ["rootOnError", "version", "transitionMeta"] }
+        ]
+      }
+    },
+    {
+      // Ratchet, W5.
+      "files": ["packages/revisions/src/sync.machine.ts"],
+      "rules": {
+        "tau-lint/xstate-owner-machine": [
+          "error",
+          { "portable": true, "spec": true, "pending": ["impure", "rootOnError", "version", "transitionMeta"] }
+        ]
+      }
+    },
+    {
+      // Ratchet, W5.
+      "files": ["packages/revisions/src/project-revisions.machine.ts"],
+      "rules": {
+        "tau-lint/xstate-owner-machine": [
+          "error",
+          {
+            "portable": true,
+            "spec": true,
+            "pending": ["rootOnError", "snapshotRead", "spawnByKey", "version", "transitionMeta"]
+          }
+        ]
+      }
+    },
+    {
+      // Ratchet, W9: `admitTurn` and `settleTurn` are deleted in PV-S13.
+      "files": ["apps/ui/app/machines/chat-session.machine.ts"],
+      "rules": {
+        "tau-lint/xstate-owner-machine": ["error", { "pending": ["fromSafeAsync"] }]
       }
     }
   ],

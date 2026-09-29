@@ -81,7 +81,20 @@ const computeOpeners = (worker: Worker, admittedProjectId: string | undefined) =
       channel.port2.start();
     }) as ReturnType<ComputeStoreControl[Name]>;
   };
-  return { openComputeBinding, openComputeStorePort, computeControl };
+  /* W8 TS-S5: a port into this project's revision root for the resident agent host, as a placement session or a
+   * `revisions` tool reader. The worker serves it only once the page's own revision port has opened the root. */
+  const openRevisionSessionPort = (kind: 'placement' | 'reader', projectId: string): MessagePort => {
+    if (!admittedProjectId || projectId !== admittedProjectId) {
+      throw new Error('Revision session project authority does not match the active project.');
+    }
+    const channel = new MessageChannel();
+    worker.postMessage(
+      { type: kind === 'placement' ? 'placementConnect' : 'revisionsReaderConnect', projectId, port: channel.port1 },
+      [channel.port1],
+    );
+    return channel.port2;
+  };
+  return { openComputeBinding, openComputeStorePort, computeControl, openRevisionSessionPort };
 };
 
 /**
@@ -114,6 +127,7 @@ type FileManagerContext = {
   openComputeBinding?: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
   openComputeStorePort?: (projectId: string) => MessagePort;
   computeControl?: ReturnType<typeof computeOpeners>['computeControl'];
+  openRevisionSessionPort?: ReturnType<typeof computeOpeners>['openRevisionSessionPort'];
   filePoolBuffer: SharedArrayBuffer | undefined;
   contentService: FileContentService | undefined;
   treeService: FileTreeService | undefined;
@@ -153,6 +167,8 @@ type FileManagerContext = {
   activeWorkspaceName: string | undefined;
   projectId: string | undefined;
   sharedWorker: Worker | undefined;
+  /** Whether this mount restarted its worker within the last liveness bound; a second death then shows the error. */
+  restarted: boolean;
   onExternalPollTelemetry: ((aggregate: ExternalPollTelemetry) => void) | undefined;
   onRootSkipped: ((skip: WorkspaceRootSkip) => void) | undefined;
 };
@@ -168,6 +184,7 @@ type WorkerConnectedEvent = {
   openComputeBinding: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
   openComputeStorePort: (projectId: string) => MessagePort;
   computeControl: ReturnType<typeof computeOpeners>['computeControl'];
+  openRevisionSessionPort: ReturnType<typeof computeOpeners>['openRevisionSessionPort'];
   filePoolBuffer: SharedArrayBuffer | undefined;
 };
 
@@ -378,7 +395,10 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     const openBridge = (root: string, consumer: RootedBridgeConsumer): FileSystemBridgeConnection =>
       openFileSystemBridge(worker, { root, consumer });
     worker.postMessage({ type: 'computeStoreAdmission', projectId: context.projectId });
-    const { openComputeBinding, openComputeStorePort, computeControl } = computeOpeners(worker, context.projectId);
+    const { openComputeBinding, openComputeStorePort, computeControl, openRevisionSessionPort } = computeOpeners(
+      worker,
+      context.projectId,
+    );
 
     return {
       type: 'workerConnected',
@@ -389,6 +409,7 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
       openComputeBinding,
       openComputeStorePort,
       computeControl,
+      openRevisionSessionPort,
       filePoolBuffer,
     };
   },
@@ -700,6 +721,7 @@ const destroyWorkerAndServices = (context: FileManagerContext, enq: FileManagerE
     openComputeBinding: undefined,
     openComputeStorePort: undefined,
     computeControl: undefined,
+    openRevisionSessionPort: undefined,
     worker: context.sharedWorker ? context.worker : undefined,
     contentService: undefined,
     treeService: undefined,
@@ -728,6 +750,7 @@ const updateRootAndReset = (
     openComputeBinding: openers?.openComputeBinding,
     openComputeStorePort: openers?.openComputeStorePort,
     computeControl: openers?.computeControl,
+    openRevisionSessionPort: openers?.openRevisionSessionPort,
     error: undefined,
     // Workspace identity is a per-init *output* of `initializeServicesActor`;
     // it must NEVER survive a project transition. Clearing here closes the
@@ -779,6 +802,10 @@ export const fileManagerMachine = setup({
     input: types<FileManagerInput>(),
   },
   actors: fileManagerActors,
+  delays: {
+    /** A worker that dies again within this bound of its restart is shown as failed (RV1-F1, T9 E4). Milliseconds. */
+    restartWindow: 3500,
+  },
 }).createMachine({
   id: 'fileManager',
   entry: ({ context, self }, enq) => {
@@ -793,6 +820,7 @@ export const fileManagerMachine = setup({
     openComputeBinding: undefined,
     openComputeStorePort: undefined,
     computeControl: undefined,
+    openRevisionSessionPort: undefined,
     // Seed with the parent's SAB when nested so the connect actor's gate
     // observes a non-undefined buffer and skips re-allocation.
     filePoolBuffer: input.sharedFilePoolBuffer,
@@ -809,6 +837,7 @@ export const fileManagerMachine = setup({
     activeWorkspaceName: undefined,
     projectId: input.projectId,
     sharedWorker: input.sharedWorker,
+    restarted: false,
     onExternalPollTelemetry: input.onExternalPollTelemetry,
     onRootSkipped: input.onRootSkipped,
   }),
@@ -837,6 +866,7 @@ export const fileManagerMachine = setup({
             openComputeBinding: event.openComputeBinding,
             openComputeStorePort: event.openComputeStorePort,
             computeControl: event.computeControl,
+            openRevisionSessionPort: event.openRevisionSessionPort,
             filePoolBuffer: event.filePoolBuffer,
           }),
         },
@@ -923,13 +953,24 @@ export const fileManagerMachine = setup({
       exit: ({ context }, enq) => {
         stopPolling(context, enq);
       },
+      after: {
+        restartWindow: () => ({ context: { restarted: false } }),
+      },
       invoke: {
         src: 'watchProxyClosedActor',
         input: ({ context }) => ({ proxy: context.proxy }),
-        onError: ({ context, event }, enq) => ({
-          target: 'error',
-          context: { ...setError(event.error, enq), ...destroyWorkerAndServices(context, enq) },
-        }),
+        /* RV1-F1: the root mount restarts its own dead worker once without a click; a nested mount's worker is its
+         * parent's to restart, and a second death within the bound shows the error with "Try again". */
+        onError: ({ context, event }, enq) =>
+          context.sharedWorker === undefined && !context.restarted
+            ? {
+                target: 'connectingWorker',
+                context: { ...destroyWorkerAndServices(context, enq), restarted: true },
+              }
+            : {
+                target: 'error',
+                context: { ...setError(event.error, enq), ...destroyWorkerAndServices(context, enq) },
+              },
       },
       on: {
         setRoot: changeRoot({ whenChanged: true, stopPolling: true }),

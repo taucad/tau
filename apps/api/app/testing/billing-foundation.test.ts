@@ -174,6 +174,18 @@ describe('billing database protections and real command', () => {
         day - interval '2 days', true, true, true, true, true, true, 'complete', clock_timestamp()
       FROM (SELECT date_trunc('day', clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS day) w
       ON CONFLICT DO NOTHING`;
+    const accountId = randomUUID();
+    const bindingId = randomUUID();
+    const closureId = randomUUID();
+    await client`INSERT INTO billing.credit_account (id, environment, status) VALUES (${accountId}, 'staging', 'closing')`;
+    await client`INSERT INTO billing.billing_owner_binding (id, account_id, environment, revoked_at)
+      VALUES (${bindingId}, ${accountId}, 'staging', clock_timestamp() - interval '2 minutes')`;
+    await client`INSERT INTO billing.billing_account_closure
+        (id, account_id, binding_id, environment, request_id, request_hash, state,
+         binding_revoked_at, obligations_frozen_at, auth_deleted_at, updated_at)
+      VALUES (${closureId}, ${accountId}, ${bindingId}, 'staging', ${closureId}, 'fixture', 'ready_for_auth_deletion',
+        clock_timestamp() - interval '2 minutes', clock_timestamp() - interval '2 minutes',
+        clock_timestamp() - interval '2 minutes', clock_timestamp() - interval '2 minutes')`;
     childEnvironment['STRIPE_SECRET_KEY'] = 'rk_test_operations_worker';
     childEnvironment['STRIPE_READ_SECRET_KEY'] = 'rk_test_operations_worker_read';
     childEnvironment['STRIPE_ACCOUNT_ID'] = 'acct_operations_worker';
@@ -194,7 +206,7 @@ describe('billing database protections and real command', () => {
         '1000',
       ],
       {
-        // The empty environment has no reload work or closures, so this verifies scheduling without provider I/O.
+        // The owned due closure proves the scheduled job runs without any provider I/O.
         env: childEnvironment as NodeJS.ProcessEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
       },
@@ -232,7 +244,6 @@ describe('billing database protections and real command', () => {
           expect.objectContaining({
             event: 'billing.account_closure',
             environment: 'staging',
-            report: { processed: 0, pending: 0, attention: 0 },
           }),
           // Due at boot, not one cadence in: a frequently restarted worker still reconciles.
           expect.objectContaining({
@@ -241,6 +252,9 @@ describe('billing database protections and real command', () => {
           }),
         ]),
       );
+      const [closed] = await client`SELECT state, closed_at IS NOT NULL AS closed
+        FROM billing.billing_account_closure WHERE id = ${closureId}`;
+      expect(closed).toMatchObject({ state: 'closed', closed: true });
       child.kill('SIGTERM');
       const [code, signal] = (await once(child, 'close')) as unknown[];
       expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: '' });

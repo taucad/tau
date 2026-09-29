@@ -267,7 +267,7 @@ const liveThread = async (options: LiveThreadOptions): Promise<HostRunSnapshot> 
           systemPrompt,
           model,
           toolRegistry,
-          eventLog: await createNodeEventLog({ filePath }),
+          eventLog: await createNodeEventLog({ filePath, access: 'write' }),
         });
         try {
           await session.prompt({ id: `${chatId}-user-${String(index + 1)}`, role: 'user', content: prompt });

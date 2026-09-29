@@ -5,7 +5,7 @@
  * lifetime of the app. The store outlives every React subtree and owns the
  * per-chat AI SDK `Chat`, persistence actor, draft actor and composer record
  * actor, plus each project's unread record; React components subscribe via
- * `useChatSession(chatId)` (acquire/release) and
+ * `useChatSession(chatId, projectId)` (acquire/release) and
  * `useChatSessionSnapshot(chatId, selector)` (re-render gate).
  *
  * The provider mirrors the closures from `useProjectManager()` and the file
@@ -15,9 +15,11 @@
  */
 
 import { createContext, useContext, useState } from 'react';
+import type { EventRejection } from 'xstate';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
+import { inspect } from '#machines/inspector.js';
 
 const ChatSessionStoreContext = createContext<ChatSessionStore | undefined>(undefined);
 
@@ -25,8 +27,19 @@ type ChatSessionStoreProviderProps = {
   readonly children: React.ReactNode;
 };
 
+/* Development only: a rejected event is a machine that did not expect it (MC-R4). */
+const warnRejectedEvent = (rejection: EventRejection): void => {
+  console.warn('[ChatSessionStore] an actor rejected an event', rejection);
+};
+
 export function ChatSessionStoreProvider({ children }: ChatSessionStoreProviderProps): React.JSX.Element {
-  const [store] = useState(() => new ChatSessionStore());
+  const [store] = useState(
+    () =>
+      new ChatSessionStore({
+        ...(inspect === undefined ? {} : { inspect }),
+        ...(import.meta.env.DEV ? { onRejectedEvent: warnRejectedEvent } : {}),
+      }),
+  );
   const projectManager = useProjectManager();
   const { recordFiles } = useFileManager();
 

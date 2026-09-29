@@ -504,7 +504,7 @@ bool all_source_length_contexts_are_millimeters(STEPControl_Reader& reader) {
     } else if (entity->IsKind(STANDARD_TYPE(
                    StepGeom_GeomRepContextAndGlobUnitAssCtxAndGlobUncertaintyAssCtx))) {
       context = occ::down_cast<
-          StepGeom_GeomRepContextAndGlobUncertaintyAssCtxAndGlobUncertaintyAssCtx>(entity)
+          StepGeom_GeomRepContextAndGlobUnitAssCtxAndGlobUncertaintyAssCtx>(entity)
                     ->GlobalUnitAssignedContext();
     }
     if (context.IsNull()) continue;
@@ -7735,8 +7735,8 @@ int geospec_occt_occurrence_minimum_distance(
     // Charge the setup traversal before it reads topology. The second charge
     // prices the synchronous extrema from the counted whole occurrences.
     if (charge(context, 1) != 0) return GEOSPEC_OCCT_STOPPED;
-    TopTools_IndexedMapOfShape parts_a;
-    TopTools_IndexedMapOfShape parts_b;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> parts_a;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> parts_b;
     TopExp::MapShapes(document->occurrences[a].shape, parts_a);
     TopExp::MapShapes(document->occurrences[b].shape, parts_b);
     const uint64_t units_a = static_cast<uint64_t>(parts_a.Extent());

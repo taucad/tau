@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- file-system path keys are not camelCase identifiers. */
 /**
  * Provenance on request-scoped kernel results (blueprint R4, invariant I5).
  *
@@ -12,6 +11,10 @@
 import { describe, it, expect } from 'vitest';
 import { digestContent } from '@taucad/cache-core';
 import type { OnWorkerLog } from '@taucad/types';
+import type { NativeBuildInput } from '#framework/render-artifact.js';
+import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import type { ExportGeometryInput, KernelRuntime } from '#types/runtime-kernel.types.js';
+import type { CreateGeometryResult, ExportGeometryResult } from '#types/runtime.types.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
 import {
   MockKernelWorker,
@@ -34,7 +37,11 @@ const notFound = (path: string): NodeJS.ErrnoException => {
 const writtenDigest = async (source: string): Promise<string> =>
   digestContent({ bytes: new TextEncoder().encode(source) });
 
-const createHarness = (initial: Record<string, string>) => {
+const createHarness = (
+  initial: Record<string, string>,
+  middleware: ConstructorParameters<typeof MockKernelWorker>[0]['middleware'] = [],
+  Worker: new (options: ConstructorParameters<typeof MockKernelWorker>[0]) => MockKernelWorker = MockKernelWorker,
+) => {
   const files = new Map(Object.entries(initial));
   const filesystem = createMockFileSystem({
     existsResult: (path) => files.has(path),
@@ -57,7 +64,7 @@ const createHarness = (initial: Record<string, string>) => {
       }),
     ),
   );
-  const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+  const worker = new Worker({ middleware, onLog: noopLog, filesystem });
   // @ts-expect-error - the private bridge filesystem is what a host adapter supplies.
   worker.fileSystem = { ...filesystem };
   return { worker, files };
@@ -103,5 +110,162 @@ describe('request-scoped results name the source revision they evaluated (R4)', 
     expect(exported.sourceRevision?.files['main.ts']).toBe(expected);
     expect(snapshot.sourceRevision?.files['main.ts']).toBe(expected);
     await worker.cleanup();
+  });
+
+  it('should not mistake parameter provenance for geometry-only source identity', async () => {
+    const path = 'geometry.flag';
+    let geometryValue = 'first';
+    const middleware = defineMiddleware({
+      id: 'geometry-only-provenance',
+      name: 'GeometryOnlyProvenance',
+      getDependencies: () => [{ path, affects: ['createGeometry'] }],
+      async wrapCreateGeometry(input, handler) {
+        const result = await handler(input);
+        return result.success
+          ? { ...result, data: { format: 'gltf', content: new TextEncoder().encode(geometryValue) } }
+          : result;
+      },
+    });
+    const { worker, files } = createHarness({ 'main.ts': 'same', [path]: geometryValue }, [middleware]);
+    try {
+      const first = await worker.evaluateModel({ file: createGeometryFile('main.ts'), parameters: {} });
+      geometryValue = 'second';
+      files.set(path, geometryValue);
+      const second = await worker.evaluateModel({ file: createGeometryFile('main.ts'), parameters: {} });
+
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(true);
+      if (!first.success || !second.success) {
+        throw new Error('Expected two evaluated geometries.');
+      }
+      expect(first.data.hash).not.toBe(second.data.hash);
+      expect(first.sourceRevision).toEqual(second.sourceRevision);
+      expect(first.sourceRevision?.files[path]).toBeUndefined();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('should not mistake parameter provenance for export-only source identity', async () => {
+    const path = 'export.flag';
+    let exportValue = 'first';
+    const middleware = defineMiddleware({
+      id: 'export-only-provenance',
+      name: 'ExportOnlyProvenance',
+      getDependencies: () => [{ path, affects: ['exportGeometry'] }],
+      async wrapExportGeometry(input, handler) {
+        const result = await handler(input);
+        return result.success
+          ? { ...result, data: [{ ...result.data[0]!, bytes: new TextEncoder().encode(exportValue) }] }
+          : result;
+      },
+    });
+    const { worker, files } = createHarness({ 'main.ts': 'same', [path]: exportValue }, [middleware]);
+    try {
+      const first = await worker.exportModel({ file: createGeometryFile('main.ts'), parameters: {}, format: 'gltf' });
+      exportValue = 'second';
+      files.set(path, exportValue);
+      const second = await worker.exportModel({ file: createGeometryFile('main.ts'), parameters: {}, format: 'gltf' });
+
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(true);
+      if (!first.success || !second.success) {
+        throw new Error('Expected two exports.');
+      }
+      expect(first.data[0]?.bytes).not.toEqual(second.data[0]?.bytes);
+      expect(first.sourceRevision).toEqual(second.sourceRevision);
+      expect(first.sourceRevision?.files[path]).toBeUndefined();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('should re-evaluate an export-only missing dependency when the file appears', async () => {
+    const path = 'optional-export.flag';
+    let exportValue = 'missing';
+    const middleware = defineMiddleware({
+      id: 'appearing-export-dependency',
+      name: 'AppearingExportDependency',
+      getDependencies: () => [{ path, affects: ['exportGeometry'] }],
+      async wrapExportGeometry(input, handler) {
+        const result = await handler(input);
+        return result.success
+          ? { ...result, data: [{ ...result.data[0]!, bytes: new TextEncoder().encode(exportValue) }] }
+          : result;
+      },
+    });
+    const { worker, files } = createHarness({ 'main.ts': 'same' }, [middleware]);
+    try {
+      const first = await worker.exportModel({ file: createGeometryFile('main.ts'), parameters: {}, format: 'gltf' });
+      files.set(path, 'present');
+      exportValue = 'present';
+      const second = await worker.exportModel({ file: createGeometryFile('main.ts'), parameters: {}, format: 'gltf' });
+
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(true);
+      if (!first.success || !second.success) {
+        throw new Error('Expected two exports.');
+      }
+      expect(new TextDecoder().decode(first.data[0]?.bytes)).toBe('missing');
+      expect(new TextDecoder().decode(second.data[0]?.bytes)).toBe('present');
+      expect(first.sourceRevision).toEqual(second.sourceRevision);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('should not reuse a published render after its geometry-only dependency changes', async () => {
+    const path = 'geometry.flag';
+    let geometryValue = 'first';
+    const middleware = defineMiddleware({
+      id: 'render-cache-source',
+      name: 'RenderCacheSource',
+      getDependencies: () => [{ path, affects: ['createGeometry'] }],
+    });
+    class SourceBoundHandleWorker extends MockKernelWorker {
+      protected override async onCreateGeometry(
+        _input: NativeBuildInput,
+        _runtime: KernelRuntime,
+      ): Promise<CreateGeometryResult> {
+        this.createGeometryCalls++;
+        this.captureNativeHandle({ value: geometryValue });
+        return { success: true, data: { format: 'gltf', content: new TextEncoder().encode(geometryValue) }, issues: [] };
+      }
+
+      protected override async onExportGeometry(
+        input: ExportGeometryInput,
+        _runtime: KernelRuntime,
+      ): Promise<ExportGeometryResult> {
+        const handle = input.nativeHandle as { value: string };
+        return {
+          success: true,
+          data: [{ name: 'export.gltf', mimeType: 'model/gltf+json', bytes: new TextEncoder().encode(handle.value) }],
+          issues: [],
+        };
+      }
+    }
+    const { worker, files } = createHarness(
+      { 'main.ts': 'same', [path]: geometryValue }, [middleware], SourceBoundHandleWorker,
+    );
+    try {
+      await worker.runCreateGeometry('main.ts');
+      const first = await worker.exportModel({ file: createGeometryFile('main.ts'), parameters: {}, format: 'gltf' });
+      const buildsAfterFirst = worker.createGeometryCalls;
+      geometryValue = 'second';
+      files.set(path, geometryValue);
+      const second = await worker.exportModel({ file: createGeometryFile('main.ts'), parameters: {}, format: 'gltf' });
+
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(true);
+      if (!first.success || !second.success) {
+        throw new Error('Expected two exports.');
+      }
+      expect(new TextDecoder().decode(first.data[0]?.bytes)).toBe('first');
+      expect(new TextDecoder().decode(second.data[0]?.bytes)).toBe('second');
+      expect(first.sourceRevision).toEqual(second.sourceRevision);
+      expect(worker.createGeometryCalls).toBeGreaterThan(buildsAfterFirst);
+    } finally {
+      await worker.cleanup();
+    }
   });
 });

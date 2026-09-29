@@ -59,6 +59,8 @@ export function useProjectChatUsage(
     const controller = new AbortController();
     let active = 0;
     const activeIds = new Set<string>();
+    const readingIds = new Set<string>();
+    const dirtyIds = new Set<string>();
     const pending = new Set<string>();
     const retries = new Map<string, ReturnType<typeof setTimeout>>();
     async function load(chatId: string): Promise<void> {
@@ -70,8 +72,9 @@ export function useProjectChatUsage(
         if (controller.signal.aborted || !ready) {
           return;
         }
+        readingIds.add(chatId);
         const summary = await store.getHistoricalUsage(chatId);
-        if (!stopped) {
+        if (!stopped && !dirtyIds.has(chatId)) {
           complete = true;
           setUsage((previous) => {
             if (previous.get(chatId) === summary) {
@@ -83,10 +86,14 @@ export function useProjectChatUsage(
       } catch (error) {
         console.warn('[Chat] historical usage could not be read', chatId, error);
       } finally {
+        readingIds.delete(chatId);
         release();
         active--;
         activeIds.delete(chatId);
         if (!stopped) {
+          if (dirtyIds.delete(chatId)) {
+            pending.add(chatId);
+          }
           pump();
           if (!complete && !pending.has(chatId) && !activeIds.has(chatId)) {
             const retry = setTimeout(() => {
@@ -114,6 +121,9 @@ export function useProjectChatUsage(
         retries.delete(chatId);
       }
       if (activeIds.has(chatId)) {
+        if (readingIds.has(chatId)) {
+          dirtyIds.add(chatId);
+        }
         return;
       }
       pending.add(chatId);

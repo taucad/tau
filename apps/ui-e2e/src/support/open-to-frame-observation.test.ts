@@ -104,3 +104,98 @@ it('clips selected producer spans without counting nested work twice or implying
     await observedRuntimeWindow({ traceFile: file, kernelId: 'replicad', fromEpoch: 1010, toEpoch: 1070 }),
   ).toBeUndefined();
 });
+
+it('joins only the in-window selected utility when a later render uses another PID', async () => {
+  directory = await mkdtemp(join(tmpdir(), 'tau-otf-pid-'));
+  const file = join(directory, 'trace.jsonl');
+  await writeFile(
+    file,
+    [
+      {
+        name: 'kernel.render',
+        epoch: 1000,
+        startTime: 0,
+        duration: 70,
+        detail: { spanId: '1' },
+        origin: { label: 'utility', instance: 'pid-42-one' },
+      },
+      {
+        name: 'kernel.select',
+        epoch: 1000,
+        startTime: 15,
+        duration: 5,
+        detail: { parentSpanId: '1', kernelId: 'jscad' },
+        origin: { label: 'utility', instance: 'pid-42-one' },
+      },
+      {
+        name: 'kernel.compute',
+        epoch: 1000,
+        startTime: 20,
+        duration: 50,
+        origin: { label: 'utility', instance: 'pid-42-one' },
+      },
+      {
+        name: 'kernel.render',
+        epoch: 1000,
+        startTime: 100,
+        duration: 50,
+        detail: { spanId: '2' },
+        origin: { label: 'utility', instance: 'pid-99-two' },
+      },
+      {
+        name: 'kernel.select',
+        epoch: 1000,
+        startTime: 105,
+        duration: 5,
+        detail: { parentSpanId: '2', kernelId: 'jscad' },
+        origin: { label: 'utility', instance: 'pid-99-two' },
+      },
+    ]
+      .map((row) => JSON.stringify(row))
+      .join('\n'),
+  );
+  expect(await observedRuntimeWindow({ traceFile: file, kernelId: 'jscad', fromEpoch: 1010, toEpoch: 1060 })).toEqual({
+    origin: 'pid-42-one',
+    role: 'utility',
+    pid: 42,
+    spanCount: 3,
+    overlappingMilliseconds: 50,
+    names: { 'kernel.render': 50, 'kernel.compute': 40, 'kernel.select': 5 },
+    pidJoined: true,
+  });
+  expect(
+    await observedRuntimeWindow({ traceFile: file, kernelId: 'jscad', fromEpoch: 1070, toEpoch: 1090 }),
+  ).toBeUndefined();
+});
+
+it('refuses a PID when two utilities select the same kernel during one action', async () => {
+  directory = await mkdtemp(join(tmpdir(), 'tau-otf-ambiguous-'));
+  const file = join(directory, 'trace.jsonl');
+  await writeFile(
+    file,
+    [42, 99]
+      .flatMap((pid, index) => [
+        {
+          name: 'kernel.render',
+          epoch: 1000,
+          startTime: 10 + index * 10,
+          duration: 40,
+          detail: { spanId: String(pid) },
+          origin: { label: 'utility', instance: `pid-${String(pid)}-unique` },
+        },
+        {
+          name: 'kernel.select',
+          epoch: 1000,
+          startTime: 15 + index * 10,
+          duration: 5,
+          detail: { parentSpanId: String(pid), kernelId: 'jscad' },
+          origin: { label: 'utility', instance: `pid-${String(pid)}-unique` },
+        },
+      ])
+      .map((row) => JSON.stringify(row))
+      .join('\n'),
+  );
+  expect(
+    await observedRuntimeWindow({ traceFile: file, kernelId: 'jscad', fromEpoch: 1000, toEpoch: 1060 }),
+  ).toBeUndefined();
+});

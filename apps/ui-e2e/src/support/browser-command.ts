@@ -7,6 +7,7 @@ import type { Server } from 'node:http';
 import { release } from 'node:os';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { gunzipSync } from 'node:zlib';
 import type { BrowserCommand, BrowserCommandContext } from 'vitest/node';
 import { captureChatLogs, chatLogDestination, writeChatLogs } from '@taucad/formal/capture';
 import type { CapturedChatLog } from '@taucad/formal/capture';
@@ -85,6 +86,8 @@ type Session = {
   /** The DevTools session of each page whose CPU profile `uiCpuProfile` is recording. */
   readonly cpuProfiles: Map<TargetSurface, CdpSession>;
   readonly pageErrors: string[];
+  readonly posthogEvents: Array<{ readonly event: string; readonly decoded: string }>;
+  readonly posthogRequests: string[];
   readonly primary: TargetPage;
   readonly workerIds: WeakMap<object, string>;
   nextWorkerId: number;
@@ -351,6 +354,8 @@ export const uiOpenTarget: BrowserCommand = async (commandContext) => {
     context,
     cpuProfiles: new Map(),
     pageErrors: [],
+    posthogEvents: [],
+    posthogRequests: [],
     primary,
     workerIds: new WeakMap(),
     nextWorkerId: 0,
@@ -807,6 +812,94 @@ export const uiSetAgentHostGatewayFailure: BrowserCommand<[failure?: AgentHostGa
 export const uiReadAgentHostApiRequests: BrowserCommand<[], string[]> = (commandContext) => [
   ...sessionFor(commandContext).agentHostApiRequests,
 ];
+
+/** Local SDK transport: no analytics request can leave the browser context. */
+export const uiInstallPostHogFixture: BrowserCommand<[apiKey: string]> = async (commandContext, apiKey) => {
+  const session = sessionFor(commandContext);
+  const recorder = await readFile(
+    resolve(import.meta.dirname, '../../../../node_modules/posthog-js/dist/lazy-recorder.js'),
+  );
+  const deadClicks = await readFile(
+    resolve(import.meta.dirname, '../../../../node_modules/posthog-js/dist/dead-clicks-autocapture.js'),
+  );
+  await session.context.addInitScript(
+    ({ key }) => {
+      Object.defineProperty(navigator, 'webdriver', { configurable: true, value: false });
+      Object.defineProperty(navigator, 'userAgent', {
+        configurable: true,
+        value: navigator.userAgent.replace('HeadlessChrome', 'Chrome'),
+      });
+      (globalThis as typeof globalThis & { ENV?: Record<string, unknown> }).ENV = {
+        ...(globalThis as typeof globalThis & { ENV?: Record<string, unknown> }).ENV,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- client environment wire name
+        POSTHOG_CLIENT_KEY: key,
+      };
+      (globalThis as typeof globalThis & { _POSTHOG_REMOTE_CONFIG?: Record<string, unknown> })._POSTHOG_REMOTE_CONFIG =
+        {
+          [key]: { config: { sessionRecording: { sampleRate: 1, minimumDurationMilliseconds: 0 } } },
+        };
+    },
+    { key: apiKey },
+  );
+  await session.context.route(/\/api\/ph\//u, async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    session.posthogRequests.push(`${request.method()} ${url.pathname}`);
+    if (url.pathname.endsWith('/lazy-recorder.js')) {
+      await route.fulfill({ status: 200, contentType: 'application/javascript', body: recorder });
+      return;
+    }
+    if (url.pathname.endsWith('/dead-clicks-autocapture.js')) {
+      await route.fulfill({ status: 200, contentType: 'application/javascript', body: deadClicks });
+      return;
+    }
+    const body = request.postDataBuffer();
+    if (body && (url.pathname.includes('/e/') || url.pathname.includes('/s/'))) {
+      const decoded = body[0] === 31 && body[1] === 139 ? gunzipSync(body).toString('utf8') : body.toString('utf8');
+      const payload: unknown = JSON.parse(decoded);
+      const events: unknown[] = Array.isArray(payload) ? (payload as unknown[]) : [payload];
+      for (const event of events) {
+        if (event !== null && typeof event === 'object' && 'event' in event && typeof event.event === 'string') {
+          const compressed: string[] = [];
+          const visit = (value: unknown): void => {
+            if (typeof value === 'string' && value.codePointAt(0) === 31 && value.codePointAt(1) === 139) {
+              compressed.push(gunzipSync(Buffer.from(value, 'latin1')).toString('utf8'));
+            } else if (Array.isArray(value)) {
+              for (const item of value) {
+                visit(item);
+              }
+            } else if (value !== null && typeof value === 'object') {
+              for (const item of Object.values(value)) {
+                visit(item);
+              }
+            }
+          };
+          visit(event);
+          session.posthogEvents.push({
+            event: event.event,
+            decoded: `${JSON.stringify(event)}\n${compressed.join('\n')}`,
+          });
+        }
+      }
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"flags":{}}' });
+  });
+};
+
+export const uiReadPostHogSummary: BrowserCommand<
+  [sentinels: readonly string[]],
+  { readonly events: string[]; readonly requests: string[]; readonly present: Record<string, boolean> }
+> = (commandContext, sentinels) => {
+  const session = sessionFor(commandContext);
+  const events = session.posthogEvents;
+  return {
+    events: events.map(({ event }) => event),
+    requests: [...session.posthogRequests],
+    present: Object.fromEntries(
+      sentinels.map((sentinel) => [sentinel, events.some(({ decoded }) => decoded.includes(sentinel))]),
+    ),
+  };
+};
 
 /** Release a response parked mid-stream; omit `turn` for the newest one. */
 export const uiReleaseAgentHostGatewayFixture: BrowserCommand<[turn?: string]> = (commandContext, turn) => {
@@ -1810,7 +1903,9 @@ export const uiBrowserCommands = {
   uiHoverTarget,
   uiHoldNextAgentHostGatewayRequest,
   uiInstallAgentHostGatewayFixture,
+  uiInstallPostHogFixture,
   uiReadAgentHostApiRequests,
+  uiReadPostHogSummary,
   uiReadAgentHostGatewayState,
   uiReleaseAgentHostGatewayRequest,
   uiWaitForAgentHostGatewayGate,

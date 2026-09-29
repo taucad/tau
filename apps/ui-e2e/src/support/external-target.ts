@@ -190,6 +190,7 @@ export type UiBrowserCommands = {
     script?: readonly GatewayScriptTurn[],
     options?: AgentHostGatewayFixtureOptions,
   ): Promise<void>;
+  uiInstallPostHogFixture(apiKey: string): Promise<void>;
   uiKeyboardPress(key: string, surface?: TargetSurface): Promise<void>;
   uiMouseClick(x: number, y: number, options?: TargetClickOptions, surface?: TargetSurface): Promise<void>;
   uiMouseDown(options?: { readonly button?: 'left' | 'middle' | 'right' }, surface?: TargetSurface): Promise<void>;
@@ -203,6 +204,11 @@ export type UiBrowserCommands = {
   uiReadTarget(selector: string, options?: TargetReadOptions, surface?: TargetSurface): Promise<TargetState>;
   uiReadTauVertexOperations(email: string): Promise<TargetTauBillingOperation[]>;
   uiReadAgentHostApiRequests(): Promise<string[]>;
+  uiReadPostHogSummary(sentinels: readonly string[]): Promise<{
+    readonly events: string[];
+    readonly requests: string[];
+    readonly present: Record<string, boolean>;
+  }>;
   uiHoldNextAgentHostGatewayRequest(): Promise<void>;
   uiReadAgentHostGatewayRequests(): Promise<unknown[]>;
   uiReadAgentHostGatewayState(): Promise<TargetGatewayState>;
@@ -509,6 +515,15 @@ export const waitForAgentHostGatewayGate = (
 ): Promise<TargetGatewayGate> => server.commands.uiWaitForAgentHostGatewayGate(match, timeoutMilliseconds);
 /** Every `/v1/chat/...` path the page asked the (absent) API for since the fixture was installed. */
 export const readAgentHostApiRequests = (): Promise<string[]> => server.commands.uiReadAgentHostApiRequests();
+/** Intercepts first-party PostHog requests and serves the installed recorder locally. */
+export const installPostHogFixture = (apiKey: string): Promise<void> => server.commands.uiInstallPostHogFixture(apiKey);
+export const readPostHogSummary = (
+  sentinels: readonly string[],
+): Promise<{
+  readonly events: string[];
+  readonly requests: string[];
+  readonly present: Record<string, boolean>;
+}> => server.commands.uiReadPostHogSummary(sentinels);
 
 /** The two points a row can park a chat's turn at; see {@link holdChatTurn}. */
 export type ChatTurnHold = 'admission' | 'settlement';

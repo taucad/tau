@@ -63,6 +63,11 @@ const issueInvitation = async (): Promise<HTMLInputElement> => {
 
 beforeEach(() => {
   answer();
+  globalThis.window.ENV = {
+    ...clientEnvironment,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- local host fixture
+    TAU_API_URL: 'http://localhost:4000',
+  };
   /* Radix's Select asks for pointer capture before it opens, and jsdom has
      none — the same shims the sync-region suite installs. */
   Element.prototype.scrollIntoView = vi.fn();
@@ -82,13 +87,14 @@ describe('RevisionCollaborators', () => {
     const link = await issueInvitation();
 
     expect(link.value).toBe(`${globalThis.location.origin}/invitations/tok_abcdef`);
+    expect(screen.getByRole('status', { name: 'Invitation created' }).classList.contains('ph-no-capture')).toBe(true);
     expect(screen.getByText('Tau does not email this link. Send it to them yourself.')).toBeDefined();
   });
 
   it('should mint the invitation from the web origin on desktop, never app://tau', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
     globalThis.window.ENV = {
-      ...clientEnvironment,
+      ...globalThis.window.ENV,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
       TAU_FRONTEND_URL: 'https://tau.new',
     };
@@ -101,7 +107,7 @@ describe('RevisionCollaborators', () => {
   it('should tell a desktop owner where the link lands and what happens after it', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
     globalThis.window.ENV = {
-      ...clientEnvironment,
+      ...globalThis.window.ENV,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
       TAU_FRONTEND_URL: 'https://tau.new',
     };

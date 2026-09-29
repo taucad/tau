@@ -686,7 +686,7 @@ const laneExportRefusal = (): KernelIssue => ({
 
 const noShapesIssue = (): KernelIssue => ({
   message: 'PicoVoxel has no shapes to export: main() returned an empty scene.',
-  code: 'NO_RENDER_GEOMETRY',
+  code: 'RENDER_ARTIFACT_MISSING',
   type: 'runtime',
   severity: 'error',
   details: { producer: { kernelId } },

@@ -67,10 +67,181 @@ const createHarness = (
   const worker = new Worker({ middleware, onLog: noopLog, filesystem });
   // @ts-expect-error - the private bridge filesystem is what a host adapter supplies.
   worker.fileSystem = { ...filesystem };
-  return { worker, files };
+  return { worker, files, filesystem };
 };
 
 describe('request-scoped results name the source revision they evaluated (R4)', () => {
+  it('should measure repeated authored exports without treating parameter provenance as an export key', async () => {
+    const geometryPath = 'geometry.flag';
+    const exportPath = 'export.flag';
+    const geometryDependencies: Array<{ hash: string; files: string[] }> = [];
+    const exportDependencies: Array<{ hash: string; files: string[] }> = [];
+    const middleware = defineMiddleware({
+      id: 'measured-authored-dependencies',
+      name: 'MeasuredAuthoredDependencies',
+      getDependencies: () => [
+        { path: geometryPath, affects: ['createGeometry'] },
+        { path: exportPath, affects: ['exportGeometry'] },
+      ],
+      async wrapCreateGeometry(input, handler, runtime) {
+        geometryDependencies.push({
+          hash: runtime.dependencyHash,
+          files: runtime.dependencies.filter((dependency) => dependency.type === 'file').map(({ path, contentHash }) => `${path}:${contentHash}`),
+        });
+        return handler(input);
+      },
+      async wrapExportGeometry(input, handler, runtime) {
+        exportDependencies.push({
+          hash: runtime.dependencyHash,
+          files: runtime.dependencies.filter((dependency) => dependency.type === 'file').map(({ path, contentHash }) => `${path}:${contentHash}`),
+        });
+        return handler(input);
+      },
+    });
+    const authored = { files: new Map<string, string>() };
+    class MeasuredWorker extends MockKernelWorker {
+      protected override async onCreateGeometry(): Promise<CreateGeometryResult> {
+        this.createGeometryCalls++;
+        const geometry = authored.files.get(geometryPath)!;
+        this.captureNativeHandle({ geometry });
+        return { success: true, data: { format: 'gltf', content: new TextEncoder().encode(geometry) }, issues: [] };
+      }
+
+      protected override async onExportGeometry(input: ExportGeometryInput, runtime: KernelRuntime): Promise<ExportGeometryResult> {
+        this.exportGeometrySpy(input, runtime);
+        const { geometry } = input.nativeHandle as { geometry: string };
+        return {
+          success: true,
+          data: [{
+            name: 'export.gltf',
+            mimeType: 'model/gltf+json',
+            bytes: new TextEncoder().encode(`${geometry}:${authored.files.get(exportPath) ?? 'missing'}`),
+          }],
+          issues: [],
+        };
+      }
+    }
+    const harness = createHarness({ 'main.ts': 'same', [geometryPath]: 'g1' }, [middleware], MeasuredWorker);
+    const { worker, files, filesystem } = harness;
+    authored.files = files;
+    const reads: Array<{ paths: string[]; bytes: number }> = [];
+    const singleReads: Array<{ path: string; bytes: number }> = [];
+    filesystem.mocks.readFile.mockImplementation(async (path: string) => {
+      const source = files.get(path);
+      if (source === undefined) {
+        throw notFound(path);
+      }
+      const bytes = new TextEncoder().encode(source);
+      singleReads.push({ path, bytes: bytes.byteLength });
+      return bytes;
+    });
+    filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) => {
+      const contents = Object.fromEntries(paths.map((path) => {
+        const source = files.get(path);
+        if (source === undefined) {
+          throw notFound(path);
+        }
+        return [path, new TextEncoder().encode(source)];
+      }));
+      reads.push({ paths: [...paths], bytes: Object.values(contents).reduce((sum, value) => sum + value.byteLength, 0) });
+      return contents;
+    });
+    const request = { file: createGeometryFile('main.ts'), parameters: {}, format: 'gltf' } satisfies Parameters<MockKernelWorker['exportModel']>[0];
+    const observations = [];
+    try {
+      for (const edit of [undefined, undefined, 'geometry', 'export'] as const) {
+        if (edit === 'geometry') {
+          files.set(geometryPath, 'g2');
+        } else if (edit === 'export') {
+          files.set(exportPath, 'e1');
+        }
+        const before = reads.length;
+        const beforeSingle = singleReads.length;
+        const beforeExists = filesystem.mocks.exists.mock.calls.length;
+        const beforeExports = worker.exportGeometrySpy.mock.calls.length;
+        const started = performance.now();
+        // oxlint-disable-next-line no-await-in-loop -- Each authored edit must precede the next export.
+        const result = await worker.exportModel(request);
+        /** Milliseconds. */
+        const elapsed = performance.now() - started;
+        expect(result.success).toBe(true);
+        if (!result.success) {
+          throw new Error('Expected an authored export.');
+        }
+        const { bytes } = result.data[0]!;
+        observations.push({
+          sourceRevision: result.sourceRevision,
+          // oxlint-disable-next-line no-await-in-loop -- Digest the bytes returned by this exact export before the next edit.
+          outputDigest: await digestContent({ bytes }),
+          outputText: new TextDecoder().decode(bytes),
+          readCalls: reads.length - before,
+          readBytes: reads.slice(before).reduce((sum, read) => sum + read.bytes, 0),
+          singleReadCalls: singleReads.length - beforeSingle,
+          singleReadBytes: singleReads.slice(beforeSingle).reduce((sum, read) => sum + read.bytes, 0),
+          existsCalls: filesystem.mocks.exists.mock.calls.length - beforeExists,
+          exportCalls: worker.exportGeometrySpy.mock.calls.length - beforeExports,
+          elapsed,
+        });
+      }
+      expect(observations.map(({ outputText }) => outputText)).toEqual(['g1:missing', 'g1:missing', 'g2:missing', 'g2:e1']);
+      expect(new Set(observations.map(({ outputDigest }) => outputDigest)).size).toBe(3);
+      expect(observations.map(({ sourceRevision }) => sourceRevision)).toEqual([
+        observations[0]!.sourceRevision,
+        observations[0]!.sourceRevision,
+        observations[0]!.sourceRevision,
+        observations[0]!.sourceRevision,
+      ]);
+      expect(geometryDependencies).toHaveLength(4);
+      expect(exportDependencies).toHaveLength(4);
+      expect(geometryDependencies[0]?.hash).toBe(geometryDependencies[1]?.hash);
+      expect(geometryDependencies[1]?.hash).not.toBe(geometryDependencies[2]?.hash);
+      expect(exportDependencies[2]?.hash).not.toBe(exportDependencies[3]?.hash);
+      expect(exportDependencies[0]?.files).toContainEqual(expect.stringContaining(`${exportPath}:missing`));
+      expect(exportDependencies[3]?.files).toContainEqual(expect.stringContaining(`${exportPath}:`));
+      expect(observations.map(({ readCalls, readBytes, existsCalls, exportCalls }) => ({ readCalls, readBytes, existsCalls, exportCalls }))).toEqual([
+        { readCalls: 1, readBytes: 4, existsCalls: 0, exportCalls: 1 },
+        { readCalls: 1, readBytes: 6, existsCalls: 1, exportCalls: 1 },
+        { readCalls: 1, readBytes: 6, existsCalls: 1, exportCalls: 1 },
+        { readCalls: 1, readBytes: 6, existsCalls: 1, exportCalls: 1 },
+      ]);
+      expect(observations.map(({ singleReadCalls, singleReadBytes }) => ({ singleReadCalls, singleReadBytes }))).toEqual([
+        { singleReadCalls: 1, singleReadBytes: 2 },
+        { singleReadCalls: 0, singleReadBytes: 0 },
+        { singleReadCalls: 0, singleReadBytes: 0 },
+        { singleReadCalls: 1, singleReadBytes: 2 },
+      ]);
+      const snapshots = [];
+      for (let index = 0; index < 2; index++) {
+        const beforeReads = reads.length;
+        const beforeSingle = singleReads.length;
+        const beforeExists = filesystem.mocks.exists.mock.calls.length;
+        // oxlint-disable-next-line no-await-in-loop -- Repeated snapshots must observe the same settled authored state in order.
+        const snapshot = await worker.snapshotSource({ file: createGeometryFile('main.ts') });
+        expect(snapshot.success).toBe(true);
+        if (!snapshot.success) {
+          throw new Error('Expected a coherent source snapshot.');
+        }
+        snapshots.push({
+          files: snapshot.data.files.map(({ path, sha256 }) => `${path}:${sha256}`),
+          readCalls: reads.length - beforeReads,
+          readBytes: reads.slice(beforeReads).reduce((sum, read) => sum + read.bytes, 0),
+          singleReadCalls: singleReads.length - beforeSingle,
+          singleReadBytes: singleReads.slice(beforeSingle).reduce((sum, read) => sum + read.bytes, 0),
+          existsCalls: filesystem.mocks.exists.mock.calls.length - beforeExists,
+        });
+      }
+      expect(snapshots[0]?.files).toEqual(snapshots[1]?.files);
+      expect(snapshots.map(({ readCalls, readBytes, singleReadCalls, singleReadBytes, existsCalls }) => ({
+        readCalls, readBytes, singleReadCalls, singleReadBytes, existsCalls,
+      }))).toEqual([
+        { readCalls: 3, readBytes: 24, singleReadCalls: 0, singleReadBytes: 0, existsCalls: 6 },
+        { readCalls: 3, readBytes: 24, singleReadCalls: 0, singleReadBytes: 0, existsCalls: 6 },
+      ]);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
   it('should return the entry digest the write path computes for the same bytes', async () => {
     const { worker } = createHarness({ 'main.ts': 'v1' });
 

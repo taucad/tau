@@ -3,7 +3,7 @@
  *
  * Bundles a TSX board with the runtime bundler, evaluates it once through
  * `@tscircuit/core` to settled circuit JSON (the native handle), and meshes that
- * JSON per the `output` render option: a GLB board (`3d`), a schematic SVG or a
+ * JSON by view: a GLB board, a schematic SVG or a
  * PCB SVG. Exports (`glb`, `csv` BOM, `txt` netlist, `json`) derive from the same
  * handle without re-evaluating (charter D8). Rendering is offline: no parts
  * engine, local autorouter, and `fetch` is trapped during evaluation and GLB
@@ -18,7 +18,7 @@ import type { AnyCircuitElement } from 'circuit-json';
 import type { ComponentType } from 'react';
 import { z } from 'zod';
 
-import type { GeometryResponse, KernelIssue } from '@taucad/runtime/types';
+import type { KernelIssue } from '@taucad/runtime/types';
 import { createExportFile } from '@taucad/runtime/types';
 import {
   createFrameClassifier,
@@ -29,7 +29,6 @@ import {
   deriveLocationFromFrames,
   enrichIssueLocation,
   extractDefaultParameters,
-  finalizeMeshOutput,
   gltfExportConventionSchema,
   isRecordObject,
   jsonSchemaFromJson,
@@ -76,10 +75,10 @@ export const tscircuitRenderSchema = z.object({
 
 /** Per-format export option schemas: GLB shares the runtime's glTF convention; the text formats take none. @public */
 export const tscircuitExportSchemas = {
-  glb: gltfExportConventionSchema,
-  csv: z.object({}),
-  txt: z.object({}),
-  json: z.object({}),
+  board: gltfExportConventionSchema,
+  bom: z.object({}),
+  netlist: z.object({}),
+  circuit: z.object({}),
 } as const satisfies Record<string, z.ZodType>;
 
 type GlbConvention = z.output<typeof gltfExportConventionSchema>;
@@ -141,8 +140,10 @@ const resolveCircuitComponent = (module: unknown): CircuitComponent | undefined 
 const isCircuitElementArray = (value: unknown): value is CircuitElement[] =>
   Array.isArray(value) && value.every((element) => isRecordObject(element) && typeof element['type'] === 'string');
 
-// The converters take circuit-json's element union; the handle stores it structurally.
-const asCircuitJson = (circuitJson: CircuitElement[]): AnyCircuitElement[] => circuitJson as AnyCircuitElement[];
+// `circuit-json`'s schema rejects elements emitted by the installed `@tscircuit/core`.
+// Preserve the handle's actual wire invariant while admitting converter input at one boundary.
+const converterCircuitJsonSchema = z.custom<AnyCircuitElement[]>(isCircuitElementArray);
+const asCircuitJson = (circuitJson: CircuitElement[]) => converterCircuitJsonSchema.parse(circuitJson);
 
 // Map tscircuit `*_error` / `*_warning` elements to kernel issues. A failed library or URL
 // footprint leaves the part unplaced but the board renders, so it is a warning (charter D4), as is
@@ -244,8 +245,6 @@ const withViewBox = (svg: string): string => {
     : svg;
 };
 
-const svgArtifact = (svg: string): GeometryResponse => ({ format: 'svg', content: withViewBox(svg) });
-
 // Drop the converter's `TEXCOORD_n` attributes: with `boardTextureResolution: 0` no material samples
 // them, and untextured rasterizers (Tau's nanoraster thumbnail transcoder) reject UV-bearing primitives.
 const stripTextureCoordinates = (root: Root): void => {
@@ -336,12 +335,36 @@ export const tscircuitKernel = defineKernel({
   builtinModuleNames: ['tscircuit', '@tscircuit/core'],
   name: 'TscircuitKernel',
   version: '1.0.0',
-  render: { optionsSchema: tscircuitRenderSchema },
-  exportFormats: {
-    glb: { optionsSchema: tscircuitExportSchemas.glb },
-    csv: { optionsSchema: tscircuitExportSchemas.csv },
-    txt: { optionsSchema: tscircuitExportSchemas.txt },
-    json: { optionsSchema: tscircuitExportSchemas.json },
+  views: {
+    board: { title: '3D board', mimeType: 'model/gltf-binary' },
+    schematic: { title: 'Schematic', mimeType: 'image/svg+xml' },
+    pcb: { title: 'PCB', mimeType: 'image/svg+xml' },
+  },
+  exports: {
+    board: {
+      title: '3D board (glTF)',
+      mimeType: 'model/gltf-binary',
+      extension: 'glb',
+      optionsSchema: tscircuitExportSchemas.board,
+    },
+    bom: {
+      title: 'Bill of materials',
+      mimeType: 'text/csv',
+      extension: 'csv',
+      optionsSchema: tscircuitExportSchemas.bom,
+    },
+    netlist: {
+      title: 'Netlist',
+      mimeType: 'text/plain',
+      extension: 'txt',
+      optionsSchema: tscircuitExportSchemas.netlist,
+    },
+    circuit: {
+      title: 'Circuit JSON',
+      mimeType: 'application/json',
+      extension: 'json',
+      optionsSchema: tscircuitExportSchemas.circuit,
+    },
   },
 
   async initialize(_options, runtime): Promise<TscircuitContext> {
@@ -381,11 +404,11 @@ export const tscircuitKernel = defineKernel({
     };
   },
 
-  async getDependencies({ entryPath }, runtime) {
+  async resolve({ entryPath }, runtime) {
     return runtime.bundler.resolveDependencies(entryPath);
   },
 
-  async getParameters({ entryPath }, runtime) {
+  async describe({ entryPath }, runtime) {
     const relativeFilePath = toVmEntryPath(entryPath);
     try {
       const bundleResult = await runtime.bundler.bundle(entryPath);
@@ -398,12 +421,12 @@ export const tscircuitKernel = defineKernel({
       }
       const defaultParameters = extractDefaultParameters(executeResult.value);
       const jsonSchema = await jsonSchemaFromJson(defaultParameters);
-      return createKernelSuccess(
-        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+      return createKernelSuccess({
+        parameters: createKernelParameterDeclaration(defaultParameters, jsonSchema, {
           id: 'urn:taucad:tscircuit:parameters',
           name: 'TscircuitParameters',
         }),
-      );
+      });
     } catch (error) {
       return createKernelError([
         {
@@ -417,7 +440,7 @@ export const tscircuitKernel = defineKernel({
     }
   },
 
-  async createGeometry({ entryPath, parameters }, runtime, context) {
+  async evaluate({ entryPath, parameters }, runtime, context) {
     const relativeFilePath = toVmEntryPath(entryPath);
 
     const bundleResult = await runtime.bundler.bundle(entryPath);
@@ -457,78 +480,75 @@ export const tscircuitKernel = defineKernel({
       ]);
     }
 
-    const nativeHandle: TscircuitNativeHandle = { circuitJson };
-    return { nativeHandle, issues: [...collectCircuitIssues(circuitJson), ...networkIssues] };
+    const handle: TscircuitNativeHandle = { circuitJson };
+    const hasBoard = circuitJson.some((element) => element.type === 'pcb_board');
+    const hasSchematic = circuitJson.some((element) => element.type.startsWith('schematic_'));
+    return {
+      handle,
+      issues: [...collectCircuitIssues(circuitJson), ...networkIssues],
+      views: hasBoard ? undefined : hasSchematic ? (['schematic'] as const) : ([] as const),
+      exports: hasBoard ? undefined : (['bom', 'netlist', 'circuit'] as const),
+    };
   },
 
-  async meshGeometry({ nativeHandle, options }) {
-    const { circuitJson } = nativeHandle;
-    switch (options.output) {
+  async render({ handle, view }) {
+    const { circuitJson } = handle;
+    switch (view) {
       case 'schematic': {
         const { convertCircuitJsonToSchematicSvg } = await import('circuit-to-svg');
-        return finalizeMeshOutput({
-          artifacts: [svgArtifact(convertCircuitJsonToSchematicSvg(asCircuitJson(circuitJson)))],
-        });
+        return { content: withViewBox(convertCircuitJsonToSchematicSvg(asCircuitJson(circuitJson))) };
       }
       case 'pcb': {
         const { convertCircuitJsonToPcbSvg } = await import('circuit-to-svg');
-        return finalizeMeshOutput({ artifacts: [svgArtifact(convertCircuitJsonToPcbSvg(asCircuitJson(circuitJson)))] });
+        return { content: withViewBox(convertCircuitJsonToPcbSvg(asCircuitJson(circuitJson))) };
       }
-      case '3d': {
+      case 'board': {
         const { content, issues } = await circuitJsonToGlb(circuitJson, displayGlbConvention);
-        return finalizeMeshOutput({ artifacts: [{ format: 'gltf', content }], issues });
+        return { content, issues };
       }
     }
   },
 
-  serializeNativeHandle({ nativeHandle }) {
-    return new TextEncoder().encode(JSON.stringify(nativeHandle.circuitJson));
+  serializeHandle({ handle }) {
+    return new TextEncoder().encode(JSON.stringify(handle.circuitJson));
   },
 
-  deserializeNativeHandle({ serializedNativeHandle }): TscircuitNativeHandle {
-    const parsed = JSON.parse(new TextDecoder().decode(toBufferSource(serializedNativeHandle))) as unknown;
+  deserializeHandle({ serialized }): TscircuitNativeHandle {
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(toBufferSource(serialized)));
     if (!isCircuitElementArray(parsed)) {
       throw new TypeError('Invalid tscircuit serialized handle: expected a circuit JSON array.');
     }
     return { circuitJson: parsed };
   },
 
-  async exportGeometry({ format, nativeHandle, options }) {
-    const { circuitJson } = nativeHandle;
+  async write({ exportId, handle, options }) {
+    const { circuitJson } = handle;
     const issues = collectCircuitIssues(circuitJson);
-    switch (format) {
-      case 'glb': {
+    switch (exportId) {
+      case 'board': {
         const { content, issues: glbIssues } = await circuitJsonToGlb(circuitJson, options);
-        return createKernelSuccess([createExportFile('glb', 'model.glb', content)], [...issues, ...glbIssues]);
+        return { files: [createExportFile('glb', 'model.glb', content)], issues: [...issues, ...glbIssues] };
       }
-      case 'csv': {
+      case 'bom': {
         const { convertBomRowsToCsv, convertCircuitJsonToBomRows } = await import('circuit-json-to-bom-csv');
         const rows = await convertCircuitJsonToBomRows({ circuitJson: asCircuitJson(circuitJson) });
-        return createKernelSuccess([textExportFile('csv', 'bom.csv', convertBomRowsToCsv(rows))], issues);
+        return { files: [textExportFile('csv', 'bom.csv', convertBomRowsToCsv(rows))], issues };
       }
-      case 'txt': {
+      case 'netlist': {
         const { convertCircuitJsonToReadableNetlist } = await import('circuit-json-to-readable-netlist');
-        return createKernelSuccess(
-          [textExportFile('txt', 'netlist.txt', convertCircuitJsonToReadableNetlist(asCircuitJson(circuitJson)))],
+        return {
+          files: [
+            textExportFile('txt', 'netlist.txt', convertCircuitJsonToReadableNetlist(asCircuitJson(circuitJson))),
+          ],
           issues,
-        );
+        };
       }
-      case 'json': {
-        return createKernelSuccess(
-          [textExportFile('json', 'circuit.json', JSON.stringify(circuitJson, null, 2))],
-          issues,
-        );
+      case 'circuit': {
+        return { files: [textExportFile('json', 'circuit.json', JSON.stringify(circuitJson, null, 2))], issues };
       }
       default: {
-        const exhaustive: never = format;
-        return createKernelError([
-          {
-            message: `Export format '${String(exhaustive)}' is not supported by tscircuit. Supported formats: glb, csv, txt, json.`,
-            code: 'KERNEL_CAPABILITY_MISSING',
-            type: 'runtime',
-            severity: 'error',
-          },
-        ]);
+        const exhaustive: never = exportId;
+        throw new Error(`Export '${String(exhaustive)}' is not supported by tscircuit.`);
       }
     }
   },

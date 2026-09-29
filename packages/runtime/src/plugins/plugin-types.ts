@@ -15,6 +15,9 @@ export type RuntimePluginKind = (typeof runtimeCapabilityKinds)[number];
 declare const __exportFormats: unique symbol;
 declare const __renderOptions: unique symbol;
 declare const __kernelId: unique symbol;
+declare const __evaluateSchema: unique symbol;
+declare const __views: unique symbol;
+declare const __exports: unique symbol;
 declare const __renderContent: unique symbol;
 declare const __exportContent: unique symbol;
 declare const __middlewareRenderContent: unique symbol;
@@ -74,6 +77,9 @@ export type KernelPlugin<
   RenderContent extends RuntimeContentKey = RuntimeContentKey,
   ExportContent extends Record<string, RuntimeContentKey> = Record<string, RuntimeContentKey>,
   Extensions extends readonly string[] = readonly string[],
+  EvaluateSchema = unknown,
+  Views = unknown,
+  Exports = unknown,
 > = RuntimePluginDeclaration & {
   /** Unique identifier for this kernel */
   id: Id;
@@ -82,7 +88,7 @@ export type KernelPlugin<
   /** Export formats declared by the kernel definition. */
   exportFormats?: readonly string[];
   /** Regex to match against file content for kernel selection */
-  detectImport?: RegExp;
+  detectImport?: RegExp | Readonly<{ source: string; flags: string }>;
   /** Bare-specifier module names this kernel provides for bundler-assisted detection */
   builtinModuleNames?: string[];
   /** Kernel-specific options passed to initialize() */
@@ -113,6 +119,12 @@ export type KernelPlugin<
   readonly [__renderContent]?: { readonly keys: RenderContent };
   /** @internal */
   readonly [__exportContent]?: ExportContent;
+  /** @internal */
+  readonly [__evaluateSchema]?: EvaluateSchema;
+  /** @internal */
+  readonly [__views]?: Views;
+  /** @internal */
+  readonly [__exports]?: Exports;
 };
 
 /**
@@ -685,11 +697,11 @@ export type ExportOptionsFor<
   Kernels extends readonly AnyKernelPlugin[],
   Transcoders extends readonly AnyTranscoderPlugin[],
   F,
-> = Kernels extends readonly [AnyKernelPlugin]
-  ? F extends keyof MergeExportMap<CollectFormatMap<Kernels>, Transcoders>
+> = string extends keyof MergeExportMap<CollectFormatMap<Kernels>, Transcoders>
+  ? Record<string, unknown>
+  : F extends keyof MergeExportMap<CollectFormatMap<Kernels>, Transcoders>
     ? MergeExportMap<CollectFormatMap<Kernels>, Transcoders>[F]
-    : Record<string, unknown> | undefined
-  : Record<string, unknown>;
+    : Record<string, unknown> | undefined;
 
 /**
  * Resolves the render-options input type for a specific kernel id within a

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExportFile } from '@taucad/runtime/types';
-import type { TranscoderRuntime } from '@taucad/runtime/transcoder';
+import type { TranscoderServices } from '@taucad/runtime/transcoder';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import * as libassimpExporter from 'libassimp';
 import type { CreateAssimpOptions } from 'libassimp';
@@ -19,7 +19,7 @@ vi.mock('libassimp', async (importOriginal) => ({
   createAssimp: assimpMock.createAssimp,
 }));
 
-const createRuntime = (): TranscoderRuntime => ({
+const createRuntime = (): TranscoderServices => ({
   logger: { log: vi.fn(), debug: vi.fn(), trace: vi.fn(), warn: vi.fn(), error: vi.fn(), custom: vi.fn() },
   tracer: { startSpan: vi.fn() },
   signal: new AbortController().signal,
@@ -82,7 +82,7 @@ describe('assimp transcoder', () => {
         data: 'missing addon',
       });
       expect(runtime.logger.log).toHaveBeenCalledWith('libassimp backend=native addon=darwin-arm64-napi8');
-      await resolved.cleanup?.(context);
+      await resolved.onDispose?.(context);
       expect(assimpMock.dispose).toHaveBeenCalledOnce();
     },
   );

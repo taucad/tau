@@ -78,8 +78,8 @@ export type {
   PluginInstance,
   PluginMeta,
 } from '#plugins/plugin.js';
-export { defineKernel } from '#types/runtime-kernel.types.js';
-export { defineMiddleware } from '#middleware/runtime-middleware.js';
+export { defineKernelV2 as defineKernel } from '#types/runtime-kernel-v2.types.js';
+export { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
 export { defineBundler } from '#types/runtime-bundler.types.js';
 export { defineTranscoder } from '#types/runtime-transcoder.types.js';
 export { defineRuntime } from '#worker/runtime-definition.js';

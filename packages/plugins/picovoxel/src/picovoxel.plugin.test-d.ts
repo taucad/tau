@@ -1,8 +1,8 @@
 import { expectTypeOf } from 'vitest';
 import type { ExpandPluginKernels } from '@taucad/runtime/plugin';
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
-import { plugin, picovoxel } from '#index.js';
-import type { picovoxelKernel } from '#index.js';
+import { plugin, picovoxel, picovoxelKernel } from '#index.js';
 
 const selected = plugin();
 
@@ -10,3 +10,11 @@ expectTypeOf<ExpandPluginKernels<readonly [typeof selected]>>().toEqualTypeOf<
   readonly [ReturnType<typeof picovoxelKernel>]
 >();
 expectTypeOf(picovoxel).toEqualTypeOf(plugin);
+
+const registration = picovoxelKernel();
+const definition = await resolveRuntimePluginDefinition('kernel', registration);
+expectTypeOf(registration.id).toEqualTypeOf<'picovoxel'>();
+expectTypeOf<keyof typeof registration.views>().toEqualTypeOf<'model'>();
+expectTypeOf<keyof typeof registration.exports>().toEqualTypeOf<'glb' | 'stl'>();
+expectTypeOf<Parameters<NonNullable<typeof definition.render>>[0]['view']>().toEqualTypeOf<'model'>();
+expectTypeOf<Parameters<NonNullable<typeof definition.write>>[0]['exportId']>().toEqualTypeOf<'glb' | 'stl'>();

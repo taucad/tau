@@ -847,7 +847,7 @@ describe('route-scoped content projections', () => {
       expectTypeOf(input).not.toHaveProperty('content');
       return { success: true, data: input.files, issues: [] };
     },
-    async cleanup() {},
+    async onDispose() {},
   })();
 
   const runtime = defineRuntime({
@@ -882,6 +882,7 @@ describe('route-scoped content projections', () => {
     });
     void client.export('webp', {
       source,
+      // @ts-expect-error -- image source options are pinned by the transcoder edge.
       exportOptions: { coordinateSystem: 'z-up' },
     });
   });

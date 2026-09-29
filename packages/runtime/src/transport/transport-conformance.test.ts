@@ -41,7 +41,7 @@ import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem
 import { createWorkerDispatcher, runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
 import type { RuntimeTransportClient } from '#transport/runtime-transport.types.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
-import { defineKernel } from '#types/runtime-kernel.types.js';
+import { defineKernelV2 as defineKernel } from '#types/runtime-kernel-v2.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
 import { _registerComputeStore } from '#cache/kernel-compute-runtime.js';
@@ -155,35 +155,33 @@ describe('transport conformance — in-process (C2)', () => {
       name: 'In-process request-scope fixture',
       version: '1.0.0',
       extensions: ['scope'],
-      exportFormats: { glb: { optionsSchema: z.object({}) } },
+      views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+      exports: { glb: { title: 'GLB', mimeType: 'model/gltf-binary', extension: 'glb', optionsSchema: z.object({}) } },
       async initialize() {
         return {};
       },
-      async getDependencies(input) {
+      async resolve(input) {
         return { resolved: [input.entryPath], unresolved: [] };
       },
-      async getParameters() {
-        return createParameterDeclaration();
+      async describe() {
+        const declaration = createParameterDeclaration();
+        if (!declaration.success) {
+          return declaration;
+        }
+        return { success: true, data: { parameters: declaration.data }, issues: declaration.issues };
       },
-      async createGeometry(input, runtime) {
+      async evaluate(input, runtime) {
         const label = await runtime.filesystem.readFile(input.entryPath, 'utf8');
-        return {
-          geometry: { format: 'gltf', content: encoder.encode(`mesh:${label}`) },
-          nativeHandle: { label },
-          issues: [],
-        };
+        return { handle: { label } };
       },
-      async exportGeometry(input) {
+      async render({ handle }) {
+        return { content: encoder.encode(`mesh:${handle.label}`) };
+      },
+      async write({ handle }) {
         return {
-          success: true,
-          data: [
-            {
-              name: 'model.glb',
-              bytes: encoder.encode(`export:${input.nativeHandle.label}`),
-              mimeType: 'model/gltf-binary',
-            },
+          files: [
+            { name: 'model.glb', bytes: encoder.encode(`export:${handle.label}`), mimeType: 'model/gltf-binary' },
           ],
-          issues: [],
         };
       },
     })();
@@ -197,7 +195,7 @@ describe('transport conformance — in-process (C2)', () => {
       expect(preview.superseded).toBe(false);
 
       const evaluation = await client.evaluate({ source: { files: { 'evaluation.scope': 'source-a' } } });
-      expect(evaluation.success).toBe(true);
+      expect(evaluation.success, JSON.stringify(evaluation.issues)).toBe(true);
       if (!evaluation.success || evaluation.data.format !== 'gltf') {
         throw new Error('Expected request-scoped GLTF evaluation.');
       }
@@ -246,20 +244,22 @@ describe('transport conformance — in-process (C2)', () => {
       name: 'In-process compute fixture',
       version: '1.0.0',
       extensions: ['compute'],
-      exportFormats: {},
+      views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+      exports: {},
       async initialize() {
         return {};
       },
-      async getDependencies(input) {
+      async resolve(input) {
         return { resolved: [input.entryPath], unresolved: [] };
       },
-      async getParameters() {
-        return createParameterDeclaration();
+      async describe() {
+        const declaration = createParameterDeclaration();
+        if (!declaration.success) {
+          return declaration;
+        }
+        return { success: true, data: { parameters: declaration.data }, issues: declaration.issues };
       },
-      async exportGeometry() {
-        return { success: false, issues: [] };
-      },
-      async createGeometry(_input, runtime) {
+      async evaluate(_input, runtime) {
         createCalls += 1;
         if (runtime.compute.status !== 'on') {
           throw new Error('compute capability was off');
@@ -306,7 +306,10 @@ describe('transport conformance — in-process (C2)', () => {
           scope.announce({ entries: [{ kind: 'action', action, digest, computeDuration: 2, estimatedBytes: 5 }] });
         }
         settlement = scope.close({ outcome: 'delivered' }).settled;
-        return { geometry: testGeometry, nativeHandle: {}, issues: [] };
+        return { handle: {} };
+      },
+      async render() {
+        return { content: testGeometry.content };
       },
     })();
     const authority = createMemoryComputeEngine();
@@ -325,7 +328,11 @@ describe('transport conformance — in-process (C2)', () => {
         }),
       });
     const producer = createClient();
-    await producer.render({ source: { files: { 'main.compute': 'producer' } } });
+    const produced = await producer.render({ source: { files: { 'main.compute': 'producer' } } });
+    expect(produced.superseded).toBe(false);
+    if (!produced.superseded) {
+      expect(produced.geometry.success, JSON.stringify(produced.geometry.issues)).toBe(true);
+    }
     await expect(settlement).resolves.toMatchObject({ status: 'published' });
     await producer.shutdown();
 

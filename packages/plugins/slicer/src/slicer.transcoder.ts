@@ -150,7 +150,7 @@ export const slicerTranscoder = defineTranscoder({
     return {};
   },
 
-  async transcode(input, runtime) {
+  async transcode(input, services) {
     const [file] = input.files;
     if (file === undefined) {
       return failure([issue('No input files provided for slicing.', 'RUNTIME')]);
@@ -172,7 +172,7 @@ export const slicerTranscoder = defineTranscoder({
     }
     try {
       if (options.engine === 'bambu-studio') {
-        const { archive, issues } = await sliceThroughBambuStudio(file.bytes, options, runtime.signal);
+        const { archive, issues } = await sliceThroughBambuStudio(file.bytes, options, services.signal);
         return { success: true, data: [createExportFile('gcode.3mf', 'model.gcode.3mf', archive)], issues };
       }
       const model = await readTriangleMesh(file.bytes);
@@ -181,9 +181,9 @@ export const slicerTranscoder = defineTranscoder({
           ? await sliceWithService({
               mesh: model,
               options: { ...options, service: options.service },
-              signal: runtime.signal,
+              signal: services.signal,
             })
-          : await sliceReference({ mesh: model, options, signal: runtime.signal });
+          : await sliceReference({ mesh: model, options, signal: services.signal });
       // Both engines print one material: the whole model, recorded in its first colour.
       const bytes = writeBambuContainer({
         gcode: sliced.gcode,
@@ -201,7 +201,7 @@ export const slicerTranscoder = defineTranscoder({
         issues: model.parts.length > 1 ? [mergedColors(model, reason, options.engine)] : [],
       };
     } catch (error) {
-      runtime.signal.throwIfAborted();
+      services.signal.throwIfAborted();
       if (error instanceof ReferenceEngineError) {
         return failure([issue(error.message, error.code === 'GEOMETRY_INVALID' ? 'GEOMETRY_INVALID' : 'RUNTIME')]);
       }

@@ -53,18 +53,16 @@ describe('OpenCascade Kernel (multi-threaded)', { timeout: 60_000 }, () => {
     kernels: [opencascadeKernel({ wasm: 'multi', ocTracing: 'off' })],
     bundlers: [esbuildBundler()],
   });
-  let client: ReturnType<typeof createTestRuntimeClient>;
+  const makeTestClient = (files: Record<string, string>) => createTestRuntimeClient({ runtime, files });
+  let client: ReturnType<typeof makeTestClient>;
 
   beforeAll(async () => {
-    client = createTestRuntimeClient({
-      runtime,
-      files: {
-        'box.ts': `
+    client = makeTestClient({
+      'box.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   return new BRepPrimAPI_MakeBox(10, 20, 30).Shape();
 }`,
-      },
     });
   });
 

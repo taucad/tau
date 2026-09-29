@@ -713,48 +713,6 @@ export interface KernelPluginFactory<
  *
  * @public
  *
- * @example <caption>Registering a custom kernel</caption>
- * ```typescript
- * import { defineKernel } from '@taucad/runtime/kernel';
- *
- * export const myKernel = defineKernel({
- *   id: 'my-kernel',
- *   extensions: ['myext'],
- *   name: 'MyKernel',
- *   version: '1.0.0',
- *   exportFormats: {},
- *   async initialize(options, runtime) {
- *     return { myContext: true };
- *   },
- *   async getDependencies(input, runtime, context) {
- *     return { resolved: [input.entryPath], unresolved: [] };
- *   },
- *   async getParameters(input, runtime, context) {
- *     return {
- *       success: true,
- *       data: {
- *         schema: {
- *           $schema: 'https://json-structure.org/meta/extended/v0/#',
- *           $id: 'urn:example:parameters',
- *           $uses: ['JSONSchemaUnits'],
- *           name: 'Parameters',
- *           type: 'object',
- *         },
- *         defaults: {},
- *       },
- *       issues: [],
- *     };
- *   },
- *   async createGeometry(input, runtime, context) {
- *     const response = await fetch('/geometry', { signal: runtime.signal });
- *     const bytes = new Uint8Array(await response.arrayBuffer());
- *     return { geometry: { format: 'gltf', content: bytes }, nativeHandle: {} };
- *   },
- *   async exportGeometry(input, runtime, context) {
- *     return { success: true, data: [], issues: [] };
- *   },
- * });
- * ```
  */
 export function defineKernel<
   const Id extends string,

@@ -30,7 +30,6 @@ import type * as OpenRscadModule from '@taulabs/openrscad-engine';
 import type { RawEngine } from '@taulabs/openrscad-engine/core';
 import { makeApi } from '@taulabs/openrscad-engine/core';
 import * as wasmGlue from '@taulabs/openrscad-engine/node';
-import type { AnyKernelDefinition } from '@taucad/runtime/kernel';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createMockKernelRuntime } from '@taucad/runtime-testing';
 
@@ -74,11 +73,11 @@ const exportOptions = {
 const buildAndExport = async (
   kernel: typeof openrscadKernel,
   source: string,
-  request: 'glb' | '3mf' | { format: 'glb' | '3mf'; parameters: Record<string, unknown> },
+  request: 'glb' | '3mf' | { exportId: 'glb' | '3mf'; parameters: Record<string, unknown> },
 ) => {
-  const format = typeof request === 'string' ? request : request.format;
+  const format = typeof request === 'string' ? request : request.exportId;
   const parameters = typeof request === 'string' ? {} : request.parameters;
-  const definition: AnyKernelDefinition = await resolveRuntimePluginDefinition('kernel', kernel());
+  const definition = await resolveRuntimePluginDefinition('kernel', kernel());
   const runtime = createMockKernelRuntime({
     filesystemOverrides: {
       readFileResult: async (path) => {
@@ -89,20 +88,22 @@ const buildAndExport = async (
       },
     },
   });
-  const context: unknown = await definition.initialize({}, runtime);
-  const created = (await definition.createGeometry({ entryPath, parameters, options }, runtime, context)) as {
-    nativeHandle: { stats: { triangleCount: number; vertexCount: number; volume: number; area: number } };
-  };
-  const exported = await definition.exportGeometry(
-    { format, nativeHandle: created.nativeHandle, options: exportOptions[format] },
-    runtime,
-    context,
-  );
-  if (!exported.success) {
-    throw new Error(`${format} export failed: ${JSON.stringify(exported.issues)}`);
-  }
-  await definition.cleanup?.(context);
-  return { file: exported.data[0]!, stats: created.nativeHandle.stats };
+  const context = await definition.initialize({}, runtime);
+  const created = await definition.evaluate({ entryPath, parameters, options }, runtime, context);
+  const exported =
+    format === 'glb'
+      ? await definition.write!(
+          { exportId: 'glb', handle: created.handle, options: exportOptions.glb },
+          runtime,
+          context,
+        )
+      : await definition.write!(
+          { exportId: '3mf', handle: created.handle, options: exportOptions['3mf'] },
+          runtime,
+          context,
+        );
+  await definition.onDispose?.(context);
+  return { file: exported.files[0], stats: created.handle.stats };
 };
 
 describe('@taulabs/openrscad-engine native/WebAssembly parity', () => {
@@ -117,8 +118,8 @@ describe('@taulabs/openrscad-engine native/WebAssembly parity', () => {
     const parameters = { [group]: { size: 7 } };
     const wasmDefault = await buildAndExport(wasmKernel, source, 'glb');
     const nativeDefault = await buildAndExport(openrscadKernel, source, 'glb');
-    const wasm = await buildAndExport(wasmKernel, source, { format: 'glb', parameters });
-    const native = await buildAndExport(openrscadKernel, source, { format: 'glb', parameters });
+    const wasm = await buildAndExport(wasmKernel, source, { exportId: 'glb', parameters });
+    const native = await buildAndExport(openrscadKernel, source, { exportId: 'glb', parameters });
 
     expect(wasmDefault.stats.volume).toBe(125);
     expect(nativeDefault.stats.volume).toBe(125);

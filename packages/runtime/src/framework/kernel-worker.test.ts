@@ -12,7 +12,6 @@ import type { JSONSchema7 } from '@taucad/json-schema';
 import type { WatchEvent } from '@taucad/filesystem';
 import type {
   CapabilitiesManifest,
-  CreateGeometryResult,
   ExportGeometryResult,
   GetParameterDeclarationsResult,
   HashedGeometryResult,
@@ -21,13 +20,13 @@ import type {
 import type {
   KernelFileSystem,
   KernelRuntime,
-  CreateGeometryInput,
   GetDependenciesInput,
   GetParametersInput,
 } from '#types/runtime-kernel.types.js';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { TranscoderDefinition, TranscoderEdge } from '#types/runtime-transcoder.types.js';
-import type { MaterializedRender, OperationOwner } from '#framework/render-artifact.js';
+import type { MaterializedRender, NativeBuildInput, OperationOwner } from '#framework/render-artifact.js';
+import type { EvaluateResult } from '#types/runtime-kernel-v2.types.js';
 // oxlint-disable-next-line no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph.
 import type { MockKernelWorkerOptions } from '../../test/support/kernel-worker.fixture.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
@@ -38,7 +37,7 @@ import {
   createParameterDeclaration,
 } from '../../test/support/kernel-worker.fixture.js';
 /* oxlint-enable no-restricted-imports, import/extensions */
-import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
 import { createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { createKernelParameterDeclaration } from '#kernels/kernel-module-helpers.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
@@ -179,10 +178,11 @@ async function openAndWaitForRender(
 }
 
 class FailingKernelWorker extends MockKernelWorker {
-  protected override async onCreateGeometry(
-    _input: CreateGeometryInput,
+  protected override async onEvaluateForOwner(
+    _owner: OperationOwner,
+    _input: NativeBuildInput,
     _runtime: KernelRuntime,
-  ): Promise<CreateGeometryResult> {
+  ): Promise<EvaluateResult> {
     throw new Error('Build failed: syntax error');
   }
 }
@@ -217,18 +217,16 @@ class DisposingKernelWorker extends MockKernelWorker {
 
   private builds = 0;
 
-  protected override async onCreateGeometryForOwner(
+  protected override async onEvaluateForOwner(
     owner: OperationOwner,
-    _input: CreateGeometryInput,
+    _input: NativeBuildInput,
     _runtime: KernelRuntime,
-  ): Promise<CreateGeometryResult> {
+  ): Promise<EvaluateResult> {
     this.builds++;
-    this.captureNativeHandle(this.stableHandle ?? { build: this.builds }, owner);
-    return {
-      success: true,
-      data: { format: 'gltf', content: new Uint8Array([1, 2, 3]) },
-      issues: [],
-    };
+    return this.completeFixtureEvaluation(new Uint8Array([1, 2, 3]), {
+      handle: this.stableHandle ?? { build: this.builds },
+      owner,
+    });
   }
 
   protected override disposeNativeHandleForOwner(_owner: OperationOwner, nativeHandle: unknown): void {
@@ -256,19 +254,20 @@ describe('KernelWorker lifecycle', () => {
       );
     }
 
-    protected override async onCreateGeometry(
-      input: CreateGeometryInput,
+    protected override async onEvaluateForOwner(
+      owner: OperationOwner,
+      input: NativeBuildInput,
       runtime: KernelRuntime,
-    ): Promise<CreateGeometryResult> {
+    ): Promise<EvaluateResult> {
       this.receivedParameters = input.parameters;
-      return super.onCreateGeometry(input, runtime);
+      return super.onEvaluateForOwner(owner, input, runtime);
     }
   }
 
   const storedUnitBearingWidth = defineMiddleware({
     id: 'storedUnitBearingWidth',
     name: 'StoredUnitBearingWidth',
-    async wrapCreateGeometry(input, handler) {
+    async wrapEvaluate(input, handler) {
       return handler({ ...input, parameters: { width: '20 in', ...input.parameters } });
     },
   });
@@ -305,12 +304,13 @@ describe('KernelWorker lifecycle', () => {
         this.kernelCreateOptionsZodSchemaMap.set('mock-kernel', z.object({ tessellation: z.number() }));
       }
 
-      protected override async onCreateGeometry(
-        input: CreateGeometryInput,
+      protected override async onEvaluateForOwner(
+        owner: OperationOwner,
+        input: NativeBuildInput,
         runtime: KernelRuntime,
-      ): Promise<CreateGeometryResult> {
+      ): Promise<EvaluateResult> {
         this.receivedParameterHistory.push(input.parameters);
-        return super.onCreateGeometry(input, runtime);
+        return super.onEvaluateForOwner(owner, input, runtime);
       }
     }
     const worker = new ExportParameterBoundaryWorker({
@@ -385,12 +385,13 @@ describe('KernelWorker lifecycle', () => {
       protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
         return { success: false, issues: [issue] };
       }
-      protected override async onCreateGeometry(
-        input: CreateGeometryInput,
+      protected override async onEvaluateForOwner(
+        owner: OperationOwner,
+        input: NativeBuildInput,
         runtime: KernelRuntime,
-      ): Promise<CreateGeometryResult> {
+      ): Promise<EvaluateResult> {
         builds();
-        return super.onCreateGeometry(input, runtime);
+        return super.onEvaluateForOwner(owner, input, runtime);
       }
     }
     const worker = new FailedParameterWorker({ middleware: [], onLog: noopLog });
@@ -423,12 +424,13 @@ describe('KernelWorker lifecycle', () => {
         });
       }
 
-      protected override async onCreateGeometry(
-        input: CreateGeometryInput,
+      protected override async onEvaluateForOwner(
+        owner: OperationOwner,
+        input: NativeBuildInput,
         runtime: KernelRuntime,
-      ): Promise<CreateGeometryResult> {
+      ): Promise<EvaluateResult> {
         capturedParameters.push(input.parameters);
-        return super.onCreateGeometry(input, runtime);
+        return super.onEvaluateForOwner(owner, input, runtime);
       }
     }
 
@@ -476,19 +478,20 @@ describe('KernelWorker lifecycle', () => {
           return declaration();
         }
 
-        protected override async onCreateGeometry(
-          input: CreateGeometryInput,
+        protected override async onEvaluateForOwner(
+          owner: OperationOwner,
+          input: NativeBuildInput,
           runtime: KernelRuntime,
-        ): Promise<CreateGeometryResult> {
+        ): Promise<EvaluateResult> {
           capturedParameters.push(input.parameters);
-          return super.onCreateGeometry(input, runtime);
+          return super.onEvaluateForOwner(owner, input, runtime);
         }
       }
 
       const restorePersistedParameters = defineMiddleware({
         id: 'restorePersistedParameters',
         name: 'RestorePersistedParameters',
-        async wrapCreateGeometry(input, handler) {
+        async wrapEvaluate(input, handler) {
           return handler({ ...input, parameters: { ...input.parameters, RadiusMm: 16 } });
         },
       });
@@ -647,7 +650,7 @@ describe('KernelWorker lifecycle', () => {
         const middleware = defineMiddleware({
           id: 'optional-sidecar',
           name: 'OptionalSidecar',
-          getDependencies: () => [{ path: sidecarPath, affects: ['createGeometry'] }],
+          resolve: () => [{ path: sidecarPath, affects: ['evaluate'] }],
         });
         const worker = new DependencyKernelWorker({ middleware: [middleware], onLog: noopLog, filesystem });
         try {
@@ -895,12 +898,12 @@ describe('KernelWorker lifecycle', () => {
       let createGeometryCallCount = 0;
 
       class GatedKernelWorker extends MockKernelWorker {
-        protected override async onCreateGeometry(): Promise<CreateGeometryResult> {
+        protected override async onEvaluateForOwner(): Promise<EvaluateResult> {
           createGeometryCallCount++;
           const isFirst = createGeometryCallCount === 1;
           (isFirst ? enteredA : enteredB)();
           await (isFirst ? gateA : gateB);
-          return { success: true, data: { format: 'gltf', content: new Uint8Array([1]) }, issues: [] };
+          return this.completeFixtureEvaluation(new Uint8Array([1]));
         }
       }
 
@@ -990,14 +993,14 @@ describe('KernelWorker lifecycle', () => {
       class SupersededHandleWorker extends DisposingKernelWorker {
         private calls = 0;
 
-        protected override async onCreateGeometryForOwner(
+        protected override async onEvaluateForOwner(
           owner: OperationOwner,
-          input: CreateGeometryInput,
+          input: NativeBuildInput,
           runtime: KernelRuntime,
-        ): Promise<CreateGeometryResult> {
+        ): Promise<EvaluateResult> {
           this.calls++;
           if (this.calls !== 1) {
-            return super.onCreateGeometryForOwner(owner, input, runtime);
+            return super.onEvaluateForOwner(owner, input, runtime);
           }
 
           const handle = { superseded: true };
@@ -1005,11 +1008,7 @@ describe('KernelWorker lifecycle', () => {
           entered.resolve();
           await gate.promise;
           runtime.signal.throwIfAborted();
-          return {
-            success: true,
-            data: { format: 'gltf', content: new Uint8Array([1]) },
-            issues: [],
-          };
+          return this.completeFixtureEvaluation(new Uint8Array([1]), { handle, owner });
         }
       }
 
@@ -1923,7 +1922,7 @@ describe('KernelWorker lifecycle', () => {
     const parameterMiddleware = defineMiddleware({
       id: 'parameter-reuse-test',
       name: 'parameter-reuse-test',
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         return handler(input);
       },
     });
@@ -2127,13 +2126,14 @@ describe('KernelWorker lifecycle', () => {
       });
 
       class GatedKernelWorker extends MockKernelWorker {
-        protected override async onCreateGeometry(
-          _input: CreateGeometryInput,
+        protected override async onEvaluateForOwner(
+          _owner: OperationOwner,
+          _input: NativeBuildInput,
           _runtime: KernelRuntime,
-        ): Promise<CreateGeometryResult> {
+        ): Promise<EvaluateResult> {
           enterGate();
           await gate;
-          return { success: true, data: { format: 'gltf', content: new Uint8Array([1]) }, issues: [] };
+          return this.completeFixtureEvaluation(new Uint8Array([1]));
         }
       }
 
@@ -2223,12 +2223,13 @@ describe('KernelWorker lifecycle', () => {
       });
       const callOrder: string[] = [];
       class RecordingWorker extends MockKernelWorker {
-        protected override async onCreateGeometry(
-          input: CreateGeometryInput,
+        protected override async onEvaluateForOwner(
+          owner: OperationOwner,
+          input: NativeBuildInput,
           runtime: KernelRuntime,
-        ): Promise<CreateGeometryResult> {
+        ): Promise<EvaluateResult> {
           callOrder.push('createGeometry');
-          return super.onCreateGeometry(input, runtime);
+          return super.onEvaluateForOwner(owner, input, runtime);
         }
       }
       const worker = new RecordingWorker({ middleware: [], onLog: noopLog, filesystem });
@@ -2388,10 +2389,11 @@ describe('KernelWorker lifecycle', () => {
       const renderAborted = Promise.withResolvers<void>();
 
       class GatedKernelWorker extends MockKernelWorker {
-        protected override async onCreateGeometry(
-          _input: CreateGeometryInput,
+        protected override async onEvaluateForOwner(
+          _owner: OperationOwner,
+          _input: NativeBuildInput,
           runtime: KernelRuntime,
-        ): Promise<CreateGeometryResult> {
+        ): Promise<EvaluateResult> {
           runtime.signal.addEventListener(
             'abort',
             () => {
@@ -2401,11 +2403,7 @@ describe('KernelWorker lifecycle', () => {
           );
           enterGate();
           await gate;
-          return {
-            success: true,
-            data: { format: 'gltf', content: new Uint8Array([1]) },
-            issues: [],
-          };
+          return this.completeFixtureEvaluation(new Uint8Array([1]));
         }
       }
 
@@ -2508,10 +2506,10 @@ describe('KernelWorker lifecycle', () => {
       const gate = Promise.withResolvers<void>();
       const gateEntered = Promise.withResolvers<void>();
       class GatedKernelWorker extends MockKernelWorker {
-        protected override async onCreateGeometry(): Promise<CreateGeometryResult> {
+        protected override async onEvaluateForOwner(): Promise<EvaluateResult> {
           gateEntered.resolve();
           await gate.promise;
-          return { success: true, data: { format: 'gltf', content: new Uint8Array([1]) }, issues: [] };
+          return this.completeFixtureEvaluation(new Uint8Array([1]));
         }
       }
 
@@ -2618,10 +2616,10 @@ describe('KernelWorker lifecycle', () => {
       const middleware = defineMiddleware({
         id: 'operation-scoped-dependency',
         name: 'operation-scoped-dependency',
-        getDependencies() {
-          return [{ path: dependencyPath, affects: ['createGeometry'] }];
+        resolve() {
+          return [{ path: dependencyPath, affects: ['evaluate'] }];
         },
-        async wrapGetParameters(input, handler) {
+        async wrapDescribe(input, handler) {
           return handler(input);
         },
       });
@@ -2653,8 +2651,8 @@ describe('KernelWorker lifecycle', () => {
       const middlewareWithDeps = defineMiddleware({
         id: 'test-deps',
         name: 'test-deps',
-        getDependencies() {
-          return [{ path: '.tau/parameters/main.ts.json', affects: ['createGeometry'] }];
+        resolve() {
+          return [{ path: '.tau/parameters/main.ts.json', affects: ['evaluate'] }];
         },
       });
 
@@ -2699,8 +2697,8 @@ describe('KernelWorker lifecycle', () => {
       const middlewareWithDeps = defineMiddleware({
         id: 'test-deps',
         name: 'test-deps',
-        getDependencies() {
-          return [{ path: '.tau/parameters/main.ts.json', affects: ['createGeometry'] }];
+        resolve() {
+          return [{ path: '.tau/parameters/main.ts.json', affects: ['evaluate'] }];
         },
       });
 
@@ -2732,8 +2730,8 @@ describe('KernelWorker lifecycle', () => {
       const middlewareWithDeps = defineMiddleware({
         id: 'test-deps',
         name: 'test-deps',
-        getDependencies() {
-          return [{ path: '.tau/missing.json', affects: ['createGeometry'] }];
+        resolve() {
+          return [{ path: '.tau/missing.json', affects: ['evaluate'] }];
         },
       });
 
@@ -2761,7 +2759,7 @@ describe('KernelWorker lifecycle', () => {
       const middlewareWithDeps = defineMiddleware({
         id: 'test-deps',
         name: 'test-deps',
-        getDependencies: getDependenciesSpy,
+        resolve: getDependenciesSpy,
       });
 
       const filesystem = createMockFileSystem();
@@ -2799,7 +2797,7 @@ describe('KernelWorker lifecycle', () => {
       const middlewareWithDeps = defineMiddleware({
         id: 'test-deps',
         name: 'test-deps',
-        getDependencies: getDependenciesSpy,
+        resolve: getDependenciesSpy,
       });
 
       const filesystem = createMockFileSystem();
@@ -2825,8 +2823,8 @@ describe('KernelWorker lifecycle', () => {
       const middlewareWithInvalidDependency = defineMiddleware({
         id: 'invalid-dependency',
         name: 'invalid-dependency',
-        getDependencies() {
-          return [{ path: '../outside.json', affects: ['createGeometry'] }];
+        resolve() {
+          return [{ path: '../outside.json', affects: ['evaluate'] }];
         },
       });
       const filesystem = createMockFileSystem();
@@ -2881,10 +2879,10 @@ describe('KernelWorker lifecycle', () => {
     const cleanupHook = vi.fn();
 
     class CleanupWorker extends MockKernelWorker {
-      protected override async onCreateGeometry(): Promise<CreateGeometryResult> {
+      protected override async onEvaluateForOwner(): Promise<EvaluateResult> {
         renderStarted();
         await renderGate;
-        return { success: true, data: { format: 'gltf', content: new Uint8Array([1]) }, issues: [] };
+        return this.completeFixtureEvaluation(new Uint8Array([1]));
       }
 
       protected override async onCleanup(): Promise<void> {
@@ -2941,13 +2939,14 @@ describe('preview admission invariants', () => {
     const gate = Promise.withResolvers<void>();
 
     class GatedWorker extends MockKernelWorker {
-      protected override async onCreateGeometry(
-        input: CreateGeometryInput,
+      protected override async onEvaluateForOwner(
+        owner: OperationOwner,
+        input: NativeBuildInput,
         runtime: KernelRuntime,
-      ): Promise<CreateGeometryResult> {
+      ): Promise<EvaluateResult> {
         entered.resolve();
         await gate.promise;
-        return super.onCreateGeometry(input, runtime);
+        return super.onEvaluateForOwner(owner, input, runtime);
       }
     }
 
@@ -3128,13 +3127,14 @@ describe('preview admission invariants', () => {
     const gate = Promise.withResolvers<void>();
 
     class GatedWorker extends MockKernelWorker {
-      protected override async onCreateGeometry(
-        input: CreateGeometryInput,
+      protected override async onEvaluateForOwner(
+        owner: OperationOwner,
+        input: NativeBuildInput,
         runtime: KernelRuntime,
-      ): Promise<CreateGeometryResult> {
+      ): Promise<EvaluateResult> {
         entered.resolve();
         await gate.promise;
-        return super.onCreateGeometry(input, runtime);
+        return super.onEvaluateForOwner(owner, input, runtime);
       }
     }
 
@@ -3159,13 +3159,14 @@ describe('preview admission invariants', () => {
     const gate = Promise.withResolvers<void>();
 
     class GatedWorker extends MockKernelWorker {
-      protected override async onCreateGeometry(
-        input: CreateGeometryInput,
+      protected override async onEvaluateForOwner(
+        owner: OperationOwner,
+        input: NativeBuildInput,
         runtime: KernelRuntime,
-      ): Promise<CreateGeometryResult> {
+      ): Promise<EvaluateResult> {
         entered.resolve();
         await gate.promise;
-        return super.onCreateGeometry(input, runtime);
+        return super.onEvaluateForOwner(owner, input, runtime);
       }
     }
 
@@ -3197,10 +3198,11 @@ describe('preview admission invariants', () => {
   it('cancels only the selected evaluateModel call and leaves the next preview admissible', async () => {
     const evaluationEntered = Promise.withResolvers<void>();
     class AbortableEvaluationWorker extends MockKernelWorker {
-      protected override async onCreateGeometry(
-        input: CreateGeometryInput,
+      protected override async onEvaluateForOwner(
+        owner: OperationOwner,
+        input: NativeBuildInput,
         runtime: KernelRuntime,
-      ): Promise<CreateGeometryResult> {
+      ): Promise<EvaluateResult> {
         if (input.parameters['request'] === true) {
           evaluationEntered.resolve();
           await new Promise<void>((resolve) => {
@@ -3214,7 +3216,7 @@ describe('preview admission invariants', () => {
           });
           runtime.signal.throwIfAborted();
         }
-        return super.onCreateGeometry(input, runtime);
+        return super.onEvaluateForOwner(owner, input, runtime);
       }
     }
     const filesystem = createMockFileSystem();
@@ -3444,13 +3446,14 @@ describe('preview admission invariants', () => {
     const gate = Promise.withResolvers<void>();
 
     class GatedWorker extends MockKernelWorker {
-      protected override async onCreateGeometry(
-        input: CreateGeometryInput,
+      protected override async onEvaluateForOwner(
+        owner: OperationOwner,
+        input: NativeBuildInput,
         runtime: KernelRuntime,
-      ): Promise<CreateGeometryResult> {
+      ): Promise<EvaluateResult> {
         entered.resolve();
         await gate.promise;
-        return super.onCreateGeometry(input, runtime);
+        return super.onEvaluateForOwner(owner, input, runtime);
       }
     }
 
@@ -3505,13 +3508,14 @@ describe('preview admission invariants', () => {
     const gate = Promise.withResolvers<void>();
 
     class GatedDependencyWorker extends DependencyKernelWorker {
-      protected override async onCreateGeometry(
-        input: CreateGeometryInput,
+      protected override async onEvaluateForOwner(
+        owner: OperationOwner,
+        input: NativeBuildInput,
         runtime: KernelRuntime,
-      ): Promise<CreateGeometryResult> {
+      ): Promise<EvaluateResult> {
         entered.resolve();
         await gate.promise;
-        return super.onCreateGeometry(input, runtime);
+        return super.onEvaluateForOwner(owner, input, runtime);
       }
     }
 
@@ -3695,11 +3699,15 @@ describe('preview admission invariants', () => {
         return super.onGetParameters(input, runtime);
       }
 
-      protected override async onCreateGeometry(input: CreateGeometryInput, runtime: KernelRuntime) {
+      protected override async onEvaluateForOwner(
+        owner: OperationOwner,
+        input: NativeBuildInput,
+        runtime: KernelRuntime,
+      ) {
         if (this.exportInProgress) {
           exportSignals.push(runtime.signal);
         }
-        return super.onCreateGeometry(input, runtime);
+        return super.onEvaluateForOwner(owner, input, runtime);
       }
     }
 
@@ -3747,13 +3755,13 @@ describe('abort reason propagation', () => {
     let createGeometryCalls = 0;
 
     class WireSupersessionWorker extends MockKernelWorker {
-      protected override async onCreateGeometry(): Promise<CreateGeometryResult> {
+      protected override async onEvaluateForOwner(): Promise<EvaluateResult> {
         createGeometryCalls++;
         if (createGeometryCalls === 1) {
           markFirstStarted();
           await firstGate;
         }
-        return { success: true, data: { format: 'gltf', content: new Uint8Array([createGeometryCalls]) }, issues: [] };
+        return this.completeFixtureEvaluation(new Uint8Array([createGeometryCalls]));
       }
     }
 
@@ -3799,13 +3807,13 @@ describe('abort reason propagation', () => {
     let createGeometryCalls = 0;
 
     class SabAdmissionWorker extends MockKernelWorker {
-      protected override async onCreateGeometry(): Promise<CreateGeometryResult> {
+      protected override async onEvaluateForOwner(): Promise<EvaluateResult> {
         createGeometryCalls++;
         if (createGeometryCalls === 1) {
           markFirstStarted();
           await firstGate;
         }
-        return { success: true, data: { format: 'gltf', content: new Uint8Array([createGeometryCalls]) }, issues: [] };
+        return this.completeFixtureEvaluation(new Uint8Array([createGeometryCalls]));
       }
     }
 
@@ -3865,10 +3873,10 @@ describe('abort reason propagation', () => {
     });
 
     class MismatchedTimeoutWorker extends MockKernelWorker {
-      protected override async onCreateGeometry(): Promise<CreateGeometryResult> {
+      protected override async onEvaluateForOwner(): Promise<EvaluateResult> {
         markRenderStarted();
         await renderGate;
-        return { success: true, data: { format: 'gltf', content: new Uint8Array([1]) }, issues: [] };
+        return this.completeFixtureEvaluation(new Uint8Array([1]));
       }
     }
 
@@ -3913,24 +3921,25 @@ describe('abort reason propagation', () => {
     const middleware = defineMiddleware({
       id: 'signal-capture',
       name: 'signal-capture',
-      async wrapCreateGeometry(input, handler, runtime) {
+      async wrapEvaluate(input, handler, runtime) {
         middlewareSignals.push(runtime.signal);
         return handler(input);
       },
     });
 
     class SignalIdentityWorker extends MockKernelWorker {
-      protected override async onCreateGeometry(
-        _input: CreateGeometryInput,
+      protected override async onEvaluateForOwner(
+        _owner: OperationOwner,
+        _input: NativeBuildInput,
         runtime: KernelRuntime,
-      ): Promise<CreateGeometryResult> {
+      ): Promise<EvaluateResult> {
         kernelSignals.push(runtime.signal);
         await runtime.execute('export default undefined;');
         if (kernelSignals.length === 1) {
           markFirstStarted();
           await firstGate;
         }
-        return { success: true, data: { format: 'gltf', content: new Uint8Array([1]) }, issues: [] };
+        return this.completeFixtureEvaluation(new Uint8Array([1]));
       }
     }
 
@@ -3992,12 +4001,12 @@ describe('abort reason propagation', () => {
     const view = new Int32Array(sab);
 
     class TimeoutKernelWorker extends MockKernelWorker {
-      protected override async onCreateGeometry(): Promise<CreateGeometryResult> {
+      protected override async onEvaluateForOwner(): Promise<EvaluateResult> {
         // Simulate main-thread timeout firing during WASM: set reason then increment generation
         Atomics.store(view, signalSlot.abortReason, 2);
         Atomics.add(view, signalSlot.abortGeneration, 1);
         checkAbort();
-        return { success: true, data: { format: 'gltf', content: new Uint8Array([1]) }, issues: [] };
+        return this.completeFixtureEvaluation(new Uint8Array([1]));
       }
     }
 
@@ -4045,10 +4054,10 @@ describe('abort reason propagation', () => {
     });
 
     class WireTimeoutKernelWorker extends MockKernelWorker {
-      protected override async onCreateGeometry(): Promise<CreateGeometryResult> {
+      protected override async onEvaluateForOwner(): Promise<EvaluateResult> {
         markRenderStarted();
         await renderGate;
-        return { success: true, data: { format: 'gltf', content: new Uint8Array([1]) }, issues: [] };
+        return this.completeFixtureEvaluation(new Uint8Array([1]));
       }
     }
 
@@ -4108,7 +4117,7 @@ describe('abort reason propagation', () => {
       "wire validation failed for client-call-result 'call': __bridgeError.metadata: Invalid input: expected record, received null";
 
     class ForeignIssuesKernelWorker extends MockKernelWorker {
-      protected override async onCreateGeometry(): Promise<CreateGeometryResult> {
+      protected override async onEvaluateForOwner(): Promise<EvaluateResult> {
         throw Object.assign(new Error(reason), {
           issues: [
             {
@@ -4149,12 +4158,12 @@ describe('abort reason propagation', () => {
     const view = new Int32Array(sab);
 
     class SupersededKernelWorker extends MockKernelWorker {
-      protected override async onCreateGeometry(): Promise<CreateGeometryResult> {
+      protected override async onEvaluateForOwner(): Promise<EvaluateResult> {
         // Simulate main-thread supersession: set reason then increment generation
         Atomics.store(view, signalSlot.abortReason, 1);
         Atomics.add(view, signalSlot.abortGeneration, 1);
         checkAbort();
-        return { success: true, data: { format: 'gltf', content: new Uint8Array([1]) }, issues: [] };
+        return this.completeFixtureEvaluation(new Uint8Array([1]));
       }
     }
 
@@ -4222,7 +4231,7 @@ describe('transcoder loading', () => {
         data: [{ bytes: new Uint8Array([1, 2, 3]), name: 'output.usdz', mimeType: 'model/vnd.usdz+zip' }],
         issues: [],
       }),
-      cleanup: vi.fn().mockResolvedValue(undefined),
+      onDispose: vi.fn().mockResolvedValue(undefined),
     } satisfies TranscoderDefinition<{ initialized: boolean }>;
   }
 
@@ -4335,8 +4344,8 @@ describe('transcoder loading', () => {
     expect(mockModule.transcode).toHaveBeenCalledTimes(2);
 
     await worker.cleanup();
-    expect(mockModule.cleanup).toHaveBeenCalledOnce();
-    expect(mockModule.cleanup).toHaveBeenCalledWith({ initialized: true });
+    expect(mockModule.onDispose).toHaveBeenCalledOnce();
+    expect(mockModule.onDispose).toHaveBeenCalledWith({ initialized: true });
   });
 
   it('should fall through to direct kernel export when no transcoder route matches', async () => {
@@ -4391,7 +4400,7 @@ describe('transcoder loading', () => {
     await worker.cleanup();
 
     expect(mockModule.initialize).not.toHaveBeenCalled();
-    expect(mockModule.cleanup).not.toHaveBeenCalled();
+    expect(mockModule.onDispose).not.toHaveBeenCalled();
   });
 
   it('should propagate kernel export failure without calling transcoder', async () => {
@@ -4959,7 +4968,7 @@ describe('transcoder loading', () => {
         data: [{ bytes: new Uint8Array([1, 2, 3]), name: 'output.usdz', mimeType: 'model/vnd.usdz+zip' }],
         issues: [],
       }),
-      cleanup: vi.fn().mockResolvedValue(undefined),
+      onDispose: vi.fn().mockResolvedValue(undefined),
     } satisfies TranscoderDefinition<{ initialized: boolean }>;
 
     const glbSchema = tessellationSchema.extend(coordinateSystemSchema.shape);
@@ -5436,7 +5445,7 @@ describe('export schema hard-fail', () => {
       id: 'readsDuringExport',
       name: 'ReadsDuringExport',
       version: '1.0.0',
-      async wrapExportGeometry(input, handler, runtime) {
+      async wrapWrite(input, handler, runtime) {
         await runtime.filesystem.exists('main.ts');
         return handler(input);
       },

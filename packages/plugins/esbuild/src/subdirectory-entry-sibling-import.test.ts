@@ -19,21 +19,16 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type {
-  GeometryResponse,
-  GetDependenciesResult,
-  GetDependenciesInput,
-  KernelRuntime,
-} from '@taucad/runtime/types';
+import type { GetDependenciesResult } from '@taucad/runtime/types';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { createKernelParameterDeclaration, defineKernel } from '@taucad/runtime/kernel';
+import { createKernelParameterDeclaration, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 import { defineRuntime } from '@taucad/runtime/worker';
 import { esbuildBundler } from '#esbuild.bundler.js';
 
-const testGeometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies GeometryResponse;
+const testGeometry = new Uint8Array([1]);
 
 /** Entry sits in `test-exports`; its dependency sits in the sibling `lib`. */
 const files = {
@@ -55,27 +50,27 @@ describe('subdirectory entry importing a sibling directory', () => {
       extensions: ['ts'],
       name: 'Sibling import probe',
       version: '1.0.0',
-      exportFormats: {},
+      views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+      exports: {},
       initialize: async () => ({}),
       // The real bundler resolution path — the one the regression broke.
-      getDependencies: async (input: GetDependenciesInput, runtime: KernelRuntime) => {
+      resolve: async (input, runtime) => {
         dependencies = await runtime.bundler.resolveDependencies(input.entryPath);
         return dependencies;
       },
-      getParameters: async () => ({
-        success: true,
-        data: createKernelParameterDeclaration(
-          {},
-          { type: 'object', properties: {} },
-          {
-            id: 'urn:taucad:test:sibling-probe',
-            name: 'SiblingProbeParameters',
-          },
-        ),
-        issues: [],
-      }),
-      createGeometry: async () => ({ geometry: testGeometry, nativeHandle: {} }),
-      exportGeometry: async () => ({ success: true, data: [], issues: [] }),
+      describe: async () =>
+        createKernelSuccess({
+          parameters: createKernelParameterDeclaration(
+            {},
+            { type: 'object', properties: {} },
+            {
+              id: 'urn:taucad:test:sibling-probe',
+              name: 'SiblingProbeParameters',
+            },
+          ),
+        }),
+      evaluate: async () => ({ handle: testGeometry }),
+      render: async ({ handle }) => ({ content: handle }),
     });
 
     const runtime = defineRuntime({

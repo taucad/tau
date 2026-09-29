@@ -1,6 +1,5 @@
 /* oxlint-disable typescript/no-unsafe-assignment -- public test definitions intentionally erase private kernel context. */
 // @vitest-environment node
-import type { AnyKernelDefinition } from '@taucad/runtime/kernel';
 import { actionDigest, canonicalizeComputeAction, contentDigest } from '@taucad/cache-core';
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import { sha256StringSync } from '@taucad/utils/hash';
@@ -44,7 +43,7 @@ const parameterDeclaration = {
   },
 };
 
-const createContext = () => ({
+const createContextData = () => ({
   mirror: { sync: vi.fn().mockResolvedValue(['main.py']), cleanup: vi.fn().mockResolvedValue(undefined) },
   session: {
     generation: 2,
@@ -98,17 +97,23 @@ const workerError = (type: 'syntax' | 'validation' | 'runtime' | 'kernel' = 'syn
     },
   ]);
 
+const loadDefinition = async () => resolveRuntimePluginDefinition('kernel', build123dKernel(kernelOptions));
+// The hook tests use focused session/mirror doubles; this is their checked context boundary.
+const createContext = () =>
+  createContextData() as ReturnType<typeof createContextData> &
+    Parameters<Awaited<ReturnType<typeof loadDefinition>>['evaluate']>[2];
+
 describe('Build123d kernel lifecycle errors', () => {
-  let definition: AnyKernelDefinition;
+  let definition: Awaited<ReturnType<typeof loadDefinition>>;
 
   beforeEach(async () => {
-    definition = await resolveRuntimePluginDefinition('kernel', build123dKernel(kernelOptions));
+    definition = await loadDefinition();
   });
 
   it('preserves Python issue provenance for dependencies and parameters', async () => {
     const context = createContext();
     context.session.request.mockRejectedValueOnce(workerError('syntax'));
-    await expect(definition.getDependencies({ entryPath: 'main.py' }, runtime, context)).rejects.toMatchObject({
+    await expect(definition.resolve({ entryPath: 'main.py' }, runtime, context)).rejects.toMatchObject({
       name: 'Build123dKernelError',
       issues: [
         expect.objectContaining({ type: 'compilation', details: { pythonCode: 'PYTHON_TEST', pythonType: 'syntax' } }),
@@ -116,14 +121,14 @@ describe('Build123d kernel lifecycle errors', () => {
     });
 
     context.session.request.mockRejectedValueOnce(workerError('validation'));
-    await expect(definition.getParameters({ entryPath: 'main.py' }, runtime, context)).resolves.toMatchObject({
+    await expect(definition.describe({ entryPath: 'main.py' }, runtime, context)).resolves.toMatchObject({
       success: false,
       issues: [expect.objectContaining({ type: 'compilation' })],
     });
 
     context.session.request.mockRejectedValueOnce(workerError('runtime'));
     await expect(
-      definition.createGeometry({ entryPath: 'main.py', parameters: {}, options: renderOptions }, runtime, context),
+      definition.evaluate({ entryPath: 'main.py', parameters: {}, options: {} }, runtime, context),
     ).rejects.toMatchObject({
       issues: [expect.objectContaining({ type: 'runtime' })],
     });
@@ -133,11 +138,7 @@ describe('Build123d kernel lifecycle errors', () => {
     const context = createContext();
     context.session.request.mockResolvedValueOnce({ handleId: 'shape', observedDependencies: [] });
 
-    await definition.createGeometry(
-      { entryPath: 'main.py', parameters: { width: 20 }, options: renderOptions },
-      runtime,
-      context,
-    );
+    await definition.evaluate({ entryPath: 'main.py', parameters: { width: 20 }, options: {} }, runtime, context);
 
     expect(context.session.request).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'analyze' }));
   });
@@ -152,16 +153,16 @@ describe('Build123d kernel lifecycle errors', () => {
     const render = { ...runtime, operationId: 1 };
     const input = { entryPath: 'main.py' };
 
-    await definition.getDependencies(input, render, context);
-    await definition.getParameters(input, render, context);
-    await definition.createGeometry({ ...input, parameters: {}, options: renderOptions }, render, context);
+    await definition.resolve(input, render, context);
+    await definition.describe(input, render, context);
+    await definition.evaluate({ ...input, parameters: {}, options: {} }, render, context);
 
     // The mirror reuses its own walk per operation id.
     expect(context.mirror.sync.mock.calls.map((call): unknown => call[2])).toEqual([1, 1, 1]);
     expect(requestedMethods(context.session.request)).toEqual(['analyze', 'build']);
 
     // The next operation observes the workspace afresh.
-    await definition.getParameters(input, { ...runtime, operationId: 2 }, context);
+    await definition.describe(input, { ...runtime, operationId: 2 }, context);
     expect(requestedMethods(context.session.request)).toEqual(['analyze', 'build', 'analyze']);
   });
 
@@ -175,7 +176,7 @@ describe('Build123d kernel lifecycle errors', () => {
       unresolved: [],
     });
 
-    await definition.getParameters({ entryPath: 'main.py' }, runtime, context);
+    await definition.describe({ entryPath: 'main.py' }, runtime, context);
 
     /* D8: a native kernel's time is in the trace, not only in its own process. */
     expect(runtime.tracer.startSpan).toHaveBeenCalledWith('build123d.analyze', { entryPath: 'main.py' });
@@ -190,14 +191,14 @@ describe('Build123d kernel lifecycle errors', () => {
       resolved: ['main.py'],
       unresolved: [],
     });
-    await expect(definition.getParameters({ entryPath: 'main.py' }, runtime, context)).resolves.toEqual({
+    await expect(definition.describe({ entryPath: 'main.py' }, runtime, context)).resolves.toEqual({
       success: true,
-      data: parameterDeclaration,
+      data: { parameters: parameterDeclaration },
       issues: [],
     });
 
     context.session.request.mockRejectedValueOnce('plain failure');
-    const parameters = await definition.getParameters({ entryPath: 'main.py' }, runtime, context);
+    const parameters = await definition.describe({ entryPath: 'main.py' }, runtime, context);
     expect(parameters).toMatchObject({
       success: false,
       issues: [{ message: 'plain failure', location: { fileName: 'main.py' } }],
@@ -205,22 +206,19 @@ describe('Build123d kernel lifecycle errors', () => {
 
     context.session.isHandleGenerationValid.mockReturnValue(false);
     await expect(
-      definition.meshGeometry?.(
-        { nativeHandle: { sessionGeneration: 1, handleId: 'stale' }, options: renderOptions },
+      definition.render?.(
+        { view: 'model', handle: { sessionGeneration: 1, handleId: 'stale' }, options: renderOptions },
         runtime,
         context,
       ),
     ).rejects.toThrow(/stale/);
     await expect(
-      definition.exportGeometry(
-        { format: 'step', nativeHandle: { sessionGeneration: 1, handleId: 'stale' }, options: {} },
+      definition.write!(
+        { exportId: 'step', handle: { sessionGeneration: 1, handleId: 'stale' }, options: {} },
         runtime,
         context,
       ),
-    ).resolves.toMatchObject({
-      success: false,
-      issues: [expect.objectContaining({ message: expect.stringContaining('stale') })],
-    });
+    ).rejects.toThrow(/stale/);
   });
 
   it('handles mesh/export worker failures and GLB export naming', async () => {
@@ -228,20 +226,20 @@ describe('Build123d kernel lifecycle errors', () => {
     const handle = { sessionGeneration: 2, handleId: 'shape' };
     context.session.request.mockRejectedValueOnce(new Error('mesh failed'));
     await expect(
-      definition.meshGeometry?.({ nativeHandle: handle, options: renderOptions }, runtime, context),
+      definition.render?.({ view: 'model', handle, options: renderOptions }, runtime, context),
     ).rejects.toThrow(/mesh failed/);
 
     context.session.request.mockResolvedValueOnce({ artifactPath: '/private/model.glb', byteLength: 3 });
-    const exported = await definition.exportGeometry(
+    const exported = await definition.write!(
       {
-        format: 'glb',
-        nativeHandle: handle,
+        exportId: 'glb',
+        handle,
         options: { ...renderOptions, coordinateSystem: 'y-up', unit: { length: 'meter' } },
       },
       runtime,
       context,
     );
-    expect(exported).toMatchObject({ success: true, data: [{ name: 'model.glb', bytes: new Uint8Array([1, 2, 3]) }] });
+    expect(exported).toMatchObject({ files: [{ name: 'model.glb', bytes: new Uint8Array([1, 2, 3]) }] });
     expect(context.session.request).toHaveBeenLastCalledWith(
       expect.objectContaining({
         method: 'mesh',
@@ -251,9 +249,9 @@ describe('Build123d kernel lifecycle errors', () => {
     );
 
     context.session.request.mockRejectedValueOnce(new Error('export failed'));
-    await expect(
-      definition.exportGeometry({ format: 'step', nativeHandle: handle, options: {} }, runtime, context),
-    ).resolves.toMatchObject({ success: false, issues: [expect.objectContaining({ message: 'export failed' })] });
+    await expect(definition.write!({ exportId: 'step', handle, options: {} }, runtime, context)).rejects.toThrow(
+      /export failed/,
+    );
   });
 
   it('announces verified worker admissions, refreshes warm candidates and skips the off arm', async () => {
@@ -304,8 +302,8 @@ describe('Build123d kernel lifecycle errors', () => {
     const openScope = vi.spyOn(capability, 'openScope').mockReturnValueOnce(discoveryScope);
 
     await expect(
-      definition.createGeometry({ entryPath: 'main.py', parameters: {}, options: renderOptions }, runtime, context),
-    ).resolves.toEqual({ nativeHandle: { sessionGeneration: 2, handleId: 'shape' } });
+      definition.evaluate({ entryPath: 'main.py', parameters: {}, options: renderOptions }, runtime, context),
+    ).resolves.toEqual({ handle: { sessionGeneration: 2, handleId: 'shape' } });
     expect(openScope).toHaveBeenCalledWith(
       expect.objectContaining({ namespace: 'build123d.operation.v1', admissionFloor: 5, resident: context.resident }),
     );
@@ -326,7 +324,7 @@ describe('Build123d kernel lifecycle errors', () => {
 
     // The next build warms from the refreshed candidate set before it executes.
     context.session.request.mockResolvedValueOnce({ handleId: 'again', observedDependencies: [] });
-    await definition.createGeometry({ entryPath: 'main.py', parameters: {}, options: renderOptions }, runtime, context);
+    await definition.evaluate({ entryPath: 'main.py', parameters: {}, options: {} }, runtime, context);
     expect(context.resident.importEntries).toHaveBeenCalled();
 
     // C2/EQ14 off arm: no scope, and the worker is asked to build with no compute configuration at all.
@@ -334,8 +332,8 @@ describe('Build123d kernel lifecycle errors', () => {
     const offRuntime = { ...runtime, compute: { status: 'off' } } as unknown as typeof runtime;
     off.session.request.mockResolvedValueOnce({ handleId: 'plain', observedDependencies: [] });
     await expect(
-      definition.createGeometry({ entryPath: 'main.py', parameters: {}, options: renderOptions }, offRuntime, off),
-    ).resolves.toEqual({ nativeHandle: { sessionGeneration: 2, handleId: 'plain' } });
+      definition.evaluate({ entryPath: 'main.py', parameters: {}, options: renderOptions }, offRuntime, off),
+    ).resolves.toEqual({ handle: { sessionGeneration: 2, handleId: 'plain' } });
     expect(off.session.request).toHaveBeenCalledWith(
       expect.objectContaining({ params: { entryPath: 'main.py', parameters: {} } }),
     );
@@ -347,14 +345,14 @@ describe('Build123d kernel lifecycle errors', () => {
 
   it('delegates handle validity/disposal and always removes the mirror', async () => {
     const context = createContext();
-    expect(
-      definition.isNativeHandleValid?.({ nativeHandle: { sessionGeneration: 2, handleId: 'shape' } }, runtime, context),
-    ).toBe(true);
-    definition.disposeNativeHandle?.({ nativeHandle: { sessionGeneration: 2, handleId: 'shape' } }, runtime, context);
+    expect(definition.isHandleValid?.({ handle: { sessionGeneration: 2, handleId: 'shape' } }, runtime, context)).toBe(
+      true,
+    );
+    definition.releaseHandle?.({ handle: { sessionGeneration: 2, handleId: 'shape' } }, runtime, context);
     expect(context.session.release).toHaveBeenCalledWith('shape', 2);
 
     context.session.cleanup.mockRejectedValueOnce(new Error('cleanup failed'));
-    await expect(definition.cleanup?.(context)).rejects.toThrow(/cleanup failed/);
+    await expect(definition.onDispose?.(context)).rejects.toThrow(/cleanup failed/);
     expect(context.mirror.cleanup).toHaveBeenCalled();
   });
 });

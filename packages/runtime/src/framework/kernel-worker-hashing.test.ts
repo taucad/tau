@@ -13,11 +13,11 @@ import type { OnWorkerLog } from '@taucad/types';
 import type { CreateGeometryResult } from '#types/runtime.types.js';
 import type { GetDependenciesInput, KernelRuntime, RuntimeImplementationAsset } from '#types/runtime-kernel.types.js';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
-import type { WrapCreateGeometryHook } from '#types/runtime-middleware.types.js';
+import type { WrapEvaluateHook } from '#types/runtime-middleware-v2.types.js';
 // oxlint-disable-next-line no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph.
 import { MockKernelWorker, createMockFileSystem } from '../../test/support/kernel-worker.fixture.js';
 import { sha256Bytes } from '@taucad/utils/hash';
-import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
 import type { MaterializedRender } from '#framework/render-artifact.js';
 
 class AssetTestWorker extends MockKernelWorker {
@@ -115,19 +115,20 @@ describe('kernel-worker hashing', () => {
     });
 
     it('excludes non-mutating middleware from artifact and native-build identity', async () => {
-      const observe: WrapCreateGeometryHook = async (input, handler) => handler(input);
+      const observe: WrapEvaluateHook<Record<string, never>, Record<string, never>> = async (input, handler) =>
+        handler(input);
       const observerSpy = vi.fn(observe);
       const observer = defineMiddleware({
         id: 'observer',
         name: 'Observer',
         mutates: false,
-        wrapCreateGeometry: observerSpy,
+        wrapEvaluate: observerSpy,
       });
       const mutator = defineMiddleware({
         id: 'mutator',
         name: 'Mutator',
         mutates: true,
-        wrapCreateGeometry: async (input, handler) => handler(input),
+        wrapEvaluate: async (input, handler) => handler(input),
       });
       const createWorker = (middleware: ConstructorParameters<typeof MockKernelWorker>[0]['middleware']) =>
         new MockKernelWorker({

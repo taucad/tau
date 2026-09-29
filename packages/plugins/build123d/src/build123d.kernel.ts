@@ -1,5 +1,5 @@
 import { asBuffer, createKernelError, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
-import type { ComputeAnnouncement, KernelIssue, KernelRuntime } from '@taucad/runtime/kernel';
+import type { ComputeAnnouncement, KernelIssue, KernelServices } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
 import { actionDigest, canonicalizeComputeAction, contentDigest } from '@taucad/cache-core';
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
@@ -96,7 +96,7 @@ type Build123dContext = {
  */
 const analyzeEntry = async (
   entryPath: string,
-  runtime: Pick<KernelRuntime, 'operationId' | 'signal' | 'tracer'>,
+  runtime: Pick<KernelServices, 'operationId' | 'signal' | 'tracer'>,
   context: Build123dContext,
 ): Promise<Build123dAnalysis> => {
   const { operationId } = runtime;
@@ -132,12 +132,22 @@ export const build123dKernel = defineKernel({
   name: 'Build123dKernel',
   version: '0.11.1+python3.13.ocp7.9.3.1.1.protocol1.topology1',
   optionsSchema: build123dOptionsSchema,
-  render: { optionsSchema: build123dRenderSchema },
+  views: { model: { title: 'Model', mimeType: 'model/gltf-binary', optionsSchema: build123dRenderSchema } },
   // D2: the Python worker answers `cancelMethod: 'cancel'` itself and keeps its resident prefix.
   cancellation: 'cooperative',
-  exportFormats: {
-    glb: { optionsSchema: build123dExportSchemas.glb },
-    step: { optionsSchema: build123dExportSchemas.step },
+  exports: {
+    glb: {
+      title: 'glTF binary',
+      mimeType: 'model/gltf-binary',
+      extension: 'glb',
+      optionsSchema: build123dExportSchemas.glb,
+    },
+    step: {
+      title: 'STEP',
+      mimeType: 'application/step',
+      extension: 'step',
+      optionsSchema: build123dExportSchemas.step,
+    },
   },
 
   async initialize(options, runtime) {
@@ -167,7 +177,7 @@ export const build123dKernel = defineKernel({
     };
   },
 
-  async getDependencies({ entryPath }, runtime, context) {
+  async resolve({ entryPath }, runtime, context) {
     await context.mirror.sync(runtime.filesystem, runtime.fileContentCache, runtime.operationId);
     try {
       const analysis = await analyzeEntry(entryPath, runtime, context);
@@ -177,20 +187,20 @@ export const build123dKernel = defineKernel({
     }
   },
 
-  async getParameters({ entryPath }, runtime, context) {
+  async describe({ entryPath }, runtime, context) {
     await context.mirror.sync(runtime.filesystem, runtime.fileContentCache, runtime.operationId);
     try {
       const analysis = await analyzeEntry(entryPath, runtime, context);
       if (!analysis.declaration) {
         throw new Error('Build123d analyzer omitted its parameter declaration.');
       }
-      return createKernelSuccess(analysis.declaration);
+      return createKernelSuccess({ parameters: analysis.declaration });
     } catch (error) {
       return createKernelError(issuesFrom(error, entryPath));
     }
   },
 
-  async createGeometry({ entryPath, parameters }, runtime, context) {
+  async evaluate({ entryPath, parameters }, runtime, context) {
     await context.mirror.sync(runtime.filesystem, runtime.fileContentCache, runtime.operationId);
     const build = async (compute: Record<string, unknown> | undefined) => {
       const span = runtime.tracer.startSpan('build123d.build', { entryPath });
@@ -219,7 +229,7 @@ export const build123dKernel = defineKernel({
         // Off arm: no scope, no announcement, no publication tail, no worker-side patching.
         const plain = await build(undefined);
         return {
-          nativeHandle: {
+          handle: {
             sessionGeneration: context.session.generation,
             handleId: plain.handleId,
           },
@@ -274,7 +284,7 @@ export const build123dKernel = defineKernel({
         }
         outcome = 'delivered';
         return {
-          nativeHandle: {
+          handle: {
             sessionGeneration: context.session.generation,
             handleId: result.handleId,
           },
@@ -290,68 +300,65 @@ export const build123dKernel = defineKernel({
     }
   },
 
-  async meshGeometry({ nativeHandle, options }, runtime, context) {
-    if (!context.session.isHandleGenerationValid(nativeHandle.sessionGeneration)) {
+  async render({ handle, options }, runtime, context) {
+    if (!context.session.isHandleGenerationValid(handle.sessionGeneration)) {
       throw new Build123dKernelError(issuesFrom(new Error('Build123d native handle is stale.')));
     }
     try {
       const artifact = await context.session.request({
         method: 'mesh',
         params: {
-          handleId: nativeHandle.handleId,
+          handleId: handle.handleId,
           linearTolerance: options.tessellation.linearTolerance,
           angularTolerance: options.tessellation.angularTolerance,
         },
         schema: build123dArtifactSchema,
         signal: runtime.signal,
       });
+      return { content: await context.session.readArtifact(artifact) };
+    } catch (error) {
+      throw new Build123dKernelError(issuesFrom(error));
+    }
+  },
+
+  async write(input, runtime, context) {
+    if (!context.session.isHandleGenerationValid(input.handle.sessionGeneration)) {
+      throw new Build123dKernelError(issuesFrom(new Error('Build123d native handle is stale.')));
+    }
+    try {
+      const artifact = await context.session.request({
+        method: input.exportId === 'glb' ? 'mesh' : 'export',
+        params:
+          input.exportId === 'glb'
+            ? {
+                handleId: input.handle.handleId,
+                linearTolerance: input.options.tessellation.linearTolerance,
+                angularTolerance: input.options.tessellation.angularTolerance,
+              }
+            : { handleId: input.handle.handleId, format: 'step' },
+        schema: build123dArtifactSchema,
+        signal: runtime.signal,
+      });
+      const bytes = await context.session.readArtifact(artifact);
       return {
-        geometry: {
-          format: 'gltf',
-          content: await context.session.readArtifact(artifact),
-        },
+        files: [
+          createExportFile(input.exportId, input.exportId === 'glb' ? 'model.glb' : 'assembly.step', asBuffer(bytes)),
+        ],
       };
     } catch (error) {
       throw new Build123dKernelError(issuesFrom(error));
     }
   },
 
-  async exportGeometry(input, runtime, context) {
-    if (!context.session.isHandleGenerationValid(input.nativeHandle.sessionGeneration)) {
-      return createKernelError(issuesFrom(new Error('Build123d native handle is stale.')));
-    }
-    try {
-      const artifact = await context.session.request({
-        method: input.format === 'glb' ? 'mesh' : 'export',
-        params:
-          input.format === 'glb'
-            ? {
-                handleId: input.nativeHandle.handleId,
-                linearTolerance: input.options.tessellation.linearTolerance,
-                angularTolerance: input.options.tessellation.angularTolerance,
-              }
-            : { handleId: input.nativeHandle.handleId, format: 'step' },
-        schema: build123dArtifactSchema,
-        signal: runtime.signal,
-      });
-      const bytes = await context.session.readArtifact(artifact);
-      return createKernelSuccess([
-        createExportFile(input.format, input.format === 'glb' ? 'model.glb' : 'assembly.step', asBuffer(bytes)),
-      ]);
-    } catch (error) {
-      return createKernelError(issuesFrom(error));
-    }
+  isHandleValid({ handle }, _runtime, context) {
+    return context.session.isHandleGenerationValid(handle.sessionGeneration);
   },
 
-  isNativeHandleValid({ nativeHandle }, _runtime, context) {
-    return context.session.isHandleGenerationValid(nativeHandle.sessionGeneration);
+  releaseHandle({ handle }, _runtime, context) {
+    context.session.release(handle.handleId, handle.sessionGeneration);
   },
 
-  disposeNativeHandle({ nativeHandle }, _runtime, context) {
-    context.session.release(nativeHandle.handleId, nativeHandle.sessionGeneration);
-  },
-
-  async cleanup(context) {
+  async onDispose(context) {
     try {
       await context.session.cleanup();
     } finally {

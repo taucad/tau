@@ -1,13 +1,14 @@
 /* oxlint-disable no-restricted-imports, import/extensions -- focused runtime-private pipeline fixture */
 import { describe, expect, it, vi } from 'vitest';
 import { compileParameterManifest } from '@taucad/parameters';
-import type { ParameterDeclaration, ParameterProvenance } from '@taucad/parameters';
+import type { ParameterDeclaration, ParameterManifest, ParameterProvenance } from '@taucad/parameters';
 import type { OnWorkerLog } from '@taucad/types';
 import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
 import { _registerComputeStore } from '#cache/kernel-compute-runtime.js';
-import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
 import type { KernelRuntime, GetParametersInput } from '#types/runtime-kernel.types.js';
-import type { GetParameterDeclarationsResult, GetParametersResult } from '#types/runtime.types.js';
+import type { GetParameterDeclarationsResult } from '#types/runtime.types.js';
+import type { DescribeResult } from '#types/runtime-kernel-v2.types.js';
 import type { ComputeStore } from '#types/runtime-compute.types.js';
 import {
   MockKernelWorker,
@@ -79,9 +80,9 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: 'observe-manifest',
       name: 'observe-manifest',
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
-        observedProfiles.push(result.success ? result.data.profile : undefined);
+        observedProfiles.push(result.success ? result.data.parameters.profile : undefined);
         return result;
       },
     });
@@ -100,7 +101,7 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: 'observe-invalid',
       name: 'observe-invalid',
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         receivedSuccess = result.success;
         return result;
@@ -124,15 +125,15 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: 'break-manifest',
       name: 'break-manifest',
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         if (!result.success) {
           return result;
         }
         return {
           ...result,
-          data: { ...result.data, bindings: { '/length': { unit: 'mm' } } },
-        } as unknown as GetParametersResult;
+          data: { parameters: { ...result.data.parameters, bindings: { '/length': { unit: 'mm' } } } },
+        } as unknown as DescribeResult<ParameterManifest>;
       },
     });
     const worker = createWorker([middleware()]);
@@ -148,28 +149,30 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: 'forge-source',
       name: 'forge-source',
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         if (!result.success) {
           return result;
         }
-        const manifest = result.data;
+        const manifest = result.data.parameters;
         return {
           ...result,
-          data: await compileParameterManifest({
-            declaration: {
-              schema: manifest.schema,
-              resources: manifest.resources,
-              defaults: manifest.defaults,
-              bindings: manifest.bindingDeclarations,
-            },
-            scope: manifest.scope,
-            source: { ...manifest.source, id: 'forged-kernel' },
-            dependency: manifest.identity.dependency,
-            middleware: manifest.identity.middleware,
-            resolution: manifest.identity.resolution,
-            sourceFiles: manifest.identity.sourceFiles,
-          }),
+          data: {
+            parameters: await compileParameterManifest({
+              declaration: {
+                schema: manifest.schema,
+                resources: manifest.resources,
+                defaults: manifest.defaults,
+                bindings: manifest.bindingDeclarations,
+              },
+              scope: manifest.scope,
+              source: { ...manifest.source, id: 'forged-kernel' },
+              dependency: manifest.identity.dependency,
+              middleware: manifest.identity.middleware,
+              resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
+            }),
+          },
         };
       },
     });
@@ -191,37 +194,39 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: 'replace-producer-declaration',
       name: 'replace-producer-declaration',
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         if (!result.success) {
           return result;
         }
-        const manifest = result.data;
+        const manifest = result.data.parameters;
         return {
           ...result,
-          data: await compileParameterManifest({
-            declaration: {
-              schema: {
-                ...manifest.schema,
-                properties: { length: { type: 'double', ucumUnit: 'cm' } },
-              },
-              resources: manifest.resources,
-              defaults: manifest.defaults,
-              bindings: {
-                '/length': {
-                  parameterId: 'forged:length',
-                  quantityKind: 'http://qudt.org/vocab/quantitykind/Time',
-                  space: 'linear',
+          data: {
+            parameters: await compileParameterManifest({
+              declaration: {
+                schema: {
+                  ...manifest.schema,
+                  properties: { length: { type: 'double', ucumUnit: 'cm' } },
+                },
+                resources: manifest.resources,
+                defaults: manifest.defaults,
+                bindings: {
+                  '/length': {
+                    parameterId: 'forged:length',
+                    quantityKind: 'http://qudt.org/vocab/quantitykind/Time',
+                    space: 'linear',
+                  },
                 },
               },
-            },
-            scope: manifest.scope,
-            source: manifest.source,
-            dependency: manifest.identity.dependency,
-            middleware: manifest.identity.middleware,
-            resolution: manifest.identity.resolution,
-            sourceFiles: manifest.identity.sourceFiles,
-          }),
+              scope: manifest.scope,
+              source: manifest.source,
+              dependency: manifest.identity.dependency,
+              middleware: manifest.identity.middleware,
+              resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
+            }),
+          },
         };
       },
     });
@@ -248,31 +253,33 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: 'add-constraint',
       name: 'add-constraint',
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         if (!result.success) {
           return result;
         }
-        const manifest = result.data;
+        const manifest = result.data.parameters;
         return {
           ...result,
-          data: await compileParameterManifest({
-            declaration: {
-              schema: {
-                ...manifest.schema,
-                properties: { length: { type: 'double', ucumUnit: 'mm', maximum: 3 } },
+          data: {
+            parameters: await compileParameterManifest({
+              declaration: {
+                schema: {
+                  ...manifest.schema,
+                  properties: { length: { type: 'double', ucumUnit: 'mm', maximum: 3 } },
+                },
+                resources: manifest.resources,
+                defaults: manifest.defaults,
+                bindings: manifest.bindingDeclarations,
               },
-              resources: manifest.resources,
-              defaults: manifest.defaults,
-              bindings: manifest.bindingDeclarations,
-            },
-            scope: manifest.scope,
-            source: manifest.source,
-            dependency: manifest.identity.dependency,
-            middleware: manifest.identity.middleware,
-            resolution: manifest.identity.resolution,
-            sourceFiles: manifest.identity.sourceFiles,
-          }),
+              scope: manifest.scope,
+              source: manifest.source,
+              dependency: manifest.identity.dependency,
+              middleware: manifest.identity.middleware,
+              resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
+            }),
+          },
         };
       },
     });
@@ -290,28 +297,30 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: 'add-required',
       name: 'add-required',
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         if (!result.success) {
           return result;
         }
-        const manifest = result.data;
+        const manifest = result.data.parameters;
         return {
           ...result,
-          data: await compileParameterManifest({
-            declaration: {
-              schema: { ...manifest.schema, required: ['length'] },
-              resources: manifest.resources,
-              defaults: manifest.defaults,
-              bindings: manifest.bindingDeclarations,
-            },
-            scope: manifest.scope,
-            source: manifest.source,
-            dependency: manifest.identity.dependency,
-            middleware: manifest.identity.middleware,
-            resolution: manifest.identity.resolution,
-            sourceFiles: manifest.identity.sourceFiles,
-          }),
+          data: {
+            parameters: await compileParameterManifest({
+              declaration: {
+                schema: { ...manifest.schema, required: ['length'] },
+                resources: manifest.resources,
+                defaults: manifest.defaults,
+                bindings: manifest.bindingDeclarations,
+              },
+              scope: manifest.scope,
+              source: manifest.source,
+              dependency: manifest.identity.dependency,
+              middleware: manifest.identity.middleware,
+              resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
+            }),
+          },
         };
       },
     });
@@ -333,31 +342,33 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: `add-schema-${field}`,
       name: `add-schema-${field}`,
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         if (!result.success) {
           return result;
         }
-        const manifest = result.data;
+        const manifest = result.data.parameters;
         return {
           ...result,
-          data: await compileParameterManifest({
-            declaration: {
-              schema: {
-                ...manifest.schema,
-                properties: { length: { type: 'double', [field]: 'mm' } },
+          data: {
+            parameters: await compileParameterManifest({
+              declaration: {
+                schema: {
+                  ...manifest.schema,
+                  properties: { length: { type: 'double', [field]: 'mm' } },
+                },
+                resources: manifest.resources,
+                defaults: manifest.defaults,
+                bindings: manifest.bindingDeclarations,
               },
-              resources: manifest.resources,
-              defaults: manifest.defaults,
-              bindings: manifest.bindingDeclarations,
-            },
-            scope: manifest.scope,
-            source: manifest.source,
-            dependency: manifest.identity.dependency,
-            middleware: manifest.identity.middleware,
-            resolution: manifest.identity.resolution,
-            sourceFiles: manifest.identity.sourceFiles,
-          }),
+              scope: manifest.scope,
+              source: manifest.source,
+              dependency: manifest.identity.dependency,
+              middleware: manifest.identity.middleware,
+              resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
+            }),
+          },
         };
       },
     });
@@ -379,28 +390,30 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: 'add-unattributed-unit',
       name: 'add-unattributed-unit',
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         if (!result.success) {
           return result;
         }
-        const manifest = result.data;
+        const manifest = result.data.parameters;
         return {
           ...result,
-          data: await compileParameterManifest({
-            declaration: {
-              schema: manifest.schema,
-              resources: manifest.resources,
-              defaults: manifest.defaults,
-              bindings: { '/length': { unit: 'mm' } },
-            },
-            scope: manifest.scope,
-            source: manifest.source,
-            dependency: manifest.identity.dependency,
-            middleware: manifest.identity.middleware,
-            resolution: manifest.identity.resolution,
-            sourceFiles: manifest.identity.sourceFiles,
-          }),
+          data: {
+            parameters: await compileParameterManifest({
+              declaration: {
+                schema: manifest.schema,
+                resources: manifest.resources,
+                defaults: manifest.defaults,
+                bindings: { '/length': { unit: 'mm' } },
+              },
+              scope: manifest.scope,
+              source: manifest.source,
+              dependency: manifest.identity.dependency,
+              middleware: manifest.identity.middleware,
+              resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
+            }),
+          },
         };
       },
     });
@@ -421,42 +434,44 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: 'infer-binding-unit',
       name: 'infer-binding-unit',
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         if (!result.success) {
           return result;
         }
-        const manifest = result.data;
+        const manifest = result.data.parameters;
         return {
           ...result,
-          data: await compileParameterManifest({
-            declaration: {
-              schema: manifest.schema,
-              resources: manifest.resources,
-              defaults: manifest.defaults,
-              bindings: {
-                '/length': {
-                  unit: 'mm',
-                  provenance: {
-                    unit: {
-                      origin: 'inferred',
-                      producer: 'infer-binding-unit',
-                      sourceRevision: manifest.source.revision,
-                      profile: manifest.profile,
-                      rule: 'identifier-suffix-mm',
-                      evidence: 'main.ts#/length',
+          data: {
+            parameters: await compileParameterManifest({
+              declaration: {
+                schema: manifest.schema,
+                resources: manifest.resources,
+                defaults: manifest.defaults,
+                bindings: {
+                  '/length': {
+                    unit: 'mm',
+                    provenance: {
+                      unit: {
+                        origin: 'inferred',
+                        producer: 'infer-binding-unit',
+                        sourceRevision: manifest.source.revision,
+                        profile: manifest.profile,
+                        rule: 'identifier-suffix-mm',
+                        evidence: 'main.ts#/length',
+                      },
                     },
                   },
                 },
               },
-            },
-            scope: manifest.scope,
-            source: manifest.source,
-            dependency: manifest.identity.dependency,
-            middleware: manifest.identity.middleware,
-            resolution: manifest.identity.resolution,
-            sourceFiles: manifest.identity.sourceFiles,
-          }),
+              scope: manifest.scope,
+              source: manifest.source,
+              dependency: manifest.identity.dependency,
+              middleware: manifest.identity.middleware,
+              resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
+            }),
+          },
         };
       },
     });
@@ -522,33 +537,35 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: 'incomplete-unit-provenance',
       name: 'incomplete-unit-provenance',
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         if (!result.success) {
           return result;
         }
-        const manifest = result.data;
+        const manifest = result.data.parameters;
         return {
           ...result,
-          data: await compileParameterManifest({
-            declaration: {
-              schema: manifest.schema,
-              resources: manifest.resources,
-              defaults: manifest.defaults,
-              bindings: {
-                '/length': {
-                  unit: 'mm',
-                  provenance: { unit: provenance as Omit<ParameterProvenance, 'field'> },
+          data: {
+            parameters: await compileParameterManifest({
+              declaration: {
+                schema: manifest.schema,
+                resources: manifest.resources,
+                defaults: manifest.defaults,
+                bindings: {
+                  '/length': {
+                    unit: 'mm',
+                    provenance: { unit: provenance as Omit<ParameterProvenance, 'field'> },
+                  },
                 },
               },
-            },
-            scope: manifest.scope,
-            source: manifest.source,
-            dependency: manifest.identity.dependency,
-            middleware: manifest.identity.middleware,
-            resolution: manifest.identity.resolution,
-            sourceFiles: manifest.identity.sourceFiles,
-          }),
+              scope: manifest.scope,
+              source: manifest.source,
+              dependency: manifest.identity.dependency,
+              middleware: manifest.identity.middleware,
+              resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
+            }),
+          },
         };
       },
     });
@@ -567,40 +584,42 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: 'project-binding-unit',
       name: 'project-binding-unit',
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         if (!result.success) {
           return result;
         }
-        const manifest = result.data;
+        const manifest = result.data.parameters;
         return {
           ...result,
-          data: await compileParameterManifest({
-            declaration: {
-              schema: manifest.schema,
-              resources: manifest.resources,
-              defaults: manifest.defaults,
-              bindings: {
-                '/length': {
-                  unit: 'mm',
-                  provenance: {
-                    unit: {
-                      origin: 'project',
-                      producer: 'project.json',
-                      sourceRevision: manifest.source.revision,
-                      evidence: 'project.json#/bindings/length',
+          data: {
+            parameters: await compileParameterManifest({
+              declaration: {
+                schema: manifest.schema,
+                resources: manifest.resources,
+                defaults: manifest.defaults,
+                bindings: {
+                  '/length': {
+                    unit: 'mm',
+                    provenance: {
+                      unit: {
+                        origin: 'project',
+                        producer: 'project.json',
+                        sourceRevision: manifest.source.revision,
+                        evidence: 'project.json#/bindings/length',
+                      },
                     },
                   },
                 },
               },
-            },
-            scope: manifest.scope,
-            source: manifest.source,
-            dependency: manifest.identity.dependency,
-            middleware: manifest.identity.middleware,
-            resolution: manifest.identity.resolution,
-            sourceFiles: manifest.identity.sourceFiles,
-          }),
+              scope: manifest.scope,
+              source: manifest.source,
+              dependency: manifest.identity.dependency,
+              middleware: manifest.identity.middleware,
+              resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
+            }),
+          },
         };
       },
     });
@@ -633,12 +652,12 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: `shared-reference-${kind}-${String(reverse)}`,
       name: `shared-reference-${kind}-${String(reverse)}`,
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         if (!result.success) {
           return result;
         }
-        const manifest = result.data;
+        const manifest = result.data.parameters;
         const attributed: Omit<ParameterProvenance, 'field'> = {
           origin: 'inferred',
           producer: 'length-unit',
@@ -652,20 +671,22 @@ describe('parameter admission in the kernel worker', () => {
           : { '/length': { unit: 'mm', provenance: { unit: attributed } }, '/width': { unit: 'cm' } };
         return {
           ...result,
-          data: await compileParameterManifest({
-            declaration: {
-              schema: manifest.schema,
-              resources: manifest.resources,
-              defaults: manifest.defaults,
-              bindings,
-            },
-            scope: manifest.scope,
-            source: manifest.source,
-            dependency: manifest.identity.dependency,
-            middleware: manifest.identity.middleware,
-            resolution: manifest.identity.resolution,
-            sourceFiles: manifest.identity.sourceFiles,
-          }),
+          data: {
+            parameters: await compileParameterManifest({
+              declaration: {
+                schema: manifest.schema,
+                resources: manifest.resources,
+                defaults: manifest.defaults,
+                bindings,
+              },
+              scope: manifest.scope,
+              source: manifest.source,
+              dependency: manifest.identity.dependency,
+              middleware: manifest.identity.middleware,
+              resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
+            }),
+          },
         };
       },
     });
@@ -713,12 +734,12 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: `valid-shared-reference-${kind}-${String(reverse)}`,
       name: `valid-shared-reference-${kind}-${String(reverse)}`,
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         if (!result.success) {
           return result;
         }
-        const manifest = result.data;
+        const manifest = result.data.parameters;
         const provenance = (name: string, field: string): Omit<ParameterProvenance, 'field'> => ({
           origin: 'inferred',
           producer: `${name}-${field}`,
@@ -744,20 +765,22 @@ describe('parameter admission in the kernel worker', () => {
           : { '/length': binding('length', 'mm'), '/width': binding('width', 'cm') };
         return {
           ...result,
-          data: await compileParameterManifest({
-            declaration: {
-              schema: manifest.schema,
-              resources: manifest.resources,
-              defaults: manifest.defaults,
-              bindings,
-            },
-            scope: manifest.scope,
-            source: manifest.source,
-            dependency: manifest.identity.dependency,
-            middleware: manifest.identity.middleware,
-            resolution: manifest.identity.resolution,
-            sourceFiles: manifest.identity.sourceFiles,
-          }),
+          data: {
+            parameters: await compileParameterManifest({
+              declaration: {
+                schema: manifest.schema,
+                resources: manifest.resources,
+                defaults: manifest.defaults,
+                bindings,
+              },
+              scope: manifest.scope,
+              source: manifest.source,
+              dependency: manifest.identity.dependency,
+              middleware: manifest.identity.middleware,
+              resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
+            }),
+          },
         };
       },
     });
@@ -805,40 +828,42 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: 'relabel-schema-unit',
       name: 'relabel-schema-unit',
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         if (!result.success) {
           return result;
         }
-        const manifest = result.data;
+        const manifest = result.data.parameters;
         return {
           ...result,
-          data: await compileParameterManifest({
-            declaration: {
-              schema: manifest.schema,
-              resources: manifest.resources,
-              defaults: manifest.defaults,
-              bindings: {
-                '/length': {
-                  unit: 'mm',
-                  provenance: {
-                    unit: {
-                      origin: 'project',
-                      producer: 'test-project',
-                      sourceRevision: manifest.source.revision,
-                      evidence: 'project.json#/units/length',
+          data: {
+            parameters: await compileParameterManifest({
+              declaration: {
+                schema: manifest.schema,
+                resources: manifest.resources,
+                defaults: manifest.defaults,
+                bindings: {
+                  '/length': {
+                    unit: 'mm',
+                    provenance: {
+                      unit: {
+                        origin: 'project',
+                        producer: 'test-project',
+                        sourceRevision: manifest.source.revision,
+                        evidence: 'project.json#/units/length',
+                      },
                     },
                   },
                 },
               },
-            },
-            scope: manifest.scope,
-            source: manifest.source,
-            dependency: manifest.identity.dependency,
-            middleware: manifest.identity.middleware,
-            resolution: manifest.identity.resolution,
-            sourceFiles: manifest.identity.sourceFiles,
-          }),
+              scope: manifest.scope,
+              source: manifest.source,
+              dependency: manifest.identity.dependency,
+              middleware: manifest.identity.middleware,
+              resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
+            }),
+          },
         };
       },
     });
@@ -862,12 +887,12 @@ describe('parameter admission in the kernel worker', () => {
       const middleware = defineMiddleware({
         id: `incomplete-${field}-${origin}-${mode}`,
         name: `incomplete-${field}-${origin}-${mode}`,
-        async wrapGetParameters(input, handler) {
+        async wrapDescribe(input, handler) {
           const result = await handler(input);
           if (!result.success) {
             return result;
           }
-          const manifest = result.data;
+          const manifest = result.data.parameters;
           const provenance =
             origin === 'inferred'
               ? mode === 'missing'
@@ -902,20 +927,22 @@ describe('parameter admission in the kernel worker', () => {
           };
           return {
             ...result,
-            data: await compileParameterManifest({
-              declaration: {
-                schema: manifest.schema,
-                resources: manifest.resources,
-                defaults: manifest.defaults,
-                bindings: { '/length': binding },
-              } as unknown as ParameterDeclaration,
-              scope: manifest.scope,
-              source: manifest.source,
-              dependency: manifest.identity.dependency,
-              middleware: manifest.identity.middleware,
-              resolution: manifest.identity.resolution,
-              sourceFiles: manifest.identity.sourceFiles,
-            }),
+            data: {
+              parameters: await compileParameterManifest({
+                declaration: {
+                  schema: manifest.schema,
+                  resources: manifest.resources,
+                  defaults: manifest.defaults,
+                  bindings: { '/length': binding },
+                } as unknown as ParameterDeclaration,
+                scope: manifest.scope,
+                source: manifest.source,
+                dependency: manifest.identity.dependency,
+                middleware: manifest.identity.middleware,
+                resolution: manifest.identity.resolution,
+                sourceFiles: manifest.identity.sourceFiles,
+              }),
+            },
           };
         },
       });
@@ -940,12 +967,12 @@ describe('parameter admission in the kernel worker', () => {
       const middleware = defineMiddleware({
         id: `complete-${field}-${origin}`,
         name: `complete-${field}-${origin}`,
-        async wrapGetParameters(input, handler) {
+        async wrapDescribe(input, handler) {
           const result = await handler(input);
           if (!result.success) {
             return result;
           }
-          const manifest = result.data;
+          const manifest = result.data.parameters;
           const provenance: Omit<ParameterProvenance, 'field'> =
             origin === 'inferred'
               ? {
@@ -981,20 +1008,22 @@ describe('parameter admission in the kernel worker', () => {
           };
           return {
             ...result,
-            data: await compileParameterManifest({
-              declaration: {
-                schema: manifest.schema,
-                resources: manifest.resources,
-                defaults: manifest.defaults,
-                bindings: { '/length': binding },
-              } as unknown as ParameterDeclaration,
-              scope: manifest.scope,
-              source: manifest.source,
-              dependency: manifest.identity.dependency,
-              middleware: manifest.identity.middleware,
-              resolution: manifest.identity.resolution,
-              sourceFiles: manifest.identity.sourceFiles,
-            }),
+            data: {
+              parameters: await compileParameterManifest({
+                declaration: {
+                  schema: manifest.schema,
+                  resources: manifest.resources,
+                  defaults: manifest.defaults,
+                  bindings: { '/length': binding },
+                } as unknown as ParameterDeclaration,
+                scope: manifest.scope,
+                source: manifest.source,
+                dependency: manifest.identity.dependency,
+                middleware: manifest.identity.middleware,
+                resolution: manifest.identity.resolution,
+                sourceFiles: manifest.identity.sourceFiles,
+              }),
+            },
           };
         },
       });
@@ -1023,49 +1052,51 @@ describe('parameter admission in the kernel worker', () => {
     const middleware = defineMiddleware({
       id: 'enrich-semantics',
       name: 'enrich-semantics',
-      async wrapGetParameters(input, handler) {
+      async wrapDescribe(input, handler) {
         const result = await handler(input);
         if (!result.success) {
           return result;
         }
-        const manifest = result.data;
+        const manifest = result.data.parameters;
         return {
           ...result,
-          data: await compileParameterManifest({
-            declaration: {
-              schema: manifest.schema,
-              resources: manifest.resources,
-              defaults: manifest.defaults,
-              bindings: {
-                '/length': {
-                  quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
-                  space: 'linear',
-                  provenance: {
-                    quantityKind: {
-                      origin: 'inferred',
-                      producer: 'enrich-semantics',
-                      sourceRevision: manifest.source.revision,
-                      profile: manifest.profile,
-                      rule: 'test-length',
-                      evidence: 'main.ts#/length',
-                    },
-                    space: {
-                      origin: 'project',
-                      producer: 'test-project',
-                      sourceRevision: manifest.source.revision,
-                      evidence: 'project.json#/bindings/length/space',
+          data: {
+            parameters: await compileParameterManifest({
+              declaration: {
+                schema: manifest.schema,
+                resources: manifest.resources,
+                defaults: manifest.defaults,
+                bindings: {
+                  '/length': {
+                    quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
+                    space: 'linear',
+                    provenance: {
+                      quantityKind: {
+                        origin: 'inferred',
+                        producer: 'enrich-semantics',
+                        sourceRevision: manifest.source.revision,
+                        profile: manifest.profile,
+                        rule: 'test-length',
+                        evidence: 'main.ts#/length',
+                      },
+                      space: {
+                        origin: 'project',
+                        producer: 'test-project',
+                        sourceRevision: manifest.source.revision,
+                        evidence: 'project.json#/bindings/length/space',
+                      },
                     },
                   },
                 },
               },
-            },
-            scope: manifest.scope,
-            source: manifest.source,
-            dependency: manifest.identity.dependency,
-            middleware: manifest.identity.middleware,
-            resolution: manifest.identity.resolution,
-            sourceFiles: manifest.identity.sourceFiles,
-          }),
+              scope: manifest.scope,
+              source: manifest.source,
+              dependency: manifest.identity.dependency,
+              middleware: manifest.identity.middleware,
+              resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
+            }),
+          },
         };
       },
     });

@@ -31,6 +31,7 @@ export type {
   LogOptions,
   LogOrigin,
   MimeType,
+  MediaType,
   OnWorkerLog,
   StandardSchemaV1,
   StandardSchemaV1FailureResult,
@@ -63,7 +64,19 @@ export { isKernelIssueCode, kernelIssueCodeValues } from '#types/kernel-issue-co
 export type { KernelIssueCode } from '#types/kernel-issue-codes.js';
 export type * from '#types/runtime.types.js';
 export type * from '#types/runtime-tracer.types.js';
-export type * from '#types/runtime-dependency.types.js';
+export type {
+  AssetDependency,
+  ContentDependency,
+  Dependency,
+  ExportDependency,
+  FileDependency,
+  FrameworkDependency,
+  GetDependenciesResult,
+  KernelDependency,
+  OptionDependency,
+  ParameterDependency,
+  RenderOptionsDependency,
+} from '#types/runtime-dependency.types.js';
 export type {
   BundleResult,
   ExecuteResult,
@@ -71,14 +84,14 @@ export type {
   KernelBundler,
 } from '#types/runtime-bundler-service.types.js';
 export type {
-  BundlerInitRuntime,
-  BundlerRuntime,
+  BundlerInitRuntime as BundlerInitServices,
+  BundlerRuntime as BundlerServices,
   BundleInput,
   DetectImportsResult,
   BundlerDefinition,
   BundlerPluginFactory,
 } from '#types/runtime-bundler.types.js';
-export type * from '#types/runtime-middleware.types.js';
+export type * from '#types/runtime-middleware-v2.types.js';
 export type * from '#types/runtime-content.types.js';
 export type * from '#types/runtime-source-snapshot.types.js';
 export {
@@ -106,15 +119,34 @@ export type {
   CreateGeometryOutput,
   MeshGeometryInput,
   MeshGeometryOutput,
-  KernelDefinition,
-  AnyKernelDefinition,
-  KernelPluginFactory,
 } from '#types/runtime-kernel.types.js';
+export type {
+  Artifact,
+  DescribeInput,
+  DescribeResult,
+  EvaluateInput,
+  EvaluateOutput,
+  EvaluateResult,
+  ExportDeclaration,
+  KernelDefinitionV2 as KernelDefinition,
+  KernelFactoryV2 as KernelPluginFactory,
+  KernelServices,
+  RenderInput,
+  RenderOutput,
+  RenderResult,
+  ResolveInput,
+  ResolveOutput,
+  ViewDeclaration,
+  ViewInstance,
+  WriteInput,
+  WriteOutput,
+  WriteResult,
+} from '#types/runtime-kernel-v2.types.js';
 export type {
   TranscoderEdge,
   TranscodeInput,
   TranscodeResult,
-  TranscoderRuntime,
+  TranscoderRuntime as TranscoderServices,
   TranscoderDefinition,
   TranscoderPluginFactory,
 } from '#types/runtime-transcoder.types.js';

@@ -153,7 +153,7 @@ export const imageTranscoder = defineTranscoder({
 
   async transcode(
     input,
-    runtime,
+    services,
     context: { renderer: typeof Nanoraster; adapter: Nanoraster.AdapterInfo | undefined },
   ) {
     if (input.files.length !== 1) {
@@ -171,12 +171,12 @@ export const imageTranscoder = defineTranscoder({
     }
 
     const glb = input.files[0]!.bytes;
-    let renderSpan: ReturnType<typeof runtime.tracer.startSpan> | undefined;
+    let renderSpan: ReturnType<typeof services.tracer.startSpan> | undefined;
     try {
       // The runtime validates each edge payload before invoking its transcoder.
       const options = input.options as ImageExportOptions;
       const { renderImages } = context.renderer;
-      renderSpan = runtime.tracer.startSpan('image.render', {
+      renderSpan = services.tracer.startSpan('image.render', {
         mode: options.mode,
         format: input.to,
         width: options.width,
@@ -189,7 +189,7 @@ export const imageTranscoder = defineTranscoder({
             }
           : {}),
       });
-      runtime.logger.log(`Rendering GLB → ${input.to}`);
+      services.logger.log(`Rendering GLB → ${input.to}`);
       const cameras = options.mode === 'batch' ? options.views.map((view) => view.camera) : [options.camera];
       const boundsFitStartedAt = cameras.some((camera) => isBoundsCamera(camera)) ? performance.now() : undefined;
       const boundsParseStartedAt = boundsFitStartedAt === undefined ? undefined : performance.now();
@@ -295,7 +295,7 @@ export const imageTranscoder = defineTranscoder({
     }
   },
 
-  async cleanup() {
+  async onDispose() {
     // Nothing to release here. nanoraster's free functions share one lazy
     // renderer per process, so the GPU device stays resident for the worker's
     // lifetime (warm after the first render) and is reclaimed when the worker

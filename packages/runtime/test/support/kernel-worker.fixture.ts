@@ -4,10 +4,10 @@ import type { FileExtension, FileStat, FileStatEntry, GeometryResponse, OnWorker
 import { assertRootedPath } from '@taucad/utils/path';
 import { vi } from 'vitest';
 import { z } from 'zod';
-import type { NativeBuildInput } from '#framework/render-artifact.js';
+import type { NativeBuildInput, OperationOwner } from '#framework/render-artifact.js';
 import type { ResolvedMiddleware } from '#framework/kernel-worker.js';
 import { KernelWorker } from '#framework/kernel-worker.js';
-import type { KernelMiddleware, MiddlewarePluginFactory } from '#middleware/runtime-middleware.js';
+import type { MiddlewarePluginFactory } from '#middleware/runtime-middleware.js';
 import type { MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 import { runtimePluginDefinitionSymbol } from '#plugins/plugin-runtime-definition.js';
 import { _fromMemoryFsHandle as fromMemoryFs } from '#transport/_internal/from-memory-fs-handle.js';
@@ -20,12 +20,15 @@ import type {
   RuntimeFileSystemBase,
 } from '#types/runtime-kernel.types.js';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
+import type { EvaluateResult, KernelOffers, RenderResult } from '#types/runtime-kernel-v2.types.js';
+import type { KernelMiddlewareV2, MiddlewareContent, RenderRequest } from '#types/runtime-middleware-v2.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type {
   CreateGeometryResult,
   ExportGeometryResult,
   GetParameterDeclarationsResult,
   HashedGeometryResult,
+  KernelIssue,
 } from '#types/runtime.types.js';
 
 let testFileSystemHandle: ReturnType<typeof fromMemoryFs> | undefined;
@@ -205,7 +208,11 @@ export const createGeometryFile = (filename: string): RuntimeFileLocator => {
 
 /** Options for the runtime-local white-box worker fixture. */
 export type MockKernelWorkerOptions = {
-  readonly middleware: Array<KernelMiddleware | MiddlewarePlugin | MiddlewarePluginFactory<string, unknown>>;
+  readonly middleware: Array<
+    | KernelMiddlewareV2<z.ZodObject<z.ZodRawShape>, z.ZodObject<z.ZodRawShape>, MiddlewareContent | undefined>
+    | MiddlewarePlugin
+    | MiddlewarePluginFactory<string, unknown>
+  >;
   readonly middlewareConfigs?: Array<Record<string, unknown>>;
   readonly middlewareEnabled?: boolean[];
   readonly computeResult?: CreateGeometryResult;
@@ -219,14 +226,20 @@ export type MockKernelWorkerOptions = {
 };
 
 const normalizeTestMiddleware = (
-  entry: KernelMiddleware | MiddlewarePlugin | MiddlewarePluginFactory<string, unknown>,
-): KernelMiddleware => {
+  entry: MockKernelWorkerOptions['middleware'][number],
+): KernelMiddlewareV2<z.ZodObject<z.ZodRawShape>, z.ZodObject<z.ZodRawShape>, MiddlewareContent | undefined> => {
   const plugin = typeof entry === 'function' ? entry() : entry;
   if ('name' in plugin) {
     return plugin;
   }
   const load = (
-    plugin as { readonly [runtimePluginDefinitionSymbol]?: () => KernelMiddleware | Promise<KernelMiddleware> }
+    plugin as {
+      readonly [runtimePluginDefinitionSymbol]?: () =>
+        | KernelMiddlewareV2<z.ZodObject<z.ZodRawShape>, z.ZodObject<z.ZodRawShape>, MiddlewareContent | undefined>
+        | Promise<
+            KernelMiddlewareV2<z.ZodObject<z.ZodRawShape>, z.ZodObject<z.ZodRawShape>, MiddlewareContent | undefined>
+          >;
+    }
   )[runtimePluginDefinitionSymbol];
   if (!load) {
     throw new Error(`Test middleware '${plugin.id}' is missing a worker-owned definition.`);
@@ -273,6 +286,7 @@ export class MockKernelWorker extends KernelWorker {
   private readonly mockComputeResult: CreateGeometryResult;
   private readonly mockExportResult: ExportGeometryResult;
   private readonly handleToCapture: unknown;
+  private readonly geometryByHandle = new Map<unknown, GeometryResponse>();
 
   public constructor(options: MockKernelWorkerOptions) {
     super({ transcoders: options.transcoders ?? [] });
@@ -349,6 +363,82 @@ export class MockKernelWorker extends KernelWorker {
     this.createGeometryCalls++;
     this.captureNativeHandle(this.handleToCapture);
     return this.mockComputeResult;
+  }
+
+  protected override async onEvaluateForOwner(
+    _owner: OperationOwner,
+    _input: NativeBuildInput,
+    _runtime: KernelRuntime,
+  ): Promise<EvaluateResult> {
+    this.createGeometryCalls++;
+    const result = this.mockComputeResult;
+    if (!result.success) {
+      return result;
+    }
+    if (result.data?.format !== 'gltf') {
+      return {
+        success: false,
+        issues: [
+          {
+            code: 'KERNEL_CAPABILITY_MISSING',
+            message: 'Mock evaluation has no GLB view.',
+            severity: 'error',
+            type: 'kernel',
+          },
+        ],
+      };
+    }
+    return {
+      ...this.completeFixtureEvaluation(result.data.content, { issues: result.issues, handle: this.handleToCapture }),
+      ...(result.serializedNativeHandle === undefined ? {} : { serializedHandle: result.serializedNativeHandle }),
+      ...(result.serializeNativeHandleSnapshot === undefined
+        ? {}
+        : { serializeHandleSnapshot: result.serializeNativeHandleSnapshot }),
+    };
+  }
+
+  /** Complete a v2 evaluation with a real handle and its GLB view content. */
+  protected completeFixtureEvaluation(
+    content: Uint8Array<ArrayBuffer>,
+    options?: { issues?: readonly KernelIssue[]; handle?: unknown; owner?: OperationOwner },
+  ): EvaluateResult {
+    const handle = options?.handle ?? { kind: 'mock-native-handle' };
+    this.captureNativeHandle(handle, options?.owner);
+    this.geometryByHandle.set(handle, { format: 'gltf', content });
+    return { success: true, data: { views: ['model'] }, issues: [...(options?.issues ?? [])] };
+  }
+
+  protected override kernelHasMeshPhaseForOwner(_owner: OperationOwner): boolean {
+    return true;
+  }
+
+  protected override selectDefaultViewForOwner(
+    _owner: OperationOwner,
+    offers: KernelOffers,
+  ): { view: string; mimeType: 'model/gltf-binary' } | undefined {
+    return offers.views?.includes('model') ? { view: 'model', mimeType: 'model/gltf-binary' } : undefined;
+  }
+
+  protected override async onRenderForOwner(
+    _owner: OperationOwner,
+    input: RenderRequest & { nativeHandle: unknown },
+    _runtime: KernelRuntime,
+  ): Promise<RenderResult> {
+    const geometry = this.geometryByHandle.get(input.nativeHandle);
+    if (geometry?.format !== 'gltf') {
+      return {
+        success: false,
+        issues: [
+          {
+            code: 'KERNEL_CAPABILITY_MISSING',
+            message: 'Mock handle has no GLB view.',
+            severity: 'error',
+            type: 'kernel',
+          },
+        ],
+      };
+    }
+    return { success: true, data: { mimeType: 'model/gltf-binary', content: geometry.content }, issues: [] };
   }
 
   protected override async onExportGeometry(

@@ -173,6 +173,28 @@ export const getParametersResultSchema = z.union([
     .catchall(z.unknown()),
 ]);
 
+/** Parameter description result used by the view/export runtime contract. @public */
+export const describeResultSchema = z.union([
+  z
+    .object({
+      success: z.literal(true),
+      data: z.object({
+        parameters: z.custom<ParameterManifest>(isParameterManifestShape, 'Expected a parameter manifest wire shape'),
+      }),
+      issues: z.array(kernelIssueSchema),
+      serializedHandle: z.unknown().optional(),
+      ...sourceRevisionShape,
+    })
+    .catchall(z.unknown()),
+  z
+    .object({
+      success: z.literal(false),
+      issues: z.array(kernelIssueSchema),
+      ...sourceRevisionShape,
+    })
+    .catchall(z.unknown()),
+]);
+
 const renderIdSchema = z.uuid();
 const geometryTransportSchema = z.discriminatedUnion('format', [
   z.object({ format: z.literal('gltf'), content: binaryContentDeliverySchema, hash: z.string() }).strict(),

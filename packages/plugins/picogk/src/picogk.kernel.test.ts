@@ -1,13 +1,12 @@
-/* oxlint-disable typescript/no-unsafe-assignment -- private kernel context is intentionally erased by the public definition. */
 // @vitest-environment node
 import { createHash } from 'node:crypto';
 
-import type { AnyKernelDefinition } from '@taucad/runtime/kernel';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createMockFileSystem, createMockKernelRuntime } from '@taucad/runtime-testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { picogkKernel } from '#picogk.kernel.js';
+import { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';
 import { PicogkWorkerError } from '#picogk-session.js';
 import type { PicogkSession } from '#picogk-session.js';
 
@@ -69,7 +68,7 @@ const buildResult = (id = 'component:picogk-1') => ({
   metrics: { managedHeapBytes: 10, picoGkNativeBytes: 0, processWorkingSetBytes: 20 },
 });
 
-const context = () => ({
+const contextData = () => ({
   mirror: {
     sync: vi.fn().mockResolvedValue(['helper.cs', 'main.cs', 'asset.txt', 'tau.json', 'thumbnail.webp']),
     cleanup: vi.fn(),
@@ -118,11 +117,17 @@ const endedSpanAttributes = (name: string): Record<string, unknown> | undefined 
   return end.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
 };
 
+const loadDefinition = async () => resolveRuntimePluginDefinition('kernel', picogkKernel(kernelOptions));
+// These hook tests need only the mirror and session methods they exercise.
+const context = () =>
+  contextData() as ReturnType<typeof contextData> &
+    Parameters<Awaited<ReturnType<typeof loadDefinition>>['evaluate']>[2];
+
 describe('PicoGK kernel', () => {
-  let definition: AnyKernelDefinition;
+  let definition: Awaited<ReturnType<typeof loadDefinition>>;
   beforeEach(async () => {
     vi.clearAllMocks();
-    definition = await resolveRuntimePluginDefinition('kernel', picogkKernel(kernelOptions));
+    definition = await loadDefinition();
   });
 
   it('never reads the generated root thumbnail during workspace discovery', async () => {
@@ -144,12 +149,12 @@ describe('PicoGK kernel', () => {
         : [],
     );
     const mirrorRuntime = { ...createMockKernelRuntime(), filesystem };
-    const value = await definition.initialize(kernelOptions, mirrorRuntime);
+    const value = await definition.initialize(picogkOptionsSchema.parse(kernelOptions), mirrorRuntime);
     vi.spyOn((value as { readonly session: PicogkSession }).session, 'request').mockResolvedValue({
       sources: ['main.cs'],
     });
     try {
-      await expect(definition.getDependencies({ entryPath: 'main.cs' }, mirrorRuntime, value)).resolves.toEqual({
+      await expect(definition.resolve({ entryPath: 'main.cs' }, mirrorRuntime, value)).resolves.toEqual({
         resolved: ['main.cs', 'package.json'],
         unresolved: [],
       });
@@ -159,21 +164,21 @@ describe('PicoGK kernel', () => {
         ['tau.json', undefined],
       ]);
     } finally {
-      await definition.cleanup?.(value);
+      await definition.onDispose?.(value);
     }
   });
 
   it('owns C#, watches model inputs but not Tau system artifacts, and preserves issue provenance', async () => {
     const value = context();
     value.session.request.mockResolvedValueOnce({ sources: ['helper.cs', 'main.cs'] });
-    await expect(definition.getDependencies({ entryPath: 'main.cs' }, runtime, value)).resolves.toEqual({
+    await expect(definition.resolve({ entryPath: 'main.cs' }, runtime, value)).resolves.toEqual({
       resolved: ['helper.cs', 'main.cs', 'asset.txt'],
       unresolved: [],
     });
     // Another program in the project is its own model: never compiled, watched or hashed with this one.
     value.mirror.sync.mockResolvedValueOnce(['helper.cs', 'main.cs', 'other.cs', 'asset.txt', 'tau.json']);
     value.session.request.mockResolvedValueOnce({ sources: ['helper.cs', 'other.cs'] });
-    await expect(definition.getDependencies({ entryPath: 'other.cs' }, runtime, value)).resolves.toEqual({
+    await expect(definition.resolve({ entryPath: 'other.cs' }, runtime, value)).resolves.toEqual({
       resolved: ['helper.cs', 'other.cs', 'asset.txt'],
       unresolved: [],
     });
@@ -183,28 +188,28 @@ describe('PicoGK kernel', () => {
     // An entry the worker cannot select watches every input, so the edit that settles it re-renders it.
     value.mirror.sync.mockResolvedValueOnce(['helper.cs', 'main.cs', 'other.cs', 'asset.txt', 'tau.json']);
     value.session.request.mockRejectedValueOnce(workerError('validation'));
-    await expect(definition.getDependencies({ entryPath: 'helper.cs' }, runtime, value)).resolves.toEqual({
+    await expect(definition.resolve({ entryPath: 'helper.cs' }, runtime, value)).resolves.toEqual({
       resolved: ['helper.cs', 'main.cs', 'other.cs', 'asset.txt'],
       unresolved: [],
     });
     value.session.request.mockRejectedValueOnce(new Error('worker exited'));
-    await expect(definition.getDependencies({ entryPath: 'main.cs' }, runtime, value)).rejects.toMatchObject({
+    await expect(definition.resolve({ entryPath: 'main.cs' }, runtime, value)).rejects.toMatchObject({
       issues: [expect.objectContaining({ message: 'worker exited', type: 'runtime' })],
     });
     value.mirror.sync.mockRejectedValueOnce(workerError('syntax'));
-    await expect(definition.getDependencies({ entryPath: 'main.cs' }, runtime, value)).rejects.toMatchObject({
+    await expect(definition.resolve({ entryPath: 'main.cs' }, runtime, value)).rejects.toMatchObject({
       issues: [
         expect.objectContaining({ type: 'compilation', details: { workerCode: 'CS_TEST', workerType: 'syntax' } }),
       ],
     });
 
     value.session.request.mockRejectedValueOnce(workerError('validation'));
-    await expect(definition.getParameters({ entryPath: 'main.cs' }, runtime, value)).resolves.toMatchObject({
+    await expect(definition.describe({ entryPath: 'main.cs' }, runtime, value)).resolves.toMatchObject({
       success: false,
       issues: [expect.objectContaining({ type: 'compilation' })],
     });
     value.session.request.mockRejectedValueOnce('plain failure');
-    await expect(definition.getParameters({ entryPath: 'main.cs' }, runtime, value)).resolves.toMatchObject({
+    await expect(definition.describe({ entryPath: 'main.cs' }, runtime, value)).resolves.toMatchObject({
       success: false,
       issues: [{ message: 'plain failure', type: 'runtime', location: { fileName: 'main.cs' } }],
     });
@@ -221,9 +226,9 @@ describe('PicoGK kernel', () => {
     );
     const render = { ...runtime, operationId: 1 };
 
-    await definition.getDependencies({ entryPath: 'main.cs' }, render, value);
-    await definition.getParameters({ entryPath: 'main.cs' }, render, value);
-    await definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, render, value);
+    await definition.resolve({ entryPath: 'main.cs' }, render, value);
+    await definition.describe({ entryPath: 'main.cs' }, render, value);
+    await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, render, value);
 
     // The mirror reuses its own walk per operation id.
     expect(value.mirror.sync.mock.calls.map((call): unknown => call[2])).toEqual([1, 1, 1]);
@@ -237,17 +242,13 @@ describe('PicoGK kernel', () => {
       jsonSchema: { type: 'object' },
       timings: compilationTimings,
     });
-    await expect(definition.getParameters({ entryPath: 'main.cs' }, runtime, value)).resolves.toMatchObject({
+    await expect(definition.describe({ entryPath: 'main.cs' }, runtime, value)).resolves.toMatchObject({
       success: true,
-      data: { defaults: {} },
+      data: { parameters: { defaults: {} } },
     });
 
     value.session.request.mockResolvedValueOnce(buildResult());
-    const built = await definition.createGeometry(
-      { entryPath: 'main.cs', parameters: {}, options: {} },
-      runtime,
-      value,
-    );
+    const built = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value);
     /* D8: the C# stage timings are attributes on the span that measured the request, not a debug
      * log line, so the breakdown is answerable from the trace file with no log parsing. */
     expect(endedSpanAttributes('picogk.analyze')).toMatchObject(compilationTimings);
@@ -257,53 +258,54 @@ describe('PicoGK kernel', () => {
     // W17/D2: an aborted build stops the worker cooperatively, which is what the live-edit lane needs.
     expect(value.session.request).toHaveBeenLastCalledWith(expect.objectContaining({ cancelMethod: 'cancel' }));
     expect(definition.cancellation).toBe('cooperative');
-    expect(built.geometry).toMatchObject({ format: 'gltf' });
-    const handle = built.nativeHandle as { glb: Uint8Array<ArrayBuffer> };
-    expect(handle.glb).toEqual((built.geometry as { content: Uint8Array<ArrayBuffer> }).content);
-    const serialized = definition.serializeNativeHandle?.({ nativeHandle: handle }, runtime, value);
-    const restored = definition.deserializeNativeHandle?.(
-      { serializedNativeHandle: serialized },
-      runtime,
-      value,
-    ) as typeof handle;
+    const handle = built.handle as { glb: Uint8Array<ArrayBuffer> };
+    const artifact = await definition.render!({ view: 'model', handle, options: {} }, runtime, value);
+    expect(handle.glb).toEqual(artifact.content);
+    const serialized = definition.serializeHandle!({ handle }, runtime, value);
+    const restored = definition.deserializeHandle!({ serialized }, runtime, value);
     expect(restored.glb).toEqual(handle.glb);
     expect(restored.glb).not.toBe(handle.glb);
 
-    const exported = await definition.exportGeometry(
-      { format: 'glb', nativeHandle: handle, options: {} },
+    const exported = await definition.write!(
+      { exportId: 'glb', handle, options: picogkExportSchemas.glb.parse({}) },
       runtime,
       value,
     );
-    expect(exported).toMatchObject({ success: true, data: [{ name: 'model.glb' }] });
+    expect(exported).toMatchObject({ files: [{ name: 'model.glb' }] });
   });
 
   it('recycles requested generations and returns structured build/export failures', async () => {
     const value = context();
     value.session.request.mockResolvedValueOnce({ ...buildResult(), recycleAfterResponse: true });
-    await definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value);
+    await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value);
     expect(value.session.recycle).toHaveBeenCalled();
 
     value.session.request.mockRejectedValueOnce(workerError('kernel'));
     await expect(
-      definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value),
+      definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value),
     ).rejects.toMatchObject({ issues: [expect.objectContaining({ type: 'kernel' })] });
     const badHandle = Object.defineProperty({}, 'glb', {
       get() {
         throw new Error('unreadable handle');
       },
     });
-    const badExport = await definition.exportGeometry(
-      { format: 'glb', nativeHandle: badHandle, options: {} },
-      runtime,
-      value,
-    );
-    expect(badExport).toMatchObject({ success: false, issues: [expect.objectContaining({ type: 'runtime' })] });
+    await expect(
+      definition.write!(
+        {
+          exportId: 'glb',
+          handle: badHandle as { glb: Uint8Array<ArrayBuffer> },
+          options: picogkExportSchemas.glb.parse({}),
+        },
+        runtime,
+        value,
+      ),
+    ).rejects.toMatchObject({ issues: [expect.objectContaining({ type: 'runtime' })] });
   });
 
   it('always removes the mirror when session cleanup fails', async () => {
     const value = context();
     value.session.cleanup.mockRejectedValueOnce(new Error('cleanup failed'));
-    await expect(definition.cleanup?.(value)).rejects.toThrow('cleanup failed');
+    await expect(definition.onDispose?.(value)).rejects.toThrow('cleanup failed');
     expect(value.mirror.cleanup).toHaveBeenCalled();
   });
 });

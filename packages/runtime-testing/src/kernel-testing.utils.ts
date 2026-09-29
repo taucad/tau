@@ -14,22 +14,15 @@ import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { compileParameterManifest } from '@taucad/parameters';
 import type { ParameterManifest } from '@taucad/parameters';
 import type {
-  AnyKernelDefinition,
   ComputeGeneration,
   ComputeScopeReceipt,
   ComputeStoreEntry,
   KernelComputeCapability,
   KernelFileSystem,
-  KernelRuntime,
   RuntimeLogger,
 } from '@taucad/runtime/kernel';
 import { assertRootedPath } from '@taucad/runtime/kernel';
-import type {
-  CreateGeometryHandler,
-  KernelMiddlewareRuntime,
-  MiddlewareCreateGeometryRequest,
-  MiddlewareState,
-} from '@taucad/runtime/middleware';
+import type { EvaluateRequest, KernelMiddlewareServices, MiddlewareState } from '@taucad/runtime/middleware';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import type {
   CreateGeometryResult,
@@ -38,10 +31,12 @@ import type {
   FileStatEntry,
   GeometryResponse,
   HashedGeometryResult,
-  GetParametersInput,
-  GetParametersResult,
+  DescribeInput,
+  DescribeResult,
+  EvaluateResult,
   KernelErrorResult,
   KernelIssue,
+  KernelRuntime,
   KernelResult,
   KernelSuccessResult,
   RuntimeContentInput,
@@ -296,7 +291,7 @@ export const createMockRuntime = <
   readonly dependencyHash?: string;
   readonly options?: Options;
   readonly signal?: AbortSignal;
-}): KernelMiddlewareRuntime<State, Options> & {
+}): KernelMiddlewareServices<State, Options> & {
   logger: ReturnType<typeof createMockLogger>;
   filesystem: MockFileSystem;
   state: ReturnType<typeof createMockState<State>>;
@@ -350,9 +345,12 @@ export function assertFailure<T>(result: KernelResult<T>, context?: string): ass
 }
 
 /** Creates a middleware render request. @public */
-export const createMockInput = (
-  overrides?: Partial<MiddlewareCreateGeometryRequest>,
-): MiddlewareCreateGeometryRequest => ({ entryPath: 'test.kcl', parameters: {}, options: {}, ...overrides });
+export const createMockInput = (overrides?: Partial<EvaluateRequest>): EvaluateRequest => ({
+  entryPath: 'test.kcl',
+  parameters: {},
+  options: {},
+  ...overrides,
+});
 
 /** Creates a normalized worker-level file locator. @public */
 export const createGeometryFile = (filename: string): { filename: string; path: string } => {
@@ -518,46 +516,47 @@ export const createMockDependencies = (overrides?: Dependency[]): readonly Depen
   ...(overrides ?? []),
 ];
 
-/** Creates a mocked middleware geometry handler. @public */
-export const createMockCreateGeometryHandler = (result?: CreateGeometryResult): CreateGeometryHandler =>
-  vi.fn(async () => result ?? createGltfSuccessResult(new Uint8Array([1, 2, 3])));
+/** Creates a mocked middleware evaluate handler. @public */
+export const createMockEvaluateHandler = (
+  result?: EvaluateResult,
+): ((input: EvaluateRequest) => Promise<EvaluateResult>) =>
+  vi.fn(async () => result ?? { success: true, data: { views: ['model'] }, issues: [] });
 
-/** Creates a mocked middleware parameter handler. @public */
-type TestGetParametersHandler = (input: GetParametersInput) => Promise<GetParametersResult>;
+/** Creates a mocked middleware describe handler. @public */
+type TestGetParametersHandler = (input: DescribeInput) => Promise<DescribeResult<ParameterManifest>>;
 
-/** Creates a mocked middleware parameter handler. @public */
-export const createMockGetParametersHandler = (result?: GetParametersResult): TestGetParametersHandler =>
+/** Creates a mocked middleware describe handler. @public */
+export const createMockDescribeHandler = (result?: DescribeResult<ParameterManifest>): TestGetParametersHandler =>
   vi.fn(
-    async (): Promise<GetParametersResult> =>
+    async (): Promise<DescribeResult<ParameterManifest>> =>
       result ?? {
         success: true,
-        data: await compileParameterManifest({
-          declaration: {
-            schema: {
-              $schema: 'https://json-structure.org/meta/extended/v0/#',
-              $id: 'urn:taucad:runtime-testing:parameters',
-              $uses: ['JSONSchemaUnits'],
-              name: 'RuntimeTestingParameters',
-              type: 'object',
+        data: {
+          parameters: await compileParameterManifest({
+            declaration: {
+              schema: {
+                $schema: 'https://json-structure.org/meta/extended/v0/#',
+                $id: 'urn:taucad:runtime-testing:parameters',
+                $uses: ['JSONSchemaUnits'],
+                name: 'RuntimeTestingParameters',
+                type: 'object',
+              },
+              defaults: {},
             },
-            defaults: {},
-          },
-          scope: { kind: 'source', authority: 'runtime-testing', root: '', entry: 'test.kcl' },
-          source: {
-            id: 'runtime-testing',
-            version: '1',
-            revision: contentDigest({ value: `sha256:${'0'.repeat(64)}` }),
-            capability: 'json-structure',
-          },
-          dependency: contentDigest({ value: `sha256:${'1'.repeat(64)}` }),
-          middleware: contentDigest({ value: `sha256:${'2'.repeat(64)}` }),
-        }),
+            scope: { kind: 'source', authority: 'runtime-testing', root: '', entry: 'test.kcl' },
+            source: {
+              id: 'runtime-testing',
+              version: '1',
+              revision: contentDigest({ value: `sha256:${'0'.repeat(64)}` }),
+              capability: 'json-structure',
+            },
+            dependency: contentDigest({ value: `sha256:${'1'.repeat(64)}` }),
+            middleware: contentDigest({ value: `sha256:${'2'.repeat(64)}` }),
+          }),
+        },
         issues: [],
       },
   );
 
 /** Runtime definition accepted by public test integration helpers. @public */
 export type TestRuntimeDefinition = RuntimeDefinition;
-
-/** Kernel definition type retained for mock-authoring signatures. @public */
-export type TestKernelDefinition = AnyKernelDefinition;

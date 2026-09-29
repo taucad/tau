@@ -8,8 +8,8 @@ import { describe, it, expect, vi } from 'vitest';
 import type * as ParametersModule from '@taucad/parameters';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
-import { defineMiddleware } from '#middleware/runtime-middleware.js';
-import { defineKernel } from '#types/runtime-kernel.types.js';
+import { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
+import { defineKernelV2 as defineKernel } from '#types/runtime-kernel-v2.types.js';
 import type { RuntimeStateChangedArgs } from '#types/runtime-protocol.types.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
 import {
@@ -58,37 +58,38 @@ const createCommitWorker = async () => {
     detectImport: /from 'commit-kernel'/,
     name: 'Commit kernel',
     version: '1.0.0',
-    exportFormats: {},
+    views: { display: { title: 'Display', mimeType: 'model/gltf-binary' } },
+    exports: {},
     async initialize() {
       return {};
     },
-    async getDependencies(input, runtime) {
+    async resolve(input, runtime) {
       operationIds.push(['dependencies', runtime.operationId]);
       counts.dependencies++;
       return { resolved: [input.entryPath], unresolved: [] };
     },
-    async getParameters(_input, runtime) {
+    async describe(_input, runtime) {
       operationIds.push(['parameters', runtime.operationId]);
       counts.parameters++;
-      return { success: true, data: declaration, issues: [] };
+      return { success: true, data: { parameters: declaration }, issues: [] };
     },
-    async createGeometry(input, runtime) {
+    async evaluate(input, runtime) {
       operationIds.push(['geometry', runtime.operationId]);
       geometryParameters.push(input.parameters);
-      return { geometry: { format: 'gltf', content: new Uint8Array([1]) }, nativeHandle: {} };
+      return { handle: {} };
     },
-    async exportGeometry() {
-      return { success: true, data: [], issues: [] };
+    async render() {
+      return { content: new Uint8Array([1]) };
     },
   })();
   // Stands in for the parameter-file resolver: the record feeds geometry, never parameters.
   const recordResolver = defineMiddleware({
     id: 'record-resolver',
     name: 'RecordResolver',
-    getDependencies() {
-      return [{ path: record, affects: ['createGeometry'] }];
+    resolve() {
+      return [{ path: record, affects: ['evaluate'] }];
     },
-    async wrapCreateGeometry(input, handler, runtime) {
+    async wrapEvaluate(input, handler, runtime) {
       const stored = JSON.parse(await runtime.filesystem.readFile(record, 'utf8')) as Record<string, unknown>;
       return handler({ ...input, parameters: { ...stored, ...input.parameters } });
     },

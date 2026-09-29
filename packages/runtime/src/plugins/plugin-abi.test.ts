@@ -134,7 +134,7 @@ const crossCopyInstance = () => {
 
 describe('runtime plugin ABI', () => {
   it('pins every registry key and the current ABI', () => {
-    expect(runtimePluginAbiVersion).toBe(2);
+    expect(runtimePluginAbiVersion).toBe(3);
     expect(Symbol.keyFor(runtimePluginDefinitionSymbol)).toBe('@taucad/runtime/plugin-definition');
     expect(Symbol.keyFor(runtimePluginFactoryAcceptsOptionsSymbol)).toBe(
       '@taucad/runtime/plugin-factory-accepts-options',
@@ -152,11 +152,13 @@ describe('runtime plugin ABI', () => {
     expect(isPluginInstance({ meta: instance.meta })).toBe(false);
     expect(isPluginFactory(fakeFactory(1))).toBe(false);
     expect(isPluginInstance(fakeInstance(1))).toBe(false);
+    expect(isPluginFactory(fakeFactory(2))).toBe(false);
+    expect(isPluginInstance(fakeInstance(2))).toBe(false);
     expect(isPluginFactory(fakeFactory('1'))).toBe(false);
     expect(isPluginInstance(fakeInstance(true))).toBe(false);
   });
 
-  it('rejects incomplete ABI 2 instances without reading accessors', () => {
+  it('rejects incomplete ABI 3 instances without reading accessors', () => {
     const missingExpanded = stamp(
       {
         meta: { name: '@test/incomplete' },
@@ -317,7 +319,7 @@ describe('runtime plugin ABI', () => {
 
   it('reports an incompatible instance ABI separately in defineRuntime', () => {
     expect(() => defineUncheckedRuntime({ plugins: [fakeInstance(1)] })).toThrow(
-      'Tau plugin ABI mismatch: received 1, but this runtime requires 2. Align @taucad/runtime versions.',
+      'Tau plugin ABI mismatch: received 1, but this runtime requires 3. Align @taucad/runtime versions.',
     );
   });
 });

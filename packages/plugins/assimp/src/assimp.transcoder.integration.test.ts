@@ -5,7 +5,7 @@ import { esbuildBundler } from '@taucad/esbuild';
 import { manifoldKernel } from '@taucad/manifold';
 import { assertSuccess, createTestRuntimeClient, glbToDocument, validateGlbData } from '@taucad/runtime-testing';
 import type { ExportFile } from '@taucad/runtime/types';
-import type { TranscoderRuntime } from '@taucad/runtime/transcoder';
+import type { TranscoderServices } from '@taucad/runtime/transcoder';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { createAssimp } from 'libassimp';
@@ -13,7 +13,7 @@ import type { Assimp, AssimpFile } from 'libassimp';
 
 import { assimpTranscoder } from '#assimp.transcoder.js';
 
-const runtime: TranscoderRuntime = {
+const runtime: TranscoderServices = {
   logger: {
     log: () => undefined,
     debug: () => undefined,
@@ -160,7 +160,7 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
-  await definition.cleanup?.(context);
+  await definition.onDispose?.(context);
   fullAssimp.dispose();
 });
 

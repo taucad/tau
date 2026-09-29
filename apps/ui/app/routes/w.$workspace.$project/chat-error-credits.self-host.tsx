@@ -8,6 +8,7 @@ export const ChatErrorCredits = memo(function ({
   className,
 }: {
   readonly className?: string;
+  readonly resumable?: boolean;
   readonly description?: string;
   readonly details?: Record<string, unknown>;
 }): React.JSX.Element {

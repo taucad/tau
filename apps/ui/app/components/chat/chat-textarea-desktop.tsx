@@ -56,6 +56,7 @@ type ChatTextareaDesktopProperties = {
   // State
   readonly dragKind: ChatTextareaDragKind | undefined;
   readonly isSubmitting: boolean;
+  readonly canResume?: boolean;
   readonly isAttaching: boolean;
   readonly inputText: string;
   readonly attachments: readonly DraftAttachment[];
@@ -170,6 +171,7 @@ export const ChatTextareaDesktop = memo(function ({
   // State
   dragKind,
   isSubmitting,
+  canResume = false,
   isAttaching,
   inputText,
   attachments,
@@ -392,7 +394,7 @@ export const ChatTextareaDesktop = memo(function ({
     isSubmitting,
     isAttaching,
     isSubmitDisabled,
-    isEmpty: inputText.trim().length === 0 && attachments.length === 0,
+    isEmpty: !canResume && inputText.trim().length === 0 && attachments.length === 0,
   });
   const blockReasonId = useId();
   /* F19: the beam follows the box's corners. */
@@ -476,6 +478,7 @@ export const ChatTextareaDesktop = memo(function ({
           attachmentAccept={attachmentAccept}
           handleFileChange={handleFileChange}
           isSubmitting={isSubmitting}
+          canResume={canResume}
           sendRefusal={sendRefusal}
           describedBy={sendBlockReason === undefined ? undefined : blockReasonId}
           formattedCancelKeyCombination={formattedCancelKeyCombination}
@@ -562,6 +565,7 @@ export const ChatTextareaBar = memo(function ({
   attachmentAccept,
   handleFileChange,
   isSubmitting,
+  canResume = false,
   sendRefusal,
   describedBy,
   formattedCancelKeyCombination,
@@ -585,6 +589,7 @@ export const ChatTextareaBar = memo(function ({
   readonly attachmentAccept: string;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   readonly isSubmitting: boolean;
+  readonly canResume?: boolean;
   readonly sendRefusal: string | undefined;
   readonly describedBy: string | undefined;
   readonly formattedCancelKeyCombination: string;
@@ -650,6 +655,7 @@ export const ChatTextareaBar = memo(function ({
         <ChatTextareaSubmitButton
           status={status}
           isSubmitting={isSubmitting}
+          canResume={canResume}
           refusal={sendRefusal}
           describedBy={describedBy}
           formattedCancelKeyCombination={formattedCancelKeyCombination}

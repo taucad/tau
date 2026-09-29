@@ -69,9 +69,8 @@ export type ChatTurnGesture =
   | Readonly<{ kind: 'edit'; messageId: string; text: string; attachments?: readonly StoredAttachmentRef[] }>
   | Readonly<{ kind: 'regenerate'; execution?: CadAgentExecution; requestId?: string }>
   /**
-   * *Try again* on an error card: resume the stream if the host can still
-   * continue it, and re-run the turn if it cannot. Only the admission knows
-   * which, so the two are one gesture here.
+   * Resume the saved run only. Admission refuses if the host cannot continue
+   * it; replaying the last turn is the separate `regenerate` gesture.
    */
   | Readonly<{ kind: 'continue' }>;
 

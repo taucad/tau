@@ -2,6 +2,7 @@
 import { ChatAttachmentDirectoriesContext, chatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
+import { mock } from 'vitest-mock-extended';
 import {
   resolveKernel,
   tauEditorPanelDragMime,
@@ -50,6 +51,8 @@ const stableModel = makeResolvedModel();
 
 let mockActiveModel: ResolvedModel = stableModel;
 let mockExecution: CadAgentExecution | undefined;
+let mockResume: (() => void) | undefined;
+let mockStatus: ChatComposerContextValue['status'] = 'ready';
 
 const chatActionsMock = {
   stop: vi.fn<() => void>(),
@@ -106,9 +109,10 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
         setActiveExecution: vi.fn(),
       },
       kernel: { kernelId: 'openscad', kernel: resolveKernel('openscad'), setActiveKernel: vi.fn() },
-      status: 'ready',
+      status: mockStatus,
       agentActivity: 'ready',
       stop: () => undefined,
+      resume: mockResume,
       contextUsage: undefined,
       session: undefined,
     }) as unknown as ChatComposerContextValue,
@@ -131,7 +135,83 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
     vi.clearAllMocks();
     mockActiveModel = stableModel;
     mockExecution = undefined;
+    mockResume = undefined;
+    mockStatus = 'ready';
     draftState = defaultDraftState;
+  });
+
+  it('should resume an empty main draft through both submit and Enter without sending a new message', async () => {
+    mockResume = vi.fn();
+    draftState = { ...defaultDraftState, draftText: '  ' };
+    const onSubmit = vi.fn(async () => undefined);
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
+
+    expect(result.current.canResume).toBe(true);
+    await act(async () => result.current.handleSubmit());
+    act(() => {
+      result.current.handleTextareaKeyDown(mock<React.KeyboardEvent>({ key: 'Enter', shiftKey: false }));
+    });
+    expect(mockResume).toHaveBeenCalledTimes(2);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(chatActionsMock.setDraftText).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'text', draftText: 'Keep this draft', draftAttachments: [] },
+    {
+      name: 'attachment',
+      draftText: '',
+      draftAttachments: [storedRef({ hash: 'a'.repeat(64), mediaType: 'image/png' })],
+    },
+  ])('should send a new $name draft instead of resuming the interrupted turn', async (draft) => {
+    mockResume = vi.fn();
+    draftState = { ...defaultDraftState, ...draft };
+    const onSubmit = vi.fn(async () => undefined);
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
+
+    expect(result.current.canResume).toBe(false);
+    await act(async () => result.current.handleSubmit());
+    expect(mockResume).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledWith({ content: draft.draftText, attachments: draft.draftAttachments });
+  });
+
+  it.each(['edit', 'attaching', 'unavailable', 'submitted', 'streaming'] as const)(
+    'should not offer or activate Resume while %s',
+    async (state) => {
+      mockResume = vi.fn();
+      mockStatus = state === 'submitted' || state === 'streaming' ? state : 'ready';
+      draftState = { ...defaultDraftState, draftText: '', attachingMain: state === 'attaching' };
+      const onSubmit = vi.fn(async () => undefined);
+      const { result } = renderHook(() =>
+        useChatTextareaLogic({
+          ref: undefined,
+          onSubmit,
+          mode: state === 'edit' ? 'edit' : 'main',
+          isSubmitDisabled: state === 'unavailable',
+        }),
+      );
+
+      expect(result.current.canResume).toBe(false);
+      await act(async () => result.current.handleSubmit());
+      expect(mockResume).not.toHaveBeenCalled();
+      expect(onSubmit).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should stop offering Resume when the session withdraws the action', async () => {
+    const resume = vi.fn();
+    mockResume = resume;
+    draftState = { ...defaultDraftState, draftText: '' };
+    const onSubmit = vi.fn(async () => undefined);
+    const { result, rerender } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
+    expect(result.current.canResume).toBe(true);
+
+    mockResume = undefined;
+    rerender();
+    expect(result.current.canResume).toBe(false);
+    await act(async () => result.current.handleSubmit());
+    expect(resume).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('should expose the chat-scoped model on selectedModel (UI display)', () => {

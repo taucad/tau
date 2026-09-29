@@ -1,4 +1,6 @@
-use geospec_engine_native_core::{process_request, sha256_hex, Engine, ProtocolError};
+use geospec_engine_native_core::{
+    canonicalize, process_request, sha256_hex, Engine, ProtocolError,
+};
 use serde_json::Value;
 
 const FIXTURES: &str = include_str!("fixtures/mesh-entry.json");
@@ -189,11 +191,31 @@ fn advertises_the_complete_current_contract_through_both_entrypoints() {
     let current = current();
     let bound = binding(&current, "a1/raw/initialize");
     let request = string(bound, "effectiveInputUtf8").as_bytes();
-    let expected = string(bound, "expectedUtf8");
+    let mut expected: Value = serde_json::from_str(
+        &string(bound, "expectedUtf8")
+            .replace("geospec-st-logical-requests-v3", CURRENT_NUMERIC_PROFILE),
+    )
+    .expect("frozen initialize response");
+    let capabilities = expected["result"]["capabilities"]
+        .as_array_mut()
+        .expect("frozen capabilities");
+    assert_eq!(capabilities.last().unwrap()["name"], "queryPmi");
+    capabilities.push(serde_json::json!({
+        "name": "minimumDistance",
+        "implementation": "implemented",
+        "profile": "geospec-minimum-distance-v1",
+        "qualification": "unqualified",
+        "registryVersion": 5,
+        "scope": "declared-subject-profile",
+    }));
+    let expected = canonicalize(&serde_json::to_vec(&expected).unwrap()).unwrap();
     let engine = Engine::new().process_request(request).expect("initialize");
     let free = process_request(request).expect("free initialize");
-    assert_response(engine, expected, "Engine::initialize");
-    assert_response(free, expected, "process_request::initialize");
+    assert_eq!(engine, expected, "Engine::initialize canonical bytes");
+    assert_eq!(
+        free, expected,
+        "process_request::initialize canonical bytes"
+    );
 }
 
 #[test]

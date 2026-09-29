@@ -626,6 +626,20 @@ fn initialize(engine: &Engine, request: &[(String, Json)]) -> Result<Vec<u8>, Pr
                                         ));
                                     }
                                 }
+                                if *name == "minimumDistance" {
+                                    if let Json::Object(fields) = &mut entry {
+                                        fields.push((
+                                            "profile".into(),
+                                            Json::string("geospec-minimum-distance-v1"),
+                                        ));
+                                        if let Some((_, implementation)) = fields
+                                            .iter_mut()
+                                            .find(|(key, _)| key == "implementation")
+                                        {
+                                            *implementation = Json::string("implemented");
+                                        }
+                                    }
+                                }
                                 if *name == "toSatisfyParallelPlaneDistance" {
                                     if let Json::Object(fields) = &mut entry {
                                         fields.push((

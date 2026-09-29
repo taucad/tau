@@ -69,6 +69,7 @@ fn ap242_box_retains_shape_face_and_mesh_facts() {
 
     assert_eq!(admission.source_length_unit, "millimetre");
     close(admission.source_unit_to_millimeters, 1.0, 1e-12);
+    assert!(admission.all_source_length_contexts_mm);
     assert!(document.validity().unwrap().valid);
     close(shape.volume, 6_000.0, 1e-8);
     close(shape.surface_area, 2_200.0, 1e-8);
@@ -174,6 +175,20 @@ fn ap242_box_retains_shape_face_and_mesh_facts() {
         .iter()
         .flatten()
         .all(|index| (*index as usize) < mesh.positions.len()));
+}
+
+#[test]
+fn mixed_length_contexts_keep_first_mm_metadata_but_refuse_minimum_provenance() {
+    let source = String::from_utf8(fixture("ap242-box.step")).unwrap();
+    let end = source.rfind("ENDSEC;").unwrap();
+    let mut mixed = source.clone();
+    mixed.insert_str(end,
+        "#500000 = ( GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#500001,#347,#348)) REPRESENTATION_CONTEXT('mixed-unit-control','') );\n\
+         #500001 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.) );\n");
+    let document = Document::from_step(mixed.as_bytes()).unwrap();
+    let admission = document.admission_facts().unwrap();
+    assert_eq!(admission.source_unit_to_millimeters, 1.0);
+    assert!(!admission.all_source_length_contexts_mm);
 }
 
 #[test]

@@ -239,6 +239,12 @@ typedef struct geospec_occt_entity {
   uint32_t face;
 } geospec_occt_entity;
 
+typedef struct geospec_occt_minimum_distance {
+  double distance;
+  double point_a[3];
+  double point_b[3];
+} geospec_occt_minimum_distance;
+
 typedef struct geospec_occt_located_face_facts {
   geospec_occt_face_facts face;
   geospec_occt_bounds bounds;
@@ -607,7 +613,8 @@ size_t geospec_occt_triangulated_face_count(
 int geospec_occt_admission_facts(
     const geospec_occt_document* document,
     double* out_source_unit_to_millimeters, size_t* out_occurrence_count,
-    size_t* out_surfaceless_face_count, geospec_occt_string* source_unit,
+    size_t* out_surfaceless_face_count, int* out_all_source_length_contexts_mm,
+    geospec_occt_string* source_unit,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_step_subject_metadata(
     const geospec_occt_document* document, size_t* out_source_byte_length,
@@ -827,6 +834,13 @@ int geospec_occt_component_body_inside(
 int geospec_occt_component_bodies_within_dedicated(
     const geospec_occt_component_bodies* bodies, size_t left, size_t right,
     double tolerance, int grant_width, int* out_used_parallel, int* out_within,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Complete serial whole-occurrence minimum, including the first OCCT witness
+// pair in A/B order. The caller charges deterministic work before this call.
+int geospec_occt_occurrence_minimum_distance(
+    const geospec_occt_document* document, uint32_t a, uint32_t b,
+    geospec_occt_charge charge, void* context,
+    geospec_occt_minimum_distance* out_result,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_regular_solid_containment(
     const geospec_occt_document* document, geospec_occt_entity subject,

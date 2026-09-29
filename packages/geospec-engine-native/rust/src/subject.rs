@@ -63,6 +63,8 @@ pub(crate) struct Subject {
     pub semantic_identity: OnceCell<SubjectIdentity>,
     pub format: SubjectFormat,
     pub source_unit: String,
+    /// Declared STEP source axis frame; non-STEP subjects stay z-up.
+    pub(crate) step_source_frame: String,
     /// Verified source metadata from successful STEP admission, not report generation.
     pub(crate) step_admission_facts: Option<BrepAdmissionFacts>,
     pub rational_plate: Option<crate::certificates::engine::RationalSubject>,
@@ -187,6 +189,7 @@ impl Subject {
             semantic_identity: OnceCell::new(),
             format,
             source_unit,
+            step_source_frame: "z-up".into(),
             step_admission_facts: None,
             rational_plate: None,
             parallel_plane: None,
@@ -808,6 +811,17 @@ impl Subject {
     /// ponytail: subject-wide; scope it to the claim's occurrences if a
     /// mixed BRep and tessellated document becomes a live case.
     pub(crate) fn tessellated_only_refusal(&self, capability: Capability) -> Option<Evaluation> {
+        if self.format == SubjectFormat::Step
+            && self.step_source_frame == "y-up"
+            && capability != Capability::MinimumDistance
+        {
+            return Some(Evaluation::Refused {
+                diagnostics: vec![Diagnostic::error(
+                    "GEOSPEC_UNSUPPORTED_EVIDENCE",
+                    "This y-up STEP subject currently supports only minimumDistance; other operations require canonicalized native geometry.",
+                )],
+            });
+        }
         let faces = self.step_admission_facts.as_ref()?.surfaceless_faces;
         if faces == 0 || !capability.is_exact() {
             return None;

@@ -7,8 +7,8 @@ extern crate self as geospec_engine_native_occt;
 mod finite_contact_engagement_tests;
 
 pub use geospec_engine_native_core::backend::brep::{
-    Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepSubject, Charge,
-    CircularBoreCandidate, CircularBoreDisposition, CircularBoreEnd, CircularBoreInventory,
+    Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepMinimumDistance, BrepSubject,
+    Charge, CircularBoreCandidate, CircularBoreDisposition, CircularBoreEnd, CircularBoreInventory,
     CircularBoreNonMember, CircularBoreTermination, CircularBoreTopology, CircularBoreUnqualified,
     ComponentBodies, ComponentBody, ContinuousWallDomain, ContinuousWallShape, CurveFacts,
     CylinderAttachmentProfile, CylinderAxialExtent, CylinderBoundaryOrientation,
@@ -286,6 +286,53 @@ impl BrepConnector for ParallelOcctConnector {
 }
 
 impl BrepSubject for Document {
+    fn occurrence_minimum_distance(
+        &self,
+        a: u32,
+        b: u32,
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<BrepMinimumDistance>, BackendError> {
+        self.require_occurrence(a)?;
+        self.require_occurrence(b)?;
+        if a == b {
+            return Err(invalid_input(
+                "Minimum distance requires distinct occurrences.",
+            ));
+        }
+        let mut result = ffi::MinimumDistance::default();
+        let mut error = ErrorBuffer::new();
+        let mut callback = charge;
+        let status = unsafe {
+            ffi::geospec_occt_occurrence_minimum_distance(
+                self.raw.as_ptr(),
+                a,
+                b,
+                charge_units,
+                charge_context(&mut callback),
+                &mut result,
+                error.raw(),
+            )
+        };
+        if status == ffi::STOPPED {
+            return Ok(None);
+        }
+        check(status, &error)?;
+        if !result.distance.is_finite()
+            || result.distance < 0.0
+            || !result
+                .point_a
+                .into_iter()
+                .chain(result.point_b)
+                .all(f64::is_finite)
+        {
+            return Err(backend_error("OCCT minimum returned non-finite evidence."));
+        }
+        Ok(Some(BrepMinimumDistance {
+            distance: result.distance,
+            point_a: result.point_a,
+            point_b: result.point_b,
+        }))
+    }
     fn pmi_source_faces(
         &self,
         source_face_id: u32,
@@ -1677,12 +1724,14 @@ unsafe fn admission_facts(raw: *const ffi::Document) -> Result<BrepAdmissionFact
     let mut source_unit_to_millimeters = 0.0;
     let mut occurrence_count = 0;
     let mut surfaceless_faces = 0;
+    let mut all_source_length_contexts_mm = 0;
     let source_length_unit = copied_string(|unit, error| {
         ffi::geospec_occt_admission_facts(
             raw,
             &mut source_unit_to_millimeters,
             &mut occurrence_count,
             &mut surfaceless_faces,
+            &mut all_source_length_contexts_mm,
             unit,
             error,
         )
@@ -1692,6 +1741,7 @@ unsafe fn admission_facts(raw: *const ffi::Document) -> Result<BrepAdmissionFact
         source_unit_to_millimeters,
         occurrence_count,
         surfaceless_faces,
+        all_source_length_contexts_mm: all_source_length_contexts_mm != 0,
     })
 }
 
@@ -3990,6 +4040,14 @@ mod ffi {
 
     #[derive(Clone, Copy, Default)]
     #[repr(C)]
+    pub struct MinimumDistance {
+        pub distance: f64,
+        pub point_a: [f64; 3],
+        pub point_b: [f64; 3],
+    }
+
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
     pub struct LocatedFaceFacts {
         pub face: FaceFacts,
         pub bounds: Bounds,
@@ -4660,6 +4718,15 @@ mod ffi {
             grant_width: i32,
             used_parallel: *mut i32,
             within: *mut i32,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_occurrence_minimum_distance(
+            document: *const Document,
+            a: u32,
+            b: u32,
+            charge: Charge,
+            context: *mut c_void,
+            result: *mut MinimumDistance,
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_cylinder_axial_extent(

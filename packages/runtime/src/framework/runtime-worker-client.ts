@@ -209,7 +209,7 @@ type QueuedPreview = {
  */
 export const renderTimeoutIssue = (renderTimeout?: number): KernelIssue => ({
   message: renderTimeout === undefined ? 'Render timed out.' : `Render timed out after ${renderTimeout} ms.`,
-  code: 'RENDER_TIMEOUT',
+  code: 'OPERATION_TIMEOUT',
   type: 'runtime',
   severity: 'error',
 });

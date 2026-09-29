@@ -1535,7 +1535,7 @@ export function createRuntimeClient(
       return;
     }
     pendingRender = undefined;
-    if (issues.some((issue) => issue.code === 'RENDER_TIMEOUT')) {
+    if (issues.some((issue) => issue.code === 'OPERATION_TIMEOUT')) {
       prior.reject(new RenderTimeoutError(prior.renderTimeout));
       return;
     }

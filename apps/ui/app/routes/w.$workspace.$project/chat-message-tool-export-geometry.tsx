@@ -33,6 +33,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
+import { selectCadFailureIssues } from '#machines/cad.machine.js';
 
 /** Matches {@link chat-tool-file-operation.tsx} action buttons — label hidden until `@xs/code`. */
 const exportActionLabelClassName = '**:data-[slot=label]:hidden @xs/code:**:data-[slot=label]:flex';
@@ -131,7 +132,16 @@ function ExportGeometryDownloadSplitButton({
           toast.error('Export failed');
           return;
         }
-        await awaitFreshRender(claimedActor);
+        const settled = await awaitFreshRender(claimedActor);
+        const failedIssues = selectCadFailureIssues(settled);
+        if (failedIssues) {
+          toast.error(failedIssues.map((issue) => issue.message).join('; ') || 'Export failed');
+          return;
+        }
+        if (settled.context.latestGeometryOutcome !== 'success') {
+          toast.error(`No current successful geometry is available for ${targetFile}`);
+          return;
+        }
         await exportToDisk(claimedActor, selectedFormat);
       } catch {
         toast.error('Export failed');

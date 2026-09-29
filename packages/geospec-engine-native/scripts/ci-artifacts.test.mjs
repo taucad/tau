@@ -825,6 +825,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     for (const [index, archive] of originalDelivery.archives.entries()) {
       assert.deepEqual(fileRecordForTest(join(producer, archive.path)), oldArchives[index], 'old trio is immutable');
     }
+    let priorArchives = renewedDelivery.archives;
     for (const [index, path] of sourceOnlyPaths.entries()) {
       put(join(producer, path), `second source-only edit ${path}`);
       assert.deepEqual(verifyArtifacts(producer).artifacts, inventory.artifacts);
@@ -833,8 +834,21 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       process.env['GITHUB_RUN_ATTEMPT'] = '3';
       const second = withProducerMarker(producer, () => ensureDelivery(producer), { pgid: process.pid });
       assert.deepEqual(second.artifacts, inventory.artifacts);
+      assert.deepEqual(
+        second.producerSource,
+        inventory.producerSource,
+        'source-only relinks retain original producer source',
+      );
       assert.deepEqual(second.delivery.run, inventory.delivery.run, 'source-only relinks never relabel the product');
       assert.deepEqual(second.delivery.assemblyRun, { id: 'assembly-C', attempt: '3' });
+      const { archives } = /** @type {{archives: {path: string, sha256: string}[]}} */ (second.delivery);
+      const previousArchives = priorArchives;
+      assert.equal(archives.length, 3, 'source-kit delivery retains the complete archive trio');
+      assert.ok(
+        archives.every((archive, archiveIndex) => archive.sha256 !== previousArchives[archiveIndex]?.sha256),
+        `all three archives renew after source-only edit ${path}`,
+      );
+      priorArchives = archives;
       assert.deepEqual(targets, [...builtTargets, ...Array.from({ length: index + 2 }, () => 'assemble-package')]);
     }
     for (const [path, value] of [

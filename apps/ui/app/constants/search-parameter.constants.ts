@@ -17,6 +17,10 @@ export const searchParameterName = {
   // The Community kernel filter, absent for every kernel.
   kernel: 'kernel',
 
+  /* Parts */
+  // The Parts category filter, absent for all categories.
+  partCategory: 'category',
+
   /* Dialogs */
   // The open settings dialog section, absent when the dialog is closed.
   settings: 'settings',

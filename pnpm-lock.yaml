@@ -2670,6 +2670,9 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../libs/utils
+      '@taucad/warehouse':
+        specifier: workspace:*
+        version: link:../../packages/warehouse
       '@taucad/workbench':
         specifier: workspace:*
         version: link:../../packages/workbench

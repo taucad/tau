@@ -27,6 +27,11 @@ export type FlagDefinition = {
 const tauDebugDefault = Boolean(ENV.TAU_DEBUG);
 
 export const flagRegistry = {
+  partsWarehouse: {
+    schema: z.boolean().default(true),
+    label: 'Parts warehouse',
+    description: 'Browse and remix reusable parametric parts.',
+  },
   nativeGeoSpec: {
     schema: z.boolean().default(false),
     label: 'Native GeoSpec',

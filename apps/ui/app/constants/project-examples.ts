@@ -15,7 +15,7 @@ export type BuiltinProjectCardModel = {
   readonly description: string;
   readonly tags: readonly string[];
   readonly assets: ProjectManifest['assets'];
-  readonly thumbnail: string;
+  readonly thumbnail?: string;
   /** Drawn for the featured card's doubled size with proportionally thinner edges. */
   readonly featuredThumbnail?: string;
   readonly fileAssets: BuiltinExample['assets'];

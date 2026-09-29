@@ -1,4 +1,4 @@
-import { findBuiltinExample } from '@taucad/tau-examples/builtin';
+import { findBuiltinProject } from '#lib/builtin-projects.js';
 import { shareArtifactLimits } from '@taucad/share/artifact';
 import type { ShareOpenedFile } from '@taucad/share/artifact';
 import type {
@@ -12,7 +12,7 @@ import type { ShareSnapshotFileRole } from '@taucad/share/snapshot';
 
 export const builtinShareProviderDescriptor = {
   id: 'builtin',
-  label: 'Builtin example',
+  label: 'Tau catalog',
   capabilities: ['project.resolve'],
 } as const satisfies ShareProviderDescriptor;
 
@@ -33,11 +33,11 @@ const sha256 = async (content: Uint8Array<ArrayBuffer>): Promise<string> => {
 const fetchBuiltinFiles = async (input: ShareResolveInput): Promise<readonly ShareOpenedFile[]> => {
   const { reference } = input.locator;
   if (input.locator.providerId !== builtinShareProviderDescriptor.id || !reference) {
-    throw new ShareError('SHARE_LOCATOR_INVALID', 'The builtin example locator is malformed.');
+    throw new ShareError('SHARE_LOCATOR_INVALID', 'The catalog project locator is malformed.');
   }
-  const example = findBuiltinExample(reference);
+  const example = findBuiltinProject(reference);
   if (!example) {
-    throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'This builtin example does not exist.');
+    throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'This catalog project does not exist.');
   }
   let totalBytes = 0;
   return Promise.all(
@@ -50,15 +50,15 @@ const fetchBuiltinFiles = async (input: ShareResolveInput): Promise<readonly Sha
         if (error instanceof Error && error.name === 'AbortError') {
           throw error;
         }
-        throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'The builtin example could not be loaded.');
+        throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'The catalog project could not be loaded.');
       }
       input.signal?.throwIfAborted();
       if (content.byteLength > shareArtifactLimits.maxEntryBytes) {
-        throw new ShareError('SHARE_ARTIFACT_LIMIT', 'A builtin example file exceeds the portable-share limit.');
+        throw new ShareError('SHARE_ARTIFACT_LIMIT', 'A catalog project file exceeds the portable-share limit.');
       }
       totalBytes += content.byteLength;
       if (totalBytes > shareArtifactLimits.maxTotalBytes) {
-        throw new ShareError('SHARE_ARTIFACT_LIMIT', 'The builtin example exceeds the portable-share limit.');
+        throw new ShareError('SHARE_ARTIFACT_LIMIT', 'The catalog project exceeds the portable-share limit.');
       }
       return { path: asset.path, content };
     }),
@@ -67,9 +67,9 @@ const fetchBuiltinFiles = async (input: ShareResolveInput): Promise<readonly Sha
 
 const resolveBuiltin = async (input: ShareResolveInput, context: ShareProviderContext) => {
   const { reference } = input.locator;
-  const example = reference ? findBuiltinExample(reference) : undefined;
+  const example = reference ? findBuiltinProject(reference) : undefined;
   if (!example) {
-    throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'This builtin example does not exist.');
+    throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'This catalog project does not exist.');
   }
   const files = await fetchBuiltinFiles(input);
   const snapshotFiles = await Promise.all(

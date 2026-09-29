@@ -68,6 +68,7 @@
     "@taucad/ui": "workspace:*",
     "@taucad/units": "workspace:*",
     "@taucad/utils": "workspace:*",
+    "@taucad/warehouse": "workspace:*",
     "@taucad/workbench": "workspace:*",
     "@taucad/zoo": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",

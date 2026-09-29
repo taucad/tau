@@ -13,6 +13,7 @@
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepExtrema_DistanceSS.hxx>
+#include <BRepExtrema_ExtCF.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -7631,14 +7632,38 @@ int geospec_occt_component_faces_within(
       open[event.side].push_back(event.piece);
     }
     std::sort(pairs.begin(), pairs.end());
+    // The vectors and their entries live for this call only. Piece indices are
+    // immutable here; separate sides prevent equal indices from sharing state.
+    std::vector<std::unique_ptr<BRepExtrema_PreparedFaceCF>> left_prepared;
+    std::vector<std::unique_ptr<BRepExtrema_PreparedFaceCF>> right_prepared;
     for (const auto& [gap, lindex, rindex] : pairs) {
       const ComponentPiece& lpiece = lpieces[lindex];
       const ComponentPiece& rpiece = rpieces[rindex];
       if (charge(context, component_pair_units(lpiece, rpiece)) != 0) {
         return GEOSPEC_OCCT_STOPPED;
       }
+      BRepExtrema_PreparedFaceCF* prepared = nullptr;
+      if (lpiece.shape.ShapeType() == TopAbs_FACE &&
+          rpiece.shape.ShapeType() == TopAbs_EDGE) {
+        if (left_prepared.empty()) left_prepared.resize(lpieces.size());
+        auto& slot = left_prepared[lindex];
+        if (!slot) {
+          slot = std::make_unique<BRepExtrema_PreparedFaceCF>(
+              TopoDS::Face(lpiece.shape), tolerance);
+        }
+        prepared = slot.get();
+      } else if (lpiece.shape.ShapeType() == TopAbs_EDGE &&
+                 rpiece.shape.ShapeType() == TopAbs_FACE) {
+        if (right_prepared.empty()) right_prepared.resize(rpieces.size());
+        auto& slot = right_prepared[rindex];
+        if (!slot) {
+          slot = std::make_unique<BRepExtrema_PreparedFaceCF>(
+              TopoDS::Face(rpiece.shape), tolerance);
+        }
+        prepared = slot.get();
+      }
       BRepExtrema_DistanceSS distance(lpiece.shape, rpiece.shape, lpiece.box, rpiece.box,
-                                      reference, eps);
+                                      reference, eps, prepared, tolerance);
       if (distance.IsDone() && distance.DistValue() <= tolerance) {
         *out_within = 1;
         break;

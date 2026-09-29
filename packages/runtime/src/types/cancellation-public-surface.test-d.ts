@@ -11,9 +11,9 @@ import type {
   RuntimeRenderInput,
   RuntimeTerminatedCause,
 } from '#client/index.js';
-import type { BundlerRuntime } from '#plugins/bundler-entry.js';
-import type { KernelRuntime } from '#plugins/kernel-plugin-entry.js';
-import type { KernelMiddlewareRuntime, MiddlewareDependencyRuntime } from '#plugins/middleware-entry.js';
+import type { BundlerServices } from '#plugins/bundler-entry.js';
+import type { KernelServices } from '#plugins/kernel-plugin-entry.js';
+import type { KernelMiddlewareServices, MiddlewareDependencyServices } from '#plugins/middleware-entry.js';
 import type { WorkerState } from '#types/runtime-protocol.types.js';
 import type { KernelPlugin, MiddlewarePlugin } from '#plugins/plugin-types.js';
 import type {
@@ -26,10 +26,10 @@ import type {
 
 describe('public cancellation declarations', () => {
   it('requires the platform AbortSignal on every operation-scoped author runtime', () => {
-    expectTypeOf<KernelRuntime['signal']>().toEqualTypeOf<AbortSignal>();
-    expectTypeOf<KernelMiddlewareRuntime['signal']>().toEqualTypeOf<AbortSignal>();
-    expectTypeOf<MiddlewareDependencyRuntime['signal']>().toEqualTypeOf<AbortSignal>();
-    expectTypeOf<BundlerRuntime['signal']>().toEqualTypeOf<AbortSignal>();
+    expectTypeOf<KernelServices['signal']>().toEqualTypeOf<AbortSignal>();
+    expectTypeOf<KernelMiddlewareServices['signal']>().toEqualTypeOf<AbortSignal>();
+    expectTypeOf<MiddlewareDependencyServices['signal']>().toEqualTypeOf<AbortSignal>();
+    expectTypeOf<BundlerServices['signal']>().toEqualTypeOf<AbortSignal>();
   });
 
   it('includes render-timeout in the complete terminal cause union', () => {

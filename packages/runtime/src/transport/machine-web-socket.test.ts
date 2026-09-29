@@ -53,7 +53,7 @@ describe('prepareMachineWebSocket', () => {
     first.close();
     second.close();
     expect(sockets).toEqual(['wss://host.test/prefix/machines?scope=one', 'wss://host.test/prefix/machines?scope=one']);
-    await expect(first.ready).rejects.toThrow('Channel closed before ready');
-    await expect(second.ready).rejects.toThrow('Channel closed before ready');
+    await expect(first.ready).rejects.toThrow('Channel closed');
+    await expect(second.ready).rejects.toThrow('Channel closed');
   });
 });

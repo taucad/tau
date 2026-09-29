@@ -62,7 +62,9 @@ const runtime = (tessellationInstancing: boolean) =>
     kernels: [replicadKernel({ wasm: 'single', tessellationInstancing })],
     bundlers: [esbuildBundler()],
   });
-const clients = new Set<ReturnType<typeof createTestRuntimeClient>>();
+const makeClient = (tessellationInstancing: boolean, files: Record<string, string>) =>
+  createTestRuntimeClient({ runtime: runtime(tessellationInstancing), files });
+const clients = new Set<ReturnType<typeof makeClient>>();
 afterEach(async () => {
   await Promise.all([...clients].map(async (client) => client.shutdown()));
   clients.clear();
@@ -72,10 +74,7 @@ describe('standard physical materials through Replicad and the runtime', () => {
   it.each([false, true])(
     'should preserve per-occurrence materials, seam UVs, edits and exports (instancing=%s)',
     async (tessellationInstancing) => {
-      const client = createTestRuntimeClient({
-        runtime: runtime(tessellationInstancing),
-        files: { 'main.ts': source },
-      });
+      const client = makeClient(tessellationInstancing, { 'main.ts': source });
       clients.add(client);
       const rendered = await client.render({
         source: { path: 'main.ts' },
@@ -144,11 +143,8 @@ describe('standard physical materials through Replicad and the runtime', () => {
   );
 
   it('should diagnose mixed legacy and standard material settings', async () => {
-    const client = createTestRuntimeClient({
-      runtime: runtime(false),
-      files: {
-        'main.ts': `import { makeBox } from 'replicad'; export default () => ({ shape: makeBox([0,0,0],[1,1,1]), color: '#fff', material: {} });`,
-      },
+    const client = makeClient(false, {
+      'main.ts': `import { makeBox } from 'replicad'; export default () => ({ shape: makeBox([0,0,0],[1,1,1]), color: '#fff', material: {} });`,
     });
     clients.add(client);
     const result = await client.render({ source: { path: 'main.ts' } });
@@ -161,7 +157,7 @@ describe('standard physical materials through Replicad and the runtime', () => {
   }, 60_000);
 
   it('should retain embedded textures and physical materials across native-handle serialization', async () => {
-    const client = createTestRuntimeClient({ runtime: runtime(false), files: { 'main.ts': source } });
+    const client = makeClient(false, { 'main.ts': source });
     clients.add(client);
     const boot = await client.render({ source: { path: 'main.ts' } });
     if (boot.superseded) {
@@ -170,8 +166,8 @@ describe('standard physical materials through Replicad and the runtime', () => {
     assertSuccess(boot.geometry);
     const library = await import('replicad');
     const definition = await resolveRuntimePluginDefinition('kernel', replicadKernel());
-    const serialize = definition.serializeNativeHandle!;
-    const deserialize = definition.deserializeNativeHandle!;
+    const serialize = definition.serializeHandle!;
+    const deserialize = definition.deserializeHandle!;
     const context = mock<Parameters<typeof deserialize>[2]>();
     context.replicadLibrary = library;
     const image = Uint8Array.from(
@@ -184,17 +180,13 @@ describe('standard physical materials through Replicad and the runtime', () => {
       ...copper,
       pbrMetallicRoughness: { ...copper.pbrMetallicRoughness, baseColorTexture: { index: 0 } },
     };
-    const nativeHandle: Parameters<typeof serialize>[0]['nativeHandle'] = {
+    const nativeHandle: Parameters<typeof serialize>[0]['handle'] = {
       shapes: normalizeRenderShapes({ shape: library.makeCylinder(10, 20), material, name: 'Textured copper' }),
       images: [{ data: image, mimeType: 'image/png' }],
       textures: [{ source: 0 }],
     };
-    const serialized = serialize({ nativeHandle }, createMockKernelRuntime(), context);
-    const restored = deserialize(
-      { serializedNativeHandle: structuredClone(serialized) },
-      createMockKernelRuntime(),
-      context,
-    );
+    const serialized = serialize({ handle: nativeHandle }, createMockKernelRuntime(), context);
+    const restored = deserialize({ serialized: structuredClone(serialized) }, createMockKernelRuntime(), context);
     expect(restored.images?.[0]?.data).toEqual(image);
     expect(restored.shapes[0]?.material).toEqual(material);
     const geometries = render(normalizeRenderShapes(restored.shapes)).filter(

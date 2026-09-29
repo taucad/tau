@@ -2,7 +2,7 @@
  * Manifold Kernel Module
  *
  * Integrates the Manifold WASM CAD kernel into Tau's kernel framework.
- * Uses runtime.bundler for JS/TS bundling and runtime.execute for module evaluation.
+ * Uses services.bundler for JS/TS bundling and services.execute for module evaluation.
  * Registers manifold-3d modules as built-ins for user code imports.
  */
 
@@ -27,20 +27,14 @@ import {
   parseStackTrace,
   resolveSourcePath,
   deriveLocationFromFrames,
-  finalizeRenderOutput,
 } from '@taucad/runtime/kernel';
-import type { KernelRuntime } from '@taucad/runtime/kernel';
+import type { KernelServices } from '@taucad/runtime/kernel';
 
 import { manifoldOptionsSchema, manifoldExportSchemas } from '#manifold.schemas.js';
 
 import { initManifoldWasm } from '#init-manifold.js';
 
-import {
-  transformGltfExportBytes,
-  normalizeGltfGeometryNames,
-  createEmptyGlb,
-  createEmptyGltfGeometry,
-} from '@taucad/geometry-core';
+import { transformGltfExportBytes, normalizeGltfGeometryNames, createEmptyGlb } from '@taucad/geometry-core';
 
 // =============================================================================
 // Types
@@ -64,7 +58,7 @@ export const manifoldDetectPattern =
 const isCallable = (value: unknown): value is (...arguments_: readonly unknown[]) => unknown =>
   typeof value === 'function';
 
-async function registerManifoldModules(runtime: KernelRuntime): Promise<Record<string, unknown>> {
+async function registerManifoldModules(services: KernelServices): Promise<Record<string, unknown>> {
   const [manifoldRoot, manifoldCad, gltfNodeModule] = await Promise.all([
     import('manifold-3d'),
     import('manifold-3d/manifoldCAD'),
@@ -84,14 +78,14 @@ async function registerManifoldModules(runtime: KernelRuntime): Promise<Record<s
     resetGLTFNodes: gltfNodeModule.resetGLTFNodes,
   };
 
-  registerKernelModule(runtime, {
+  registerKernelModule(services, {
     name: 'manifold-3d',
     exports: manifoldRoot,
     version: manifoldModuleVersion,
     globalName: 'manifold3d',
   });
 
-  registerKernelModule(runtime, {
+  registerKernelModule(services, {
     name: 'manifold-3d/manifoldCAD',
     exports: patchedManifoldCad,
     version: manifoldModuleVersion,
@@ -228,31 +222,37 @@ export const manifoldKernel = defineKernel({
   name: 'ManifoldKernel',
   version: '1.0.0',
   optionsSchema: manifoldOptionsSchema,
-  exportFormats: {
-    glb: { optionsSchema: manifoldExportSchemas.glb },
+  views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+  exports: {
+    glb: {
+      title: 'glTF binary',
+      mimeType: 'model/gltf-binary',
+      extension: 'glb',
+      optionsSchema: manifoldExportSchemas.glb,
+    },
   },
 
-  async initialize(options, runtime) {
+  async initialize(options, services) {
     initManifoldWasm(options.wasmUrl);
-    const manifoldCadModule = await registerManifoldModules(runtime);
-    runtime.logger.debug('Initialized Manifold kernel with manifold-3d modules');
+    const manifoldCadModule = await registerManifoldModules(services);
+    services.logger.debug('Initialized Manifold kernel with manifold-3d modules');
     return { manifoldCadModule };
   },
 
-  async getDependencies({ entryPath }, runtime) {
-    return runtime.bundler.resolveDependencies(entryPath);
+  async resolve({ entryPath }, services) {
+    return services.bundler.resolveDependencies(entryPath);
   },
 
-  async getParameters({ entryPath }, runtime) {
+  async describe({ entryPath }, services) {
     const relativeFilePath = toVmEntryPath(entryPath);
 
     try {
-      const bundleResult = await runtime.bundler.bundle(entryPath);
+      const bundleResult = await services.bundler.bundle(entryPath);
       if (!bundleResult.success) {
         return createKernelError(enrichIssueLocation(bundleResult.issues, relativeFilePath));
       }
 
-      const executeResult = await runtime.execute(bundleResult.code);
+      const executeResult = await services.execute(bundleResult.code);
       if (!executeResult.success) {
         return createKernelError(enrichIssueLocation(executeResult.issues, relativeFilePath));
       }
@@ -261,12 +261,12 @@ export const manifoldKernel = defineKernel({
       const defaultParameters = extractDefaultParameters(module);
       const jsonSchema = await jsonSchemaFromJson(defaultParameters);
 
-      return createKernelSuccess(
-        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+      return createKernelSuccess({
+        parameters: createKernelParameterDeclaration(defaultParameters, jsonSchema, {
           id: 'urn:taucad:manifold:parameters',
           name: 'ManifoldParameters',
         }),
-      );
+      });
     } catch (error) {
       return createKernelError([
         {
@@ -284,17 +284,17 @@ export const manifoldKernel = defineKernel({
     }
   },
 
-  async createGeometry({ entryPath, parameters }, runtime, context) {
+  async evaluate({ entryPath, parameters }, services, context) {
     const relativeFilePath = toVmEntryPath(entryPath);
 
     await cleanupManifoldRuntime();
 
-    const bundleResult = await runtime.bundler.bundle(entryPath);
+    const bundleResult = await services.bundler.bundle(entryPath);
     if (!bundleResult.success) {
       throw new ManifoldBuildError(enrichIssueLocation(bundleResult.issues, relativeFilePath));
     }
 
-    const executeResult = await runtime.execute(bundleResult.code);
+    const executeResult = await services.execute(bundleResult.code);
     if (!executeResult.success) {
       throw new ManifoldBuildError(enrichIssueLocation(executeResult.issues, relativeFilePath));
     }
@@ -326,14 +326,10 @@ export const manifoldKernel = defineKernel({
 
     if (model === undefined || (Array.isArray(model) && model.length === 0)) {
       await cleanupManifoldRuntime();
-      runtime.logger.warn('createGeometry returning empty: main-returned-undefined', {
+      services.logger.warn('createGeometry returning empty: main-returned-undefined', {
         data: { filePath: relativeFilePath },
       });
-      const geometry = createEmptyGltfGeometry();
-      return finalizeRenderOutput({
-        artifacts: [geometry],
-        nativeHandle: { glb: geometry.content },
-      });
+      return { handle: { glb: asBuffer(createEmptyGlb()) } };
     }
 
     try {
@@ -345,10 +341,7 @@ export const manifoldKernel = defineKernel({
         sceneNamePolicy: 'clear-generated',
         sceneNameSource: 'external-generated',
       });
-      return finalizeRenderOutput({
-        artifacts: [{ format: 'gltf', content: glb }],
-        nativeHandle: { glb },
-      });
+      return { handle: { glb } };
     } catch (error) {
       const stackFrames = parseStackTrace(error, {
         classifyFrame: createFrameClassifier(),
@@ -372,17 +365,21 @@ export const manifoldKernel = defineKernel({
     }
   },
 
-  async exportGeometry(input) {
-    const { format, nativeHandle, options } = input;
+  async render({ handle }) {
+    return { content: handle.glb };
+  },
 
-    if (nativeHandle.glb.length === 0) {
-      return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))]);
+  async write(input) {
+    const { exportId, handle, options } = input;
+
+    if (handle.glb.length === 0) {
+      return { files: [createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))] };
     }
 
-    switch (format) {
+    switch (exportId) {
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- exhaustive switch
       case 'glb': {
-        const transformedGlb = await transformGltfExportBytes(nativeHandle.glb, {
+        const transformedGlb = await transformGltfExportBytes(handle.glb, {
           format: 'glb',
           coordinateSystem: options.coordinateSystem,
           unit: options.unit,
@@ -395,33 +392,26 @@ export const manifoldKernel = defineKernel({
           sceneNamePolicy: 'clear-generated',
           sceneNameSource: 'external-generated',
         });
-        return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(glb))]);
+        return { files: [createExportFile('glb', 'model.glb', asBuffer(glb))] };
       }
 
       default: {
-        const _exhaustive: never = format;
-        return createKernelError([
-          {
-            message: `Export format '${String(_exhaustive)}' is not supported by Manifold. Supported formats: glb.`,
-            code: 'KERNEL_CAPABILITY_MISSING',
-            type: 'runtime',
-            severity: 'error',
-          },
-        ]);
+        const _exhaustive: never = exportId;
+        throw new Error(`Export format '${String(_exhaustive)}' is not supported by Manifold. Supported formats: glb.`);
       }
     }
   },
 
-  async cleanup() {
+  async onDispose() {
     await cleanupManifoldRuntime();
   },
 
-  serializeNativeHandle({ nativeHandle }) {
-    return { glb: new Uint8Array(nativeHandle.glb) };
+  serializeHandle({ handle }) {
+    return { glb: new Uint8Array(handle.glb) };
   },
 
-  deserializeNativeHandle({ serializedNativeHandle }) {
-    return { glb: new Uint8Array(serializedNativeHandle.glb) };
+  deserializeHandle({ serialized }) {
+    return { glb: new Uint8Array(serialized.glb) };
   },
 });
 

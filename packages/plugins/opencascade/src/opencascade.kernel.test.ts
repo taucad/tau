@@ -4,7 +4,7 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return any */
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
-import type { FileExtension, GeometryResponse, GetParametersResult, HashedGeometryResult } from '@taucad/runtime/types';
+import type { GeometryResponse, GetParametersResult, HashedGeometryResult } from '@taucad/runtime/types';
 import type { ExportResult } from '@taucad/runtime';
 import { opencascadeKernel } from '#opencascade.kernel.js';
 import { getModuleRegistry } from '@taucad/runtime/kernel';
@@ -151,6 +151,7 @@ const runtime = defineRuntime({
   kernels: [opencascadeKernel({ wasm: 'full', ocTracing: 'off' })],
   bundlers: [esbuildBundler()],
 });
+const makeTestClient = (files: Record<string, string>) => createTestRuntimeClient({ runtime, files });
 
 type GeometryFile = ReturnType<typeof createGeometryFile>;
 
@@ -162,7 +163,7 @@ const sourcePath = (file: GeometryFile): string => (file.path === '' ? file.file
 // =============================================================================
 
 describe('OpenCascade Kernel', { timeout: 30_000 }, () => {
-  let client: ReturnType<typeof createTestRuntimeClient>;
+  let client: ReturnType<typeof makeTestClient>;
 
   const renderGeometry = async ({
     file,
@@ -191,7 +192,7 @@ describe('OpenCascade Kernel', { timeout: 30_000 }, () => {
   };
 
   const exportLastRender = async (
-    format: FileExtension,
+    format: Extract<keyof ReturnType<typeof opencascadeKernel>['exports'], string>,
     exportOptions?: Record<string, unknown>,
   ): Promise<ExportResult> => client.export(format, exportOptions === undefined ? undefined : { exportOptions });
 
@@ -199,38 +200,42 @@ describe('OpenCascade Kernel', { timeout: 30_000 }, () => {
     const plugin = opencascadeKernel();
 
     expect(plugin.builtinModuleNames).toEqual(['libcascade']);
-    expect(plugin.detectImport?.test("import init from 'libcascade';")).toBe(true);
-    expect(plugin.detectImport?.test("import init from 'opencascade';")).toBe(false);
-    expect(plugin.detectImport?.test("import init from 'opencascade.js';")).toBe(false);
+    const { detectImport } = plugin;
+    expect(detectImport).toBeDefined();
+    if (!detectImport) {
+      throw new Error('OpenCascade kernel has no import detector metadata.');
+    }
+    const pattern = new RegExp(detectImport.source, detectImport.flags);
+    expect(pattern.test("import init from 'libcascade';")).toBe(true);
+    expect(pattern.test("import init from 'opencascade';")).toBe(false);
+    expect(pattern.test("import init from 'opencascade.js';")).toBe(false);
   });
 
   beforeAll(async () => {
-    client = createTestRuntimeClient({
-      runtime,
-      files: {
-        'box-import.ts': `import oc, { BRepPrimAPI_MakeBox } from 'libcascade';\nexport default function main() { if (oc.BRepPrimAPI_MakeBox !== BRepPrimAPI_MakeBox) throw new Error('libcascade default and named exports diverged'); return new oc.BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
-        'box-import-js.ts': `import { BRepPrimAPI_MakeBox } from 'libcascade';\nexport default function main() { return new BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
-        'no-import.ts': `export default function main() { return { x: 1 }; }`,
-        'model.scad': `cube([10, 10, 10]);`,
-        'box-require.js': `const { BRepPrimAPI_MakeBox } = require('libcascade');\nmodule.exports = function main() { return new BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
-        'params.ts': `
+    client = makeTestClient({
+      'box-import.ts': `import oc, { BRepPrimAPI_MakeBox } from 'libcascade';\nexport default function main() { if (oc.BRepPrimAPI_MakeBox !== BRepPrimAPI_MakeBox) throw new Error('libcascade default and named exports diverged'); return new oc.BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
+      'box-import-js.ts': `import { BRepPrimAPI_MakeBox } from 'libcascade';\nexport default function main() { return new BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
+      'no-import.ts': `export default function main() { return { x: 1 }; }`,
+      'model.scad': `cube([10, 10, 10]);`,
+      'box-require.js': `const { BRepPrimAPI_MakeBox } = require('libcascade');\nmodule.exports = function main() { return new BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
+      'params.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export const defaultParams = { width: 10, height: 20, depth: 30 };
 export default function main(params = defaultParams) {
   return new BRepPrimAPI_MakeBox(params.width, params.height, params.depth).Shape();
 }`,
-        'no-params.ts': `
+      'no-params.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   return new BRepPrimAPI_MakeBox(10, 20, 30).Shape();
 }`,
-        'box.ts': `
+      'box.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 20, 30);
   return box.Shape();
 }`,
-        'coordinate.ts': `
+      'coordinate.ts': `
 import { BRepPrimAPI_MakeBox, gp_Pnt } from 'libcascade';
 export default function main() {
   const origin = new gp_Pnt(7, 11, 13);
@@ -240,32 +245,32 @@ export default function main() {
   box.delete();
   return [{ shape, name: 'Asymmetric Box', color: '#ff0000' }];
 }`,
-        'multi.ts': `
+      'multi.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(10, 10, 10);
   const box2 = new BRepPrimAPI_MakeBox(20, 20, 20);
   return [box1.Shape(), box2.Shape()];
 }`,
-        'named.ts': `
+      'named.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 10, 10);
   return [{ shape: box.Shape(), name: 'MyBox', color: '#ff0000' }];
 }`,
-        'named-pbr.ts': `
+      'named-pbr.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 10, 10);
   return [{ shape: box.Shape(), name: 'PbrBox', color: '#ff0000', metalness: 0.2, roughness: 0.7, density: 1.25 }];
 }`,
-        'parameterized.ts': `
+      'parameterized.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export const defaultParams = { size: 10 };
 export default function main(params = defaultParams) {
   return new BRepPrimAPI_MakeBox(params.size, params.size, params.size).Shape();
 }`,
-        'assembly.ts': `
+      'assembly.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(10, 10, 10);
@@ -275,7 +280,7 @@ export default function main() {
     { shape: box2.Shape(), name: 'LargeBox' },
   ];
 }`,
-        'fuse.ts': `
+      'fuse.ts': `
 import { BRepPrimAPI_MakeBox, Message_ProgressRange, BRepAlgoAPI_Fuse } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(10, 10, 10).Shape();
@@ -287,7 +292,7 @@ export default function main() {
   fused.delete();
   return result;
 }`,
-        'common.ts': `
+      'common.ts': `
 import { BRepPrimAPI_MakeBox, Message_ProgressRange, BRepAlgoAPI_Common } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(20, 20, 20).Shape();
@@ -299,7 +304,7 @@ export default function main() {
   common.delete();
   return result;
 }`,
-        'cut.ts': `
+      'cut.ts': `
 import { BRepPrimAPI_MakeBox, Message_ProgressRange, BRepAlgoAPI_Cut } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(20, 20, 20).Shape();
@@ -311,7 +316,7 @@ export default function main() {
   cut.delete();
   return result;
 }`,
-        'fillet.ts': `
+      'fillet.ts': `
 import { BRepPrimAPI_MakeBox, BRepFilletAPI_MakeFillet, ChFi3d_FilletShape, TopExp_Explorer, TopAbs_ShapeEnum, TopoDS } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(20, 20, 20).Shape();
@@ -326,7 +331,7 @@ export default function main() {
   fillet.delete();
   return result;
 }`,
-        'transform.ts': `
+      'transform.ts': `
 import { BRepPrimAPI_MakeBox, gp_Trsf, gp_Vec, BRepBuilderAPI_Transform } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 10, 10).Shape();
@@ -340,7 +345,7 @@ export default function main() {
   transformed.delete();
   return result;
 }`,
-        'compound.ts': `
+      'compound.ts': `
 import { TopoDS_Builder, TopoDS_Compound, BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const builder = new TopoDS_Builder();
@@ -352,13 +357,13 @@ export default function main() {
   builder.Add(compound, box2);
   return compound;
 }`,
-        'empty.ts': `
+      'empty.ts': `
 import init from 'libcascade';
 export default function main() {}`,
-        'default-not-function.ts': `
+      'default-not-function.ts': `
 import 'libcascade';
 export default 42;`,
-        'bad-call.ts': `
+      'bad-call.ts': `
 import { BRepPrimAPI_MakeBox, BRepFilletAPI_MakeFillet, ChFi3d_FilletShape, TopExp_Explorer, TopAbs_ShapeEnum, TopoDS } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 10, 10).Shape();
@@ -370,7 +375,7 @@ export default function main() {
   }
   return fillet.Shape();
 }`,
-        'throw-in-params.ts': `
+      'throw-in-params.ts': `
 import 'libcascade';
 const trap = {};
 Object.defineProperty(trap, 'badKey', {
@@ -382,13 +387,12 @@ Object.defineProperty(trap, 'badKey', {
 export const defaultParams = trap;
 export default function main() {}
 `,
-        'bad-wedge-arity.ts': `
+      'bad-wedge-arity.ts': `
 import { BRepPrimAPI_MakeWedge, gp_Pnt, gp_Dir, gp_Ax2 } from 'libcascade';
 export default function main() {
   const ax = new gp_Ax2(new gp_Pnt(0, 0, 0), new gp_Dir(0, 0, 1));
   return new BRepPrimAPI_MakeWedge(ax, 1, 1, 1, 0, 1, 0, 0, 0, 1).Shape();
 }`,
-      },
     });
   });
 
@@ -501,7 +505,7 @@ export default function main() {
           },
         ];
         const snapshot = expectOpenCascadeSnapshot(
-          definition.serializeNativeHandle!({ nativeHandle }, kernelRuntime, context),
+          definition.serializeHandle!({ handle: nativeHandle }, kernelRuntime, context),
         );
         expect(snapshot.entries).toHaveLength(1);
         expect(snapshot.entries[0]!.metadata).toEqual(
@@ -522,8 +526,8 @@ export default function main() {
           expect.any(Object),
         );
 
-        const restored = definition.deserializeNativeHandle!(
-          { serializedNativeHandle: structuredClone(snapshot) },
+        const restored = definition.deserializeHandle!(
+          { serialized: structuredClone(snapshot) },
           kernelRuntime,
           context,
         );
@@ -538,7 +542,7 @@ export default function main() {
             properties.delete();
           }
         } finally {
-          definition.disposeNativeHandle!({ nativeHandle: restored }, kernelRuntime, context);
+          definition.releaseHandle!({ handle: restored }, kernelRuntime, context);
         }
       } finally {
         shape.delete();

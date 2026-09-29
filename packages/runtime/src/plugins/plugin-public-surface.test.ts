@@ -84,7 +84,7 @@ describe('plugin factory public surface', () => {
       async transcode(input) {
         return { success: true, data: input.files, issues: [] };
       },
-      async cleanup() {
+      async onDispose() {
         await Promise.resolve();
       },
     });

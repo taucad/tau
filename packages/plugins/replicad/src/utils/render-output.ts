@@ -91,6 +91,13 @@ const isSvgable = (shape: unknown): shape is Svgable => {
   );
 };
 
+/**
+ * Whether a retained shape can be rendered as a drawing.
+ * @param shape - Shape in a live Replicad handle.
+ * @returns True for SVG-capable drawings.
+ */
+export const isDrawingShape = (shape: unknown): boolean => isSvgable(shape);
+
 const isMeshable = (shape: unknown): shape is Meshable => {
   return (
     typeof shape === 'object' &&

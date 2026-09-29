@@ -192,7 +192,7 @@ describe('Esbuild runtime adapter', () => {
       },
       { vm },
     );
-    await esbuildDefinition.cleanup?.({ vm });
+    await esbuildDefinition.onDispose?.({ vm });
 
     expect(vm.registerModule).toHaveBeenCalledWith('geospec', {
       code: 'export const describe = () => {};',

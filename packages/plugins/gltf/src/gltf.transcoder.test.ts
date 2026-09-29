@@ -4,7 +4,7 @@ import type { Document, JSONDocument } from '@gltf-transform/core';
 import { allExtensions, KittyCadBoundaryRepresentation, TauCadTopology } from '@taucad/geometry-core';
 import { defineRuntime } from '@taucad/runtime';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import type { TranscoderRuntime } from '@taucad/runtime/transcoder';
+import type { TranscoderServices } from '@taucad/runtime/transcoder';
 import { kittyCadBoundaryRepresentationExtension, tauCadTopologyExtension } from '@taucad/runtime/types';
 import type { ExportFile } from '@taucad/runtime/types';
 import { createTestRuntimeClient } from '@taucad/runtime-testing';
@@ -15,7 +15,7 @@ import { dracoExtensionName, loadDracoDecoder } from '#draco-backend.js';
 import { gltf } from '#gltf.plugin.js';
 import { gltfTranscodeOptionsSchema, gltfTranscoder } from '#gltf.transcoder.js';
 
-const runtime: TranscoderRuntime = {
+const runtime: TranscoderServices = {
   logger: { log: vi.fn(), debug: vi.fn(), trace: vi.fn(), warn: vi.fn(), error: vi.fn(), custom: vi.fn() },
   tracer: { startSpan: vi.fn() },
   signal: new AbortController().signal,

@@ -1,12 +1,12 @@
 /* eslint-disable @typescript-eslint/member-ordering -- operation entrypoints stay adjacent to their private lane implementations in this stateful worker. */
 /* oxlint-disable unicorn/prefer-math-trunc, no-bitwise -- cancellation generations require ECMAScript ToUint32 wrap semantics. */
 import deepmerge from 'deepmerge';
-import { logLevels, lookupExportFidelity } from '@taucad/types/constants';
+import { logLevels, lookupExportFidelity, mimeTypes } from '@taucad/types/constants';
 import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
 import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
-import type { FileExtension, FileStat, OnWorkerLog } from '@taucad/types';
+import type { FileExtension, FileStat, GeometryResponse, MediaType, OnWorkerLog } from '@taucad/types';
 import type { JSONSchema7, JSONSchema7Definition } from '@taucad/json-schema';
 import type { MessagePortLike } from '@taucad/rpc';
 import type {
@@ -36,18 +36,7 @@ import type {
   RuntimeImplementationAsset,
 } from '#types/runtime-kernel.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
-import type {
-  KernelMiddlewareRuntime,
-  CreateGeometryHandler,
-  MiddlewareCreateGeometryRequest,
-  MeshGeometryHandler,
-  MeshGeometryRequest,
-  ExportGeometryHandler,
-  MiddlewareExportGeometryRequest,
-  GetParametersHandler,
-  MiddlewareDependencyDeclaration,
-  MiddlewareDependencyRuntime,
-} from '#types/runtime-middleware.types.js';
+import type { KernelMiddlewareRuntime, MiddlewareExportGeometryRequest } from '#types/runtime-middleware.types.js';
 import type { BundlerDefinition } from '#types/runtime-bundler.types.js';
 import type {
   KernelBundler,
@@ -110,7 +99,24 @@ import type { ContentDigest } from '@taucad/cache-core';
 import { RuntimeTracer } from '#framework/runtime-tracer.js';
 import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
 import { createMiddlewareRuntime } from '#middleware/runtime-middleware.js';
-import type { KernelMiddleware } from '#middleware/runtime-middleware.js';
+import type {
+  EvaluateRequest,
+  KernelMiddlewareV2,
+  MiddlewareContent,
+  MiddlewareDependency as MiddlewareFileDependency,
+  RenderRequest,
+  WriteRequest,
+} from '#types/runtime-middleware-v2.types.js';
+import { nonemptyExportFiles } from '#types/runtime-kernel-v2.types.js';
+import type {
+  Artifact,
+  DescribeInput,
+  DescribeResult,
+  EvaluateResult,
+  KernelOffers,
+  RenderResult,
+  WriteResult,
+} from '#types/runtime-kernel-v2.types.js';
 import type { BundlerPlugin, KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
@@ -416,12 +422,29 @@ function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
   }
   return true;
 }
+
+/** Presentation bridge for the current client; W3 consumes Artifact directly. */
+function toLegacyGeometry(artifact: Artifact): GeometryResponse {
+  if (artifact.mimeType === 'image/svg+xml' && typeof artifact.content === 'string') {
+    return { format: 'svg', content: artifact.content, ...(artifact.units ? { units: artifact.units } : {}) };
+  }
+  if (artifact.mimeType === 'model/gltf-binary' && artifact.content instanceof Uint8Array) {
+    return { format: 'gltf', content: artifact.content };
+  }
+  throw new TypeError(`The current runtime client cannot display ${artifact.mimeType}; W3 adds open-media delivery.`);
+}
 /**
  * A resolved middleware instance paired with its parsed options.
  * @public
  */
+type RuntimeMiddlewareDefinition = KernelMiddlewareV2<
+  z.ZodObject<z.ZodRawShape>,
+  z.ZodObject<z.ZodRawShape>,
+  MiddlewareContent | undefined
+>;
+
 export type ResolvedMiddleware = {
-  middleware: KernelMiddleware;
+  middleware: RuntimeMiddlewareDefinition;
   options: Record<string, unknown>;
   id: string;
   enabled: boolean;
@@ -512,9 +535,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     string,
     Partial<Record<FileExtension, readonly RuntimeContentKey[]>>
   >();
+  /** Export IDs and media types selected by the current client's extension route. */
+  protected readonly kernelExportMetadataMap = new Map<
+    string,
+    Readonly<Record<string, { id: string; mimeType: MediaType }>>
+  >();
 
   /** Native render content declarations keyed by kernel ID. */
   protected readonly kernelRenderContentMap = new Map<string, readonly RuntimeContentKey[]>();
+  /** Admission union before evaluation chooses the offered default view. */
+  protected readonly kernelAllViewContentMap = new Map<string, readonly RuntimeContentKey[]>();
+  /** Current client's selected default view media type for keyed middleware admission. */
+  protected readonly kernelRenderMimeTypeMap = new Map<string, MediaType>();
   /** Cooperative cancellation support by kernel ID. */
   protected readonly kernelCancellationMap = new Map<string, 'cooperative'>();
 
@@ -648,7 +680,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * Cache of already-imported middleware modules keyed by plugin id.
    * Prevents duplicate resolution across setup paths and test helpers.
    */
-  private readonly middlewareModuleCache = new Map<string, KernelMiddleware>();
+  private readonly middlewareModuleCache = new Map<string, RuntimeMiddlewareDefinition>();
 
   /**
    * Cached middleware loggers, keyed by middleware name.
@@ -1618,10 +1650,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.telemetryCollector?.dispose();
     this.telemetryCollector = undefined;
     this.tracer.setEntrySink(undefined);
-    this.fileSystem?.dispose();
-    this.fileSystem = undefined;
     await this.computeHost?.dispose();
     this.computeHost = undefined;
+
+    // Each extension may point at the same initialized bundler. Dispose that
+    // context once, after accepted operations have drained.
+    for (const bundler of new Set(this.loadedBundlers.values())) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- Release distinct bundlers in initialization order.
+        await bundler.definition.onDispose?.(bundler.ctx);
+      } catch (error) {
+        this.logger.warn('Bundler disposal failed', { data: { error: String(error) } });
+      }
+    }
+    this.loadedBundlers.clear();
 
     for (const transcoder of this.loadedTranscoders.values()) {
       if (!transcoder.initialized) {
@@ -1629,14 +1671,16 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
       try {
         // oxlint-disable-next-line no-await-in-loop -- Sequential to preserve cleanup order
-        await transcoder.definition.cleanup?.(transcoder.context);
-      } catch {
-        // Best-effort cleanup
+        await transcoder.definition.onDispose?.(transcoder.context);
+      } catch (error) {
+        this.logger.warn('Transcoder disposal failed', { data: { error: String(error) } });
       }
     }
     this.loadedTranscoders.clear();
 
     await this.onCleanup();
+    this.fileSystem?.dispose();
+    this.fileSystem = undefined;
   }
 
   /**
@@ -1689,7 +1733,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     };
 
     const resolvedArray = this.getMiddleware().filter(
-      ({ enabled, middleware }) => enabled && Boolean(middleware.wrapGetParameters ?? middleware.getDependencies),
+      ({ enabled, middleware }) => enabled && Boolean(middleware.wrapDescribe ?? middleware.resolve),
     );
 
     if (operationOwner.kind === 'render-artifact') {
@@ -1699,7 +1743,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       phase: 'resolvingDeps',
     });
     const dependencies = await this.computeDependencies({
-      operations: ['getParameters'],
+      operations: ['describe'],
       resolvedMiddleware: resolvedArray,
       dependencyContext,
       owner: operationOwner,
@@ -1709,7 +1753,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const parameterMiddlewareKey = canonicalJson(
       resolvedArray.map(({ id, middleware, options }) => ({
         id,
-        version: middleware.version ?? '1',
+        version: middleware.version,
         options,
       })),
     );
@@ -1784,7 +1828,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const runtimes = new Map<string, KernelMiddlewareRuntime>();
     for (const { middleware, options: middlewareOptions, enabled, id } of resolvedArray) {
-      if (enabled && middleware.wrapGetParameters) {
+      if (enabled && middleware.wrapDescribe) {
         runtimes.set(
           id,
           createMiddlewareRuntime({
@@ -1806,55 +1850,58 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const { tracer } = this;
     let producerDeclaration: ParameterDeclaration | undefined;
-    const kernelHandler: GetParametersHandler = named('kernelHandler', async (handlerInput: GetParametersInput) => {
-      const parametersSpan = tracer.startSpan('kernel.extract-params', {
-        phase: 'extractingParams',
-      });
-      const result = await this.onGetParametersForOwner(operationOwner, handlerInput, this.createRuntime());
-      parametersSpan.end();
-      if (!result.success) {
-        return result;
-      }
-      try {
-        const manifest = await compileParameterManifest({
-          declaration: result.data,
-          scope: parameterScope,
-          source: parameterSource,
-          dependency: parameterIdentity.dependency,
-          middleware: parameterIdentity.middleware,
-          resolution: parameterIdentity.resolution,
-          sourceFiles: parameterIdentity.sourceFiles,
+    const kernelHandler = named(
+      'kernelHandler',
+      async (handlerInput: DescribeInput): Promise<DescribeResult<ParameterManifest>> => {
+        const parametersSpan = tracer.startSpan('kernel.extract-params', {
+          phase: 'extractingParams',
         });
-        producerDeclaration = {
-          schema: manifest.schema,
-          resources: manifest.resources,
-          defaults: manifest.defaults,
-          bindings: manifest.bindingDeclarations,
-        };
-        return { ...result, data: manifest };
-      } catch (error) {
-        return createKernelError([
-          {
-            message: error instanceof Error ? error.message : 'Parameter declaration admission failed',
-            code: 'RUNTIME',
-            type: 'kernel',
-            severity: 'error',
-            details: error instanceof ParameterAdmissionError ? error.diagnostics : undefined,
-          },
-        ]);
-      }
-    });
+        const result = await this.onGetParametersForOwner(operationOwner, handlerInput, this.createRuntime());
+        parametersSpan.end();
+        if (!result.success) {
+          return result;
+        }
+        try {
+          const manifest = await compileParameterManifest({
+            declaration: result.data,
+            scope: parameterScope,
+            source: parameterSource,
+            dependency: parameterIdentity.dependency,
+            middleware: parameterIdentity.middleware,
+            resolution: parameterIdentity.resolution,
+            sourceFiles: parameterIdentity.sourceFiles,
+          });
+          producerDeclaration = {
+            schema: manifest.schema,
+            resources: manifest.resources,
+            defaults: manifest.defaults,
+            bindings: manifest.bindingDeclarations,
+          };
+          return { ...result, data: { parameters: manifest } };
+        } catch (error) {
+          return createKernelError([
+            {
+              message: error instanceof Error ? error.message : 'Parameter declaration admission failed',
+              code: 'RUNTIME',
+              type: 'kernel',
+              severity: 'error',
+              details: error instanceof ParameterAdmissionError ? error.diagnostics : undefined,
+            },
+          ]);
+        }
+      },
+    );
     let chain = kernelHandler;
 
     for (let index = resolvedArray.length - 1; index >= 0; index--) {
       const { middleware, enabled, id } = resolvedArray[index]!;
-      if (enabled && middleware.wrapGetParameters) {
+      if (enabled && middleware.wrapDescribe) {
         const inner = chain;
         const runtime = runtimes.get(id)!;
         const middlewareName = middleware.name;
-        const wrapHook = middleware.wrapGetParameters;
+        const wrapHook = middleware.wrapDescribe;
 
-        chain = named(`middleware(${middlewareName})`, async (handlerInput: GetParametersInput) => {
+        chain = named(`middleware(${middlewareName})`, async (handlerInput: DescribeInput) => {
           const span = tracer.startSpan(`middleware.wrap(${middlewareName})`, {
             middleware: middlewareName,
           });
@@ -1892,7 +1939,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         chainedResult = producerResult;
       }
     }
-    let result = chainedResult;
+    let result: GetParametersResult = chainedResult.success
+      ? { ...chainedResult, data: chainedResult.data.parameters }
+      : chainedResult;
     if (chainedResult.success) {
       try {
         if (producerDeclaration === undefined) {
@@ -1900,7 +1949,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
         result = {
           ...chainedResult,
-          data: await this.admitEffectiveManifest(chainedResult.data, {
+          data: await this.admitEffectiveManifest(chainedResult.data.parameters, {
             scope: parameterScope,
             source: parameterSource,
             identity: parameterIdentity,
@@ -2338,16 +2387,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     };
     const paths: string[] = [];
     for (const { middleware, options, enabled, id } of this.getMiddleware()) {
-      if (!enabled || !middleware.getDependencies) {
+      if (!enabled || !middleware.resolve) {
         continue;
       }
-      const getDependencies = middleware.getDependencies as unknown as (
-        request: GetDependenciesInput,
-        runtime: MiddlewareDependencyRuntime<Record<string, unknown>>,
-      ) => MiddlewareDependencyDeclaration[] | Promise<MiddlewareDependencyDeclaration[]>;
       try {
         // oxlint-disable-next-line no-await-in-loop -- middleware declaration order is part of runtime semantics.
-        const declarations = await getDependencies(input, {
+        const declarations = await middleware.resolve(input, {
           signal: this.operationSignal ?? neverAbortedSignal,
           logger: this.getMiddlewareLogger(id, middleware.name),
           filesystem: this.filesystem,
@@ -2438,7 +2483,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           }
           const resolvedArray = this.getExportExecutionList(plan);
           const dependencies = await this.computeDependencies({
-            operations: ['createGeometry', 'exportGeometry'],
+            operations: ['evaluate', 'write'],
             parameters: callerParameters,
             renderOptions: renderOptionsResult.options,
             content: plan.route.content,
@@ -3000,9 +3045,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     });
     const dependencies = await this.computeDependencies({
       operations: [
-        'createGeometry',
-        ...(meshMiddleware.length === 0 ? [] : (['meshGeometry'] as const)),
-        ...(entry.export ? (['exportGeometry'] as const) : []),
+        'evaluate',
+        ...(meshMiddleware.length === 0 ? [] : (['render'] as const)),
+        ...(entry.export ? (['write'] as const) : []),
       ],
       parameters: entry.parameters,
       renderOptions: renderOptionsResult.options,
@@ -3014,7 +3059,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     });
     const dependencyHash = await this.computeDependencyHash(dependencies);
     const nativeHandleDependencies = await this.computeDependencies({
-      operations: ['createGeometry'],
+      operations: ['evaluate'],
       parameters: entry.parameters,
       resolvedMiddleware: createMiddleware,
       dependencyContext: options.dependencyContext,
@@ -3032,7 +3077,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const runtimes = new Map<string, KernelMiddlewareRuntime>();
     for (const { middleware, options: middlewareOptions, enabled, id } of createMiddleware) {
-      if (enabled && middleware.wrapCreateGeometry) {
+      if (enabled && middleware.wrapEvaluate) {
         runtimes.set(
           id,
           createMiddlewareRuntime({
@@ -3056,95 +3101,90 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       this.onProgress?.('computingGeometry');
     }
     const { tracer } = this;
-    let chain: CreateGeometryHandler = named('kernelHandler', async (handlerInput: MiddlewareCreateGeometryRequest) => {
-      const computeSpan = tracer.startSpan('kernel.compute');
-      const createSchema = owner.binding?.kernelId
-        ? this.kernelCreateOptionsZodSchemaMap.get(owner.binding.kernelId)
-        : undefined;
-      const chainParameters = mergeParameterDefaults({}, handlerInput.parameters, entry.parameterSchema);
-      const unitlessText = unitlessTextParameter(entry.parameterManifest, entry.parameterSchema, chainParameters);
-      if (unitlessText) {
+    let chain: (input: EvaluateRequest) => Promise<EvaluateResult> = named(
+      'kernelHandler',
+      async (handlerInput: EvaluateRequest) => {
+        const computeSpan = tracer.startSpan('kernel.compute');
+        const createSchema = owner.binding?.kernelId
+          ? this.kernelCreateOptionsZodSchemaMap.get(owner.binding.kernelId)
+          : undefined;
+        const chainParameters = mergeParameterDefaults({}, handlerInput.parameters, entry.parameterSchema);
+        const unitlessText = unitlessTextParameter(entry.parameterManifest, entry.parameterSchema, chainParameters);
+        if (unitlessText) {
+          computeSpan.end();
+          return createKernelError([
+            {
+              message: `Parameter ${unitlessText.pointer} received unit-bearing text "${unitlessText.text}", but the field declares no unit. Send a number in the field's declared scale or add a unit declaration.`,
+              code: 'SEMANTICS_UNRESOLVED',
+              type: 'kernel',
+              severity: 'error',
+            },
+          ]);
+        }
+        let resolvedParameters: Readonly<Record<string, unknown>>;
+        try {
+          resolvedParameters = resolveParameterInputValues(entry.parameterManifest, chainParameters);
+        } catch (error) {
+          computeSpan.end();
+          const diagnostic = error instanceof ParameterAdmissionError ? error.diagnostics[0] : undefined;
+          return createKernelError([
+            {
+              message: error instanceof Error ? error.message : String(error),
+              code: diagnostic?.code ?? 'INVALID_SCHEMA',
+              type: 'kernel',
+              severity: 'error',
+              ...(diagnostic ? { details: diagnostic } : {}),
+            },
+          ]);
+        }
+        const parameters = mergeParameterDefaults(
+          entry.parameterDefaults,
+          { ...resolvedParameters },
+          entry.parameterSchema,
+        );
+        if (!validateJsonSchemaValue(entry.parameterSchema, parameters)) {
+          computeSpan.end();
+          return createKernelError([
+            {
+              message: 'Parameters do not satisfy the admitted execution schema',
+              code: 'RUNTIME',
+              type: 'kernel',
+              severity: 'error',
+            },
+          ]);
+        }
+        const kernelInput: NativeBuildInput = {
+          entryPath: handlerInput.entryPath,
+          // Persisted-parameter middleware may reintroduce values removed from the source schema.
+          parameters,
+          ...(createSchema
+            ? {
+                options:
+                  handlerInput.options ??
+                  ('options' in createOptionsResult.input ? createOptionsResult.input.options : {}),
+              }
+            : {}),
+        };
+        const result = await this.onEvaluateForOwner(owner, kernelInput, this.createRuntime());
         computeSpan.end();
-        return createKernelError([
-          {
-            message: `Parameter ${unitlessText.pointer} received unit-bearing text "${unitlessText.text}", but the field declares no unit. Send a number in the field's declared scale or add a unit declaration.`,
-            code: 'SEMANTICS_UNRESOLVED',
-            type: 'kernel',
-            severity: 'error',
-          },
-        ]);
-      }
-      let resolvedParameters: Readonly<Record<string, unknown>>;
-      try {
-        resolvedParameters = resolveParameterInputValues(entry.parameterManifest, chainParameters);
-      } catch (error) {
-        computeSpan.end();
-        const diagnostic = error instanceof ParameterAdmissionError ? error.diagnostics[0] : undefined;
-        return createKernelError([
-          {
-            message: error instanceof Error ? error.message : String(error),
-            code: diagnostic?.code ?? 'INVALID_SCHEMA',
-            type: 'kernel',
-            severity: 'error',
-            ...(diagnostic ? { details: diagnostic } : {}),
-          },
-        ]);
-      }
-      const parameters = mergeParameterDefaults(
-        entry.parameterDefaults,
-        { ...resolvedParameters },
-        entry.parameterSchema,
-      );
-      if (!validateJsonSchemaValue(entry.parameterSchema, parameters)) {
-        computeSpan.end();
-        return createKernelError([
-          {
-            message: 'Parameters do not satisfy the admitted execution schema',
-            code: 'RUNTIME',
-            type: 'kernel',
-            severity: 'error',
-          },
-        ]);
-      }
-      const kernelInput: NativeBuildInput = {
-        entryPath: handlerInput.entryPath,
-        // Persisted-parameter middleware may reintroduce values removed from the source schema.
-        parameters,
-        ...(createSchema
-          ? {
-              options:
-                handlerInput.options ??
-                ('options' in createOptionsResult.input ? createOptionsResult.input.options : {}),
-            }
-          : {}),
-      };
-      const result = await this.onCreateGeometryForOwner(owner, kernelInput, this.createRuntime());
-      computeSpan.end();
-      return { ...result, [nativeBuildInputSymbol]: kernelInput };
-    });
+        return { ...result, [nativeBuildInputSymbol]: kernelInput };
+      },
+    );
 
     for (let index = createMiddleware.length - 1; index >= 0; index--) {
       const { middleware, enabled, id } = createMiddleware[index]!;
-      if (enabled && middleware.wrapCreateGeometry) {
+      if (enabled && middleware.wrapEvaluate) {
         const inner = chain;
         const runtime = runtimes.get(id)!;
         const middlewareName = middleware.name;
-        const wrapHook = middleware.wrapCreateGeometry;
+        const wrapHook = middleware.wrapEvaluate;
 
-        chain = named(`middleware(${middlewareName})`, async (handlerInput: MiddlewareCreateGeometryRequest) => {
+        chain = named(`middleware(${middlewareName})`, async (handlerInput: EvaluateRequest) => {
           const span = tracer.startSpan(`middleware.wrap(${middlewareName})`, {
             middleware: middlewareName,
           });
           try {
-            const result = await wrapHook(
-              this.withProviderRuntimeContent(
-                handlerInput,
-                renderContentResult.content,
-                middleware.content?.render ?? [],
-              ),
-              inner,
-              runtime,
-            );
+            const result = await wrapHook(handlerInput, inner, runtime);
             span.end();
             return result;
           } catch (error) {
@@ -3167,8 +3207,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     this.pendingNativeHandle = undefined;
-    const internalResult = await chain(input);
-    const nativeBuildInput = (internalResult as CreateGeometryResult & NativeBuildInputCarrier)[nativeBuildInputSymbol];
+    const evaluated = await chain(input);
+    const internalResult: CreateGeometryResult & NativeBuildInputCarrier = evaluated.success
+      ? {
+          success: true,
+          data: undefined,
+          issues: evaluated.issues,
+          ...(evaluated.serializedHandle === undefined ? {} : { serializedNativeHandle: evaluated.serializedHandle }),
+          ...(evaluated.serializeHandleSnapshot === undefined
+            ? {}
+            : { serializeNativeHandleSnapshot: evaluated.serializeHandleSnapshot }),
+          [nativeBuildInputSymbol]: evaluated[nativeBuildInputSymbol],
+        }
+      : evaluated;
+    const nativeBuildInput = evaluated[nativeBuildInputSymbol];
     const identity = this.createRenderIdentity({
       file: entry.file,
       parameters: entry.parameters,
@@ -3214,8 +3266,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       displayResult = await this.runMeshPhase({
         owner,
         identity,
+        selection: evaluated.success ? this.selectDefaultViewForOwner(owner, evaluated.data) : undefined,
         renderOptions: renderOptionsResult.options,
-        content: renderContentResult.content,
+        requestedContent: entry.content,
         resolvedMiddleware: resolvedArray,
         createResult: internalResult,
         renderArtifact: {
@@ -3744,6 +3797,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return this.onCreateGeometry(input, runtime);
   }
 
+  /** Evaluate the selected kernel before the current-client display bridge. */
+  protected abstract onEvaluateForOwner(
+    owner: OperationOwner,
+    input: NativeBuildInput,
+    runtime: KernelRuntime,
+  ): Promise<EvaluateResult>;
+
   /**
    * Whether the owner's kernel implements the optional `meshGeometry` display phase.
    * Base workers have no kernel registry, so the display path must come from
@@ -3753,24 +3813,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return false;
   }
 
-  /**
-   * Run the owner's kernel `meshGeometry` phase. Only called on the display path,
-   * after {@link kernelHasMeshPhaseForOwner} returned true.
-   */
-  protected async onMeshGeometryForOwner(
-    _owner: OperationOwner,
-    _input: { nativeHandle: unknown; options: Record<string, unknown>; content?: RuntimeContentInput },
-    _runtime: KernelRuntime,
-  ): Promise<MeshGeometryResult> {
-    return createKernelError([
-      {
-        message: 'meshGeometry is not supported by this worker.',
-        code: 'KERNEL_CAPABILITY_MISSING',
-        type: 'kernel',
-        severity: 'error',
-      },
-    ]);
-  }
+  /** Select the current client's default view from one evaluation's serializable offers. */
+  protected abstract selectDefaultViewForOwner(
+    owner: OperationOwner,
+    offers: KernelOffers,
+  ): { view: string; mimeType: MediaType; instance?: string } | undefined;
+
+  /** Render a selected view before current-client artifact conversion. */
+  protected abstract onRenderForOwner(
+    owner: OperationOwner,
+    input: RenderRequest & { nativeHandle: unknown },
+    runtime: KernelRuntime,
+  ): Promise<RenderResult>;
 
   protected async onExportGeometryForOwner(
     _owner: OperationOwner,
@@ -3922,7 +3976,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /**
    * Display-path mesh phase: produce the viewer artifact from the native handle
-   * when `createGeometry` deferred it. Runs the `wrapMeshGeometry` middleware
+   * when `createGeometry` deferred it. Runs the `wrapRender` middleware
    * pipeline (display-mesh cache) around the kernel boundary; the native handle
    * is materialized lazily inside the innermost handler, so a mesh-cache hit
    * costs no kernel work and no handle deserialization.
@@ -3930,15 +3984,25 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private async runMeshPhase(options: {
     owner: OperationOwner;
     identity: RenderIdentity;
+    selection: { view: string; mimeType: MediaType; instance?: string } | undefined;
     renderOptions: Record<string, unknown>;
-    content: RuntimeContentInput;
+    requestedContent?: RuntimeContentInput;
     resolvedMiddleware: ResolvedMiddleware[];
     createResult: Extract<CreateGeometryResult, { success: true }>;
     renderArtifact: MaterializedRender;
   }): Promise<MeshGeometryResult> {
-    const { owner, identity, renderOptions, content, resolvedMiddleware, createResult, renderArtifact } = options;
+    const {
+      owner,
+      identity,
+      selection,
+      renderOptions,
+      requestedContent,
+      resolvedMiddleware,
+      createResult,
+      renderArtifact,
+    } = options;
 
-    if (!this.kernelHasMeshPhaseForOwner(owner)) {
+    if (!this.kernelHasMeshPhaseForOwner(owner) || !selection) {
       return createKernelError([
         {
           message:
@@ -3950,10 +4014,40 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       ]);
     }
 
+    const selectedKeys = new Set(this.getNativeRenderContentKeys(owner));
+    for (const { enabled, middleware } of resolvedMiddleware) {
+      if (enabled) {
+        for (const key of middleware.content?.views?.[selection.mimeType] ?? []) {
+          selectedKeys.add(key);
+        }
+      }
+    }
+    // The current client serializes global content defaults even when the caller
+    // did not request them. Drop unsupported default-valued flags for this
+    // selected view; retain nondefault requests for strict admission.
+    const selectedRequest = { ...requestedContent };
+    if (
+      !selectedKeys.has('includeEdges') &&
+      selectedRequest.includeEdges === contentDefault('render', 'includeEdges')
+    ) {
+      delete selectedRequest.includeEdges;
+    }
+    if (
+      !selectedKeys.has('includeTopology') &&
+      selectedRequest.includeTopology === contentDefault('render', 'includeTopology')
+    ) {
+      delete selectedRequest.includeTopology;
+    }
+    const selectedContentResult = this.validateRuntimeContent('render', [...selectedKeys], selectedRequest);
+    if (!selectedContentResult.success) {
+      return createKernelError(selectedContentResult.issues);
+    }
+    const selectedContent = selectedContentResult.content;
+
     const meshSpan = this.tracer.startSpan('kernel.mesh', { phase: 'computingGeometry' });
     try {
       const runtime = this.createRuntime();
-      const computeMesh = async (handlerInput: MeshGeometryRequest): Promise<MeshGeometryResult> => {
+      const computeMesh = async (handlerInput: RenderRequest): Promise<RenderResult> => {
         const handle = await this.materializeNativeHandleForOwner({
           owner,
           runtime,
@@ -3964,11 +4058,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             ? { success: false, issues: [] }
             : { success: false, issues: handle.result.issues };
         }
-        return this.onMeshGeometryForOwner(
+        return this.onRenderForOwner(
           owner,
           this.withProviderRuntimeContent(
-            { nativeHandle: handle.handle, options: handlerInput.options },
-            content,
+            { ...handlerInput, nativeHandle: handle.handle },
+            selectedContent,
             this.getNativeRenderContentKeys(owner),
           ),
           runtime,
@@ -3976,16 +4070,22 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       };
 
       const activeMiddleware = resolvedMiddleware.filter(
-        ({ middleware, enabled }) => enabled && middleware.wrapMeshGeometry,
+        (resolved) =>
+          resolved.enabled &&
+          resolved.middleware.wrapRender &&
+          this.middlewareRunsForRender(resolved, owner, selectedContent),
       );
 
       const { tracer } = this;
-      let chain: MeshGeometryHandler = named('kernelHandler', async (handlerInput: MeshGeometryRequest) => {
-        const computeSpan = tracer.startSpan('kernel.mesh-compute');
-        const meshResult = await computeMesh(handlerInput);
-        computeSpan.end();
-        return meshResult;
-      });
+      let chain: (input: RenderRequest) => Promise<RenderResult> = named(
+        'kernelHandler',
+        async (handlerInput: RenderRequest) => {
+          const computeSpan = tracer.startSpan('kernel.mesh-compute');
+          const meshResult = await computeMesh(handlerInput);
+          computeSpan.end();
+          return meshResult;
+        },
+      );
 
       if (activeMiddleware.length > 0) {
         const runtimes = new Map<string, KernelMiddlewareRuntime>();
@@ -4013,15 +4113,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           const inner = chain;
           const middlewareRuntime = runtimes.get(id)!;
           const middlewareName = middleware.name;
-          const wrapHook = middleware.wrapMeshGeometry!;
+          const wrapHook = middleware.wrapRender!;
 
-          chain = named(`middleware(${middlewareName})`, async (handlerInput: MeshGeometryRequest) => {
+          chain = named(`middleware(${middlewareName})`, async (handlerInput: RenderRequest) => {
             const span = tracer.startSpan(`middleware.wrap(${middlewareName})`, {
               middleware: middlewareName,
             });
             try {
               const chainResult = await wrapHook(
-                this.withProviderRuntimeContent(handlerInput, content, middleware.content?.render ?? []),
+                this.withProviderRuntimeContent(
+                  handlerInput,
+                  selectedContent,
+                  middleware.content?.views?.[selection.mimeType] ?? [],
+                ),
                 inner,
                 middlewareRuntime,
               );
@@ -4046,7 +4150,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
       }
 
-      const meshResult = await chain({ options: renderOptions });
+      // Today's client supplies one global renderOptions bag. Once evaluate selects
+      // the offered default view, omit that bag for a schema-less view.
+      const selectedOptions =
+        owner.binding?.kernelId && !this.kernelRenderZodSchemaMap.has(owner.binding.kernelId) ? {} : renderOptions;
+      const meshResult = await chain({ ...selection, options: selectedOptions });
       if (!meshResult.success) {
         return meshResult;
       }
@@ -4056,7 +4164,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       // export path reads; a display result never carries it.
       return {
         success: true,
-        data: meshResult.data,
+        data: toLegacyGeometry(meshResult.data),
         issues: [...createResult.issues, ...meshResult.issues],
       };
     } finally {
@@ -4155,7 +4263,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const zodSchemas = ownerKernelId ? this.kernelExportZodSchemasMap.get(ownerKernelId) : undefined;
     const formatZodSchema = zodSchemas?.[format];
 
-    if (formatZodSchema) {
+    if (zodSchemas && Object.hasOwn(zodSchemas, format)) {
       const directRoute = this._capabilitiesManifest.routes.find(
         (route) => route.kernelId === ownerKernelId && route.targetFormat === format && !route.transcoderId,
       );
@@ -4180,8 +4288,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       if (!contentResult.success) {
         return { success: false, result: createKernelError(contentResult.issues) };
       }
-      const parseResult = formatZodSchema.safeParse(rawOptions);
-      if (!parseResult.success) {
+      const parseResult = formatZodSchema?.safeParse(rawOptions);
+      if (parseResult && !parseResult.success) {
         return {
           success: false,
           result: {
@@ -4195,7 +4303,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           },
         };
       }
-      const validatedOptions = parseResult.data as Record<string, unknown>;
+      const parsedOptions: unknown = parseResult?.data ?? rawOptions;
+      if (typeof parsedOptions !== 'object' || parsedOptions === null || Array.isArray(parsedOptions)) {
+        return {
+          success: false,
+          result: createKernelError([
+            {
+              message: `Export options for ${ownerKernelId} → ${format} must resolve to an object.`,
+              code: 'RUNTIME',
+              type: 'runtime',
+              severity: 'error',
+            },
+          ]),
+        };
+      }
+      const validatedOptions: Record<string, unknown> = { ...parsedOptions };
       const contentContributors = this.describeContentContributors(owner, format, contentResult.content);
       return {
         success: true,
@@ -4583,7 +4705,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       phase: 'resolvingDeps',
     });
     const dependencies = await this.computeDependencies({
-      operations: ['createGeometry', 'exportGeometry'],
+      operations: ['evaluate', 'write'],
       parameters: options.renderIdentity.parameters,
       renderOptions: options.renderIdentity.renderOptions,
       content: options.plan.route.content,
@@ -4615,6 +4737,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     const { onCacheMiss, renderArtifact } = options;
+    const { targetFormat } = options.plan.route;
+    const kernelId = options.plan.owner.binding?.kernelId;
+    const declared =
+      kernelId && options.plan.route.kind === 'direct'
+        ? this.kernelExportMetadataMap.get(kernelId)?.[targetFormat]
+        : undefined;
+    const writeRequest: WriteRequest = {
+      exportId: declared?.id ?? targetFormat,
+      mimeType: declared?.mimeType ?? mimeTypes[targetFormat],
+      extension: targetFormat,
+      options: options.plan.input.options,
+    };
     const computeExport =
       onCacheMiss ??
       (async (handlerInput: MiddlewareExportGeometryRequest): Promise<ExportGeometryResult> => {
@@ -4625,21 +4759,53 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       });
 
     const { tracer } = this;
-    let chain: ExportGeometryHandler = named('kernelHandler', async (handlerInput: MiddlewareExportGeometryRequest) => {
-      const computeSpan = tracer.startSpan('kernel.export-compute');
-      const exportResult = await computeExport(this.withoutRuntimeContent(handlerInput));
-      computeSpan.end();
-      return exportResult;
-    });
+    let chain: (input: WriteRequest) => Promise<WriteResult> = named(
+      'kernelHandler',
+      async (handlerInput: WriteRequest) => {
+        const computeSpan = tracer.startSpan('kernel.export-compute');
+        if (
+          handlerInput.exportId !== writeRequest.exportId ||
+          handlerInput.mimeType !== writeRequest.mimeType ||
+          handlerInput.extension !== writeRequest.extension
+        ) {
+          computeSpan.end();
+          return createKernelError([
+            {
+              message: `Middleware changed the selected export ${writeRequest.exportId}.`,
+              code: 'MIDDLEWARE_FAILED',
+              type: 'kernel',
+              severity: 'error',
+            },
+          ]);
+        }
+        const exportResult = await computeExport({ format: targetFormat, options: handlerInput.options });
+        computeSpan.end();
+        if (!exportResult.success) {
+          return exportResult;
+        }
+        try {
+          return { ...exportResult, data: nonemptyExportFiles(exportResult.data) };
+        } catch (error) {
+          return createKernelError([
+            {
+              message: error instanceof Error ? error.message : String(error),
+              code: 'EXPORT_ARTIFACT_SET_INVALID',
+              type: 'runtime',
+              severity: 'error',
+            },
+          ]);
+        }
+      },
+    );
 
     for (let index = options.activeMiddleware.length - 1; index >= 0; index--) {
       const { middleware, id } = options.activeMiddleware[index]!;
       const inner = chain;
       const runtime = runtimes.get(id)!;
       const middlewareName = middleware.name;
-      const wrapHook = middleware.wrapExportGeometry!;
+      const wrapHook = middleware.wrapWrite!;
 
-      chain = named(`middleware(${middlewareName})`, async (handlerInput: MiddlewareExportGeometryRequest) => {
+      chain = named(`middleware(${middlewareName})`, async (handlerInput: WriteRequest) => {
         const span = tracer.startSpan(`middleware.wrap(${middlewareName})`, {
           middleware: middlewareName,
         });
@@ -4648,7 +4814,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             this.withProviderRuntimeContent(
               handlerInput,
               options.plan.route.content,
-              middleware.content?.exportFormats?.[options.plan.route.targetFormat] ?? [],
+              middleware.content?.exports?.[options.plan.route.targetFormat] ?? [],
             ),
             inner,
             runtime,
@@ -4673,7 +4839,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       });
     }
 
-    return chain(options.plan.input);
+    const result = await chain(writeRequest);
+    return result.success ? { ...result, data: [...result.data] } : result;
   }
 
   private async executeExportRequest(
@@ -5414,9 +5581,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         // oxlint-disable-next-line no-await-in-loop -- Middleware must be loaded sequentially to preserve order
         const middleware = await this.importMiddlewareModule(entry);
 
-        const resolvedOptions = middleware.optionsSchema
-          ? (middleware.optionsSchema.parse(entry.options ?? {}) as Record<string, unknown>)
-          : {};
+        const resolvedOptions = middleware.optionsSchema ? middleware.optionsSchema.parse(entry.options ?? {}) : {};
 
         const enabled = middleware.enabled ?? true;
 
@@ -5578,7 +5743,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         const contentKeys = new Set(this.kernelExportContentMap.get(kernelId)?.[format] ?? []);
         for (const { enabled, middleware } of this.getMiddleware()) {
           if (enabled) {
-            for (const key of middleware.content?.exportFormats?.[format] ?? []) {
+            for (const key of middleware.content?.exports?.[format] ?? []) {
               contentKeys.add(key);
             }
           }
@@ -5650,7 +5815,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const keys = new Set(this.kernelRenderContentMap.get(kernelId) ?? []);
       for (const { enabled, middleware } of this.getMiddleware()) {
         if (enabled) {
-          for (const key of middleware.content?.render ?? []) {
+          for (const key of this.getMiddlewareRenderContentKeys(middleware, kernelId)) {
             keys.add(key);
           }
         }
@@ -5775,17 +5940,54 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       format: route.sourceFormat,
       options: route.sourceOptions,
     };
+    const sourceMetadata = this.kernelExportMetadataMap.get(route.kernelId)?.[route.sourceFormat];
+    const sourceWriteRequest: WriteRequest = {
+      exportId: sourceMetadata?.id ?? route.sourceFormat,
+      mimeType: sourceMetadata?.mimeType ?? mimeTypes[route.sourceFormat],
+      extension: route.sourceFormat,
+      options: route.sourceOptions,
+    };
     const contributors = this.getSourceContentContributors(plan.owner, route);
-    let sourceHandler: ExportGeometryHandler = async (handlerInput) =>
-      this.onExportGeometryForOwner(
+    let sourceHandler: (input: WriteRequest) => Promise<WriteResult> = async (handlerInput) => {
+      if (
+        handlerInput.exportId !== sourceWriteRequest.exportId ||
+        handlerInput.mimeType !== sourceWriteRequest.mimeType ||
+        handlerInput.extension !== sourceWriteRequest.extension
+      ) {
+        return createKernelError([
+          {
+            message: `Middleware changed the selected source export ${sourceWriteRequest.exportId}.`,
+            code: 'MIDDLEWARE_FAILED',
+            type: 'kernel',
+            severity: 'error',
+          },
+        ]);
+      }
+      const result = await this.onExportGeometryForOwner(
         plan.owner,
         this.withProviderRuntimeContent(
-          { ...sourceInput, ...this.withoutRuntimeContent(handlerInput), options: handlerInput.options },
+          { ...sourceInput, options: handlerInput.options },
           route.content,
           this.getNativeExportContentKeys(plan.owner, route.sourceFormat),
         ),
         runtime,
       );
+      if (!result.success) {
+        return result;
+      }
+      try {
+        return { ...result, data: nonemptyExportFiles(result.data) };
+      } catch (error) {
+        return createKernelError([
+          {
+            message: error instanceof Error ? error.message : String(error),
+            code: 'EXPORT_ARTIFACT_SET_INVALID',
+            type: 'runtime',
+            severity: 'error',
+          },
+        ]);
+      }
+    };
     if (contributors.length > 0) {
       const dependencies = [...renderIdentity.dependencies, plan.dependency];
       const dependencyHash = await this.computeDependencyHash(dependencies);
@@ -5807,11 +6009,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         });
         sourceHandler = async (handlerInput) => {
           try {
-            return await contributor.middleware.wrapExportGeometry!(
+            return await contributor.middleware.wrapWrite!(
               this.withProviderRuntimeContent(
                 handlerInput,
                 route.content,
-                contributor.middleware.content?.exportFormats?.[route.sourceFormat] ?? [],
+                contributor.middleware.content?.exports?.[route.sourceFormat] ?? [],
               ),
               inner,
               middlewareRuntime,
@@ -5830,10 +6032,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         };
       }
     }
-    const kernelResult = await sourceHandler({
-      format: route.sourceFormat,
-      options: route.sourceOptions,
-    });
+    const sourceResult = await sourceHandler(sourceWriteRequest);
+    const kernelResult: ExportGeometryResult = sourceResult.success
+      ? { ...sourceResult, data: [...sourceResult.data] }
+      : sourceResult;
     if (!kernelResult.success) {
       return kernelResult;
     }
@@ -5893,13 +6095,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
   }
 
-  private async importMiddlewareModule(entry: MiddlewarePlugin): Promise<KernelMiddleware> {
+  private async importMiddlewareModule(entry: MiddlewarePlugin): Promise<RuntimeMiddlewareDefinition> {
     const cached = this.middlewareModuleCache.get(entry.id);
     if (cached) {
       return cached;
     }
 
-    const middleware = await resolveRuntimePluginDefinition<KernelMiddleware>('middleware', entry);
+    const middleware = await resolveRuntimePluginDefinition<RuntimeMiddlewareDefinition>('middleware', entry);
 
     this.middlewareModuleCache.set(entry.id, middleware);
     return middleware;
@@ -6068,7 +6270,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @returns Array of all dependencies
    */
   private async computeDependencies(input: {
-    operations: ReadonlyArray<MiddlewareDependencyDeclaration['affects'][number]>;
+    operations: ReadonlyArray<MiddlewareFileDependency['affects'][number]>;
     parameters?: Record<string, unknown>;
     renderOptions?: Record<string, unknown>;
     content?: RuntimeContentInput;
@@ -6091,7 +6293,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       operations: input.operations,
       middleware: executionList
         .filter(({ enabled }) => enabled)
-        .map(({ id, middleware, options }) => ({ id, version: middleware.version ?? '1', options })),
+        .map(({ id, middleware, options }) => ({ id, version: middleware.version, options })),
     });
     let commonDependencies = input.dependencyContext?.commonDependencies;
     if (!commonDependencies) {
@@ -6123,7 +6325,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           this.computeMiddlewareDependencies(input.owner, executionList, input.operations),
           ({ watchPaths }) => ({
             paths: new Set(watchPaths.keys()),
-            affectsParameters: input.operations.includes('getParameters'),
+            affectsParameters: input.operations.includes('describe'),
           }),
         );
         this.middlewareDependencyCache.set(middlewareDependencyKey, pending);
@@ -6325,23 +6527,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private async computeMiddlewareDependencies(
     owner: OperationOwner,
     middleware: ResolvedMiddleware[],
-    operations: ReadonlyArray<MiddlewareDependencyDeclaration['affects'][number]>,
+    operations: ReadonlyArray<MiddlewareFileDependency['affects'][number]>,
   ): Promise<MiddlewareDependencySet> {
     const discoverInput: GetDependenciesInput = {
       entryPath: assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename)),
     };
-    const declarations: MiddlewareDependencyDeclaration[] = [];
+    const declarations: MiddlewareFileDependency[] = [];
     for (const { middleware: definition, options, enabled, id } of middleware) {
-      if (!enabled || !definition.getDependencies) {
+      if (!enabled || !definition.resolve) {
         continue;
       }
-      const getDependencies = definition.getDependencies as unknown as (
-        input: GetDependenciesInput,
-        runtime: MiddlewareDependencyRuntime<Record<string, unknown>>,
-      ) => MiddlewareDependencyDeclaration[] | Promise<MiddlewareDependencyDeclaration[]>;
       try {
         // oxlint-disable-next-line no-await-in-loop -- Middleware declaration order is part of dependency identity.
-        const resolved = await getDependencies(discoverInput, {
+        const resolved = await definition.resolve(discoverInput, {
           signal: this.operationSignal ?? neverAbortedSignal,
           logger: this.getMiddlewareLogger(id, definition.name),
           filesystem: this.filesystem,
@@ -6396,7 +6594,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       .map(({ middleware: definition, options, id }, index) => ({
         type: 'middleware',
         id,
-        version: definition.version ?? '1',
+        version: definition.version,
         index,
         options,
       }));
@@ -6748,7 +6946,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return createOptions;
     }
     const dependencies = await this.computeDependencies({
-      operations: ['createGeometry'],
+      operations: ['evaluate'],
       parameters: input.parameters,
       resolvedMiddleware: this.getCreateExecutionList(input.owner, input.content, input.exportOptions !== undefined),
       owner: input.owner,
@@ -6803,12 +7001,24 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return owner.binding?.kernelId ? (this.kernelRenderContentMap.get(owner.binding.kernelId) ?? []) : [];
   }
 
+  private getMiddlewareRenderContentKeys(
+    middleware: RuntimeMiddlewareDefinition,
+    kernelId: string | undefined,
+  ): readonly RuntimeContentKey[] {
+    const mimeType = kernelId ? this.kernelRenderMimeTypeMap.get(kernelId) : undefined;
+    return mimeType ? (middleware.content?.views?.[mimeType] ?? []) : [];
+  }
+
   private getRenderContentKeys(owner: OperationOwner): readonly RuntimeContentKey[] {
-    const keys = new Set(this.getNativeRenderContentKeys(owner));
+    const keys = new Set(
+      owner.binding?.kernelId ? (this.kernelAllViewContentMap.get(owner.binding.kernelId) ?? []) : [],
+    );
     for (const { enabled, middleware } of this.getMiddleware()) {
       if (enabled) {
-        for (const key of middleware.content?.render ?? []) {
-          keys.add(key);
+        for (const declaration of Object.values(middleware.content?.views ?? {})) {
+          for (const key of declaration ?? []) {
+            keys.add(key);
+          }
         }
       }
     }
@@ -6823,7 +7033,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const keys = new Set(this.getNativeExportContentKeys(owner, format));
     for (const { enabled, middleware } of this.getMiddleware()) {
       if (enabled) {
-        for (const key of middleware.content?.exportFormats?.[format] ?? []) {
+        for (const key of middleware.content?.exports?.[format] ?? []) {
           keys.add(key);
         }
       }
@@ -6878,43 +7088,23 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   private getCreateExecutionList(
-    owner: OperationOwner,
-    content: RuntimeContentInput,
-    exportOperation: boolean,
+    _owner: OperationOwner,
+    _content: RuntimeContentInput,
+    _exportOperation: boolean,
   ): ResolvedMiddleware[] {
-    return this.getMiddleware().filter((resolved) => {
-      if (!resolved.enabled || !(resolved.middleware.wrapCreateGeometry ?? resolved.middleware.getDependencies)) {
-        return false;
-      }
-      if (exportOperation) {
-        return resolved.middleware.content === undefined;
-      }
-      if (
-        this.kernelHasMeshPhaseForOwner(owner) &&
-        resolved.middleware.content?.render &&
-        resolved.middleware.wrapMeshGeometry
-      ) {
-        return false;
-      }
-      return this.middlewareRunsForRender(resolved, owner, content);
-    });
+    return this.getMiddleware().filter(
+      ({ enabled, middleware }) => enabled && Boolean(middleware.wrapEvaluate ?? middleware.resolve),
+    );
   }
 
-  private getMeshExecutionList(owner: OperationOwner, content: RuntimeContentInput): ResolvedMiddleware[] {
-    return this.getMiddleware().filter(
-      (resolved) =>
-        resolved.enabled &&
-        Boolean(resolved.middleware.wrapMeshGeometry) &&
-        this.middlewareRunsForRender(resolved, owner, content),
-    );
+  private getMeshExecutionList(_owner: OperationOwner, _content: RuntimeContentInput): ResolvedMiddleware[] {
+    return this.getMiddleware().filter(({ enabled, middleware }) => enabled && Boolean(middleware.wrapRender));
   }
 
   private getOuterExportExecutionList(plan: Extract<OwnerBoundExportPlan, { success: true }>): ResolvedMiddleware[] {
     return this.getMiddleware().filter(
       (resolved) =>
-        resolved.enabled &&
-        Boolean(resolved.middleware.wrapExportGeometry) &&
-        this.middlewareRunsInOuterExport(resolved, plan),
+        resolved.enabled && Boolean(resolved.middleware.wrapWrite) && this.middlewareRunsInOuterExport(resolved, plan),
     );
   }
 
@@ -6935,10 +7125,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     owner: OperationOwner,
     content: RuntimeContentInput,
   ): boolean {
-    const declared = resolved.middleware.content?.render;
-    if (!declared) {
+    if (!resolved.middleware.content?.views) {
       return true;
     }
+    const declared = this.getMiddlewareRenderContentKeys(resolved.middleware, owner.binding?.kernelId);
     const native = new Set(this.getNativeRenderContentKeys(owner));
     return declared.some((key) => content[key] === true && !native.has(key));
   }
@@ -6947,7 +7137,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     resolved: ResolvedMiddleware,
     plan: Extract<OwnerBoundExportPlan, { success: true }>,
   ): boolean {
-    const declarations = resolved.middleware.content?.exportFormats;
+    const declarations = resolved.middleware.content?.exports;
     if (!declarations) {
       return true;
     }
@@ -6973,12 +7163,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   ): ResolvedMiddleware[] {
     const native = new Set(this.getNativeExportContentKeys(owner, format));
     return this.getMiddleware().filter(({ enabled, middleware }) => {
-      if (!enabled || !middleware.wrapExportGeometry) {
+      if (!enabled || !middleware.wrapWrite) {
         return false;
       }
-      return (middleware.content?.exportFormats?.[format] ?? []).some(
-        (key) => content[key] === true && !native.has(key),
-      );
+      return (middleware.content?.exports?.[format] ?? []).some((key) => content[key] === true && !native.has(key));
     });
   }
 
@@ -6990,7 +7178,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const allMiddleware = this.getMiddleware();
     return this.getContentContributors(owner, format, content).map((resolved) => ({
       id: resolved.id,
-      version: resolved.middleware.version ?? '1',
+      version: resolved.middleware.version,
       index: allMiddleware.indexOf(resolved),
       options: resolved.options,
     }));

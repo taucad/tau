@@ -18,7 +18,7 @@ import type {
 } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
 import { createExportFile } from '@taucad/runtime/types';
-import type { GeometryGltf, KernelIssue, KernelIssueCode } from '@taucad/runtime/types';
+import type { KernelIssue, KernelIssueCode } from '@taucad/runtime/types';
 import {
   asBuffer,
   checkAbort,
@@ -31,9 +31,9 @@ import {
   deriveLocationFromFrames,
   enrichIssueLocation,
   extractDefaultParameters,
-  finalizeMeshOutput,
   isRecordObject,
   jsonSchemaFromJson,
+  nonemptyExportFiles,
   parseStackTrace,
   quantityKinds,
   registerKernelModule,
@@ -41,7 +41,7 @@ import {
   resolveSourcePath,
   toVmEntryPath,
 } from '@taucad/runtime/kernel';
-import type { KernelRuntime, RuntimeLogger } from '@taucad/runtime/kernel';
+import type { KernelServices, RuntimeLogger } from '@taucad/runtime/kernel';
 import { resolveShapeName } from '@taucad/geometry-core';
 
 import { dropZeroAreaTriangles, picovoxelToGlb } from '#picovoxel.geometry.js';
@@ -182,7 +182,7 @@ const artifactFor = (lane: PicovoxelLane, wasm: PicovoxelArtifact): PicovoxelArt
  * @param wasmUrl - The artifact's `.wasm` URL.
  * @returns The module every runtime of this artifact instantiates.
  */
-const compiledModuleFor = async (runtime: KernelRuntime, wasmUrl: string): Promise<WebAssembly.Module> =>
+const compiledModuleFor = async (runtime: KernelServices, wasmUrl: string): Promise<WebAssembly.Module> =>
   runtime.getCompiledWasmModule(wasmUrl) ?? compileWasmStreaming(wasmUrl);
 
 /**
@@ -215,7 +215,7 @@ const emscriptenOverrides = async (artifact: PicovoxelArtifact): Promise<PicoWas
  */
 const startRuntime = async (
   context: PicovoxelContext,
-  runtime: KernelRuntime,
+  runtime: KernelServices,
   artifact: PicovoxelArtifact,
 ): Promise<PicoRuntime> => {
   try {
@@ -250,7 +250,7 @@ const startRuntime = async (
  */
 const loadRuntime = async (
   context: PicovoxelContext,
-  runtime: KernelRuntime,
+  runtime: KernelServices,
   artifact: PicovoxelArtifact,
 ): Promise<PicoRuntime> => {
   let loading = context.runtimes.get(artifact);
@@ -369,7 +369,7 @@ const withAbortChecks = <Value>(value: Value): Value => {
  */
 const openSession = async (
   context: PicovoxelContext,
-  kernelRuntime: KernelRuntime,
+  kernelRuntime: KernelServices,
   input: { readonly artifact: PicovoxelArtifact; readonly lane: PicovoxelLane; readonly voxelSize: number },
 ): Promise<Pico> => {
   const runtime = await loadRuntime(context, kernelRuntime, input.artifact);
@@ -430,7 +430,7 @@ const authorRoot = (root: PicovoxelRoot, resources: Set<AuthorResource>): Picovo
 });
 
 const registerPicovoxelModules = async (
-  runtime: KernelRuntime,
+  runtime: KernelServices,
   root: PicovoxelRoot,
   resources: Set<AuthorResource>,
 ): Promise<void> => {
@@ -790,14 +790,20 @@ export const picovoxelKernel = defineKernel({
   name: 'PicovoxelKernel',
   version: kernelVersion,
   optionsSchema: picovoxelOptionsSchema,
-  createOptionsSchema: picovoxelRenderSchema,
-  render: { optionsSchema: picovoxelRenderSchema, content: ['includeEdges'] },
+  evaluateOptionsSchema: picovoxelRenderSchema,
+  views: { model: { title: 'Model', mimeType: 'model/gltf-binary', content: ['includeEdges'] } },
   // D21: every PicoVoxel call checks for a newer render first, so a superseded build stops between
   // native operations instead of running to completion.
   cancellation: 'cooperative',
-  exportFormats: {
-    glb: { optionsSchema: picovoxelExportSchemas.glb, content: ['includeEdges'] },
-    stl: { optionsSchema: picovoxelExportSchemas.stl },
+  exports: {
+    glb: {
+      title: 'glTF binary',
+      mimeType: 'model/gltf-binary',
+      extension: 'glb',
+      optionsSchema: picovoxelExportSchemas.glb,
+      content: ['includeEdges'],
+    },
+    stl: { title: 'STL', mimeType: 'model/stl', extension: 'stl', optionsSchema: picovoxelExportSchemas.stl },
   },
 
   async initialize(options, runtime): Promise<PicovoxelContext> {
@@ -813,11 +819,11 @@ export const picovoxelKernel = defineKernel({
     return { root, wasm: options.wasm, runtimes: new Map(), authorResources };
   },
 
-  async getDependencies({ entryPath }, runtime) {
+  async resolve({ entryPath }, runtime) {
     return runtime.bundler.resolveDependencies(entryPath);
   },
 
-  async getParameters({ entryPath }, runtime) {
+  async describe({ entryPath }, runtime) {
     const relativeFilePath = toVmEntryPath(entryPath);
     try {
       const bundleResult = await runtime.bundler.bundle(entryPath);
@@ -830,12 +836,12 @@ export const picovoxelKernel = defineKernel({
       }
       const defaultParameters = extractDefaultParameters(resolveModule(executeResult.value));
       const jsonSchema = declareVoxelSize(await jsonSchemaFromJson(defaultParameters));
-      return createKernelSuccess(
-        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+      return createKernelSuccess({
+        parameters: createKernelParameterDeclaration(defaultParameters, jsonSchema, {
           id: 'urn:taucad:picovoxel:parameters',
           name: 'PicovoxelParameters',
         }),
-      );
+      });
     } catch (error) {
       return createKernelError([
         {
@@ -849,7 +855,7 @@ export const picovoxelKernel = defineKernel({
     }
   },
 
-  async createGeometry({ entryPath, parameters, options }, runtime, context) {
+  async evaluate({ entryPath, parameters, options }, runtime, context) {
     const relativeFilePath = toVmEntryPath(entryPath);
     const bundleResult = await runtime.bundler.bundle(entryPath);
     if (!bundleResult.success) {
@@ -920,7 +926,7 @@ export const picovoxelKernel = defineKernel({
 
     buildCalls = 0;
     try {
-      return { nativeHandle: await build(artifact) };
+      return { handle: await build(artifact) };
     } catch (error) {
       if (artifact !== 'multi' || !isPicoError(error) || !serialRetryCodes.has(error.code)) {
         return fail(error, artifact);
@@ -930,19 +936,18 @@ export const picovoxelKernel = defineKernel({
       runtime.logger.warn(warning.message, { data: { picoCode: error.code } });
       buildCalls = 0;
       try {
-        return { nativeHandle: await build('serial'), issues: [warning] };
+        return { handle: await build('serial'), issues: [warning] };
       } catch (retryError) {
         return fail(retryError, 'serial', [warning]);
       }
     }
   },
 
-  async meshGeometry({ nativeHandle }) {
-    const geometry: GeometryGltf = { format: 'gltf', content: picovoxelToGlb(nativeHandle) };
-    return finalizeMeshOutput({ artifacts: [geometry] });
+  async render({ handle }) {
+    return { content: picovoxelToGlb(handle) };
   },
 
-  async cleanup(context) {
+  async onDispose(context) {
     const runtimes = await Promise.allSettled(context.runtimes.values());
     context.runtimes.clear();
     // Author resources left by module top-level code, then every started runtime; a teardown that
@@ -955,16 +960,16 @@ export const picovoxelKernel = defineKernel({
     releaseRender(undefined, context.authorResources);
   },
 
-  serializeNativeHandle({ nativeHandle }) {
-    return nativeHandle;
+  serializeHandle({ handle }) {
+    return handle;
   },
 
-  deserializeNativeHandle({ serializedNativeHandle }) {
-    if (!isRecordObject(serializedNativeHandle) || !Array.isArray(serializedNativeHandle.shapes)) {
+  deserializeHandle({ serialized }) {
+    if (!isRecordObject(serialized) || !Array.isArray(serialized.shapes)) {
       throw new TypeError('Invalid PicoVoxel serialized handle: expected a shapes array.');
     }
     return {
-      shapes: serializedNativeHandle.shapes.map((value: unknown, index): PicovoxelShapeSnapshot => {
+      shapes: serialized.shapes.map((value: unknown, index): PicovoxelShapeSnapshot => {
         if (
           !isRecordObject(value) ||
           typeof value['name'] !== 'string' ||
@@ -986,50 +991,52 @@ export const picovoxelKernel = defineKernel({
     };
   },
 
-  async exportGeometry(input, _runtime, context) {
-    const { shapes } = input.nativeHandle;
-    switch (input.format) {
+  async write(input, _runtime, context) {
+    const { shapes } = input.handle;
+    switch (input.exportId) {
       case 'glb': {
         // Checked against the handle too: fast provenance never passes for exact, whatever was asked.
         if (input.options.lane === 'fast' || shapes.some((shape) => shape.lane === 'fast')) {
-          return createKernelError([laneExportRefusal()]);
+          throw new PicovoxelBuildError([laneExportRefusal()]);
         }
-        const bytes = picovoxelToGlb(input.nativeHandle, {
+        const bytes = picovoxelToGlb(input.handle, {
           coordinateSystem: input.options.coordinateSystem,
           unit: input.options.unit,
         });
-        return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(bytes))]);
+        return { files: [createExportFile('glb', 'model.glb', asBuffer(bytes))] };
       }
       case 'stl': {
         if (shapes.length === 0) {
-          return createKernelError([noShapesIssue()]);
+          throw new PicovoxelBuildError([noShapesIssue()]);
         }
         const { unit, scale, offset, lane } = input.options;
-        return createKernelSuccess(
-          shapes.map((shape) =>
-            createExportFile(
-              'stl',
-              `${shape.name}.stl`,
-              // An explicit fast export is the consent: the header carries LANE=fast, as does any shape
-              // with fast provenance. An exact export of an exact handle never stamps.
-              // `acceptLane` is PicoVoxel's own form of that consent (rider R2).
-              asBuffer(
-                lane === 'fast' || shape.lane === 'fast'
-                  ? context.root.meshToStlBytes(
-                      shape.vertices,
-                      shape.triangles,
-                      { unit, scale, offset, acceptLane: 'fast' },
-                      'fast',
-                    )
-                  : context.root.meshToStlBytes(shape.vertices, shape.triangles, { unit, scale, offset }),
+        return {
+          files: nonemptyExportFiles(
+            shapes.map((shape) =>
+              createExportFile(
+                'stl',
+                `${shape.name}.stl`,
+                // An explicit fast export is the consent: the header carries LANE=fast, as does any shape
+                // with fast provenance. An exact export of an exact handle never stamps.
+                // `acceptLane` is PicoVoxel's own form of that consent (rider R2).
+                asBuffer(
+                  lane === 'fast' || shape.lane === 'fast'
+                    ? context.root.meshToStlBytes(
+                        shape.vertices,
+                        shape.triangles,
+                        { unit, scale, offset, acceptLane: 'fast' },
+                        'fast',
+                      )
+                    : context.root.meshToStlBytes(shape.vertices, shape.triangles, { unit, scale, offset }),
+                ),
               ),
             ),
           ),
-        );
+        };
       }
       default: {
         const exhaustive: never = input;
-        return createKernelError([
+        throw new PicovoxelBuildError([
           {
             message: `Unsupported PicoVoxel export format: ${String(exhaustive)}.`,
             code: 'KERNEL_CAPABILITY_MISSING',

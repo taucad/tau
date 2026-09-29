@@ -31,11 +31,11 @@ const testPrimitives = testModeling as unknown as {
 describe('mesh phase conversion failure', () => {
   it('fails with the conversion error, not with the finalizer standing in for it', async () => {
     const nativeHandle = normalizeJscadParts(testPrimitives.primitives.cuboid({ size: [2, 2, 2] }), testModeling);
-    const { meshGeometry } = await resolveRuntimePluginDefinition('kernel', jscadKernel());
-    expect(meshGeometry).toBeDefined();
+    const { render } = await resolveRuntimePluginDefinition('kernel', jscadKernel());
+    expect(render).toBeDefined();
 
     await expect(
-      meshGeometry!({ nativeHandle, options: {}, content: {} }, createMockKernelRuntime(), {
+      render!({ view: 'model', handle: nativeHandle, options: {}, content: {} }, createMockKernelRuntime(), {
         modulesRegistered: true,
         modeling: testModeling,
       }),

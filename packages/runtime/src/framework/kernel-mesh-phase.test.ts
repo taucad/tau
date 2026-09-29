@@ -1,12 +1,10 @@
 // @vitest-environment node
-/* eslint-disable @typescript-eslint/naming-convention -- Seeded filesystem keys are absolute paths. */
 /**
  * Mesh/build/export phase separation — orchestration contract.
  *
  * Locks in the three-phase kernel pipeline (kernel-mesh-geometry-phase-separation.md):
- * kernels that defer their display artifact return only a nativeHandle from
- * createGeometry; the display path runs meshGeometry at the kernel boundary;
- * BRep-only exports never tessellate; the geometry cache carries the build
+ * kernels evaluate a native handle before rendering the display artifact;
+ * BRep-only exports never render; the geometry cache carries the build
  * entry (serialized handle) and the mesh cache carries the display artifact.
  */
 
@@ -14,7 +12,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { z } from 'zod';
 import { createExportFile } from '@taucad/types/constants';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
-import type { GetDependenciesInput, KernelDefinition } from '#types/runtime-kernel.types.js';
+import type { AnyKernelDefinitionV2, ResolveInput } from '#types/runtime-kernel-v2.types.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
 import {
@@ -27,7 +25,7 @@ import {
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { MiddlewarePlugin } from '#plugins/plugin-types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
-import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
 import type { NativeBuildInput } from '#framework/render-artifact.js';
 
@@ -40,49 +38,55 @@ type PhaseCounters = {
 
 const displayBytes = new Uint8Array([9, 9, 9]);
 
-function createDeferredKernel(counters: PhaseCounters, overrides?: Partial<KernelDefinition>): KernelDefinition {
-  const definition = {
+function createDeferredKernel(
+  counters: PhaseCounters,
+  overrides: Partial<AnyKernelDefinitionV2> = {},
+): AnyKernelDefinitionV2 {
+  const definition: AnyKernelDefinitionV2 = {
+    id: 'mock-brep',
+    extensions: ['mock'],
     name: 'deferred-brep',
     version: '1.0.0',
-    exportFormats: { step: { optionsSchema: z.object({}) } },
+    views: { display: { title: 'Display', mimeType: 'model/gltf-binary' } },
+    exports: { step: { title: 'STEP', mimeType: 'model/step', extension: 'step', optionsSchema: z.object({}) } },
     initialize: async () => ({}),
-    getDependencies: async (input: GetDependenciesInput) => ({
+    resolve: async (input: ResolveInput) => ({
       resolved: [input.entryPath],
       unresolved: [],
     }),
-    getParameters: async () => createParameterDeclaration(),
-    createGeometry: async () => {
+    describe: async () => {
+      const declaration = createParameterDeclaration();
+      if (!declaration.success) {
+        return declaration;
+      }
+      return { success: true, data: { parameters: declaration.data }, issues: declaration.issues };
+    },
+    evaluate: async () => {
       counters.create++;
-      return { nativeHandle: { shapes: 2 }, issues: [] as KernelIssue[] };
+      return { handle: { shapes: 2 }, issues: [] as KernelIssue[] };
     },
-    meshGeometry: async ({ nativeHandle }: { nativeHandle: unknown; options: Record<string, unknown> }) => {
+    render: async ({ handle }: { handle: unknown }) => {
       counters.mesh++;
-      counters.lastMeshedHandle = nativeHandle;
-      return {
-        geometry: { format: 'gltf', content: new Uint8Array(displayBytes) },
-      };
+      counters.lastMeshedHandle = handle;
+      return { content: new Uint8Array(displayBytes) };
     },
-    exportGeometry: async () => {
+    write: async () => {
       counters.export++;
       return {
-        success: true,
-        data: [createExportFile('step', 'model', new Uint8Array([1, 2]))],
+        files: [createExportFile('step', 'model', new Uint8Array([1, 2]))] as const,
         issues: [] as KernelIssue[],
       };
     },
-    serializeNativeHandle: ({ nativeHandle }: { nativeHandle: unknown }) => ({
-      snapshot: nativeHandle,
+    serializeHandle: ({ handle }: { handle: unknown }) => ({
+      snapshot: handle,
     }),
-    deserializeNativeHandle: ({ serializedNativeHandle }: { serializedNativeHandle: { snapshot: unknown } }) =>
-      serializedNativeHandle.snapshot,
-    ...overrides,
+    deserializeHandle: ({ serialized }: { serialized: { snapshot: unknown } }) => serialized.snapshot,
   };
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- test helper merges partial union branches.
-  return definition as KernelDefinition;
+  return Object.assign(definition, overrides);
 }
 
 async function createWorker(
-  definition: KernelDefinition,
+  definition: AnyKernelDefinitionV2,
   middleware: readonly MiddlewarePlugin[] = [],
 ): Promise<KernelRuntimeWorker> {
   const runtime = defineRuntime({
@@ -102,7 +106,7 @@ describe('mesh/build/export phase separation', () => {
     await seedTestFileSystem({ 'model.mock': 'mock-model' });
   });
 
-  it('display render defers to meshGeometry and publishes its artifact', async () => {
+  it('display render uses the v2 render hook and publishes its artifact', async () => {
     const counters: PhaseCounters = { create: 0, mesh: 0, export: 0 };
     const worker = await createWorker(createDeferredKernel(counters));
 
@@ -131,7 +135,7 @@ describe('mesh/build/export phase separation', () => {
     const create = defineMiddleware({
       id: 'create-phase',
       name: 'create-phase',
-      async wrapCreateGeometry(input, handler, runtime) {
+      async wrapEvaluate(input, handler, runtime) {
         createDependencies = runtime.dependencies;
         return handler(input);
       },
@@ -139,7 +143,7 @@ describe('mesh/build/export phase separation', () => {
     const mesh = defineMiddleware({
       id: 'mesh-phase',
       name: 'mesh-phase',
-      async wrapMeshGeometry(input, handler, runtime) {
+      async wrapRender(input, handler, runtime) {
         meshDependencies = runtime.dependencies;
         return handler(input);
       },
@@ -147,7 +151,7 @@ describe('mesh/build/export phase separation', () => {
     const exportOnly = defineMiddleware({
       id: 'export-only',
       name: 'export-only',
-      async wrapExportGeometry(input, handler) {
+      async wrapWrite(input, handler) {
         return handler(input);
       },
     });
@@ -207,7 +211,7 @@ describe('mesh/build/export phase separation', () => {
     const createInputs: NativeBuildInput[] = [];
     const worker = await createWorker(
       createDeferredKernel(counters, {
-        createOptionsSchema: z.object({
+        evaluateOptionsSchema: z.object({
           tessellation: z
             .object({
               segments: z.number(),
@@ -216,19 +220,26 @@ describe('mesh/build/export phase separation', () => {
             .default({ segments: 8, samples: [1, 2] }),
           renderOnly: z.string().default('preview'),
         }),
-        render: {
-          optionsSchema: z.object({
-            tessellation: z
-              .object({
-                segments: z.number(),
-                samples: z.array(z.number()),
-              })
-              .default({ segments: 8, samples: [1, 2] }),
-            renderOnly: z.string().default('preview'),
-          }),
+        views: {
+          display: {
+            title: 'Display',
+            mimeType: 'model/gltf-binary',
+            optionsSchema: z.object({
+              tessellation: z
+                .object({
+                  segments: z.number(),
+                  samples: z.array(z.number()),
+                })
+                .default({ segments: 8, samples: [1, 2] }),
+              renderOnly: z.string().default('preview'),
+            }),
+          },
         },
-        exportFormats: {
+        exports: {
           step: {
+            title: 'STEP',
+            mimeType: 'model/step',
+            extension: 'step',
             optionsSchema: z.object({
               tessellation: z.object({
                 segments: z.number(),
@@ -238,10 +249,10 @@ describe('mesh/build/export phase separation', () => {
             }),
           },
         },
-        createGeometry: async (input: NativeBuildInput) => {
+        evaluate: async (input: NativeBuildInput) => {
           counters.create++;
           createInputs.push(input);
-          return { nativeHandle: { shapes: 2 }, issues: [] as KernelIssue[] };
+          return { handle: { shapes: 2 }, issues: [] as KernelIssue[] };
         },
       }),
     );
@@ -287,9 +298,9 @@ describe('mesh/build/export phase separation', () => {
     }
   });
 
-  it('display render fails the invariant when neither inline geometry nor meshGeometry exists', async () => {
+  it('display render fails the invariant when the declared view has no render hook', async () => {
     const counters: PhaseCounters = { create: 0, mesh: 0, export: 0 };
-    const worker = await createWorker(createDeferredKernel(counters, { meshGeometry: undefined }));
+    const worker = await createWorker(createDeferredKernel(counters, { render: undefined }));
 
     const result = await worker.createGeometry({
       file: modelFile(),
@@ -299,24 +310,23 @@ describe('mesh/build/export phase separation', () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.issues[0]?.code).toBe('KERNEL_CAPABILITY_MISSING');
-      expect(result.issues[0]?.message).toContain('display path');
+      expect(result.issues[0]?.message).toContain('display');
     }
     expect(counters.mesh).toBe(0);
   });
 
-  it('mesh-native kernels keep the inline display path untouched', async () => {
+  it('mesh-native kernels render their evaluated display artifact', async () => {
     const counters: PhaseCounters = { create: 0, mesh: 0, export: 0 };
     const inlineBytes = new Uint8Array([4, 5, 6]);
     const worker = await createWorker(
       createDeferredKernel(counters, {
-        meshGeometry: undefined,
-        createGeometry: async () => {
+        evaluate: async () => {
           counters.create++;
-          return {
-            geometry: { format: 'gltf', content: inlineBytes },
-            nativeHandle: { shapes: 1 },
-            issues: [] as KernelIssue[],
-          };
+          return { handle: { shapes: 1, bytes: inlineBytes }, issues: [] as KernelIssue[] };
+        },
+        render: async ({ handle }: { handle: { bytes: Uint8Array<ArrayBuffer> } }) => {
+          counters.mesh++;
+          return { content: handle.bytes };
         },
       }),
     );
@@ -331,23 +341,25 @@ describe('mesh/build/export phase separation', () => {
       expect(result.data.content).toEqual(inlineBytes);
     }
     expect(counters.create).toBe(1);
-    expect(counters.mesh).toBe(0);
+    expect(counters.mesh).toBe(1);
   });
 
-  it('runs a dual-hook content contributor only at the artifact-producing phase', async () => {
+  it('routes a dual-hook content contributor only to the artifact-producing render phase', async () => {
     const deferredCalls = { create: 0, mesh: 0 };
     const inlineCalls = { create: 0, mesh: 0 };
     const contentMiddleware = (calls: typeof deferredCalls, id: string) =>
       defineMiddleware({
         id,
         name: id,
-        content: { render: ['includeEdges'] },
-        async wrapCreateGeometry(input, handler) {
+        content: { views: { 'model/gltf-binary': ['includeEdges'] } },
+        async wrapEvaluate(input, handler) {
           calls.create++;
+          expect('content' in input).toBe(false);
           return handler(input);
         },
-        async wrapMeshGeometry(input, handler) {
+        async wrapRender(input, handler) {
           calls.mesh++;
+          expect(input.content).toMatchObject({ includeEdges: true });
           return handler(input);
         },
       })();
@@ -359,14 +371,13 @@ describe('mesh/build/export phase separation', () => {
     const inlineCounters: PhaseCounters = { create: 0, mesh: 0, export: 0 };
     const inline = await createWorker(
       createDeferredKernel(inlineCounters, {
-        meshGeometry: undefined,
-        async createGeometry() {
+        async evaluate() {
           inlineCounters.create++;
-          return {
-            geometry: { format: 'gltf', content: displayBytes },
-            nativeHandle: {},
-            issues: [],
-          };
+          return { handle: { bytes: displayBytes }, issues: [] };
+        },
+        async render({ handle }: { handle: { bytes: Uint8Array<ArrayBuffer> } }) {
+          inlineCounters.mesh++;
+          return { content: handle.bytes };
         },
       }),
       [contentMiddleware(inlineCalls, 'inline-content')],
@@ -385,8 +396,8 @@ describe('mesh/build/export phase separation', () => {
       });
       expect(deferredResult.success).toBe(true);
       expect(inlineResult.success).toBe(true);
-      expect(deferredCalls).toEqual({ create: 0, mesh: 1 });
-      expect(inlineCalls).toEqual({ create: 1, mesh: 0 });
+      expect(deferredCalls).toEqual({ create: 1, mesh: 1 });
+      expect(inlineCalls).toEqual({ create: 1, mesh: 1 });
     } finally {
       await deferred.cleanup();
       await inline.cleanup();

@@ -9,7 +9,6 @@ import { NodeIO } from '@gltf-transform/core';
 import type { Document } from '@gltf-transform/core';
 import { Window } from 'happy-dom';
 import type {
-  FileExtension,
   GeometryResponse,
   HashedGeometryResult,
   RuntimeContentInput,
@@ -23,7 +22,7 @@ import type { TauCadTopologyPayload, TauCadTopologyRoot } from '@taucad/geometry
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
 import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
 import { evaluatePose, resolveMechanismComponents, sampleAnimation } from '@taucad/kinematics';
-import { readMechanismExport, replicadKernel } from '#replicad.kernel.js';
+import { offersFor, readMechanismExport, replicadKernel } from '#replicad.kernel.js';
 import { normalizeRenderShapes } from '#utils/render-output.js';
 import type { NativeHandleEntry } from '#interface-resolution.js';
 import {
@@ -59,7 +58,9 @@ const createReplicadRuntime = (options?: ReplicadTestOptions) =>
     bundlers: [esbuildBundler()],
   });
 
-type TestClient = ReturnType<typeof createTestRuntimeClient>;
+const makeTestClient = (files: Record<string, string>, options?: ReplicadTestOptions) =>
+  createTestRuntimeClient({ runtime: createReplicadRuntime(options), files });
+type TestClient = ReturnType<typeof makeTestClient>;
 type GeometryFile = ReturnType<typeof createGeometryFile>;
 
 const testClients = new Set<TestClient>();
@@ -69,7 +70,7 @@ const createClient = (
   files: Record<string, string>,
   options?: ReplicadTestOptions & { readonly onTelemetry?: (entries: readonly TelemetryEntry[]) => void },
 ): TestClient => {
-  const client = createTestRuntimeClient({ runtime: createReplicadRuntime(options), files });
+  const client = makeTestClient(files, options);
   if (options?.onTelemetry) {
     const { onTelemetry } = options;
     client.on('telemetry', (batch) => {
@@ -111,7 +112,7 @@ const renderGeometry = async (
 
 const exportLastRender = async (
   client: TestClient,
-  format: FileExtension,
+  format: Extract<keyof ReturnType<typeof replicadKernel>['exports'], string>,
   exportOptions?: Record<string, unknown>,
 ): Promise<ExportResult> => client.export(format, exportOptions === undefined ? undefined : { exportOptions });
 
@@ -1320,6 +1321,16 @@ describe('ReplicadWorker', () => {
     });
 
     describe('2D geometry (SVG output)', () => {
+      it('offers a drawing-only model with an authored instance as the default view', async () => {
+        const { draw } = await import('replicad');
+        const drawing = draw().hLine(5).vLine(5).close();
+        const offers = offersFor({ shapes: normalizeRenderShapes({ shape: drawing, name: 'Front' }) });
+        expect(offers.views).toEqual(['drawing']);
+        expect(offers.views[0]).toBe('drawing');
+        expect(offers.exports).toEqual([]);
+        expect(offers.instances.drawing).toEqual([{ id: 'Front', title: 'Front' }]);
+      });
+
       it('should return SVG for 2D sketch without extrusion', async () => {
         const result = await createGeometry({
           files: {
@@ -1378,7 +1389,7 @@ describe('ReplicadWorker', () => {
         expectStandardReplicadSvgPaths(svg);
       });
 
-      it('should reject mixed 3D and projected SVG drawing output without path serialization errors', async () => {
+      it('should render a model while retaining projected drawings as separate view offers', async () => {
         const result = await createGeometry({
           files: {
             'projection-drawings.ts': `
@@ -1422,15 +1433,8 @@ describe('ReplicadWorker', () => {
           mainFile: 'projection-drawings.ts',
         });
 
-        assertFailure(result, 'projection drawings');
-        expect(result.issues).toHaveLength(1);
-        expect(result.issues[0]).toMatchObject({
-          code: 'MIXED_RENDER_OUTPUT_UNSUPPORTED',
-          message: 'Kernel render produced mixed public geometry formats.',
-          severity: 'error',
-          type: 'runtime',
-        });
-        expect(result.issues.map((issue) => issue.message).join('\n')).not.toContain('replaceAll');
+        assertSuccess(result, 'projection drawings');
+        expect(extractGltfFromResult(result)?.byteLength).toBeGreaterThan(0);
       });
 
       it('should render multiple colored 2D drawings as one SVG', async () => {
@@ -4502,14 +4506,14 @@ describe('mechanism export', () => {
 
 // A display render no longer carries the durable snapshot (charter D12/W6b), so these tests call the
 // kernel's serializer the way the framework does: on the native handle `createGeometry` produces.
-type ReplicadKernelContext = Parameters<NonNullable<typeof replicadDefinition.serializeNativeHandle>>[2];
+type ReplicadKernelContext = Parameters<NonNullable<typeof replicadDefinition.serializeHandle>>[2];
 
 const serializeHandle = (entries: NativeHandleEntry[], mechanism?: unknown) => {
-  if (!replicadDefinition.serializeNativeHandle) {
-    throw new Error('The replicad kernel declares serializeNativeHandle.');
+  if (!replicadDefinition.serializeHandle) {
+    throw new Error('The replicad kernel declares serializeHandle.');
   }
-  return replicadDefinition.serializeNativeHandle(
-    { nativeHandle: { shapes: entries, mechanism } },
+  return replicadDefinition.serializeHandle(
+    { handle: { shapes: entries, mechanism } },
     createMockKernelRuntime(),
     mock<ReplicadKernelContext>(),
   );
@@ -4584,8 +4588,8 @@ describe('serializeNativeHandle', () => {
       mechanism,
     );
 
-    const restored = replicadDefinition.deserializeNativeHandle!(
-      { serializedNativeHandle: structuredClone(snapshot) },
+    const restored = replicadDefinition.deserializeHandle!(
+      { serialized: structuredClone(snapshot) },
       createMockKernelRuntime(),
       mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad } }),
     );
@@ -4596,8 +4600,8 @@ describe('serializeNativeHandle', () => {
   });
 
   it('should have serializeNativeHandle and deserializeNativeHandle defined on the kernel', () => {
-    expect(replicadDefinition.serializeNativeHandle).toBeDefined();
-    expect(replicadDefinition.deserializeNativeHandle).toBeDefined();
+    expect(replicadDefinition.serializeHandle).toBeDefined();
+    expect(replicadDefinition.deserializeHandle).toBeDefined();
   });
 });
 

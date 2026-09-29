@@ -16,7 +16,6 @@ import {
   createKernelParameterDeclaration,
   defineKernel,
   extractDefaultParameters,
-  finalizeRenderOutput,
   isRecordObject,
   jsonSchemaFromJson,
   enrichIssueLocation,
@@ -25,7 +24,7 @@ import {
 } from '@taucad/runtime/kernel';
 import type { KernelIssue } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
-import { createEmptyGlb, createEmptyGltfGeometry } from '@taucad/geometry-core';
+import { createEmptyGlb } from '@taucad/geometry-core';
 
 import { loadNativeBackend } from '#opencascade-native-backend.js';
 import type { NativeBinding, NativeSolid, NativeTessellation } from '#opencascade-native-backend.js';
@@ -139,10 +138,20 @@ export const opencascadeNativeKernel = defineKernel({
   name: 'OpenCascadeNativeKernel',
   version: '0.1.0',
   optionsSchema: opencascadeNativeOptionsSchema,
-  render: { optionsSchema: opencascadeNativeRenderSchema },
-  exportFormats: {
-    glb: { optionsSchema: opencascadeNativeExportSchemas.glb },
-    step: { optionsSchema: opencascadeNativeExportSchemas.step },
+  views: { model: { title: 'Model', mimeType: 'model/gltf-binary', optionsSchema: opencascadeNativeRenderSchema } },
+  exports: {
+    glb: {
+      title: 'glTF binary',
+      mimeType: 'model/gltf-binary',
+      extension: 'glb',
+      optionsSchema: opencascadeNativeExportSchemas.glb,
+    },
+    step: {
+      title: 'STEP',
+      mimeType: 'application/step',
+      extension: 'step',
+      optionsSchema: opencascadeNativeExportSchemas.step,
+    },
   },
 
   async initialize(_options, runtime) {
@@ -161,11 +170,11 @@ export const opencascadeNativeKernel = defineKernel({
     return { binding, version };
   },
 
-  async getDependencies({ entryPath }, runtime) {
+  async resolve({ entryPath }, runtime) {
     return runtime.bundler.resolveDependencies(entryPath);
   },
 
-  async getParameters({ entryPath }, runtime) {
+  async describe({ entryPath }, runtime) {
     const fileName = toVmEntryPath(entryPath);
     const bundleResult = await runtime.bundler.bundle(entryPath);
     if (!bundleResult.success) {
@@ -178,15 +187,15 @@ export const opencascadeNativeKernel = defineKernel({
     }
 
     const defaultParameters = extractDefaultParameters(executeResult.value);
-    return createKernelSuccess(
-      createKernelParameterDeclaration(defaultParameters, await jsonSchemaFromJson(defaultParameters), {
+    return createKernelSuccess({
+      parameters: createKernelParameterDeclaration(defaultParameters, await jsonSchemaFromJson(defaultParameters), {
         id: 'urn:taucad:opencascade-native:parameters',
         name: 'OpenCascadeNativeParameters',
       }),
-    );
+    });
   },
 
-  async createGeometry({ entryPath, parameters }, runtime, context) {
+  async evaluate({ entryPath, parameters }, runtime, context) {
     const fileName = toVmEntryPath(entryPath);
 
     const bundleResult = await runtime.bundler.bundle(entryPath);
@@ -203,87 +212,70 @@ export const opencascadeNativeKernel = defineKernel({
     const main = isRecordObject(module) ? (module['default'] ?? module['main']) : undefined;
     if (!isCallable(main)) {
       runtime.logger.warn('createGeometry returning empty: main-function-not-found', { data: { filePath: fileName } });
-      return finalizeRenderOutput({
-        artifacts: [createEmptyGltfGeometry()],
-        nativeHandle: [],
-      });
+      return { handle: [] };
     }
 
     try {
       // Tessellation is deferred to `meshGeometry`: a STEP-only export must
       // never pay for a display mesh.
       return {
-        nativeHandle: normalizeSolids(await main(toModelApi(context.binding), parameters)),
+        handle: normalizeSolids(await main(toModelApi(context.binding), parameters)),
       };
     } catch (error) {
       throw new OpencascadeNativeBuildError(runtimeIssue(error, fileName));
     }
   },
 
-  async meshGeometry({ nativeHandle, options }, _runtime, context) {
-    if (nativeHandle.length === 0) {
-      return { geometry: createEmptyGltfGeometry() };
+  async render({ handle, options }, _runtime, context) {
+    if (handle.length === 0) {
+      return { content: asBuffer(createEmptyGlb()) };
     }
     // One crossing: tessellate and encode the whole batch inside the addon.
-    const content = context.binding.toGlb(nativeHandle, tessellationOf(options));
-    return { geometry: { format: 'gltf', content: new Uint8Array(content) } };
+    const content = context.binding.toGlb(handle, tessellationOf(options));
+    return { content: new Uint8Array(content) };
   },
 
-  async exportGeometry({ format, nativeHandle, options }, _runtime, context) {
-    switch (format) {
+  async write({ exportId, handle, options }, _runtime, context) {
+    switch (exportId) {
       case 'glb': {
         // An empty render is a successful artifact with no scene nodes, not a
         // failure.
         const glb =
-          nativeHandle.length === 0
+          handle.length === 0
             ? createEmptyGlb()
-            : new Uint8Array(context.binding.toGlb(nativeHandle, tessellationOf(options)));
-        return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(glb))]);
+            : new Uint8Array(context.binding.toGlb(handle, tessellationOf(options)));
+        return { files: [createExportFile('glb', 'model.glb', asBuffer(glb))] };
       }
 
       case 'step': {
-        if (nativeHandle.length === 0) {
-          return createKernelError([
-            {
-              message: 'No geometry available for STEP export',
-              code: 'RUNTIME',
-              type: 'runtime',
-              severity: 'error',
-            },
-          ]);
+        if (handle.length === 0) {
+          throw new Error('No geometry available for STEP export');
         }
         // BRep formats never tessellate.
-        const step = context.binding.writeStep(nativeHandle);
-        return createKernelSuccess([createExportFile('step', 'assembly', asBuffer(new Uint8Array(step)))]);
+        const step = context.binding.writeStep(handle);
+        return { files: [createExportFile('step', 'assembly', asBuffer(new Uint8Array(step)))] };
       }
 
       default: {
-        const exhaustive: never = format;
-        return createKernelError([
-          {
-            message: `Export format '${String(exhaustive)}' is not supported by the native OpenCascade kernel. Supported formats: glb, step.`,
-            code: 'KERNEL_CAPABILITY_MISSING',
-            type: 'runtime',
-            severity: 'error',
-          },
-        ]);
+        const exhaustive: never = exportId;
+        throw new Error(
+          `Export format '${String(exhaustive)}' is not supported by the native OpenCascade kernel. Supported formats: glb, step.`,
+        );
       }
     }
   },
 
   // BRep is the byte-stable interchange (no timestamp header), so a
   // serialize/deserialize round trip is fingerprint-comparable.
-  serializeNativeHandle({ nativeHandle }, _runtime, context) {
+  serializeHandle({ handle }, _runtime, context) {
     // An empty render still has to serialize: `writeBrep` needs at least one
     // solid, so the empty case is an empty payload, not a kernel error.
     return {
-      brep: nativeHandle.length === 0 ? new Uint8Array() : new Uint8Array(context.binding.writeBrep(nativeHandle)),
+      brep: handle.length === 0 ? new Uint8Array() : new Uint8Array(context.binding.writeBrep(handle)),
     };
   },
 
-  deserializeNativeHandle({ serializedNativeHandle }, _runtime, context) {
-    return serializedNativeHandle.brep.byteLength === 0
-      ? []
-      : context.binding.readBrep(asBuffer(serializedNativeHandle.brep));
+  deserializeHandle({ serialized }, _runtime, context) {
+    return serialized.brep.byteLength === 0 ? [] : context.binding.readBrep(asBuffer(serialized.brep));
   },
 });

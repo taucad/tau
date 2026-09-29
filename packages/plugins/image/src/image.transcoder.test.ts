@@ -4,7 +4,7 @@ import type { MockedFunction } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { ExportFile } from '@taucad/runtime/types';
 import type * as RenderModule from 'nanoraster';
-import type { TranscoderRuntime } from '@taucad/runtime/transcoder';
+import type { TranscoderServices } from '@taucad/runtime/transcoder';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { imageTranscoder } from '#image.transcoder.js';
 import { imageEdgeSchemas } from '#image-export-options.js';
@@ -30,8 +30,8 @@ vi.mock('nanoraster', async (importOriginal) => ({
 vi.mock('#image-backend.js', () => ({ loadImageBackend: backendMock.load }));
 vi.mock('#gltf-scene-bounds.js', () => ({ readGltfSceneBounds: sceneBoundsMock.read }));
 
-const createRuntime = (): TranscoderRuntime =>
-  mock<TranscoderRuntime>({
+const createRuntime = (): TranscoderServices =>
+  mock<TranscoderServices>({
     logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
     tracer: { startSpan: vi.fn(() => ({ end: endSpan })) },
   });
@@ -66,7 +66,7 @@ describe('image transcoder', () => {
   const resolveImageDefinition = async () => resolveRuntimePluginDefinition('transcoder', imageTranscoder());
   let imageDefinition: Awaited<ReturnType<typeof resolveImageDefinition>>;
   let context: { renderer: typeof RenderModule; adapter: RenderModule.AdapterInfo | undefined };
-  let runtime: TranscoderRuntime;
+  let runtime: TranscoderServices;
   let renderImage: MockedFunction<typeof RenderModule.renderImage>;
   let renderImages: MockedFunction<typeof RenderModule.renderImages>;
 
@@ -725,12 +725,12 @@ describe('image transcoder', () => {
 
   describe('cleanup', () => {
     it('should clean up without error', async () => {
-      const { cleanup } = imageDefinition;
-      expect(cleanup).toBeDefined();
-      if (!cleanup) {
+      const { onDispose } = imageDefinition;
+      expect(onDispose).toBeDefined();
+      if (!onDispose) {
         return;
       }
-      await expect(cleanup(context)).resolves.toBeUndefined();
+      await expect(onDispose(context)).resolves.toBeUndefined();
     });
   });
 });

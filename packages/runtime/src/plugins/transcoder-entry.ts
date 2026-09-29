@@ -10,5 +10,5 @@ export type {
   TranscoderDefinition,
   TranscoderEdge,
   TranscoderPluginFactory,
-  TranscoderRuntime,
+  TranscoderRuntime as TranscoderServices,
 } from '#types/runtime-transcoder.types.js';

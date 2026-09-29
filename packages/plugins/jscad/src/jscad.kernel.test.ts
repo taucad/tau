@@ -873,14 +873,14 @@ module.exports = { main, getParameterDefinitions }
         ]);
         const nativeHandle = normalizeJscadParts(openCube, testModeling);
 
-        const { meshGeometry, exportGeometry } = jscadDefinition;
-        expect(meshGeometry).toBeDefined();
-        if (!meshGeometry) {
+        const { render, write } = jscadDefinition;
+        expect(render).toBeDefined();
+        if (!render) {
           return;
         }
 
-        const meshed = await meshGeometry(
-          { nativeHandle, options: {}, content: { includeEdges: true } },
+        const meshed = await render(
+          { view: 'model', handle: nativeHandle, options: {}, content: { includeEdges: true } },
           createMockKernelRuntime(),
           { modulesRegistered: true, modeling: testModeling },
         );
@@ -898,16 +898,13 @@ module.exports = { main, getParameterDefinitions }
           .topology;
         expect(meshTopology).toMatchObject({ openBoundaryEdges: 4, irregularEdges: 4, nonManifoldEdges: 0 });
 
-        const exported = await exportGeometry(
-          { format: 'glb', nativeHandle, options: jscadGlbExportOptions, content: { includeEdges: true } },
+        const exported = await write!(
+          { exportId: 'glb', handle: nativeHandle, options: jscadGlbExportOptions, content: { includeEdges: true } },
           createMockKernelRuntime(),
           { modulesRegistered: true, modeling: testModeling },
         );
-        expect(exported.success).toBe(true);
-        if (!exported.success) {
-          return;
-        }
-        expect(exported.issues.filter((issue) => issue.code === 'GEOMETRY_INVALID')).toHaveLength(1);
+        expect(exported.files).toHaveLength(1);
+        expect(exported.issues?.filter((issue) => issue.code === 'GEOMETRY_INVALID')).toHaveLength(1);
       });
 
       it('should not warn for the equivalent 2D profile composed before one extrusion', async () => {
@@ -1349,7 +1346,7 @@ module.exports = { main, getParameterDefinitions }
   // Tests: Export Geometry
   // ===========================================================================
 
-  describe('exportGeometry', () => {
+  describe('write', () => {
     it('should return error for unsupported gltf format', async () => {
       const client = createClient({
         'cube.ts': `
@@ -2164,25 +2161,24 @@ module.exports = { main, getParameterDefinitions }
 });
 
 // =============================================================================
-// serializeNativeHandle / deserializeNativeHandle
+// serializeHandle / deserializeHandle
 // =============================================================================
 
-describe('serializeNativeHandle', () => {
+describe('serializeHandle', () => {
   // Charter D12 (W6b) takes the durable snapshot off a display render's published
   // result, so these serializer unit tests take the handle from the kernel
   // definition instead of from `client.render()`. Every assertion about the
   // serializer's own behaviour is unchanged; the durable cache round-trip tests
   // later in this block still exercise the render path.
   const serializeShape = (shape: unknown): JscadSerializedNativeHandleEntry[] => {
-    const { serializeNativeHandle } = jscadDefinition;
-    if (!serializeNativeHandle) {
-      throw new Error('The JSCAD kernel does not define serializeNativeHandle.');
+    const { serializeHandle } = jscadDefinition;
+    if (!serializeHandle) {
+      throw new Error('The JSCAD kernel does not define serializeHandle.');
     }
-    return serializeNativeHandle(
-      { nativeHandle: normalizeJscadParts(shape, testModeling) },
-      createMockKernelRuntime(),
-      { modulesRegistered: true, modeling: testModeling },
-    ) as JscadSerializedNativeHandleEntry[];
+    return serializeHandle({ handle: normalizeJscadParts(shape, testModeling) }, createMockKernelRuntime(), {
+      modulesRegistered: true,
+      modeling: testModeling,
+    }) as JscadSerializedNativeHandleEntry[];
   };
 
   it('should serialize nativeHandle to compact binary arrays', () => {
@@ -2196,17 +2192,17 @@ describe('serializeNativeHandle', () => {
   });
 
   it('should deserialize serialized handles using the normalized package import shape', async () => {
-    const serializedNativeHandle = serializeShape(buildJscadCubeCutout());
+    const serialized = serializeShape(buildJscadCubeCutout());
 
-    const { deserializeNativeHandle } = jscadDefinition;
-    expect(deserializeNativeHandle).toBeDefined();
-    if (!deserializeNativeHandle) {
+    const { deserializeHandle } = jscadDefinition;
+    expect(deserializeHandle).toBeDefined();
+    if (!deserializeHandle) {
       return;
     }
 
-    const restored = deserializeNativeHandle(
+    const restored = deserializeHandle(
       {
-        serializedNativeHandle,
+        serialized,
       },
       createMockKernelRuntime(),
       { modulesRegistered: true, modeling: testModeling },
@@ -2225,57 +2221,52 @@ describe('serializeNativeHandle', () => {
   });
 
   it('should deserialize MessagePack-decoded compact binary handles and export GLB bytes', async () => {
-    const serializedNativeHandle = serializeShape(buildJscadCubeCutout());
+    const serialized = serializeShape(buildJscadCubeCutout());
 
-    const { deserializeNativeHandle, exportGeometry } = jscadDefinition;
-    expect(deserializeNativeHandle).toBeDefined();
-    if (!deserializeNativeHandle) {
+    const { deserializeHandle, write } = jscadDefinition;
+    expect(deserializeHandle).toBeDefined();
+    if (!deserializeHandle) {
       return;
     }
 
-    const decodedSerializedNativeHandle = msgpackDecode(msgpackEncode(serializedNativeHandle));
+    const decodedSerializedNativeHandle = msgpackDecode(msgpackEncode(serialized));
     const decodedEntry = (decodedSerializedNativeHandle as Array<{ data: unknown }>)[0];
     expect(decodedEntry?.data).not.toBeInstanceOf(Float32Array);
     expect(ArrayBuffer.isView(decodedEntry?.data)).toBe(true);
 
-    const restoredHandle = deserializeNativeHandle(
+    const restoredHandle = deserializeHandle(
       {
-        serializedNativeHandle: decodedSerializedNativeHandle as JscadSerializedNativeHandleEntry[],
+        serialized: decodedSerializedNativeHandle as JscadSerializedNativeHandleEntry[],
       },
       createMockKernelRuntime(),
       { modulesRegistered: true, modeling: testModeling },
     );
-    const exportResult = await exportGeometry(
+    const exportResult = await write!(
       {
-        format: 'glb',
-        nativeHandle: restoredHandle,
+        exportId: 'glb',
+        handle: restoredHandle,
         options: jscadGlbExportOptions,
       },
       createMockKernelRuntime(),
       { modulesRegistered: true, modeling: testModeling },
     );
 
-    expect(exportResult.success).toBe(true);
-    if (!exportResult.success) {
-      return;
-    }
-    expect(exportResult.data).toHaveLength(1);
-    expect(exportResult.data[0]?.name).toBe('model.glb');
-    expect(exportResult.data[0]?.bytes.byteLength).toBeGreaterThan(0);
+    expect(exportResult.files).toHaveLength(1);
+    expect(exportResult.files[0].name).toBe('model.glb');
+    expect(exportResult.files[0].bytes.byteLength).toBeGreaterThan(0);
   });
 
   it('should reject malformed serialized compact binary with precise errors', () => {
-    const { deserializeNativeHandle } = jscadDefinition;
-    expect(deserializeNativeHandle).toBeDefined();
-    if (!deserializeNativeHandle) {
+    const { deserializeHandle } = jscadDefinition;
+    expect(deserializeHandle).toBeDefined();
+    if (!deserializeHandle) {
       return;
     }
     const deserializeInvalidHandle = (data: unknown): void => {
-      deserializeNativeHandle(
-        { serializedNativeHandle: data as JscadSerializedNativeHandleEntry[] },
-        createMockKernelRuntime(),
-        { modulesRegistered: true, modeling: testModeling },
-      );
+      deserializeHandle({ serialized: data as JscadSerializedNativeHandleEntry[] }, createMockKernelRuntime(), {
+        modulesRegistered: true,
+        modeling: testModeling,
+      });
     };
 
     expect(() => {
@@ -2431,22 +2422,22 @@ describe('serializeNativeHandle', () => {
 
   it('should preserve serialized part names after handle deserialization for GLB output', async () => {
     const { primitives, transforms } = testJscadApi;
-    const serializedNativeHandle = serializeShape([
+    const serialized = serializeShape([
       Object.assign(primitives.cuboid({ size: [10, 10, 10] }), { name: 'Housing' }),
       Object.assign(transforms.translate([20, 0, 0], primitives.cuboid({ size: [6, 6, 6] })), {
         name: 'Carrier',
       }),
     ]);
 
-    const { deserializeNativeHandle } = jscadDefinition;
-    expect(deserializeNativeHandle).toBeDefined();
-    if (!deserializeNativeHandle) {
+    const { deserializeHandle } = jscadDefinition;
+    expect(deserializeHandle).toBeDefined();
+    if (!deserializeHandle) {
       return;
     }
 
-    const restoredHandle = deserializeNativeHandle(
+    const restoredHandle = deserializeHandle(
       {
-        serializedNativeHandle,
+        serialized,
       },
       createMockKernelRuntime(),
       { modulesRegistered: true, modeling: testModeling },
@@ -2465,8 +2456,8 @@ describe('serializeNativeHandle', () => {
     expect(meshNames).toEqual(nodeNames);
   });
 
-  it('should have serializeNativeHandle and deserializeNativeHandle defined on the kernel', () => {
-    expect(jscadDefinition.serializeNativeHandle).toBeDefined();
-    expect(jscadDefinition.deserializeNativeHandle).toBeDefined();
+  it('should have serializeHandle and deserializeHandle defined on the kernel', () => {
+    expect(jscadDefinition.serializeHandle).toBeDefined();
+    expect(jscadDefinition.deserializeHandle).toBeDefined();
   });
 });

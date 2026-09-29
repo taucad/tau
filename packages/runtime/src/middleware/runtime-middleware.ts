@@ -211,22 +211,6 @@ export interface MiddlewarePluginFactory<
  *
  * @public
  *
- * @example <caption>Wrapping geometry with logging</caption>
- * ```typescript
- * import { defineMiddleware } from '@taucad/runtime/middleware';
- *
- * const loggingMiddleware = defineMiddleware({
- *   id: 'logging',
- *   name: 'Logging',
- *   async wrapCreateGeometry(input, handler, { logger, signal }) {
- *     await fetch('/runtime-events', { method: 'POST', body: 'Computing geometry...', signal });
- *     logger.debug('Computing geometry...');
- *     const result = await handler(input);
- *     logger.debug('Geometry computed');
- *     return result;
- *   },
- * });
- * ```
  */
 export function defineMiddleware<
   const Id extends string,

@@ -19,7 +19,7 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 const testRuntime = defineRuntime({ kernels: [manifoldKernel()], bundlers: [esbuildBundler()] });
-const testClients = new Set<ReturnType<typeof createTestRuntimeClient>>();
+const testClients = new Set<ReturnType<typeof createTestRuntimeClient<typeof testRuntime>>>();
 const createClient = (files: Record<string, string>) => {
   const client = createTestRuntimeClient({ runtime: testRuntime, files });
   testClients.add(client);
@@ -476,29 +476,29 @@ describe('ManifoldWorker', () => {
   describe('native-handle snapshots', () => {
     it('should round-trip GLB bytes through the durable native-handle hooks', async () => {
       const definition = await resolveRuntimePluginDefinition('kernel', manifoldKernel());
-      expect(definition.serializeNativeHandle).toBeDefined();
-      expect(definition.deserializeNativeHandle).toBeDefined();
+      expect(definition.serializeHandle).toBeDefined();
+      expect(definition.deserializeHandle).toBeDefined();
 
       const nativeHandle = { glb: new Uint8Array([0x67, 0x6c, 0x54, 0x46]) };
       const runtime = createMockKernelRuntime();
-      const { serializeNativeHandle, deserializeNativeHandle } = definition;
+      const { serializeHandle, deserializeHandle } = definition;
       const serialize =
-        serializeNativeHandle ??
+        serializeHandle ??
         (() => {
           throw new Error('Manifold native-handle serializer must be defined');
         });
       const deserialize =
-        deserializeNativeHandle ??
+        deserializeHandle ??
         (() => {
           throw new Error('Manifold native-handle deserializer must be defined');
         });
       const context = { manifoldCadModule: {} };
-      const serializedNativeHandle = serialize({ nativeHandle }, runtime, context);
-      const restored = deserialize({ serializedNativeHandle }, runtime, context);
+      const serializedHandle = serialize({ handle: nativeHandle }, runtime, context);
+      const restored = deserialize({ serialized: serializedHandle }, runtime, context);
 
       expect(restored.glb).toEqual(nativeHandle.glb);
       expect(restored.glb).not.toBe(nativeHandle.glb);
-      expect(serializedNativeHandle.glb).not.toBe(nativeHandle.glb);
+      expect(serializedHandle.glb).not.toBe(nativeHandle.glb);
     });
   });
 });

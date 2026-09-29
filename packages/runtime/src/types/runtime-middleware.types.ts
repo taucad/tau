@@ -190,21 +190,6 @@ export type GetParametersHandler = (input: GetParametersInput) => Promise<GetPar
  *
  * @public
  *
- * @example <caption>Logging middleware for geometry pipeline</caption>
- * ```typescript
- * import { defineMiddleware } from '@taucad/runtime/middleware';
- *
- * const loggingMiddleware = defineMiddleware({
- *   id: 'logging',
- *   name: 'Logging',
- *   async wrapCreateGeometry(input, handler, { logger }) {
- *     logger.debug('Computing geometry...');
- *     const result = await handler(input);
- *     logger.debug('Geometry computed');
- *     return result;
- *   },
- * });
- * ```
  */
 export type WrapCreateGeometryHook<
   // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- Default represents z.infer<z.object({})>
@@ -294,19 +279,6 @@ export type WrapGetParametersHook<
  * @template Options - The options type from the middleware's optionsSchema. Must be an object type.
  * @public
  *
- * @example <caption>Parameter file resolver declaring a dependency</caption>
- * ```typescript
- * import { defineMiddleware } from '@taucad/runtime/middleware';
- *
- * const parameterResolver = defineMiddleware({
- *   id: 'parameter-resolver',
- *   name: 'ParameterResolver',
- *   async getDependencies({ entryPath }, { signal }) {
- *     const response = await fetch(`/parameter-path?entry=${encodeURIComponent(entryPath)}`, { signal });
- *     return [{ path: await response.text(), affects: ['createGeometry'] }];
- *   },
- * });
- * ```
  */
 export type MiddlewareDependencyDeclaration = Readonly<{
   /** Path of the dependency within the runtime filesystem. */

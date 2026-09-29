@@ -68,10 +68,8 @@ const createClient = (files: Record<string, string>): TestClient => {
   return client;
 };
 
-type Output = 'schematic' | 'pcb' | '3d';
-
-const render = async (client: TestClient, path: string, output?: Output): Promise<HashedGeometryResult> => {
-  const outcome = await client.render({ source: { path }, ...(output ? { renderOptions: { output } } : {}) });
+const render = async (client: TestClient, path: string): Promise<HashedGeometryResult> => {
+  const outcome = await client.render({ source: { path } });
   if (outcome.superseded) {
     throw new Error('Test render was superseded');
   }
@@ -86,15 +84,6 @@ const expectGeometry = (result: HashedGeometryResult): GeometryResponse & { hash
     throw new Error('unreachable');
   }
   return result.data;
-};
-
-const expectSvg = (result: HashedGeometryResult): string => {
-  const data = expectGeometry(result);
-  expect(data.format).toBe('svg');
-  if (data.format !== 'svg') {
-    throw new Error('unreachable');
-  }
-  return data.content;
 };
 
 const expectGlb = (result: HashedGeometryResult): Uint8Array<ArrayBuffer> => {
@@ -133,24 +122,33 @@ const countElementTypes = (circuitJson: readonly CircuitElementLike[]): Record<s
 const resolveDefinition = async () => resolveRuntimePluginDefinition('kernel', tscircuitKernel());
 let definition: Awaited<ReturnType<typeof resolveDefinition>>;
 
-/** Observes the kernel's own `createGeometry` calls: the worker invokes the resolved definition. */
-const spyOnCreateGeometry = () => vi.spyOn(definition, 'createGeometry');
+/** Read the settled circuit through its lossless JSON export. */
+const readSettledCircuitJson = async (client: TestClient): Promise<CircuitElementLike[]> => {
+  const result = await client.export('json');
+  if (!result.success) {
+    throw new Error(result.issues.map((issue) => issue.message).join('; '));
+  }
+  const file = result.data[0];
+  if (!file) {
+    throw new TypeError('Circuit JSON export returned no file.');
+  }
+  const parsed: unknown = JSON.parse(new TextDecoder().decode(file.bytes));
+  if (!isCircuitElementArray(parsed)) {
+    throw new TypeError('Circuit JSON export is not an element array.');
+  }
+  return parsed;
+};
 
-const readCreatedCircuitJson = async (
-  spy: ReturnType<typeof spyOnCreateGeometry>,
-  call = 0,
-): Promise<CircuitElementLike[]> => {
-  const result = spy.mock.results[call];
-  expect(result?.type).toBe('return');
-  const output: unknown = await result!.value;
-  if (!isRecordObject(output) || !isRecordObject(output['nativeHandle'])) {
-    throw new TypeError('createGeometry did not return a native handle.');
+/** Project one view directly from the same settled circuit while the old client exposes only its default. */
+const renderSvgView = async (client: TestClient, view: 'schematic' | 'pcb'): Promise<string> => {
+  const circuitJson = await readSettledCircuitJson(client);
+  const runtime = createMockKernelRuntime();
+  const context = await definition.initialize({}, runtime);
+  const output = await definition.render!({ view, handle: { circuitJson }, options: {} }, runtime, context);
+  if (typeof output.content !== 'string') {
+    throw new TypeError(`${view} returned bytes instead of SVG text.`);
   }
-  const { circuitJson } = output['nativeHandle'];
-  if (!isCircuitElementArray(circuitJson)) {
-    throw new TypeError('createGeometry native handle is not circuit JSON.');
-  }
-  return circuitJson;
+  return output.content;
 };
 
 type ExportFormat = 'glb' | 'csv' | 'txt' | 'json';
@@ -208,21 +206,47 @@ afterAll(() => {
 // =============================================================================
 
 describe('TscircuitKernel', () => {
-  describe('createGeometry', () => {
+  describe('evaluate', () => {
+    it('should offer only supported views and exports for board, schematic-only, and empty circuits', async () => {
+      const runtime = createMockKernelRuntime();
+      vi.spyOn(runtime.bundler, 'bundle').mockResolvedValue({
+        code: '',
+        issues: [],
+        success: true,
+        dependencies: [],
+        unresolvedPaths: [],
+      });
+      vi.spyOn(runtime, 'execute').mockResolvedValue({ success: true, value: { default: () => undefined } });
+      const context = { renderCircuit: vi.fn(async (): Promise<CircuitElementLike[]> => []) };
+      const input = { entryPath: 'main.tsx', parameters: {}, options: {} };
+
+      context.renderCircuit.mockResolvedValueOnce([{ type: 'pcb_board' }]);
+      const board = await definition.evaluate(input, runtime, context);
+      expect(board.views).toBeUndefined();
+      expect(board.exports).toBeUndefined();
+
+      context.renderCircuit.mockResolvedValueOnce([{ type: 'schematic_component' }]);
+      const schematic = await definition.evaluate(input, runtime, context);
+      expect(schematic.views).toEqual(['schematic']);
+      expect(schematic.exports).toEqual(['bom', 'netlist', 'circuit']);
+
+      const empty = await definition.evaluate(input, runtime, context);
+      expect(empty.views).toEqual([]);
+      expect(empty.exports).toEqual(['bom', 'netlist', 'circuit']);
+    });
+
     it('should evaluate the fixture board to circuit JSON with the expected element counts', async () => {
-      const spy = spyOnCreateGeometry();
       const client = createClient({ 'main.tsx': fixtureBoard });
 
       expectGlb(await render(client, 'main.tsx'));
 
-      const counts = countElementTypes(await readCreatedCircuitJson(spy));
+      const counts = countElementTypes(await readSettledCircuitJson(client));
       for (const [type, count] of fixtureBoardCounts) {
         expect(counts[type], type).toBe(count);
       }
     });
 
     it('should apply render parameters through the component props', async () => {
-      const spy = spyOnCreateGeometry();
       const files = {
         'main.tsx': `
           export const defaultParameters = { extraResistor: false };
@@ -242,8 +266,7 @@ describe('TscircuitKernel', () => {
       const client = createClient(files);
       const outcome = await client.render({ source: { path: 'main.tsx' }, parameters: { extraResistor: true } });
       expect(outcome.superseded).toBe(false);
-      const lastCall = spy.mock.results.length - 1;
-      expect(countElementTypes(await readCreatedCircuitJson(spy, lastCall))['source_component']).toBe(2);
+      expect(countElementTypes(await readSettledCircuitJson(client))['source_component']).toBe(2);
     });
 
     it('should surface an unresolved library footprint as a warning issue and still render', async () => {
@@ -259,8 +282,9 @@ describe('TscircuitKernel', () => {
         `,
       });
 
-      const result = await render(client, 'main.tsx', 'pcb');
-      expectSvg(result);
+      const result = await render(client, 'main.tsx');
+      const pcb = await renderSvgView(client, 'pcb');
+      expect(pcb.startsWith('<svg')).toBe(true);
       /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- Vitest asymmetric matchers are typed as any in structured assertions. */
       expect(result.success && result.issues).toContainEqual(
         expect.objectContaining({
@@ -288,8 +312,9 @@ describe('TscircuitKernel', () => {
         `,
       });
 
-      const result = await render(client, 'main.tsx', 'pcb');
-      expectSvg(result);
+      const result = await render(client, 'main.tsx');
+      const pcb = await renderSvgView(client, 'pcb');
+      expect(pcb.startsWith('<svg')).toBe(true);
       expect(result.success && result.issues).toContainEqual(expectNetworkWarning(url));
       // The kernel's trap intercepted the request in place of the module-level guard and handed it back.
       expect(globalThis.fetch).toBe(fetchGuard);
@@ -309,7 +334,7 @@ describe('TscircuitKernel', () => {
         `,
       });
 
-      const result = await render(client, 'main.tsx', '3d');
+      const result = await render(client, 'main.tsx');
       validateGlbData(expectGlb(result));
       expect(result.success && result.issues).toContainEqual(expectNetworkWarning(url));
       expect(globalThis.fetch).toBe(fetchGuard);
@@ -342,7 +367,7 @@ describe('TscircuitKernel', () => {
     it('should render the 3d output as a GLB in metres with one mesh per body', async () => {
       const client = createClient({ 'main.tsx': fixtureBoard });
 
-      const glb = expectGlb(await render(client, 'main.tsx', '3d'));
+      const glb = expectGlb(await render(client, 'main.tsx'));
 
       expect(new TextDecoder().decode(glb.subarray(0, 4))).toBe('glTF');
       const document = await new NodeIO().readBinary(glb);
@@ -363,7 +388,7 @@ describe('TscircuitKernel', () => {
     it('should strip the converter texture coordinates so untextured rasterizers accept the GLB', async () => {
       const client = createClient({ 'main.tsx': fixtureBoard });
 
-      const glb = expectGlb(await render(client, 'main.tsx', '3d'));
+      const glb = expectGlb(await render(client, 'main.tsx'));
 
       validateGlbData(glb);
       const document = await new NodeIO().readBinary(glb);
@@ -382,7 +407,8 @@ describe('TscircuitKernel', () => {
     it('should render the schematic output as an SVG with a viewBox and schematic elements', async () => {
       const client = createClient({ 'main.tsx': fixtureBoard });
 
-      const svg = expectSvg(await render(client, 'main.tsx', 'schematic'));
+      expectGlb(await render(client, 'main.tsx'));
+      const svg = await renderSvgView(client, 'schematic');
 
       expect(svg.startsWith('<svg ')).toBe(true);
       expect(svg).toMatch(/^<svg [^>]*viewBox="0 0 \d+(?:\.\d+)? \d+(?:\.\d+)?"/);
@@ -394,7 +420,8 @@ describe('TscircuitKernel', () => {
     it('should render the pcb output as an SVG with a viewBox and pcb elements', async () => {
       const client = createClient({ 'main.tsx': fixtureBoard });
 
-      const svg = expectSvg(await render(client, 'main.tsx', 'pcb'));
+      expectGlb(await render(client, 'main.tsx'));
+      const svg = await renderSvgView(client, 'pcb');
 
       expect(svg).toMatch(/^<svg [^>]*viewBox="0 0 \d+(?:\.\d+)? \d+(?:\.\d+)?"/);
       expect(svg).toContain('pcb-board');
@@ -402,21 +429,15 @@ describe('TscircuitKernel', () => {
       expect(svg).toContain('pcb-trace');
     });
 
-    it('should serve a repeated output kind from the cache and mesh a new kind without re-evaluating', async () => {
-      const spy = spyOnCreateGeometry();
+    it('should project the schematic from the same settled circuit as the repeated default board render', async () => {
       const client = createClient({ 'main.tsx': fixtureBoard });
 
-      const first = expectGeometry(await render(client, 'main.tsx', '3d'));
-      expect(spy).toHaveBeenCalledOnce();
+      const first = expectGeometry(await render(client, 'main.tsx'));
 
-      const second = expectGeometry(await render(client, 'main.tsx', '3d'));
+      const second = expectGeometry(await render(client, 'main.tsx'));
       expect(second.hash).toBe(first.hash);
-      expect(spy).toHaveBeenCalledOnce();
-
-      const schematic = expectGeometry(await render(client, 'main.tsx', 'schematic'));
-      expect(schematic.format).toBe('svg');
-      expect(schematic.hash).not.toBe(first.hash);
-      expect(spy).toHaveBeenCalledOnce();
+      const schematic = await renderSvgView(client, 'schematic');
+      expect(schematic).toContain('class="tscircuit-schematic"');
     });
   });
 
@@ -472,7 +493,7 @@ describe('TscircuitKernel', () => {
       // The test runtime hosts only this kernel and no transcoder, so every route is a tscircuit direct export.
       const routes = client.capabilities?.routes ?? [];
       expect(routes.every((route) => route.transcoderId === undefined)).toBe(true);
-      const formats = routes.map((route) => route.targetFormat).sort();
+      const formats = routes.map((route) => route.targetFormat).sort((left, right) => left.localeCompare(right));
       expect(formats).toEqual(['csv', 'glb', 'json', 'txt']);
     });
 
@@ -507,7 +528,6 @@ describe('TscircuitKernel', () => {
     });
 
     it('should export the circuit JSON handle pretty-printed with every element', async () => {
-      const spy = spyOnCreateGeometry();
       const client = createClient({ 'main.tsx': fixtureBoard });
 
       const { name, text } = await exportText(client, 'json');
@@ -518,8 +538,10 @@ describe('TscircuitKernel', () => {
       if (!isCircuitElementArray(parsed)) {
         throw new TypeError('circuit.json is not a circuit JSON array.');
       }
-      expect(spy).toHaveBeenCalledOnce();
-      expect(countElementTypes(parsed)).toEqual(countElementTypes(await readCreatedCircuitJson(spy)));
+      const counts = countElementTypes(parsed);
+      for (const [type, count] of fixtureBoardCounts) {
+        expect(counts[type], type).toBe(count);
+      }
     });
 
     it('should export a valid GLB in Y-up metres by default and Z-up millimetres on request', async () => {
@@ -555,13 +577,9 @@ describe('TscircuitKernel', () => {
       const runtime = createMockKernelRuntime();
       const context = await definition.initialize({}, runtime);
       const circuitJson = [{ type: 'source_project_metadata', name: 'snapshot' }];
-      const nativeHandle = definition.deserializeNativeHandle!(
+      const nativeHandle = definition.deserializeHandle!(
         {
-          serializedNativeHandle: definition.serializeNativeHandle!(
-            { nativeHandle: { circuitJson } },
-            runtime,
-            context,
-          ),
+          serialized: definition.serializeHandle!({ handle: { circuitJson } }, runtime, context),
         },
         runtime,
         context,
@@ -575,8 +593,8 @@ describe('TscircuitKernel', () => {
       const context = await definition.initialize({}, runtime);
 
       expect(() =>
-        definition.deserializeNativeHandle!(
-          { serializedNativeHandle: new TextEncoder().encode('{"type":"pcb_board"}') },
+        definition.deserializeHandle!(
+          { serialized: new TextEncoder().encode('{"type":"pcb_board"}') },
           runtime,
           context,
         ),

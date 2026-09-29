@@ -7,7 +7,6 @@
 export default function LedBoard() {
   return (
     <board width='30mm' height='20mm'>
-      <schematicsheet />
       <resistor name='R1' resistance='1k' footprint='0402' pcbX={-8} pcbY={4} />
       <resistor
         name='R2'

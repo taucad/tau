@@ -4,6 +4,7 @@ import { tauBillingAccountArgs, tauDatabaseExecArgs } from '#support/tau-account
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.doUnmock('node:child_process');
   vi.doUnmock('#support/config.js');
   vi.resetModules();
@@ -47,6 +48,91 @@ describe('test-account billing discovery', () => {
       expect(fetchMock).toHaveBeenCalledTimes(3);
     },
   );
+});
+
+describe('completed-artifact development funding', () => {
+  const project = 'tau-desktop-e2e-123e4567-e89b-42d3-a456-426614174000';
+  const databaseUrl = 'postgresql://desktop_e2e:private@127.0.0.1:32789/desktop_e2e';
+
+  it.each([
+    { billingUrl: databaseUrl, port: '127.0.0.1:32789', cluster: project, allowed: true },
+    { billingUrl: databaseUrl, port: '127.0.0.1:32790', cluster: project, allowed: false },
+    { billingUrl: databaseUrl, port: '127.0.0.1:32789', cluster: 'another-project', allowed: false },
+    {
+      billingUrl: 'postgresql://desktop_e2e:private@127.0.0.1:5432/desktop_e2e',
+      port: '127.0.0.1:32789',
+      cluster: project,
+      allowed: false,
+    },
+  ])('funds only the verified run-owned database: %j', async ({ billingUrl, port, cluster, allowed }) => {
+    vi.resetModules();
+    vi.stubEnv('TAU_E2E_COMPLETED_CLOUD_GATEWAY', 'true');
+    vi.stubEnv('TAU_E2E_COMPOSE_PROJECT', project);
+    vi.stubEnv('TAU_E2E_POSTGRES_CONTAINER', 'a'.repeat(64));
+    vi.stubEnv('TAU_E2E_POSTGRES_DATABASE', 'desktop_e2e');
+    vi.stubEnv('TAU_E2E_POSTGRES_USER', 'desktop_e2e');
+    vi.stubEnv('DATABASE_URL', databaseUrl);
+    vi.stubEnv('BILLING_DATABASE_URL', billingUrl);
+    vi.doMock('#support/config.js', () => ({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- actual config export
+      desktopE2EApiUrl: 'http://127.0.0.1:4014',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- actual config export
+      desktopE2EFrontendUrl: 'http://localhost:3014',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- actual config export
+      desktopE2ECompletedArtifact: true,
+    }));
+    const calls: Array<{ command: unknown; arguments_: unknown; options: unknown }> = [];
+    vi.doMock('node:child_process', () => {
+      const execFile = (...args: unknown[]): void => {
+        const [command, arguments_, options] = args;
+        calls.push({ command, arguments_, options });
+        const callback = args.at(-1) as (error: Error | undefined, stdout: string, stderr: string) => void;
+        const identity = Array.isArray(arguments_) && arguments_.includes('-At');
+        const published = Array.isArray(arguments_) && arguments_.includes('port');
+        callback(undefined, identity ? `${cluster}|desktop_e2e|desktop_e2e\n` : published ? `${port}\n` : '', '');
+      };
+      Object.defineProperty(execFile, Symbol.for('nodejs.util.promisify.custom'), {
+        value: async (...args: unknown[]) => {
+          const [command, arguments_, options] = args;
+          calls.push({ command, arguments_, options });
+          const identity = Array.isArray(arguments_) && arguments_.includes('-At');
+          const published = Array.isArray(arguments_) && arguments_.includes('port');
+          return {
+            stdout: identity ? `${cluster}|desktop_e2e|desktop_e2e\n` : published ? `${port}\n` : '',
+            stderr: '',
+          };
+        },
+      });
+      return { execFile };
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+        .mockResolvedValueOnce(new Response('{}', { status: 200, headers: { 'set-auth-token': 'test-bearer' } }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ environment: 'development' }), { status: 200 })),
+    );
+    const { seedTauTestUser } = await import('#support/tau-account.js');
+    const account = { email: 'tau-desktop-billing-owner@example.test', name: 'Test', password: 'test' };
+    const result = expect(seedTauTestUser(account));
+    await (allowed ? result.resolves.toBe('test-bearer') : result.rejects.toThrow(/Completed-artifact billing/u));
+    const funding = calls.find((call) => call.command === process.execPath);
+    expect(Boolean(funding)).toBe(allowed);
+    if (funding) {
+      expect(funding.arguments_).not.toContain('--env-file-if-exists=apps/api/.env');
+      expect(funding.options).toMatchObject({
+        env: {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment contract
+          DATABASE_URL: databaseUrl,
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment contract
+          BILLING_DATABASE_URL: databaseUrl,
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment contract
+          BILLING_ENVIRONMENT: 'development',
+        },
+      });
+    }
+  });
 });
 
 describe('completed-artifact database isolation', () => {

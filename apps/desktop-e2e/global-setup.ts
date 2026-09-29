@@ -133,10 +133,10 @@ export const setup = async (): Promise<() => void> => {
    * (`billing.module.ts`), so the seed turn on the fixture route stays mocked
    * while the live turn's own wire (`TAU_E2E_LIVE_MODEL`, OpenAI by default)
    * reaches the real provider and earns the credit delta; an Anthropic live
-   * model would be stubbed and is not a supported live selection. Not the
-   * completed-artifact tier: its isolated API has no billing environment, and
-   * `environmentSchema` refuses this name without `BILLING_ENVIRONMENT=development`. */
-  if (!desktopE2ECompletedArtifact) {
+   * model would be stubbed and is not a supported live selection. The default
+   * completed-artifact tier remains self-host; an explicit isolated-cloud
+   * gateway run uses its verified disposable development billing database. */
+  if (!desktopE2ECompletedArtifact || process.env['TAU_E2E_COMPLETED_CLOUD_GATEWAY'] === 'true') {
     environment['TAU_CLOUD_ENABLED'] = 'true';
     environment['BILLING_ENVIRONMENT'] = 'development';
     environment['BILLING_USAGE_CURSOR_SECRET'] = 'desktop-e2e-usage-cursor-secret-min-32-chars';

@@ -218,7 +218,8 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
   const account = tauTestAccount('geometry-host');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
-  fixture = await startGatewayFixture({ toolCalls: (turn) => (turn === 1 ? slowCalls : quickCalls) });
+  let toolPhase: 'quick' | 'slow' = 'quick';
+  fixture = await startGatewayFixture({ toolCalls: () => (toolPhase === 'slow' ? slowCalls : quickCalls) });
   session = await launchDesktopApp({
     packaged: true,
     token,
@@ -255,6 +256,7 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
 
   const beforeSlow = await geometryHostEvents(session);
   const runsBeforeSlow = beforeSlow.filter((event) => event.kind === 'run').length;
+  toolPhase = 'slow';
   await sendPrompt(page, 'Run the AP242 native check.');
   await expect
     .poll(
@@ -310,6 +312,7 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
 
   await expectVisible(stopButtonOf(page), 15_000);
   await stopButtonOf(page).click();
+  toolPhase = 'quick';
   const requestsBeforeRestart = fixture.gatewayRequests.length;
   /* Request the next turn promptly after cancellation; dispatch must follow actual exit. */
   await sendPrompt(page, restartPrompt);

@@ -41,6 +41,7 @@ const project = vi.hoisted(() => ({
   geometryUnits: new Map<string, unknown>(),
   viewGraphics: new Map<string, unknown>(),
   editorRef: undefined as unknown,
+  projectRef: { send: vi.fn() },
 }));
 
 type RevealListener = (event: { entryPath: string; unitId: string; componentId: string }) => void;
@@ -246,6 +247,7 @@ const alertRegion = () => screen.getByRole('alert', { name: 'Kinematics error' }
 describe('KinematicsPanelBody', () => {
   beforeEach(() => {
     solvePose.mockReset();
+    project.projectRef.send.mockClear();
   });
 
   it('should render driver sliders in degrees and millimetres and describe read-only followers by joint, relation and range', async () => {
@@ -795,12 +797,22 @@ describe('KinematicsPanelBody', () => {
       const { panelApi, setVisible } = createPanelVisibility(false);
       renderPane({ panelApi });
       expect(unit().dragEnabled).toBe(false);
+      expect(project.projectRef.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'claimGeometryUnit' }));
 
       setVisible(true);
       expect(unit().dragEnabled).toBe(true);
+      const claim = project.projectRef.send.mock.calls.find(
+        ([event]) => event.type === 'claimGeometryUnit',
+      )?.[0] as unknown as {
+        claimId: string;
+        entryPath: string;
+      };
+      expect(claim.entryPath).toBe('main.ts');
+      expect(typeof claim.claimId).toBe('string');
 
       setVisible(false);
       expect(unit().dragEnabled).toBe(false);
+      expect(project.projectRef.send).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: claim.claimId });
     });
 
     it('should disarm viewer drags while the workbench lane is hidden', () => {

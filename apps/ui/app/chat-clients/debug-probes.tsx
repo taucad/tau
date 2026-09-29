@@ -9,6 +9,7 @@
  * `ENV.TAU_DEBUG` is set, so production bundles never install the globals.
  */
 import { useEffect, useRef } from 'react';
+import { randomUuid } from '@taucad/utils/id';
 import type { ReactNode } from 'react';
 import type { CaptureImagesRpcInput, CaptureImagesRpcResult, RunGeoSpecTestsRpcInput } from '@taucad/chat';
 import { rpcName } from '@taucad/chat/constants';
@@ -99,30 +100,36 @@ export function DebugProbes(): ReactNode {
     };
     probeGlobals.__tauCaptureSectionCuts = async (cutLists) => {
       const { projectRef: liveProjectRef, headlessImageService: imageService } = depsRef.current;
-      const cadUnit = liveProjectRef.getSnapshot().context.geometryUnits.get('src/main.ts');
-      if (!cadUnit) {
-        throw new Error('No geometry unit for src/main.ts');
+      const claimId = randomUuid();
+      liveProjectRef.send({ type: 'claimGeometryUnit', claimId, entryPath: 'src/main.ts' });
+      try {
+        const cadUnit = liveProjectRef.getSnapshot().context.geometryUnits.get('src/main.ts');
+        if (!cadUnit) {
+          throw new Error('No geometry unit for src/main.ts');
+        }
+        const cadSnapshot = await awaitFreshRender(cadUnit);
+        const dataUrls: string[] = [];
+        for (const cuts of cutLists) {
+          // oxlint-disable-next-line no-await-in-loop -- the image service runs one capture at a time, in order.
+          const files = await captureSettledCadImages({
+            cadSnapshot,
+            imageService,
+            recipe: { purpose: 'agent', mode: 'isometric', includeEdges: true },
+            presentation: {
+              upDirection: 'z',
+              enableSurfaces: true,
+              enableLines: true,
+              hiddenComponentIds: [],
+              isolatedComponentIds: [],
+              sectionCuts: cuts.map((cut, index) => ({ ...cut, id: `e2e-cut-${index}` })),
+            },
+          });
+          dataUrls.push(...captureFilesToDataUrls(files));
+        }
+        return dataUrls;
+      } finally {
+        liveProjectRef.send({ type: 'releaseGeometryUnit', claimId });
       }
-      const cadSnapshot = await awaitFreshRender(cadUnit);
-      const dataUrls: string[] = [];
-      for (const cuts of cutLists) {
-        // oxlint-disable-next-line no-await-in-loop -- the image service runs one capture at a time, in order.
-        const files = await captureSettledCadImages({
-          cadSnapshot,
-          imageService,
-          recipe: { purpose: 'agent', mode: 'isometric', includeEdges: true },
-          presentation: {
-            upDirection: 'z',
-            enableSurfaces: true,
-            enableLines: true,
-            hiddenComponentIds: [],
-            isolatedComponentIds: [],
-            sectionCuts: cuts.map((cut, index) => ({ ...cut, id: `e2e-cut-${index}` })),
-          },
-        });
-        dataUrls.push(...captureFilesToDataUrls(files));
-      }
-      return dataUrls;
     };
     probeGlobals.__tauHoldChatTurn = armChatTurnHold;
     probeGlobals.__tauReleaseChatTurn = releaseChatTurnHold;

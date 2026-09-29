@@ -24,6 +24,7 @@ import type { UIMatch } from 'react-router';
 import { useProject, useMainGraphics } from '#hooks/use-project.js';
 import { toast } from '#components/ui/sonner.js';
 import { downloadBlob } from '@taucad/utils/file';
+import { randomUuid } from '@taucad/utils/id';
 import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -128,22 +129,29 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
   }, [project, projectName, fileManager]);
 
   const capturePng = useCallback(async (): Promise<Blob> => {
-    if (!mainCadRef) {
-      throw new Error('No settled CAD unit is available');
+    const claimId = randomUuid();
+    projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath: mainEntryPath });
+    try {
+      const claimedActor = projectRef.getSnapshot().context.geometryUnits.get(mainEntryPath) ?? mainCadRef;
+      if (!claimedActor) {
+        throw new Error('No settled CAD unit is available');
+      }
+      const { files, omittedSectionCutIds } = await captureCadImages({
+        cadRef: claimedActor,
+        graphicsRef: mainGraphicsRef,
+        cameraState: getGraphicsCameraState(mainGraphicsRef),
+        imageService,
+        recipe: { purpose: 'utility', mode: 'current' },
+      });
+      if (omittedSectionCutIds.length > 0) {
+        toast.warning(omittedSectionCutsNotice);
+      }
+      const file = files[0]!;
+      return new Blob([file.bytes], { type: file.mimeType });
+    } finally {
+      projectRef.send({ type: 'releaseGeometryUnit', claimId });
     }
-    const { files, omittedSectionCutIds } = await captureCadImages({
-      cadRef: mainCadRef,
-      graphicsRef: mainGraphicsRef,
-      cameraState: getGraphicsCameraState(mainGraphicsRef),
-      imageService,
-      recipe: { purpose: 'utility', mode: 'current' },
-    });
-    if (omittedSectionCutIds.length > 0) {
-      toast.warning(omittedSectionCutsNotice);
-    }
-    const file = files[0]!;
-    return new Blob([file.bytes], { type: file.mimeType });
-  }, [imageService, mainCadRef, mainGraphicsRef]);
+  }, [imageService, mainCadRef, mainEntryPath, mainGraphicsRef, projectRef]);
 
   const handleDownloadPng = useCallback(
     async (filename: string) => {

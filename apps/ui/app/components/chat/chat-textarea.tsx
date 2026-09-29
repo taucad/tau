@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { useSelector } from '@xstate/react';
+import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import { useChatTextareaLogic } from '#components/chat/chat-textarea-types.js';
@@ -11,8 +12,8 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useDraftActions } from '#hooks/use-chat.js';
 import { toast } from '#components/ui/sonner.js';
+import { randomUuid } from '@taucad/utils/id';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
-import type { cadMachine } from '#machines/cad.machine.js';
 import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-types.js';
 import { takeScreenshotGroup } from '#components/chat/tiptap/context-suggestion.utils.js';
 import { useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
@@ -23,6 +24,7 @@ import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, captureFilesToDataUrls, omittedSectionCutsNotice } from '#services/headless-capture.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { latestAcpSessionData } from '#services/agent-host-event-projection.js';
+import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 
 /**
  * Main chat textarea: one composer on every device (C11) — a phone gets the
@@ -130,12 +132,13 @@ export const ChatTextarea = memo(function ({
 
   const geometryUnits = projectContext?.geometryUnits;
   const mainEntryPath = projectContext?.mainEntryPath;
+  const viewSettings = useSelector(projectContext?.editorRef, (state) => state?.context.viewSettings);
   const mainGeometryFormat = useSelector(
     mainEntryPath ? geometryUnits?.get(mainEntryPath) : undefined,
     (state) => state?.context.geometry?.format,
   );
   const screenshotActionItems = useMemo((): ContextSuggestionItem[] => {
-    if (!geometryUnits || !logic.imageInputSupported) {
+    if (!geometryUnits || !viewSettings || !logic.imageInputSupported) {
       return [];
     }
 
@@ -160,7 +163,7 @@ export const ChatTextarea = memo(function ({
       });
     }
 
-    for (const [entryPath] of geometryUnits) {
+    for (const entryPath of listGeometryEntryPaths(geometryUnits, viewSettings, mainEntryPath ?? '')) {
       if (entryPath === mainEntryPath) {
         continue;
       }
@@ -176,7 +179,7 @@ export const ChatTextarea = memo(function ({
     }
 
     return items;
-  }, [geometryUnits, mainEntryPath, mainGeometryFormat, logic.imageInputSupported]);
+  }, [geometryUnits, viewSettings, mainEntryPath, mainGeometryFormat, logic.imageInputSupported]);
 
   const mounted = useRef(true);
   useEffect(() => {
@@ -227,39 +230,36 @@ export const ChatTextarea = memo(function ({
     [],
   );
 
-  /** Resolve the CAD actor matching a viewer entry path. */
-  const resolveCadRefForEntry = useCallback(
-    (entryPath: string | undefined): ActorRefFrom<typeof cadMachine> | undefined => {
-      const currentProjectContext = projectContextRef.current;
-      if (!currentProjectContext) {
-        return undefined;
-      }
-      const { geometryUnits, mainEntryPath: mainEntry } = currentProjectContext;
-      const target = entryPath ?? mainEntry;
-      if (target && geometryUnits.has(target)) {
-        return geometryUnits.get(target);
-      }
-      if (entryPath === undefined) {
-        return geometryUnits.values().next().value;
-      }
-      return undefined;
-    },
-    [],
-  );
-
   const captureEntry = useCallback(
     async (entryPath: string | undefined, captureMode: 'current' | 'orthographic', successToast = false) => {
-      const cadRef = resolveCadRefForEntry(entryPath);
-      if (!cadRef) {
+      const currentProjectContext = projectContextRef.current;
+      const target = [
+        entryPath,
+        currentProjectContext?.mainEntryPath,
+        currentProjectContext?.geometryUnits.keys().next().value,
+      ].find((candidate) => candidate !== undefined && candidate !== '');
+      if (!currentProjectContext || !target) {
         toast.error('No CAD view available for image capture');
         return;
       }
+      const claimId = randomUuid();
+      const { projectRef } = currentProjectContext;
+      projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath: target });
       try {
+        const unit = await waitFor(projectRef, (state) => state.context.geometryUnits.has(target), { timeout: 30_000 });
+        const cadRef = unit.context.geometryUnits.get(target);
+        if (!cadRef) {
+          throw new Error('No CAD view available for image capture');
+        }
+        const graphicsRef = resolveGraphicsRefForEntry(entryPath);
         const { files, omittedSectionCutIds } = await captureCadImages({
           cadRef,
-          graphicsRef: resolveGraphicsRefForEntry(entryPath),
+          graphicsRef,
           imageService,
-          recipe: { purpose: 'chat', mode: captureMode },
+          recipe:
+            captureMode === 'current' && !graphicsRef
+              ? { purpose: 'chat', mode: 'isometric' }
+              : { purpose: 'chat', mode: captureMode },
         });
         if (!mounted.current) {
           return;
@@ -277,9 +277,11 @@ export const ChatTextarea = memo(function ({
         if (mounted.current) {
           toast.error(error instanceof Error ? error.message : 'Image capture failed');
         }
+      } finally {
+        projectRef.send({ type: 'releaseGeometryUnit', claimId });
       }
     },
-    [imageService, resolveCadRefForEntry, resolveGraphicsRefForEntry],
+    [imageService, resolveGraphicsRefForEntry],
   );
 
   // Viewer-drop screenshots use the same settled-geometry adapter as menu actions.

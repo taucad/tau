@@ -307,13 +307,15 @@ function JobsWorkbenchPanel(): React.JSX.Element {
   return <JobsPanelBody />;
 }
 
-function PrintWorkbenchPanel(): React.JSX.Element {
-  return <PrintPanelBody />;
+export function PrintWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
+  const isShown = useWorkbenchPanelShown(api);
+  return <PrintPanelBody isShown={isShown} />;
 }
 
-function ExportWorkbenchPanel(): React.JSX.Element {
+export function ExportWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
-  return <ConverterPanelBody downloadOnly={profile === 'shared'} />;
+  const isShown = useWorkbenchPanelShown(api);
+  return <ConverterPanelBody downloadOnly={profile === 'shared'} isShown={isShown} />;
 }
 
 function ShareWorkbenchPanel(): React.JSX.Element {

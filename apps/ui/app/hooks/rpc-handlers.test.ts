@@ -1411,6 +1411,39 @@ describe('rpc-handlers', () => {
 
   describe('createBrowserRuntimeClient', () => {
     describe('getKernelResult', () => {
+      it('keeps a claim while a parked unit wakes and releases it after the fresh render', async () => {
+        const cadUnit = createMockCadUnit({ value: 'idle' });
+        const projectRef = createMockProjectRef({ geometryUnits: new Map([['parked.scad', cadUnit]]) });
+        const fresh = Promise.withResolvers<ReturnType<typeof cadUnit.getSnapshot>>();
+        mockWaitFor.mockReturnValue(fresh.promise);
+
+        const pending = buildDeps({ projectRef }).kernelClient.getKernelResult('parked.scad');
+        await vi.waitFor(() => {
+          expect(projectRef.send).toHaveBeenCalled();
+        });
+        const claim = projectRef.send.mock.calls[0]?.[0] as unknown as {
+          type: string;
+          claimId: string;
+          entryPath: string;
+          renderTimeout?: number;
+        };
+        expect(claim).toEqual({
+          type: 'claimGeometryUnit',
+          claimId: claim.claimId,
+          entryPath: 'parked.scad',
+          renderTimeout: undefined,
+        });
+        expect(typeof claim.claimId).toBe('string');
+        expect(projectRef.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'releaseGeometryUnit' }));
+
+        fresh.resolve(cadUnit.getSnapshot());
+        await expect(pending).resolves.toMatchObject({ success: true, status: 'ready' });
+        expect(projectRef.send).toHaveBeenLastCalledWith({
+          type: 'releaseGeometryUnit',
+          claimId: claim.claimId,
+        });
+      });
+
       it('should return ready status when cad unit is idle with no errors', async () => {
         const cadUnit = createMockCadUnit({ value: 'idle' });
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
@@ -1447,10 +1480,22 @@ describe('rpc-handlers', () => {
         const deps = buildDeps({ projectRef, editorRef });
         await deps.kernelClient.getKernelResult('main.scad');
 
-        expect(projectRef.send).toHaveBeenCalledWith({
-          type: 'createGeometryUnit',
+        const claim = projectRef.send.mock.calls[0]?.[0] as unknown as {
+          type: string;
+          claimId: string;
+          entryPath: string;
+          renderTimeout?: number;
+        };
+        expect(claim).toEqual({
+          type: 'claimGeometryUnit',
+          claimId: claim.claimId,
           entryPath: 'main.scad',
           renderTimeout: 30_000,
+        });
+        expect(typeof claim.claimId).toBe('string');
+        expect(projectRef.send).toHaveBeenCalledWith({
+          type: 'releaseGeometryUnit',
+          claimId: claim.claimId,
         });
       });
 
@@ -1515,14 +1560,15 @@ describe('rpc-handlers', () => {
         });
       });
 
-      it('should send createGeometryUnit when unit does not exist', async () => {
+      it('should claim a geometry unit when it does not exist', async () => {
         const cadUnit = createMockCadUnit({ value: 'idle' });
         const emptyUnits = new Map<string, unknown>();
-        const populatedUnits = new Map<string, unknown>([['new-file.scad', cadUnit]]);
         const projectRef = createMockProjectRef({ geometryUnits: emptyUnits });
-        projectRef.getSnapshot
-          .mockReturnValueOnce({ context: { geometryUnits: emptyUnits, mainEntryPath: 'main.scad' } })
-          .mockReturnValue({ context: { geometryUnits: populatedUnits, mainEntryPath: 'main.scad' } });
+        projectRef.send.mockImplementation((event: { type: string }) => {
+          if (event.type === 'claimGeometryUnit') {
+            emptyUnits.set('new-file.scad', cadUnit);
+          }
+        });
         mockWaitFor.mockResolvedValue({
           value: 'idle',
           context: { kernelIssues: new Map<string, unknown[]>() },
@@ -1531,10 +1577,19 @@ describe('rpc-handlers', () => {
         const deps = buildDeps({ projectRef });
         const result = await deps.kernelClient.getKernelResult('new-file.scad');
 
-        expect(projectRef.send).toHaveBeenCalledWith({
-          type: 'createGeometryUnit',
+        const claim = projectRef.send.mock.calls[0]?.[0] as unknown as {
+          type: string;
+          claimId: string;
+          entryPath: string;
+          renderTimeout?: number;
+        };
+        expect(claim).toEqual({
+          type: 'claimGeometryUnit',
+          claimId: claim.claimId,
           entryPath: 'new-file.scad',
+          renderTimeout: undefined,
         });
+        expect(typeof claim.claimId).toBe('string');
         expect(result.success).toBe(true);
       });
 

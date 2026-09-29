@@ -47,6 +47,7 @@ export const later = '2026-09-24T02:00:05.000Z';
 export const projectId = 'proj_000000000000000000001';
 
 export const mockEditorSend = vi.fn();
+export const mockProjectSend = vi.fn();
 /** Slice writes land in the shared project, so a second slice of the same bytes finds them there. */
 export const mockWriteFiles = vi.fn(async (files: Readonly<Record<string, { content: Uint8Array<ArrayBuffer> }>>) => {
   for (const [path, { content }] of Object.entries(files)) {
@@ -98,8 +99,17 @@ const kernelClient = {
   export: mockExport,
 };
 const cadRenders = new Topic<void>({ name: 'chat-print-fixture.cad-renders' });
-const cadSnapshot = (): { context: Record<string, unknown> } => ({
-  context: { kernelClient, activeKernelId: 'replicad', capabilities, geometry: {} },
+const cadSnapshot = (): { context: Record<string, unknown>; hasTag: () => boolean } => ({
+  context: {
+    kernelClient,
+    activeKernelId: 'replicad',
+    capabilities,
+    geometry: {},
+    entryPath: 'main.ts',
+    latestGeometryOutcome: 'success',
+    kernelIssues: new Map(),
+  },
+  hasTag: () => false,
 });
 let cadState = cadSnapshot();
 const cadActor = {
@@ -110,6 +120,17 @@ const cadActor = {
     }),
   }),
 };
+export const settledCadSnapshot = (): ReturnType<typeof cadActor.getSnapshot> => cadActor.getSnapshot();
+export const failedCadSnapshot = (): ReturnType<typeof cadActor.getSnapshot> => ({
+  ...cadSnapshot(),
+  context: {
+    ...cadState.context,
+    latestGeometryOutcome: 'failure',
+    kernelIssues: new Map([
+      ['main.ts', [{ message: 'radius must be positive', code: 'RUNTIME', type: 'runtime', severity: 'error' }]],
+    ]),
+  },
+});
 
 /** The kernel renders the model again: a new geometry, as after an edit. */
 export const renderGeometry = (): void => {
@@ -121,16 +142,53 @@ type ProjectSeam = Readonly<{
   projectId: string;
   geometryUnits: Map<string, typeof cadActor>;
   mainEntryPath: string;
-  editorRef: { send: typeof mockEditorSend };
+  editorRef: {
+    send: typeof mockEditorSend;
+    getSnapshot: () => {
+      context: {
+        unitSettings: Record<string, { renderTimeout?: number }>;
+        viewSettings: Record<string, { entryPath: string }>;
+      };
+    };
+    subscribe: () => { unsubscribe: () => void };
+  };
+  projectRef: {
+    send: typeof mockProjectSend;
+    getSnapshot: () => { context: { geometryUnits: Map<string, typeof cadActor> } };
+    subscribe: () => { unsubscribe: () => void };
+  };
 }>;
+
+const viewSettings: Record<string, { entryPath: string }> = {};
+export const setRestoredPrintEntryPath = (entryPath: string | undefined): void => {
+  if (entryPath) {
+    viewSettings['parked'] = { entryPath };
+  } else {
+    delete viewSettings['parked'];
+  }
+};
+const geometryUnits = new Map([['main.ts', cadActor]]);
+const editorSnapshot = { context: { unitSettings: {}, viewSettings } };
+const editorRef = {
+  send: mockEditorSend,
+  getSnapshot: () => editorSnapshot,
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
+const projectSnapshot = { context: { geometryUnits } };
+const projectRef = {
+  send: mockProjectSend,
+  getSnapshot: () => projectSnapshot,
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
 
 /** What the pane reads from `useProject`. */
 export const projectMock = {
   useProject: (): ProjectSeam => ({
     projectId,
-    geometryUnits: new Map([['main.ts', cadActor]]),
+    geometryUnits,
     mainEntryPath: 'main.ts',
-    editorRef: { send: mockEditorSend },
+    editorRef,
+    projectRef,
   }),
 };
 

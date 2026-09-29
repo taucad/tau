@@ -11,6 +11,7 @@ import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-naviga
 import { projectChatIdFromSearch, projectChatUrl, projectUrl } from '#utils/project-url.utils.js';
 import { compareChatsByRecency, getChatRecencyAt } from '#utils/chat-recency.utils.js';
 import { StatusMark } from '#components/nav/status-mark.js';
+import { sidebarDisclosureButtonClass } from '#components/nav/sidebar-disclosure.styles.js';
 import {
   SidebarFailureRow,
   SidebarRowActions,
@@ -183,7 +184,7 @@ export function ProjectChatList({
         <SidebarMenuSubItem>
           <SidebarMenuButton
             type='button'
-            className='pr-1.5 pl-[30px] text-muted-foreground/55 hover:bg-transparent hover:text-muted-foreground/90 active:bg-transparent active:text-muted-foreground/90 dark:hover:bg-transparent'
+            className={sidebarDisclosureButtonClass}
             onClick={() => {
               setVisibleCount((count) => count + chatsPerPage);
             }}
@@ -196,7 +197,7 @@ export function ProjectChatList({
         <SidebarMenuSubItem>
           <SidebarMenuButton
             type='button'
-            className='gap-1.5 pl-7.5 text-muted-foreground'
+            className={sidebarDisclosureButtonClass}
             aria-expanded={isTrashOpen}
             onClick={() => {
               setIsTrashOpen((open) => !open);

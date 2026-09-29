@@ -511,7 +511,13 @@ export const prepareArtifacts = (root) => {
   mkdirSync(resolve(root, transportPath), { recursive: true });
   /** @type {(target: string, preparationEnvironment?: Record<string, string | undefined>) => string} */
   const run = (target, preparationEnvironment = {}) => {
-    const argv = ['pnpm', 'nx', 'run', `geospec-engine-native:${target}`];
+    const argv = [
+      'pnpm',
+      'nx',
+      'run',
+      `geospec-engine-native:${target}`,
+      ...(['build', 'assemble-package'].includes(target) ? ['--excludeTaskDependencies'] : []),
+    ];
     const capture = target === 'build-node' || target === 'assemble-package';
     const overrides =
       target === 'build-node'
@@ -661,6 +667,9 @@ export const prepareArtifacts = (root) => {
     { cwd: root, stdio: producerStdio(), env: environment },
   );
   assert.ok(pythonSources.status === 0, 'Locked Python Cargo material fetch failed.');
+  // Build the JS facades from this attempt's fresh generated bindings without
+  // re-entering require-geospec-artifacts while this producer owns its lock.
+  run('build');
   const assemblyOutput = run('assemble-package');
   const selections = [...assemblyOutput.matchAll(/^ASSEMBLY_ROOT=(.+)$/gm)].map((match) => match[1]?.trim());
   assert.ok(

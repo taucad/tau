@@ -255,6 +255,12 @@ const checkTransport = (context, reusePrefixes) => {
       const command = args[2];
       assert.ok(command);
       const target = command.replace('geospec-engine-native:', '');
+      assert.deepEqual(
+        args.slice(3),
+        target === 'build' || target === 'assemble-package' ? ['--excludeTaskDependencies'] : [],
+        'only the explicit facade build and assembly may omit recursive task dependencies',
+      );
+      assert.notEqual(target, 'require-geospec-artifacts', 'producer must not recursively verify its own lock');
       assert.equal(
         options.env.GEOSPEC_DELIVERY_GENERATION,
         target === 'prepare-delivery:reuse-native' ? undefined : generation,
@@ -285,8 +291,11 @@ const checkTransport = (context, reusePrefixes) => {
         assert.equal(options.env.GIT_CEILING_DIRECTORIES, undefined);
       }
       if (target === 'assemble-package') {
-        // Nx owns the target's build dependency. The real input inventory must already verify.
+        // The explicit dependency-excluded build must have produced package facades first.
         verifyArtifacts(producer);
+        for (const name of ['index.mjs', 'node.mjs', 'wasm.mjs']) {
+          assert.ok(existsSync(join(producer, packagePath, 'dist', name)), `missing built facade: ${name}`);
+        }
         assert.equal(observations, 1);
         assert.equal(pythonFetches, 1);
         assert.equal(options.env.CARGO_HOME, join(producer, 'assembly-cargo-home'));
@@ -296,6 +305,13 @@ const checkTransport = (context, reusePrefixes) => {
           put(join(assembly, 'tarballs', name), `inert ${name}`);
         }
         return { status: 0, stdout: `ASSEMBLY_ROOT=${assembly}\n` };
+      }
+      if (target === 'build') {
+        assert.equal(observations, 1, 'native proof must precede facade build');
+        assert.equal(pythonFetches, 1, 'locked Python material must precede facade build');
+        for (const name of ['index.mjs', 'node.mjs', 'wasm.mjs']) {
+          put(join(producer, packagePath, 'dist', name), `inert fresh ${name}`);
+        }
       }
       if (target === 'build-node') {
         assert.equal(options.env.GEOSPEC_NODE_MANIFEST, 'bindings/node/Cargo.toml');
@@ -438,6 +454,7 @@ const checkTransport = (context, reusePrefixes) => {
     'build-node',
     'prepare-delivery:inputs',
     'build-wasm',
+    'build',
     'assemble-package',
   ]);
   assert.equal(inventory.artifacts.length, 5);
@@ -498,7 +515,7 @@ const checkTransport = (context, reusePrefixes) => {
   rmSync(join(consumer, 'node_modules'), { recursive: true });
   assert.deepEqual(verifyArtifacts(consumer), inventory);
   assert.deepEqual(verifyDelivery(consumer), inventory);
-  assert.equal(targets.length, reusePrefixes ? 8 : 7, 'verification must not invoke a producer');
+  assert.equal(targets.length, reusePrefixes ? 9 : 8, 'verification must not invoke a producer');
   assert.equal(observations, 1, 'verification must not observe a native module');
   assert.equal(pythonFetches, 1, 'verification must not fetch Cargo material');
   for (const name of ['root.tgz', 'darwin-arm64.tgz', 'geospec-engine-native-source-relink.tar.gz']) {

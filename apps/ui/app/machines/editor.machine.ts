@@ -5,29 +5,16 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { assertRootedPath, resolveRootedPath } from '@taucad/utils/path';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import type { PartialDeep } from 'type-fest';
-import type { SerializedDockview } from 'dockview-react';
 import type {
   EditorState,
   EditorStateInput,
   OpenFile,
   FileOpenSource,
   PanelState,
-  ViewState,
+  PreviousWorkbenchLayout,
 } from '#types/editor.types.js';
-import type {
-  GraphicsViewSettings,
-  PersistedModelComponentDisplayState,
-  PersistedModelComponentDisplayUnitState,
-  PersistedUnitSettings,
-} from '#constants/editor.constants.js';
-import {
-  defaultPanelState,
-  omitEmptyComponentDisplayState,
-  parseGraphicsViewSettings,
-  parseLegacyModelComponentDisplay,
-  readLegacyRenderTimeout,
-} from '#constants/editor.constants.js';
-import { createSourceModelInteractionUnitId } from '#machines/model-interaction.machine.js';
+import type { GraphicsBackendPreference } from '#constants/editor.constants.js';
+import { defaultPanelState } from '#constants/editor.constants.js';
 import { mergePanelState } from '#utils/panel-state.utils.js';
 
 const maxOpenFiles = 200;
@@ -88,175 +75,13 @@ function rewritePathIfMatched(path: string | undefined, oldPath: string, newPath
   return `${newPath}${path.slice(oldPath.length)}`;
 }
 
-function mergeComponentDisplayUnits(
-  left: PersistedModelComponentDisplayUnitState,
-  right: PersistedModelComponentDisplayUnitState,
-): PersistedModelComponentDisplayUnitState {
-  return {
-    hiddenComponentIds: [...new Set([...(left.hiddenComponentIds ?? []), ...(right.hiddenComponentIds ?? [])])],
-    isolatedComponentIds: [...new Set([...(left.isolatedComponentIds ?? []), ...(right.isolatedComponentIds ?? [])])],
-    opacityByComponentId: {
-      ...left.opacityByComponentId,
-      ...right.opacityByComponentId,
-    },
-  };
-}
-
-function normalizeComponentDisplayUnits(
-  unitsById: Record<string, PersistedModelComponentDisplayUnitState>,
-): PersistedModelComponentDisplayState | undefined {
-  const normalizedEntries = Object.entries(unitsById)
-    .map(([unitId, unit]): [string, PersistedModelComponentDisplayUnitState] | undefined => {
-      const normalizedUnit: PersistedModelComponentDisplayUnitState = {
-        ...((unit.hiddenComponentIds?.length ?? 0) > 0 ? { hiddenComponentIds: unit.hiddenComponentIds } : {}),
-        ...((unit.isolatedComponentIds?.length ?? 0) > 0 ? { isolatedComponentIds: unit.isolatedComponentIds } : {}),
-        ...(Object.keys(unit.opacityByComponentId ?? {}).length > 0
-          ? { opacityByComponentId: unit.opacityByComponentId }
-          : {}),
-      };
-      return Object.keys(normalizedUnit).length > 0 ? [unitId, normalizedUnit] : undefined;
-    })
-    .filter((entry): entry is [string, PersistedModelComponentDisplayUnitState] => entry !== undefined);
-
-  return omitEmptyComponentDisplayState({
-    schemaVersion: 1,
-    unitsById: Object.fromEntries(normalizedEntries),
-  });
-}
-
-function mergeComponentDisplayStates(
-  displays: readonly PersistedModelComponentDisplayState[],
-): PersistedModelComponentDisplayState | undefined {
-  const unitsById: Record<string, PersistedModelComponentDisplayUnitState> = {};
-  for (const display of displays) {
-    for (const [unitId, unit] of Object.entries(display.unitsById)) {
-      unitsById[unitId] = unitsById[unitId] ? mergeComponentDisplayUnits(unitsById[unitId], unit) : unit;
-    }
-  }
-  return normalizeComponentDisplayUnits(unitsById);
-}
-
-function rekeyComponentDisplayForRename(
-  componentDisplay: PersistedModelComponentDisplayState | undefined,
+function rekeyFileSidebarsForRename(
+  widths: Record<string, number>,
   oldPath: string,
   newPath: string,
-): PersistedModelComponentDisplayState | undefined {
-  if (!componentDisplay) {
-    return undefined;
-  }
-
-  const updatedUnits: Record<string, PersistedModelComponentDisplayUnitState> = {};
-  for (const [unitId, unit] of Object.entries(componentDisplay.unitsById)) {
-    const oldUnitPrefix = createSourceModelInteractionUnitId(oldPath);
-    const nextUnitId =
-      unitId === oldUnitPrefix || unitId.startsWith(`${oldUnitPrefix}/`)
-        ? createSourceModelInteractionUnitId(`${newPath}${unitId.slice(oldUnitPrefix.length)}`)
-        : unitId;
-    updatedUnits[nextUnitId] = updatedUnits[nextUnitId]
-      ? mergeComponentDisplayUnits(updatedUnits[nextUnitId], unit)
-      : unit;
-  }
-
-  return normalizeComponentDisplayUnits(updatedUnits);
-}
-
-function pruneComponentDisplayForDeletedPath(
-  componentDisplay: PersistedModelComponentDisplayState | undefined,
-  deletedPath: string,
-): PersistedModelComponentDisplayState | undefined {
-  if (!componentDisplay) {
-    return undefined;
-  }
-
-  const deletedUnitPrefix = createSourceModelInteractionUnitId(deletedPath);
-  return normalizeComponentDisplayUnits(
-    Object.fromEntries(
-      Object.entries(componentDisplay.unitsById).filter(
-        ([unitId]) => unitId !== deletedUnitPrefix && !unitId.startsWith(`${deletedUnitPrefix}/`),
-      ),
-    ),
-  );
-}
-
-function rekeyViewSettingsForRename(
-  viewSettings: Record<string, ViewState>,
-  oldPath: string,
-  newPath: string,
-): Record<string, ViewState> {
+): Record<string, number> {
   return Object.fromEntries(
-    Object.entries(viewSettings).map(([viewId, viewState]) => [
-      viewId,
-      {
-        ...viewState,
-        entryPath: rewritePathIfMatched(viewState.entryPath, oldPath, newPath),
-      },
-    ]),
-  );
-}
-
-/** The per-entry record is keyed by path, so it follows a rename the way `viewSettings.entryPath` does. */
-function rekeyUnitSettingsForRename(
-  unitSettings: Record<string, PersistedUnitSettings>,
-  oldPath: string,
-  newPath: string,
-): Record<string, PersistedUnitSettings> {
-  return Object.fromEntries(
-    Object.entries(unitSettings).map(([entryPath, settings]) => [
-      rewritePathIfMatched(entryPath, oldPath, newPath) ?? entryPath,
-      settings,
-    ]),
-  );
-}
-
-function forgetUnitSettingsForDeletedPath(
-  unitSettings: Record<string, PersistedUnitSettings>,
-  deletedPath: string,
-): Record<string, PersistedUnitSettings> {
-  return Object.fromEntries(
-    Object.entries(unitSettings).filter(([entryPath]) => !pathMatchesPathOrDescendant(entryPath, deletedPath)),
-  );
-}
-
-/**
- * Schema v11 (E1): `renderTimeout` is owned per file, so it moves out of every view record into one
- * per-entry record. Two views on one path keep the longer timeout -- it never breaks a render the
- * shorter one allowed.
- */
-function hoistRenderTimeoutsIntoUnitSettings(
-  /* Persisted input: a stored entry can be absent or malformed whatever the type says. */
-  loadedUnitSettings: Record<string, PersistedUnitSettings | undefined> | undefined,
-  orderedViewSettings: ReadonlyArray<readonly [string, ViewState]>,
-): Record<string, PersistedUnitSettings> {
-  const unitSettings: Record<string, PersistedUnitSettings> = {};
-  for (const [entryPath, settings] of Object.entries(loadedUnitSettings ?? {})) {
-    if (typeof settings?.renderTimeout === 'number' && Number.isFinite(settings.renderTimeout)) {
-      unitSettings[entryPath] = { renderTimeout: settings.renderTimeout };
-    }
-  }
-  for (const [, viewState] of orderedViewSettings) {
-    const { entryPath } = viewState;
-    const legacy = readLegacyRenderTimeout(viewState.graphicsSettings);
-    if (entryPath === undefined || legacy === undefined) {
-      continue;
-    }
-    const existing = unitSettings[entryPath]?.renderTimeout;
-    unitSettings[entryPath] = { renderTimeout: existing === undefined ? legacy : Math.max(existing, legacy) };
-  }
-  return unitSettings;
-}
-
-/** A view whose file was deleted loses its path, so its viewer panel closes. */
-function forgetViewSettingsForDeletedPath(
-  viewSettings: Record<string, ViewState>,
-  deletedPath: string,
-): Record<string, ViewState> {
-  return Object.fromEntries(
-    Object.entries(viewSettings).map(([viewId, viewState]) => [
-      viewId,
-      viewState.entryPath !== undefined && pathMatchesPathOrDescendant(viewState.entryPath, deletedPath)
-        ? { ...viewState, entryPath: undefined }
-        : viewState,
-    ]),
+    Object.entries(widths).map(([path, width]) => [rewritePathIfMatched(path, oldPath, newPath) ?? path, width]),
   );
 }
 
@@ -278,18 +103,11 @@ export type EditorStateContext = {
   focusedChatId: string | undefined;
   /** Panel layout state (open/close, sizes, mobile tab) */
   panelState: PanelState;
-  /** Serialized mixed file/utility Workbench Dockview layout */
-  workbenchLayout: SerializedDockview | undefined;
-  /** Serialized DockviewReact layout for the geometry viewer area */
-  viewerLayout: SerializedDockview | undefined;
-  /** Per-viewer-panel state, keyed by Dockview panel ID */
-  viewSettings: Record<string, ViewState>;
-  /** Project-scoped model appearance shared by every viewer panel. */
-  modelComponentDisplay: PersistedModelComponentDisplayState | undefined;
-  /** Per-entry-path settings whose live owner is that entry's CAD actor (schema v11). */
-  unitSettings: Record<string, PersistedUnitSettings>;
-  /** Legacy per-view display data must be rewritten into the canonical top-level field. */
-  needsModelComponentDisplayMigration: boolean;
+  /** Device-local file sidebar pixel widths, keyed by project path. */
+  fileSidebars: Record<string, number>;
+  /** Device rendering API preference. */
+  graphicsBackendPreferences: Record<string, GraphicsBackendPreference>;
+  previousLayout: PreviousWorkbenchLayout | undefined;
   isLoading: boolean;
   error: Error | undefined;
   /** Flag indicating changes occurred during a write operation that need persisting */
@@ -348,16 +166,10 @@ type EditorStateEvent =
   | { type: 'setFocusedChatId'; chatId: string | undefined }
   // Panel operations
   | { type: 'setPanelState'; panelState: PartialDeep<PanelState> }
-  // Dockview layout operations
-  | { type: 'setWorkbenchLayout'; layout: SerializedDockview }
-  | { type: 'setViewerLayout'; layout: SerializedDockview }
-  // View settings operations
-  | { type: 'setViewSettings'; viewId: string; viewState: ViewState }
-  | { type: 'updateViewSettings'; viewId: string; settings: Partial<GraphicsViewSettings> }
-  | { type: 'removeViewSettings'; viewId: string }
-  | { type: 'setUnitSettings'; entryPath: string; settings: PersistedUnitSettings }
-  | { type: 'setModelComponentDisplay'; componentDisplay?: PersistedModelComponentDisplayState }
-  | { type: 'pruneComponentDisplayForDeletedPath'; path: string }
+  // Browser-local presentation only; portable arrangement belongs to workbench records.
+  | { type: 'setPreviousLayout'; layout: PreviousWorkbenchLayout | undefined }
+  | { type: 'setFileSidebarWidth'; path: string; width: number }
+  | { type: 'setGraphicsBackendPreference'; viewId: string; preference: GraphicsBackendPreference }
   // Flush pending state immediately (bypasses debounce, used on tab close)
   | { type: 'flushNow' }
   | { type: 'editorStateRetrieved'; state: EditorState | undefined }
@@ -455,48 +267,6 @@ const loadedStatePatch = ({ event }: EditorArgs<'editorStateRetrieved'>, enq: Ed
     ? mergePanelState(defaultPanelState, loadedState.panelState)
     : defaultPanelState;
 
-  // Safe loading for Dockview layout fields -- older persisted data may not have these
-  let workbenchLayout: SerializedDockview | undefined;
-  let viewerLayout: SerializedDockview | undefined;
-  let viewSettings: Record<string, ViewState> = {};
-  let unitSettings: Record<string, PersistedUnitSettings> = {};
-  let modelComponentDisplay = loadedState?.modelComponentDisplay;
-  let needsModelComponentDisplayMigration = false;
-  try {
-    workbenchLayout = loadedState?.workbenchLayout;
-
-    viewerLayout = loadedState?.viewerLayout;
-
-    const persistedViewSettings = loadedState?.viewSettings ?? {};
-    const orderedViewSettings = Object.entries(persistedViewSettings).sort(([left], [right]) =>
-      left.localeCompare(right),
-    );
-    const legacyDisplays = orderedViewSettings
-      .map(([, viewState]) => parseLegacyModelComponentDisplay(viewState.graphicsSettings))
-      .filter((display): display is PersistedModelComponentDisplayState => display !== undefined);
-    needsModelComponentDisplayMigration = orderedViewSettings.some(
-      ([, viewState]) =>
-        (viewState.graphicsSettings as GraphicsViewSettings & { componentDisplay?: unknown }).componentDisplay !==
-        undefined,
-    );
-    modelComponentDisplay ??= mergeComponentDisplayStates(legacyDisplays);
-    unitSettings = hoistRenderTimeoutsIntoUnitSettings(loadedState?.unitSettings, orderedViewSettings);
-    viewSettings = Object.fromEntries(
-      orderedViewSettings.map(([viewId, viewState]) => [
-        viewId,
-        { ...viewState, graphicsSettings: parseGraphicsViewSettings(viewState.graphicsSettings) },
-      ]),
-    );
-  } catch {
-    // Corrupt/incompatible persisted data -- silently default
-    workbenchLayout = undefined;
-    viewerLayout = undefined;
-    viewSettings = {};
-    unitSettings = {};
-    modelComponentDisplay = undefined;
-    needsModelComponentDisplayMigration = false;
-  }
-
   const persistedActivePaneId = loadedState?.activePaneId;
   const openFiles = repairPersistedOpenFiles(loadedState?.openFiles ?? [], persistedActivePaneId);
   const knownPaneIds = new Set<string>(openFiles.map((f) => f.paneId));
@@ -518,12 +288,9 @@ const loadedStatePatch = ({ event }: EditorArgs<'editorStateRetrieved'>, enq: Ed
     // an extant chat id.
     focusedChatId: loadedState?.focusedChatId,
     panelState: mergedPanelState,
-    workbenchLayout,
-    viewerLayout,
-    viewSettings,
-    unitSettings,
-    modelComponentDisplay: omitEmptyComponentDisplayState(modelComponentDisplay),
-    needsModelComponentDisplayMigration,
+    fileSidebars: loadedState?.fileSidebars ?? {},
+    graphicsBackendPreferences: loadedState?.graphicsBackendPreferences ?? {},
+    previousLayout: loadedState?.previousLayout,
     isLoading: false,
   };
 };
@@ -615,12 +382,9 @@ export const editorMachine = setup({
     requestedChatId: input.requestedChatId,
     focusedChatId: undefined,
     panelState: defaultPanelState,
-    workbenchLayout: undefined,
-    viewerLayout: undefined,
-    viewSettings: {},
-    unitSettings: {},
-    modelComponentDisplay: undefined,
-    needsModelComponentDisplayMigration: false,
+    fileSidebars: {},
+    graphicsBackendPreferences: {},
+    previousLayout: undefined,
     isLoading: false,
     error: undefined,
     hasPendingChanges: false,
@@ -905,13 +669,7 @@ export const editorMachine = setup({
               return {
                 context: {
                   openFiles,
-                  viewSettings: rekeyViewSettingsForRename(context.viewSettings, oldPath, newPath),
-                  unitSettings: rekeyUnitSettingsForRename(context.unitSettings, oldPath, newPath),
-                  modelComponentDisplay: rekeyComponentDisplayForRename(
-                    context.modelComponentDisplay,
-                    oldPath,
-                    newPath,
-                  ),
+                  fileSidebars: rekeyFileSidebarsForRename(context.fileSidebars, oldPath, newPath),
                 },
               };
             },
@@ -920,52 +678,15 @@ export const editorMachine = setup({
             setPanelState: {
               context: ({ context, event }) => ({ panelState: mergePanelState(context.panelState, event.panelState) }),
             },
-            setWorkbenchLayout: { context: ({ event }) => ({ workbenchLayout: event.layout }) },
-            setViewerLayout: { context: ({ event }) => ({ viewerLayout: event.layout }) },
-            setViewSettings: {
+            setPreviousLayout: { context: ({ event }) => ({ previousLayout: event.layout }) },
+            setFileSidebarWidth: {
               context: ({ context, event }) => ({
-                viewSettings: { ...context.viewSettings, [event.viewId]: event.viewState },
+                fileSidebars: { ...context.fileSidebars, [event.path]: event.width },
               }),
             },
-            updateViewSettings: ({ context, event }) => {
-              const existing = context.viewSettings[event.viewId];
-              if (!existing) {
-                return {};
-              }
-              return {
-                context: {
-                  viewSettings: {
-                    ...context.viewSettings,
-                    [event.viewId]: {
-                      ...existing,
-                      graphicsSettings: { ...existing.graphicsSettings, ...event.settings },
-                    },
-                  },
-                },
-              };
-            },
-            setUnitSettings: {
+            setGraphicsBackendPreference: {
               context: ({ context, event }) => ({
-                unitSettings: { ...context.unitSettings, [event.entryPath]: event.settings },
-              }),
-            },
-            removeViewSettings: {
-              context: ({ context, event }) => {
-                const { [event.viewId]: _, ...rest } = context.viewSettings;
-                return { viewSettings: rest };
-              },
-            },
-            setModelComponentDisplay: {
-              context: ({ event }) => ({
-                modelComponentDisplay: omitEmptyComponentDisplayState(event.componentDisplay),
-                needsModelComponentDisplayMigration: false,
-              }),
-            },
-            pruneComponentDisplayForDeletedPath: {
-              context: ({ context, event }) => ({
-                modelComponentDisplay: pruneComponentDisplayForDeletedPath(context.modelComponentDisplay, event.path),
-                viewSettings: forgetViewSettingsForDeletedPath(context.viewSettings, event.path),
-                unitSettings: forgetUnitSettingsForDeletedPath(context.unitSettings, event.path),
+                graphicsBackendPreferences: { ...context.graphicsBackendPreferences, [event.viewId]: event.preference },
               }),
             },
           },
@@ -983,14 +704,9 @@ export const editorMachine = setup({
                 renameFile: debounceWrite,
                 setFocusedChatId: debounceWrite,
                 setPanelState: debounceWrite,
-                setWorkbenchLayout: debounceWrite,
-                setViewerLayout: debounceWrite,
-                setViewSettings: debounceWrite,
-                updateViewSettings: debounceWrite,
-                removeViewSettings: debounceWrite,
-                setUnitSettings: debounceWrite,
-                setModelComponentDisplay: debounceWrite,
-                pruneComponentDisplayForDeletedPath: debounceWrite,
+                setPreviousLayout: debounceWrite,
+                setFileSidebarWidth: debounceWrite,
+                setGraphicsBackendPreference: debounceWrite,
                 registerMaterialiseModel: debounceWrite,
               },
             },
@@ -1006,14 +722,9 @@ export const editorMachine = setup({
                 renameFile: restartDebounce,
                 setFocusedChatId: restartDebounce,
                 setPanelState: restartDebounce,
-                setWorkbenchLayout: restartDebounce,
-                setViewerLayout: restartDebounce,
-                setViewSettings: restartDebounce,
-                updateViewSettings: restartDebounce,
-                removeViewSettings: restartDebounce,
-                setUnitSettings: restartDebounce,
-                setModelComponentDisplay: restartDebounce,
-                pruneComponentDisplayForDeletedPath: restartDebounce,
+                setPreviousLayout: restartDebounce,
+                setFileSidebarWidth: restartDebounce,
+                setGraphicsBackendPreference: restartDebounce,
                 registerMaterialiseModel: restartDebounce,
                 // Immediately bypass debounce and write
                 flushNow: { target: 'writing' },
@@ -1029,11 +740,9 @@ export const editorMachine = setup({
                     activePaneId: context.activePaneId,
                     focusedChatId: context.focusedChatId,
                     panelState: context.panelState,
-                    workbenchLayout: context.workbenchLayout,
-                    viewerLayout: context.viewerLayout,
-                    viewSettings: context.viewSettings,
-                    unitSettings: context.unitSettings,
-                    modelComponentDisplay: context.modelComponentDisplay,
+                    fileSidebars: context.fileSidebars,
+                    graphicsBackendPreferences: context.graphicsBackendPreferences,
+                    previousLayout: context.previousLayout,
                   },
                 }),
                 onDone: ({ context }) =>
@@ -1054,13 +763,9 @@ export const editorMachine = setup({
                 renameFile: markPendingChanges,
                 setFocusedChatId: markPendingChanges,
                 setPanelState: markPendingChanges,
-                setWorkbenchLayout: markPendingChanges,
-                setViewerLayout: markPendingChanges,
-                setViewSettings: markPendingChanges,
-                updateViewSettings: markPendingChanges,
-                removeViewSettings: markPendingChanges,
-                setModelComponentDisplay: markPendingChanges,
-                pruneComponentDisplayForDeletedPath: markPendingChanges,
+                setPreviousLayout: markPendingChanges,
+                setFileSidebarWidth: markPendingChanges,
+                setGraphicsBackendPreference: markPendingChanges,
                 registerMaterialiseModel: markPendingChanges,
               },
             },

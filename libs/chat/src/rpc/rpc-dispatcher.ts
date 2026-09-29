@@ -18,6 +18,7 @@ import { handleResolveSkill } from '#rpc/handlers/handle-resolve-skill.js';
 import { handleReadRevisions } from '#rpc/handlers/handle-read-revisions.js';
 import { handleApplyParameterOperation, handleGetParameters } from '#rpc/handlers/handle-parameters.js';
 import { handleWriteTodos } from '#rpc/handlers/handle-write-todos.js';
+import { handleArrangeWorkbench } from '#rpc/handlers/handle-arrange-workbench.js';
 
 type RpcHandlerMap = {
   [K in RpcName]: (args: RpcInput<K>, context?: RpcInvocationContext) => Promise<RpcResult<K>>;
@@ -60,6 +61,7 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
     [rpcName.applyParameterOperation]: async (args, context) =>
       handleApplyParameterOperation(args, deps.parameters, context),
     [rpcName.writeTodos]: async (args) => handleWriteTodos(args, deps.fileSystem),
+    [rpcName.arrangeWorkbench]: async (args) => handleArrangeWorkbench(args, deps.fileSystem, deps.workbench),
   };
 
   const dispatch = async <K extends keyof RpcSchemasRegistry>(

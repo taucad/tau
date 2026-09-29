@@ -233,30 +233,28 @@ const vertex = (record: MeshAnalysisRecord, index: number): [number, number, num
  * @returns Triangle records labelled by primitive.
  * @public
  */
-export const recordTriangles = (record: MeshAnalysisRecord): MeshTriangle[] => {
-  const triangles: MeshTriangle[] = [];
-  const triangleCount = record.trianglePrimitives.length;
-  for (let index = 0; index < triangleCount; index++) {
-    const a = vertex(record, record.triangles[index * 3]!);
-    const b = vertex(record, record.triangles[index * 3 + 1]!);
-    const c = vertex(record, record.triangles[index * 3 + 2]!);
-    const ux = b[0] - a[0];
-    const uy = b[1] - a[1];
-    const uz = b[2] - a[2];
-    const vx = c[0] - a[0];
-    const vy = c[1] - a[1];
-    const vz = c[2] - a[2];
-    triangles.push({
-      primitive: record.primitives[record.trianglePrimitives[index]!]!.name,
-      triangleIndex: index,
-      a,
-      b,
-      c,
-      center: [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3],
-      area: Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2,
-    });
-  }
-  return triangles;
+export const recordTriangles = (record: MeshAnalysisRecord): MeshTriangle[] =>
+  Array.from({ length: record.trianglePrimitives.length }, (_unused, index) => recordTriangle(record, index));
+
+const recordTriangle = (record: MeshAnalysisRecord, index: number): MeshTriangle => {
+  const a = vertex(record, record.triangles[index * 3]!);
+  const b = vertex(record, record.triangles[index * 3 + 1]!);
+  const c = vertex(record, record.triangles[index * 3 + 2]!);
+  const ux = b[0] - a[0];
+  const uy = b[1] - a[1];
+  const uz = b[2] - a[2];
+  const vx = c[0] - a[0];
+  const vy = c[1] - a[1];
+  const vz = c[2] - a[2];
+  return {
+    primitive: record.primitives[record.trianglePrimitives[index]!]!.name,
+    triangleIndex: index,
+    a,
+    b,
+    c,
+    center: [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3],
+    area: Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2,
+  };
 };
 
 /**
@@ -267,7 +265,6 @@ export const recordTriangles = (record: MeshAnalysisRecord): MeshTriangle[] => {
  * @public
  */
 export const recordMeshQuality = (record: MeshAnalysisRecord): MeshQualityStats => {
-  const triangles = recordTriangles(record);
   const nonFiniteVertices: MeshQualityStats['nonFiniteVertices'] = [];
   const degenerateTriangles: MeshQualityStats['degenerateTriangles'] = [];
   let surfaceArea = 0;
@@ -275,7 +272,8 @@ export const recordMeshQuality = (record: MeshAnalysisRecord): MeshQualityStats 
   let centroidX = 0;
   let centroidY = 0;
   let centroidZ = 0;
-  for (const triangle of triangles) {
+  for (let index = 0; index < record.trianglePrimitives.length; index++) {
+    const triangle = recordTriangle(record, index);
     surfaceArea += triangle.area;
     const { a, b, c } = triangle;
     const contribution =
@@ -306,11 +304,10 @@ export const recordMeshQuality = (record: MeshAnalysisRecord): MeshQualityStats 
 
   // Duplicate faces are the expensive third of this record — an exact position
   // index plus a keyed map entry per triangle — and only
-  // `toHaveMeshIntegrity` with a `duplicateFaces` expectation ever reads them,
-  // while `triangles`/`surfaceArea`/`signedVolume` above are read by the
-  // interference sweep and the distance matchers on every assembly. Splitting
-  // them off keeps the common path off the weld. Memoized, so a consumer that
-  // does ask sees one build.
+  // `toHaveMeshIntegrity` with a `duplicateFaces` expectation ever reads them.
+  // The common scalar path does not need the retained triangle-object array.
+  // Memoized, so a consumer that does ask sees one build.
+  let trianglesCache: MeshTriangle[] | undefined;
   let duplicateFacesCache: MeshQualityStats['duplicateFaces'] | undefined;
   const duplicateFaces = (): MeshQualityStats['duplicateFaces'] => {
     if (!duplicateFacesCache) {
@@ -326,7 +323,7 @@ export const recordMeshQuality = (record: MeshAnalysisRecord): MeshQualityStats 
       }
       const found: MeshQualityStats['duplicateFaces'] = [];
       const seen = new Map<string, number>();
-      for (const [index, triangle] of triangles.entries()) {
+      for (let index = 0; index < record.trianglePrimitives.length; index++) {
         // A numeric key would need `n³` for `n` welded vertices, which leaves
         // the safe-integer range on a real assembly; the string stays.
         const corners = [
@@ -341,7 +338,11 @@ export const recordMeshQuality = (record: MeshAnalysisRecord): MeshQualityStats 
         if (first === undefined) {
           seen.set(key, index);
         } else {
-          found.push({ primitive: triangle.primitive, triangleIndex: index, firstTriangleIndex: first });
+          found.push({
+            primitive: record.primitives[record.trianglePrimitives[index]!]!.name,
+            triangleIndex: index,
+            firstTriangleIndex: first,
+          });
         }
       }
       duplicateFacesCache = found;
@@ -350,13 +351,16 @@ export const recordMeshQuality = (record: MeshAnalysisRecord): MeshQualityStats 
   };
 
   return {
-    triangleCount: triangles.length,
+    triangleCount: record.trianglePrimitives.length,
     nonFiniteVertices,
     degenerateTriangles,
     get duplicateFaces(): MeshQualityStats['duplicateFaces'] {
       return duplicateFaces();
     },
-    triangles,
+    get triangles(): MeshTriangle[] {
+      trianglesCache ??= recordTriangles(record);
+      return trianglesCache;
+    },
     surfaceArea,
     signedVolume,
     // A centre of mass only exists for a soup that encloses a finite volume:
@@ -885,14 +889,12 @@ export const recordConnectedComponents = (
  * @public
  */
 export const recordGeometryStats = (record: MeshAnalysisRecord, unitsPerMm = 1): GeometryStats => {
-  // Lazy facets. `recordMeshQuality` materializes one `MeshTriangle` object per
-  // triangle and keys a duplicate-face map by a per-triangle
-  // string; `boundingBox` walks every vertex twice (once for the box, once per
-  // primitive). On the 650-part assembly that is tens of seconds and gigabytes
-  // paid by EVERY subject load, whether or not the file's claims ever read a
-  // mesh facet — and the subject lives for the whole run, so the cost is also
-  // retained. Both are memoized on first read, so a consumer that does want
-  // them sees the identical object it saw before.
+  // Lazy facets. Mesh-quality scalars and defect witnesses scan triangles on
+  // first read without retaining the full `MeshTriangle` array. The triangle
+  // array and duplicate-face map are built and memoized separately on demand.
+  // `boundingBox` walks every vertex twice (once for the box, once per
+  // primitive). Each top-level facet is memoized so repeated reads return the
+  // same object without paying for another analysis.
   let meshQualityCache: MeshQualityStats | undefined;
   const meshQuality = (): MeshQualityStats => {
     meshQualityCache ??= recordMeshQuality(record);

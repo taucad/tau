@@ -1,6 +1,6 @@
 # picovoxel — Interfaces
 
-50 top-level symbols. Signatures are verbatim typescript.
+51 top-level symbols. Signatures are verbatim typescript.
 
 AddBeamOptions: interface AddBeamOptions
 
@@ -15,7 +15,7 @@ AddBeamOptions: interface AddBeamOptions
 
   endRadius: number
 
-  // Hemispherical end caps (SG12 default)
+  // Hemispherical end caps (default true, as upstream)
   roundCap: boolean
 
 // An axis-aligned box in millimetres
@@ -31,8 +31,8 @@ CreatePicoOptions: interface CreatePicoOptions extends CreatePicoRuntimeOptions,
 // Options that shape a runtime
 CreatePicoRuntimeOptions: interface CreatePicoRuntimeOptions
 
-  // Emscripten Module overrides (e.g
-  wasm: object
+  // Emscripten Module overrides forwarded to instantiation
+  wasm: PicoWasmOverrides
 
   // A compiled `WebAssembly.Module` of this entry's wasm (`pico.wasm` for the base entry, `pico-multi.wasm` for `picovoxel/multi`)
   wasmModule: WebAssembly.Module
@@ -46,13 +46,13 @@ CreatePicoSessionOptions: interface CreatePicoSessionOptions
   // Native-memory warning threshold in bytes (default 1 GiB)
   memoryWarningBytes: number
 
-  // SKv2-0 V0.5 (§14.1) — the named lane bundle
+  // The session's lane, a policy claim about every value it produces (see docs/lanes.md)
   lane: 'exact' | 'fast' | 'auto'
 
-  // Session-wide default for the offset family's `fastRenorm` (SK-0.8 first-order renormalization — 3.5–3.9× on offsets, output bounded and gated, see `offset()`)
+  // Session-wide default for the offset family's `fastRenorm` (first-order renormalization — 3.5–3.9× on offsets, output bounded and gated, see `offset()`)
   fastRenorm: boolean
 
-  // SKv2-0 V0.6 — routes lattice rendering down the serial C#-identical `Voxels::RenderLattice` loop instead of the parallel tube-complex lane (both deterministic
+  // Routes lattice rendering down the serial C#-identical `Voxels::RenderLattice` loop instead of the parallel tube-complex lane
   serialLattice: boolean
 
   registry: HandleRegistry
@@ -84,7 +84,7 @@ Lattice: interface Lattice
 
   memUsage: number
 
-  // Raw ABI handle — escape hatch (§10)
+  // Raw ABI handle — escape hatch
   handle: bigint
 
   // Optional
@@ -127,6 +127,12 @@ Mesh: interface Mesh
   // Bounding box
   bounds(): Bounds;
 
+  // Enclosed volume (mm³) and surface area (mm²) from the triangles
+  measure(): {
+      volume: number;
+      area: number;
+    };
+
   // Pure transformed copy
   transform(options: TransformOptions): Mesh;
 
@@ -142,12 +148,12 @@ Mesh: interface Mesh
   // Voxelizes the (closed) mesh
   toVoxels(): Voxels;
 
-  // SG13 — offset in ALL directions from a not-necessarily-closed mesh
+  // Offset in ALL directions from a not-necessarily-closed mesh
   shellVoxels(options: {
       radius: number;
     }): Voxels;
 
-  // SG7 — binary STL bytes with the UNITS= header convention
+  // Binary STL bytes with the UNITS= header convention
   toStl(options?: ToStlOptions): Uint8Array;
 
   // GLB container (positions + indices)
@@ -155,10 +161,10 @@ Mesh: interface Mesh
       acceptLane?: 'fast';
     }): Uint8Array;
 
-  // §14.1 value-class provenance, inherited from the producing voxels/mesh chain
+  // Value provenance, inherited from the producing voxels/mesh chain
   lane: 'exact' | 'fast'
 
-  // Raw ABI handle — escape hatch (§10)
+  // Raw ABI handle — escape hatch
   handle: bigint
 
   // Optional
@@ -179,13 +185,13 @@ Metadata: interface Metadata
   // Typed read
   get(name: string): MetadataValue | undefined;
 
-  // SG3 — reserved names (`PicoGK.*`, `class`, `name`, `file_*`) throw
+  // Reserved names (`PicoGK.*`, `PicoVoxel.*`, `class`, `name`, `file_*`) throw
   set(name: string, value: MetadataValue): void;
 
-  // SG3 guard applies here too
+  // The reserved-name guard applies here too
   remove(name: string): void;
 
-  // Raw ABI handle — escape hatch (§10)
+  // Raw ABI handle — escape hatch
   handle: bigint
 
   // Optional
@@ -197,7 +203,7 @@ Pico: interface Pico
 
   voxelSize: number
 
-  // SKv2-0 V0.5 — the RESOLVED session lane (never `'auto'`
+  // The RESOLVED session lane (never `'auto'`
   lane: 'exact' | 'fast' | 'open'
 
   name: string
@@ -209,7 +215,7 @@ Pico: interface Pico
   // Convert voxel-index coordinates to world millimetres
   voxelToMm(voxel: Vec3): Vec3;
 
-  // Convert world millimetres to integer voxel indices (fixes upstream B2)
+  // Convert world millimetres to integer voxel indices (upstream `MmToVoxels` converts the wrong way)
   mmToVoxel(mm: Vec3): Vec3;
 
   createVoxels(options: CreateVoxelsOptions): Voxels;
@@ -236,13 +242,13 @@ Pico: interface Pico
   // Opens .vdb bytes as a container for field-level access
   openVdb(bytes: Uint8Array): VdbFile;
 
-  // SG5 handshake — the voxel size recorded in .vdb bytes (mm), 0 when the file carries no PicoGK metadata
+  // The voxel-size handshake — the voxel size recorded in .vdb bytes (mm), 0 when the file carries no PicoGK metadata
   vdbVoxelSize(bytes: Uint8Array): number;
 
-  // SG5 — first GRID_LEVEL_SET field wins
+  // The first GRID_LEVEL_SET field wins
   voxelsFromVdb(bytes: Uint8Array): Voxels;
 
-  // SG7 — binary STL bytes to a mesh (UNITS= header honoured on 'auto')
+  // Binary STL bytes to a mesh (UNITS= header honoured on 'auto')
   meshFromStl(bytes: Uint8Array, options?: FromStlOptions): Mesh;
 
   // PicoGK-side memory usage in bytes, per object type
@@ -251,10 +257,10 @@ Pico: interface Pico
   // PicoGK's own per-type allocation counters — the leak oracle
   allocated: AllocatedCounts
 
-  // §10 escape hatch
+  // Escape hatch
   module: PicoWasmModule
 
-  // §10 escape hatch
+  // Escape hatch
   handle: bigint
 
   // Deterministic teardown
@@ -272,6 +278,21 @@ PicoRuntime: interface PicoRuntime
   dispose(): void;
 
   [Symbol.dispose](): void;
+
+// The Emscripten Module overrides picovoxel forwards to its glue
+PicoWasmOverrides: interface PicoWasmOverrides
+
+  // Returns the URL of the wasm file (a filesystem path also works in Node)
+  locateFile: (file: string, scriptDirectory: string) => string
+
+  // The pthread worker script (`picovoxel/multi/worker`), loaded by every worker as a module
+  mainScriptUrlOrBlob: string | Blob
+
+  // Instantiates the module yourself
+  instantiateWasm: (imports: WebAssembly.Imports, receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void) => unknown
+
+  // The wasm file's bytes, compiled in place of fetching the file
+  wasmBinary: ArrayBuffer | Uint8Array
 
 PolyLine: interface PolyLine
 
@@ -296,7 +317,7 @@ PolyLine: interface PolyLine
 
   memUsage: number
 
-  // Raw ABI handle — escape hatch (§10)
+  // Raw ABI handle — escape hatch
   handle: bigint
 
   // Optional
@@ -331,7 +352,7 @@ ScalarField: interface ScalarField extends FieldBase
   // Bounding box of active voxels in mm (dims × voxel size, as C# does)
   bounds(): Bounds;
 
-  // SG6 — stored values are voxel-unit signed distance
+  // Stored values are voxel-unit signed distance
   signedDistanceAt(position: Vec3): number | null;
 
   clone(): ScalarField;
@@ -355,7 +376,7 @@ ShellOptions: interface ShellOptions
 
   smoothInner: number
 
-  // SK-0.8 — see `offset({ fastRenorm })`
+  // See `offset({ fastRenorm })`
   fastRenorm: boolean
 
 SurfaceNormalFieldOptions: interface SurfaceNormalFieldOptions
@@ -382,7 +403,7 @@ ToStlOptions: interface ToStlOptions
   // Offset in mm, applied first
   offset: Vec3
 
-  // §14.1 — acknowledges, for this one export, that the geometry has non-exact provenance
+  // Acknowledges, for this one export, that the geometry has non-exact provenance
   acceptLane: 'fast'
 
 VdbFile: interface VdbFile
@@ -409,7 +430,7 @@ VdbFile: interface VdbFile
       acceptLane?: 'fast';
     }): Uint8Array;
 
-  // Raw ABI handle — escape hatch (§10)
+  // Raw ABI handle — escape hatch
   handle: bigint
 
   // Optional
@@ -456,10 +477,10 @@ Voxels: interface Voxels
   // Pure intersection
   intersect(other: Voxels): Voxels;
 
-  // Content equality (SG10-guarded)
+  // Content equality
   equals(other: Voxels): boolean;
 
-  // SG2 — THE emptiness oracle
+  // THE emptiness oracle
   isEmpty: boolean
 
   // Pure surface offset
@@ -475,13 +496,13 @@ Voxels: interface Voxels
       fastRenorm?: boolean;
     }): Voxels;
 
-  // SG9 — in, 2× out, in again
+  // In, 2× out, in again
   smoothen(options: {
       distance: number;
       fastRenorm?: boolean;
     }): Voxels;
 
-  // SG9 — over-offset composition
+  // Over-offset composition
   fillet(options: {
       rounding: number;
       finalSurfaceDistance?: number;
@@ -518,17 +539,17 @@ Voxels: interface Voxels
       sdf: SdfFunction | SdfExpression;
     }): Voxels;
 
-  // Volume in mm³ from the raw grid — fast but approximate after booleans (SG1)
+  // Volume in mm³ from the raw grid — fast but approximate after booleans (use `properties()`)
   volume: number
 
-  // SG1 — the correct volume (mm³), surface area (mm²) and bounds, from one native traversal of the mesh → fresh-voxels round-trip (src/pico-props.cpp)
+  // Volume (mm³), surface area (mm²) and bounds free of boolean residue, from one native traversal of the mesh → fresh-voxels round-trip (src/pico-props.cpp)
   properties(): {
       volume: number;
       area: number;
       bounds: Bounds;
     };
 
-  // SKv2-0 V0.1 — the G0 canonical grid hash (NON-DETERMINISM.md §14.5)
+  // The canonical grid hash
   gridHash(): {
       hash: string;
       activeVoxels: number;
@@ -539,7 +560,7 @@ Voxels: interface Voxels
   // Oracle test tooling
   densifyInterior(): void;
 
-  // SG1 — bounding box via the intermediate mesh (the only accurate way)
+  // Bounding box via the intermediate mesh (the only accurate way)
   bounds(): Bounds;
 
   // True if the point is at or below the surface
@@ -554,7 +575,7 @@ Voxels: interface Voxels
   // Ray-surface intersection, or null on a miss
   raycastToSurface(position: Vec3, direction: Vec3): Vec3 | null;
 
-  // SKv2-0 V0.11 (P8) — N rays over ONE cached intersector and one ABI crossing
+  // N rays over ONE cached intersector and one ABI crossing
   raycastBatch(options: {
       origins: ArrayLike<number>;
       directions: ArrayLike<number>;
@@ -563,7 +584,7 @@ Voxels: interface Voxels
       hit: Uint8Array;
     };
 
-  // SKv2-0 V0.11 (P8) — N closest-surface-point queries over one index build (openvdb ClosestSurfacePoint)
+  // N closest-surface-point queries over one index build (openvdb ClosestSurfacePoint)
   closestPointsOnSurface(options: {
       points: ArrayLike<number>;
     }): {
@@ -594,10 +615,10 @@ Voxels: interface Voxels
 
   memUsage: number
 
-  // §14.1 value-class provenance
+  // Value provenance
   lane: 'exact' | 'fast'
 
-  // Raw ABI handle — escape hatch (§10)
+  // Raw ABI handle — escape hatch
   handle: bigint
 
   // Optional
@@ -790,7 +811,7 @@ Slice: interface Slice
 
   contours: SliceContour[]
 
-  // §14.1 value-class provenance of the sliced voxels (`'exact'` or absent = exact
+  // Value provenance of the sliced voxels (`'exact'` or absent = exact
   lane: 'exact' | 'fast'
 
 SliceContour: interface SliceContour
@@ -811,7 +832,7 @@ SliceStack: interface SliceStack
       max: readonly [number, number, number];
     }
 
-  // §14.1 value-class provenance (`'exact'` or absent = exact)
+  // Value provenance (`'exact'` or absent = exact)
   lane: 'exact' | 'fast'
 
 SliceVoxelsOptions: interface SliceVoxelsOptions

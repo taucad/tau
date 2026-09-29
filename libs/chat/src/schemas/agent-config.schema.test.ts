@@ -63,6 +63,10 @@ describe('agentConfigSchema', () => {
     });
   });
 
+  it('accepts arrange_workbench as an explicit tool choice', () => {
+    expect(cadAgentConfigSchema.safeParse({ ...validCadAgent, toolChoice: ['arrange_workbench'] }).success).toBe(true);
+  });
+
   describe('cad variant required fields', () => {
     it('should reject a cad agent missing execution with path agent.execution', () => {
       const { execution: _execution, ...withoutExecution } = validCadAgent;

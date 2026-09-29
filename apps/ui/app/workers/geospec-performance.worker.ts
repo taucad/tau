@@ -3,7 +3,7 @@
 import {
   parsePerformanceLabRunInput,
   runPerformanceLabCell,
-} from '../../../../packages/geospec-engine-native/bench/performance-lab-runner.js';
+} from '../../../../packages/geospec-engine/experiments/performance-lab/performance-lab-runner.js';
 /* oxlint-enable no-restricted-imports */
 import type { PerformanceLabPortRequest } from '#services/geospec-performance.js';
 

@@ -7,8 +7,11 @@ import {
   parsePerformanceLabRunInput,
   runPerformanceLabCell,
   withTwoCallClaims,
-} from '#bench/performance-lab-runner';
-import type { PerformanceLabEngineModule, PerformanceLabWasmExecution } from '#bench/performance-lab-runner';
+} from '#experiments/performance-lab/performance-lab-runner.js';
+import type {
+  PerformanceLabEngineModule,
+  PerformanceLabWasmExecution,
+} from '#experiments/performance-lab/performance-lab-runner.js';
 
 const bytes = new TextEncoder().encode('ordinary fixture bytes');
 const sha256 = async (): Promise<string> =>

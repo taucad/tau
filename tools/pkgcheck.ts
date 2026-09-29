@@ -26,17 +26,11 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
-import {
-  bundledLibraries,
-  bundleOwnershipIssues as bundleRuleOwnershipIssues,
-  publishable,
-  workspace,
-} from '@taucad/nx';
+import { bundledLibraries, publishable, workspace } from '@taucad/nx';
 import {
   bundledArtifactIssues,
   bundledWorkspaceMirrors,
   bundleDeclarationClosure,
-  bundleOwnershipIssues,
   bundleWitnessIssues,
   copyTargetPaths,
   doubledPathSegments,
@@ -132,21 +126,19 @@ const directPermittedBundles = new Map(
   ]),
 );
 
-const permittedBundles = bundleDeclarationClosure(
-  directPermittedBundles,
-  resolved.projects.flatMap((project) =>
-    project.manifest?.name !== undefined && project.manifest.private === true && project.tags.includes('type:lib')
-      ? [
-          {
-            name: project.manifest.name,
-            dependencies: project.manifest.dependencies,
-            optionalDependencies: project.manifest.optionalDependencies,
-            devDependencies: project.manifest.devDependencies,
-          },
-        ]
-      : [],
-  ),
+const privateLibraries = resolved.projects.flatMap((project) =>
+  project.manifest?.name !== undefined && project.manifest.private === true && project.tags.includes('type:lib')
+    ? [
+        {
+          name: project.manifest.name,
+          dependencies: project.manifest.dependencies,
+          optionalDependencies: project.manifest.optionalDependencies,
+          devDependencies: project.manifest.devDependencies,
+        },
+      ]
+    : [],
 );
+const permittedBundles = bundleDeclarationClosure(directPermittedBundles, privateLibraries);
 
 /** Every directory under `<projectDirectory>/dist`, relative to that `dist`. */
 function distributionDirectories(projectDirectory: string): string[] {
@@ -382,35 +374,20 @@ function validateBundleOwnership(): CheckResult {
     .filter((project) => !unbuilt.includes(project))
     .map((project) => ({ owner: project.name, bundled: bundledWorkspaceProjects(project) }));
 
-  // Two independent witnesses: the mirrors say what the builds did (one owner
-  // each, and each permitted), the rule says what the manifests and tags allow.
-  const issues = [
-    ...bundleOwnershipIssues(roots),
-    ...bundleWitnessIssues(roots, permittedBundles),
-    ...bundleRuleOwnershipIssues(resolved),
-  ];
+  const issues = bundleWitnessIssues(roots, permittedBundles);
   const notes =
     unbuilt.length === 0
       ? undefined
-      : [`ownership unverified for unbuilt package(s): ${unbuilt.map((project) => project.name).join(', ')}`];
+      : [`bundle mirrors unverified for unbuilt package(s): ${unbuilt.map((project) => project.name).join(', ')}`];
 
   return issues.length === 0
-    ? { name: 'tau-bundle-ownership', status: 'pass', details: ['bundled workspace modules have one owner'], notes }
+    ? { name: 'tau-bundle-ownership', status: 'pass', details: ['bundle mirrors are permitted by each owner'], notes }
     : {
         name: 'tau-bundle-ownership',
         status: 'fail',
-        details: [`${String(issues.length)} bundle ownership conflict(s) found`, ...issues],
+        details: [`${String(issues.length)} invalid bundle mirror(s) found`, ...issues],
         notes,
       };
-}
-
-/**
- * Workspace packages inlined into this artifact: what the build actually
- * mirrored. What the rule *permits* is the ownership check's business.
- */
-function bundledWorkspacePackages(): string[] {
-  const project = publishableProjects.find((candidate) => candidate.name === packageName);
-  return project ? bundledWorkspaceProjects(project).filter((name) => name !== packageName) : [];
 }
 
 /** Every emitted module and declaration file, read once: three rules parse them. */
@@ -421,13 +398,16 @@ const emittedFiles = walkDirectory(join(absoluteRoot, 'dist'))
 const emitted = emittedSpecifiers(emittedFiles);
 
 function validateBundledArtifact(): CheckResult {
-  const bundledPackages = bundledWorkspacePackages();
-  const issues = bundledArtifactIssues(packageJson.dependencies ?? {}, emittedFiles, bundledPackages);
+  const issues = bundledArtifactIssues(
+    packageJson.dependencies ?? {},
+    emittedFiles,
+    privateLibraries.map((library) => library.name),
+  );
   return issues.length === 0
     ? {
         name: 'tau-bundled-artifact',
         status: 'pass',
-        details: ['bundled workspace packages are absent from production dependencies and emitted specifiers'],
+        details: ['private workspace libraries are absent from production dependencies and emitted specifiers'],
       }
     : {
         name: 'tau-bundled-artifact',

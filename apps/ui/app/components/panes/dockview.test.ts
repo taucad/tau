@@ -10,12 +10,14 @@ vi.mock('dockview-react', async () => {
   const dockviewReact = ({
     className,
     disableTabsOverflowList,
+    disableFloatingGroups,
     onReady,
     rightHeaderActionsComponent: RightHeaderActions,
     scrollbars,
   }: {
     className?: string;
     disableTabsOverflowList?: boolean;
+    disableFloatingGroups?: boolean;
     onReady?: (event: DockviewReadyEvent) => void;
     rightHeaderActionsComponent?: FunctionComponent<IDockviewHeaderActionsProps>;
     scrollbars?: string;
@@ -27,6 +29,7 @@ vi.mock('dockview-react', async () => {
       {
         className,
         'data-disable-tabs-overflow-list': String(disableTabsOverflowList),
+        'data-disable-floating-groups': String(disableFloatingGroups),
         'data-scrollbars': scrollbars,
         'data-testid': 'dockview-react',
         ref: (element) => {
@@ -666,6 +669,7 @@ describe('Dockview', () => {
     expect(wrapper?.className).toContain('[--dv-tabs-and-actions-container-height:2.25rem]');
     expect(dockview).toHaveAttribute('data-scrollbars', 'custom');
     expect(dockview).toHaveAttribute('data-disable-tabs-overflow-list', 'true');
+    expect(dockview).toHaveAttribute('data-disable-floating-groups', 'true');
     expect(dockview).toHaveClass('caller-class');
     expect(dockview.className).not.toContain('[--dv-tabs-and-actions-container-height:2.25rem]');
     expect(tabs.scrollLeft).toBe(60);

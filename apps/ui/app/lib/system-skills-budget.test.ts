@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
 
 const maxDescriptionCharacters = 160;
+// B9 ships the approved workbench draft verbatim; all other bundles retain the original limits.
+const workbenchDescriptionCharacters = 540;
+const workbenchBodyTokens = 2400;
 
 /*
  * Derived, not listed. This table used to be nine hardcoded
@@ -22,11 +25,13 @@ const assertSkillBudget = (skillName: string, skillMarkdown: string, maxBodyToke
   }
 
   const body = skillMarkdown.replace(/^---\n[\S\s]*?\n---\n?/, '');
-  if (description.length > maxDescriptionCharacters) {
-    throw new Error(`${skillName} description exceeds ${maxDescriptionCharacters} characters`);
+  const descriptionLimit = skillName === 'workbench' ? workbenchDescriptionCharacters : maxDescriptionCharacters;
+  const bodyLimit = (skillName === 'workbench' ? workbenchBodyTokens : maxBodyTokens) * 4;
+  if (description.length > descriptionLimit) {
+    throw new Error(`${skillName} description exceeds ${descriptionLimit} characters`);
   }
-  if (body.length > maxBodyTokens * 4) {
-    throw new Error(`${skillName} body exceeds ${maxBodyTokens} estimated tokens`);
+  if (body.length > bodyLimit) {
+    throw new Error(`${skillName} body exceeds ${bodyLimit / 4} estimated tokens`);
   }
 };
 

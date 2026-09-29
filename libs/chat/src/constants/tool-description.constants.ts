@@ -1,4 +1,5 @@
 import { toolName } from '#constants/tool.constants.js';
+import { arrangeWorkbenchDescription } from '#schemas/tools/arrange-workbench.tool.schema.js';
 import { requestPrintOptionKeys } from '#schemas/tools/print.tool.schema.js';
 
 const parameterUnitRule =
@@ -75,6 +76,7 @@ Every image includes:
 
 Use these annotations when reasoning about orientation, handedness, opposite faces, and size.`,
   [toolName.editFile]: `Replace text in one existing file. Read the file first and copy oldString with enough context to be unique. The edit tolerates only trailing whitespace and common Unicode punctuation differences. Set replaceAll only when every match should change. ${writeRevisionRule} Use create_file or delete_file for file lifecycle operations.`,
+  [toolName.arrangeWorkbench]: arrangeWorkbenchDescription,
   [toolName.useSkill]: `Activate one available workspace skill by name and read its full SKILL.md instructions.
 
 Use this tool when the user's task matches a skill listed in the system prompt or selected by the user. The tool resolves the selected skill through the client skill resolver, reads only that skill's instructions, records skill usage through the use_skill tool call, and returns raw markdown for you to follow.

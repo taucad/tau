@@ -1,0 +1,46 @@
+---
+title: Workbench Records
+description: Read and author portable layout, view, and per-entry JSON records with @taucad/workbench.
+docType: reference
+icon: 'lucide:panels-top-left text-purple'
+wordBudgetOverride: 500
+---
+
+# Workbench Records
+
+`@taucad/workbench` defines the portable files that describe a Tau project's viewer and workbench. The package has no React or Dockview dependency; a host owns file writes, and an open Tau window applies valid changes to the visible workspace.
+
+| Live project file                | What it controls                                                                                      |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `.tau/workbench/layout.json`     | Chat and workbench lane intent, viewer groups, and workbench tabs.                                    |
+| `.tau/workbench/views/<id>.json` | One named viewer view: entry file, camera, display, grid unit, section cuts, and pinned measurements. |
+| `.tau/workbench/entries.json`    | Render timeout and component visibility shared by every view of each entry file.                      |
+
+These version-1 records belong to the **live project root**, including when an agent's code turn works in a candidate checkout. The layout records group weights, not window pixel widths or keyboard focus. Device choices stay local to the window. Named-layout and device schemas are exported for future file shapes; neither has a runtime writer in this release.
+
+## Read a view
+
+Use the package's path helpers and strict codecs when integrating a file-capable host. A `read` result never rewrites the bytes it received.
+
+```typescript
+import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
+
+const path = workbenchPaths.view('front'); // .tau/workbench/views/front.json
+const text = workbenchRecords.view.serialize({
+  version: 1,
+  entryPath: 'main.scad',
+  name: 'Front',
+  camera: { kind: 'preset', preset: 'front' },
+});
+const result = workbenchRecords.view.read(new TextEncoder().encode(text));
+if (result.status !== 'current') throw new Error(result.message);
+console.log(path, result.record.name); // .tau/workbench/views/front.json Front
+```
+
+`workbenchRecords.layout`, `.view`, and `.entries` validate and serialize the three live shapes. Serialization sorts keys, uses two-space indentation and ends with a newline. A record may be at most 64 KiB. A malformed or unsupported older shape returns `INVALID_RECORD`; a higher `version` returns `NEWER_RECORD`. Both return `invalid-preserved`: keep the original bytes for a person's correction or update instead of replacing them with defaults. Invalid layout bytes offer Reset in the editor; a newer layout asks the person to update Tau without offering Reset.
+
+## How changes appear
+
+A named view such as `Front` appears as `Front · main.scad`. Preset and `look` cameras frame the model; a `look` direction points from the model toward the camera, so `[0, -1, 0]` looks from the front. Lengths in section cuts and measurements are metres in the model frame. The editor adopts record changes from another window or an external file edit, and preserves invalid and newer bytes. Closing a view tab deletes its view record.
+
+For changes that depend on the person's current arrangement, use [arrange_workbench](./agent-tools): it validates the request, writes with checked preconditions, reports conflicts and offers Restore on its chat card. Read [External Agents](./external-agents) for the host and candidate-checkout boundary.

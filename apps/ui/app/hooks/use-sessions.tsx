@@ -8,7 +8,7 @@
  * project.
  */
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
@@ -94,6 +94,7 @@ function SessionsQuitHold(): React.JSX.Element | undefined {
   const actor = useSessions();
   const flushProducers = useFlushProducers();
   const [held, setHeld] = useState(false);
+  const [flushError, setFlushError] = useState<string>();
   const pending = useSelector(actor, (state) => sessionsPendingRevisions(state.context));
 
   useEffect(() => {
@@ -106,21 +107,34 @@ function SessionsQuitHold(): React.JSX.Element | undefined {
     };
   }, [actor]);
 
-  useEffect(() => {
-    return onDesktopQuitRequested(async () => {
-      /* A38's order: producers settle before any session's close cut. A Home
-       * draft still in its debounce writes through the services utility main
-       * disposes once this answers, and `hidden` only fires at window teardown
-       * — after that. Main's bound covers a producer that never settles. */
+  const requestQuit = useCallback(async (): Promise<void> => {
+    /* A38's order: producers settle before any session's close cut. A Home
+     * draft still in its debounce writes through the services utility main
+     * disposes once this answers, and `hidden` only fires at window teardown
+     * — after that. Main's bound covers a producer that never settles. */
+    try {
       await flushProducers();
-      if (actor.getSnapshot().status === 'done') {
-        reportDesktopQuiesced(false);
-        return;
-      }
+    } catch (error) {
+      setFlushError(error instanceof Error ? error.message : 'Pending changes could not be saved.');
       setHeld(true);
-      actor.send({ type: 'quit' });
-    });
+      return;
+    }
+    setFlushError(undefined);
+    if (actor.getSnapshot().status === 'done') {
+      reportDesktopQuiesced(false);
+      return;
+    }
+    setHeld(true);
+    actor.send({ type: 'quit' });
   }, [actor, flushProducers]);
+
+  useEffect(
+    () =>
+      onDesktopQuitRequested(() => {
+        void requestQuit();
+      }),
+    [requestQuit],
+  );
 
   if (!held) {
     return undefined;
@@ -134,14 +148,28 @@ function SessionsQuitHold(): React.JSX.Element | undefined {
     >
       <div className='max-w-sm space-y-3 text-center'>
         <p className='text-sm'>
-          {pending === 0
-            ? 'Closing your projects…'
-            : `Backing up ${pending} ${pending === 1 ? 'revision' : 'revisions'}, then closing…`}
+          {flushError ??
+            (pending === 0
+              ? 'Closing your projects…'
+              : `Backing up ${pending} ${pending === 1 ? 'revision' : 'revisions'}, then closing…`)}
         </p>
+        {flushError ? (
+          <Button
+            type='button'
+            onClick={() => {
+              void requestQuit();
+            }}
+          >
+            Try again
+          </Button>
+        ) : null}
         <Button
           type='button'
           variant='ghost'
           onClick={() => {
+            if (flushError) {
+              actor.send({ type: 'quit' });
+            }
             actor.send({ type: 'quitAnyway' });
           }}
         >

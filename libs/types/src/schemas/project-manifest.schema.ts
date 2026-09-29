@@ -1,21 +1,15 @@
 import { z } from 'zod';
 import {
-  parseAdoptableProjectManifestBytes,
   parseProjectManifestBytes,
   projectIdSchema,
-  projectManifestMaxBytes,
-  projectManifestSchema,
   projectManifestSchemaUrl,
   projectRelativePathSchema,
   projectToManifest,
-  serializeProjectManifest,
 } from '@taucad/project-core';
 import type {
   AdoptableProjectManifest,
-  AdoptableProjectManifestParseResult,
   ProjectManifest,
   ProjectManifestParseIssue as CoreProjectManifestParseIssue,
-  ProjectManifestParseResult,
 } from '@taucad/project-core';
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- This private entrypoint forwards the public project manifest authority without duplicating schemas. */
@@ -29,13 +23,13 @@ export {
   projectRelativePathSchema,
   projectToManifest,
   serializeProjectManifest,
-};
+} from '@taucad/project-core';
 export type {
   AdoptableProjectManifest,
   AdoptableProjectManifestParseResult,
   ProjectManifest,
   ProjectManifestParseResult,
-};
+} from '@taucad/project-core';
 /* oxlint-enable no-barrel-files/no-barrel-files */
 
 /** Strict parser issues plus discovery's missing-manifest issue. @public */

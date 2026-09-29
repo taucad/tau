@@ -147,6 +147,7 @@
     "@taucad/project-core": "workspace:*",
     "buffer": "catalog:",
     "isomorphic-git": "catalog:",
+    "nanoid": "catalog:",
     "zod": "catalog:"
   },
   "peerDependencies": {

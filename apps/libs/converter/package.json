@@ -28,8 +28,7 @@
     "@taucad/brep": "workspace:*",
     "@taucad/gltf": "workspace:*",
     "@taucad/image": "workspace:*",
-    "@taucad/rhino": "workspace:*",
-    "@taucad/runtime": "workspace:*"
+    "@taucad/rhino": "workspace:*"
   },
   "exports": {
     ".": "./src/contracts.ts",
@@ -40,5 +39,8 @@
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
+  },
+  "devDependencies": {
+    "@taucad/runtime": "workspace:*"
   }
 }

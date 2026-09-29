@@ -10,19 +10,23 @@ import type {
   IWatermarkPanelProps,
 } from 'dockview-react';
 import { positionToDirection } from 'dockview-react';
+import type { ViewerNode } from '@taucad/workbench';
 import { Box } from 'lucide-react';
 import type { CapabilitiesManifest } from '@taucad/runtime';
 import { sourcePathMatchesExtensions } from '@taucad/utils/file';
 import type { FileEntry } from '@taucad/types';
 import { idPrefix, tauFileDragMime, tauEditorPanelDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
+import { fromDockview, mintViewRecordId, toDockview } from '#workbench-records/converters.js';
+import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
+import { graphicsSettingsForView, newViewRecord, viewTabTitle } from '#workbench-records/projection.js';
+import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { createStaticDataSource } from '#components/files/file-selector.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { useProject } from '#hooks/use-project.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
-import { defaultGraphicsSettings, parseGraphicsViewSettings } from '#constants/editor.constants.js';
+import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import type { GraphicsViewSettings } from '#constants/editor.constants.js';
-import type { ViewState } from '#types/editor.types.js';
 import { ChatViewer } from '#routes/w.$workspace.$project/chat-viewer.js';
 import { Dockview } from '#components/panes/dockview.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
@@ -45,6 +49,30 @@ type ViewerProfile = 'editor' | 'shared';
 
 const isViewerPanelParameters = (parameters: unknown): parameters is ViewerPanelParameters =>
   typeof (parameters as Partial<ViewerPanelParameters> | undefined)?.viewId === 'string';
+
+/** Adopt the record and return only view IDs genuinely removed from the arrangement. */
+export function adoptViewerRecordNode(api: DockviewApi, node: ViewerNode): string[] {
+  const ids = (current: ViewerNode): string[] =>
+    current.kind === 'group' ? current.tabs.map((tab) => tab.view) : current.children.flatMap(ids);
+  const desired = new Set(ids(node));
+  const existing = api.panels.flatMap((panel) =>
+    isViewerPanelParameters(panel.params) ? [{ id: panel.id, title: panel.title, params: panel.params }] : [],
+  );
+  const dimensions = { width: Math.max(1, api.width), height: Math.max(1, api.height) };
+  const projection = toDockview('viewer', node, { dimensions });
+  // Dockview reuses panel instances but replaces their metadata from the serialized projection.
+  for (const prior of existing) {
+    if (!desired.has(prior.id)) {
+      continue;
+    }
+    const panel = projection.panels[prior.id];
+    if (panel) {
+      projection.panels[prior.id] = { ...panel, title: prior.title, params: prior.params };
+    }
+  }
+  api.fromJSON(projection, { reuseExistingPanels: true });
+  return existing.filter(({ id }) => !desired.has(id)).map(({ id }) => id);
+}
 
 function getDragDataTransfer(event: DragEvent | PointerEvent): DataTransfer | undefined {
   return 'dataTransfer' in event ? (event.dataTransfer ?? undefined) : undefined;
@@ -102,7 +130,7 @@ export function replaceViewerNewTabWithFile({
   api,
   placeholderId,
   path,
-  viewId = generatePrefixedId('view'),
+  viewId = mintViewRecordId(),
   onViewCreated,
 }: {
   readonly api: DockviewApi;
@@ -129,26 +157,6 @@ export function replaceViewerNewTabWithFile({
   placeholder.api.close();
 }
 
-/**
- * Make viewer panels follow their persisted view state: a renamed file retitles
- * its panel, and a deleted file (path cleared by the editor machine) closes it.
- */
-export function reconcileViewerPanelPaths(api: DockviewApi, viewSettings: Record<string, ViewState>): void {
-  for (const panel of api.panels) {
-    const viewState = viewSettings[panel.id];
-    if (!isViewerPanelParameters(panel.params) || !viewState || viewState.entryPath === panel.params.entryPath) {
-      continue;
-    }
-    const { entryPath } = viewState;
-    if (entryPath === undefined) {
-      panel.api.close();
-      continue;
-    }
-    panel.api.updateParameters({ entryPath });
-    panel.api.setTitle(entryPath.split('/').pop() ?? entryPath);
-  }
-}
-
 export function ensureViewerGroup(api: DockviewApi): void {
   if (api.groups.length === 0) {
     api.addGroup();
@@ -166,7 +174,7 @@ export function handleViewerDrop({
 }): void {
   const dataTransfer = getDragDataTransfer(event.nativeEvent);
   const addViewer = (entryPath: string): void => {
-    const viewId = generatePrefixedId('view');
+    const viewId = mintViewRecordId();
     event.api.addPanel({
       id: viewId,
       component: 'viewer',
@@ -323,25 +331,18 @@ function ViewerEmptyState({
   readonly onClose?: () => void;
   readonly closeLabel?: string;
 }): React.JSX.Element {
-  const { projectRef, editorRef } = useProject();
-  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
+  const { projectRef, entriesRecord } = useProject();
+  const viewCommands = useWorkbenchViewCommands();
   const files = useViewerSelectableFiles();
 
   const handleSelect = useCallback(
     (path: string) => {
       const onViewCreated = (viewId: string, entryPath: string): void => {
-        editorRef.send({
-          type: 'setViewSettings',
-          viewId,
-          viewState: {
-            entryPath,
-            graphicsSettings: { ...defaultGraphicsSettings },
-          },
-        });
+        void viewCommands.edit(viewId, (current) => current ?? newViewRecord(entryPath));
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath,
-          renderTimeout: unitSettings[entryPath]?.renderTimeout,
+          renderTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
         });
       };
 
@@ -350,7 +351,7 @@ function ViewerEmptyState({
         return;
       }
 
-      const viewId = generatePrefixedId('view');
+      const viewId = mintViewRecordId();
       containerApi.addPanel({
         id: viewId,
         component: 'viewer',
@@ -360,7 +361,7 @@ function ViewerEmptyState({
       });
       onViewCreated(viewId, path);
     },
-    [containerApi, group, placeholderId, projectRef, editorRef, unitSettings],
+    [containerApi, entriesRecord, group, placeholderId, projectRef, viewCommands],
   );
 
   return (
@@ -411,7 +412,7 @@ export const createInheritedGraphicsSettings = (
     return { ...defaultGraphicsSettings };
   }
   return {
-    ...parseGraphicsViewSettings(activeSettings),
+    ...activeSettings,
     // Cuts belong to the geometry they were made through, so a new pane starts without them.
     cameraView: undefined,
     sectionView: undefined,
@@ -449,7 +450,10 @@ export const ViewerDockview = memo(function ({
 }: {
   readonly profile?: ViewerProfile;
 } = {}): React.JSX.Element {
-  const { projectRef, editorRef, mainEntryPath } = useProject();
+  const { projectRef, editorRef, mainEntryPath, viewRecords, entriesRecord, setViewEntryPath } = useProject();
+  const viewCommands = useWorkbenchViewCommands();
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- The optional workspace is absent in shared-profile embeds.
+  const layoutController = useProjectWorkspace({ enableNoContext: true })?.layoutController;
   const components = useMemo(
     () => ({
       viewer: (properties: IDockviewPanelProps<ViewerPanelParameters>) => (
@@ -461,15 +465,12 @@ export const ViewerDockview = memo(function ({
   );
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
+  const adoptedProjectionRef = useRef<string | undefined>(undefined);
   // Track the active (focused) viewer panel for settings inheritance
   const [activeViewerPanelId, setActiveViewerPanelId] = useState<string | undefined>();
 
-  // Read persisted layout from editor machine
-  const viewerLayout = useSelector(editorRef, (state) => state.context.viewerLayout);
-  const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
   /* The entry's CAD actor owns its render timeout; a unit is seeded with the durable value at spawn
    * rather than pushed from a mount (Finding 4, E1). */
-  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
 
   /**
    * Get the graphics settings to use for a new panel.
@@ -479,29 +480,61 @@ export const ViewerDockview = memo(function ({
    */
   const getInheritedSettings = useCallback((): GraphicsViewSettings => {
     return createInheritedGraphicsSettings(
-      activeViewerPanelId ? viewSettings[activeViewerPanelId]?.graphicsSettings : undefined,
+      activeViewerPanelId
+        ? viewRecords.get(activeViewerPanelId)
+          ? graphicsSettingsForView(viewRecords.get(activeViewerPanelId)!)
+          : undefined
+        : undefined,
     );
-  }, [activeViewerPanelId, viewSettings]);
+  }, [activeViewerPanelId, viewRecords]);
 
-  // Save layout to editor machine on layout changes
+  // A person-edited semantic lane is the only layout write from Dockview.
   useEffect(() => {
-    if (!api) {
+    if (!api || !layoutController || profile === 'shared') {
       return;
     }
 
     const disposable = api.onDidLayoutChange(() => {
-      // Don't persist while restoring layout (fromJSON triggers layout changes)
       if (isRestoringLayout.current) {
         return;
       }
-
-      editorRef.send({ type: 'setViewerLayout', layout: api.toJSON() });
+      try {
+        const node = fromDockview('viewer', api.toJSON());
+        if (JSON.stringify(node) === adoptedProjectionRef.current) {
+          return;
+        }
+        adoptedProjectionRef.current = undefined;
+        layoutController.personViewerChanged(node);
+      } catch {
+        // Dockview can emit while a drag has a temporary unsupported intermediate group.
+      }
     });
 
     return () => {
       disposable.dispose();
     };
-  }, [api, editorRef]);
+  }, [api, layoutController, profile]);
+
+  useEffect(() => {
+    if (!api || !layoutController || profile === 'shared') {
+      return;
+    }
+    return layoutController.registerViewer((node, applied) => {
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+      isRestoringLayout.current = true;
+      try {
+        const removed = adoptViewerRecordNode(api, node);
+        adoptedProjectionRef.current = JSON.stringify(fromDockview('viewer', api.toJSON()));
+        for (const viewId of removed) {
+          void viewCommands.remove(viewId);
+        }
+        applied();
+      } finally {
+        isRestoringLayout.current = false;
+        active?.focus({ preventScroll: true });
+      }
+    });
+  }, [api, layoutController, profile, viewCommands]);
 
   // Track active viewer panel for settings inheritance
   useEffect(() => {
@@ -528,8 +561,11 @@ export const ViewerDockview = memo(function ({
     const removeDisposable = api.onDidRemovePanel((event) => {
       if (isViewerPanelParameters(event.params)) {
         const viewId = event.id;
+        setViewEntryPath(viewId, undefined);
         projectRef.send({ type: 'destroyViewGraphics', viewId });
-        editorRef.send({ type: 'removeViewSettings', viewId });
+        if (!isRestoringLayout.current && profile === 'editor') {
+          void viewCommands.remove(viewId);
+        }
       }
       if (api.panels.length === 0) {
         queueMicrotask(() => {
@@ -543,12 +579,29 @@ export const ViewerDockview = memo(function ({
     };
   }, [api, projectRef, editorRef]);
 
-  // Follow filesystem renames/deletes routed into the editor machine's view state.
   useEffect(() => {
-    if (api) {
-      reconcileViewerPanelPaths(api, viewSettings);
+    if (!api || profile === 'shared') {
+      return;
     }
-  }, [api, viewSettings]);
+    for (const panel of api.panels) {
+      if (!isViewerPanelParameters(panel.params)) {
+        continue;
+      }
+      const record = viewRecords.get(panel.id);
+      if (!record) {
+        continue;
+      }
+      const nextPath = record.entryPath ?? undefined;
+      if (panel.params.entryPath !== nextPath) {
+        panel.api.updateParameters({ entryPath: nextPath });
+      }
+      setViewEntryPath(panel.id, record.entryPath);
+      const title = viewTabTitle(record);
+      if (panel.title !== title) {
+        panel.api.setTitle(title);
+      }
+    }
+  }, [api, profile, setViewEntryPath, viewRecords]);
 
   // Tag outgoing tab drags with the viewer MIME so the editor can identify them
   useEffect(() => {
@@ -645,6 +698,7 @@ export const ViewerDockview = memo(function ({
       }
 
       let panelEntryPath = (panel.params as ViewerPanelParameters | undefined)?.entryPath;
+      setViewEntryPath(panelViewId, panelEntryPath ?? null);
 
       // If the panel was created without an entry path (project was still loading),
       // assign the main entry path now that the project is ready.
@@ -653,14 +707,12 @@ export const ViewerDockview = memo(function ({
         const fileName = mainEntryPath.split('/').pop() ?? mainEntryPath;
         panel.api.setTitle(fileName);
         panel.api.updateParameters({ entryPath: mainEntryPath });
-        editorRef.send({
-          type: 'setViewSettings',
-          viewId: panelViewId,
-          viewState: {
+        if (profile === 'editor') {
+          void viewCommands.edit(panelViewId, (current) => ({
+            ...(current ?? newViewRecord(mainEntryPath)),
             entryPath: mainEntryPath,
-            graphicsSettings: validatedSettings,
-          },
-        });
+          }));
+        }
       }
 
       if (panelEntryPath && admittedGeometry.current.get(panelViewId) !== panelEntryPath) {
@@ -668,7 +720,7 @@ export const ViewerDockview = memo(function ({
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath: panelEntryPath,
-          renderTimeout: unitSettings[panelEntryPath]?.renderTimeout,
+          renderTimeout: entriesRecord?.entries[panelEntryPath]?.renderTimeout,
         });
       }
       if (panelEntryPath && visibleGeometryDemand.current.get(panelViewId) !== panelEntryPath) {
@@ -732,7 +784,7 @@ export const ViewerDockview = memo(function ({
       }
 
       // Create a new viewer panel
-      const viewId = generatePrefixedId('view');
+      const viewId = mintViewRecordId();
       const fileName = entryPath.split('/').pop() ?? entryPath;
 
       api.addPanel({
@@ -742,21 +794,15 @@ export const ViewerDockview = memo(function ({
         params: { viewId, entryPath },
       });
 
-      // Persist view settings (inherit from active panel)
-      editorRef.send({
-        type: 'setViewSettings',
-        viewId,
-        viewState: {
-          entryPath,
-          graphicsSettings: getInheritedSettings(),
-        },
-      });
+      if (profile === 'editor') {
+        void viewCommands.edit(viewId, (current) => current ?? newViewRecord(entryPath, getInheritedSettings()));
+      }
     });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, [api, projectRef, editorRef, getInheritedSettings]);
+  }, [api, getInheritedSettings, profile, projectRef, viewCommands]);
 
   // Handle ready event: restore layout or seed default
   const onReady = useCallback(
@@ -767,32 +813,19 @@ export const ViewerDockview = memo(function ({
       isRestoringLayout.current = true;
 
       try {
-        if (viewerLayout) {
-          dockApi.fromJSON(viewerLayout);
-        } else {
-          // Seed default: single viewer panel for mainEntryPath
-          const viewId = generatePrefixedId('view');
+        if (profile === 'shared') {
+          const viewId = mintViewRecordId();
           dockApi.addPanel({
             id: viewId,
             component: 'viewer',
             title: mainEntryPath || 'Viewer',
             params: { viewId, entryPath: mainEntryPath || undefined },
           });
-
-          // Persist view settings for the seeded panel
-          editorRef.send({
-            type: 'setViewSettings',
-            viewId,
-            viewState: {
-              entryPath: mainEntryPath || undefined,
-              graphicsSettings: { ...defaultGraphicsSettings },
-            },
-          });
         }
       } catch {
         // Corrupt layout -- re-seed defaults
         dockApi.clear();
-        const viewId = generatePrefixedId('view');
+        const viewId = mintViewRecordId();
         dockApi.addPanel({
           id: viewId,
           component: 'viewer',
@@ -800,20 +833,15 @@ export const ViewerDockview = memo(function ({
           params: { viewId, entryPath: mainEntryPath || undefined },
         });
 
-        editorRef.send({
-          type: 'setViewSettings',
-          viewId,
-          viewState: {
-            entryPath: mainEntryPath || undefined,
-            graphicsSettings: { ...defaultGraphicsSettings },
-          },
-        });
+        if (profile === 'editor') {
+          void viewCommands.edit(viewId, (current) => current ?? newViewRecord(mainEntryPath || null));
+        }
       } finally {
         isRestoringLayout.current = false;
       }
       ensureViewerGroup(dockApi);
     },
-    [viewerLayout, mainEntryPath, editorRef],
+    [mainEntryPath, profile, viewCommands],
   );
 
   // Handle external file drops and cross-dockview editor panel drops
@@ -823,26 +851,24 @@ export const ViewerDockview = memo(function ({
         event,
         getInheritedSettings,
         onViewCreated: (viewId, entryPath, graphicsSettings) => {
-          editorRef.send({
-            type: 'setViewSettings',
-            viewId,
-            viewState: { entryPath, graphicsSettings },
-          });
+          if (profile === 'editor') {
+            void viewCommands.edit(viewId, (current) => current ?? newViewRecord(entryPath, graphicsSettings));
+          }
           projectRef.send({
             type: 'createGeometryUnit',
             entryPath,
-            renderTimeout: unitSettings[entryPath]?.renderTimeout,
+            renderTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
           });
         },
       });
     },
-    [projectRef, editorRef, getInheritedSettings, unitSettings],
+    [entriesRecord, getInheritedSettings, profile, projectRef, viewCommands],
   );
 
   // Open-file action: add a new viewer panel in the same group
   const handleOpenFile = useCallback(
     (path: string, group: DockviewGroupPanel, containerApi: DockviewApi) => {
-      const viewId = generatePrefixedId('view');
+      const viewId = mintViewRecordId();
       const fileName = path.split('/').pop() ?? path;
 
       containerApi.addPanel({
@@ -856,23 +882,17 @@ export const ViewerDockview = memo(function ({
         },
       });
 
-      // Inherit settings from active panel
-      editorRef.send({
-        type: 'setViewSettings',
-        viewId,
-        viewState: {
-          entryPath: path,
-          graphicsSettings: getInheritedSettings(),
-        },
-      });
+      if (profile === 'editor') {
+        void viewCommands.edit(viewId, (current) => current ?? newViewRecord(path, getInheritedSettings()));
+      }
 
       projectRef.send({
         type: 'createGeometryUnit',
         entryPath: path,
-        renderTimeout: unitSettings[path]?.renderTimeout,
+        renderTimeout: entriesRecord?.entries[path]?.renderTimeout,
       });
     },
-    [projectRef, editorRef, getInheritedSettings, unitSettings],
+    [entriesRecord, getInheritedSettings, profile, projectRef, viewCommands],
   );
 
   return (

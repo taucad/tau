@@ -118,6 +118,7 @@ export class AgentHostWorkerError extends Error {
 export type AgentHostClientOptions = {
   readonly openFileSystemBridge: () => FileSystemBridgeConnection;
   readonly openProjectRootBridge: () => FileSystemBridgeConnection;
+  readonly openWorkbenchRootBridge: () => FileSystemBridgeConnection;
   readonly computeMode?: 'off' | 'memory' | 'durable' | undefined;
   readonly openComputeStorePort?: (() => MessagePort) | undefined;
   /**

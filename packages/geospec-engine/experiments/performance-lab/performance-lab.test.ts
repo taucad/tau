@@ -7,10 +7,9 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
-// oxlint-disable-next-line no-restricted-imports -- Test reads the private catalog manifest.
-import manifest from './fixtures/performance-lab/manifest.json' with { type: 'json' };
-// oxlint-disable-next-line no-restricted-imports -- Test the versioned current-source overlay without modifying frozen authority.
-import currentAuthority from './fixtures/performance-lab/current-source-authority-v5.json' with { type: 'json' };
+/* oxlint-disable no-restricted-imports -- Private lab checks read the frozen native catalog and fixture receipts. */
+import manifest from '../../../geospec-engine-native/bench/fixtures/performance-lab/manifest.json' with { type: 'json' };
+import currentAuthority from '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v5.json' with { type: 'json' };
 import {
   classifyPerformanceLabDifference,
   performanceLabAnalyticCases,
@@ -20,11 +19,12 @@ import {
   performanceLabQualifiedCases,
   performanceLabScaleCases,
   performanceLabScaleQueries,
-} from '#bench/performance-lab';
-import { selectLabProducts, toRunCase } from '#bench/performance-lab-cli';
-import { runPerformanceLabCell } from '#bench/performance-lab-runner';
+} from '../../../geospec-engine-native/bench/performance-lab.ts';
+/* oxlint-enable no-restricted-imports */
+import { selectLabProducts, toRunCase } from '#experiments/performance-lab/performance-lab-cli.js';
+import { runPerformanceLabCell } from '#experiments/performance-lab/performance-lab-runner.js';
 
-const root = resolve(import.meta.dirname, '../../..');
+const root = resolve(import.meta.dirname, '../../../..');
 
 /**
  * Run one scale cell on the installed native engine, as the lab times it.
@@ -51,7 +51,7 @@ const scaleCellTessellation = async (
       repeats: 1,
       cache: 'cold',
     },
-    { native: async () => selectLabProducts({})(resolve(import.meta.dirname, '../src/node.ts')) },
+    { native: async () => selectLabProducts({})(resolve(root, 'packages/geospec-engine-native/src/node.ts')) },
   );
   const { physical } = result.engineObservations as { physical: Record<string, unknown> };
   return { tessellations: physical['tessellations'], meshRecords: physical['meshRecords'] };

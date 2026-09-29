@@ -25,6 +25,7 @@ const sectionMaxBytes = new Map([
   ['research_capabilities', 800],
   ['transcript_search', 1600],
   ['task_tracking', 800],
+  ['workbench', 800],
   ['plan_mode', 1800],
   ['kernel_skill', 500],
   ['transcript_path', 500],
@@ -66,6 +67,7 @@ const expectedSectionNames = (options: { mode: 'agent' | 'plan'; supportsImageIn
   'geometry_fidelity',
   'research_capabilities',
   'transcript_search',
+  'workbench',
   'task_tracking',
   ...(options.mode === 'plan' ? ['plan_mode'] : []),
   'kernel_skill',
@@ -171,4 +173,12 @@ describe('getCadSystemPrompt progressive-disclosure contract', () => {
       expect(prompt.dynamic.length).toBeGreaterThan(0);
     },
   );
+});
+
+describe('workbench prompt', () => {
+  it('teaches the tool and digest without exceeding its section budget', () => {
+    const prompt = renderDefaultPrompt('openscad');
+    expect(prompt.dynamic).toContain('arrange_workbench');
+    expect(prompt.dynamic).toContain('basedOn');
+  });
 });

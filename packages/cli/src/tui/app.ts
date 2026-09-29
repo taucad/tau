@@ -141,10 +141,21 @@ const applyEvent = (session: Session, event: AgentLogEvent): Session => {
    * next turn is an ordinary Tau one must not inherit the last agent, or the
    * keyboard would go on refusing to steer a run that steers perfectly well. */
   const sameRun = session.runId === event.runId;
+  const startsRun =
+    (event.type === 'message.appended' && event.message.role === 'user') ||
+    (event.type === 'run.lifecycle' && event.state === 'admitted');
+  /* A prior turn can settle after the next has been admitted. Its record is a
+   * transcript row, never a new keyboard target. The user marker precedes
+   * admission, so it must select the new run early enough to retain its agent. */
+  if (session.runId !== undefined && !sameRun && !startsRun) {
+    return { ...session, rows };
+  }
   const base = {
     ...session,
     rows,
     runId: event.runId,
+    state: sameRun ? session.state : undefined,
+    approval: sameRun ? session.approval : undefined,
     agent: externalAgentOf(event) ?? (sameRun ? session.agent : undefined),
     refusal: sameRun ? session.refusal : undefined,
   };

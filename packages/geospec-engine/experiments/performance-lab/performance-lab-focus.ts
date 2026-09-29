@@ -5,7 +5,7 @@
  * admits the case fixture once, then evaluates the unchanged authored claim `--repeats` times on that retained
  * subject: repeat 0 is the cold first claim and later repeats are warm repeat claims.
  * Run with Node's native TypeScript support from any directory. No environment variables required.
- * Usage: node packages/geospec-engine-native/bench/performance-lab-focus.ts --output-dir=out/reports/benchmarks/focus
+ * Usage: node packages/geospec-engine/experiments/performance-lab/performance-lab-focus.ts --output-dir=out/reports/benchmarks/focus
  * Exit: 0 recorded; 1 worker error, unexpected status, product drift or unequal same-family bytes.
  */
 import { execFile, spawn } from 'node:child_process';
@@ -25,17 +25,18 @@ import {
   summarizeLabCaseResults,
   toRunCase,
   verifyLabArtifacts,
-} from '#bench/performance-lab-cli';
-import type { HostReading } from '#bench/performance-lab-cli';
-import type { Artifact } from '#bench/lib';
-import { withTwoCallClaims } from '#bench/performance-lab-runner';
+} from '#experiments/performance-lab/performance-lab-cli.js';
+import type { HostReading } from '#experiments/performance-lab/performance-lab-cli.js';
+// oxlint-disable-next-line no-restricted-imports -- Private lab uses the native benchmark artifact type without a public export.
+import type { Artifact } from '../../../geospec-engine-native/bench/lib.ts';
+import { withTwoCallClaims } from '#experiments/performance-lab/performance-lab-runner.js';
 import type {
   PerformanceLabCaseResult,
   PerformanceLabModules,
   PerformanceLabRunInput,
   PerformanceLabRunResult,
   PerformanceLabWasmExecution,
-} from '#bench/performance-lab-runner';
+} from '#experiments/performance-lab/performance-lab-runner.js';
 
 // oxlint-disable-next-line typescript/no-restricted-types -- Raw JSON evidence distinguishes explicit null from omission.
 type WireNull = null;
@@ -189,8 +190,8 @@ export type FocusSummary = {
   }>;
 };
 
-const root = resolvePath(import.meta.dirname, '../../..');
-const packageRoot = resolvePath(import.meta.dirname, '..');
+const root = resolvePath(import.meta.dirname, '../../../..');
+const packageRoot = resolvePath(root, 'packages/geospec-engine-native');
 const script = resolvePath(import.meta.dirname, 'performance-lab-focus.ts');
 const defaults = {
   module: resolvePath(
@@ -532,7 +533,11 @@ const measureFocusCase = async (spec: { product: FocusProduct; caseId: string; r
     native: async () => {
       const loaded = await load(hostEntry('node'));
       // An add-on from before evaluateClaim (R10) still runs the cell through the calls its client made.
-      const binding = await import('#native-binding');
+      const binding = (await import(
+        pathToFileURL(resolvePath(packageRoot, 'bindings/node/generated/index.js')).href
+      )) as {
+        Engine: { prototype: Record<string, unknown> };
+      };
       const module = 'evaluateClaim' in binding.Engine.prototype ? loaded : withTwoCallClaims(loaded);
       return {
         ...module,
@@ -550,7 +555,7 @@ const measureFocusCase = async (spec: { product: FocusProduct; caseId: string; r
     product.receipt === undefined
       ? undefined
       : { variant: 'mt', permits: product.permits!, receipt: pathToFileURL(product.receipt).href };
-  const { runPerformanceLabCell } = await import('#bench/performance-lab-runner');
+  const { runPerformanceLabCell } = await import('#experiments/performance-lab/performance-lab-runner.js');
   const start = sample();
   const result = await runPerformanceLabCell(
     {
@@ -880,9 +885,9 @@ const productFiles = (request: ProductRequest): string[] =>
       [request.module!, resolvePath(dirname(request.module!), 'cache/evidence-cache.mjs')]
     : [request.addon ?? request.receipt ?? request.binary!, ...(request.glue === undefined ? [] : [request.glue])];
 const sourcePaths = [
-  'bench/performance-lab-focus.ts',
-  'bench/performance-lab-cli.ts',
-  'bench/performance-lab-runner.ts',
+  '../geospec-engine/experiments/performance-lab/performance-lab-focus.ts',
+  '../geospec-engine/experiments/performance-lab/performance-lab-cli.ts',
+  '../geospec-engine/experiments/performance-lab/performance-lab-runner.ts',
   'bench/performance-lab.ts',
   'bench/fixtures/performance-lab/manifest.json',
   'bench/fixtures/performance-lab/authority-cases.json',

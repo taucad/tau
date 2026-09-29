@@ -1,5 +1,16 @@
+/* oxlint-disable typescript/no-restricted-types -- Workbench record entry paths are nullable by schema. */
+/* oxlint-disable eslint/no-await-in-loop -- Producer flushes must finish in owner order before project close. */
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom, InputFrom } from 'xstate';
@@ -15,6 +26,7 @@ import {
 } from '@taucad/types';
 import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import type { ParameterManifest, ParameterSetOutcome } from '@taucad/parameters';
+import type { WorkbenchEntries, WorkbenchView } from '@taucad/workbench';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -29,7 +41,6 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { logMachine } from '#machines/logs.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
-import { serializeModelComponentDisplayState } from '#machines/model-interaction.machine.js';
 import { inspect } from '#machines/inspector.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -42,6 +53,7 @@ import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
 import { isNotFound } from '#db/attachment-store.js';
 import { toast } from 'sonner';
+import type { EntryPathChange } from '#workbench-records/entries-store.js';
 
 type ProjectContextType = {
   projectId: string;
@@ -49,6 +61,20 @@ type ProjectContextType = {
   editorRef: ActorRefFrom<typeof editorMachine>;
   /** Per-viewer-panel graphics machines, keyed by Dockview panel ID */
   viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
+  viewRecords: ReadonlyMap<string, WorkbenchView>;
+  appliedWorkbenchRevisions: ReadonlyMap<string, `sha256:${string}`>;
+  setAppliedWorkbenchRevision: (path: string, digest: `sha256:${string}` | undefined) => void;
+  appliedEntryRevisions: ReadonlyMap<string, `sha256:${string}`>;
+  setAppliedEntryRevision: (path: string, digest: `sha256:${string}` | undefined) => void;
+  setViewRecord: (viewId: string, record: WorkbenchView | undefined) => void;
+  viewEntryPaths: ReadonlyMap<string, string | null>;
+  setViewEntryPath: (viewId: string, path: string | null | undefined) => void;
+  entriesRecord: WorkbenchEntries | undefined;
+  setEntriesRecord: (record: WorkbenchEntries | undefined) => void;
+  registerEntryPathChange: (change: (operation: EntryPathChange) => Promise<boolean>) => () => void;
+  changeEntryPaths: (operation: EntryPathChange) => Promise<boolean>;
+  registerWorkbenchRecordProducer: (flush: () => Promise<boolean>) => () => void;
+  flushWorkbenchRecordProducers: () => Promise<void>;
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
@@ -342,6 +368,20 @@ export function ProjectProvider({
       }),
     [fileManager.parameterFiles, fileManager.contentService, fileSystemRoot],
   );
+  const workbenchRecordProducers = useRef(new Set<() => Promise<boolean>>());
+  const registerWorkbenchRecordProducer = useCallback((flush: () => Promise<boolean>) => {
+    workbenchRecordProducers.current.add(flush);
+    return () => {
+      workbenchRecordProducers.current.delete(flush);
+    };
+  }, []);
+  const flushWorkbenchRecordProducers = useCallback(async (): Promise<void> => {
+    for (const flush of workbenchRecordProducers.current) {
+      if (!(await flush())) {
+        throw new Error('Workbench records could not be saved.');
+      }
+    }
+  }, []);
   /* A re-memoed service replaces the previous one; close the one it replaced. Never close on unmount:
    * the project session owns the final close and Strict Mode would close a live service. */
   const previousParameterService = useRef(parameterService);
@@ -503,6 +543,84 @@ export function ProjectProvider({
 
   // Select state from the machine
   const viewGraphics = useSelector(actorRef, (state) => state.context.viewGraphics);
+  const [viewRecords, setViewRecords] = useState<ReadonlyMap<string, WorkbenchView>>(() => new Map());
+  const [appliedWorkbenchRevisions, setAppliedWorkbenchRevisions] = useState<ReadonlyMap<string, `sha256:${string}`>>(
+    () => new Map(),
+  );
+  const [appliedEntryRevisions, setAppliedEntryRevisions] = useState<ReadonlyMap<string, `sha256:${string}`>>(
+    () => new Map(),
+  );
+  const setAppliedWorkbenchRevision = useCallback((path: string, digest: `sha256:${string}` | undefined) => {
+    setAppliedWorkbenchRevisions((current) => {
+      if (current.get(path) === digest) {
+        return current;
+      }
+      const next = new Map(current);
+      if (digest === undefined) {
+        next.delete(path);
+      } else {
+        next.set(path, digest);
+      }
+      return next;
+    });
+  }, []);
+  const setAppliedEntryRevision = useCallback((path: string, digest: `sha256:${string}` | undefined) => {
+    setAppliedEntryRevisions((current) => {
+      if (current.get(path) === digest) {
+        return current;
+      }
+      const next = new Map(current);
+      if (digest === undefined) {
+        next.delete(path);
+      } else {
+        next.set(path, digest);
+      }
+      return next;
+    });
+  }, []);
+  const [viewEntryPaths, setViewEntryPaths] = useState<ReadonlyMap<string, string | null>>(() => new Map());
+  const setViewEntryPath = useCallback((viewId: string, path: string | null | undefined) => {
+    setViewEntryPaths((current) => {
+      if (current.get(viewId) === path) {
+        return current;
+      }
+      const next = new Map(current);
+      if (path === undefined) {
+        next.delete(viewId);
+      } else {
+        next.set(viewId, path);
+      }
+      return next;
+    });
+  }, []);
+  const [entriesRecord, setEntriesRecord] = useState<WorkbenchEntries>();
+  const entryPathChangeRef = useRef<((operation: EntryPathChange) => Promise<boolean>) | undefined>(undefined);
+  const registerEntryPathChange = useCallback((change: (operation: EntryPathChange) => Promise<boolean>) => {
+    entryPathChangeRef.current = change;
+    return () => {
+      if (entryPathChangeRef.current === change) {
+        entryPathChangeRef.current = undefined;
+      }
+    };
+  }, []);
+  const changeEntryPaths = useCallback(
+    async (operation: EntryPathChange) => (entryPathChangeRef.current ? entryPathChangeRef.current(operation) : false),
+    [],
+  );
+  const setViewRecord = useCallback((viewId: string, record: WorkbenchView | undefined) => {
+    setViewRecords((current) => {
+      if (current.get(viewId) === record) {
+        return current;
+      }
+      const next = new Map(current);
+      if (record) {
+        next.set(viewId, record);
+      } else {
+        next.delete(viewId);
+      }
+      return next;
+    });
+  }, []);
   const modelInteractionRef = useSelector(actorRef, (state) => state.context.modelInteractionRef);
   const geometryUnits = useSelector(actorRef, (state) => state.context.geometryUnits);
   const mainEntryPath = useSelector(
@@ -575,53 +693,9 @@ export function ProjectProvider({
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const resolvedRequestedChatId = useSelector(editorRef, (state) => state.context.requestedChatId);
   const focusedChatResolved = useSelector(editorRef, (state) => state.matches({ ready: { operation: 'idle' } }));
-  const modelComponentDisplay = useSelector(editorRef, (state) => state.context.modelComponentDisplay);
-  const needsModelComponentDisplayMigration = useSelector(
-    editorRef,
-    (state) => state.context.needsModelComponentDisplayMigration,
-  );
-  const modelDisplayRevision = useSelector(modelInteractionRef, (state) => state.context.displayRevision);
-  const restoredModelInteractionRef = useRef<ActorRefFrom<typeof modelInteractionMachine> | undefined>(undefined);
-
   useEffect(() => {
     editorRef.send({ type: 'load' });
   }, [editorRef]);
-
-  useEffect(() => {
-    if (!focusedChatResolved || restoredModelInteractionRef.current === modelInteractionRef) {
-      return;
-    }
-    modelInteractionRef.send({
-      type: 'restoreComponentDisplay',
-      componentDisplay: modelComponentDisplay,
-    });
-    restoredModelInteractionRef.current = modelInteractionRef;
-  }, [focusedChatResolved, modelComponentDisplay, modelInteractionRef]);
-
-  useEffect(() => {
-    if (!focusedChatResolved || restoredModelInteractionRef.current !== modelInteractionRef) {
-      return;
-    }
-    const snapshot = modelInteractionRef.getSnapshot();
-    if (snapshot.context.displayRevision !== modelDisplayRevision) {
-      return;
-    }
-    const componentDisplay = serializeModelComponentDisplayState(snapshot.context);
-    if (
-      !needsModelComponentDisplayMigration &&
-      JSON.stringify(componentDisplay) === JSON.stringify(modelComponentDisplay)
-    ) {
-      return;
-    }
-    editorRef.send({ type: 'setModelComponentDisplay', componentDisplay });
-  }, [
-    editorRef,
-    focusedChatResolved,
-    modelComponentDisplay,
-    modelDisplayRevision,
-    modelInteractionRef,
-    needsModelComponentDisplayMigration,
-  ]);
 
   useEffect(() => {
     if (focusedChatResolved && focusedChatId !== undefined && resolvedRequestedChatId === requestedChatId) {
@@ -824,6 +898,20 @@ export function ProjectProvider({
       projectRef: actorRef,
       editorRef,
       viewGraphics,
+      viewRecords,
+      appliedWorkbenchRevisions,
+      setAppliedWorkbenchRevision,
+      appliedEntryRevisions,
+      setAppliedEntryRevision,
+      setViewRecord,
+      viewEntryPaths,
+      setViewEntryPath,
+      entriesRecord,
+      setEntriesRecord,
+      registerEntryPathChange,
+      changeEntryPaths,
+      registerWorkbenchRecordProducer,
+      flushWorkbenchRecordProducers,
       modelInteractionRef,
       geometryUnits,
       mainEntryPath,
@@ -846,6 +934,20 @@ export function ProjectProvider({
     actorRef,
     editorRef,
     viewGraphics,
+    viewRecords,
+    appliedWorkbenchRevisions,
+    setAppliedWorkbenchRevision,
+    appliedEntryRevisions,
+    setAppliedEntryRevision,
+    setViewRecord,
+    viewEntryPaths,
+    setViewEntryPath,
+    entriesRecord,
+    setEntriesRecord,
+    registerEntryPathChange,
+    changeEntryPaths,
+    registerWorkbenchRecordProducer,
+    flushWorkbenchRecordProducers,
     modelInteractionRef,
     geometryUnits,
     mainEntryPath,
@@ -879,14 +981,11 @@ export function useMainGraphics(): ActorRefFrom<typeof graphicsMachine> | undefi
     throw new Error('useMainGraphics must be used within a ProjectProvider');
   }
 
-  const { viewGraphics, editorRef, mainEntryPath } = context;
-
-  const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
+  const { viewGraphics, viewRecords, mainEntryPath } = context;
 
   // Find a viewer panel showing mainEntryPath
   for (const [viewId, graphicsRef] of viewGraphics) {
-    const settings = viewSettings[viewId];
-    if (settings?.entryPath === mainEntryPath) {
+    if (viewRecords.get(viewId)?.entryPath === mainEntryPath) {
       return graphicsRef;
     }
   }

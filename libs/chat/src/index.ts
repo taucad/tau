@@ -44,3 +44,4 @@ export type * from '#types/chat.types.js';
 export * from '#types/model.types.js';
 export type * from '#types/message-metadata.types.js';
 export type * from '#types/websocket.types.js';
+export * from '#schemas/tools/arrange-workbench.tool.schema.js';

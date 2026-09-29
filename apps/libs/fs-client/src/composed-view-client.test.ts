@@ -403,7 +403,7 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
 
     const rows = await client.readDirectory('/node_modules');
 
-    expect(dependencies.readdirWithStats).toHaveBeenCalledWith('');
+    expect(dependencies.readdirWithStats).toHaveBeenCalledWith('', { content: 'head' });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.provenance).toEqual({
       source: 'dependencies',
@@ -417,6 +417,22 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
         agentAccess: 'read-only',
       },
     });
+  });
+
+  it('should list current exact rows after files are added, removed, or reclassified', async () => {
+    const { client, provider } = await harness();
+    await provider.writeFile('switch.bin', new Uint8Array([0, 0, 0, 0]));
+    expect(await client.readDirectoryExact(root)).toContainEqual(
+      expect.objectContaining({ name: 'switch.bin', type: 'file', contentKind: 'binary' }),
+    );
+
+    await provider.unlink('main.ts');
+    await provider.writeFile('switch.bin', 'a\nb\n');
+    await provider.writeFile('added.ts', 'hello\n');
+    const rows = await client.readDirectoryExact(root);
+    expect(rows.some((row) => row.name === 'main.ts')).toBe(false);
+    expect(rows).toContainEqual(expect.objectContaining({ name: 'added.ts', contentKind: 'text', lineCount: 2 }));
+    expect(rows).toContainEqual(expect.objectContaining({ name: 'switch.bin', contentKind: 'text', lineCount: 3 }));
   });
 
   /*

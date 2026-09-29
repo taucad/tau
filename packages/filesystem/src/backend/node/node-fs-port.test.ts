@@ -25,7 +25,7 @@ import { tauPathPolicy } from '#path-registry.js';
 import { acquireNodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { NodeFsProvider } from '#backend/node/provider.js';
 import type { NodeFsPort } from '#backend/node/port.js';
-import { nodeFsProtocolVersion } from '#backend/node/protocol.js';
+import { nodeFsProtocolVersion, nodeFsResultSchemas } from '#backend/node/protocol.js';
 import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
 
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -144,6 +144,22 @@ const aliasesEntry = (root: string, probe: string, alias: string): boolean => {
 };
 
 describe('node filesystem client/host round trip', () => {
+  it('keeps exact and head wire validators distinct', () => {
+    const row = [{ name: 'file.txt', type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' }];
+    expect(nodeFsResultSchemas.readdirWithStats.safeParse(row).success).toBe(false);
+    expect(nodeFsResultSchemas.readdirHeadWithStats.safeParse(row).success).toBe(true);
+  });
+
+  it('transports head-only metadata without weakening exact listing', async () => {
+    const { root, provider } = connect();
+    writeFileSync(join(root, 'large.txt'), `${'x'.repeat(1024)}\nend`);
+    const head = await provider.readdirWithStats('', { content: 'head' });
+    const exact = await provider.readdirWithStats('');
+    expect(head).toMatchObject([{ name: 'large.txt', type: 'file', size: 1028, contentKind: 'text' }]);
+    expect(head[0]).not.toHaveProperty('lineCount');
+    expect(exact).toMatchObject([{ name: 'large.txt', type: 'file', size: 1028, contentKind: 'text', lineCount: 2 }]);
+  });
+
   it('serializes checked writes across distinct ports and releases the OS owner after both dispose', async () => {
     const sandbox = mkdtempSync(join(tmpdir(), 'tau-node-checked-'));
     const root = join(sandbox, 'root');

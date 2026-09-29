@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ChatSnapshot } from '@taucad/chat';
-import type { FileEntry, FileTreeEntry } from '@taucad/types';
+import type { FileEntry } from '@taucad/types';
 import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -25,7 +25,7 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
   const editorRef = projectContext?.editorRef;
   const { treeService } = useFileManager();
 
-  const [fileTree, setFileTree] = useState<FileTreeEntry[] | undefined>();
+  const [fileTree, setFileTree] = useState<NonNullable<ChatSnapshot['fileTree']> | undefined>();
 
   useEffect(() => {
     if (!treeService) {
@@ -42,17 +42,19 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
           entry.type === 'file' && (entry.provenance === undefined || entry.provenance.source === 'project'),
       );
       setFileTree(
-        items.map((item): FileTreeEntry => {
+        items.map((item): NonNullable<ChatSnapshot['fileTree']>[number] => {
           const name = item.path.split('/').pop() ?? item.path;
           return item.contentKind === 'text'
-            ? {
-                path: item.path,
-                name,
-                type: 'file',
-                size: item.size,
-                contentKind: 'text',
-                lineCount: item.lineCount,
-              }
+            ? item.lineCount === undefined
+              ? { path: item.path, name, type: 'file', size: item.size }
+              : {
+                  path: item.path,
+                  name,
+                  type: 'file',
+                  size: item.size,
+                  contentKind: 'text',
+                  lineCount: item.lineCount,
+                }
             : {
                 path: item.path,
                 name,
@@ -95,10 +97,15 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
 
   return useMemo((): ChatSnapshot | undefined => {
     const snapshot: ChatSnapshot = {};
-    const fileByPath = new Map((fileTree ?? []).map((entry): [string, FileTreeEntry] => [entry.path, entry]));
+    const fileByPath = new Map(
+      (fileTree ?? []).map((entry): [string, NonNullable<ChatSnapshot['fileTree']>[number]] => [entry.path, entry]),
+    );
     const enrichFileReference = (path: string, fallbackName: string): NonNullable<ChatSnapshot['activeFile']> => {
       const entry = fileByPath.get(path);
       if (entry?.type !== 'file') {
+        return { path, name: fallbackName };
+      }
+      if (!('contentKind' in entry)) {
         return { path, name: fallbackName };
       }
       return entry.contentKind === 'text'

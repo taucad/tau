@@ -132,3 +132,26 @@ describe('NodeFsProvider atomic writes', () => {
     expect(temporaryFiles(root)).toEqual([]);
   });
 });
+
+describe('NodeFsProvider head listing', () => {
+  it('avoids full reads and leaves exact counts fresh after a same-size external edit', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const file = join(root, 'large.txt');
+    writeFileSync(file, `${'a'.repeat(1024)}\nend`);
+    const fullRead = vi.spyOn(fs, 'readFile');
+
+    const headRows = await provider.readdirWithStats('', { content: 'head' });
+    expect(headRows.find(({ name }) => name === 'large.txt')).toMatchObject({
+      contentKind: 'text',
+      size: 1028,
+    });
+    expect(fullRead).not.toHaveBeenCalled();
+    writeFileSync(file, `${'a'.repeat(1024)}-end`);
+    expect(await provider.stat('large.txt')).toMatchObject({ contentKind: 'text', lineCount: 1 });
+    const exactRows = await provider.readdirWithStats('');
+    expect(exactRows.find(({ name }) => name === 'large.txt')).toMatchObject({
+      lineCount: 1,
+    });
+  });
+});

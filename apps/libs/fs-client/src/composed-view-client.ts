@@ -1,6 +1,6 @@
 import type { CheckedFileWrite, CheckedFileWriteResult, FileStat, FileStatEntry, FileProvenance } from '@taucad/types';
 import { isWorkspaceMutationError, WorkspaceMutationError } from '@taucad/filesystem';
-import type { FileTreeNode } from '@taucad/filesystem';
+import type { DirectoryStatRow, FileTreeNode, HeadFileStat } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type { BulkMoveEdit, BulkMoveResult, FileSystemClient, WorkspaceAuthorityClient } from '#file-system-client.js';
 import { resolveAuthorityPath } from '@taucad/utils/path';
@@ -23,7 +23,8 @@ export type ComposedViewProxy = {
   stat(path: string): Promise<FileStat>;
   lstat(path: string): Promise<FileStat>;
   exists(path: string): Promise<boolean>;
-  readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
+  readdirWithStats(path: string): Promise<DirectoryStatRow[]>;
+  readdirWithStats(path: string, options: { readonly content: 'head' }): Promise<Array<DirectoryStatRow<HeadFileStat>>>;
   provenance(path: string): Promise<FileProvenance>;
   /** ZIP one subtree of the view; `{ versionedOnly }` keeps the bytes that are the project. */
   archive(path: string, options?: ContentExportFilter): Promise<Blob>;
@@ -61,6 +62,8 @@ export type ComposedViewProxy = {
  * @public
  */
 export type ComposedViewClient = FileSystemClient & {
+  /** Exact one-level listing for agent RPCs; never served from the UI tree cache. */
+  readDirectoryExact(path: string): Promise<DirectoryStatRow[]>;
   /**
    * Copy one file inside the view, mask-checked by it (charter D4).
    *
@@ -118,7 +121,7 @@ const outsideCheckoutProvenance: FileProvenance = Object.freeze({
 const dependencyMountName = 'node_modules';
 const dependencyMountPath = `/${dependencyMountName}`;
 
-const treeNode = (row: { name: string } & FileStat): FileTreeNode => {
+const treeNode = (row: DirectoryStatRow<HeadFileStat>): FileTreeNode => {
   const common = {
     id: row.name,
     name: row.name,
@@ -129,9 +132,7 @@ const treeNode = (row: { name: string } & FileStat): FileTreeNode => {
   if (row.type === 'dir') {
     return { ...common, children: [] };
   }
-  return row.contentKind === 'text'
-    ? { ...common, contentKind: 'text', lineCount: row.lineCount }
-    : { ...common, contentKind: 'binary' };
+  return row.contentKind === 'text' ? { ...common, contentKind: 'text' } : { ...common, contentKind: 'binary' };
 };
 
 /**
@@ -366,13 +367,13 @@ export const createComposedViewClient = (input: {
    * remembering its absence would let one transient authority failure — or one
    * listing that raced the mount — cost the session its row for good.
    */
-  let dependencyMount: Promise<FileTreeNode | undefined> | undefined;
-  const dependencyMountRow = async (): Promise<FileTreeNode | undefined> => {
+  let dependencyMount: Promise<DirectoryStatRow<Extract<FileStat, { type: 'dir' }>> | undefined> | undefined;
+  const dependencyMountStat = async (): Promise<DirectoryStatRow<Extract<FileStat, { type: 'dir' }>> | undefined> => {
     dependencyMount ??= (async () => {
       try {
         const mount = await dependencies.stat('');
         return mount.type === 'dir'
-          ? treeNode({ name: dependencyMountName, ...mount, provenance: outsideCheckoutProvenance })
+          ? { name: dependencyMountName, ...mount, provenance: outsideCheckoutProvenance }
           : undefined;
       } catch {
         return undefined;
@@ -383,6 +384,10 @@ export const createComposedViewClient = (input: {
       dependencyMount = undefined;
     }
     return row;
+  };
+  const dependencyMountRow = async (): Promise<FileTreeNode | undefined> => {
+    const stat = await dependencyMountStat();
+    return stat === undefined ? undefined : treeNode(stat);
   };
 
   const remember = (relativePath: string, value: FileProvenance | undefined): void => {
@@ -560,7 +565,7 @@ export const createComposedViewClient = (input: {
     },
     readDirectory: async (absolutePath: string) => {
       const { proxy, path: relative } = servedBy(absolutePath);
-      const rows = await proxy.readdirWithStats(relative);
+      const rows = await proxy.readdirWithStats(relative, { content: 'head' });
       if (isDependency(proxy)) {
         return rows.map((row) => treeNode({ ...row, provenance: outsideCheckoutProvenance }));
       }
@@ -576,6 +581,21 @@ export const createComposedViewClient = (input: {
       }
       const mount = await dependencyMountRow();
       return mount === undefined ? nodes : [...nodes, mount];
+    },
+    readDirectoryExact: async (absolutePath: string) => {
+      const { proxy, path: relative } = servedBy(absolutePath);
+      const rows = await proxy.readdirWithStats(relative);
+      if (isDependency(proxy)) {
+        return rows.map((row) => ({ ...row, provenance: outsideCheckoutProvenance }));
+      }
+      for (const row of rows) {
+        remember(relative === '' ? row.name : `${relative}/${row.name}`, row.provenance);
+      }
+      if (relative !== '' || rows.some((row) => row.name === dependencyMountName)) {
+        return rows;
+      }
+      const mount = await dependencyMountStat();
+      return mount === undefined ? rows : [...rows, mount];
     },
   };
 

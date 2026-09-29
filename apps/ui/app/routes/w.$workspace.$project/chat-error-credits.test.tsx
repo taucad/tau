@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party billing surface owns the direct billing client contract
 import { entitlementsFromTier } from '@taucad/billing';
 import { ChatErrorCredits } from '#routes/w.$workspace.$project/chat-error-credits.js';
+import { ChatErrorCredits as ChatErrorCreditsSelfHost } from '#routes/w.$workspace.$project/chat-error-credits.self-host.js';
 
 const openSettingsDialog = vi.hoisted(() => vi.fn());
 const continueChat = vi.fn();
@@ -50,7 +51,7 @@ describe('ChatErrorCredits', () => {
     const description =
       'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.';
 
-    const { container } = render(<ChatErrorCredits description={description} />);
+    const { container } = render(<ChatErrorCredits resumable description={description} />);
 
     expect(screen.getByText('Credit limit reached')).toBeInTheDocument();
     expect(screen.getByText(description)).toBeInTheDocument();
@@ -65,14 +66,14 @@ describe('ChatErrorCredits', () => {
   });
 
   it('should render fallback copy when no provider description is supplied', () => {
-    render(<ChatErrorCredits />);
+    render(<ChatErrorCredits resumable />);
 
     expect(screen.getByText('Your credit balance is too low. Add credits, then resume this chat.')).toBeInTheDocument();
   });
 
   it('should resume the chat without regenerating when Resume is clicked', async () => {
     const user = userEvent.setup();
-    render(<ChatErrorCredits />);
+    render(<ChatErrorCredits resumable />);
 
     await user.click(screen.getByRole('button', { name: /resume/i }));
 
@@ -80,9 +81,31 @@ describe('ChatErrorCredits', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
+  it('should keep billing available and ask to send the draft when no saved run exists', async () => {
+    render(<ChatErrorCredits resumable={false} />);
+
+    expect(screen.getByText('Add credits, then send your message.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Billing' }));
+
+    expect(openSettingsDialog).toHaveBeenCalledWith('billing');
+    expect(continueChat).not.toHaveBeenCalled();
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  it('should explicitly restart a self-host refusal from Try again', async () => {
+    render(<ChatErrorCreditsSelfHost />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(regenerate).toHaveBeenCalledOnce();
+    expect(continueChat).not.toHaveBeenCalled();
+  });
+
   it('should open billing settings when Billing is clicked', async () => {
     const user = userEvent.setup();
-    render(<ChatErrorCredits />);
+    render(<ChatErrorCredits resumable />);
 
     await user.click(screen.getByRole('button', { name: /^billing$/i }));
 
@@ -93,7 +116,7 @@ describe('ChatErrorCredits', () => {
   it('should offer the in-place top-up when a payment method is on file (flow A)', async () => {
     useEntitlementsMock.mockReturnValue({ ...entitlementsFromTier('pro'), hasPaymentMethod: true });
     const user = userEvent.setup();
-    render(<ChatErrorCredits />);
+    render(<ChatErrorCredits resumable />);
 
     expect(screen.queryByRole('button', { name: /^billing$/i })).not.toBeInTheDocument();
     expect(screen.getByTestId('topup-modal')).toHaveAttribute('data-open', 'false');
@@ -108,6 +131,7 @@ describe('ChatErrorCredits', () => {
   it('should name the shortfall and the model when the 402 carried one', () => {
     render(
       <ChatErrorCredits
+        resumable
         description='Your credit balance is too low.'
         details={{
           requiredCreditAtoms: '3084332',
@@ -123,7 +147,7 @@ describe('ChatErrorCredits', () => {
   });
 
   it('should keep the provider description when the refusal carried no shortfall', () => {
-    render(<ChatErrorCredits description='Provider copy.' details={{ routeId: 'openai-gpt-6-astra' }} />);
+    render(<ChatErrorCredits resumable description='Provider copy.' details={{ routeId: 'openai-gpt-6-astra' }} />);
 
     expect(screen.getByText('Provider copy.')).toBeInTheDocument();
   });
@@ -131,6 +155,7 @@ describe('ChatErrorCredits', () => {
   it('should ignore a malformed shortfall rather than rendering NaN', () => {
     render(
       <ChatErrorCredits
+        resumable
         description='Provider copy.'
         details={{ requiredCreditAtoms: 'lots', availableCreditAtoms: '1', routeId: 'openai-gpt-6-astra' }}
       />,
@@ -140,13 +165,13 @@ describe('ChatErrorCredits', () => {
   });
 
   it('should offer a switch to a cheaper model', () => {
-    render(<ChatErrorCredits />);
+    render(<ChatErrorCredits resumable />);
 
     expect(screen.getByRole('button', { name: /switch model/i })).toBeInTheDocument();
   });
 
   it('should keep flow B (settings route) without a payment method and never mount the modal', () => {
-    render(<ChatErrorCredits />);
+    render(<ChatErrorCredits resumable />);
 
     expect(screen.getByRole('button', { name: /^billing$/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /add credits/i })).not.toBeInTheDocument();

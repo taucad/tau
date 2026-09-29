@@ -4,9 +4,11 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { MockInstance } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
+import { mock } from 'vitest-mock-extended';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { errorCategory } from '@taucad/types/constants';
@@ -21,6 +23,7 @@ import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-l
 const continueChat = vi.fn();
 const regenerate = vi.fn();
 const resumableFailureOverrides = vi.hoisted(() => new Set<string>());
+const retainedRun = vi.hoisted((): { runId: string | undefined } => ({ runId: undefined }));
 
 let mockRetryAttempt = 0;
 
@@ -40,8 +43,13 @@ const googleInvalidArgumentByteList = [...new TextEncoder().encode(JSON.stringif
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => ({ continueChat, regenerate }),
+  useChatContext: () => ({ activeChatId: 'chat-error' }),
   useChatRetrySnapshot: () => ({ retryAttempt: mockRetryAttempt, retryMaxAttempts: 5 }),
   useChatSelector: vi.fn(),
+}));
+
+vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
+  resumableBrowserAgentHostRunId: () => retainedRun.runId,
 }));
 
 vi.mock('@taucad/agent-host', async (importOriginal) => {
@@ -96,6 +104,7 @@ const persisted = (error: ChatErrorPayload): void => {
 describe('ChatError', () => {
   beforeEach(() => {
     mockRetryAttempt = 0;
+    retainedRun.runId = undefined;
     resumableFailureOverrides.clear();
     vi.clearAllMocks();
   });
@@ -104,7 +113,7 @@ describe('ChatError', () => {
      serves codes the host rules unrecoverable. `isResumableRunFailure` is the
      one decision, taken here and handed to the card, so no card can promise a
      resume the next click will not perform. */
-  it('tells the customer when a funded-operation limit can be retried, without promising the turn', () => {
+  it('should explicitly retry a funded-operation limit without promising the saved turn', async () => {
     persisted({
       category: errorCategory.rateLimit,
       title: 'Rate limit exceeded',
@@ -120,6 +129,9 @@ describe('ChatError', () => {
     expect(screen.getByText('Funded operation limit reached')).toBeInTheDocument();
     expect(screen.queryByText('Everything up to here is saved.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /resume/iu })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(regenerate).toHaveBeenCalledOnce();
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   it('should promise the turn and say Resume for a rate limit the host does resume', () => {
@@ -333,7 +345,8 @@ describe('ChatError', () => {
     expect(screen.queryByRole('button', { name: /resume/iu })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   /* T2-D11. A resume the host cannot honour is not a failure: the turn is
@@ -355,7 +368,8 @@ describe('ChatError', () => {
     expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   /* E1. A run whose document died is recorded abandoned, not failed by
@@ -495,7 +509,7 @@ describe('ChatError', () => {
     expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
   });
 
-  it('should continue the server-category fallback when Try again is clicked', async () => {
+  it('should explicitly restart the server-category fallback when Try again is clicked', async () => {
     const user = userEvent.setup();
     const serverError: ChatErrorPayload = {
       category: errorCategory.server,
@@ -513,13 +527,13 @@ describe('ChatError', () => {
     render(<ChatErrorBanner />);
     await user.click(screen.getByRole('button', { name: /try again/i }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(regenerate).not.toHaveBeenCalled();
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
 
-  it('should continue the generic fallback when Try again is clicked', async () => {
+  it('should explicitly restart the generic fallback when Try again is clicked', async () => {
     const user = userEvent.setup();
     const genericError: ChatErrorPayload = {
       category: errorCategory.generic,
@@ -538,13 +552,13 @@ describe('ChatError', () => {
 
     await user.click(screen.getByRole('button', { name: /try again/i }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(regenerate).not.toHaveBeenCalled();
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
 
-  it('should continue unknown fallback categories instead of regenerating', async () => {
+  it('should explicitly restart unknown fallback categories when Try again is clicked', async () => {
     const user = userEvent.setup();
     const unknownError = {
       category: 'unknown',
@@ -563,8 +577,8 @@ describe('ChatError', () => {
 
     await user.click(screen.getByRole('button', { name: /try again/i }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(regenerate).not.toHaveBeenCalled();
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
@@ -598,9 +612,7 @@ describe('ChatError', () => {
       ),
     });
 
-    expect(
-      screen.getByText('Tau paused this turn: 13 more credits needed for openai-gpt-6-astra.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('13 more credits needed for openai-gpt-6-astra.')).toBeInTheDocument();
   });
 
   /* The useSyncExternalStore contract requires a cached snapshot. Parsing inside the selector
@@ -644,13 +656,15 @@ describe('ChatError', () => {
 
   /* The funded boundary's own 402 copy is credit-denominated and reaches the
    * banner verbatim — the chat never restates a charge in dollars (B4 R2). */
-  it('should render a credit error as warning Resume UI outside the tool-error fallback', async () => {
+  it.each([true, false])('should offer credit Resume only for a retained run: %s', async (hasSavedRun) => {
+    retainedRun.runId = hasSavedRun ? 'run-saved' : undefined;
     const user = userEvent.setup();
     const creditMessage = 'Insufficient Tau credit for this model request.';
     const creditError: ChatErrorPayload = {
       category: errorCategory.credits,
       title: 'Credit Limit Reached',
       message: creditMessage,
+      code: 'INSUFFICIENT_CREDIT',
     };
     vi.mocked(useChatSelector).mockImplementation((selector) =>
       selector({
@@ -677,10 +691,75 @@ describe('ChatError', () => {
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /resume/i }));
-
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    if (hasSavedRun) {
+      await user.click(screen.getByRole('button', { name: /resume/i }));
+      expect(continueChat).toHaveBeenCalledTimes(1);
+    } else {
+      expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
+      expect(screen.getByText('Add credits, then send your message.')).toBeInTheDocument();
+      expect(continueChat).not.toHaveBeenCalled();
+    }
     expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  it('should update credit recovery when a retained run arrives after the same persisted error', () => {
+    const state = mock<CombinedChatState>({
+      error: undefined,
+      persistedError: {
+        category: errorCategory.credits,
+        title: 'Credit limit reached',
+        message: 'Insufficient Tau credit for this model request.',
+        code: 'INSUFFICIENT_CREDIT',
+      },
+    });
+    const listeners = new Set<() => void>();
+    const subscribe = (listener: () => void): (() => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    };
+    // A replay can notify the existing store while the parsed error keeps the same identity.
+    vi.mocked(useChatSelector).mockImplementation(function useTestChatSelector<T>(
+      selector: (value: CombinedChatState) => T,
+    ): T {
+      return useSyncExternalStore(subscribe, () => selector(state));
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<ChatErrorBanner />, {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <MemoryRouter>
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        </MemoryRouter>
+      ),
+    });
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+
+    act(() => {
+      retainedRun.runId = 'run-saved';
+      for (const listener of listeners) {
+        listener();
+      }
+    });
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+
+    act(() => {
+      retainedRun.runId = undefined;
+      for (const listener of listeners) {
+        listener();
+      }
+    });
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+  });
+
+  it('should explicitly restart a processing failure from Try again', async () => {
+    persisted({ category: errorCategory.toolError, title: 'Error', message: 'The tool could not finish.' });
+    render(<ChatErrorBanner />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(regenerate).toHaveBeenCalledOnce();
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   it('renders decoded Google provider errors instead of opaque byte lists', () => {

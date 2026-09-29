@@ -64,7 +64,7 @@ export const ChatErrorProviderAccount = memo(function ({
   description,
   details,
 }: ChatErrorProviderAccountProps): React.JSX.Element {
-  const { continueChat } = useChatActions();
+  const { regenerate } = useChatActions();
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const { name, billing } = providerEntryFrom(details);
   const providerCode = text(details?.['providerCode']);
@@ -99,13 +99,7 @@ export const ChatErrorProviderAccount = memo(function ({
               </Button>
             )}
           </ChatModelSelector>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => {
-              continueChat();
-            }}
-          >
+          <Button variant='outline' size='sm' onClick={regenerate}>
             <RefreshCcw className='size-3.5' />
             Try again
           </Button>

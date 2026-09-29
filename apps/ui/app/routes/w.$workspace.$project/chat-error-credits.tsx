@@ -14,12 +14,12 @@ import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js'
 
 type ChatErrorCreditsProps = {
   readonly className?: string;
+  /** The host retains a failed run that it can continue after funding. */
+  readonly resumable: boolean;
   readonly description?: string;
   /** Structured refusal fields the 402 carried; see `ChatError.details`. */
   readonly details?: Record<string, unknown>;
 };
-
-const fallbackDescription = 'Your credit balance is too low. Add credits, then resume this chat.';
 
 /** Contextual top-up default for mid-chat exhaustion (F7): $25. */
 const chatErrorDefaultTopupCents = 2500;
@@ -47,6 +47,7 @@ const shortfallCredits = (details: Record<string, unknown> | undefined): bigint 
 
 export const ChatErrorCredits = memo(function ({
   className,
+  resumable,
   description,
   details,
 }: ChatErrorCreditsProps): React.JSX.Element {
@@ -59,10 +60,13 @@ export const ChatErrorCredits = memo(function ({
   // model's own name rather than a route slug.
   const shortfall = shortfallCredits(details);
   const routeId = typeof details?.['routeId'] === 'string' ? details['routeId'] : undefined;
+  const fallbackDescription = resumable
+    ? 'Your credit balance is too low. Add credits, then resume this chat.'
+    : 'Your credit balance is too low.';
   const resolvedDescription =
     shortfall === undefined || routeId === undefined
       ? (description ?? fallbackDescription)
-      : `Tau paused this turn: ${shortfall} more ${shortfall === 1n ? 'credit' : 'credits'} needed for ${resolveModel(routeId).name}.`;
+      : `${resumable ? 'Tau paused this turn: ' : ''}${shortfall} more ${shortfall === 1n ? 'credit' : 'credits'} needed for ${resolveModel(routeId).name}.`;
 
   return (
     <ChatErrorCard
@@ -70,7 +74,12 @@ export const ChatErrorCredits = memo(function ({
       icon={CreditCard}
       className={className}
       title='Credit limit reached'
-      description={resolvedDescription}
+      description={
+        <>
+          <p>{resolvedDescription}</p>
+          {resumable ? undefined : <p>Add credits, then send your message.</p>}
+        </>
+      }
       actionsRowFrom='sm'
       actions={
         <>
@@ -109,16 +118,12 @@ export const ChatErrorCredits = memo(function ({
               </Button>
             )}
           </ChatModelSelector>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => {
-              continueChat();
-            }}
-          >
-            <Play className='size-3.5' />
-            Resume
-          </Button>
+          {resumable ? (
+            <Button variant='outline' size='sm' onClick={continueChat}>
+              <Play className='size-3.5' />
+              Resume
+            </Button>
+          ) : undefined}
         </>
       }
     >

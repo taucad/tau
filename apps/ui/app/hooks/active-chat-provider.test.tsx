@@ -5,12 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { useSelector } from '@xstate/react';
+import { createActor } from 'xstate';
 import type { ReactNode } from 'react';
 import type { Chat, MyUIMessage } from '@taucad/chat';
 import { resolveKernel } from '@taucad/types/constants';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
 import { spyOnSend } from '#lib/xstate-test.utils.js';
+import { chatSessionMachine } from '#machines/chat-session.machine.js';
+import type { ChatSessionMachineEvent, ChatTurn, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
+import type * as browserAgentHostTransport from '#chat-clients/_internal/browser-agent-host-transport.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted harness — mocks the project-manager surface (chat row persistence),
@@ -47,6 +51,12 @@ const harness = vi.hoisted(() => ({
   homeFiles: new Map<string, Uint8Array<ArrayBuffer>>(),
   homeReadFile: vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>(),
   homeWriteFile: vi.fn<(path: string, bytes: Uint8Array<ArrayBuffer>) => Promise<void>>(),
+  resumableRunId: 'run-recovery' as string | undefined,
+}));
+
+vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof browserAgentHostTransport>()),
+  resumableBrowserAgentHostRunId: () => harness.resumableRunId,
 }));
 
 vi.mock('@ai-sdk/react', () => ({
@@ -258,7 +268,7 @@ const {
   useActiveChatSession,
   useChatComposer,
 } = await import('#hooks/active-chat-provider.js');
-const { ChatSessionStoreProvider } = await import('#hooks/chat-session-store-provider.js');
+const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
 const { UnloadProvider, useFlushOnClose } = await import('#hooks/use-flush-on-close.js');
 
 const testModel: DraftAttachmentModel = {
@@ -324,6 +334,7 @@ beforeEach(() => {
   harness.selectedModelName = 'Cookie Model';
   harness.setKernel.mockReset();
   harness.cookieKernel = 'openscad';
+  harness.resumableRunId = 'run-recovery';
   harness.homeFiles.clear();
   harness.homeReadFile.mockReset().mockImplementation(async (path: string) => {
     const bytes = harness.homeFiles.get(path);
@@ -341,6 +352,339 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
+});
+
+const recoveryTurn: ChatTurn = {
+  runId: 'run-recovery',
+  leaseTurnId: 'turn-recovery',
+  request: { kind: 'continue' },
+};
+const admissionEvents: ChatSessionMachineEvent[] = [
+  { type: 'requestTurn', gesture: { kind: 'continue' } },
+  { type: 'turnAdmitted', turn: recoveryTurn },
+];
+const recoveryStates: Array<{ run: string; events: ChatSessionMachineEvent[] }> = [
+  { run: 'idle', events: [] },
+  { run: 'queued.observing', events: [{ type: 'runLifecycle', phase: 'admitted' }] },
+  { run: 'queued.admitting', events: [admissionEvents[0]!] },
+  { run: 'queued.dispatched', events: admissionEvents },
+  { run: 'running.generating', events: [{ type: 'runLifecycle', phase: 'running' }] },
+  {
+    run: 'running.tool',
+    events: [
+      { type: 'runLifecycle', phase: 'running' },
+      { type: 'toolParts', inFlight: 1, approvals: 0 },
+    ],
+  },
+  {
+    run: 'running.waiting.approval',
+    events: [
+      { type: 'runLifecycle', phase: 'running' },
+      { type: 'interruptRecorded', state: 'requested' },
+    ],
+  },
+  { run: 'running.waiting.input', events: [{ type: 'runLifecycle', phase: 'paused' }] },
+  { run: 'running.reconnecting', events: [{ type: 'durableRunState', state: 'reattaching' }] },
+  { run: 'finishing.observing', events: [{ type: 'runLifecycle', phase: 'completed' }] },
+  { run: 'finishing.settling', events: [...admissionEvents, { type: 'runLifecycle', phase: 'completed' }] },
+  {
+    run: 'done',
+    events: [
+      { type: 'runLifecycle', phase: 'completed', runId: 'run-recovery' },
+      { type: 'turnFinalizedObserved', runId: 'run-recovery', turnId: 'turn-recovery', branch: 'main' },
+    ],
+  },
+  { run: 'failed', events: [{ type: 'runLifecycle', phase: 'failed' }] },
+  { run: 'stopped', events: [{ type: 'runLifecycle', phase: 'cancelled' }] },
+];
+
+describe('composer recovery', () => {
+  const actors: Array<ReturnType<typeof createActor<typeof chatSessionMachine>>> = [];
+  afterEach(() => {
+    for (const actor of actors.splice(0)) {
+      actor.stop();
+    }
+  });
+
+  async function renderRecovery(
+    code = 'RUN_ABANDONED',
+    events: ChatSessionMachineEvent[] = [],
+    machine = chatSessionMachine,
+  ) {
+    const view = renderHook(() => ({ composer: useChatComposer(), store: useChatSessionStore() }), {
+      wrapper: createSessionWrapper('chat_recovery'),
+    });
+    const session = view.result.current.store.get('chat_recovery')!;
+    await waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    const actor = createActor(machine, { input: { chatId: 'chat_recovery', projectId: 'proj_recovery' } });
+    actors.push(actor);
+    actor.start();
+    await act(async () => {
+      session.stateActorRef = actor;
+      session.persistenceActorRef.send({
+        type: 'setPersistedError',
+        error: { category: 'generic', title: 'Interrupted', message: 'The run stopped.', code },
+      });
+      for (const event of events) {
+        actor.send(event.type === 'runLifecycle' ? { runId: 'run-recovery', ...event } : event);
+      }
+      view.rerender();
+    });
+    return { ...view, session, actor };
+  }
+
+  it('covers every run leaf from the XState machine, including its transient settlement decision', () => {
+    const run = chatSessionMachine.root.states['run']!;
+    function leaves(node: typeof run, prefix = ''): string[] {
+      const children = Object.entries(node.states);
+      return children.length === 0
+        ? [prefix]
+        : children.flatMap(([key, child]) => leaves(child, prefix ? `${prefix}.${key}` : key));
+    }
+    // `deciding` has only an always transition, so no committed React render can observe it.
+    expect([...recoveryStates.map((row) => row.run), 'finishing.deciding'].sort()).toEqual(leaves(run).sort());
+  });
+
+  it.each(recoveryStates)('offers recovery only after run.$run is settled', async ({ run, events }) => {
+    const { result, actor } = await renderRecovery('RUN_ABANDONED');
+    act(() => {
+      for (const event of events) {
+        actor.send(event.type === 'runLifecycle' ? { runId: 'run-recovery', ...event } : event);
+      }
+    });
+    let value: string | Record<string, unknown> = '';
+    for (const key of run.split('.').reverse()) {
+      value = value === '' ? key : { [key]: value };
+    }
+    expect(actor.getSnapshot().value).toMatchObject({ run: value });
+    expect(result.current.composer.resume !== undefined).toBe(run === 'failed');
+    await act(async () => undefined);
+  });
+
+  it.each(['RUN_ABANDONED', 'NETWORK_ERROR'])(
+    'continues %s once even when the same callback is activated twice',
+    async (code) => {
+      const { result, session } = await renderRecovery(code, [{ type: 'runLifecycle', phase: 'failed' }]);
+      const requestTurn = vi.spyOn(result.current.store, 'requestTurn');
+      const { resume } = result.current.composer;
+      expect(resume).toBeTypeOf('function');
+      await act(async () => {
+        resume?.();
+        resume?.();
+      });
+      expect(requestTurn).toHaveBeenCalledExactlyOnceWith('chat_recovery', { kind: 'continue' });
+      expect(session.chat.regenerate).not.toHaveBeenCalled();
+      expect(result.current.composer.resume).toBeUndefined();
+    },
+  );
+
+  it.each([
+    'RATE_LIMITED',
+    'PROVIDER_UNAVAILABLE',
+    'UNAUTHENTICATED',
+    'INSUFFICIENT_CREDIT',
+    'SUMMARY_REQUIRED',
+    'MODEL_NOT_IN_CATALOG',
+    'RESUME_UNAVAILABLE',
+    'UNKNOWN',
+  ])('leaves %s recovery on the history card', async (code) => {
+    const { result } = await renderRecovery(code, [{ type: 'runLifecycle', phase: 'failed' }]);
+    expect(result.current.composer.resume).toBeUndefined();
+  });
+
+  it.each([undefined, 'run-older'])('requires retained host evidence matching the failed run (%s)', async (runId) => {
+    const { result, rerender } = await renderRecovery('RUN_ABANDONED', [{ type: 'runLifecycle', phase: 'failed' }]);
+    const requestTurn = vi.spyOn(result.current.store, 'requestTurn');
+    const { resume } = result.current.composer;
+    act(() => {
+      harness.resumableRunId = runId;
+      resume?.();
+      rerender();
+    });
+    expect(result.current.composer.resume).toBeUndefined();
+    expect(requestTurn).not.toHaveBeenCalled();
+  });
+
+  it('does not offer a coded admission failure without a run identity', async () => {
+    harness.resumableRunId = undefined;
+    const { result, actor } = await renderRecovery('NETWORK_ERROR');
+    act(() => {
+      actor.send({ type: 'runLifecycle', phase: 'failed' });
+    });
+    expect(result.current.composer.resume).toBeUndefined();
+  });
+
+  it('resumes a hydrated failure when the host attaches even if its actor has no run id yet', async () => {
+    harness.resumableRunId = undefined;
+    harness.getChat.mockResolvedValueOnce(
+      makeChat({
+        id: 'chat_recovery',
+        error: { category: 'network', title: 'Disconnected', message: 'Connection lost.', code: 'NETWORK_ERROR' },
+      }),
+    );
+    const { result, rerender } = renderHook(() => ({ composer: useChatComposer(), store: useChatSessionStore() }), {
+      wrapper: createSessionWrapper('chat_recovery'),
+    });
+    const session = result.current.store.get('chat_recovery')!;
+    await waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.persistedError?.code).toBe('NETWORK_ERROR');
+    });
+    const { persistedError } = session.persistenceActorRef.getSnapshot().context;
+    const actor = createActor(chatSessionMachine, { input: { chatId: 'chat_recovery', projectId: 'proj_recovery' } });
+    actors.push(actor);
+    actor.start();
+    act(() => {
+      session.stateActorRef = actor;
+      // The store's replayPersistedFailure has no run identity until the host attaches.
+      actor.send({ type: 'runLifecycle', phase: 'failed', reason: 'Connection lost.' });
+      rerender();
+    });
+    expect(result.current.composer.resume).toBeUndefined();
+    act(() => {
+      harness.resumableRunId = 'run-recovery';
+      // A passive reattach can replay the same error and transcript; the retained host id still changes.
+      harness.created[0]!.emitMessagesChange();
+    });
+    expect(actor.getSnapshot().context.activeRunId).toBeUndefined();
+    expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBe(persistedError);
+    expect(result.current.composer.resume).toBeTypeOf('function');
+    const requestTurn = vi.spyOn(result.current.store, 'requestTurn');
+    await act(async () => {
+      result.current.composer.resume?.();
+    });
+    expect(requestTurn).toHaveBeenCalledExactlyOnceWith('chat_recovery', { kind: 'continue' });
+  });
+
+  it('waits for hydration before resuming and rechecks it on activation', async () => {
+    const { result, session } = await renderRecovery('RUN_ABANDONED', [{ type: 'runLifecycle', phase: 'failed' }]);
+    const requestTurn = vi.spyOn(result.current.store, 'requestTurn');
+    const { resume } = result.current.composer;
+    harness.getChat.mockReturnValueOnce(Promise.withResolvers<Chat | undefined>().promise);
+    act(() => {
+      session.persistenceActorRef.send({ type: 'setActiveChatId', chatId: 'chat_loading' });
+      resume?.();
+    });
+    expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(true);
+    expect(result.current.composer.resume).toBeUndefined();
+    expect(requestTurn).not.toHaveBeenCalled();
+  });
+
+  it('does not resume a failed settlement that still holds its turn', async () => {
+    const machine = chatSessionMachine.provide({
+      actors: {
+        settleTurn: fromSafeAsync<void, ChatTurnSettlementInput>(async () => {
+          throw new Error('Could not settle.');
+        }),
+      },
+    });
+    const { result, actor } = await renderRecovery(
+      'RUN_ABANDONED',
+      [...admissionEvents, { type: 'runLifecycle', phase: 'failed' }],
+      machine,
+    );
+    await waitFor(() => {
+      expect(actor.getSnapshot().matches({ run: 'failed' })).toBe(true);
+    });
+    expect(actor.getSnapshot().context.turn).toEqual(recoveryTurn);
+    expect(result.current.composer.resume).toBeUndefined();
+  });
+
+  it('reacts to runtime failure changes and refuses an old callback after the run completes', async () => {
+    const { result, actor } = await renderRecovery('RUN_ABANDONED', [{ type: 'runLifecycle', phase: 'failed' }]);
+    const chat = harness.created[0]!;
+    act(() => {
+      chat.error = new TypeError('Failed to fetch');
+      chat.emitErrorChange();
+    });
+    expect(result.current.composer.resume).toBeUndefined();
+    act(() => {
+      chat.error = new Error(
+        JSON.stringify({
+          category: 'network',
+          title: 'Disconnected',
+          message: 'Connection lost.',
+          code: 'NETWORK_ERROR',
+        }),
+      );
+      chat.emitErrorChange();
+    });
+    const { resume } = result.current.composer;
+    expect(resume).toBeTypeOf('function');
+    const requestTurn = vi.spyOn(result.current.store, 'requestTurn');
+    act(() => {
+      actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-recovery' });
+      actor.send({ type: 'turnFinalizedObserved', runId: 'run-recovery', turnId: 'turn-recovery', branch: 'main' });
+      resume?.();
+    });
+    expect(requestTurn).not.toHaveBeenCalled();
+    expect(result.current.composer.resume).toBeUndefined();
+  });
+
+  it.each(['submitted', 'streaming'] as const)(
+    'keeps %s SDK activity ahead of an old interrupted failure',
+    async (status) => {
+      const { result } = await renderRecovery('RUN_ABANDONED', [{ type: 'runLifecycle', phase: 'failed' }]);
+      act(() => {
+        harness.created[0]!.status = status;
+        harness.created[0]!.emitStatusChange();
+      });
+      expect(result.current.composer.resume).toBeUndefined();
+    },
+  );
+
+  it('keeps approval ahead of a stale interrupted failure', async () => {
+    const { result } = await renderRecovery('RUN_ABANDONED', [{ type: 'runLifecycle', phase: 'failed' }]);
+    act(() => {
+      harness.created[0]!.messages = [
+        {
+          id: 'approval',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'dynamic-tool',
+              toolName: 'delete_file',
+              toolCallId: 'tool-1',
+              state: 'approval-requested',
+              input: {},
+              approval: { id: 'approval-1' },
+            },
+          ],
+        },
+      ];
+      harness.created[0]!.emitMessagesChange();
+    });
+    expect(result.current.composer.resume).toBeUndefined();
+  });
+
+  it.each(['invoking', 'retrying', 'stopping'] as const)(
+    'keeps requestLifecycle.%s ahead of a stale interrupted failure',
+    async (phase) => {
+      const { result, session } = await renderRecovery('RUN_ABANDONED', [{ type: 'runLifecycle', phase: 'failed' }]);
+      act(() => {
+        session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
+        if (phase === 'retrying') {
+          session.persistenceActorRef.send({
+            type: 'requestFinished',
+            isError: true,
+            isDisconnect: true,
+            isAbort: false,
+            messages: [],
+          });
+        } else if (phase === 'stopping') {
+          session.persistenceActorRef.send({ type: 'stopRequest' });
+        }
+        session.persistenceActorRef.send({
+          type: 'setPersistedError',
+          error: { category: 'generic', title: 'Interrupted', message: 'Disconnected.', code: 'RUN_ABANDONED' },
+        });
+      });
+      expect(session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: phase })).toBe(true);
+      expect(result.current.composer.resume).toBeUndefined();
+      await act(async () => undefined);
+    },
+  );
 });
 
 // ===========================================================================
@@ -361,6 +705,7 @@ describe('ChatComposerProvider', () => {
     });
 
     expect(result.current.status).toBe('ready');
+    expect(result.current.resume).toBeUndefined();
   });
 
   it('should expose a no-op `stop` callback that does not throw', () => {

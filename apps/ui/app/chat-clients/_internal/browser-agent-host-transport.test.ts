@@ -1909,6 +1909,57 @@ describe('BrowserPlacementChatTransport', () => {
     unregister();
   });
 
+  it.each([
+    { state: 'admitted', code: 'RUN_ABANDONED', resumable: false },
+    { state: 'running', code: 'NETWORK_ERROR', resumable: false },
+    { state: 'paused', code: 'RUN_ABANDONED', resumable: false },
+    { state: 'completed', code: 'NETWORK_ERROR', resumable: false },
+    { state: 'cancelled', code: 'RUN_ABANDONED', resumable: false },
+    { state: 'failed', code: 'RUN_ABANDONED', resumable: true },
+    { state: 'failed', code: 'NETWORK_ERROR', resumable: true },
+    { state: 'failed', code: 'INSUFFICIENT_CREDIT', resumable: true },
+    { state: 'failed', code: 'MODEL_NOT_IN_CATALOG', resumable: false },
+  ] as const)(
+    'admits Resume for $state/$code only when the host failed resumably',
+    async ({ state, code, resumable }) => {
+      installBrowserGlobals();
+      const chatId = `chat-resume-${state}-${code}`;
+      const runId = `run-resume-${state}-${code}`;
+      const client = clientFor(chatId, runId, {
+        attach: vi.fn(async () => ({
+          cursor: 0,
+          nextCursor: 0,
+          endCursor: 0,
+          events: [],
+          snapshot: {
+            chatId,
+            runId,
+            turnId: 'turn-resume',
+            state,
+            messages: [],
+            failure: { code, message: 'The run stopped.' },
+          },
+        })),
+      });
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => ({
+          projectId: 'project-resume',
+          backend: 'opfs',
+          providerBasePath: 'project-resume',
+        }),
+        createClient: async () => client,
+        markRunId: async () => undefined,
+      });
+      try {
+        const stream = await new BrowserPlacementChatTransport().reconnectToStream({ chatId, metadata: undefined });
+        expect(resumableBrowserAgentHostRunId(chatId)).toBe(resumable ? runId : undefined);
+        await stream?.cancel();
+      } finally {
+        unregister();
+      }
+    },
+  );
+
   it('leaves a non-retryable failed run unresumable even when a resume was asked for', async () => {
     installBrowserGlobals();
     const chatId = 'chat-refused-catalog';

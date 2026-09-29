@@ -15,7 +15,7 @@ describe('ChatErrorTool', () => {
     vi.clearAllMocks();
   });
 
-  it('should continue the interrupted chat when Try again is clicked', async () => {
+  it('should explicitly restart the turn when Try again is clicked', async () => {
     const user = userEvent.setup();
 
     render(
@@ -33,7 +33,7 @@ describe('ChatErrorTool', () => {
 
     await user.click(screen.getByRole('button', { name: /try again/i }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(regenerate).not.toHaveBeenCalled();
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 });

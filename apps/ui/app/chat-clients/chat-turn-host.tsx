@@ -44,7 +44,8 @@ import {
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { ChatRequest, ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import { generatePrefixedId } from '@taucad/utils/id';
-import { idPrefix } from '@taucad/types/constants';
+import { errorCategory, idPrefix } from '@taucad/types/constants';
+import type { ChatError } from '@taucad/types';
 import {
   agentHostClientConfig,
   createRunBody,
@@ -346,18 +347,28 @@ export function ChatTurnHost(): ReactNode {
        * — but continuing it is still an *attempt*, and an attempt holds a
        * lease. The lease-less `continue` this replaces wrote the resumed
        * execution's files unfenced, minted no revision on completion and left
-       * nothing that could settle it (I1, T2-D3/D4). A turn nothing can
-       * continue is a new turn, so it falls through to the rewind below. */
+       * nothing that could settle it (I1, T2-D3/D4). A stale Resume must
+       * refuse before admission; replay is a separate regenerate gesture. */
       const resumableRunId = gesture.kind === 'continue' ? resumableBrowserAgentHostRunId(activeChatId) : undefined;
       const messages = Array.isArray(chat.messages) ? chat.messages : [];
       try {
+        if (gesture.kind === 'continue' && resumableRunId === undefined) {
+          throw new Error(
+            JSON.stringify({
+              category: errorCategory.generic,
+              title: 'Resume unavailable',
+              message: 'This turn has nothing left to continue. Send it again to start a new one.',
+              code: 'RESUME_UNAVAILABLE',
+            } satisfies ChatError),
+          );
+        }
         const intent = turnIntentOf(
           messages,
           gesture.kind === 'send'
             ? { kind: 'send', messageId: gesture.message.id }
             : gesture.kind === 'edit'
               ? { kind: 'edit', messageId: gesture.messageId }
-              : gesture.kind === 'continue' && resumableRunId !== undefined
+              : gesture.kind === 'continue'
                 ? { kind: 'continue' }
                 : { kind: 'regenerate' },
         );

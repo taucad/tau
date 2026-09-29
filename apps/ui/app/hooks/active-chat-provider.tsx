@@ -34,8 +34,9 @@ import { useActorRef, useSelector } from '@xstate/react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { Chat } from '@ai-sdk/react';
 import { waitFor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { isAnyToolPart } from '@taucad/chat';
+import { isResumableRunFailure } from '@taucad/agent-host';
 import type { CadAgentExecution, ContextUsageData, MyUIMessage } from '@taucad/chat';
 import type { KernelEntry, KernelId } from '@taucad/types/constants';
 import { isKernelId, resolveKernel } from '@taucad/types/constants';
@@ -46,8 +47,11 @@ import { resizeImageActor } from '#hooks/resize-image.actor.js';
 import { useDraftImageErrorToast } from '#hooks/use-draft-image-error-toast.js';
 import { inspect } from '#machines/inspector.js';
 import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession } from '#services/chat-session-store.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
+import type { chatSessionMachine } from '#machines/chat-session.machine.js';
+import { parseErrorForPersistence } from '#utils/error.utils.js';
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
@@ -69,6 +73,7 @@ import { attachmentUrl } from '#utils/attachment.utils.js';
 import type { ChatMode, ReasoningLevel } from '@taucad/chat/constants';
 import { effectiveEffort } from '#utils/model-reasoning.js';
 import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
+import { resumableBrowserAgentHostRunId } from '#chat-clients/_internal/browser-agent-host-transport.js';
 
 type ChatInstance = Chat<MyUIMessage>;
 
@@ -169,6 +174,8 @@ export type ChatComposerContextValue = {
    * provider.
    */
   stop: () => void;
+  /** Continue an interrupted, settled run; absent while recovery is unavailable. */
+  resume: (() => void) | undefined;
   /**
    * Most-recent `data-context-usage` part across the chat's messages, or
    * `undefined` when no usage data has streamed. Always `undefined` under
@@ -279,6 +286,7 @@ export function ChatComposerProvider({
       status: 'ready',
       agentActivity: 'ready',
       stop: noopStop,
+      resume: undefined,
       contextUsage: undefined,
       session: undefined,
       canSelectExecution: false,
@@ -360,6 +368,7 @@ export function HomeNewProjectComposerProvider({
       status: 'ready',
       agentActivity: 'ready',
       stop: noopStop,
+      resume: undefined,
       contextUsage: undefined,
       session: undefined,
       canSelectExecution: true,
@@ -400,6 +409,7 @@ export function ActiveChatProvider({
   const status = useSessionStatus(chatId);
   const agentActivity = useSessionAgentActivity(session, chatId, status);
   const stop = useSessionStop(session);
+  const resume = useSessionResume(session, chatId);
   const contextUsage = useSessionContextUsage(chatId);
   const consumeDraft = useConsumeDraft(session.draftActorRef);
 
@@ -422,6 +432,7 @@ export function ActiveChatProvider({
       status,
       agentActivity,
       stop,
+      resume,
       contextUsage,
       session: sessionValue,
       canSelectExecution: true,
@@ -436,6 +447,7 @@ export function ActiveChatProvider({
       status,
       agentActivity,
       stop,
+      resume,
       contextUsage,
       sessionValue,
       consumeDraft,
@@ -691,6 +703,67 @@ function useSessionStop(session: ChatSession): () => void {
   return useCallback(() => {
     session.persistenceActorRef.send({ type: 'stopRequest' });
   }, [session.persistenceActorRef]);
+}
+
+/** Recovery is projected from the existing lifecycle and durable failure, never from inactivity alone. */
+function canResumeSession({
+  chat,
+  run,
+  persistence,
+  runtimeError,
+  resumableRunId,
+}: {
+  chat: ChatInstance;
+  run: SnapshotFrom<typeof chatSessionMachine> | undefined;
+  persistence: SnapshotFrom<typeof chatPersistenceMachine>;
+  runtimeError: Error | undefined;
+  resumableRunId: string | undefined;
+}): boolean {
+  const failure =
+    runtimeError === undefined ? persistence.context.persistedError : parseErrorForPersistence(runtimeError);
+  return (
+    (failure?.code === 'RUN_ABANDONED' || failure?.code === 'NETWORK_ERROR') &&
+    isResumableRunFailure(failure) &&
+    run?.matches({ run: 'failed' }) === true &&
+    resumableRunId !== undefined &&
+    // A hydrated failure can precede host discovery; the host supplies the identity until the actor knows it.
+    (run.context.activeRunId === undefined || resumableRunId === run.context.activeRunId) &&
+    run.context.turn === undefined &&
+    persistence.matches({ requestLifecycle: 'idle', chatLoading: 'idle' }) &&
+    !persistence.context.isLoadingChat &&
+    chat.status !== 'submitted' &&
+    chat.status !== 'streaming' &&
+    !chat.messages.some((message) =>
+      message.parts.some((part) => isAnyToolPart(part) && part.state === 'approval-requested'),
+    )
+  );
+}
+
+function useSessionResume(session: ChatSession, chatId: string): (() => void) | undefined {
+  const store = useChatSessionStore();
+  const run = useSelector(session.stateActorRef, (snapshot) => snapshot);
+  const persistence = useSelector(session.persistenceActorRef, (snapshot) => snapshot);
+  const { error: runtimeError, resumableRunId } = useChatSessionSnapshot(chatId, (snapshot) => ({
+    error: snapshot?.chat.error,
+    resumableRunId: snapshot === undefined ? undefined : resumableBrowserAgentHostRunId(chatId),
+  }));
+  const resume = useCallback(() => {
+    // Admission begins synchronously. Re-read here so a stale or duplicate click cannot queue another attempt.
+    if (
+      !canResumeSession({
+        chat: session.chat,
+        run: session.stateActorRef?.getSnapshot(),
+        persistence: session.persistenceActorRef.getSnapshot(),
+        runtimeError: session.chat.error,
+        resumableRunId: resumableBrowserAgentHostRunId(chatId),
+      })
+    ) {
+      return;
+    }
+    void store.touchChatRecency(chatId, Date.now());
+    void store.requestTurn(chatId, { kind: 'continue' });
+  }, [chatId, session, store]);
+  return canResumeSession({ chat: session.chat, run, persistence, runtimeError, resumableRunId }) ? resume : undefined;
 }
 
 /**

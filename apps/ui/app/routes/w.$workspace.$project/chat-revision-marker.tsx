@@ -18,7 +18,7 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 import { useRevisionCards, useRevisionChanges, useRevisions, useTurnRevision } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useRevisionStatus } from '#hooks/use-revision-status.js';
-import { useChatActions, useChatContext, useChatRetrySnapshot, useChatSelector } from '#hooks/use-chat.js';
+import { useChatContext, useChatRetrySnapshot, useChatSelector } from '#hooks/use-chat.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import { useProject } from '#hooks/use-project.js';
 import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
@@ -210,7 +210,7 @@ export const ChatRevisionMarker = memo(function ({
   const state = useTurnRevisionState(userMessageId, isLatestTurn);
   const savedRevision = state.kind === 'saved' ? state.revision : undefined;
   const fileCount = useRevisionChanges(savedRevision).length;
-  const { continueChat } = useChatActions();
+  const { chat } = useChatContext();
   const workspace = useProjectWorkspace({ enableNoContext: true });
   const [isOpen, setIsOpen] = useState(false);
 
@@ -289,7 +289,15 @@ export const ChatRevisionMarker = memo(function ({
           </button>
         </CollapsibleTrigger>
         {state.kind === 'unconfirmed' ? (
-          <ActionButton verb='Retry' icon={RotateCw} className='mt-0.5 mr-1' onClick={continueChat} />
+          <ActionButton
+            verb='Retry'
+            icon={RotateCw}
+            className='mt-0.5 mr-1'
+            onClick={() => {
+              // Confirm the existing save by reattaching; this action does not admit another attempt.
+              void chat?.resumeStream();
+            }}
+          />
         ) : null}
       </div>
       {/* Padding sits on an inner element, so the height motion starts from zero. */}

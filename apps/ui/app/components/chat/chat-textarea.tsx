@@ -332,6 +332,7 @@ export const ChatTextarea = memo(function ({
         // State
         dragKind={logic.dragKind}
         isSubmitting={logic.isSubmitting}
+        canResume={logic.canResume}
         isAttaching={logic.isAttaching}
         inputText={logic.inputText}
         attachments={logic.attachments}

@@ -54,12 +54,19 @@ export function WorkbenchRecordHost(): React.JSX.Element {
     setStatus(message);
     setStatusVersion((version) => version + 1);
   }, []);
-  const [refusal, setRefusal] = useState<{ code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string }>();
+  const [refusal, setRefusal] = useState<{
+    code: 'INVALID_RECORD' | 'NEWER_RECORD';
+    message: string;
+  }>();
   const snapshotRef = useRef<WorkbenchLayoutSnapshot | undefined>(undefined);
   const listenersRef = useRef(new Set<() => void>());
   const viewerRef = useRef<((node: ViewerNode, applied: () => void) => void) | undefined>(undefined);
   const workbenchRef = useRef<((node: WorkbenchLaneNode, applied: () => void) => void) | undefined>(undefined);
   const applicationRef = useRef({ epoch: 0, viewer: false, workbench: false });
+  const appliedViewerRef = useRef<ViewerNode | undefined>(undefined);
+  const appliedWorkbenchRef = useRef<WorkbenchLaneNode | undefined>(undefined);
+  const personViewerRef = useRef<ViewerNode | undefined>(undefined);
+  const personWorkbenchRef = useRef<WorkbenchLaneNode | undefined>(undefined);
   const acknowledge = useCallback(
     (epoch: number): void => {
       const application = applicationRef.current;
@@ -106,12 +113,14 @@ export function WorkbenchRecordHost(): React.JSX.Element {
         root,
         editDebounce: 500,
         files: parameterFiles,
-        onChange: (state, source) => {
+        onChange: (state, source, locallyAuthored) => {
           const epoch = ++applicationRef.current.epoch;
           applicationRef.current.viewer = false;
           applicationRef.current.workbench = false;
           setAppliedWorkbenchRevision(workbenchPaths.layout, undefined);
           if (state.refusal) {
+            appliedViewerRef.current = undefined;
+            appliedWorkbenchRef.current = undefined;
             setRefusal(state.refusal);
             announce(state.refusal.message);
             snapshotRef.current = undefined;
@@ -122,6 +131,8 @@ export function WorkbenchRecordHost(): React.JSX.Element {
           }
           setRefusal(undefined);
           if (!state.layout) {
+            appliedViewerRef.current = undefined;
+            appliedWorkbenchRef.current = undefined;
             snapshotRef.current = undefined;
             for (const listener of listenersRef.current) {
               listener();
@@ -138,38 +149,81 @@ export function WorkbenchRecordHost(): React.JSX.Element {
                     tab.kind === 'pane' && (tab.pane === 'kernel' || tab.pane === 'console'),
                 )
                 .map((tab) => ({ tab, reason: 'debug-only' }));
-          snapshotRef.current = { layout: next, refused, layoutDigest: state.digest };
+          snapshotRef.current = {
+            layout: next,
+            refused,
+            layoutDigest: state.digest,
+          };
           for (const listener of listenersRef.current) {
             listener();
           }
           if (source === 'read' && previous && JSON.stringify(previous) !== JSON.stringify(next)) {
-            editorRef.send({ type: 'setPreviousLayout', layout: rollback(previous) });
+            editorRef.send({
+              type: 'setPreviousLayout',
+              layout: rollback(previous),
+            });
           }
           appliedRef.current = next;
           const viewer = viewerRef.current;
           const workbench = workbenchRef.current;
-          viewer?.(next.viewer, () => {
-            if (applicationRef.current.epoch !== epoch || viewerRef.current !== viewer) {
-              return;
+          const sameNode = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
+          if (personViewerRef.current && sameNode(personViewerRef.current, next.viewer)) {
+            personViewerRef.current = undefined;
+          }
+          if (personWorkbenchRef.current && sameNode(personWorkbenchRef.current, next.workbench)) {
+            personWorkbenchRef.current = undefined;
+          }
+          const staleViewer =
+            personViewerRef.current &&
+            (Boolean(locallyAuthored?.viewer) || (previous && sameNode(previous.viewer, next.viewer)));
+          if (viewer && !staleViewer) {
+            if (appliedViewerRef.current && sameNode(appliedViewerRef.current, next.viewer)) {
+              applicationRef.current.viewer = true;
+            } else {
+              viewer(next.viewer, () => {
+                if (applicationRef.current.epoch !== epoch || viewerRef.current !== viewer) {
+                  return;
+                }
+                appliedViewerRef.current = next.viewer;
+                applicationRef.current.viewer = true;
+                acknowledge(epoch);
+              });
             }
-            applicationRef.current.viewer = true;
-            acknowledge(epoch);
-          });
-          workbench?.(next.workbench, () => {
-            if (applicationRef.current.epoch !== epoch || workbenchRef.current !== workbench) {
-              return;
+          }
+          const staleWorkbench =
+            personWorkbenchRef.current &&
+            (Boolean(locallyAuthored?.workbench) || (previous && sameNode(previous.workbench, next.workbench)));
+          if (workbench && !staleWorkbench) {
+            if (appliedWorkbenchRef.current && sameNode(appliedWorkbenchRef.current, next.workbench)) {
+              applicationRef.current.workbench = true;
+            } else {
+              workbench(next.workbench, () => {
+                if (applicationRef.current.epoch !== epoch || workbenchRef.current !== workbench) {
+                  return;
+                }
+                appliedWorkbenchRef.current = next.workbench;
+                applicationRef.current.workbench = true;
+                acknowledge(epoch);
+              });
             }
-            applicationRef.current.workbench = true;
-            acknowledge(epoch);
-          });
+          }
           const { desktopLayout } = editorRef.getSnapshot().context.panelState;
-          if (desktopLayout.chatOpen !== next.lanes.chat || desktopLayout.workbenchOpen !== next.lanes.workbench) {
+          const intendedLanes = store.intendedLayout()?.lanes;
+          const chatOpen =
+            locallyAuthored?.lanes?.chat !== undefined && intendedLanes?.chat !== next.lanes.chat
+              ? desktopLayout.chatOpen
+              : next.lanes.chat;
+          const workbenchOpen =
+            locallyAuthored?.lanes?.workbench !== undefined && intendedLanes?.workbench !== next.lanes.workbench
+              ? desktopLayout.workbenchOpen
+              : next.lanes.workbench;
+          if (desktopLayout.chatOpen !== chatOpen || desktopLayout.workbenchOpen !== workbenchOpen) {
             editorRef.send({
               type: 'setPanelState',
               panelState: {
                 desktopLayout: {
-                  chatOpen: next.lanes.chat,
-                  workbenchOpen: next.lanes.workbench,
+                  chatOpen,
+                  workbenchOpen,
                 },
               },
             });
@@ -178,6 +232,8 @@ export function WorkbenchRecordHost(): React.JSX.Element {
           announce('Workbench arrangement updated.');
         },
         onError: (error) => {
+          appliedViewerRef.current = undefined;
+          appliedWorkbenchRef.current = undefined;
           applicationRef.current.epoch++;
           applicationRef.current.viewer = false;
           applicationRef.current.workbench = false;
@@ -261,7 +317,13 @@ export function WorkbenchRecordHost(): React.JSX.Element {
     ) {
       return;
     }
-    void store.edit({ ...current, lanes: { chat: desktopLayout.chatOpen, workbench: desktopLayout.workbenchOpen } });
+    void store.edit({
+      ...current,
+      lanes: {
+        chat: desktopLayout.chatOpen,
+        workbench: desktopLayout.workbenchOpen,
+      },
+    });
   }, [desktopLayout.chatOpen, desktopLayout.workbenchOpen, store]);
 
   const controller = useMemo<WorkbenchLayoutController>(
@@ -301,7 +363,10 @@ export function WorkbenchRecordHost(): React.JSX.Element {
         }
         const restored = await store.edit(previous.layout);
         if (restored) {
-          editorRef.send({ type: 'setPreviousLayout', layout: rollback(current) });
+          editorRef.send({
+            type: 'setPreviousLayout',
+            layout: rollback(current),
+          });
         }
         return restored;
       },
@@ -317,12 +382,14 @@ export function WorkbenchRecordHost(): React.JSX.Element {
               return;
             }
             applicationRef.current.viewer = true;
+            appliedViewerRef.current = current.viewer;
             acknowledge(epoch);
           });
         }
         return () => {
           if (viewerRef.current === apply) {
             viewerRef.current = undefined;
+            appliedViewerRef.current = undefined;
             applicationRef.current.viewer = false;
             setAppliedWorkbenchRevision(workbenchPaths.layout, undefined);
           }
@@ -340,12 +407,14 @@ export function WorkbenchRecordHost(): React.JSX.Element {
               return;
             }
             applicationRef.current.workbench = true;
+            appliedWorkbenchRef.current = current.workbench;
             acknowledge(epoch);
           });
         }
         return () => {
           if (workbenchRef.current === apply) {
             workbenchRef.current = undefined;
+            appliedWorkbenchRef.current = undefined;
             applicationRef.current.workbench = false;
             setAppliedWorkbenchRevision(workbenchPaths.layout, undefined);
           }
@@ -355,7 +424,12 @@ export function WorkbenchRecordHost(): React.JSX.Element {
         if (!store.ready()) {
           return;
         }
-        const next = { ...(store.intendedLayout() ?? fallbackLayout()), viewer: node };
+        personViewerRef.current = node;
+        appliedViewerRef.current = node;
+        const next = {
+          ...(store.intendedLayout() ?? fallbackLayout()),
+          viewer: node,
+        };
         void store.edit(next);
       },
       personWorkbenchChanged: (node) => {
@@ -367,14 +441,23 @@ export function WorkbenchRecordHost(): React.JSX.Element {
                 return;
               }
               const current = store.intendedLayout() ?? fallbackLayout();
-              await store.edit({ ...current, workbench: change(current.workbench) });
+              const workbench = change(current.workbench);
+              personWorkbenchRef.current = workbench;
+              await store.edit({ ...current, workbench });
             };
             void applyAfterFirstRead();
           }
           return;
         }
         const current = store.intendedLayout() ?? fallbackLayout();
-        const next = { ...current, workbench: typeof node === 'function' ? node(current.workbench) : node };
+        const next = {
+          ...current,
+          workbench: typeof node === 'function' ? node(current.workbench) : node,
+        };
+        personWorkbenchRef.current = next.workbench;
+        if (typeof node !== 'function') {
+          appliedWorkbenchRef.current = node;
+        }
         void store.edit(next);
       },
     }),

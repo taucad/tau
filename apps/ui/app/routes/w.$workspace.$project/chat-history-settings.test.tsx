@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { MemoryRouter, useLocation } from 'react-router';
 
 type ChatState = { chat: { messages: unknown[] } | undefined; activeChatId: string };
 const chatState = vi.hoisted((): ChatState => ({ chat: { messages: [] }, activeChatId: 'chat_active' }));
@@ -31,9 +32,23 @@ vi.mock('#routes/w.$workspace.$project/chat-options-meta.js', () => ({
 const { ChatHistorySettings } = await import('#routes/w.$workspace.$project/chat-history-settings.js');
 
 function renderMenu(onRename = vi.fn()): { readonly onRename: ReturnType<typeof vi.fn> } {
-  const wrapper = ({ children }: { readonly children: ReactNode }) => <TooltipProvider>{children}</TooltipProvider>;
-  render(<ChatHistorySettings onRename={onRename} />, { wrapper });
+  const wrapper = ({ children }: { readonly children: ReactNode }) => (
+    <MemoryRouter initialEntries={['/?chat=chat_active&workbench=share']}>
+      <TooltipProvider>{children}</TooltipProvider>
+    </MemoryRouter>
+  );
+  render(
+    <>
+      <ChatHistorySettings onRename={onRename} />
+      <Location />
+    </>,
+    { wrapper },
+  );
   return { onRename };
+}
+
+function Location(): React.JSX.Element {
+  return <output aria-label='Current URL'>{useLocation().search}</output>;
 }
 
 describe('ChatHistorySettings', () => {
@@ -50,12 +65,25 @@ describe('ChatHistorySettings', () => {
     await user.click(screen.getByRole('button', { name: 'Chat options' }));
 
     const items = screen.getAllByRole('menuitem').map((item) => item.textContent);
-    expect(items).toEqual(['Rename', 'Export transcript']);
+    expect(items).toEqual(['Rename', 'Export transcript', 'Archived chats']);
     const meta = screen.getByTestId('chat-options-meta');
     expect(screen.getByRole('menu')).toContainElement(meta);
     expect(screen.getByRole('menuitem', { name: 'Export transcript' }).compareDocumentPosition(meta)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
+  });
+
+  it('opens the project archive while preserving the current chat and other query state', async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    await user.click(screen.getByRole('button', { name: 'Chat options' }));
+    const menu = screen.getByRole('menu');
+    expect(menu.querySelector('[role=separator]')).toBeInTheDocument();
+    await user.click(screen.getByRole('menuitem', { name: 'Archived chats' }));
+    expect(screen.getByRole('status', { name: 'Current URL' })).toHaveTextContent(
+      'chat=chat_active&workbench=share&archivedChats=1',
+    );
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
   it('should hand Rename to the header and keep Export disabled with no messages', async () => {

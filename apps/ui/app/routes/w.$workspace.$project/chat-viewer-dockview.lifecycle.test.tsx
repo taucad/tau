@@ -91,7 +91,7 @@ describe('live viewer record binding', () => {
       api!.addPanel({ id: 'front', component: 'viewer', title: 'front', params: { viewId: 'front' } });
     });
     await waitFor(() => {
-      expect(api!.getPanel('front')?.title).toBe('Front · honeycomb.js');
+      expect(api!.getPanel('front')?.title).toBe('honeycomb.js');
     });
     expect(api!.getPanel('front')?.params).toMatchObject({ viewId: 'front', entryPath });
     const retainedPanel = api!.getPanel('front');
@@ -114,19 +114,19 @@ describe('live viewer record binding', () => {
       adoptViewerRecordNode(api!, arranged);
     });
     await waitFor(() => {
-      expect(api!.getPanel('left')?.title).toBe('Left · honeycomb.js');
+      expect(api!.getPanel('left')?.title).toBe('honeycomb.js');
     });
     await waitFor(() => {
-      expect(api!.getPanel('joint')?.title).toBe('Joint · honeycomb.js');
+      expect(api!.getPanel('joint')?.title).toBe('honeycomb.js');
     });
     expect(api!.getPanel('front')).toBe(retainedPanel);
-    expect(api!.getPanel('front')?.title).toBe('Front · honeycomb.js');
+    expect(api!.getPanel('front')?.title).toBe('honeycomb.js');
     expect(api!.getPanel('front')?.params).toMatchObject({ viewId: 'front', entryPath });
     await act(async () => {
       adoptViewerRecordNode(api!, arranged);
     });
     expect(api!.getPanel('front')).toBe(retainedPanel);
-    expect(api!.getPanel('front')?.title).toBe('Front · honeycomb.js');
+    expect(api!.getPanel('front')?.title).toBe('honeycomb.js');
     expect(api!.getPanel('front')?.params).toMatchObject({ viewId: 'front', entryPath });
     for (const store of stores.values()) {
       store.dispose();

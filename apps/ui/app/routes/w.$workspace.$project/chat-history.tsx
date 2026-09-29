@@ -141,12 +141,34 @@ const virtuosoComponents = {
   EmptyPlaceholder: ChatHistoryEmptyPlaceholder,
 };
 
-export const ChatHistory = memo(function (props: {
+type ChatHistoryProps = {
   readonly className?: string;
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
-}) {
-  const { className, isExpanded = true, setIsExpanded } = props;
+};
+
+export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ...props }: ChatHistoryProps) {
+  const toggleChatHistory = useCallback(() => {
+    setIsExpanded?.((current) => !current);
+  }, [setIsExpanded]);
+  const { formattedKeyCombination } = useKeybinding(toggleChatKeyCombination, toggleChatHistory);
+
+  return isExpanded ? (
+    <ExpandedChatHistory
+      {...props}
+      isExpanded={isExpanded}
+      setIsExpanded={setIsExpanded}
+      formattedKeyCombination={formattedKeyCombination}
+    />
+  ) : null;
+});
+
+const ExpandedChatHistory = memo(function ({
+  className,
+  isExpanded,
+  setIsExpanded,
+  formattedKeyCombination,
+}: ChatHistoryProps & { readonly formattedKeyCombination: string }) {
   const messageIds = useChatSelector((state) => state.messageOrder);
   const cadChat = useCadChatClient();
   const { treeService } = useFileManager();
@@ -167,12 +189,6 @@ export const ChatHistory = memo(function (props: {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatTextareaRef = useRef<ChatTextareaHandle>(null);
   const location = useLocation();
-  const toggleChatHistory = useCallback(() => {
-    setIsExpanded?.((current) => !current);
-  }, [setIsExpanded]);
-
-  const { formattedKeyCombination } = useKeybinding(toggleChatKeyCombination, toggleChatHistory);
-
   useEffect(() => {
     if (location.state?.focusChatComposer === true) {
       chatTextareaRef.current?.focus();
@@ -206,12 +222,8 @@ export const ChatHistory = memo(function (props: {
     };
   }, [persistenceActorRef]);
 
-  // The CAD chat-client composes the per-request `agent` payload (kernel,
-  // model, mode, toolChoice, testingEnabled, snapshot, contextPayload) from
-  // `useCadAgentConfig`. The verb identity stays stable across renders as
-  // long as the underlying agent config identity is stable — memoising the
-  // call site lets the tooltip-heavy memo'd children downstream avoid
-  // re-renders on every editor-state tick.
+  // The turn host owns request configuration; the client exposes action verbs.
+  // Memoising the call site avoids re-rendering tooltip-heavy children.
   const submitChat = cadChat.submit;
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content, attachments }) => {

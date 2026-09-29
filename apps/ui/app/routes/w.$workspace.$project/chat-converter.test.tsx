@@ -10,6 +10,10 @@ import { toJSONSchema } from 'zod';
 import type * as RjsfCore from '@rjsf/core';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
+import { awaitFreshRender } from '#machines/await-fresh-render.js';
+import { toast } from '#components/ui/sonner.js';
+
+vi.mock('#machines/await-fresh-render.js', () => ({ awaitFreshRender: vi.fn() }));
 
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown } | undefined, selector: (state: unknown) => unknown) => {
@@ -24,6 +28,8 @@ let mockCapabilities: CapabilitiesManifest | undefined;
 let mockGeometry: unknown | undefined;
 let mockHelperGeometry: unknown | undefined;
 let mockActiveKernelId: string | undefined = 'replicad';
+let mockLatestGeometryOutcome: 'success' | 'failure' | undefined = 'success';
+let mockKernelIssues = new Map<string, Array<{ message: string; code: string; type: string; severity: string }>>();
 
 function fidelityRank(fidelity: ExportRoute['fidelity']): number {
   return fidelity === 'brep' ? 0 : 1;
@@ -81,7 +87,11 @@ const mockCadRef = {
       capabilities: mockCapabilities,
       activeKernelId: mockActiveKernelId,
       kernelClient: mockKernelClient,
+      entryPath: 'main.ts',
+      latestGeometryOutcome: mockLatestGeometryOutcome,
+      kernelIssues: mockKernelIssues,
     },
+    hasTag: () => false,
   })),
 } as unknown as ActorRefFrom<typeof cadMachine>;
 
@@ -92,12 +102,18 @@ const mockHelperCadRef = {
       capabilities: mockCapabilities,
       activeKernelId: mockActiveKernelId,
       kernelClient: mockKernelClient,
+      entryPath: 'helper.ts',
+      latestGeometryOutcome: mockLatestGeometryOutcome,
+      kernelIssues: mockKernelIssues,
     },
+    hasTag: () => false,
   })),
 } as unknown as ActorRefFrom<typeof cadMachine>;
 
 const mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
 mockGeometryUnits.set('main.ts', mockCadRef);
+const mockProjectSend = vi.fn();
+let mockViewSettings: Record<string, { entryPath: string }> = {};
 const mockParameterEntries = new Map<string, FileParameterEntry>();
 const mockParameterSnapshots = new Map<string, Record<string, unknown>>();
 const parameterIdentity = {
@@ -148,6 +164,10 @@ vi.mock('#hooks/use-project.js', () => ({
       getSnapshot: vi.fn(() => ({ context: { project: { name: 'test-model' } } })),
       subscribe: vi.fn(() => ({ unsubscribe: vi.fn() })),
       on: vi.fn(() => ({ unsubscribe: vi.fn() })),
+      send: mockProjectSend,
+    },
+    editorRef: {
+      getSnapshot: () => ({ context: { viewSettings: mockViewSettings, unitSettings: {} } }),
     },
     geometryUnits: mockGeometryUnits,
     mainEntryPath: 'main.ts',
@@ -442,14 +462,18 @@ describe('ChatConverter', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(awaitFreshRender).mockImplementation(async (actor) => actor.getSnapshot());
     mockGeometry = { format: 'gltf', content: new Uint8Array([1]) };
     mockHelperGeometry = { format: 'gltf', content: new Uint8Array([2]) };
     mockCapabilities = createCapabilities();
     mockActiveKernelId = 'replicad';
+    mockLatestGeometryOutcome = 'success';
+    mockKernelIssues = new Map();
     mockContentService = {};
     mockReadFile.mockRejectedValue(new Error('File not found'));
     mockGeometryUnits.clear();
     mockGeometryUnits.set('main.ts', mockCadRef);
+    mockViewSettings = {};
     mockParameterEntries.clear();
     mockParameterSnapshots.clear();
   });
@@ -507,6 +531,90 @@ describe('ChatConverter', () => {
     expect(screen.getByText('File to export')).toBeDefined();
     expect(screen.getByText('No geometry to export for this file')).toBeDefined();
     expect(screen.queryByRole('button', { name: /glb/i })).toBeNull();
+  });
+
+  it('offers a hidden restored viewer file and admits its unit when selected for export', async () => {
+    const { scrollIntoView } = Element.prototype;
+    Element.prototype.scrollIntoView = vi.fn();
+    mockViewSettings = { hiddenView: { entryPath: 'helper.ts' } };
+    try {
+      render(<ChatConverter isExpanded />);
+
+      fireEvent.click(screen.getByRole('button', { name: /main\.ts/i }));
+      fireEvent.click(await screen.findByText('helper.ts'));
+
+      expect(mockProjectSend).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'claimGeometryUnit', entryPath: 'helper.ts', renderTimeout: undefined }),
+      );
+    } finally {
+      Element.prototype.scrollIntoView = scrollIntoView;
+    }
+  });
+
+  it('claims the selected unit only while the exporter is shown', async () => {
+    const view = render(<ChatConverter isExpanded={false} />);
+    expect(mockProjectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'claimGeometryUnit' }));
+
+    view.rerender(<ChatConverter isExpanded />);
+    const claim = mockProjectSend.mock.calls.find(([event]) => event.type === 'claimGeometryUnit')?.[0] as unknown as {
+      claimId: string;
+      entryPath: string;
+    };
+    expect(claim.entryPath).toBe('main.ts');
+    expect(typeof claim.claimId).toBe('string');
+
+    view.rerender(<ChatConverter isExpanded={false} />);
+    expect(mockProjectSend).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: claim.claimId });
+  });
+
+  it('holds a separate export claim after hide and waits for the resumed render', async () => {
+    let resolveFresh: (snapshot: Awaited<ReturnType<typeof awaitFreshRender>>) => void = () => undefined;
+    vi.mocked(awaitFreshRender).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFresh = resolve;
+      }),
+    );
+    const view = render(<ChatConverter isExpanded />);
+    fireEvent.click(screen.getByRole('button', { name: /glb/i }));
+    const beforeExport = mockProjectSend.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: /export glb/i }));
+    const operationClaim = mockProjectSend.mock.calls
+      .slice(beforeExport)
+      .map(([event]) => event as { type: string; claimId: string; entryPath?: string })
+      .find((event) => event.type === 'claimGeometryUnit');
+    expect(operationClaim?.entryPath).toBe('main.ts');
+
+    view.rerender(<ChatConverter isExpanded={false} />);
+    expect(mockProjectSend).not.toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: operationClaim?.claimId });
+    expect(mockKernelClient.export).not.toHaveBeenCalled();
+
+    resolveFresh(mockCadRef.getSnapshot());
+    await waitFor(() => {
+      expect(mockKernelClient.export).toHaveBeenCalledWith('glb', { exportOptions: {} });
+      expect(mockProjectSend).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: operationClaim?.claimId });
+    });
+  });
+
+  it('refuses retained geometry and client after the latest CAD render fails', async () => {
+    mockLatestGeometryOutcome = 'failure';
+    mockKernelIssues = new Map([
+      ['main.ts', [{ message: 'radius must be positive', code: 'RUNTIME', type: 'runtime', severity: 'error' }]],
+    ]);
+    render(<ChatConverter isExpanded />);
+    fireEvent.click(screen.getByRole('button', { name: /glb/i }));
+    const beforeExport = mockProjectSend.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: /export glb/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('radius must be positive');
+    });
+    expect(mockKernelClient.export).not.toHaveBeenCalled();
+    const operationClaim = mockProjectSend.mock.calls
+      .slice(beforeExport)
+      .map(([event]) => event as { type: string; claimId: string })
+      .find((event) => event.type === 'claimGeometryUnit');
+    expect(operationClaim).toBeDefined();
+    expect(mockProjectSend).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: operationClaim?.claimId });
   });
 
   it('should derive formats solely from manifest routes', () => {

@@ -1243,6 +1243,32 @@ describe('cadMachine', () => {
   // State: parked (R3)
   // =========================================================================
   describe('parked', () => {
+    it('should skip the first render when hidden before the kernel connects', async () => {
+      const client = createMockAppRuntimeClient();
+      let resolveConnect!: (value: {
+        type: 'kernelConnected';
+        client: AppRuntimeClient;
+        cleanups: Array<() => void>;
+      }) => void;
+      const connected = new Promise<{ type: 'kernelConnected'; client: AppRuntimeClient; cleanups: Array<() => void> }>(
+        (resolve) => {
+          resolveConnect = resolve;
+        },
+      );
+      const { actor } = createTestActor({ connectResult: async () => connected });
+      actor.start();
+      actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
+      actor.send({ type: 'parkRuntime' });
+
+      resolveConnect({ type: 'kernelConnected', client, cleanups: [] });
+      await waitFor(actor, (snapshot) => snapshot.value === 'parked');
+
+      expect(client.render).not.toHaveBeenCalled();
+      expect(client.terminate).toHaveBeenCalledOnce();
+      expect(actor.getSnapshot().context.entryPath).toBe(stubEntryPath);
+      actor.stop();
+    });
+
     it('releases the kernel process and keeps everything else', async () => {
       const cleanup = vi.fn();
       const client = createMockAppRuntimeClient();
@@ -1288,7 +1314,7 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
-    it('refuses to park a render in flight, and keeps its result', async () => {
+    it('defers park through a hidden parameter edit and renders the latest stage only on reveal', async () => {
       const client = createMockAppRuntimeClient();
       const { actor } = await startAndConnect({
         connectResult: async () => ({ type: 'kernelConnected', client, cleanups: [] }),
@@ -1298,13 +1324,44 @@ describe('cadMachine', () => {
       expect(actor.getSnapshot().matches('rendering')).toBe(true);
 
       actor.send({ type: 'parkRuntime' });
+      const stage: Record<string, Uint8Array<ArrayBuffer>> = {
+        '.tau/parameters/main.ts.json': new Uint8Array(new ArrayBuffer(1)),
+      };
+      stage['.tau/parameters/main.ts.json']![0] = 2;
+      const rendersBeforeEdit = vi.mocked(client.render).mock.calls.length;
+      actor.send({ type: 'commitParameters', stage });
 
       expect(actor.getSnapshot().matches('rendering')).toBe(true);
+      expect(actor.getSnapshot().context.parameterRender).toMatchObject({ kind: 'commit', stage });
+      expect(vi.mocked(client.render).mock.calls).toHaveLength(rendersBeforeEdit);
       expect(client.terminate).not.toHaveBeenCalled();
 
       actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
+      actor.send({ type: 'stateChanged', state: 'idle' });
+      expect(actor.getSnapshot().value).toBe('parked');
       expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
       expect(actor.getSnapshot().context.latestGeometryOutcome).toBe('success');
+
+      actor.send({ type: 'resumeRuntime' });
+      await vi.waitFor(() => {
+        expect(vi.mocked(client.render).mock.calls.some(([request]) => request.stage === stage)).toBe(true);
+      });
+      actor.stop();
+    });
+
+    it('should retain parameter intent while parked for the next resume', async () => {
+      const { actor } = await startAndConnect();
+      actor.send({ type: 'parkRuntime' });
+      const stage: Record<string, Uint8Array<ArrayBuffer>> = {
+        '.tau/parameters/main.ts.json': new Uint8Array(new ArrayBuffer(1)),
+      };
+      stage['.tau/parameters/main.ts.json']![0] = 1;
+
+      actor.send({ type: 'commitParameters', stage });
+
+      expect(actor.getSnapshot().value).toBe('parked');
+      expect(actor.getSnapshot().context.lastRequestedRenderId).toBeGreaterThan(0);
+      expect(actor.getSnapshot().context.parameterRender).toMatchObject({ kind: 'commit', stage });
       actor.stop();
     });
 

@@ -43,6 +43,10 @@ export type ProjectContext = {
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
+  /** Visible viewer panels and explicit operations are the runtime's entry-scoped demand. */
+  viewerGeometryDemand: Map<string, string>;
+  operationGeometryDemand: Map<string, string>;
+  runtimeParked: boolean;
   /**
    * Why this project has no kernel, and which unit said so (R4).
    *
@@ -147,6 +151,9 @@ type ProjectEventInternal =
   | { type: 'loadModel' }
   | { type: 'setMainFile'; path: string }
   | { type: 'createGeometryUnit'; entryPath: string; renderTimeout?: number }
+  | { type: 'setViewerGeometryDemand'; viewId: string; entryPath?: string }
+  | { type: 'claimGeometryUnit'; claimId: string; entryPath: string; renderTimeout?: number }
+  | { type: 'releaseGeometryUnit'; claimId: string }
   /* R4: a unit reporting whether its kernel was refused, and why. */
   | { type: 'geometryUnit.kernelRefused'; actorId: string; reason: string | undefined }
   | { type: 'openInViewer'; entryPath: string }
@@ -335,8 +342,31 @@ const withoutUnits = (context: ProjectContext, matches: (entryPath: string) => b
   }
   return {
     geometryUnits,
+    viewerGeometryDemand: new Map([...context.viewerGeometryDemand].filter(([, path]) => !matches(path))),
+    operationGeometryDemand: new Map([...context.operationGeometryDemand].filter(([, path]) => !matches(path))),
     ...(matches(context.mainEntryPath) ? { mainEntryPath: '' } : {}),
   };
+};
+
+const hasOperationDemand = (context: ProjectContext, entryPath: string): boolean =>
+  [...context.operationGeometryDemand.values()].includes(entryPath);
+
+const shouldRunUnit = (context: ProjectContext, entryPath: string): boolean =>
+  hasOperationDemand(context, entryPath) ||
+  (!context.runtimeParked &&
+    (entryPath === context.mainEntryPath || [...context.viewerGeometryDemand.values()].includes(entryPath)));
+
+const reconcileUnitRuntime = (
+  { previous, next, entryPath }: { previous: ProjectContext; next: ProjectContext; entryPath: string },
+  enq: ProjectEnqueue,
+): void => {
+  if (shouldRunUnit(previous, entryPath) === shouldRunUnit(next, entryPath)) {
+    return;
+  }
+  const unit = next.geometryUnits.get(entryPath);
+  if (unit) {
+    enq.sendTo(unit, { type: shouldRunUnit(next, entryPath) ? 'resumeRuntime' : 'parkRuntime' });
+  }
 };
 
 /**
@@ -411,6 +441,9 @@ export const projectMachine = setup({
       viewGraphics,
       modelInteractionRef,
       geometryUnits,
+      viewerGeometryDemand: new Map(),
+      operationGeometryDemand: new Map(),
+      runtimeParked: false,
       kernelRefusal: undefined,
       mainEntryPath: '',
       logRef,
@@ -433,16 +466,19 @@ export const projectMachine = setup({
     },
     /* R3: the session knows hidden-and-idle, this owns the units. One loop. */
     parkRuntime: ({ context }, enq) => {
-      for (const unit of context.geometryUnits.values()) {
-        enq.sendTo(unit, { type: 'parkRuntime' });
+      for (const [path, unit] of context.geometryUnits) {
+        if (!hasOperationDemand(context, path)) {
+          enq.sendTo(unit, { type: 'parkRuntime' });
+        }
       }
-      return {};
+      return { context: { runtimeParked: true } };
     },
     resumeRuntime: ({ context }, enq) => {
-      for (const unit of context.geometryUnits.values()) {
-        enq.sendTo(unit, { type: 'resumeRuntime' });
+      const resumed = { ...context, runtimeParked: false };
+      for (const path of context.geometryUnits.keys()) {
+        reconcileUnitRuntime({ previous: context, next: resumed, entryPath: path }, enq);
       }
-      return {};
+      return { context: { runtimeParked: false } };
     },
   },
   /* Stop the stateful children; they'll be garbage collected. */
@@ -562,23 +598,76 @@ export const projectMachine = setup({
               }
 
               const geometryUnits = new Map(context.geometryUnits);
-              geometryUnits.set(
-                event.entryPath,
-                spawnGeometryUnit(context, enq, {
-                  self,
-                  entryPath: event.entryPath,
-                  options: {
-                    shouldInitializeKernelOnStart: true,
-                    ...(event.renderTimeout === undefined ? {} : { renderTimeout: event.renderTimeout }),
-                  },
-                }),
-              );
+              const unit = spawnGeometryUnit(context, enq, {
+                self,
+                entryPath: event.entryPath,
+                options: {
+                  shouldInitializeKernelOnStart: true,
+                  ...(event.renderTimeout === undefined ? {} : { renderTimeout: event.renderTimeout }),
+                },
+              });
+              geometryUnits.set(event.entryPath, unit);
               return {
                 context: {
                   geometryUnits,
                   ...(context.mainEntryPath === '' ? { mainEntryPath: event.entryPath } : {}),
                 },
               };
+            },
+            setViewerGeometryDemand: ({ context, event }, enq) => {
+              const previousPath = context.viewerGeometryDemand.get(event.viewId);
+              const viewerGeometryDemand = new Map(context.viewerGeometryDemand);
+              if (event.entryPath === undefined) {
+                viewerGeometryDemand.delete(event.viewId);
+              } else {
+                assertRootedPath(event.entryPath);
+                viewerGeometryDemand.set(event.viewId, event.entryPath);
+              }
+              const next = { ...context, viewerGeometryDemand };
+              if (previousPath !== undefined && previousPath !== event.entryPath) {
+                reconcileUnitRuntime({ previous: context, next, entryPath: previousPath }, enq);
+              }
+              if (event.entryPath !== undefined) {
+                if (context.geometryUnits.has(event.entryPath)) {
+                  reconcileUnitRuntime({ previous: context, next, entryPath: event.entryPath }, enq);
+                } else {
+                  enq.raise({ type: 'createGeometryUnit', entryPath: event.entryPath });
+                }
+              }
+              return { context: { viewerGeometryDemand } };
+            },
+            claimGeometryUnit: ({ context, event }, enq) => {
+              assertRootedPath(event.entryPath);
+              const operationGeometryDemand = new Map(context.operationGeometryDemand);
+              const previousPath = operationGeometryDemand.get(event.claimId);
+              operationGeometryDemand.set(event.claimId, event.entryPath);
+              const next = { ...context, operationGeometryDemand };
+              if (previousPath !== undefined && previousPath !== event.entryPath) {
+                reconcileUnitRuntime({ previous: context, next, entryPath: previousPath }, enq);
+              }
+              if (context.geometryUnits.has(event.entryPath)) {
+                reconcileUnitRuntime({ previous: context, next, entryPath: event.entryPath }, enq);
+              } else {
+                enq.raise({
+                  type: 'createGeometryUnit',
+                  entryPath: event.entryPath,
+                  renderTimeout: event.renderTimeout,
+                });
+              }
+              return { context: { operationGeometryDemand } };
+            },
+            releaseGeometryUnit: ({ context, event }, enq) => {
+              const entryPath = context.operationGeometryDemand.get(event.claimId);
+              if (entryPath === undefined) {
+                return {};
+              }
+              const operationGeometryDemand = new Map(context.operationGeometryDemand);
+              operationGeometryDemand.delete(event.claimId);
+              reconcileUnitRuntime(
+                { previous: context, next: { ...context, operationGeometryDemand }, entryPath },
+                enq,
+              );
+              return { context: { operationGeometryDemand } };
             },
             openInViewer: ({ event }, enq) => {
               assertRootedPath(event.entryPath);
@@ -596,6 +685,8 @@ export const projectMachine = setup({
               return {
                 context: {
                   ...withoutUnits(context, (entryPath) => entryPath === event.entryPath),
+                  /* A still-open viewer may explicitly reopen this unit. */
+                  viewerGeometryDemand: context.viewerGeometryDemand,
                   /* R4: a unit nobody holds cannot keep a row red. */
                   ...(context.kernelRefusal?.actorId === actorIdOf(unit) ? { kernelRefusal: undefined } : {}),
                 },
@@ -639,6 +730,12 @@ export const projectMachine = setup({
               return {
                 context: {
                   ...(mutatedUnits ? { geometryUnits } : {}),
+                  viewerGeometryDemand: new Map(
+                    [...context.viewerGeometryDemand].map(([viewId, entryPath]) => [viewId, rewrite(entryPath)]),
+                  ),
+                  operationGeometryDemand: new Map(
+                    [...context.operationGeometryDemand].map(([claimId, entryPath]) => [claimId, rewrite(entryPath)]),
+                  ),
                   ...(matches(context.mainEntryPath) ? { mainEntryPath: rewrite(context.mainEntryPath) } : {}),
                   // If the main file was renamed, persist its entry pointer.
                   // Recency is stamped separately by `projectFileActivity`, so this

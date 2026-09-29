@@ -647,7 +647,7 @@ describe('KernelWorker lifecycle', () => {
         const middleware = defineMiddleware({
           id: 'optional-sidecar',
           name: 'OptionalSidecar',
-          getDependencies: () => [{ path: sidecarPath }],
+          getDependencies: () => [{ path: sidecarPath, affects: ['createGeometry'] }],
         });
         const worker = new DependencyKernelWorker({ middleware: [middleware], onLog: noopLog, filesystem });
         try {

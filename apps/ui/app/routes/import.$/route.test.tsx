@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
@@ -14,6 +14,11 @@ const slugs = vi.hoisted(() => ({
   byId: new Map<string, { workspaceSlug: string; projectSlug: string }>(),
 }));
 const linkedImport = vi.hoisted(() => ({ prepare: vi.fn() }));
+const getRepository = vi.hoisted(() =>
+  vi.fn(async () => {
+    throw Object.assign(new Error('Not Found - https://docs.github.com/rest/repos/repos'), { status: 404 });
+  }),
+);
 
 /* The route's `clientLoader`, evaluated against the router's own location so navigation re-derives it. */
 vi.mock('react-router', async (importOriginal) => {
@@ -29,9 +34,7 @@ vi.mock('react-router', async (importOriginal) => {
 });
 vi.mock('#lib/github-api.js', () => ({
   getGitHubClient: () => ({
-    getRepository: vi.fn(async () => {
-      throw Object.assign(new Error('Not Found - https://docs.github.com/rest/repos/repos'), { status: 404 });
-    }),
+    getRepository,
     listBranches: vi.fn(async () => ({ branches: [], hasMore: false, endCursor: undefined })),
     listFiles: vi.fn(async () => []),
   }),
@@ -44,7 +47,9 @@ vi.mock('#hooks/use-project-slug-route.js', () => ({
     return found === undefined ? { status: 'not-found' } : { status: 'resolved', value: found };
   },
 }));
-vi.mock('#components/desktop/open-in-desktop.js', () => ({ OpenInDesktop: () => undefined }));
+vi.mock('#components/desktop/open-in-desktop.js', () => ({
+  OpenInDesktop: () => <p>Desktop handoff offer</p>,
+}));
 vi.mock('#routes/import.$/suggested-clones.js', () => ({ SuggestedClones: () => undefined }));
 vi.mock('#routes/import.$/upload-card.js', () => ({ UploadCard: () => undefined }));
 vi.mock('#lib/github-linked-import.js', () => ({ prepareLinkedGithubImport: linkedImport.prepare }));
@@ -124,7 +129,7 @@ describe('ImportRoute GitHub card', () => {
   it('should describe the picker and the public copy when GitHub connection is available', async () => {
     await renderImport();
 
-    expect(screen.getByText('Link a repository you can access, or copy a public one')).toBeInTheDocument();
+    expect(screen.getByText('Link a repository or import a public copy.')).toBeInTheDocument();
   });
 
   it('should not promise the picker when the deployment has no GitHub App', async () => {
@@ -132,7 +137,7 @@ describe('ImportRoute GitHub card', () => {
 
     await renderImport();
 
-    expect(screen.getByText('Enter a public repository URL')).toBeInTheDocument();
+    expect(screen.getByText('Import a copy of a public repository.')).toBeInTheDocument();
   });
 
   it('should offer to open a repository that is already a project instead of importing it again', async () => {
@@ -158,6 +163,7 @@ describe('ImportRoute GitHub card', () => {
 
   it('should point a repository GitHub cannot show publicly to the account picker', async () => {
     await renderImport('/import/github.com/octo/private');
+    expect(screen.getByText('Desktop handoff offer')).toBeInTheDocument();
 
     expect(
       await screen.findByText("Tau couldn't find a public repository at this address.", {}, { timeout: 3000 }),
@@ -165,5 +171,98 @@ describe('ImportRoute GitHub card', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Choose a private repository from GitHub' }));
 
     expect(await screen.findByRole('button', { name: 'Pick linked repository' })).toBeInTheDocument();
+    expect(screen.queryByText('Desktop handoff offer')).not.toBeInTheDocument();
+  });
+
+  it('should review a URL only on submission and restore its draft and focus after cancellation', async () => {
+    const user = userEvent.setup();
+    await renderImport();
+    expect(screen.queryByText('Desktop handoff offer')).not.toBeInTheDocument();
+    const url = screen.getByRole('textbox', { name: 'Public repository URL' });
+    const review = screen.getByRole('button', { name: 'Review repository' });
+    expect(review).toBeDisabled();
+    await user.type(url, 'https://example.com/owner/repo');
+    expect(review).toBeDisabled();
+    await user.clear(url);
+    await user.type(url, 'https://github.com/octo/part');
+    expect(review).toBeEnabled();
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 600);
+      });
+    });
+    expect(getRepository).not.toHaveBeenCalled();
+
+    await user.keyboard('{Enter}');
+    expect(await screen.findByRole('heading', { name: 'Review repository' })).toBeInTheDocument();
+    expect(
+      await screen.findByText("Tau couldn't find a public repository at this address.", {}, { timeout: 3000 }),
+    ).toBeInTheDocument();
+    expect(getRepository).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Desktop handoff offer')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start import' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    const restoredUrl = await screen.findByRole('textbox', { name: 'Public repository URL' });
+    expect(restoredUrl).toHaveValue('https://github.com/octo/part');
+    await waitFor(() => {
+      expect(restoredUrl).toHaveFocus();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Review repository' }));
+    expect(await screen.findByRole('heading', { name: 'Review repository' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(await screen.findByRole('button', { name: 'Clear URL' }));
+    expect(screen.getByRole('textbox', { name: 'Public repository URL' })).toHaveValue('');
+    expect(screen.getByRole('textbox', { name: 'Public repository URL' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Review repository' })).toBeDisabled();
+  });
+
+  it('should review and resubmit a bare GitHub address after cancellation', async () => {
+    const user = userEvent.setup();
+    await renderImport();
+    await user.type(screen.getByRole('textbox', { name: 'Public repository URL' }), 'github.com/octo/part');
+    expect(screen.getByRole('button', { name: 'Review repository' })).toBeEnabled();
+    await user.keyboard('{Enter}');
+    expect(await screen.findByRole('heading', { name: 'Review repository' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByRole('textbox', { name: 'Public repository URL' })).toHaveValue(
+      'https://github.com/octo/part',
+    );
+    await user.click(screen.getByRole('button', { name: 'Review repository' }));
+    expect(await screen.findByRole('heading', { name: 'Review repository' })).toBeInTheDocument();
+  });
+
+  it('should keep linked setup consequences visible and require a nonblank branch', async () => {
+    const user = userEvent.setup();
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+    expect(screen.queryByRole('textbox', { name: 'Public repository URL' })).not.toBeInTheDocument();
+    expect(screen.getByText('octo using GitHub’s no-reply address.')).toBeInTheDocument();
+    expect(screen.getByText('private')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Sync project chats with this repository' })).toBeChecked();
+    await user.clear(screen.getByRole('textbox', { name: 'Local and sync branch' }));
+    await user.type(screen.getByRole('textbox', { name: 'Local and sync branch' }), '   ');
+    expect(screen.getByRole('button', { name: 'Import and link' })).toBeDisabled();
+    expect(linkedImport.prepare).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: 'Public repository URL' })).toHaveFocus();
+    });
+  });
+
+  it('should show linked import recovery with diagnostics behind details', async () => {
+    const user = userEvent.setup();
+    linkedImport.prepare.mockRejectedValueOnce(new Error('Git fetch failed: connection reset'));
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
+    expect(await screen.findByRole('alert', { name: 'Import interrupted' })).toBeInTheDocument();
+    expect(
+      screen.getByText('Import and link did not finish. Review the details, then try Import and link again.'),
+    ).toBeVisible();
+    expect(screen.getByText('Git fetch failed: connection reset')).not.toBeVisible();
+    await user.click(screen.getByText('Details'));
+    expect(screen.getByText('Git fetch failed: connection reset')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Import and link' })).toBeEnabled();
   });
 });

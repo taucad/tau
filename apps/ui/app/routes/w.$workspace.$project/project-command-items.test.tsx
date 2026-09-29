@@ -49,13 +49,16 @@ vi.mock('#hooks/use-project.js', () => ({
       }
       throw new Error('useProject must be used within a ProjectProvider');
     }
+    const geometryUnits = new Map([['main.ts', cadActor]]);
     return {
-      geometryUnits: new Map([['main.ts', cadActor]]),
+      geometryUnits,
       mainEntryPath: 'main.ts',
       projectRef: {
+        send: vi.fn(),
         getSnapshot: () => ({
           context: {
             project: { id: 'test-project', name: 'test-project' },
+            geometryUnits,
           },
         }),
       },

@@ -73,4 +73,34 @@ describe('budgetVerdict', () => {
     });
     expect(budgetVerdict({ tags: quietProduction }).refusals).toEqual(['coefficient of variation is unrecorded']);
   });
+
+  it('should refuse invented provenance and nonfinite variation', () => {
+    expect(
+      budgetVerdict({
+        tags: {
+          ...quietProduction,
+          wasmVariant: 'jscad:unobserved',
+          adapter: { ...quietProduction.adapter, name: '', implementation: 'ambiguous' },
+          kernelProcess: { kind: 'utility', role: 'kernel' },
+        },
+        coefficientOfVariation: Number.NaN,
+      }).refusals,
+    ).toEqual([
+      'kernel variant was not observed',
+      'renderer adapter was not observed',
+      'kernel process was not observed',
+      'coefficient of variation is invalid',
+    ]);
+    expect(budgetVerdict({ tags: quietProduction, coefficientOfVariation: -0.1 }).eligible).toBe(false);
+    expect(
+      budgetVerdict({
+        tags: {
+          ...quietProduction,
+          kernelProcess: { kind: 'worker', role: 'unobserved' },
+          crossOriginIsolated: undefined,
+        },
+        coefficientOfVariation: 0,
+      }).refusals,
+    ).toEqual(['kernel process was not observed', 'cross-origin isolation was not observed']);
+  });
 });

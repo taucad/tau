@@ -32,17 +32,16 @@ afterEach(() => {
 
 const renderViewer = (): void => {
   activeActor = createActor(
-    graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+    graphicsMachine.provide({
+      actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) },
+    }),
     { input: {} },
   ).start();
   render(
     <KeyboardProvider>
       <TooltipProvider>
         <GraphicsProvider graphicsRef={activeActor}>
-          <ConverterViewer
-            glbData={new Uint8Array([0x67, 0x6c, 0x54, 0x46])}
-            uploadedFile={{ name: 'bracket.step', format: 'step', size: 2048 }}
-          />
+          <ConverterViewer glbData={new Uint8Array([0x67, 0x6c, 0x54, 0x46])} fileName='bracket.step' />
         </GraphicsProvider>
       </TooltipProvider>
     </KeyboardProvider>,
@@ -62,7 +61,7 @@ describe('ConverterViewer', () => {
     expect(bar.closest('[data-viewer-frame]')).toContainElement(screen.getByRole('img', { name: 'Model' }));
   });
 
-  it('should centre the bar under the file card, in a label container clear of the export panel from md up', () => {
+  it('should centre the bar in a label container clear of the export panel from md up', () => {
     renderViewer();
 
     const surface = screen.getByRole('group', { name: 'Viewer controls' }).closest('[data-slot="viewer-controls"]')!;
@@ -78,7 +77,6 @@ describe('ConverterViewer', () => {
     );
     expect(strip).not.toHaveClass('items-center', 'right-84');
     expect(strip.lastElementChild).toBe(surface);
-    expect(strip).toContainElement(screen.getByText('bracket.step'));
   });
 });
 

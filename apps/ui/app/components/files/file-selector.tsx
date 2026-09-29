@@ -697,7 +697,7 @@ export function FileSelector({
     [isExplicitBrowse, loadDirectoryExplicit],
   );
 
-  const selectedFileName = selectedFile?.split('/').pop();
+  const selectedFileName = selectedFile ? selectedFile.split('/').pop() : undefined;
 
   const triggerButton = children ?? (
     <Button variant='outline' className={cn('w-full justify-between', className)} disabled={isDisabled || isLoading}>

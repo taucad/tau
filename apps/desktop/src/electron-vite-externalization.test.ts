@@ -21,7 +21,7 @@ import { copyGeoSpecNative, copyGeoSpecNativeAssembly, copyGeoSpecSourceRelink }
 const appRoot = join(import.meta.dirname, '..');
 
 describe('macOS GeoSpec assembly selection', () => {
-  it('should snapshot the current delivery only for the default assembly before staging', () => {
+  it('should select and finish copying a verified snapshot for the default assembly', () => {
     const source = readFileSync(join(appRoot, 'scripts/package-macos.mts'), 'utf8');
     const mode = source.indexOf('parseMacosPackageMode(process.argv.slice(2))');
     const unsafeOutput = source.indexOf('Refusing unsafe package output root:');
@@ -31,8 +31,12 @@ describe('macOS GeoSpec assembly selection', () => {
     const fallback = source.indexOf("'out/artifacts/geospec-native-engine/ci/assembly'", selection);
     const conditional = source.indexOf('if (selectedGeoSpecAssembly === undefined)', fallback);
     const snapshot = source.indexOf("'snapshot-delivery'", conditional);
-    const realPath = source.indexOf('const geospecAssemblyRoot = await realpath(', snapshot);
+    const selected = source.indexOf('geospecAssemblyInput = selections[0]', snapshot);
+    const realPath = source.indexOf('const geospecAssemblyRoot = await realpath(', selected);
     const stage = source.indexOf('await rm(outputRoot, { recursive: true, force: true })', realPath);
+    const nativeCopy = source.indexOf('copyGeoSpecNativeAssembly(', stage);
+    const sourceCopy = source.indexOf('copyGeoSpecSourceRelink(geospecAssemblyRoot', nativeCopy);
+    const cleanup = source.indexOf('await rm(ownedGeoSpecSnapshot, { recursive: true, force: true })', sourceCopy);
 
     expect(mode).toBeGreaterThan(-1);
     expect(unsafeOutput).toBeGreaterThan(mode);
@@ -40,8 +44,13 @@ describe('macOS GeoSpec assembly selection', () => {
     expect(fallback).toBeGreaterThan(selection);
     expect(conditional).toBeGreaterThan(fallback);
     expect(snapshot).toBeGreaterThan(conditional);
-    expect(realPath).toBeGreaterThan(snapshot);
+    expect(selected).toBeGreaterThan(snapshot);
+    expect(realPath).toBeGreaterThan(selected);
     expect(stage).toBeGreaterThan(realPath);
+    expect(nativeCopy).toBeGreaterThan(stage);
+    expect(sourceCopy).toBeGreaterThan(nativeCopy);
+    expect(cleanup).toBeGreaterThan(sourceCopy);
+    expect(source).not.toContain('await rm(geospecAssemblyRoot, { recursive: true, force: true })');
   });
 });
 

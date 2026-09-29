@@ -2,7 +2,7 @@
 /**
  * Prepare or verify the complete Node/mixed package payload for CI transport.
  * Uses existing Nx producers; hashes establish transport identity, not qualification.
- * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery
+ * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery|snapshot-delivery
  * Optional env: GEOSPEC_DELIVERY_CACHE and existing delivery tool selectors.
  * GEOSPEC_NATIVE_DELIVERY_CACHE selects independent retained native-prefix reuse;
  * GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER/RECIPE and GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES
@@ -654,19 +654,23 @@ export const ensureDelivery = (root) => {
  * @internal
  */
 export const snapshotDelivery = (root) => {
-  ensureDelivery(root);
+  const inventory = ensureDelivery(root);
   const cache = resolve(root, 'node_modules/.cache/geospec-engine-native');
   mkdirSync(cache, { recursive: true });
   const snapshot = mkdtempSync(join(cache, 'assembly-snapshot-'));
   try {
     mkdirSync(join(snapshot, 'tarballs'));
-    for (const name of archiveNames) {
-      const source = `${transportPath}/assembly/tarballs/${name}`;
-      const destination = join(snapshot, 'tarballs', name);
-      const expected = fileRecord(root, source);
-      copyFileSync(resolve(root, source), destination);
-      assert.ok(digest(readFileSync(destination)) === expected.sha256, `Assembly snapshot changed: ${name}`);
+    const { archives } = /** @type {{archives: ReturnType<typeof fileRecord>[]}} */ (inventory.delivery);
+    for (const archive of archives) {
+      const destination = join(snapshot, 'tarballs', posix.basename(archive.path));
+      copyFileSync(resolve(root, archive.path), destination);
+      const copied = readFileSync(destination);
+      assert.ok(
+        copied.length === archive.bytes && digest(copied) === archive.sha256,
+        `Assembly snapshot changed: ${archive.path}`,
+      );
     }
+    assert.ok(isDeepStrictEqual(inventory.source.files, sourceIdentity(root).files), 'GeoSpec sources changed during snapshot.');
     return snapshot;
   } catch (error) {
     rmSync(snapshot, { recursive: true, force: true });

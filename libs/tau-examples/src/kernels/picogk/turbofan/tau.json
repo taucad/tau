@@ -1,0 +1,10 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_3rqDvyHR6UIidepMlVNPf",
+  "name": "TF-2000 Turbofan Assembly",
+  "description": "Cutaway two-spool turbofan concept with 2,173 individually named parts, NACA airfoils and animated rotors.",
+  "tags": ["turbofan", "mechanism", "picogk"],
+  "assets": {
+    "main": { "entryPath": "main.cs", "thumbnail": "thumbnail.webp" }
+  }
+}

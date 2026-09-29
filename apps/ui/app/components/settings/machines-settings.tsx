@@ -28,7 +28,6 @@ import type {
 import { Button } from '@taucad/ui/components/button';
 import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
-import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { PasswordInput } from '@taucad/ui/components/password-input';
 import { ConfigurationFields, MachineDetails, isSimulatedProvider } from '#components/settings/machine-details.js';
@@ -54,6 +53,7 @@ type BindInput = {
 
 /** The bind flow names the machine itself, so its binding form does not offer the logical id. */
 const flowFilledFields: readonly string[] = ['logicalId'];
+const bindTitles = { logicalId: 'Name', address: 'Address', serial: 'Serial (optional)' } as const;
 
 /**
  * What a person reads for the host's binding and removal refusals, by code; `undefined` means say nothing.
@@ -321,6 +321,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
   /* The host holds a code for the picked printer and the person has not chosen to type another; never the code. */
   const [isCodeSaved, setIsCodeSaved] = useState(false);
   const [simulatorFields, setSimulatorFields] = useState<Record<string, unknown>>({});
+  const [bindFields, setBindFields] = useState<Record<string, unknown>>({});
   const [candidates, setCandidates] = useState<readonly MachineCandidate[]>();
   const bindForm = useRef<HTMLFormElement>(null);
   const bindButton = useRef<HTMLButtonElement>(null);
@@ -330,6 +331,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     [directory.providers],
   );
   const simulator = providers.get(simulatorProviderId);
+  const bambu = providers.get(bambuProviderId);
 
   /** Bind and say how it went; `true` when the host answered with an outcome rather than a refusal. */
   const run = async (name: string, input: BindInput): Promise<boolean> => {
@@ -376,15 +378,11 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     flushSync(() => {
       setIsCodeSaved(isSaved);
     });
-    const set = (key: string, value: string): void => {
-      const input = formInput(key);
-      if (input) {
-        input.value = value;
-      }
-    };
-    set('name', candidate.name.slice(0, 64));
-    set('address', candidate.endpoint.address);
-    set('serial', candidate.claimedIdentity.serial ?? '');
+    setBindFields({
+      logicalId: candidate.name.slice(0, 64),
+      address: candidate.endpoint.address,
+      serial: candidate.claimedIdentity.serial ?? '',
+    });
     (isSaved ? bindButton.current : formInput('accessCode'))?.focus();
   };
 
@@ -429,15 +427,19 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     const form = event.currentTarget;
     const data = new FormData(form);
     const field = (key: string): string => {
-      const value = data.get(key);
+      const value = bindFields[key];
       return typeof value === 'string' ? value.trim() : '';
     };
     const input = {
       providerId: bambuProviderId,
-      name: field('name'),
+      name: field('logicalId'),
       address: field('address'),
       serial: field('serial'),
     };
+    if (!input.name || !input.address) {
+      setStatus('Enter a name and address for the printer.');
+      return;
+    }
     const accessCodeValue = data.get('accessCode');
     const accessCode = typeof accessCodeValue === 'string' ? accessCodeValue : '';
     /* The code leaves the document before the ceremony runs; it is never state. The rest stays for a retry. */
@@ -447,6 +449,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     }
     if (await run(input.name, { ...input, accessCode })) {
       form.reset();
+      setBindFields({});
       setIsCodeSaved(false);
     }
   };
@@ -544,18 +547,19 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
               ))
             : null}
         </div>
-        <div className='grid gap-1.5'>
-          <Label htmlFor='machines-bind-name'>Name</Label>
-          <Input id='machines-bind-name' name='name' required maxLength={64} autoComplete='off' />
-        </div>
-        <div className='grid gap-1.5'>
-          <Label htmlFor='machines-bind-address'>Address</Label>
-          <Input id='machines-bind-address' name='address' required maxLength={253} autoComplete='off' />
-        </div>
-        <div className='grid gap-1.5'>
-          <Label htmlFor='machines-bind-serial'>Serial (optional)</Label>
-          <Input id='machines-bind-serial' name='serial' maxLength={64} autoComplete='off' />
-        </div>
+        {bambu ? (
+          <div className='min-w-0 lg:col-span-2' role='group' aria-label='Printer binding fields'>
+            <ConfigurationFields
+              providerId={bambuProviderId}
+              name='binding'
+              configuration={bambu.bindingConfiguration}
+              values={bindFields}
+              titles={bindTitles}
+              presentation='embedded'
+              onChange={setBindFields}
+            />
+          </div>
+        ) : null}
         {isCodeSaved ? (
           <div role='group' aria-labelledby='machines-bind-access-code-label' className='grid gap-1.5'>
             <p id='machines-bind-access-code-label' className='text-sm leading-none font-medium'>

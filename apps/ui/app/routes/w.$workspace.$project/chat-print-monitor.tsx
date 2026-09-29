@@ -25,8 +25,8 @@ import type {
   PrintRequest,
 } from '@taucad/runtime/machine';
 import { Button } from '@taucad/ui/components/button';
-import { Progress } from '@taucad/ui/components/progress';
 import { cn } from '@taucad/ui/utils/cn';
+import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import { randomUuid } from '@taucad/utils/id';
 import { isRecord } from '@taucad/utils/schema';
 import { ExternalLink } from '#components/external-link.js';
@@ -374,14 +374,6 @@ function RunGroup({
       {run ? (
         <>
           <p className='text-xs'>{describeRun(entry)}</p>
-          {run.progress === undefined ? null : (
-            <Progress
-              aria-label={`${entry.name} print progress`}
-              aria-valuenow={run.progress}
-              aria-valuetext={`${String(Math.round(run.progress))} percent`}
-              value={run.progress}
-            />
-          )}
           <dl className='flex flex-col gap-0.5'>
             {fileName === undefined ? null : <PrintRow label='File'>{fileName}</PrintRow>}
             {stage === undefined ? null : <PrintRow label='Stage'>{stage}</PrintRow>}
@@ -484,6 +476,9 @@ function MaterialGroup({
                 )}
               >
                 <span className='font-mono'>{materialSlotLabel(material.slot, manifest)}</span>
+                {material.color === undefined ? null : (
+                  <MaterialSwatch materials={[{ color: material.color, roughness: 0.35, metalness: 0 }]} />
+                )}
                 <span className={cn(material.state !== 'loaded' && 'text-muted-foreground')}>
                   {material.state === 'loaded'
                     ? (material.materialId ?? 'Loaded')
@@ -608,28 +603,64 @@ export function MonitorSection({
   entry,
   manifest,
   requests,
+  onReceipt,
 }: {
   readonly client: MachineClient;
   readonly entry: MachineDirectoryEntry;
   readonly manifest: MachineManifest | undefined;
   readonly requests: readonly PrintRequest[];
+  readonly onReceipt?: (receipt: MachineOperationReceipt) => void;
 }): React.JSX.Element {
   const now = useNow();
   const { alerts } = entry.snapshot;
   const stale = (group: string): boolean => isObservationStale({ entry, manifest, group, now });
+  const state = entry.snapshot.run?.state;
+  const active = state !== undefined && state !== 'idle' && state !== 'succeeded';
 
   return (
     <PrintSection title='Monitor'>
       {alerts && alerts.length > 0 ? <AlertNotice alerts={alerts} /> : null}
-      <RunGroup entry={entry} fileName={runFileName(entry, requests)} isStale={stale('run')} />
-      <TemperatureGroup entry={entry} manifest={manifest} isStale={stale('thermal')} />
-      <EnvironmentGroup
-        entry={entry}
-        manifest={manifest}
-        isStale={stale('fans') || stale('light') || stale('network')}
-      />
+      {active ? (
+        <>
+          <RunGroup entry={entry} fileName={runFileName(entry, requests)} isStale={stale('run')} />
+          <TemperatureGroup entry={entry} manifest={manifest} isStale={stale('thermal')} />
+          {onReceipt ? (
+            <ControlsSection
+              client={client}
+              entry={entry}
+              manifest={manifest}
+              requests={requests}
+              onReceipt={onReceipt}
+              isEmbedded
+            />
+          ) : null}
+        </>
+      ) : (
+        <p className='text-xs'>
+          {state === 'succeeded' ? 'Last run finished' : 'Idle'} · Nozzle{' '}
+          {temperature(entry.snapshot.temperatures?.nozzle, undefined)} · Bed{' '}
+          {temperature(entry.snapshot.temperatures?.bed, undefined)}
+        </p>
+      )}
       <MaterialGroup entry={entry} manifest={manifest} isStale={stale('material')} />
-      {manifest?.camera.stills === false ? null : <StillCapture client={client} entry={entry} />}
+      <PrintDisclosure title='Environment and camera' summary='Fans, light, network and stills' isDefaultOpen={active}>
+        <EnvironmentGroup
+          entry={entry}
+          manifest={manifest}
+          isStale={stale('fans') || stale('light') || stale('network')}
+        />
+        {manifest?.camera.stills === false ? null : <StillCapture client={client} entry={entry} />}
+      </PrintDisclosure>
+      {!active && onReceipt ? (
+        <ControlsSection
+          client={client}
+          entry={entry}
+          manifest={manifest}
+          requests={requests}
+          onReceipt={onReceipt}
+          isEmbedded
+        />
+      ) : null}
     </PrintSection>
   );
 }
@@ -699,12 +730,14 @@ export function ControlsSection({
   manifest,
   requests,
   onReceipt,
+  isEmbedded = false,
 }: {
   readonly client: MachineClient;
   readonly entry: MachineDirectoryEntry;
   readonly manifest: MachineManifest | undefined;
   readonly requests: readonly PrintRequest[];
   readonly onReceipt: (receipt: MachineOperationReceipt) => void;
+  readonly isEmbedded?: boolean;
 }): React.JSX.Element {
   const [isBusy, setIsBusy] = useState(false);
   const [confirming, setConfirming] = useState<MachineControlRunInput['command']>();
@@ -737,8 +770,8 @@ export function ControlsSection({
     }
   };
 
-  return (
-    <PrintSection title='Controls'>
+  const content = (
+    <>
       {commands.length > 0 ? (
         <div role='group' aria-label={`Controls for ${entry.name}`} className='flex flex-wrap gap-2'>
           {commands.map((command) => {
@@ -765,10 +798,10 @@ export function ControlsSection({
             );
           })}
         </div>
-      ) : (
+      ) : isEmbedded ? null : (
         <p className='text-xs text-muted-foreground'>No run to control.</p>
       )}
-      {isCurrent ? null : (
+      {commands.length === 0 || isCurrent ? null : (
         <p role='status' className='text-xs text-muted-foreground'>
           Run controls wait for a current observation from the machine.
         </p>
@@ -839,7 +872,12 @@ export function ControlsSection({
           </ul>
         </PrintDisclosure>
       ) : null}
-    </PrintSection>
+    </>
+  );
+  return isEmbedded ? (
+    <div className='flex min-w-0 flex-col gap-2'>{content}</div>
+  ) : (
+    <PrintSection title='Controls'>{content}</PrintSection>
   );
 }
 

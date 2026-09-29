@@ -349,6 +349,8 @@ export function ConfigurationFields({
   values = noValues,
   onChange,
   omit = noFields,
+  titles,
+  presentation = 'catalog',
 }: {
   readonly providerId: string;
   readonly name: string;
@@ -356,23 +358,32 @@ export function ConfigurationFields({
   readonly values?: Record<string, unknown>;
   readonly onChange?: (values: Record<string, unknown>) => void;
   readonly omit?: readonly string[];
+  readonly titles?: Readonly<Record<string, string>>;
+  readonly presentation?: 'catalog' | 'embedded';
 }): React.JSX.Element {
   const compiled = useConfigurationView({ providerId, name, configuration, isReadOnly: onChange === undefined });
   const view = useMemo(() => {
-    if (compiled?.status !== 'ready' || omit.length === 0) {
+    if (compiled?.status !== 'ready' || (omit.length === 0 && titles === undefined)) {
       return compiled;
     }
     const { properties = {}, required = [] } = compiled.schema;
-    const offered = Object.entries(properties).filter(([key]) => !omit.includes(key));
+    const offered: typeof properties = {};
+    for (const [key, property] of Object.entries(properties)) {
+      if (omit.includes(key)) {
+        continue;
+      }
+      offered[key] =
+        typeof property === 'object' && titles?.[key] !== undefined ? { ...property, title: titles[key] } : property;
+    }
     return {
       ...compiled,
       schema: {
         ...compiled.schema,
-        properties: Object.fromEntries(offered),
+        properties: offered,
         required: required.filter((key) => !omit.includes(key)),
       },
     };
-  }, [compiled, omit]);
+  }, [compiled, omit, titles]);
   if (view === undefined) {
     return (
       <p role='status' aria-busy='true' className='text-xs text-muted-foreground'>
@@ -389,6 +400,7 @@ export function ConfigurationFields({
       defaultParameters={view.values}
       jsonSchema={view.schema}
       enableSearch={false}
+      presentation={presentation}
       units={configurationUnits}
       parameterManifest={view.manifest}
       parameterEdit={transientEdit}

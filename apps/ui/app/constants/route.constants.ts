@@ -1,4 +1,4 @@
-import { Hammer, Import, Plug, Shuffle, UsersRound } from 'lucide-react';
+import { Blocks, Hammer, Import, Plug, Shuffle, UsersRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { FeatureFlagName } from '#flags/flag.constants.js';
 
@@ -38,6 +38,12 @@ export const navRoutes: {
       title: 'Community',
       url: '/community',
       icon: UsersRound,
+    },
+    {
+      title: 'Parts',
+      url: '/parts',
+      icon: Blocks,
+      featureFlag: 'partsWarehouse',
     },
     {
       title: 'Convert',

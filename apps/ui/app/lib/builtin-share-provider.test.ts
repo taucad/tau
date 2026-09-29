@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { shareArtifactCodec } from '@taucad/share/artifact';
 import type { ShareArtifactCodec, ShareOpenedArtifact, SharePlainArtifact } from '@taucad/share/artifact';
 import type { ShareProviderContext } from '@taucad/share/provider';
+import { warehouseParts } from '@taucad/warehouse/builtin';
 import { builtinShareProvider } from '#lib/builtin-share-provider.js';
 
 const opened: ShareOpenedArtifact = { archive: new Uint8Array([1]), files: [] };
@@ -28,6 +29,25 @@ describe('builtin share provider', () => {
     expect(pack.mock.calls[0]?.[0].files.map(({ path }) => path)).toEqual(['main.ts', 'tau.json', 'thumbnail.webp']);
     expect(new TextDecoder().decode(pack.mock.calls[0]?.[0].files[0]?.content)).toContain("from 'replicad'");
     expect(openArchive).toHaveBeenCalledWith(packed.archive, undefined);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('should open a warehouse project with all editable files and exact manifest bytes', async () => {
+    const part = warehouseParts[0];
+    if (!part) {
+      throw new Error('Expected a warehouse part');
+    }
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const artifact = await builtinShareProvider.resolve!(
+      { locator: { providerId: 'builtin', reference: part.locator }, secrets: {} },
+      { origin: 'https://tau.new', fetch, artifactCodec: shareArtifactCodec },
+    );
+    expect(artifact.files.map(({ path }) => path).sort()).toEqual(part.assets.map(({ path }) => path).sort());
+    await Promise.all(
+      part.assets.map(async (asset) => {
+        expect(artifact.files.find(({ path }) => path === asset.path)?.content).toEqual(await asset.load());
+      }),
+    );
     expect(fetch).not.toHaveBeenCalled();
   });
 

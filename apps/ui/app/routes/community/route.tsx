@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MetaFunction } from 'react-router';
 import { PageContent } from '#components/layout/page-content.js';
 import { NavLink, useLocation, useNavigate } from 'react-router';
@@ -20,13 +20,11 @@ import { CommunityProjectGrid } from '#components/project-grid.js';
 import { featuredCommunityLocator, galleryProjects } from '#constants/project-examples.js';
 import type { BuiltinProjectCardModel } from '#constants/project-examples.js';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
-import type { SearchParameterName } from '#constants/search-parameter.constants.js';
 import { cookieName } from '#constants/cookie.constants.js';
-import { useSearchParameter } from '#hooks/use-search-parameter.js';
+import { useImmediateSearchParameter } from '#hooks/use-immediate-search-parameter.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { enumParameter, stringParameter } from '#utils/search-parameter.codecs.js';
-import type { SearchParameterCodec } from '#utils/search-parameter.codecs.js';
 import { isFunction } from '#utils/function.utils.js';
 import type { Handle } from '#types/matches.types.js';
 
@@ -67,33 +65,6 @@ const pageSizeOptions = [defaultPageSize, 50, 100];
 const noColumns: Array<ColumnDef<BuiltinProjectCardModel>> = [];
 const searchShortcut = { key: '/' };
 const searchShortcutOptions = { ignoreInputs: true };
-
-/**
- * URL-backed view state that renders a write at once. A data router commits a
- * search change only after it revalidates the root loader, so an input bound to
- * the URL alone would lag, while Back and links still replace the value.
- */
-const useImmediateSearchParameter = <T,>(
-  name: SearchParameterName,
-  codec: SearchParameterCodec<T>,
-): readonly [T, (next: T) => void, (next: T) => void] => {
-  const [committed, commit] = useSearchParameter(name, codec);
-  const [value, setValue] = useState(committed);
-  const [seen, setSeen] = useState(committed);
-  if (!Object.is(committed, seen)) {
-    setSeen(committed);
-    setValue(committed);
-  }
-
-  const update = useCallback(
-    (next: T) => {
-      setValue(next);
-      commit(next);
-    },
-    [commit],
-  );
-  return [value, update, setValue] as const;
-};
 
 const matchesQuery = (project: BuiltinProjectCardModel, term: string): boolean =>
   term === '' ||

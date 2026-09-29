@@ -59,9 +59,10 @@ export function PublicationTopbar({
   }, [shareUrl]);
   /* A builtin example leads back to its card in the gallery; other shares have no gallery. */
   const { slug } = useParams();
-  const examplesHref = slug?.startsWith(builtinSlugPrefix)
-    ? `/community#${slug.slice(builtinSlugPrefix.length)}`
-    : undefined;
+  const builtinLocator = slug?.startsWith(builtinSlugPrefix) ? slug.slice(builtinSlugPrefix.length) : undefined;
+  const isWarehousePart = builtinLocator?.startsWith('warehouse.') ?? false;
+  const galleryLabel = isWarehousePart ? 'Parts' : 'Examples';
+  const examplesHref = builtinLocator ? `${isWarehousePart ? '/parts' : '/community'}#${builtinLocator}` : undefined;
 
   return (
     <header
@@ -87,9 +88,9 @@ export function PublicationTopbar({
         </Tooltip>
         {examplesHref ? (
           <Button asChild size='sm' variant='ghost' className='max-md:size-8 max-md:px-0'>
-            <Link to={examplesHref} aria-label='Examples'>
+            <Link to={examplesHref} aria-label={galleryLabel}>
               <LayoutGrid className='size-3.5 md:mr-1.5' aria-hidden />
-              <span className='hidden md:inline'>Examples</span>
+              <span className='hidden md:inline'>{galleryLabel}</span>
             </Link>
           </Button>
         ) : null}

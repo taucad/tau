@@ -6,7 +6,7 @@
  * Why: Completed-package proof must not use the shared development database or storage stack.
  * Required env vars: TAU_E2E_DESKTOP_EXECUTABLE (absolute packaged Tau executable path).
  * Optional env vars: PATH, HOME, TMPDIR, DOCKER_HOST (tool discovery only).
- * Usage: pnpm nx run desktop-e2e:test:e2e:desktop:completed-artifact [--args='--test-name-pattern="pattern"']
+ * Usage: pnpm nx run desktop-e2e:test:e2e:desktop:completed-artifact [--args='--test-name-pattern="pattern" [--isolated-cloud-gateway]']
  * Exit codes: 0 when package tests pass; non-zero on preflight, infrastructure, migration, or test failure.
  */
 
@@ -25,8 +25,12 @@ const desktopE2ERoot = resolve(import.meta.dirname, '..');
 
 const main = async (): Promise<void> => {
   const { values } = parseArgs({
-    options: { 'test-name-pattern': { type: 'string', default: String.raw`^\[completed-artifact\]` } },
+    options: {
+      'test-name-pattern': { type: 'string', default: String.raw`^\[completed-artifact\]` },
+      'isolated-cloud-gateway': { type: 'boolean', default: false },
+    },
   });
+  const isolatedCloudGateway = values['isolated-cloud-gateway'];
   const executable = process.env['TAU_E2E_DESKTOP_EXECUTABLE'];
   if (!executable || !isAbsolute(executable) || !existsSync(executable)) {
     throw new Error('TAU_E2E_DESKTOP_EXECUTABLE must name an existing absolute packaged executable.');
@@ -236,6 +240,8 @@ const main = async (): Promise<void> => {
 
     const apiPort = await freePort();
     const apiUrl = `http://127.0.0.1:${String(apiPort)}`;
+    const providerPort = isolatedCloudGateway ? await freePort() : undefined;
+    const databaseUrl = `postgresql://desktop_e2e:${databasePassword}@${databaseAddress}/desktop_e2e`;
     const environment = {
       ...toolEnvironment,
       NX_DAEMON: 'false',
@@ -243,7 +249,7 @@ const main = async (): Promise<void> => {
       NX_CACHE_DIRECTORY: join(directory, 'nx-cache'),
       NX_LOAD_DOT_ENV_FILES: 'false',
       DOTENV_CONFIG_PATH: '/dev/null',
-      DATABASE_URL: `postgresql://desktop_e2e:${databasePassword}@${databaseAddress}/desktop_e2e`,
+      DATABASE_URL: databaseUrl,
       REDIS_URL: `redis://${redisAddress}`,
       AUTH_SECRET: randomUUID(),
       TAU_VIEW_COOKIE_SECRET: randomUUID(),
@@ -270,6 +276,21 @@ const main = async (): Promise<void> => {
       TAU_E2E_API_URL: apiUrl,
       TAU_E2E_API_CWD: directory,
       TAU_E2E_COMPLETED_ARTIFACT: 'true',
+      TAU_E2E_COMPOSE_PROJECT: project,
+      ...(isolatedCloudGateway
+        ? {
+            TAU_E2E_COMPLETED_CLOUD_GATEWAY: 'true',
+            TAU_CLOUD_ENABLED: 'true',
+            BILLING_DATABASE_URL: databaseUrl,
+            BILLING_ENVIRONMENT: 'development',
+            TAU_E2E_PROVIDER_STUB_URL: `http://127.0.0.1:${String(providerPort)}`,
+            BILLING_PROVIDER_ACCOUNTS: JSON.stringify({
+              anthropic: 'desktop-e2e-anthropic',
+              openai: 'desktop-e2e-openai',
+              vertexai: 'desktop-e2e-vertexai',
+            }),
+          }
+        : {}),
       TAU_E2E_DESKTOP_EXECUTABLE: executable,
       TAU_E2E_EXTERNAL_SERVICES: 'true',
       TAU_E2E_POSTGRES_CONTAINER: postgresContainer,

@@ -492,3 +492,59 @@ describe('chatProjectionLogic (PV-S7)', () => {
     actor.stop();
   });
 });
+
+it('should reject malformed SDK reconstruction instead of accepting its partial prefix', async () => {
+  const projection = project(
+    [
+      lifecycleRow(0, 'admitted'),
+      logRow(1, {
+        type: 'message.appended',
+        message: { id: 'prefix', role: 'assistant', content: 'Before malformed tool' },
+      }),
+      logRow(2, {
+        type: 'message.appended',
+        message: {
+          id: 'orphan',
+          role: 'tool-output',
+          toolCallId: 'missing-input',
+          toolName: 'read',
+          content: 'result',
+          isError: false,
+        },
+      }),
+      lifecycleRow(3, 'completed'),
+    ],
+    1,
+  );
+  await expect(materializeTranscript(projection)).rejects.toThrow('No tool invocation found');
+});
+
+it('should retain failed-run history and finalize its interrupted tool tail', async () => {
+  const projection = project(
+    [
+      lifecycleRow(0, 'admitted'),
+      logRow(1, {
+        type: 'message.appended',
+        message: {
+          id: 'input',
+          role: 'tool-input',
+          toolCallId: 'interrupted',
+          toolName: 'read',
+          content: { file: 'main.ts' },
+        },
+      }),
+      lifecycleRow(2, 'failed'),
+    ],
+    1,
+  );
+  const messages = await materializeTranscript(projection);
+  expect(messages).toHaveLength(1);
+  expect(messages[0]?.parts).toContainEqual(
+    expect.objectContaining({
+      type: 'tool-read',
+      toolCallId: 'interrupted',
+      state: 'output-error',
+      input: { file: 'main.ts' },
+    }),
+  );
+});

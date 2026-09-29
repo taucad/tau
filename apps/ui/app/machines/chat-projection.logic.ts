@@ -478,13 +478,17 @@ const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> =
       const stream = new ReadableStream<UIMessageChunk>({
         start(controller) {
           for (const chunk of view.chunks) {
+            // The ledger owns run failure; only malformed SDK reconstruction should reject this transcript.
+            if (chunk.type === 'error') {
+              continue;
+            }
             controller.enqueue(chunk);
           }
           controller.close();
         },
       });
       let message: MyUIMessage | undefined;
-      for await (const next of readUIMessageStream<MyUIMessage>({ stream })) {
+      for await (const next of readUIMessageStream<MyUIMessage>({ stream, terminateOnError: true })) {
         message = next;
       }
       return message;

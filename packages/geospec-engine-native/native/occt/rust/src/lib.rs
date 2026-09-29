@@ -4494,6 +4494,7 @@ mod ffi {
             unit_scale: *mut f64,
             occurrence_count: *mut usize,
             surfaceless_face_count: *mut usize,
+            all_source_length_contexts_mm: *mut i32,
             unit: *mut StringBuffer,
             error: *mut StringBuffer,
         ) -> i32;

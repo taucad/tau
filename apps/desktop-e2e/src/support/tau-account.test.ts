@@ -1,6 +1,53 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { tauBillingAccountArgs, tauDatabaseExecArgs } from '#support/tau-account.js';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.doUnmock('node:child_process');
+  vi.doUnmock('#support/config.js');
+  vi.resetModules();
+});
+
+describe('test-account billing discovery', () => {
+  it.each([
+    { completedArtifact: true, acceptsAbsentRoute: true },
+    { completedArtifact: false, acceptsAbsentRoute: false },
+  ])(
+    'handles a missing billing route only in completed-artifact mode: %j',
+    async ({ completedArtifact, acceptsAbsentRoute }) => {
+      vi.resetModules();
+      vi.doMock('#support/config.js', () => ({
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- actual config export
+        desktopE2EApiUrl: 'http://127.0.0.1:4014',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- actual config export
+        desktopE2EFrontendUrl: 'http://localhost:3014',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- actual config export
+        desktopE2ECompletedArtifact: completedArtifact,
+      }));
+      vi.doMock('node:child_process', () => ({
+        execFile: (...args: unknown[]) => {
+          const callback = args.at(-1) as (error: Error | undefined, stdout: string, stderr: string) => void;
+          callback(undefined, '', '');
+        },
+      }));
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+        .mockResolvedValueOnce(new Response('{}', { status: 200, headers: { 'set-auth-token': 'test-bearer' } }))
+        .mockResolvedValueOnce(new Response('', { status: 404 }));
+      vi.stubGlobal('fetch', fetchMock);
+      const { seedTauTestUser } = await import('#support/tau-account.js');
+      const account = { email: 'tau-desktop-billing-route@example.test', name: 'Test', password: 'test' };
+
+      const result = expect(seedTauTestUser(account));
+      await (acceptsAbsentRoute
+        ? result.resolves.toBe('test-bearer')
+        : result.rejects.toThrow('Reading the Tau billing environment failed with HTTP 404.'));
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    },
+  );
+});
 
 describe('completed-artifact database isolation', () => {
   it('targets the run-owned Compose database identity', () => {

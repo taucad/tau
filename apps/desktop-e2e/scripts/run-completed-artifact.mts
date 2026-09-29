@@ -233,6 +233,7 @@ const main = async (): Promise<void> => {
 
     const apiPort = await freePort();
     const apiUrl = `http://127.0.0.1:${String(apiPort)}`;
+    const databaseUrl = `postgresql://desktop_e2e:${databasePassword}@${databaseAddress}/desktop_e2e`;
     const environment = {
       ...toolEnvironment,
       NX_DAEMON: 'false',
@@ -240,7 +241,9 @@ const main = async (): Promise<void> => {
       NX_CACHE_DIRECTORY: join(directory, 'nx-cache'),
       NX_LOAD_DOT_ENV_FILES: 'false',
       DOTENV_CONFIG_PATH: '/dev/null',
-      DATABASE_URL: `postgresql://desktop_e2e:${databasePassword}@${databaseAddress}/desktop_e2e`,
+      DATABASE_URL: databaseUrl,
+      BILLING_DATABASE_URL: databaseUrl,
+      BILLING_ENVIRONMENT: 'development',
       REDIS_URL: `redis://${redisAddress}`,
       AUTH_SECRET: randomUUID(),
       TAU_VIEW_COOKIE_SECRET: randomUUID(),

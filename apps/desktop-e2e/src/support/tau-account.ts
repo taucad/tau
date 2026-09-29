@@ -51,6 +51,10 @@ const tauBillingEnvironment = async (token: string): Promise<string | undefined>
   const response = await fetch(`${desktopE2EApiUrl}/v1/billing/credits`, {
     headers: { authorization: `Bearer ${token}`, origin: desktopE2EFrontendUrl },
   });
+  if (response.status === 404 && desktopE2ECompletedArtifact) {
+    // The isolated self-host API does not install BillingModule, so this route is absent.
+    return undefined;
+  }
   if (response.status === 503) {
     /* The API answers 503 both without a billing environment (the isolated
      * completed-artifact stack, nothing to fund) and without a usable

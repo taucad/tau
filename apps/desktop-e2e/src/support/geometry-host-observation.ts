@@ -9,8 +9,10 @@ export type GeometryHostEvent = Readonly<{
   kind: 'spawn' | 'run' | 'cancel' | 'event' | 'native-entry' | 'native-return' | 'result' | 'exit';
   pid: number;
   at: number;
+  root?: string;
   eventType?: string;
   capability?: string;
+  held?: boolean;
   count?: number;
   toleranceMm?: number;
 }>;
@@ -18,6 +20,7 @@ export type GeometryHostEvent = Readonly<{
 /* Executed only through the geometry utility's test-only --require, before its real bundle. */
 const nativeEntryPreload = String.raw`const Module = require('node:module');
 const load = Module._load;
+let minimumDistanceCalls = 0;
 Module._load = function(request, parent, isMain) {
   const binding = load.apply(this, arguments);
   let resolved;
@@ -31,14 +34,21 @@ Module._load = function(request, parent, isMain) {
     try {
       const request = JSON.parse(Buffer.from(bytes).toString('utf8'));
       const claim = request?.plan?.claims?.[0];
-      if (request?.method === 'submitClaims' && claim?.capability === 'toHaveConnectedComponents') {
+      if (request?.method === 'submitClaims' && typeof claim?.capability === 'string') {
         observed = true;
+        const held = claim.capability === 'minimumDistance' &&
+          ++minimumDistanceCalls === 2 && process.env.TAU_E2E_HOLD_SECOND_MINIMUM_DISTANCE === '1';
         const expected = claim.payload?.arguments?.[0];
         process.parentPort?.postMessage({
           type: 'tau-e2e-native-entry', capability: claim.capability,
+          ...(held ? { held: true } : {}),
           count: expected?.count,
           toleranceMm: expected?.toleranceMm,
         });
+        if (held) {
+          // Test-only synchronous boundary hold. The real addon has not been called yet.
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30_000);
+        }
       }
     } catch { /* Observation cannot alter the native call's return or throw. */ }
     try {
@@ -70,100 +80,125 @@ export const writeNativeEntryPreload = async (): Promise<string> => {
 };
 
 /** Install before the first geometry request; the real broker still owns every fork and message. */
-export const observeGeometryHost = async (session: DesktopSession): Promise<void> => {
+export const observeGeometryHost = async (
+  session: DesktopSession,
+  options?: { readonly holdSecondMinimumDistance?: boolean },
+): Promise<void> => {
   preloadPath = await writeNativeEntryPreload();
-  await session.application.evaluate(({ utilityProcess }, entryPreload) => {
-    const state = globalThis as typeof globalThis & {
-      tauE2eGeometryEvents?: Array<{
-        kind: 'spawn' | 'run' | 'cancel' | 'event' | 'native-entry' | 'native-return' | 'result' | 'exit';
-        pid: number;
-        at: number;
-        eventType?: string;
-        capability?: string;
-        count?: number;
-        toleranceMm?: number;
-      }>;
-      tauE2eRestoreGeometryFork?: () => void;
-    };
-    if (state.tauE2eRestoreGeometryFork) {
-      throw new Error('Geometry utility observation is already installed.');
-    }
-    const originalFork = utilityProcess.fork;
-    state.tauE2eGeometryEvents = [];
-    utilityProcess.fork = ((...args: Parameters<typeof originalFork>) => {
-      const options = args[2];
-      const geometry = options?.serviceName === 'tau-geometry-host';
-      if (geometry) {
-        args[2] = { ...options, execArgv: [...(options.execArgv ?? []), '--require', entryPreload] };
+  await session.application.evaluate(
+    ({ utilityProcess }, { entryPreload, holdSecondMinimumDistance }) => {
+      const state = globalThis as typeof globalThis & {
+        tauE2eGeometryEvents?: Array<{
+          kind: 'spawn' | 'run' | 'cancel' | 'event' | 'native-entry' | 'native-return' | 'result' | 'exit';
+          pid: number;
+          at: number;
+          root?: string;
+          eventType?: string;
+          capability?: string;
+          held?: boolean;
+          count?: number;
+          toleranceMm?: number;
+        }>;
+        tauE2eRestoreGeometryFork?: () => void;
+      };
+      if (state.tauE2eRestoreGeometryFork) {
+        throw new Error('Geometry utility observation is already installed.');
       }
-      const child = originalFork(...args);
-      if (geometry) {
-        let spawnedPid: number | undefined;
-        const record = (kind: GeometryHostEvent['kind'], extra?: Partial<GeometryHostEvent>): void => {
-          const pid = spawnedPid ?? child.pid;
-          if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) {
-            return;
+      const originalFork = utilityProcess.fork;
+      state.tauE2eGeometryEvents = [];
+      utilityProcess.fork = ((...args: Parameters<typeof originalFork>) => {
+        const options = args[2];
+        const geometry = options?.serviceName === 'tau-geometry-host';
+        if (geometry) {
+          const environment: Record<string, string | undefined> = { ...options.env };
+          if (holdSecondMinimumDistance) {
+            environment['TAU_E2E_HOLD_SECOND_MINIMUM_DISTANCE'] = '1';
           }
-          state.tauE2eGeometryEvents?.push({ kind, pid, at: Date.now(), ...extra });
-        };
-        if (child.pid !== undefined && Number.isSafeInteger(child.pid) && child.pid > 0) {
-          spawnedPid = child.pid;
-          record('spawn');
-        } else {
-          child.once('spawn', () => {
+          args[2] = {
+            ...options,
+            execArgv: [...(options.execArgv ?? []), '--require', entryPreload],
+            ...(holdSecondMinimumDistance ? { env: environment } : {}),
+          };
+        }
+        const child = originalFork(...args);
+        if (geometry) {
+          let spawnedPid: number | undefined;
+          const record = (kind: GeometryHostEvent['kind'], extra?: Partial<GeometryHostEvent>): void => {
+            const pid = spawnedPid ?? child.pid;
+            if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) {
+              return;
+            }
+            state.tauE2eGeometryEvents?.push({ kind, pid, at: Date.now(), ...extra });
+          };
+          if (child.pid !== undefined && Number.isSafeInteger(child.pid) && child.pid > 0) {
             spawnedPid = child.pid;
             record('spawn');
-          });
-        }
-        const originalPost = child.postMessage.bind(child);
-        child.postMessage = ((message: unknown, transfer?: Parameters<typeof originalPost>[1]) => {
-          const frame = message as { type?: string } | undefined;
-          if (frame?.type === 'geometry-run') {
-            record('run');
-          }
-          if (frame?.type === 'geometry-cancel') {
-            record('cancel');
-          }
-          originalPost(message, transfer);
-        }) as typeof child.postMessage;
-        child.on('message', (message: unknown) => {
-          const frame = message as { type?: string; event?: { type?: string } } | undefined;
-          if (frame?.type === 'geometry-event') {
-            record('event', { eventType: frame.event?.type });
-          }
-          if (frame?.type === 'tau-e2e-native-entry') {
-            const entry = frame as typeof frame & { capability?: string; count?: number; toleranceMm?: number };
-            record('native-entry', {
-              capability: entry.capability,
-              count: entry.count,
-              toleranceMm: entry.toleranceMm,
+          } else {
+            child.once('spawn', () => {
+              spawnedPid = child.pid;
+              record('spawn');
             });
           }
-          if (frame?.type === 'tau-e2e-native-return') {
-            record('native-return');
-          }
-          if (frame?.type === 'geometry-result') {
-            record('result');
-          }
-        });
-        child.once('exit', () => {
-          record('exit');
-        });
-      }
-      return child;
-    }) as typeof utilityProcess.fork;
-    state.tauE2eRestoreGeometryFork = () => {
-      utilityProcess.fork = originalFork;
-      delete state.tauE2eRestoreGeometryFork;
-    };
-  }, preloadPath);
+          const originalPost = child.postMessage.bind(child);
+          child.postMessage = ((message: unknown, transfer?: Parameters<typeof originalPost>[1]) => {
+            const frame = message as { type?: string; root?: string } | undefined;
+            if (frame?.type === 'geometry-run') {
+              record('run', { root: frame.root });
+            }
+            if (frame?.type === 'geometry-cancel') {
+              record('cancel');
+            }
+            originalPost(message, transfer);
+          }) as typeof child.postMessage;
+          child.on('message', (message: unknown) => {
+            const frame = message as { type?: string; event?: { type?: string } } | undefined;
+            if (frame?.type === 'geometry-event') {
+              record('event', { eventType: frame.event?.type });
+            }
+            if (frame?.type === 'tau-e2e-native-entry') {
+              const entry = frame as typeof frame & {
+                capability?: string;
+                held?: boolean;
+                count?: number;
+                toleranceMm?: number;
+              };
+              record('native-entry', {
+                capability: entry.capability,
+                held: entry.held,
+                count: entry.count,
+                toleranceMm: entry.toleranceMm,
+              });
+            }
+            if (frame?.type === 'tau-e2e-native-return') {
+              record('native-return');
+            }
+            if (frame?.type === 'geometry-result') {
+              record('result');
+            }
+          });
+          child.once('exit', () => {
+            record('exit');
+          });
+        }
+        return child;
+      }) as typeof utilityProcess.fork;
+      state.tauE2eRestoreGeometryFork = () => {
+        utilityProcess.fork = originalFork;
+        delete state.tauE2eRestoreGeometryFork;
+      };
+    },
+    { entryPreload: preloadPath, holdSecondMinimumDistance: options?.holdSecondMinimumDistance ?? false },
+  );
 };
 
 /** Snapshot retained by packaged main, not inferred from a separate miniapp. */
 export const geometryHostEvents = async (session: DesktopSession): Promise<readonly GeometryHostEvent[]> =>
   session.application.evaluate(() => {
     const state = globalThis as typeof globalThis & { tauE2eGeometryEvents?: GeometryHostEvent[] };
-    return [...(state.tauE2eGeometryEvents ?? [])];
+    if (!state.tauE2eGeometryEvents) {
+      throw new Error('Geometry utility observation was not installed.');
+    }
+    return [...state.tauE2eGeometryEvents];
   });
 
 /** Undo the test-only observer before Electron teardown. */

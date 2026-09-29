@@ -286,6 +286,7 @@ impl BrepSubject for ProofBrep {
             source_unit_to_millimeters: 1.0,
             occurrence_count: 1,
             surfaceless_faces: 0,
+            all_source_length_contexts_mm: true,
         })
     }
 

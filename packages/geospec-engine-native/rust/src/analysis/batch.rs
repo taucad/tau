@@ -8,7 +8,10 @@ use std::{
     rc::Rc,
 };
 
-use super::mesh::{ClusterGap, ClusterReport, ConnectedComponents, MeshAnalysis, PrimitiveRecord};
+use super::mesh::{
+    exact::{charge, ChargeStep, ChargeTrace},
+    ClusterGap, ClusterReport, ConnectedComponents, MeshAnalysis, PrimitiveRecord,
+};
 use crate::{
     backend::{AnalysisRetentionLimits, BackendError, BackendErrorKind},
     budget::Budget,
@@ -83,36 +86,44 @@ impl BatchAnalysis {
 
     /// M2 exact STEP clusters, retained by the subject's `slot` at the first
     /// tolerance a claim built them for, as a mesh analysis retains its
-    /// result, with the work units their build charged; a refused build is
-    /// never retained (policy §16). A later claim charges those units at
-    /// once when its budget covers them and otherwise rebuilds, so it spends
-    /// and answers exactly as a cold claim: a build's charges never refuse
-    /// below their total.
+    /// result, with each accepted cold charge in order. A refused build is
+    /// never retained (policy §16). Replaying one charge at a time preserves
+    /// the cold refusal boundary and its body pair on a warm claim.
     pub(crate) fn exact_clusters<E>(
         &self,
         slot: &OnceCell<(u64, Rc<ExactClusters>)>,
         tolerance: f64,
         budget: &Budget,
-        build: impl FnOnce() -> Result<Vec<ClusterReport>, E>,
+        build: impl FnOnce(&mut ChargeTrace) -> Result<(Vec<ClusterReport>, Vec<String>), E>,
+        on_exceeded: impl Fn(crate::budget::BudgetExceeded, Option<(usize, usize)>, &[String]) -> E,
     ) -> Result<Rc<ExactClusters>, E> {
         let bits = tolerance_bits(tolerance);
         if let Some((_, value)) = slot.get().filter(|(key, _)| *key == bits) {
-            if budget.used().saturating_add(value.units) <= budget.limit() {
-                let _ = budget.charge(value.units);
+            if trace_matches(value) {
+                for step in &value.trace {
+                    charge(budget, step.units)
+                        .map_err(|exceeded| on_exceeded(exceeded, step.pair, &value.labels))?;
+                }
                 self.observe(WorkCounter::DerivedHits);
                 return Ok(Rc::clone(value));
             }
         }
         self.observe(WorkCounter::ComponentBuilds);
         let before = budget.used();
-        let clusters = build()?;
+        let mut trace = ChargeTrace::default();
+        let (clusters, labels) = build(&mut trace)?;
         let value = Rc::new(ExactClusters {
             units: budget.used() - before,
             clusters,
+            labels,
+            trace: trace.steps,
+            trace_complete: trace.complete,
+            stage_calls: trace.stage_calls,
+            stage_units: trace.stage_units,
         });
         // ponytail: one tolerance per subject, as the mesh slot; key a
         // byte-bounded map by tolerance if specs alternate tolerances.
-        if retained_component_bytes(&value.clusters, &Vec::new()) <= self.byte_limit {
+        if retained_exact_bytes(&value) <= self.byte_limit && trace_matches(&value) {
             let _ = slot.set((bits, Rc::clone(&value)));
         }
         Ok(value)
@@ -193,6 +204,39 @@ impl BatchAnalysis {
 pub(crate) struct ExactClusters {
     pub(crate) clusters: Vec<ClusterReport>,
     pub(crate) units: u64,
+    pub(crate) labels: Vec<String>,
+    pub(crate) trace: Vec<ChargeStep>,
+    pub(crate) trace_complete: bool,
+    pub(crate) stage_calls: [u64; 6],
+    pub(crate) stage_units: [u64; 6],
+}
+
+fn trace_units(trace: &[ChargeStep]) -> Option<u64> {
+    trace
+        .iter()
+        .try_fold(0_u64, |sum, step| sum.checked_add(step.units))
+}
+
+fn trace_matches(value: &ExactClusters) -> bool {
+    value.trace_complete
+        && trace_units(&value.trace) == Some(value.units)
+        && value
+            .stage_units
+            .iter()
+            .try_fold(0_u64, |sum, units| sum.checked_add(*units))
+            == Some(value.units)
+        && value.stage_calls.iter().sum::<u64>() == value.trace.len() as u64
+}
+
+fn retained_exact_bytes(value: &ExactClusters) -> u64 {
+    let mut bytes = retained_component_bytes(&value.clusters, &Vec::new());
+    bytes = bytes.saturating_add((2 * size_of::<[u64; 6]>()) as u64);
+    bytes = bytes.saturating_add((value.trace.capacity() * size_of::<ChargeStep>()) as u64);
+    bytes = bytes.saturating_add((value.labels.capacity() * size_of::<String>()) as u64);
+    for label in &value.labels {
+        bytes = bytes.saturating_add(label.capacity() as u64);
+    }
+    bytes
 }
 
 fn tolerance_bits(value: f64) -> u64 {
@@ -272,7 +316,7 @@ fn retained_component_bytes_floor(clusters: &Vec<ClusterReport>) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::mesh::{analyze, MeshAnalysisRecord, Primitive};
+    use crate::analysis::mesh::{analyze, exact::ChargeStage, MeshAnalysisRecord, Primitive};
     use std::alloc::{GlobalAlloc, Layout, System};
 
     /// Passes every request to `System`, noting each thread's largest one.
@@ -370,35 +414,60 @@ mod tests {
         let batch = batch(u64::MAX);
         let slot = OnceCell::new();
         let builds = Cell::new(0);
-        let build = |budget: &Budget| {
+        let build = |budget: &Budget, trace: &mut ChargeTrace| {
             builds.set(builds.get() + 1);
-            budget.charge(1)?;
-            budget.charge(2)?;
-            Ok::<_, crate::budget::BudgetExceeded>(clusters.clone())
+            charge(budget, 1)?;
+            trace.record(ChargeStep {
+                units: 1,
+                pair: None,
+                stage: ChargeStage::BodySetup,
+            });
+            charge(budget, 2)?;
+            trace.record(ChargeStep {
+                units: 2,
+                pair: Some((0, 1)),
+                stage: ChargeStage::FaceDistance,
+            });
+            Ok::<_, crate::budget::BudgetExceeded>((clusters.clone(), vec!["a".into(), "b".into()]))
         };
         let claim = |limit: u64| {
             let budget = Budget::new(limit);
             let result = batch
-                .exact_clusters(&slot, 0.0, &budget, || build(&budget))
+                .exact_clusters(
+                    &slot,
+                    0.0,
+                    &budget,
+                    |trace| build(&budget, trace),
+                    |error, _, _| error,
+                )
                 .map(|value| value.clusters.clone());
             (result, budget.used())
         };
         let cold = claim(100);
         assert_eq!((builds.get(), cold.1), (1, 3));
         assert_eq!(cold.0.as_ref().unwrap(), &clusters);
+        let stages = &slot.get().unwrap().1;
+        assert_eq!(stages.stage_calls, [1, 0, 0, 1, 0, 0]);
+        assert_eq!(stages.stage_units, [1, 0, 0, 2, 0, 0]);
         // Warm: no build, the same three units, the same clusters.
         assert_eq!(claim(100), cold);
         assert_eq!(builds.get(), 1);
-        // Exactly the total still answers warm; one unit less rebuilds and
-        // refuses at the charge a cold claim refuses at.
+        // Exactly the total still answers warm; one unit less refuses at
+        // the same charge as a cold claim without rebuilding.
         assert_eq!(claim(3), cold);
         assert_eq!(builds.get(), 1);
         let short = claim(2);
-        assert_eq!(builds.get(), 2);
+        assert_eq!(builds.get(), 1);
         let fresh = OnceCell::new();
         let budget = Budget::new(2);
         let cold_short = batch
-            .exact_clusters(&fresh, 0.0, &budget, || build(&budget))
+            .exact_clusters(
+                &fresh,
+                0.0,
+                &budget,
+                |trace| build(&budget, trace),
+                |error, _, _| error,
+            )
             .map(|value| value.clusters.clone());
         assert_eq!(short, (cold_short, budget.used()));
         assert!(
@@ -408,9 +477,114 @@ mod tests {
         // Another tolerance builds without replacing the retained one.
         let other = Budget::new(100);
         batch
-            .exact_clusters(&slot, 1.0, &other, || build(&other))
+            .exact_clusters(
+                &slot,
+                1.0,
+                &other,
+                |trace| build(&other, trace),
+                |error, _, _| error,
+            )
             .unwrap();
-        assert_eq!((builds.get(), slot.get().unwrap().0), (4, 0));
+        assert_eq!((builds.get(), slot.get().unwrap().0), (3, 0));
+    }
+
+    #[test]
+    fn exact_clusters_replay_refusal_prefix_and_prior_spend() {
+        let batch = batch(u64::MAX);
+        let slot = OnceCell::new();
+        let builds = Cell::new(0);
+        let claim = |slot: &OnceCell<(u64, Rc<ExactClusters>)>, limit, prior| {
+            let budget = Budget::new(limit);
+            charge(&budget, prior).unwrap();
+            let result = batch.exact_clusters(
+                slot,
+                0.0,
+                &budget,
+                |trace| {
+                    builds.set(builds.get() + 1);
+                    for (units, pair) in [(1, None), (0, None), (2, Some((0, 1)))] {
+                        charge(&budget, units)
+                            .map_err(|error| (error, pair, vec!["a".into(), "b".into()]))?;
+                        trace.record(ChargeStep {
+                            units,
+                            pair,
+                            stage: ChargeStage::FaceDistance,
+                        });
+                    }
+                    Ok((Vec::new(), vec!["a".into(), "b".into()]))
+                },
+                |error, pair, labels| (error, pair, labels.to_vec()),
+            );
+            (result.map(|value| value.clusters.clone()), budget.used())
+        };
+        assert!(claim(&slot, 3, 0).0.is_ok());
+        for (limit, prior) in [(0, 0), (1, 0), (2, 0), (3, 0), (3, 1), (4, 1)] {
+            let fresh = OnceCell::new();
+            let cold = claim(&fresh, limit, prior);
+            let warm = claim(&slot, limit, prior);
+            assert_eq!(warm, cold, "limit {limit}, prior {prior}");
+        }
+        assert_eq!(builds.get(), 1 + 6);
+    }
+
+    #[test]
+    fn incomplete_trace_is_not_retained() {
+        let mut overflow = ChargeTrace::default();
+        overflow.record(ChargeStep {
+            units: u64::MAX,
+            pair: None,
+            stage: ChargeStage::BodySetup,
+        });
+        overflow.record(ChargeStep {
+            units: 1,
+            pair: None,
+            stage: ChargeStage::BodySetup,
+        });
+        assert!(!overflow.complete);
+        assert!(overflow.steps.is_empty());
+
+        let mut trace = ChargeTrace::with_limit(2);
+        for _ in 0..3 {
+            trace.record(ChargeStep {
+                units: 0,
+                pair: None,
+                stage: ChargeStage::BodySetup,
+            });
+        }
+        assert!(!trace.complete);
+        assert!(trace.steps.is_empty());
+        assert_eq!(trace.stage_calls, [0; 6]);
+        assert_eq!(trace.stage_units, [0; 6]);
+        trace.record(ChargeStep {
+            units: 1,
+            pair: None,
+            stage: ChargeStage::BodySetup,
+        });
+        assert!(trace.steps.is_empty());
+
+        let batch = batch(u64::MAX);
+        let slot = OnceCell::new();
+        let budget = Budget::new(0);
+        let callbacks = 4 * 1024 * 1024 / size_of::<ChargeStep>() + 1;
+        batch
+            .exact_clusters(
+                &slot,
+                0.0,
+                &budget,
+                |trace| {
+                    for _ in 0..callbacks {
+                        trace.record(ChargeStep {
+                            units: 0,
+                            pair: None,
+                            stage: ChargeStage::BodySetup,
+                        });
+                    }
+                    Ok::<_, crate::budget::BudgetExceeded>((Vec::new(), Vec::new()))
+                },
+                |error, _, _| error,
+            )
+            .unwrap();
+        assert!(slot.get().is_none(), "a truncated trace cannot be replayed");
     }
 
     #[test]
@@ -474,7 +648,15 @@ mod tests {
         let clusters = scattered_clusters(40).component_clusters(0.0);
         let expected = ConnectedComponents::from_clusters(clusters.clone());
         let bytes = retained_component_bytes(&expected.clusters, &expected.gaps);
-        let exact = ExactClusters { clusters, units: 0 };
+        let exact = ExactClusters {
+            clusters,
+            units: 0,
+            labels: Vec::new(),
+            trace: Vec::new(),
+            trace_complete: true,
+            stage_calls: [0; 6],
+            stage_units: [0; 6],
+        };
         let plan = batch(2 * bytes - 1);
         let alone = batch(2 * bytes - 1);
         assert_eq!(*plan.step_components("a", 0.0, &exact).unwrap(), expected);

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createMockKernelRuntime, validateGlbData } from '@taucad/runtime-testing';
+import { createMockKernelRuntime, expectKernelProjectionOrder, validateGlbData } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { defaultPostProcess } from 'libassimp';
 import type { AssimpFile, ConvertOptions, ConvertResult } from 'libassimp';
@@ -104,6 +104,33 @@ describe('assimpKernel', () => {
     expect(
       await definition.render!({ handle: result.handle, view: 'model', options: {} }, localRuntime, localContext),
     ).toEqual({ content: convertedGlb });
+    const freshSnapshot = definition.serializeHandle!({ handle: result.handle }, localRuntime, localContext);
+    const render = async (handle: typeof result.handle) => {
+      const projected = await definition.render!({ handle, view: 'model', options: {} }, localRuntime, localContext);
+      return projected.content;
+    };
+    const write = async (
+      handle: typeof result.handle,
+      coordinateSystem: 'y-up' | 'z-up',
+      length: 'meter' | 'millimeter',
+    ) => {
+      const projected = await definition.write!(
+        { exportId: 'glb', handle, options: { coordinateSystem, unit: { length } } },
+        localRuntime,
+        localContext,
+      );
+      return projected.files[0].bytes;
+    };
+    const ordered = await expectKernelProjectionOrder({
+      renderA: async () => render(result.handle),
+      renderB: async () => write(result.handle, 'y-up', 'meter'),
+      write: async () => write(result.handle, 'z-up', 'millimeter'),
+      freshB: async () => {
+        const fresh = definition.deserializeHandle!({ serialized: freshSnapshot }, localRuntime, localContext);
+        return write(fresh, 'y-up', 'meter');
+      },
+    });
+    expect(ordered.first).toEqual(convertedGlb);
   });
 
   it('reads an uncached entry exactly once without inventory probes', async () => {

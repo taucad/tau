@@ -205,10 +205,10 @@ describe('IndexedDbStorageProvider', () => {
       updatedAt: 42,
     });
     await provider.updateEditorState({ ...row!, focusedChatId: 'chat-b' });
-    // oxlint-disable-next-line typescript/no-unsafe-assignment -- Vitest's asymmetric matcher is intentionally typed any.
     expect(await provider.getEditorState(projectOneId)).toEqual({
       ...row,
       focusedChatId: 'chat-b',
+      // oxlint-disable-next-line typescript/no-unsafe-assignment -- Vitest's asymmetric matcher is intentionally typed any.
       updatedAt: expect.any(Number),
     });
   });

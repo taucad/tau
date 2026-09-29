@@ -881,8 +881,11 @@ describe('desktop main deep links', () => {
         expect(fakeWindow.show).not.toHaveBeenCalled();
         expect(fakeWindow.focus).not.toHaveBeenCalled();
       } finally {
-        if (previous === undefined) delete process.env['TAU_E2E_HIDE_WINDOW'];
-        else process.env['TAU_E2E_HIDE_WINDOW'] = previous;
+        if (previous === undefined) {
+          delete process.env['TAU_E2E_HIDE_WINDOW'];
+        } else {
+          process.env['TAU_E2E_HIDE_WINDOW'] = previous;
+        }
       }
     },
     bootMilliseconds,

@@ -432,7 +432,7 @@ describe('the page client of the worker revision root', () => {
   it('does not report a closed channel as a failed save', async () => {
     const pendingSave = Promise.withResolvers<RevisionAnswer>();
     const revision = vi.fn(
-      (request: JsonValue): Promise<RevisionAnswer> =>
+      async (request: JsonValue): Promise<RevisionAnswer> =>
         typeof request === 'object' && request !== null && 'command' in request && request['command'] === 'saveRevision'
           ? pendingSave.promise
           : Promise.resolve({ result: null, status: { projectId, branch: 'main' } }),
@@ -449,7 +449,9 @@ describe('the page client of the worker revision root', () => {
     client.subscribeToasts((toast) => toasts.push(toast));
 
     client.open();
-    await waitFor(() => expect(client.status()).toBeDefined());
+    await waitFor(() => {
+      expect(client.status()).toBeDefined();
+    });
     client.send({ command: 'saveRevision' });
     await expect.poll(() => revision.mock.calls.length).toBe(3);
     client.close();

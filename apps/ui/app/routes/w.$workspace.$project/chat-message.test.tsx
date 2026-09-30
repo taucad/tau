@@ -362,7 +362,7 @@ describe('ChatMessage column wrapper layout', () => {
     expect(planning.className).toBe('');
   });
 
-  it('should cap collapsed long user bubbles at max-h-58.5 for parity with focused ChatTextarea, without nested Virtuoso scroll', () => {
+  it('should cap collapsed long user bubbles at max-h-61.5 for parity with focused ChatTextarea, without nested Virtuoso scroll', () => {
     const longText = Array.from({ length: 12 }, (_, i) => `line ${i}`).join('\n');
     setMessages([userMessage('msg-1', longText)]);
 
@@ -374,7 +374,7 @@ describe('ChatMessage column wrapper layout', () => {
       throw new Error('inner bubble not found');
     }
 
-    expect(innerBubble.className).toContain('max-h-58.5');
+    expect(innerBubble.className).toContain('max-h-61.5');
     expect(innerBubble.className).toContain('overflow-hidden');
     expect(innerBubble.querySelector('[data-testid="virtuoso-scroller"]')).toBeNull();
 

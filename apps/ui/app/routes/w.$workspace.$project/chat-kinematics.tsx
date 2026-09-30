@@ -905,27 +905,27 @@ function KinematicsJointList({
     [context, structure, term],
   );
   const renderDriver = useCallback(
-    (_index: number, driver: DegreeOfFreedom) => {
+    (index: number, driver: DegreeOfFreedom) => {
       const followers = structure.followersByDriver.get(driver.id) ?? [];
-      if (followers.length > 0) {
-        return (
-          <DriverGroup
-            key={driver.id}
-            driver={driver}
-            followers={followers}
-            disclosure={disclosure}
-            revealed={revealed}
-            onDisclosureChange={updateDisclosure}
-          />
-        );
-      }
       return (
-        <JointRow
-          key={driver.id}
-          dof={driver}
-          label={dofLabel(driver, mechanism)}
-          componentIds={structure.componentsByJoint.get(driver.jointId) ?? []}
-        />
+        // Padding belongs to the measured row; margins and parent gaps are lost across virtual windows.
+        <div data-slot='kinematics-driver-row' className={cn(index > 0 && 'pt-1.5')}>
+          {followers.length > 0 ? (
+            <DriverGroup
+              driver={driver}
+              followers={followers}
+              disclosure={disclosure}
+              revealed={revealed}
+              onDisclosureChange={updateDisclosure}
+            />
+          ) : (
+            <JointRow
+              dof={driver}
+              label={dofLabel(driver, mechanism)}
+              componentIds={structure.componentsByJoint.get(driver.jointId) ?? []}
+            />
+          )}
+        </div>
       );
     },
     [disclosure, mechanism, revealed, structure, updateDisclosure],

@@ -147,7 +147,7 @@ export declare function createCollector(options?: GeoSpecCollectorOptions): GeoS
 export declare function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promise<GeoSpecRunResult>;
 //   options: filesystem and test entry path
 
-// Create an opt-in native runner using the SDK's existing serial lifecycle
+// Compose compiled assertion and model bindings with the SDK's serial lifecycle
 (options: GeoSpecNativeRunnerOptions) => GeoSpecRunner
 //   options: VM filesystem, native engine/client options and model defaults
 

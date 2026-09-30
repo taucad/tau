@@ -230,6 +230,121 @@ fn step_request(bytes: &[u8], name: Option<&str>) -> Vec<u8> {
 }
 
 #[test]
+fn should_bind_admitted_diagnostics_to_subject_identity_and_existing_matcher() {
+    let mut engine = Engine::with_backends(
+        EngineConfig::entry(),
+        Box::new(ProjectionBrepConnector::default()),
+        Box::new(UnusedCsg),
+    );
+    let bytes = b"diagnostic STEP";
+    let mut request: Value = serde_json::from_slice(&step_request(bytes, None)).unwrap();
+    let clean: Value = serde_json::from_slice(
+        &engine
+            .ingest_subject(&serde_json::to_vec(&request).unwrap(), bytes, vec![])
+            .unwrap(),
+    )
+    .unwrap();
+    request["diagnostics"] = json!([{"code":"MODEL_WARNING","severity":"warning","message":"Model warning","suggestion":"Repair source"}]);
+    let warned: Value = serde_json::from_slice(
+        &engine
+            .ingest_subject(&serde_json::to_vec(&request).unwrap(), bytes, vec![])
+            .unwrap(),
+    )
+    .unwrap();
+    let repeated: Value = serde_json::from_slice(
+        &engine
+            .ingest_subject(&serde_json::to_vec(&request).unwrap(), bytes, vec![])
+            .unwrap(),
+    )
+    .unwrap();
+    assert_ne!(
+        clean["result"]["subject"]["subjectHash"],
+        warned["result"]["subject"]["subjectHash"]
+    );
+    assert_eq!(warned, repeated);
+    for (admitted, expected) in [(&clean, "passed"), (&warned, "failed")] {
+        let result = claim(
+            &engine,
+            json!({"slot":"subject","subjectHash":admitted["result"]["subject"]["subjectHash"]}),
+            "toHaveNoDiagnostics",
+            json!({"kind":"noDiagnostics"}),
+        );
+        assert_eq!(result["result"]["results"][0]["status"], expected);
+        if expected == "failed" {
+            assert_eq!(
+                result["result"]["results"][0]["diagnostics"][0]["details"]["diagnostics"][0]
+                    ["code"],
+                "MODEL_WARNING"
+            );
+        }
+    }
+    request["diagnostics"][0]["severity"] = json!("bogus");
+    assert!(engine
+        .ingest_subject(&serde_json::to_vec(&request).unwrap(), bytes, vec![])
+        .is_err());
+}
+
+#[test]
+fn should_keep_mesh_diagnostics_separate_across_closure_reuse() {
+    let bytes = serde_json::to_vec(&json!({
+        "asset":{"version":"2.0"}, "scene":0, "scenes":[{"nodes":[0]}],
+        "nodes":[{"mesh":0}], "meshes":[{"primitives":[{"attributes":{"POSITION":0}}]}],
+        "buffers":[{"uri":"triangle.bin","byteLength":36}],
+        "bufferViews":[{"buffer":0,"byteLength":36}],
+        "accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}]
+    })).unwrap();
+    let resource: Vec<u8> = [0_f32, 0., 0., 1., 0., 0., 0., 1., 0.]
+        .into_iter()
+        .flat_map(f32::to_le_bytes)
+        .collect();
+    let mut request = json!({
+        "method":"ingestSubject","requestId":"mesh-diagnostics","protocolVersion":3,"registryVersion":5,
+        "canonicalProfile":"geospec-jcs-v1","format":"gltf",
+        "frame":{"coordinateSystem":"z-up","sourceUnit":"mm","outputUnit":"mm"},
+        "ingestOptions":{},"primaryByteLength":bytes.len(),"resources":[{"name":"triangle.bin","byteLength":36}]
+    });
+    let mut engine = Engine::new();
+    let mut hashes = Vec::new();
+    for severity in [None, Some("warning"), Some("info"), Some("warning"), None] {
+        request.as_object_mut().unwrap().remove("diagnostics");
+        if let Some(severity) = severity {
+            request["diagnostics"] =
+                json!([{"code":"MODEL_ISSUE","severity":severity,"message":"Source issue"}]);
+        }
+        let admitted: Value = serde_json::from_slice(
+            &engine
+                .ingest_subject(
+                    &serde_json::to_vec(&request).unwrap(),
+                    &bytes,
+                    vec![resource.clone()],
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let hash = admitted["result"]["subject"]["subjectHash"].clone();
+        let result = claim(
+            &engine,
+            json!({"slot":"subject","subjectHash":hash}),
+            "toHaveNoDiagnostics",
+            json!({"kind":"noDiagnostics"}),
+        );
+        assert_eq!(
+            result["result"]["results"][0]["status"],
+            if severity == Some("warning") {
+                "failed"
+            } else {
+                "passed"
+            }
+        );
+        hashes.push(hash);
+    }
+    assert_ne!(hashes[0], hashes[1]);
+    assert_ne!(hashes[1], hashes[2]);
+    assert_eq!(hashes[1], hashes[3]);
+    assert_eq!(hashes[0], hashes[4]);
+}
+
+#[test]
 fn should_skip_step_open_only_for_exact_retained_source_options_and_profile() {
     let opens = Rc::new(Cell::new(0));
     let alternate_profile = Rc::new(Cell::new(false));

@@ -110,6 +110,31 @@ pub(crate) struct SubjectIdentity {
 }
 
 impl SubjectIdentity {
+    /// Successful source diagnostics affect matcher results, so bind them to identity.
+    pub(crate) fn with_diagnostics(
+        mut self,
+        diagnostics: &[crate::result::Diagnostic],
+    ) -> Result<Self, BackendError> {
+        if !diagnostics.is_empty() {
+            let Json::Object(fields) = &mut self.descriptor else {
+                unreachable!()
+            };
+            fields.push((
+                "diagnostics".into(),
+                Json::Array(
+                    diagnostics
+                        .iter()
+                        .map(crate::result::Diagnostic::to_json)
+                        .collect(),
+                ),
+            ));
+            self.hash = sha256_hex(
+                codec::encode(&self.descriptor).map_err(|error| invalid(error.to_string()))?,
+            );
+        }
+        Ok(self)
+    }
+
     /// Retained identity payload, counting actual Vec/String capacities.
     pub(crate) fn owned_bytes(&self) -> usize {
         fn heap(value: &Json) -> usize {

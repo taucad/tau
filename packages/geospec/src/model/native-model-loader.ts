@@ -317,6 +317,7 @@ export const createGeoSpecNativeModelLoader = (
     primary: Uint8Array<ArrayBuffer>;
     resources: ReadonlyArray<{ name: string; bytes: Uint8Array<ArrayBuffer> }>;
     sourceUnit?: string;
+    diagnostics?: readonly GeometryDiagnostic[];
   }): GeoSpecNativeModelSubject => {
     const format = options.format === 'stp' ? 'step' : options.format;
     const ingest = (): Uint8Array<ArrayBuffer> =>
@@ -332,6 +333,9 @@ export const createGeoSpecNativeModelLoader = (
             outputUnit: 'mm',
           },
           ingestOptions: options.ingestOptions ?? {},
+          ...(options.diagnostics === undefined || options.diagnostics.length === 0
+            ? {}
+            : { diagnostics: options.diagnostics }),
           primaryByteLength: options.primary.byteLength,
           resources: options.resources.map(({ name, bytes }) => ({ name, byteLength: bytes.byteLength })),
         }),
@@ -411,9 +415,7 @@ export const createGeoSpecNativeModelLoader = (
         format,
         parameters: options.parameters ?? {},
         ingestOptions: options.ingestOptions ?? {},
-        ...(typeof options.source === 'string' || options.path !== undefined
-          ? { sourcePath: typeof options.source === 'string' ? options.source : options.path }
-          : {}),
+        ...(typeof options.source === 'string' ? { sourcePath: options.source } : {}),
         artifacts,
       } satisfies GeoSpecModelLoadEvidence,
     };
@@ -493,6 +495,7 @@ export const createGeoSpecNativeModelLoader = (
       primary: primary.bytes,
       resources,
       sourceUnit: honored.sourceUnit,
+      diagnostics: exported.issues.map(runtimeIssueDiagnostic),
       ...(options.ingestOptions === undefined ? {} : { ingestOptions: options.ingestOptions }),
     });
     return {

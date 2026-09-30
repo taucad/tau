@@ -12,13 +12,7 @@ import { expect } from 'vitest';
 
 const primitiveModeTriangles = Primitive.Mode['TRIANGLES']!;
 
-/** Temporary input for direct legacy kernel callers still being migrated. */
-type LegacyGeometryResult = {
-  readonly success: boolean;
-  readonly data?: unknown;
-  readonly issues: readonly unknown[];
-};
-type GeometryResult = LegacyGeometryResult | RenderResult | Rendering;
+type GeometryResult = RenderResult | Rendering;
 
 const isArtifact = (value: unknown): value is Artifact =>
   typeof value === 'object' &&
@@ -57,11 +51,7 @@ function listAllGlbBuffers(result: GeometryResult): Array<Uint8Array<ArrayBuffer
     const artifact = asKnownArtifact(data);
     return artifact?.mimeType === 'model/gltf-binary' ? [artifact.content] : [];
   }
-  // Direct legacy kernel callers still supply format/content until their test suites migrate.
-  if (typeof data !== 'object' || data === null || !('format' in data) || !('content' in data)) {
-    return [];
-  }
-  return data.format === 'gltf' && data.content instanceof Uint8Array ? [data.content as Uint8Array<ArrayBuffer>] : [];
+  return [];
 }
 
 /**

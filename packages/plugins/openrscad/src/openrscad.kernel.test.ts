@@ -441,7 +441,7 @@ translate([8, 0, 0]) color("blue", 0.5) cube(2);
     const readColors = async (content: Uint8Array<ArrayBuffer>) =>
       getAllMaterialBaseColors({
         success: true,
-        data: { format: 'gltf', content, hash: 'test' },
+        data: { mimeType: 'model/gltf-binary', content },
         issues: [],
       });
     const assertColors = async (content: Uint8Array<ArrayBuffer>) => {

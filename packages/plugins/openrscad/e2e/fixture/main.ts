@@ -57,7 +57,7 @@ const run = async (): Promise<OpenrscadBrowserReport> => {
   const client = createRuntimeClient(
     createWebWorkerClientOptions({
       createWorker: () => new Worker(new URL('runtime.worker.ts', import.meta.url), { type: 'module' }),
-      renderTimeout: 120_000,
+      operationTimeout: 120_000,
     }),
   );
   const tracker = trackEngineBackend(client);

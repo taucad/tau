@@ -31,6 +31,37 @@ export default function main(params = defaultParams) {
 }
 `;
 
+const previewMixedModel = `import { makeBaseBox } from 'replicad';
+
+const checker = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAw0lEQVR4nO3QMQ1CURTA0CeFGQlYQwlOcAcO/nZzLqFDxyZNz+35+lzxvj8u+XX/6ADtN0AHaL8BOkD7DdAB2j/bA6f9BugA7TdAB2i/ATpA+w3YHjjtN0AHaL8BOkD7DdAB2m/A9sBpvwE6QPsN0AHab4AO0H4DtgdO+w3QAdpvgA7QfgN0gPYbsD1w2m+ADtB+A3SA9hugA7TfgO2B034DdID2G6ADtN8AHaD9BmwPnPYboAO03wAdoP0G6ADt//2AL5XAcf/TCc2WAAAAAElFTkSuQmCC';
+const image = Uint8Array.from(atob(checker), (character) => character.charCodeAt(0));
+const materials = [
+  { name: 'Brushed copper', pbrMetallicRoughness: { baseColorFactor: [0.96, 0.62, 0.48, 1], metallicFactor: 1, roughnessFactor: 0.18 } },
+  { name: 'Optical glass', pbrMetallicRoughness: { baseColorFactor: [0.9, 0.97, 1, 1], metallicFactor: 0, roughnessFactor: 0.06 }, extensions: { KHR_materials_transmission: { transmissionFactor: 1 }, KHR_materials_ior: { ior: 1.52 } } },
+  { name: 'Woven texture', pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], baseColorTexture: { index: 0 }, metallicFactor: 0, roughnessFactor: 0.8 } },
+  { name: 'Matte polymer', pbrMetallicRoughness: { baseColorFactor: [0.18, 0.52, 0.23, 1], metallicFactor: 0, roughnessFactor: 0.9 } },
+];
+
+export default function main() {
+  return {
+    images: [{ data: image, mimeType: 'image/png' }],
+    textures: [{ source: 0 }],
+    shapes: Array.from({ length: 12 }, (_, index) => ({
+      shape: makeBaseBox(8 + (index % 3), 7 + (index % 4), 5 + (index % 2))
+        .translate([(index % 4) * 14 - 21, Math.floor(index / 4) * 14 - 21, 0]),
+      name: 'Preview part ' + String(index + 1),
+      material: materials[index % materials.length],
+    })),
+  };
+}
+`;
+
+const previewShellModel = `import { draw } from 'replicad';
+export default function main() {
+  return draw().hLine(50).vLine(30).hLine(-50).close();
+}
+`;
+
 const stressParameters = Object.fromEntries(
   Array.from({ length: 96 }, (_, index) => [`stressValue${String(index + 1)}`, index + 1]),
 );
@@ -63,14 +94,22 @@ const packageJson = JSON.stringify(
 const seedFiles = Object.fromEntries([
   ['package.json', { content: encode(packageJson) }],
   ['public/models/honeycomb.js', { content: encode(honeycombModel) }],
+  ['public/models/preview-mixed.js', { content: encode(previewMixedModel) }],
+  ['public/models/preview-shell.js', { content: encode(previewShellModel) }],
   ['public/models/box-corner.js', { content: encode(boxCornerModel) }],
   ['public/models/nested/strainer.js', { content: encode(honeycombModel) }],
   ['src/readme.md', { content: encode('# File tree e2e fixture\n') }],
 ]) as Record<string, { content: Uint8Array<ArrayBuffer> }>;
 
-/** `?main=box-corner` seeds the 101-field stress model as the main asset for large-form probes. */
+/** Select a real main producer for the file-tree and preview probes. */
 const mainEntryPathFor = (fixture: string | undefined): string =>
-  fixture === 'box-corner' ? 'public/models/box-corner.js' : 'public/models/honeycomb.js';
+  fixture === 'box-corner'
+    ? 'public/models/box-corner.js'
+    : fixture === 'preview-secondary'
+      ? 'public/models/preview-shell.js'
+      : fixture === 'preview-mixed'
+        ? 'public/models/preview-mixed.js'
+        : 'public/models/honeycomb.js';
 
 const mebibyte = 1024 * 1024;
 

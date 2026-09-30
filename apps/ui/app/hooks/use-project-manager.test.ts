@@ -434,7 +434,7 @@ const mockTouchProjectActivity = vi.fn(async (projectId: string, activityAt?: nu
 /* A chat is files, not an object-store row (W17): the chat half of the manager
  * talks to `createChatFileStore`, so the doubles that used to sit on the worker
  * sit on the store. */
-const mockPutChatRecord = vi.fn(async () => undefined);
+const mockPutChatRecord = vi.fn<(chat: Chat) => Promise<void>>(async () => undefined);
 const mockInvalidateChatLog = vi.fn();
 vi.mock('#db/chat-file-storage.js', () => ({
   createChatFileStore: () => ({
@@ -1316,7 +1316,7 @@ describe('useProjectManager.createProject', () => {
     }
   });
 
-  it("invalidates one chat when another device's projected log segment changes", async () => {
+  it("should invalidate only the affected chat when another device's projected log segment changes", async () => {
     const { wrapper, queryClient } = createInspectableWrapper();
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
     renderHook(() => useProjectManager(), { wrapper });
@@ -1325,9 +1325,8 @@ describe('useProjectManager.createProject', () => {
       emitWorkerChange('fileWritten', `/projects/${fakeProject.id}/.tau/chats/chat_remote/events/device-b.jsonl`);
     });
 
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['chats', fakeProject.id] });
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['chat', 'chat_remote'] });
-    expect(mockInvalidateChatLog).toHaveBeenCalledWith('chat_remote');
+    expect(invalidateQueries.mock.calls).toEqual([[{ queryKey: ['chat', 'chat_remote'] }]]);
+    expect(mockInvalidateChatLog).not.toHaveBeenCalled();
   });
 
   it('cancels a pending library invalidation when the provider unmounts', async () => {
@@ -2089,6 +2088,107 @@ describe('useProjectManager.createProject', () => {
       mockResumeResources.mockResolvedValueOnce([operation.chat]);
       return operation;
     };
+
+    it.each(['commit', 'attachment', 'chat'] as const)(
+      'should hold project creation until durable startup input settles at %s',
+      async (phase) => {
+        const bytes = new Uint8Array([1, 2, 3]);
+        const image = await seedHomeAttachment(bytes, 'image/png');
+        const entered = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        const hold = async (): Promise<void> => {
+          entered.resolve();
+          await release.promise;
+        };
+        mockPrepareProjectCreation.mockImplementationOnce(prepareWithChat);
+        if (phase === 'commit') {
+          mockCommitPendingProjectDirectory.mockImplementationOnce(async () => {
+            await hold();
+            return { status: 'committed' };
+          });
+        } else if (phase === 'attachment') {
+          mockWriteAttachment.mockImplementationOnce(async (path, content) => {
+            await hold();
+            attachmentFiles.set(path, content);
+          });
+        } else {
+          mockPutChatRecord.mockImplementationOnce(hold);
+        }
+        const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+        let completed = false;
+        let creation: Promise<unknown> = Promise.resolve();
+        await act(async () => {
+          creation = result.current.createProject({
+            kernel: 'openscad',
+            initialMessage: { content: 'Build it', attachments: [image] },
+            location: { kind: 'home' },
+          });
+          await entered.promise;
+        });
+        const completion = async (): Promise<void> => {
+          await creation;
+          completed = true;
+        };
+        const finished = completion();
+        expect(completed).toBe(false);
+        expect(mockCompletePending).not.toHaveBeenCalled();
+        const startup = mockPrepareProjectCreation.mock.calls.at(-1)?.[0].chat.startupRequest;
+        expect(startup?.messageId).toBe(startup?.message.id);
+        expect(startup?.message.parts).toContainEqual({
+          type: 'file',
+          url: `attachments/${image.hash}.png`,
+          mediaType: 'image/png',
+        });
+        if (phase === 'commit') {
+          expect(mockResumeResources).not.toHaveBeenCalled();
+        }
+        if (phase !== 'chat') {
+          expect(mockPutChatRecord).not.toHaveBeenCalled();
+        }
+        await act(async () => {
+          release.resolve();
+          await finished;
+        });
+        expect(completed).toBe(true);
+        expect(mockCompletePending).toHaveBeenCalledWith(operationId);
+        expect(attachmentFiles.get(`${chatAttachments}/${image.hash}.png`)).toEqual(bytes);
+        expect(mockPutChatRecord.mock.calls.at(-1)?.[0]).toMatchObject({ startupRequest: startup });
+      },
+    );
+
+    it('should recover a failed startup chat write without minting a second startup request', async () => {
+      const image = await seedHomeAttachment(new Uint8Array([4, 5, 6]), 'image/png');
+      let persisted = pendingCreate;
+      mockPrepareProjectCreation.mockImplementationOnce(async (input) => {
+        persisted = await prepareWithChat(input);
+        return persisted;
+      });
+      mockPutChatRecord.mockRejectedValueOnce(new Error('chat storage unavailable'));
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await expect(
+        act(async () =>
+          result.current.createProject({
+            kernel: 'openscad',
+            initialMessage: { content: 'Build it', attachments: [image] },
+            location: { kind: 'home' },
+          }),
+        ),
+      ).rejects.toMatchObject({ name: 'PendingProjectRecoveryError', reason: 'local-state-error' });
+      const startup = persisted.chat?.startupRequest;
+      expect(startup).toBeDefined();
+      expect(mockCompletePending).not.toHaveBeenCalled();
+      mockGetPendingProjectOperations.mockResolvedValue([persisted]);
+      mockResumeResources.mockResolvedValueOnce([persisted.chat!]);
+      await act(async () => {
+        await result.current.getProjectListing();
+      });
+      await vi.waitFor(() => {
+        expect(mockCompletePending).toHaveBeenCalledWith(operationId);
+      });
+      expect(mockPrepareProjectCreation).toHaveBeenCalledOnce();
+      expect(mockPutChatRecord).toHaveBeenCalledTimes(2);
+      expect(mockPutChatRecord.mock.calls.map(([chat]) => chat.startupRequest?.id)).toEqual([startup?.id, startup?.id]);
+    });
 
     it('copies every draft attachment into the new chat before its startup record is written', async () => {
       const image = await seedHomeAttachment(new Uint8Array([1, 2, 3]), 'image/png');

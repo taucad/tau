@@ -965,7 +965,12 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
         ...(options?.from === undefined ? {} : { from: options.from }),
         ...(options?.against === undefined ? {} : { against: options.against }),
       });
-      return result.kind === 'comparison' ? result.comparison : { original: '', modified: '' };
+      if (result.kind !== 'comparison') {
+        throw Object.assign(new Error('The revision root answered a comparison with something else.'), {
+          code: 'INVALID_REVISION_RESPONSE',
+        });
+      }
+      return result.comparison;
     },
     send: (command) => {
       post(command);

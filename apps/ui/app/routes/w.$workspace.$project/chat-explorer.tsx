@@ -552,34 +552,71 @@ function LiveComponentTree({
     if (!scroller) {
       return undefined;
     }
-    const rows = [...scroller.querySelectorAll<HTMLElement>('[data-model-component-row]')];
-    if (typeof IntersectionObserver === 'undefined') {
-      setVisiblePreviewIds(rows.slice(0, 32).flatMap((row) => row.dataset['modelComponentId'] ?? []));
-      return undefined;
-    }
+    const mounted = new Set<HTMLElement>();
     const inView = new Set<string>();
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const id = (entry.target as HTMLElement).dataset['modelComponentId'];
-          if (!id) {
-            continue;
-          }
-          if (entry.isIntersecting) {
-            inView.add(id);
-          } else {
+    const publishVisible = (): void => {
+      const next = [...inView].slice(0, 127);
+      setVisiblePreviewIds((current) =>
+        current.length === next.length && current.every((id, index) => id === next[index]) ? current : next,
+      );
+    };
+    const observer =
+      typeof IntersectionObserver === 'undefined'
+        ? undefined
+        : new IntersectionObserver(
+            (entries) => {
+              for (const entry of entries) {
+                const row = entry.target as HTMLElement;
+                const id = row.dataset['modelComponentId'];
+                if (!id || !mounted.has(row)) {
+                  continue;
+                }
+                if (entry.isIntersecting) {
+                  inView.add(id);
+                } else {
+                  inView.delete(id);
+                }
+              }
+              publishVisible();
+            },
+            { root: scroller, rootMargin: '56px 0px' },
+          );
+    const syncMountedRows = (): void => {
+      const rows = new Set(scroller.querySelectorAll<HTMLElement>('[data-model-component-row]'));
+      for (const row of mounted) {
+        if (!rows.has(row)) {
+          observer?.unobserve(row);
+          mounted.delete(row);
+          const id = row.dataset['modelComponentId'];
+          if (id) {
             inView.delete(id);
           }
         }
-        setVisiblePreviewIds([...inView].slice(0, 127));
-      },
-      { root: scroller, rootMargin: '56px 0px' },
-    );
-    for (const row of rows) {
-      observer.observe(row);
-    }
+      }
+      for (const row of rows) {
+        if (!mounted.has(row)) {
+          mounted.add(row);
+          observer?.observe(row);
+        }
+      }
+      if (!observer) {
+        inView.clear();
+        for (const row of [...rows].slice(0, 32)) {
+          const id = row.dataset['modelComponentId'];
+          if (id) {
+            inView.add(id);
+          }
+        }
+      }
+      publishVisible();
+    };
+    // Virtual rows mount and unmount while the manifest and filter stay unchanged.
+    const mountedRows = new MutationObserver(syncMountedRows);
+    mountedRows.observe(scroller, { childList: true, subtree: true });
+    syncMountedRows();
     return () => {
-      observer.disconnect();
+      mountedRows.disconnect();
+      observer?.disconnect();
     };
   }, [manifest, normalizedQuery]);
 
@@ -1292,7 +1329,13 @@ export const ComponentRow = memo(function ComponentRow({
             actionButtonClassName={actionButtonClassName}
             opacity={opacity}
             preview={preview}
-            onRetryPreview={onRetryPreview ? () => onRetryPreview(node.id) : undefined}
+            onRetryPreview={
+              onRetryPreview
+                ? () => {
+                    onRetryPreview(node.id);
+                  }
+                : undefined
+            }
             onPreviewDecodeError={preview?.bytes ? () => onPreviewDecodeError?.(node.id, preview.bytes!) : undefined}
             onPreviewDecoded={preview?.bytes ? () => onPreviewDecoded?.(node.id, preview.bytes!) : undefined}
           />
@@ -1310,7 +1353,13 @@ export const ComponentRow = memo(function ComponentRow({
         hasOpacityOverrides={hasOpacityOverrides}
         opacity={opacity}
         preview={preview}
-        onRetryPreview={onRetryPreview ? () => onRetryPreview(node.id) : undefined}
+        onRetryPreview={
+          onRetryPreview
+            ? () => {
+                onRetryPreview(node.id);
+              }
+            : undefined
+        }
         onPreviewDecodeError={preview?.bytes ? () => onPreviewDecodeError?.(node.id, preview.bytes!) : undefined}
         onPreviewDecoded={preview?.bytes ? () => onPreviewDecoded?.(node.id, preview.bytes!) : undefined}
       />

@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import process from 'node:process';
 import { createNodeIo } from '@taucad/geometry-core';
 import { createNodeClient } from '@taucad/runtime/node';
+import { asKnownArtifact } from '@taucad/runtime';
 import { exampleRuntime } from '#scripts/runtime.js';
 
 type VisualCase = {
@@ -32,25 +33,31 @@ const fixtureDirectory = join(sourceDirectory, 'kernels');
 const provenance = JSON.parse(readFileSync(join(fixtureDirectory, 'picovoxel/provenance.json'), 'utf8')) as Provenance;
 
 const renderCase = async (visualCase: VisualCase): Promise<string> => {
-  const client = await createNodeClient({ runtime: exampleRuntime, projectPath: fixtureDirectory });
+  const client = await createNodeClient({
+    runtime: exampleRuntime,
+    projectPath: fixtureDirectory,
+  });
+  const document = client.open({
+    source: { path: `picovoxel/${visualCase.project}/main.ts` },
+    parameters: visualCase.parameters,
+    evaluateOptions: { lane: 'exact' },
+    watch: false,
+  });
+  const view = document.view('model', { content: { includeEdges: true } });
   try {
-    const outcome = await client.render({
-      source: { path: `picovoxel/${visualCase.project}/main.ts` },
-      parameters: visualCase.parameters,
-      renderOptions: { lane: 'exact' },
-      content: { includeEdges: true },
-    });
+    const outcome = await view.rendering();
     if (outcome.superseded) {
       throw new Error('render was superseded');
     }
-    if (!outcome.geometry.success) {
-      throw new Error(outcome.geometry.issues.map((issue) => issue.message).join('; '));
+    if (!outcome.rendering.success) {
+      throw new Error(outcome.rendering.issues.map((issue) => issue.message).join('; '));
     }
-    if (outcome.geometry.data.format !== 'gltf') {
-      throw new Error(`expected glTF geometry, received ${outcome.geometry.data.format}`);
+    const artifact = asKnownArtifact(outcome.rendering.artifact);
+    if (artifact?.mimeType !== 'model/gltf-binary') {
+      throw new Error(`expected GLB geometry, received ${artifact?.mimeType ?? 'unknown media'}`);
     }
 
-    const bytes = outcome.geometry.data.content;
+    const bytes = artifact.content;
     if (new TextDecoder().decode(bytes.subarray(0, 4)) !== 'glTF') {
       throw new Error('invalid GLB header');
     }
@@ -100,7 +107,9 @@ const renderCase = async (visualCase: VisualCase): Promise<string> => {
     }
     return createHash('sha256').update(bytes).digest('hex');
   } finally {
-    client.terminate();
+    view.close();
+    document.close();
+    await client.shutdown();
   }
 };
 

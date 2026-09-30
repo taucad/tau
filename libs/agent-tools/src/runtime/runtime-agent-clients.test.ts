@@ -290,8 +290,9 @@ describe('createRuntimeAgentClients', () => {
       images: [{ view: 'drawing', dataUrl: 'data:image/png;base64,AQ==' }],
     });
     expect(unitless.exporter.mock.calls[2]?.[0]).toMatchObject({
-      exportOptions: { axes: false, scaleBar: false, lengthSymbol: '' },
+      exportOptions: { axes: false, scaleBar: false },
     });
+    expect(unitless.exporter.mock.calls[2]?.[0].exportOptions).not.toHaveProperty('lengthSymbol');
   });
 
   it('rejects malformed or unknown display artifacts before image execution', async () => {

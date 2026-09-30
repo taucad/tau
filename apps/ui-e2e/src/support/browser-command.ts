@@ -1,5 +1,6 @@
 /* oxlint-disable max-params, no-await-in-loop, no-eval, no-restricted-imports, tau-lint/no-bare-time-identifier, typescript/consistent-type-definitions, typescript/no-restricted-types -- Vitest command callbacks add their context parameter to the explicit external-target contract, and config-time modules cannot use test aliases. `no-eval` is the external-target contract itself: `evaluateTarget`, `evaluateTargetLocator` and `waitForTarget` take a function SOURCE across the browser↔node command boundary — nothing else survives that serialization — and the page reconstitutes it. The sources are spec literals, never page-derived input. */
 import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import type { ChildProcess } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -76,6 +77,8 @@ export type AgentHostGatewayState = {
 };
 
 type Session = {
+  geospecWasm?: Promise<TargetDiagnostics['geospecWasm']>;
+  geospecResponseCleanup?: () => void;
   readonly agentHostApiRequests: string[];
   readonly agentHostGatewayRequests: unknown[];
   readonly consoleMessages: Array<{
@@ -207,6 +210,47 @@ const pageFor = (session: Session, surface: TargetSurface = 'primary'): TargetPa
 };
 
 const observePage = (session: Session, page: TargetPage): void => {
+  if (session.geospecResponseCleanup === undefined) {
+    const listener = (response: Awaited<ReturnType<TargetPage['waitForResponse']>>) => {
+      if (
+        session.geospecWasm !== undefined ||
+        !/\/geospec_engine_native(?:-[\w-]+)?\.wasm$/u.test(new URL(response.url()).pathname)
+      ) {
+        return;
+      }
+      session.geospecWasm = (async () => {
+        try {
+          const bytes = await response.body();
+          const sourceBytes = await readFile(
+            resolve(
+              import.meta.dirname,
+              '../../../../packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.wasm',
+            ),
+          );
+          return {
+            url: response.url(),
+            status: response.status(),
+            byteLength: bytes.byteLength,
+            sha256: createHash('sha256').update(bytes).digest('hex'),
+            sourceSha256: createHash('sha256').update(sourceBytes).digest('hex'),
+            sourceByteLength: sourceBytes.byteLength,
+            expectedSha256: process.env['TAU_E2E_GEOSPEC_WASM_SHA256'],
+            expectedByteLength:
+              process.env['TAU_E2E_GEOSPEC_WASM_BYTES'] === undefined
+                ? undefined
+                : Number(process.env['TAU_E2E_GEOSPEC_WASM_BYTES']),
+          };
+        } catch (error) {
+          session.pageErrors.push(
+            `GeoSpec WASM response capture failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return undefined;
+        }
+      })();
+    };
+    session.context.on('response', listener);
+    session.geospecResponseCleanup = () => session.context.off('response', listener);
+  }
   page.on('console', (message) =>
     session.consoleMessages.push({
       text: message.text(),
@@ -217,6 +261,7 @@ const observePage = (session: Session, page: TargetPage): void => {
 };
 
 const disposeSession = async (session: Session): Promise<void> => {
+  session.geospecResponseCleanup?.();
   const errors: unknown[] = [];
   for (const gate of session.agentHostGatewayGates.splice(0)) {
     gate.release();
@@ -259,6 +304,7 @@ const disposeSession = async (session: Session): Promise<void> => {
   } catch (error) {
     errors.push(error);
   }
+  await session.geospecWasm;
   if (errors.length > 0) {
     throw new AggregateError(errors, 'UI E2E target cleanup failed.');
   }
@@ -1121,6 +1167,7 @@ export const uiCaptureTargetDiagnostics: BrowserCommand<[], TargetDiagnostics> =
     screenshot,
     tracePath,
     url: session.primary.url(),
+    geospecWasm: await session.geospecWasm,
   };
 };
 
@@ -1868,12 +1915,14 @@ export const uiReadTargetEvents: BrowserCommand<
       readonly type: string;
     }>;
     readonly pageErrors: readonly string[];
+    readonly geospecWasm?: TargetDiagnostics['geospecWasm'];
   }
-> = (commandContext) => {
+> = async (commandContext) => {
   const session = sessionFor(commandContext);
   return {
     consoleMessages: session.consoleMessages,
     pageErrors: session.pageErrors,
+    geospecWasm: await session.geospecWasm,
   };
 };
 

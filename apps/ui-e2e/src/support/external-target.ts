@@ -63,6 +63,16 @@ export type TargetState = {
 };
 export type TargetWorker = Readonly<{ identity: string; url: string }>;
 export type TargetDiagnostics = {
+  readonly geospecWasm?: {
+    readonly url: string;
+    readonly status: number;
+    readonly byteLength: number;
+    readonly sha256: string;
+    readonly sourceSha256: string;
+    readonly sourceByteLength: number;
+    readonly expectedSha256?: string;
+    readonly expectedByteLength?: number;
+  };
   readonly consoleMessages: ReadonlyArray<{
     readonly text: string;
     readonly type: string;
@@ -408,7 +418,7 @@ export const chooseFile = (
     readonly name: string;
   },
 ): Promise<void> => server.commands.uiChooseTargetFile(selectorFor(trigger), file);
-export const events = (): Promise<Pick<TargetDiagnostics, 'consoleMessages' | 'pageErrors'>> =>
+export const events = (): Promise<Pick<TargetDiagnostics, 'consoleMessages' | 'pageErrors' | 'geospecWasm'>> =>
   server.commands.uiReadTargetEvents();
 export const delay = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => {

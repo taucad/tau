@@ -39,6 +39,7 @@ vi.mock('#components/geometry/parameters/parameters-number-field.js', async (imp
 const staticRef = <T,>(snapshot: T) => ({ getSnapshot: () => snapshot, subscribe: () => ({ unsubscribe: vi.fn() }) });
 
 const project = vi.hoisted(() => ({
+  viewEntryPaths: new Map<string, string>(),
   geometryUnits: new Map<string, unknown>(),
   viewGraphics: new Map<string, unknown>(),
   editorRef: undefined as unknown,
@@ -202,6 +203,7 @@ const unit = () => getKinematicsUnitState(kinematics.getSnapshot().context, unit
 function renderPane({
   virtualViewport = false,
   withViewer = true,
+  shared = false,
   withMechanism = true,
   loaded = mechanism,
   entryPath = 'main.ts',
@@ -213,6 +215,7 @@ function renderPane({
   readonly virtualViewport?: boolean;
   readonly withViewer?: boolean;
   readonly withMechanism?: boolean;
+  readonly shared?: boolean;
   readonly loaded?: Mechanism;
   readonly entryPath?: string;
   readonly isBuilding?: boolean;
@@ -240,7 +243,8 @@ function renderPane({
   project.viewGraphics = new Map(
     withViewer ? [['view-1', staticRef({ context: { kinematicsRef: kinematics, modelInteractionRef } })]] : [],
   );
-  project.editorRef = editorRef({ 'view-1': { entryPath } });
+  project.viewEntryPaths = new Map(withViewer ? [['view-1', entryPath]] : []);
+  project.editorRef = editorRef(shared ? {} : { 'view-1': { entryPath } });
   return render(
     <TooltipProvider>
       {virtualViewport ? (
@@ -874,6 +878,7 @@ describe('KinematicsPanelBody', () => {
         ],
       ]);
       project.editorRef = editorRef({ 'view-2': { entryPath: 'main.ts' } });
+      project.viewEntryPaths = new Map([['view-2', 'main.ts']]);
       view.rerender(
         <TooltipProvider>
           <KinematicsPanelBody />
@@ -883,6 +888,14 @@ describe('KinematicsPanelBody', () => {
       expect(getKinematicsUnitState(first.getSnapshot().context, unitId).dragEnabled).toBe(false);
       expect(getKinematicsUnitState(second.getSnapshot().context, unitId).dragEnabled).toBe(true);
     });
+  });
+});
+
+describe('shared preview viewer binding', () => {
+  it('should expose joint controls without editor view records', () => {
+    renderPane({ shared: true });
+    expect(screen.queryByText('Open renderer to pose this model')).not.toBeInTheDocument();
+    expect(field('sun')).toBeInTheDocument();
   });
 });
 

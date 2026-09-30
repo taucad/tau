@@ -719,6 +719,13 @@ describe('ChatViewer reopen-renderer overlay', () => {
     });
   });
 
+  it('should switch a shared preview file without writing an editor view record', () => {
+    render(<ChatViewer viewId='view-1' panelApi={mockPanelApi} profile='shared' />);
+    fireEvent.click(screen.getByTestId('file-selector'));
+    expect(mockPanelApi.updateParameters).toHaveBeenCalledWith({ entryPath: 'other.scad' });
+    expect(mockViewActions.edit).not.toHaveBeenCalled();
+  });
+
   it('should clear the camera pose, every cut and every measurement when the pane switches files', () => {
     const pinned = {
       id: 'measurement-pinned',

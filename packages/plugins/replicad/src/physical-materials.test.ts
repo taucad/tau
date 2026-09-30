@@ -7,7 +7,6 @@ import type { Material } from '@taucad/replicad/model';
 import { esbuildBundler } from '@taucad/esbuild';
 import { defineRuntime } from '@taucad/runtime/worker';
 import {
-  assertSuccess,
   assertRenderingSuccess,
   createTestRuntimeClient,
   extractGltfFromResult,
@@ -124,7 +123,10 @@ describe('standard physical materials through Replicad and the runtime', () => {
       expect([...seam.values()].some((values) => Math.max(...values) - Math.min(...values) > 0.99)).toBe(true);
 
       const exported = await runtimeDocument.export('glb');
-      assertSuccess(exported);
+      expect(exported.success).toBe(true);
+      if (!exported.success) {
+        throw new Error(exported.issues.map((issue) => issue.message).join('\n'));
+      }
       const exportedJson = await io.binaryToJSON(exported.files[0].bytes);
       expect(exportedJson.json.materials).toEqual(expect.arrayContaining([copper, glass]));
       const edited = await runtimeDocument.update({ parameters: { anisotropy: 0.25 } });

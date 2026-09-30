@@ -27,7 +27,7 @@ import { NodeIO } from '@gltf-transform/core';
 import { converter } from 'culori';
 import { replicadKernel } from '#replicad.kernel.js';
 import { esbuildBundler } from '@taucad/esbuild';
-import { assertSuccess, createTestRuntimeClient } from '@taucad/runtime-testing';
+import { createTestRuntimeClient } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 vi.setConfig({ testTimeout: 60_000 });
@@ -95,9 +95,12 @@ const runtime = defineRuntime({ kernels: [replicadKernel()], bundlers: [esbuildB
 const exportModel = async (format: 'step' | 'glb', source: string): Promise<Uint8Array<ArrayBuffer>> => {
   const client = createTestRuntimeClient({ runtime, files: { 'main.ts': source } });
   try {
-    const exportResult = await client.export(format, { source: { path: 'main.ts' } });
-    assertSuccess(exportResult, `conformance ${format} export`);
-    return exportResult.data[0]!.bytes;
+    const exportResult = await client.open({ source: { path: 'main.ts' } }).export(format);
+    expect(exportResult.success, `conformance ${format} export`).toBe(true);
+    if (!exportResult.success) {
+      throw new Error(exportResult.issues.map((issue) => issue.message).join('\n'));
+    }
+    return exportResult.files[0].bytes;
   } finally {
     await client.shutdown();
   }

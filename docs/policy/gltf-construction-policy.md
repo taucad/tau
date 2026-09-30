@@ -3,7 +3,7 @@ title: 'glTF Construction Policy'
 description: 'Rules for constructing glTF/GLB binaries in the runtime, governing the direct writer, buffer layout, material encoding, and kernel integration patterns'
 status: active
 created: '2026-03-24'
-updated: '2026-08-31'
+updated: '2026-09-30'
 related:
   - docs/policy/geometry-naming-policy.md
   - docs/policy/rendering-pipeline-policy.md
@@ -140,6 +140,8 @@ All GLB output must comply with the glTF 2.0 specification. The direct writer mu
 ### 3.3 Material Encoding
 
 Follow `cadMaterialDefaults` and `cadEdgeOverlayMaterialDefaults` from `@taucad/types/constants` (see `docs/policy/rendering-pipeline-policy.md`):
+
+These are generated CAD defaults. Preserve explicitly authored or imported standard material alpha modes (`"OPAQUE"`, `"MASK"`, `"BLEND"`) and their `alphaCutoff`; do not replace authored `"MASK"` with a generated default. Supported rendering remains subject to the selected consumer's profile.
 
 | Property                 | Surface primitives                       | Tau-generated auxiliary edge overlays |
 | ------------------------ | ---------------------------------------- | ------------------------------------- |
@@ -298,7 +300,7 @@ Do not assert only byte length, byte inequality, or `instanceof Uint8Array` — 
 - Producing GLB without `asset.generator: "tau-runtime"` (breaks traceability)
 - Testing GLB output with only `expect(result).toBeInstanceOf(Uint8Array)` without parsing
 - Omitting `min`/`max` on POSITION accessors (breaks bounding box computation in viewers)
-- Using `alphaMode: "MASK"` (not used in CAD; use `"BLEND"` for transparent, `"OPAQUE"` for opaque)
+- Choosing `alphaMode: "MASK"` as a generated CAD default; use `"BLEND"` for transparent or `"OPAQUE"` for opaque defaults, while preserving explicitly authored/imported standard modes
 - Returning GLB content as a non-zero-offset typed-array view
 - Adding app or example `bytesToArrayBuffer` helpers to compensate for an unenforced runtime byte-view invariant
 

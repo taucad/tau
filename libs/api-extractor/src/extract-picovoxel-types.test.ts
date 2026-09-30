@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import ts from 'typescript';
 import { afterEach, describe, expect, it } from 'vitest';
 import picovoxelBundle from '#generated/picovoxel/picovoxel.bundled.json' with { type: 'json' };
 import { buildPicovoxelTypes, collectDeclarationGraph, picovoxelAuthorSubpaths } from '#extract-picovoxel-types.js';
@@ -153,4 +154,72 @@ describe('buildPicovoxelTypes', () => {
       ).toBe(true);
     }
   });
+});
+
+/** Type-check one authored module against the bundle, exactly as the editor mounts it. */
+const checkAuthoredModule = (source: string): readonly string[] => {
+  const bundle = buildPicovoxelTypes();
+  const files = new Map<string, string>([['/project/main.ts', source]]);
+  for (const [packageName, entry] of Object.entries(bundle)) {
+    files.set(`/node_modules/${packageName}/index.d.ts`, entry.content);
+    for (const [path, content] of Object.entries(entry.files ?? {})) {
+      files.set(`/node_modules/${packageName}/${path}`, content);
+    }
+    files.set(`/node_modules/${packageName}/package.json`, JSON.stringify({ name: packageName, types: 'index.d.ts' }));
+  }
+  const options: ts.CompilerOptions = {
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    noEmit: true,
+    strict: true,
+    target: ts.ScriptTarget.ES2022,
+    types: [],
+    lib: ['lib.esnext.d.ts', 'lib.dom.d.ts'],
+  };
+  const host = ts.createCompilerHost(options);
+  host.fileExists = (path) => files.has(path);
+  host.readFile = (path) => files.get(path);
+  host.getSourceFile = (path, languageVersion) => {
+    const text = files.get(path) ?? (path.includes('/lib.') ? readFileSync(path, 'utf8') : undefined);
+    return text === undefined ? undefined : ts.createSourceFile(path, text, languageVersion);
+  };
+  host.getDefaultLibLocation = () => ts.getDefaultLibFilePath(options).replace(/\/[^/]+$/u, '');
+  host.getCurrentDirectory = () => '/project';
+  host.directoryExists = (path) => [...files.keys()].some((file) => file.startsWith(`${path}/`));
+  const program = ts.createProgram(['/project/main.ts'], options, host);
+  return ts
+    .getPreEmitDiagnostics(program)
+    .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));
+};
+
+describe('PicoVoxel authored result types', () => {
+  it('should compile raw, named, readonly and repeated parts through the editor mount', () => {
+    expect(
+      checkAuthoredModule(`
+      import type { Pico } from 'picovoxel';
+      import type { PicovoxelResult } from '@taucad/picovoxel';
+      export default function main(pico: Pico): PicovoxelResult {
+        const shape = pico.createVoxels({ shape: 'sphere', radius: 2 });
+        return [shape, { shape: shape.toMesh(), name: '蓋' }, { shape, name: '蓋' }] as const;
+      }
+    `),
+    ).toEqual([]);
+  }, 20_000);
+
+  it('should reject malformed names, nested parts and plugin value imports through the editor mount', () => {
+    const errors = checkAuthoredModule(`
+      import type { Voxels } from 'picovoxel';
+      import type { PicovoxelResult } from '@taucad/picovoxel';
+      import { picovoxel } from '@taucad/picovoxel';
+      declare const shape: Voxels;
+      const named: PicovoxelResult = { shape, name: 42 };
+      const nested: PicovoxelResult = [[shape]];
+      const assembly: PicovoxelResult = { shape, children: [shape] };
+      void [named, nested, assembly, picovoxel];
+    `);
+    expect(errors).toHaveLength(4);
+    expect(errors.join('\n')).toContain("has no exported member 'picovoxel'");
+    expect(errors.join('\n')).toContain("Type 'number' is not assignable to type 'string'");
+    expect(errors.join('\n')).toContain("'children' does not exist");
+  }, 20_000);
 });

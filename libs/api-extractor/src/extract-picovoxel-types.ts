@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { emitPackageDeclarations } from '#emit-package-declarations.js';
 import type { BundledTypesPackageMap } from '#bundled-types.types.js';
 
 /**
@@ -102,7 +103,18 @@ export const buildPicovoxelTypes = (root = packageRoot()): BundledTypesPackageMa
   if (content === undefined) {
     throw new Error(`PicoVoxel root declarations are missing from ${root}.`);
   }
+  const sourceRoot = join(import.meta.dirname, '../../../packages/plugins/picovoxel/src');
+  const model = emitPackageDeclarations({
+    label: '@taucad/picovoxel',
+    sourceRoot,
+    entryPaths: [join(sourceRoot, 'model.ts')],
+  });
   return {
+    '@taucad/picovoxel': {
+      content: "export type { PicovoxelResult } from './model.js';\n",
+      files: model,
+      packageJson: { name: '@taucad/picovoxel', types: './index.d.ts', exports: { '.': { types: './index.d.ts' } } },
+    },
     picovoxel: {
       content,
       files,

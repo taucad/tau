@@ -25,6 +25,7 @@
  */
 
 import { discoverGeoSpecFiles } from 'geospec/runner';
+import { toGeoSpecProtocolJson } from 'geospec/engine';
 import type { GeoSpecForensicEvent, GeoSpecRunner, GeoSpecRunnerResult } from 'geospec/runner/worker';
 import type { GeoSpecRunResult, GeoSpecTestCase } from '#runner/types.js';
 
@@ -326,23 +327,55 @@ export const runReportJson = (result: GeoSpecRunnerResult): Record<string, unkno
   passed: result.passed,
   failed: result.failed,
   selectedTests: result.selectedTests,
+  ...(result.accounting === undefined ? {} : { accounting: result.accounting }),
+  ...(result.lineageStatus === undefined ? {} : { lineageStatus: result.lineageStatus }),
   ...(result.durationMs === undefined ? {} : { durationMs: result.durationMs }),
   ...(result.issues === undefined ? {} : { issues: result.issues }),
   files: result.files.map((file) => ({
     file: file.file,
     success: file.result.success && file.result.passed,
+    ...(file.result.accounting === undefined ? {} : { accounting: file.result.accounting }),
+    ...(file.result.lineage === undefined ? {} : { lineage: toGeoSpecProtocolJson(file.result.lineage) }),
     ...(file.durationMs === undefined ? {} : { durationMs: file.durationMs }),
-    ...(file.result.success
-      ? {
+    ...(file.result.tests === undefined
+      ? {}
+      : {
           tests: file.result.tests.map((test) => ({
             suite: test.suite,
             name: test.name,
+            ...(test.ordinal === undefined ? {} : { ordinal: test.ordinal }),
             status: test.status,
             ...(test.durationMs === undefined ? {} : { durationMs: test.durationMs }),
             diagnostics: [...test.diagnostics, ...test.assertions.flatMap((assertion) => assertion.diagnostics ?? [])],
+            ...(test.assertions.some((assertion) => assertion.report !== undefined)
+              ? {
+                  reports: test.assertions.flatMap((assertion) => {
+                    const { report } = assertion;
+                    return report === undefined
+                      ? []
+                      : [
+                          {
+                            claimId: report.claimId,
+                            status: report.status,
+                            polarity: report.polarity,
+                            claim: structuredClone(report.claim),
+                            result: structuredClone(report.result),
+                            diagnostics: structuredClone(report.diagnostics),
+                            ...(report.evidence === undefined ? {} : { evidence: structuredClone(report.evidence) }),
+                            ...(assertion.loadId === undefined ? {} : { loadId: assertion.loadId }),
+                            canonical: {
+                              claim: [...report.canonicalClaim],
+                              plan: [...report.canonicalPlan],
+                              result: [...report.canonicalResult],
+                            },
+                          },
+                        ];
+                  }),
+                }
+              : {}),
           })),
-        }
-      : { issues: file.result.issues }),
+        }),
+    ...(file.result.success ? {} : { issues: file.result.issues }),
   })),
 });
 

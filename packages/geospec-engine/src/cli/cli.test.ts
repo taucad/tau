@@ -316,6 +316,149 @@ describe('formatRunReport', () => {
 describe('runReportJson', () => {
   const diagnostic = { code: 'GEOSPEC_X', message: 'bad', severity: 'error' } as const;
 
+  it.each([true, false])('should transport canonical bytes and load identity after module success=%s', (success) => {
+    const canonical = { claim: [0, 255], plan: [1, 254], result: [2, 253] };
+    const report = runReportJson({
+      success: true,
+      passed: 1,
+      failed: 0,
+      selectedTests: 1,
+      files: [
+        {
+          file: 'a.geospec.ts',
+          result: {
+            success,
+            issues: [],
+            passed: true,
+            bundle,
+            tests: [
+              {
+                suite: [],
+                name: 'canonical',
+                ordinal: 2,
+                status: 'passed',
+                diagnostics: [],
+                assertions: [
+                  {
+                    kind: 'watertight',
+                    subject: { huge: true },
+                    expected: true,
+                    loadId: 'load-1',
+                    report: {
+                      claimId: 'claim-1',
+                      status: 'passed',
+                      polarity: 'positive',
+                      claim: { claimId: 'claim-1' },
+                      result: { status: 'passed' },
+                      diagnostics: [],
+                      evidence: { value: 1 },
+                      canonicalClaim: new Uint8Array(canonical.claim),
+                      canonicalPlan: new Uint8Array(canonical.plan),
+                      canonicalResult: new Uint8Array(canonical.result),
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const json = [...jsonChunks(report)].join('');
+    expect(json).not.toContain('huge');
+    expect(JSON.parse(json)).toMatchObject({
+      files: [
+        {
+          tests: [
+            {
+              ordinal: 2,
+              reports: [
+                {
+                  claimId: 'claim-1',
+                  loadId: 'load-1',
+                  canonical,
+                  evidence: { value: 1 },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('should preserve selected scope accounting and terminal lineage qualification', () => {
+    const accounting = {
+      requestedFiles: ['a.geospec.ts'],
+      completedFiles: ['a.geospec.ts'],
+      notRunFiles: [],
+      discoveryComplete: true,
+      cancelled: false,
+      bailed: false,
+      discovered: 3,
+      selected: 2,
+      completed: 1,
+      passed: 1,
+      failed: 0,
+      unsupported: 1,
+      inconclusive: 0,
+      skipped: 0,
+      notRun: 1,
+    };
+    const lineage = {
+      status: 'mixed',
+      modules: [
+        {
+          entryPath: 'a.geospec.ts',
+          bundleSha256: 'bundle-hash',
+          files: { 'helper.ts': 'helper-hash' },
+          consistent: true,
+        },
+      ],
+      loads: [
+        {
+          loadId: 'load-1',
+          status: 'complete',
+          subject: { contentHash: 'content-hash' },
+          evidence: {
+            loadId: 'load-1',
+            status: 'complete',
+            format: 'gltf',
+            parameters: { size: 2 },
+            ingestOptions: {},
+            artifacts: [{ name: 'alias.bin', sourcePath: 'assets/actual.bin', sha256: 'actual-hash', byteLength: 2 }],
+          },
+        },
+      ],
+    } as const;
+    const report = runReportJson({
+      success: false,
+      passed: 1,
+      failed: 0,
+      selectedTests: 2,
+      accounting,
+      lineageStatus: 'mixed',
+      files: [
+        {
+          file: 'a.geospec.ts',
+          result: {
+            success: true,
+            passed: false,
+            bundle,
+            tests: [],
+            accounting,
+            lineage,
+          },
+        },
+      ],
+    });
+    expect(JSON.parse([...jsonChunks(report)].join(''))).toMatchObject({
+      accounting,
+      lineageStatus: 'mixed',
+      files: [{ accounting, lineage }],
+    });
+  });
+
   it('should carry verdicts and diagnostics without the live geometry subjects', () => {
     const report = runReportJson({
       success: false,

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { plugin, tscircuit } from '#index.js';
+import { plugin, tscircuit, tscircuitKernel } from '#index.js';
 
 describe('@taucad/tscircuit', () => {
   it('binds the mechanical plugin alias to the package-named factory', () => {
@@ -20,6 +20,28 @@ describe('@taucad/tscircuit', () => {
     expect(capabilities.middleware.map(({ id }) => id)).toEqual([]);
     expect(capabilities.bundlers.map(({ id }) => id)).toEqual([]);
     expect(capabilities.transcoders.map(({ id }) => id)).toEqual([]);
+  });
+
+  it('keeps the public root and documented view/export IDs in sync', async () => {
+    expect(Object.keys(await import('#index.js')).sort()).toEqual(['plugin', 'tscircuit', 'tscircuitKernel']);
+    const definition = tscircuitKernel();
+    expect(Object.keys(definition.views)).toEqual(['board', 'schematic', 'pcb']);
+    expect(Object.keys(definition.exports)).toEqual(['board', 'bom', 'netlist', 'circuit']);
+    expect(
+      Object.fromEntries(Object.entries(definition.exports).map(([id, declaration]) => [id, declaration.extension])),
+    ).toEqual({
+      board: 'glb',
+      bom: 'csv',
+      netlist: 'txt',
+      circuit: 'json',
+    });
+    expect(definition.views.pcb.optionsSchema).toMatchObject({
+      properties: { pinNumbers: { title: 'Pin numbers', type: 'boolean' } },
+    });
+    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+    for (const id of ['board', 'schematic', 'pcb', 'bom', 'netlist', 'circuit']) {
+      expect(readme).toContain(`\`${id}\``);
+    }
   });
 
   it('keeps native, Python, and Node-only payloads out of browser source', () => {

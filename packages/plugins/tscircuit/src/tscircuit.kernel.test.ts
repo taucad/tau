@@ -1,12 +1,13 @@
 // @vitest-environment node
 
-import { NodeIO } from '@gltf-transform/core';
+import { readFile } from 'node:fs/promises';
+import { createNodeIo } from '@taucad/geometry-core';
 import { esbuildBundler } from '@taucad/esbuild';
 import { middleware } from '@taucad/middleware';
-import { defineRuntime } from '@taucad/runtime';
+import { asKnownArtifact, defineRuntime } from '@taucad/runtime';
+import type { Rendering } from '@taucad/runtime/client';
 import { isRecordObject } from '@taucad/runtime/kernel';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import type { GeometryResponse, HashedGeometryResult } from '@taucad/runtime/types';
 import {
   createMockKernelRuntime,
   createTestRuntimeClient,
@@ -50,6 +51,13 @@ const fixtureBoardCounts: ReadonlyArray<[type: string, count: number]> = [
   ['pcb_board', 1],
 ];
 
+const fixtureSheets = `
+  export default () => <board width="30mm" height="20mm">
+    <schematicsheet name="Power"><resistor name="R1" resistance="1k" footprint="0402" /></schematicsheet>
+    <schematicsheet name="Signals"><led name="LED1" footprint="0603" /></schematicsheet>
+  </board>;
+`;
+
 // =============================================================================
 // Test utilities
 // =============================================================================
@@ -63,37 +71,45 @@ const createRuntime = () =>
 
 type TestClient = ReturnType<typeof createTestRuntimeClient<ReturnType<typeof createRuntime>>>;
 const clients = new Set<TestClient>();
-const createClient = (files: Record<string, string>): TestClient => {
+const documents = new Set<ReturnType<TestClient['open']>>();
+const createClient = (files: Record<string, string>) => {
   const client = createTestRuntimeClient({ runtime: createRuntime(), files });
+  const path = Object.keys(files)[0];
+  if (!path) throw new Error('Test fixture has no source file.');
+  const document = client.open({ source: { path }, watch: false });
   clients.add(client);
-  return client;
+  documents.add(document);
+  return { client, document, path };
 };
+type TestSession = ReturnType<typeof createClient>;
 
-const render = async (client: TestClient, path: string): Promise<HashedGeometryResult> => {
-  const outcome = await client.render({ source: { path } });
+const render = async (session: TestSession, path: string): Promise<Rendering<'board'>> => {
+  expect(path).toBe(session.path);
+  const view = session.document.view('board');
+  const outcome = await view.rendering();
+  view.close();
   if (outcome.superseded) {
     throw new Error('Test render was superseded');
   }
-  return outcome.geometry;
+  return outcome.rendering;
 };
 
-const expectGeometry = (result: HashedGeometryResult): GeometryResponse & { hash: string } => {
+const expectGeometry = (result: Rendering): Extract<Rendering, { success: true }> => {
   expect(result.success, result.success ? undefined : result.issues.map((issue) => issue.message).join('\n')).toBe(
     true,
   );
   if (!result.success) {
     throw new Error('unreachable');
   }
-  return result.data;
+  return result;
 };
 
-const expectGlb = (result: HashedGeometryResult): Uint8Array<ArrayBuffer> => {
-  const data = expectGeometry(result);
-  expect(data.format).toBe('gltf');
-  if (data.format !== 'gltf') {
-    throw new Error('unreachable');
+const expectGlb = (result: Rendering): Uint8Array<ArrayBuffer> => {
+  const artifact = asKnownArtifact(expectGeometry(result).artifact);
+  if (artifact?.mimeType !== 'model/gltf-binary') {
+    throw new TypeError('Board view did not return a GLB artifact.');
   }
-  return data.content;
+  return artifact.content;
 };
 
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return -- Vitest asymmetric matchers are typed as any in structured assertions. */
@@ -124,12 +140,12 @@ const resolveDefinition = async () => resolveRuntimePluginDefinition('kernel', t
 let definition: Awaited<ReturnType<typeof resolveDefinition>>;
 
 /** Read the settled circuit through its lossless JSON export. */
-const readSettledCircuitJson = async (client: TestClient): Promise<CircuitElementLike[]> => {
-  const result = await client.export('json');
+const readSettledCircuitJson = async (session: TestSession): Promise<CircuitElementLike[]> => {
+  const result = await session.document.export('circuit');
   if (!result.success) {
     throw new Error(result.issues.map((issue) => issue.message).join('; '));
   }
-  const file = result.data[0];
+  const file = result.files[0];
   if (!file) {
     throw new TypeError('Circuit JSON export returned no file.');
   }
@@ -140,14 +156,17 @@ const readSettledCircuitJson = async (client: TestClient): Promise<CircuitElemen
   return parsed;
 };
 
-/** Project one view directly from the same settled circuit while the old client exposes only its default. */
-const renderSvgView = async (client: TestClient, view: 'schematic' | 'pcb'): Promise<string> => {
-  const circuitJson = await readSettledCircuitJson(client);
-  const runtime = createMockKernelRuntime();
-  const context = await definition.initialize({}, runtime);
-  const output = await definition.render!({ view, handle: { circuitJson }, options: {} }, runtime, context);
-  if (typeof output.content !== 'string') {
-    throw new TypeError(`${view} returned bytes instead of SVG text.`);
+/** Project a secondary SVG view from the same public document. */
+const renderSvgView = async (session: TestSession, id: 'schematic' | 'pcb'): Promise<string> => {
+  const view = session.document.view(id);
+  const outcome = await view.rendering();
+  view.close();
+  if (outcome.superseded || !outcome.rendering.success) {
+    throw new Error(`${id} view failed to render.`);
+  }
+  const output = asKnownArtifact(outcome.rendering.artifact);
+  if (output?.mimeType !== 'image/svg+xml') {
+    throw new TypeError(`${id} returned bytes instead of SVG text.`);
   }
   return output.content;
 };
@@ -155,26 +174,25 @@ const renderSvgView = async (client: TestClient, view: 'schematic' | 'pcb'): Pro
 type ExportFormat = 'glb' | 'csv' | 'txt' | 'json';
 
 const exportBytes = async (
-  client: TestClient,
+  session: TestSession,
   format: ExportFormat,
-  exportOptions?: Record<string, unknown>,
+  exportOptions?: { coordinateSystem: 'z-up'; unit: { length: 'millimeter' } },
 ): Promise<{ name: string; bytes: Uint8Array<ArrayBuffer> }> => {
-  const result = await client.export(format, {
-    source: { path: 'main.tsx' },
-    ...(exportOptions ? { exportOptions } : {}),
-  });
+  const result = exportOptions
+    ? await session.document.export('glb', { options: exportOptions })
+    : await session.document.export(format);
   expect(result.success, result.success ? undefined : result.issues.map((issue) => issue.message).join('\n')).toBe(
     true,
   );
   if (!result.success) {
     throw new Error('unreachable');
   }
-  expect(result.data).toHaveLength(1);
-  return result.data[0]!;
+  expect(result.files).toHaveLength(1);
+  return result.files[0];
 };
 
-const exportText = async (client: TestClient, format: ExportFormat): Promise<{ name: string; text: string }> => {
-  const file = await exportBytes(client, format);
+const exportText = async (session: TestSession, format: ExportFormat): Promise<{ name: string; text: string }> => {
+  const file = await exportBytes(session, format);
   return { name: file.name, text: new TextDecoder().decode(file.bytes) };
 };
 
@@ -192,6 +210,8 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  for (const document of documents) document.close();
+  documents.clear();
   await Promise.all([...clients].map(async (client) => client.shutdown()));
   clients.clear();
   vi.restoreAllMocks();
@@ -218,15 +238,24 @@ describe('TscircuitKernel', () => {
         unresolvedPaths: [],
       });
       vi.spyOn(runtime, 'execute').mockResolvedValue({ success: true, value: { default: () => undefined } });
-      const context = { renderCircuit: vi.fn(async (): Promise<CircuitElementLike[]> => []) };
+      const context = {
+        renderCircuit: vi.fn(async () => ({
+          circuitJson: [] as CircuitElementLike[],
+          authoredSheets: new Map<string, string>(),
+        })),
+      };
       const input = { entryPath: 'main.tsx', parameters: {}, options: {} };
 
-      context.renderCircuit.mockResolvedValueOnce([{ type: 'pcb_board' }]);
+      context.renderCircuit.mockResolvedValueOnce({ circuitJson: [{ type: 'pcb_board' }], authoredSheets: new Map() });
       const board = await definition.evaluate(input, runtime, context);
       expect(board.views).toBeUndefined();
       expect(board.exports).toBeUndefined();
+      expect(board.instances).toBeUndefined();
 
-      context.renderCircuit.mockResolvedValueOnce([{ type: 'schematic_component' }]);
+      context.renderCircuit.mockResolvedValueOnce({
+        circuitJson: [{ type: 'schematic_component' }],
+        authoredSheets: new Map(),
+      });
       const schematic = await definition.evaluate(input, runtime, context);
       expect(schematic.views).toEqual(['schematic']);
       expect(schematic.exports).toEqual(['bom', 'netlist', 'circuit']);
@@ -236,8 +265,168 @@ describe('TscircuitKernel', () => {
       expect(empty.exports).toEqual(['bom', 'netlist', 'circuit']);
     });
 
+    it('preserves structured component, port and center evidence in issues', async () => {
+      const runtime = createMockKernelRuntime();
+      vi.spyOn(runtime.bundler, 'bundle').mockResolvedValue({
+        code: '',
+        issues: [],
+        success: true,
+        dependencies: [],
+        unresolvedPaths: [],
+      });
+      vi.spyOn(runtime, 'execute').mockResolvedValue({ success: true, value: { default: () => undefined } });
+      const context = {
+        renderCircuit: async () => ({
+          circuitJson: [
+            {
+              type: 'pcb_route_warning',
+              message: 'Unrouted pin',
+              components: ['U1'],
+              ports: ['U1.pin1'],
+              center: { x: 2, y: 3 },
+            },
+          ],
+          authoredSheets: new Map<string, string>(),
+        }),
+      };
+      const result = await definition.evaluate(
+        { entryPath: 'main.tsx', parameters: {}, options: {} },
+        runtime,
+        context,
+      );
+      expect(result.issues?.[0]?.details).toEqual({
+        producer: 'tscircuit',
+        elementType: 'pcb_route_warning',
+        components: ['U1'],
+        ports: ['U1.pin1'],
+        center: { x: 2, y: 3 },
+      });
+    });
+
+    it('maps authored sheet names across reorder and expires duplicate or generated identities', async () => {
+      const runtime = createMockKernelRuntime();
+      vi.spyOn(runtime.bundler, 'bundle').mockResolvedValue({
+        code: '',
+        issues: [],
+        success: true,
+        dependencies: [],
+        unresolvedPaths: [],
+      });
+      vi.spyOn(runtime, 'execute').mockResolvedValue({ success: true, value: { default: () => undefined } });
+      const context = {
+        renderCircuit: vi.fn(async () => ({
+          circuitJson: [] as CircuitElementLike[],
+          authoredSheets: new Map<string, string>(),
+        })),
+      };
+      const evaluate = async (circuitJson: CircuitElementLike[]) => {
+        const authoredSheets = new Map(
+          circuitJson
+            .filter(({ type }) => type === 'schematic_sheet')
+            .map((sheet) => [String(Reflect.get(sheet, 'schematic_sheet_id')), String(Reflect.get(sheet, 'name'))]),
+        );
+        context.renderCircuit.mockResolvedValueOnce({ circuitJson, authoredSheets });
+        return definition.evaluate({ entryPath: 'main.tsx', parameters: {}, options: {} }, runtime, context);
+      };
+      const sheet = (id: string, name: string) => {
+        const element = { type: 'schematic_sheet', name };
+        Reflect.set(element, 'schematic_sheet_id', id);
+        return element;
+      };
+      const first = await evaluate([sheet('schematic_sheet_0', 'Power'), sheet('schematic_sheet_1', 'Signals')]);
+      const second = await evaluate([sheet('schematic_sheet_0', 'Signals'), sheet('schematic_sheet_1', 'Power')]);
+      expect(first.instances?.schematic?.map(({ id }) => id)).toEqual(['sheet:Power', 'sheet:Signals']);
+      expect(first.instances?.schematic?.map(({ title }) => title)).toEqual(['Power', 'Signals']);
+      expect(second.handle.sheets.get('sheet:Power')).toBe('schematic_sheet_1');
+      const duplicates = await evaluate([
+        sheet('schematic_sheet_0', 'Duplicate'),
+        sheet('schematic_sheet_1', 'Duplicate'),
+        sheet('schematic_sheet_2', 'Sheet 3'),
+      ]);
+      const repeated = await evaluate([
+        sheet('schematic_sheet_0', 'Duplicate'),
+        sheet('schematic_sheet_1', 'Duplicate'),
+        sheet('schematic_sheet_2', 'Sheet 3'),
+      ]);
+      expect(duplicates.instances?.schematic?.slice(0, 2).every(({ id }) => id.startsWith('local:'))).toBe(true);
+      expect(duplicates.instances?.schematic?.slice(0, 2).map(({ title }) => title)).toEqual([
+        'Duplicate (current evaluation)',
+        'Duplicate (current evaluation)',
+      ]);
+      expect(duplicates.instances?.schematic?.[2]?.id).toBe('sheet:Sheet%203');
+      expect(repeated.instances?.schematic?.[0]?.id).not.toBe(duplicates.instances?.schematic?.[0]?.id);
+      const restored = definition.deserializeHandle!(
+        { serialized: definition.serializeHandle!({ handle: duplicates.handle }, runtime, context) },
+        runtime,
+        context,
+      );
+      expect(restored.sheets.get(duplicates.instances?.schematic?.[0]?.id ?? '')).toBe('schematic_sheet_0');
+      context.renderCircuit.mockResolvedValueOnce({
+        circuitJson: [sheet('schematic_sheet_0', 'Sheet 1')],
+        authoredSheets: new Map(),
+      });
+      const generated = await definition.evaluate(
+        { entryPath: 'main.tsx', parameters: {}, options: {} },
+        runtime,
+        context,
+      );
+      expect(generated.instances?.schematic?.[0]?.id).toMatch(/^local:/);
+      expect(generated.instances?.schematic?.[0]?.title).toBe('Sheet 1 (current evaluation)');
+    });
+
+    it('renders two authored sheets individually and warns about an orphaned part', async () => {
+      const client = createClient({ 'main.tsx': fixtureSheets });
+      const circuitJson = await readSettledCircuitJson(client);
+      const sheets = circuitJson.filter(({ type }) => type === 'schematic_sheet');
+      expect(sheets).toHaveLength(2);
+      const runtime = createMockKernelRuntime();
+      const context = await definition.initialize({}, runtime);
+      const handle = {
+        circuitJson,
+        sheets: new Map(
+          sheets.map((sheet) => [
+            `sheet:${encodeURIComponent(String(Reflect.get(sheet, 'name')))}`,
+            String(Reflect.get(sheet, 'schematic_sheet_id')),
+          ]),
+        ),
+      };
+      await Promise.all(
+        ['Power', 'Signals'].map(async (name) => {
+          const result = await definition.render!(
+            { view: 'schematic', handle, options: {}, instance: `sheet:${name}` },
+            runtime,
+            context,
+          );
+          expect(result.content).toContain(name === 'Power' ? 'R1' : 'LED1');
+          expect(result.content).not.toContain(name === 'Power' ? 'LED1' : 'R1');
+        }),
+      );
+      await expect(
+        definition.render!({ view: 'schematic', handle, options: {}, instance: 'local:expired' }, runtime, context),
+      ).rejects.toThrow('Unknown schematic sheet');
+      const orphan = { type: 'schematic_component', name: 'R7' };
+      vi.spyOn(runtime.bundler, 'bundle').mockResolvedValue({
+        code: '',
+        issues: [],
+        success: true,
+        dependencies: [],
+        unresolvedPaths: [],
+      });
+      vi.spyOn(runtime, 'execute').mockResolvedValue({ success: true, value: { default: () => undefined } });
+      const orphanBuild = await definition.evaluate({ entryPath: 'main.tsx', parameters: {}, options: {} }, runtime, {
+        renderCircuit: async () => ({ circuitJson: [sheets[0]!, orphan], authoredSheets: new Map() }),
+      });
+      expect(orphanBuild.issues?.some((issue) => issue.message.includes('R7'))).toBe(true);
+    }, 20_000);
+
     it('should evaluate the fixture board to circuit JSON with the expected element counts', async () => {
       const client = createClient({ 'main.tsx': fixtureBoard });
+
+      const evaluated = await client.document.evaluation();
+      expect(evaluated.superseded).toBe(false);
+      if (!evaluated.superseded) {
+        expect(evaluated.evaluation.sourceRevision?.files['.tau/parameters/main.tsx.json']).toBe('missing');
+      }
 
       expectGlb(await render(client, 'main.tsx'));
 
@@ -245,7 +434,37 @@ describe('TscircuitKernel', () => {
       for (const [type, count] of fixtureBoardCounts) {
         expect(counts[type], type).toBe(count);
       }
-    });
+    }, 20_000);
+
+    it('draws every part in the product template and led-board example without a stray sheet', async () => {
+      const catalog = await readFile(
+        new URL('../../../../libs/types/src/constants/kernel.constants.ts', import.meta.url),
+        'utf8',
+      );
+      const template = /id: 'tscircuit',[\S\s]*?emptyCode: `([\S\s]*?)`,/.exec(catalog)?.[1];
+      if (!template) {
+        throw new Error('tscircuit product template was not found');
+      }
+      const example = await readFile(
+        new URL('../../../../libs/tau-examples/src/kernels/tscircuit/led-board/main.tsx', import.meta.url),
+        'utf8',
+      );
+      await Promise.all(
+        (
+          [
+            [template, 2],
+            [example, 4],
+          ] as const
+        ).map(async ([source, expected]) => {
+          const client = createClient({ 'main.tsx': source });
+          const circuit = await readSettledCircuitJson(client);
+          expect(circuit.filter(({ type }) => type === 'schematic_sheet')).toHaveLength(0);
+          expect(circuit.filter(({ type }) => type === 'schematic_component')).toHaveLength(expected);
+          const svg = await renderSvgView(client, 'schematic');
+          expect((svg.match(/class="sch-component"/g) ?? []).length).toBe(expected);
+        }),
+      );
+    }, 20_000);
 
     it('should apply render parameters through the component props', async () => {
       const files = {
@@ -265,7 +484,7 @@ describe('TscircuitKernel', () => {
       expect(parameters.schema).toMatchObject({ properties: { extraResistor: { type: 'boolean' } } });
 
       const client = createClient(files);
-      const outcome = await client.render({ source: { path: 'main.tsx' }, parameters: { extraResistor: true } });
+      const outcome = await client.document.update({ parameters: { extraResistor: true } });
       expect(outcome.superseded).toBe(false);
       expect(countElementTypes(await readSettledCircuitJson(client))['source_component']).toBe(2);
     });
@@ -371,7 +590,8 @@ describe('TscircuitKernel', () => {
       const glb = expectGlb(await render(client, 'main.tsx'));
 
       expect(new TextDecoder().decode(glb.subarray(0, 4))).toBe('glTF');
-      const document = await new NodeIO().readBinary(glb);
+      const io = await createNodeIo();
+      const document = await io.readBinary(glb);
       expect(document.getRoot().listMeshes().length).toBeGreaterThanOrEqual(1);
       expect(
         document
@@ -386,23 +606,22 @@ describe('TscircuitKernel', () => {
       expect(extent.height).toBeLessThan(0.01);
     });
 
-    it('should strip the converter texture coordinates so untextured rasterizers accept the GLB', async () => {
+    it('should retain board textures and add feature-edge line primitives', async () => {
       const client = createClient({ 'main.tsx': fixtureBoard });
 
       const glb = expectGlb(await render(client, 'main.tsx'));
 
       validateGlbData(glb);
-      const document = await new NodeIO().readBinary(glb);
+      const io = await createNodeIo();
+      const document = await io.readBinary(glb);
       const root = document.getRoot();
-      const semantics = root
-        .listMeshes()
-        .flatMap((mesh) => mesh.listPrimitives().flatMap((primitive) => primitive.listSemantics()));
-      expect(semantics.length).toBeGreaterThan(0);
-      expect(semantics.filter((semantic) => semantic.startsWith('TEXCOORD_'))).toEqual([]);
-      expect(semantics).toContain('POSITION');
-      expect(root.listTextures()).toEqual([]);
-      // No orphaned UV accessor survives in the written file.
-      expect(root.listAccessors().every((accessor) => accessor.listParents().length > 1)).toBe(true);
+      expect(root.listTextures().length).toBeGreaterThan(0);
+      expect(
+        root
+          .listMeshes()
+          .flatMap((mesh) => mesh.listPrimitives())
+          .filter((primitive) => primitive.getMode() === 1).length,
+      ).toBeGreaterThan(0);
     });
 
     it('should render the schematic output as an SVG with a viewBox and schematic elements', async () => {
@@ -416,7 +635,13 @@ describe('TscircuitKernel', () => {
       expect(svg).toContain('class="tscircuit-schematic"');
       expect(svg).toContain('sch-component');
       expect(svg).toContain('sch-trace');
-    });
+      expect(svg).toContain('fill: rgb(0, 105, 0)');
+      // WCAG contrast of the net-label text colour against white paper.
+      const channel = 105 / 255;
+      const luminance = 0.7152 * ((channel + 0.055) / 1.055) ** 2.4;
+      expect(1.05 / (luminance + 0.05)).toBeGreaterThan(4.5);
+      expect(/^<svg [^>]*width="[\d.]+" height="[\d.]+"/.exec(svg)).not.toBeNull();
+    }, 20_000);
 
     it('should render the pcb output as an SVG with a viewBox and pcb elements', async () => {
       const client = createClient({ 'main.tsx': fixtureBoard });
@@ -425,9 +650,19 @@ describe('TscircuitKernel', () => {
       const svg = await renderSvgView(client, 'pcb');
 
       expect(svg).toMatch(/^<svg [^>]*viewBox="0 0 \d+(?:\.\d+)? \d+(?:\.\d+)?"/);
-      expect(svg).toContain('pcb-board');
+      expect(svg).toContain('data-type="pcb_background"');
       expect(svg).toContain('pcb-pad');
       expect(svg).toContain('pcb-trace');
+      expect(/^<svg [^>]*width="[\d.]+" height="[\d.]+"/.exec(svg)).not.toBeNull();
+      const circuitJson = await readSettledCircuitJson(client);
+      const runtime = createMockKernelRuntime();
+      const context = await definition.initialize({}, runtime);
+      const pinSvg = await definition.render!(
+        { view: 'pcb', handle: { circuitJson, sheets: new Map() }, options: { pinNumbers: true } },
+        runtime,
+        context,
+      );
+      expect(pinSvg.content).toContain('class="pcb-pad-pin-number"');
     });
 
     it('should project the schematic from the same settled circuit as the repeated default board render', async () => {
@@ -444,7 +679,10 @@ describe('TscircuitKernel', () => {
     it('keeps board, schematic, and circuit export projections stable on one settled handle', async () => {
       const client = createClient({ 'main.tsx': fixtureBoard });
       expectGlb(await render(client, 'main.tsx'));
-      const handle = { circuitJson: await readSettledCircuitJson(client) };
+      const handle: { circuitJson: CircuitElementLike[]; sheets: ReadonlyMap<string, string> } = {
+        circuitJson: await readSettledCircuitJson(client),
+        sheets: new Map(),
+      };
       const runtime = createMockKernelRuntime();
       const context = await definition.initialize({}, runtime);
       const fresh = definition.deserializeHandle!(
@@ -453,7 +691,11 @@ describe('TscircuitKernel', () => {
         context,
       );
       const project = async (view: 'board' | 'schematic', source = handle) => {
-        const result = await definition.render!({ view, handle: source, options: {} }, runtime, context);
+        const result = await definition.render!(
+          { view, handle: source, options: {}, ...(view === 'schematic' ? { instance: undefined } : {}) },
+          runtime,
+          context,
+        );
         return result.content;
       };
       const write = async () => {
@@ -519,7 +761,7 @@ describe('TscircuitKernel', () => {
       expectGlb(await render(client, 'main.tsx'));
 
       // The test runtime hosts only this kernel and no transcoder, so every route is a tscircuit direct export.
-      const routes = client.capabilities?.routes ?? [];
+      const routes = client.client.capabilities?.routes ?? [];
       expect(routes.every((route) => route.transcoderId === undefined)).toBe(true);
       const formats = routes.map((route) => route.targetFormat).sort((left, right) => left.localeCompare(right));
       expect(formats).toEqual(['csv', 'glb', 'json', 'txt']);
@@ -595,7 +837,7 @@ describe('TscircuitKernel', () => {
       const client = createClient({ 'main.tsx': fixtureBoard });
 
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- deliberately bypasses the typed format union to test wire rejection.
-      const result = await client.export('step' as 'glb', { source: { path: 'main.tsx' } });
+      const result = await client.document.export('step' as 'glb');
       expect(result.success).toBe(false);
     });
   });
@@ -607,13 +849,13 @@ describe('TscircuitKernel', () => {
       const circuitJson = [{ type: 'source_project_metadata', name: 'snapshot' }];
       const nativeHandle = definition.deserializeHandle!(
         {
-          serialized: definition.serializeHandle!({ handle: { circuitJson } }, runtime, context),
+          serialized: definition.serializeHandle!({ handle: { circuitJson, sheets: new Map() } }, runtime, context),
         },
         runtime,
         context,
       );
 
-      expect(nativeHandle).toEqual({ circuitJson });
+      expect(nativeHandle).toEqual({ circuitJson, sheets: new Map() });
     });
 
     it('should reject a snapshot that is not a circuit JSON array', async () => {

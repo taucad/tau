@@ -58,7 +58,7 @@ Build123d needs a packaged CPython payload and a project trust grant, so only a 
 
 ## Choose tscircuit for electronics
 
-A `.tsx` or `.jsx` file exports a board component. The `output` render option picks the artifact: `3d` (default) meshes a GLB board, `schematic`/`pcb` return SVG, each a separate render identity. Rendering is offline: local autorouter, no parts engine; URL footprints and models are never fetched; each attempt or `kicad:`/`jlcpcb:` reference becomes a warning. See [tscircuit](../reference/tscircuit) for the authoring contract and zod note.
+A `.tsx` or `.jsx` file exports a board component. Rendering is offline: local autorouter, no parts engine; URL footprints and models are never fetched; each attempt or `kicad:`/`jlcpcb:` reference becomes a warning. See [tscircuit](../reference/tscircuit) for the authoring contract and install steps.
 
 ## Related
 

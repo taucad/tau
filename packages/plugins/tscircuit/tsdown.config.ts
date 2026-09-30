@@ -9,6 +9,7 @@ const baseConfig: UserConfig = {
   minify: true,
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
+  deps: { neverBundle: [/^#engine\//u] },
 };
 
 const packageConfig: UserConfig = {

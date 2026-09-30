@@ -11,15 +11,15 @@
  * (charter D3–D6, D10, I1).
  */
 
-import { NodeIO } from '@gltf-transform/core';
-import { normalizeGltfGeometryNames } from '@taucad/geometry-core';
-import type { Root } from '@gltf-transform/core';
+import { Primitive } from '@gltf-transform/core';
+import { createNodeIo, detectEdges, normalizeGltfGeometryNames } from '@taucad/geometry-core';
+import type { Document, Root } from '@gltf-transform/core';
 import type { AnyCircuitElement } from 'circuit-json';
 import type { ComponentType } from 'react';
 import { z } from 'zod';
 
 import type { KernelIssue } from '@taucad/runtime/types';
-import { createExportFile } from '@taucad/runtime/types';
+import { cadEdgeOverlayMaterialDefaults, createExportFile } from '@taucad/runtime/types';
 import {
   createFrameClassifier,
   createKernelError,
@@ -68,13 +68,10 @@ const zUpRotation: [number, number, number, number] = [Math.SQRT1_2, 0, 0, Math.
 export const tscircuitDetectPattern =
   /import\s+.*from\s+["'](tscircuit|@tscircuit\/core)["']|require\s*\(\s*["'](tscircuit|@tscircuit\/core)["']\s*\)/;
 
-/** Output kinds selectable through the `output` render option. @public */
-export const tscircuitRenderSchema = z.object({
-  output: z.enum(['3d', 'schematic', 'pcb']).default('3d'),
-});
+const pcbViewOptionsSchema = z.object({ pinNumbers: z.boolean().optional().meta({ title: 'Pin numbers' }) });
 
 /** Per-format export option schemas: GLB shares the runtime's glTF convention; the text formats take none. @public */
-export const tscircuitExportSchemas = {
+const tscircuitExportSchemas = {
   board: gltfExportConventionSchema,
   bom: z.object({}),
   netlist: z.object({}),
@@ -99,11 +96,19 @@ type CircuitElement = { type: string };
 
 type TscircuitNativeHandle = {
   circuitJson: CircuitElement[];
+  /** Public selection IDs mapped to the converter's current sheet IDs. */
+  sheets: ReadonlyMap<string, string>;
 };
 
 type TscircuitContext = {
   /** Evaluate an entry module's board component to settled circuit JSON. */
-  renderCircuit: (module: unknown, parameters: Record<string, unknown>) => Promise<CircuitElement[]>;
+  renderCircuit: (
+    module: unknown,
+    parameters: Record<string, unknown>,
+  ) => Promise<{
+    circuitJson: CircuitElement[];
+    authoredSheets: ReadonlyMap<string, string>;
+  }>;
 };
 
 type CircuitComponent = ComponentType<Record<string, unknown>>;
@@ -145,6 +150,59 @@ const isCircuitElementArray = (value: unknown): value is CircuitElement[] =>
 const converterCircuitJsonSchema = z.custom<AnyCircuitElement[]>(isCircuitElementArray);
 const asCircuitJson = (circuitJson: CircuitElement[]) => converterCircuitJsonSchema.parse(circuitJson);
 
+const stringField = (element: CircuitElement, key: string): string | undefined => {
+  const value: unknown = Reflect.get(element, key);
+  return typeof value === 'string' && value !== '' ? value : undefined;
+};
+
+// Names supplied by an author are stable across reordered evaluations. Generated names and
+// duplicate names are evaluation-local; a fresh random token prevents a saved choice from retargeting.
+const sheetsOf = (circuitJson: CircuitElement[], authoredSheets: ReadonlyMap<string, string>) => {
+  const sheets = circuitJson.filter((element) => element.type === 'schematic_sheet');
+  const counts = new Map<string, number>();
+  for (const sheet of sheets) {
+    const name = stringField(sheet, 'name');
+    if (name) {
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+  }
+  const localId = crypto.getRandomValues(new Uint32Array(4)).join('-');
+  const map = new Map<string, string>();
+  const instances = sheets.flatMap((sheet) => {
+    const converterId = stringField(sheet, 'schematic_sheet_id');
+    if (!converterId) {
+      return [];
+    }
+    const name = stringField(sheet, 'name');
+    const stable = name && counts.get(name) === 1 && authoredSheets.get(converterId) === name;
+    const id = stable ? `sheet:${encodeURIComponent(name)}` : `local:${localId}:${converterId}`;
+    map.set(id, converterId);
+    const title = stringField(sheet, 'display_name') ?? name ?? 'Schematic sheet';
+    return [{ id, title: stable ? title : `${title} (current evaluation)` }];
+  });
+  return { map, instances };
+};
+
+const orphanPartIssues = (circuitJson: CircuitElement[]): KernelIssue[] => {
+  if (!circuitJson.some((element) => element.type === 'schematic_sheet')) {
+    return [];
+  }
+  const names = circuitJson
+    .filter((element) => element.type === 'schematic_component' && !stringField(element, 'schematic_sheet_id'))
+    .map((element) => stringField(element, 'name') ?? stringField(element, 'source_component_id') ?? 'unnamed part');
+  return names.length === 0
+    ? []
+    : [
+        {
+          message: `Parts outside every schematic sheet: ${names.join(', ')}.`,
+          code: 'RUNTIME',
+          type: 'runtime',
+          severity: 'warning',
+          details: { producer: 'tscircuit', components: names },
+        },
+      ];
+};
+
 // Map tscircuit `*_error` / `*_warning` elements to kernel issues. A failed library or URL
 // footprint leaves the part unplaced but the board renders, so it is a warning (charter D4), as is
 // any error core itself flags `is_fatal: false`.
@@ -164,7 +222,13 @@ const collectCircuitIssues = (circuitJson: CircuitElement[]): KernelIssue[] => {
       code: 'RUNTIME',
       type: 'runtime',
       severity: isError && !isNonFatal ? 'error' : 'warning',
-      details: { producer: 'tscircuit', elementType: element.type },
+      details: {
+        producer: 'tscircuit',
+        elementType: element.type,
+        ...('components' in element ? { components: element.components } : {}),
+        ...('ports' in element ? { ports: element.ports } : {}),
+        ...('center' in element ? { center: element.center } : {}),
+      },
     });
   }
   return issues;
@@ -245,22 +309,42 @@ const withViewBox = (svg: string): string => {
     : svg;
 };
 
-// Drop the converter's `TEXCOORD_n` attributes: with `boardTextureResolution: 0` no material samples
-// them, and untextured rasterizers (Tau's nanoraster thumbnail transcoder) reject UV-bearing primitives.
-const stripTextureCoordinates = (root: Root): void => {
+const addFeatureEdges = (document: Document, root: Root): void => {
+  const edgeMaterial = document
+    .createMaterial('tau-edge-material')
+    .setBaseColorFactor([...cadEdgeOverlayMaterialDefaults.baseColorFactor])
+    .setMetallicFactor(cadEdgeOverlayMaterialDefaults.metallicFactor)
+    .setRoughnessFactor(cadEdgeOverlayMaterialDefaults.roughnessFactor)
+    .setDoubleSided(cadEdgeOverlayMaterialDefaults.doubleSided)
+    .setAlphaMode(cadEdgeOverlayMaterialDefaults.alphaMode);
   for (const mesh of root.listMeshes()) {
     for (const primitive of mesh.listPrimitives()) {
-      for (const semantic of primitive.listSemantics()) {
-        if (!semantic.startsWith('TEXCOORD_')) {
-          continue;
-        }
-        const accessor = primitive.getAttribute(semantic);
-        primitive.setAttribute(semantic, null);
-        // The document root is every accessor's first parent; dispose once no primitive shares it.
-        if (accessor && accessor.listParents().length <= 1) {
-          accessor.dispose();
-        }
+      if (primitive.getMode() !== Primitive.Mode['TRIANGLES']) {
+        continue;
       }
+      const positions = primitive.getAttribute('POSITION')?.getArray();
+      const indices = primitive.getIndices()?.getArray();
+      if (!(positions instanceof Float32Array)) {
+        continue;
+      }
+      const edges = detectEdges(
+        positions,
+        indices instanceof Uint16Array || indices instanceof Uint32Array ? indices : undefined,
+        30,
+      );
+      if (edges.positions.length === 0) {
+        continue;
+      }
+      mesh.addPrimitive(
+        document
+          .createPrimitive()
+          .setMode(Primitive.Mode['LINES']!)
+          .setMaterial(edgeMaterial)
+          .setAttribute(
+            'POSITION',
+            document.createAccessor('edge-positions').setType('VEC3').setArray(edges.positions),
+          ),
+      );
     }
   }
 };
@@ -270,10 +354,10 @@ const applyGlbConvention = async (
   glb: Uint8Array<ArrayBuffer>,
   { coordinateSystem, unit }: GlbConvention,
 ): Promise<Uint8Array<ArrayBuffer>> => {
-  const io = new NodeIO();
+  const io = await createNodeIo();
   const document = await io.readBinary(glb);
   const root = document.getRoot();
-  stripTextureCoordinates(root);
+  addFeatureEdges(document, root);
   const scene = root.getDefaultScene() ?? root.listScenes()[0];
   if (!scene) {
     return glb;
@@ -309,11 +393,10 @@ const circuitJsonToGlb = async (
   circuitJson: CircuitElement[],
   convention: GlbConvention,
 ): Promise<{ content: Uint8Array<ArrayBuffer>; issues: KernelIssue[] }> => {
-  const { convertCircuitJsonToGltf } = await import('circuit-json-to-gltf');
-  // Textures off: the texture path needs resvg and a DOM; component bodies come from
-  // local footprinter models and bounding boxes, never from model URLs (charter D10).
+  const { convertCircuitJsonToGltf } = await import('#engine/gltf.js');
+  // The converter's browser worker path uses resvg-wasm for board layers.
   const { value: glb, issues } = await withOfflineFetch(async () =>
-    convertCircuitJsonToGltf(asCircuitJson(circuitJson), { format: 'glb', boardTextureResolution: 0 }),
+    convertCircuitJsonToGltf(asCircuitJson(circuitJson), { format: 'glb' }),
   );
   if (!(glb instanceof ArrayBuffer)) {
     throw new TypeError('circuit-json-to-gltf did not return binary GLB bytes.');
@@ -334,11 +417,11 @@ export const tscircuitKernel = defineKernel({
   extensions: ['tsx', 'jsx'],
   builtinModuleNames: ['tscircuit', '@tscircuit/core'],
   name: 'TscircuitKernel',
-  version: '1.0.0',
+  version: '1.1.0',
   views: {
     board: { title: '3D board', mimeType: 'model/gltf-binary' },
-    schematic: { title: 'Schematic', mimeType: 'image/svg+xml' },
-    pcb: { title: 'PCB', mimeType: 'image/svg+xml' },
+    schematic: { title: 'Schematic', mimeType: 'image/svg+xml', instances: true },
+    pcb: { title: 'PCB', mimeType: 'image/svg+xml', optionsSchema: pcbViewOptionsSchema },
   },
   exports: {
     board: {
@@ -368,11 +451,13 @@ export const tscircuitKernel = defineKernel({
   },
 
   async initialize(_options, runtime): Promise<TscircuitContext> {
-    const [react, jsxRuntime, core] = await Promise.all([
-      import('react'),
-      import('react/jsx-runtime'),
-      import('@tscircuit/core'),
+    const [reactModule, jsxRuntimeModule, core] = await Promise.all([
+      import('#engine/react.js'),
+      import('#engine/jsx-runtime.js'),
+      import('#engine/core.js'),
     ]);
+    const react = reactModule.default;
+    const jsxRuntime = jsxRuntimeModule.default;
     const tscircuitCore: Record<string, unknown> = { ...core };
     // `React` as a global lets the bundler's classic JSX transform resolve without an import.
     registerKernelModule(runtime, {
@@ -399,7 +484,21 @@ export const tscircuitKernel = defineKernel({
         const circuit = new core.RootCircuit({ platform: { autorouter: 'auto' } });
         circuit.add(react.createElement(component, parameters));
         await circuit.renderUntilSettled();
-        return circuit.getCircuitJson();
+        const authoredSheets = new Map<string, string>();
+        for (const child of circuit.children) {
+          for (const component of [child, ...child.getDescendants()]) {
+            if (component.componentName !== 'SchematicSheet') {
+              continue;
+            }
+            const props: unknown = Reflect.get(component, '_parsedProps');
+            const name = isRecordObject(props) && typeof props['name'] === 'string' ? props['name'] : undefined;
+            const converterId: unknown = Reflect.get(component, 'schematic_sheet_id');
+            if (name && typeof converterId === 'string') {
+              authoredSheets.set(converterId, name);
+            }
+          }
+        }
+        return { circuitJson: circuit.getCircuitJson(), authoredSheets };
       },
     };
   },
@@ -454,11 +553,13 @@ export const tscircuitKernel = defineKernel({
     }
 
     let circuitJson: CircuitElement[];
+    let authoredSheets: ReadonlyMap<string, string>;
     let networkIssues: KernelIssue[];
     try {
-      ({ value: circuitJson, issues: networkIssues } = await withOfflineFetch(async () =>
-        context.renderCircuit(executeResult.value, parameters),
-      ));
+      ({
+        value: { circuitJson, authoredSheets },
+        issues: networkIssues,
+      } = await withOfflineFetch(async () => context.renderCircuit(executeResult.value, parameters)));
       runtime.signal.throwIfAborted();
     } catch (error) {
       const stackFrames = parseStackTrace(error, {
@@ -480,27 +581,49 @@ export const tscircuitKernel = defineKernel({
       ]);
     }
 
-    const handle: TscircuitNativeHandle = { circuitJson };
+    const sheets = sheetsOf(circuitJson, authoredSheets);
+    const handle: TscircuitNativeHandle = { circuitJson, sheets: sheets.map };
     const hasBoard = circuitJson.some((element) => element.type === 'pcb_board');
     const hasSchematic = circuitJson.some((element) => element.type.startsWith('schematic_'));
     return {
       handle,
-      issues: [...collectCircuitIssues(circuitJson), ...networkIssues],
+      issues: [...collectCircuitIssues(circuitJson), ...orphanPartIssues(circuitJson), ...networkIssues],
       views: hasBoard ? undefined : hasSchematic ? (['schematic'] as const) : ([] as const),
       exports: hasBoard ? undefined : (['bom', 'netlist', 'circuit'] as const),
+      ...(hasSchematic ? { instances: { schematic: sheets.instances } } : {}),
     };
   },
 
-  async render({ handle, view }) {
+  async render(request) {
+    const { handle, view } = request;
     const { circuitJson } = handle;
     switch (view) {
       case 'schematic': {
-        const { convertCircuitJsonToSchematicSvg } = await import('circuit-to-svg');
-        return { content: withViewBox(convertCircuitJsonToSchematicSvg(asCircuitJson(circuitJson))) };
+        const { convertCircuitJsonToSchematicSvg } = await import('#engine/svg.js');
+        const sheetId = request.instance === undefined ? undefined : handle.sheets.get(request.instance);
+        if (request.instance !== undefined && sheetId === undefined) {
+          throw new TypeError(`Unknown schematic sheet instance: ${request.instance}`);
+        }
+        return {
+          content: withViewBox(
+            convertCircuitJsonToSchematicSvg(asCircuitJson(circuitJson), {
+              ...(sheetId === undefined ? {} : { schematicSheetId: sheetId }),
+              colorOverrides: { schematic: { junction: 'rgb(0, 105, 0)', wire: 'rgb(0, 105, 0)' } },
+            }),
+          ),
+        };
       }
       case 'pcb': {
-        const { convertCircuitJsonToPcbSvg } = await import('circuit-to-svg');
-        return { content: withViewBox(convertCircuitJsonToPcbSvg(asCircuitJson(circuitJson))) };
+        const { convertCircuitJsonToPcbSvg } = await import('#engine/svg.js');
+        return {
+          content: withViewBox(
+            convertCircuitJsonToPcbSvg(asCircuitJson(circuitJson), {
+              showPinNumbers: request.options.pinNumbers,
+              matchBoardAspectRatio: true,
+              drawPaddingOutsideBoard: false,
+            }),
+          ),
+        };
       }
       case 'board': {
         const { content, issues } = await circuitJsonToGlb(circuitJson, displayGlbConvention);
@@ -510,15 +633,37 @@ export const tscircuitKernel = defineKernel({
   },
 
   serializeHandle({ handle }) {
-    return new TextEncoder().encode(JSON.stringify(handle.circuitJson));
+    return new TextEncoder().encode(JSON.stringify({ circuitJson: handle.circuitJson, sheets: [...handle.sheets] }));
   },
 
   deserializeHandle({ serialized }): TscircuitNativeHandle {
     const parsed: unknown = JSON.parse(new TextDecoder().decode(toBufferSource(serialized)));
-    if (!isCircuitElementArray(parsed)) {
-      throw new TypeError('Invalid tscircuit serialized handle: expected a circuit JSON array.');
+    if (
+      !isRecordObject(parsed) ||
+      !isCircuitElementArray(parsed['circuitJson']) ||
+      !Array.isArray(parsed['sheets']) ||
+      !parsed['sheets'].every(
+        (entry: unknown) =>
+          Array.isArray(entry) && entry.length === 2 && entry.every((part) => typeof part === 'string'),
+      )
+    ) {
+      throw new TypeError('Invalid tscircuit serialized handle: expected circuit JSON and sheet mappings.');
     }
-    return { circuitJson: parsed };
+    const mappings = new Map<string, string>(parsed['sheets']);
+    const converterIds = new Set(
+      parsed['circuitJson']
+        .filter((element) => element.type === 'schematic_sheet')
+        .map((element) => stringField(element, 'schematic_sheet_id')),
+    );
+    if (
+      mappings.size !== parsed['sheets'].length ||
+      mappings.size !== converterIds.size ||
+      [...mappings].some(([id, converterId]) => !id || !converterIds.has(converterId)) ||
+      new Set(mappings.values()).size !== mappings.size
+    ) {
+      throw new TypeError('Invalid tscircuit serialized handle: sheet mappings do not match circuit JSON.');
+    }
+    return { circuitJson: parsed['circuitJson'], sheets: mappings };
   },
 
   async write({ exportId, handle, options }) {
@@ -530,12 +675,12 @@ export const tscircuitKernel = defineKernel({
         return { files: [createExportFile('glb', 'model.glb', content)], issues: [...issues, ...glbIssues] };
       }
       case 'bom': {
-        const { convertBomRowsToCsv, convertCircuitJsonToBomRows } = await import('circuit-json-to-bom-csv');
+        const { convertBomRowsToCsv, convertCircuitJsonToBomRows } = await import('#engine/bom.js');
         const rows = await convertCircuitJsonToBomRows({ circuitJson: asCircuitJson(circuitJson) });
         return { files: [textExportFile('csv', 'bom.csv', convertBomRowsToCsv(rows))], issues };
       }
       case 'netlist': {
-        const { convertCircuitJsonToReadableNetlist } = await import('circuit-json-to-readable-netlist');
+        const { convertCircuitJsonToReadableNetlist } = await import('#engine/netlist.js');
         return {
           files: [
             textExportFile('txt', 'netlist.txt', convertCircuitJsonToReadableNetlist(asCircuitJson(circuitJson))),

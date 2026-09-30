@@ -28,41 +28,28 @@ Traces use tscircuit selectors (`.R1 > .pin1`, `net.GND`). Optional `defaultPara
 
 One evaluation retains the settled circuit JSON. It offers these separately declared views from that handle:
 
-| View ID     | Artifact                        |
-| ----------- | ------------------------------- |
-| `board`     | GLB board with component bodies |
-| `schematic` | Schematic SVG                   |
-| `pcb`       | PCB layout SVG                  |
+| View ID     | Artifact                                               |
+| ----------- | ------------------------------------------------------ |
+| `board`     | Textured GLB board with feature-edge lines             |
+| `schematic` | Schematic SVG, with one instance per authored sheet    |
+| `pcb`       | Fitted PCB layout SVG; `pinNumbers` is its view option |
 
 The kernel declares export IDs `board` (GLB), `bom` (CSV), `netlist` (text), and `circuit` (JSON). Each has its own title, MIME type, extension, and optional options schema. A schematic-only result may offer only the schematic view; the ordered offers are returned by `evaluate`.
 
-The current client renders the first offered view and still addresses exports by extension. It cannot select `schematic` or `pcb` through a global `renderOptions.output` setting; explicit view selection arrives with the W3 document-view client migration. Kernel authors can already call the v2 `evaluate`/`render` hooks directly in isolated tests.
+Each sheet is rendered through its converter ID. A uniquely named authored sheet keeps a stable selection across reorder; unnamed or duplicate-name sheets have evaluation-local IDs and titles marked “current evaluation,” and expire after reevaluation. With no authored sheets, the schematic renders the whole circuit. Parts outside all sheets produce a warning naming those parts. The SVG dimensions are fitted pixels, with no physical-unit claim.
+
+The document client opens synchronously with `client.open({ source })`, selects PCB with `document.view('pcb', { options: { pinNumbers: true } })`, and waits for the result with `await pcb.rendering()`.
 
 ## Offline behaviour
 
-The circuit uses the local autorouter and no parts engine. `fetch` is disabled during evaluation and GLB conversion, so `http(s)://` footprint and `cadModel` URLs are never requested; each attempt becomes a `warning` naming the URL. Library references (`kicad:`, `jlcpcb:`) produce a `warning` and an unplaced part. The render completes with local bodies and bounding boxes.
+The circuit uses the local autorouter and no parts engine. The kernel blocks `fetch` during evaluation and GLB conversion, so `http(s)://` footprint and `cadModel` URLs are never requested; each attempt becomes a `warning` naming the URL. Library references (`kicad:`, `jlcpcb:`) produce a `warning` and an unplaced part. The render completes with local bodies and bounding boxes.
 
-## Install note for zod
+## Install
 
-Several tscircuit packages (`@tscircuit/props`, `@tscircuit/circuit-json-util`, `@tscircuit/soup-util`, `circuit-json`) target the zod 3 API but declare zod as a loose peer or not at all. In a zod 4 workspace they resolve zod 4 and fail at load. Until upstream manifests are zod-4 clean, add this pnpm hook to the consumer's `.pnpmfile.cjs` so zod 3 nests under them:
+Install `@taucad/tscircuit` with its runtime and Zod peers. The package includes its upstream engine, so consumers need no pnpm hook or bundler alias.
 
-```javascript
-const zod3Consumers = new Set([
-  '@tscircuit/props',
-  '@tscircuit/circuit-json-util',
-  '@tscircuit/soup-util',
-  'circuit-json',
-]);
-
-function readPackage(pkg) {
-  if (zod3Consumers.has(pkg.name)) {
-    delete pkg.peerDependencies?.zod;
-    pkg.dependencies = { ...pkg.dependencies, zod: '^3.25.76' };
-  }
-  return pkg;
-}
-
-module.exports = { hooks: { readPackage } };
+```bash
+npm install @taucad/tscircuit @taucad/runtime zod
 ```
 
 ## Related

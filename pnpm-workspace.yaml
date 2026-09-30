@@ -125,6 +125,7 @@ catalog:
   '@tscircuit/infgrid-ijump-astar': 0.0.35
   '@tscircuit/matchpack': 0.0.91
   '@tscircuit/math-utils': 0.0.38
+  '@tscircuit/manifold-2d': 0.0.6
   '@tscircuit/miniflex': 0.0.4
   '@tscircuit/props': 0.0.646
   '@tscircuit/schematic-match-adapt': 0.0.22

@@ -34,9 +34,13 @@ Add other plugins the same way when you need them — see [Choose a Kernel](../g
 
 `@taucad/build123d` is not a browser plugin, and a global Python does not make it usable: the host packages the pinned CPython and wheel tree itself. Read [Build123d](../reference/build123d) first.
 
-### tscircuit and zod
+### tscircuit
 
-Several `@taucad/tscircuit` dependencies are written against zod 3 but declare zod as a loose peer, so a zod 4 workspace breaks them at load. Add the pnpm `readPackage` hook from [tscircuit](../reference/tscircuit) to your project.
+To use TSX electronics boards, install `@taucad/tscircuit` with the runtime, bundler, and Zod. Its bundled engine needs no package-manager hook or bundler alias. See [tscircuit](../reference/tscircuit) for the authoring contract.
+
+```bash
+npm install @taucad/runtime @taucad/esbuild @taucad/tscircuit zod
+```
 
 ## Framework Configuration
 

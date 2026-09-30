@@ -17,11 +17,10 @@ tscircuit EDA kernel for Tau: TSX circuits rendered to 3D boards, schematic and 
 ## Install
 
 ```bash
-npm i @taucad/tscircuit @taucad/runtime
+npm i @taucad/tscircuit @taucad/runtime zod
 ```
 
-`@taucad/runtime` is a required peer — one install must hold one runtime. A capability with an
-options schema adds `zod` as a second required peer.
+`@taucad/runtime` is a required peer — one install must hold one runtime. `zod` is a second required peer. The package vendors its upstream engine and needs no consumer pnpm hook or bundler alias.
 
 ## Quick start
 
@@ -34,8 +33,8 @@ const runtime = defineRuntime({ plugins: [esbuild(), tscircuit()] });
 ```
 
 A `.tsx` or `.jsx` file default-exports a board; the kernel evaluates it once with `@tscircuit/core` and keeps
-the settled circuit JSON. The `output` render option selects the artifact — `3d` (GLB board, default),
-`schematic` or `pcb` (SVG) — and each value is its own cached render identity:
+the settled circuit JSON. Its declared views are `board` (GLB, default),
+`schematic` (SVG, one selectable instance per sheet), and `pcb` (SVG, with a `pinNumbers` option):
 
 ```tsx
 export default () => (
@@ -48,49 +47,22 @@ export default () => (
 ```
 
 ```typescript
-await client.render({ source: { path: '/main.tsx' }, renderOptions: { output: 'pcb' } });
+const document = client.open({ source: { path: '/main.tsx' } });
+const pcb = document.view('pcb', { options: { pinNumbers: true } });
+const outcome = await pcb.rendering();
 ```
 
 Rendering is offline: local autorouter, no parts engine. `fetch` is disabled while the board evaluates and while
 the GLB is built, so `http(s)://` footprint and `cadModel` URLs are never requested — each attempt becomes a
 `warning` issue naming the URL — and `kicad:`/`jlcpcb:` references produce a `warning` and an unplaced part.
-Exports: `glb`, `csv` (BOM), `txt` (readable netlist), `json` (circuit JSON).
-
-### zod hook (required for consumers)
-
-`@tscircuit/props`, `@tscircuit/circuit-json-util`, `@tscircuit/soup-util` and `circuit-json` are built on the
-zod 3 API but declare zod as a loose peer (or not at all). Under a zod 4 workspace they resolve zod 4 and fail
-at load, and neither `overrides` nor `packageExtensions` can replace a peer. Add this `readPackage` hook to your
-`.pnpmfile.cjs` until upstream manifests are zod-4 clean:
-
-```javascript
-const zod3Consumers = new Set([
-  '@tscircuit/props',
-  '@tscircuit/circuit-json-util',
-  '@tscircuit/soup-util',
-  'circuit-json',
-]);
-
-function readPackage(pkg) {
-  if (zod3Consumers.has(pkg.name)) {
-    delete pkg.peerDependencies?.zod;
-    pkg.dependencies = { ...pkg.dependencies, zod: '^3.25.76' };
-  }
-  return pkg;
-}
-
-module.exports = { hooks: { readPackage } };
-```
+Exports are named `board` (`glb`), `bom` (`csv`), `netlist` (`txt`), and `circuit` (`json`).
+An authored schematic sheet with a unique name keeps its selection across reorder; unnamed or
+ambiguous sheets receive evaluation-local IDs and titles marked “current evaluation”; their choices expire on the next evaluation. Parts outside
+all sheets produce a warning naming the parts. SVG output is fitted in pixels and carries no
+physical units. The GLB includes board-layer textures and feature-edge lines.
 
 Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, or your own host. See
 [`@taucad/runtime`](https://www.npmjs.com/package/@taucad/runtime) for the client lifecycle.
-
-### Browser bundling
-
-`circuit-json-to-gltf` references the native `@resvg/resvg-js` binding from a chunk the kernel never executes
-(textures are off). A host that bundles the kernel for a worker must alias `@resvg/resvg-js` to a stub module
-exporting a constructible `Resvg` class (one that throws), so the bundler never resolves the native `.node`
-file; Tau does this in `apps/ui/vite.config.ts` through `uiResolveAlias`.
 
 ## API
 

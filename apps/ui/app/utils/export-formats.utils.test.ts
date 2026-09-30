@@ -24,7 +24,7 @@ function createClient(routes: ExportRoute[]): AppRuntimeClient {
   const capabilities: CapabilitiesManifest = { routes, renderCapabilities: {}, registrations: [] };
   const client = mock<AppRuntimeClient>();
   Object.defineProperty(client, 'capabilities', { value: capabilities, configurable: true });
-  vi.mocked(client.bestRouteFor).mockImplementation((format: FileExtension, options?: { kernelId?: string }) => {
+  vi.mocked(client.bestRouteFor).mockImplementation((format: string, options?: { kernelId?: string }) => {
     const candidates = routes
       .filter((route) => route.targetFormat === format)
       .filter((route) => (options?.kernelId ? route.kernelId === options.kernelId : true))

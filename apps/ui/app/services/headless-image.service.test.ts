@@ -390,7 +390,13 @@ describe('HeadlessImageService', () => {
       }),
     );
     await service.export(
-      captureJob('visibility', { exportOptions: { width: 16, height: 16, visiblePrimitives: [0] } }),
+      captureJob('visibility', {
+        exportOptions: {
+          width: 16,
+          height: 16,
+          visiblePrimitives: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+        },
+      }),
     );
 
     expect(imageClient.transcode).toHaveBeenCalledTimes(5);
@@ -532,7 +538,7 @@ describe('HeadlessImageService', () => {
       files: [{ name: 'render.svg', bytes: new TextEncoder().encode(svg), mimeType: 'image/svg+xml' }],
       options,
     });
-    expect(imageClient.render).not.toHaveBeenCalled();
+    expect(imageClient.open).not.toHaveBeenCalled();
   });
 
   it('does not probe renderer GPU when the selected execution host does not require it', async () => {

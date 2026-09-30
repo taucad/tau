@@ -302,6 +302,214 @@ const mount = (): ReturnType<typeof render> =>
   );
 
 describe('the page client of the worker revision root', () => {
+  it.each(['status', 'open', 'subscribe'])('should keep the candidate private until %s settles', async (held) => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const seen: JsonValue[] = [];
+    const channel = revisionChannel({
+      revision: async (request) => {
+        seen.push(request);
+        if (typeof request === 'object' && request !== null && 'command' in request && request['command'] === held) {
+          entered.resolve();
+          await release.promise;
+        }
+        return { result: null, status: { projectId, branch: 'main' } };
+      },
+      async *revisionEvents() {
+        if (held === 'subscribe') {
+          entered.resolve();
+          await release.promise;
+        }
+        yield { kind: 'status', value: { projectId, branch: 'main' } };
+      },
+      close: vi.fn(),
+    });
+    const client = createHostRevisionClient({ projectId, connect: async () => channel });
+    try {
+      client.open();
+      await entered.promise;
+      client.send({ command: 'setDeviceId', deviceId: 'device-1' });
+      const saved = client.saveRevision();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(client.status()).toBeUndefined();
+      expect(seen).toEqual(held === 'status' ? [{ command: 'status' }] : [{ command: 'status' }, { command: 'open' }]);
+      release.resolve();
+      await saved;
+      expect(seen).toEqual([
+        { command: 'status' },
+        { command: 'open' },
+        { command: 'setDeviceId', deviceId: 'device-1' },
+        { command: 'saveRevision' },
+      ]);
+    } finally {
+      release.resolve();
+      client.close();
+    }
+  });
+
+  it('should keep explicit save failures visible after healthy attachment', async () => {
+    const channel = revisionChannel({
+      revision: async (request) => {
+        if (
+          typeof request === 'object' &&
+          request !== null &&
+          'command' in request &&
+          request['command'] === 'saveRevision'
+        ) {
+          throw new Error('The history write was refused.');
+        }
+        return { result: null, status: { projectId, branch: 'main' } };
+      },
+      async *revisionEvents() {
+        yield { kind: 'status', value: { projectId, branch: 'main' } };
+      },
+      close: vi.fn(),
+    });
+    const connect = vi.fn(async () => channel);
+    const client = createHostRevisionClient({ projectId, connect });
+    const toasts: RevisionToast[] = [];
+    client.subscribeToasts((toast) => toasts.push(toast));
+    try {
+      await client.log();
+      client.send({ command: 'saveRevision' });
+      await vi.waitFor(() => {
+        expect(toasts).toEqual([{ type: 'error', subject: 'save', message: 'The history write was refused.' }]);
+      });
+      expect(connect).toHaveBeenCalledOnce();
+      expect(channel.close).not.toHaveBeenCalled();
+      expect(client.status()).toMatchObject({ branch: 'main' });
+    } finally {
+      client.close();
+    }
+  });
+
+  it.each(['status', 'open', 'subscribe'])(
+    'should dispose failed %s initialization and retry with one connection failure',
+    async (failure) => {
+      const cause = Object.assign(new Error('The selected host refused this attachment.'), {
+        code: 'HOST_CONFIGURATION_MISMATCH',
+      });
+      const gate = Promise.withResolvers<void>();
+      const entered = Promise.withResolvers<void>();
+      const failed = revisionChannel({
+        revision: async (request) => {
+          if (
+            typeof request === 'object' &&
+            request !== null &&
+            'command' in request &&
+            request['command'] === failure
+          ) {
+            entered.resolve();
+            await gate.promise;
+            throw cause;
+          }
+          return { result: null, status: { projectId, branch: 'main' } };
+        },
+        async *revisionEvents() {
+          if (failure === 'subscribe') {
+            entered.resolve();
+            await gate.promise;
+            throw cause;
+          }
+          yield { kind: 'status', value: { projectId, branch: 'main' } };
+        },
+        close: vi.fn(),
+      });
+      const recovered = revisionChannel({
+        revision: async () => ({ result: null, status: { projectId, branch: 'recovered' } }),
+        async *revisionEvents() {
+          yield { kind: 'status', value: { projectId, branch: 'recovered' } };
+        },
+        close: vi.fn(),
+      });
+      const connect = vi
+        .fn<() => Promise<AgentChannelClient>>()
+        .mockResolvedValueOnce(failed)
+        .mockResolvedValue(recovered);
+      const client = createHostRevisionClient({ projectId, connect });
+      const toasts: RevisionToast[] = [];
+      client.subscribeToasts((toast) => toasts.push(toast));
+      try {
+        client.send({ command: 'setDeviceId', deviceId: 'device-1' });
+        client.remoteCredential({ apiBaseUrl: 'http://api.test' });
+        client.open();
+        client.send({ command: 'setActor', actor: { kind: 'system' } });
+        const waiter = client.saveRevision();
+        const rejection = expect(waiter).rejects.toMatchObject({
+          name: 'RevisionConnectionError',
+          code: cause.code,
+          cause,
+          operation: failure,
+          generation: 1,
+        });
+        await entered.promise;
+        gate.resolve();
+        await rejection;
+        await vi.waitFor(() => {
+          expect(toasts).toHaveLength(1);
+        });
+        expect(toasts[0]).toMatchObject({
+          type: 'error',
+          subject: 'connection',
+          code: cause.code,
+          message: cause.message,
+          generation: 1,
+          connectionOperation: failure,
+        });
+        expect(client.status()).toBeUndefined();
+        expect(failed.close).toHaveBeenCalledOnce();
+        await client.saveRevision();
+        expect(connect).toHaveBeenCalledTimes(2);
+        expect(client.status()).toMatchObject({ branch: 'recovered' });
+        expect(recovered.close).not.toHaveBeenCalled();
+      } finally {
+        gate.resolve();
+        client.close();
+      }
+    },
+  );
+
+  it('should settle a closed initialization without letting its late result update the successor', async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const stale = revisionChannel({
+      revision: async () => {
+        entered.resolve();
+        await release.promise;
+        return { result: null, status: { projectId, branch: 'stale' } };
+      },
+      async *revisionEvents() {
+        yield { kind: 'status', value: { projectId, branch: 'stale' } };
+      },
+      close: vi.fn(),
+    });
+    const current = revisionChannel({
+      revision: async () => ({ result: null, status: { projectId, branch: 'current' } }),
+      async *revisionEvents() {
+        yield { kind: 'status', value: { projectId, branch: 'current' } };
+      },
+      close: vi.fn(),
+    });
+    const connect = vi.fn<() => Promise<AgentChannelClient>>().mockResolvedValueOnce(stale).mockResolvedValue(current);
+    const client = createHostRevisionClient({ projectId, connect });
+    try {
+      const waiting = client.saveRevision();
+      await entered.promise;
+      client.close();
+      await expect(waiting).rejects.toMatchObject({ code: 'STALE_REVISION_CONNECTION' });
+      await client.saveRevision();
+      release.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(client.status()).toMatchObject({ branch: 'current' });
+      expect(stale.close).toHaveBeenCalledOnce();
+      expect(current.close).not.toHaveBeenCalled();
+    } finally {
+      release.resolve();
+      client.close();
+    }
+  });
   /**
    * A host-owned client whose revision stream the case itself feeds.
    *
@@ -343,6 +551,7 @@ describe('the page client of the worker revision root', () => {
         status: { projectId, branch: 'main', headRevisionId: 'revision-1' },
       }),
       async *revisionEvents() {
+        yield { kind: 'status', value: { projectId, branch: 'main' } };
         for (;;) {
           // oxlint-disable-next-line no-await-in-loop -- a stream is sequential by definition.
           yield { kind: 'toast', value: (await nextToast()) as unknown as JsonValue };
@@ -374,7 +583,7 @@ describe('the page client of the worker revision root', () => {
     const channel = revisionChannel({
       revision,
       async *revisionEvents() {
-        yield* [];
+        yield { kind: 'status', value: { projectId, branch: 'main', headRevisionId: 'revision-1' } };
       },
       close: vi.fn(),
     });
@@ -410,7 +619,7 @@ describe('the page client of the worker revision root', () => {
     const channel = revisionChannel({
       revision: vi.fn(),
       async *revisionEvents() {
-        yield* [];
+        yield { kind: 'status', value: { projectId, branch: 'main' } };
       },
       close: vi.fn(),
     });
@@ -440,7 +649,7 @@ describe('the page client of the worker revision root', () => {
     const channel = revisionChannel({
       revision,
       async *revisionEvents() {
-        yield* [];
+        yield { kind: 'status', value: { projectId, branch: 'main' } };
       },
       close: vi.fn(),
     });
@@ -478,7 +687,7 @@ describe('the page client of the worker revision root', () => {
     const channel = revisionChannel({
       revision,
       async *revisionEvents() {
-        yield* [];
+        yield { kind: 'status', value: { projectId, branch: 'main' } };
       },
       close: vi.fn(),
     });

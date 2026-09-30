@@ -342,7 +342,10 @@ export type RevisionToast =
   | Readonly<{ type: 'notice'; subject: 'remote' | 'resolution'; tone: 'info' | 'error'; message: string }>
   | Readonly<{
       type: 'error';
-      subject: 'restore' | 'branch' | 'save';
+      subject: 'restore' | 'branch' | 'save' | 'connection';
+      /** Which attachment attempt and initialization step failed. */
+      generation?: number;
+      connectionOperation?: 'connect' | 'status' | 'open' | 'subscribe' | 'stream';
       /* Which branch verb refused, so a caller correlating one *New branch*
        * does not take another verb's refusal for its own (finding 1). */
       operation?: BranchOperation;

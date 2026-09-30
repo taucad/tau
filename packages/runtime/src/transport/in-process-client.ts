@@ -14,7 +14,7 @@ import type { Channel, ChannelServerHandle } from '@taucad/rpc';
 import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import type { inProcessClientOptionsSchema } from '#transport/in-process-transport.schemas.js';
-import type { BinaryContentDelivery, RuntimeInitializeResult } from '#types/runtime-protocol.types.js';
+import type { BinaryContentDelivery, RuntimeInitializeResult } from '#types/runtime-wire.types.js';
 import type {
   EncodedBinary,
   RuntimeInitializeMemoryHandle,
@@ -185,7 +185,7 @@ export const inProcessClient = (
     signalDocumentAbort(evaluationId, generation, reason) {
       return signalDocumentAbort(ensurePoolsAndPorts().pooled.signalBuffer, evaluationId, generation, reason);
     },
-    renderTimeoutRecovery: { kind: 'unsupported' },
+    operationTimeoutRecovery: { kind: 'unsupported' },
     describe(): TransportDescriptor<typeof inProcessId> {
       return inProcessClientDescribe(options);
     },

@@ -24,7 +24,7 @@ const createFixture = (channel: Channel<RuntimeDocumentProtocol>) => {
       // The fixture retains its transport until the test completes.
     }),
     signalDocumentAbort: () => false,
-    renderTimeoutRecovery: { kind: 'unsupported' },
+    operationTimeoutRecovery: { kind: 'unsupported' },
     describe: () => descriptor,
     open: vi.fn(async () => ({ channel })),
     initialize,

@@ -66,7 +66,6 @@ describe('nodeWorkerHost — real port acquisition (R3)', () => {
       expect(host.id).toBe('node-worker');
       expect(typeof host.open).toBe('function');
       expect(typeof host.adoptInitialize).toBe('function');
-      expect(typeof host.encodeGeometry).toBe('function');
       expect(host.closed).toBeInstanceOf(Promise);
     } finally {
       acquireSpy.mockRestore();

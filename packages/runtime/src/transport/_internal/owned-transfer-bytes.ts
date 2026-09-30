@@ -8,44 +8,9 @@
  * @internal
  */
 
-import type { Geometry } from '@taucad/types';
-import type { EncodedGeometry } from '#transport/runtime-transport.types.js';
 import type { BinaryEncoder } from '#transport/_internal/runtime-channel-bindings.js';
 
 const cloneBytes = (bytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => new Uint8Array(bytes);
-
-export const encodeGeometryAsOwnedTransfer = (geometry: Geometry): EncodedGeometry => {
-  if (geometry.format !== 'gltf') {
-    return { value: geometry, transferables: [], tier: 'copy' };
-  }
-
-  const bytes = cloneBytes(geometry.content);
-  return {
-    value: {
-      format: 'gltf',
-      content: { delivery: 'inline', bytes },
-      hash: geometry.hash,
-    },
-    transferables: [bytes.buffer],
-    tier: 'transfer',
-  };
-};
-
-export const encodeGeometryAsOwnedCopy = (geometry: Geometry): EncodedGeometry => {
-  if (geometry.format !== 'gltf') {
-    return { value: geometry, transferables: [], tier: 'copy' };
-  }
-
-  return {
-    value: {
-      format: 'gltf',
-      content: { delivery: 'inline', bytes: cloneBytes(geometry.content) },
-      hash: geometry.hash,
-    },
-    transferables: [],
-    tier: 'copy',
-  };
-};
 
 /**
  * Copy binary output for transports that cannot transfer ArrayBuffers.

@@ -113,7 +113,7 @@ describe('transport conformance — in-process (C2)', () => {
     expect(typeof client.describe).toBe('function');
     expect(typeof client.open).toBe('function');
     expect(typeof client.initialize).toBe('function');
-    expect(client.renderTimeoutRecovery.kind).toBe('unsupported');
+    expect(client.operationTimeoutRecovery.kind).toBe('unsupported');
     expect(typeof client.resolveBinary).toBe('function');
     expect(typeof client.close).toBe('function');
     expect(client.closed).toBeInstanceOf(Promise);
@@ -190,19 +190,22 @@ describe('transport conformance — in-process (C2)', () => {
 
     try {
       const preview = client.open({ source: { files: { 'preview.scope': 'preview-c' } } });
-      expect((await preview.evaluation()).superseded).toBe(false);
+      const previewEvaluation = await preview.evaluation();
+      expect(previewEvaluation.superseded).toBe(false);
 
       const evaluationDocument = client.open({ source: { files: { 'evaluation.scope': 'source-a' } } });
-      expect((await evaluationDocument.evaluation()).superseded).toBe(false);
+      const selectedEvaluation = await evaluationDocument.evaluation();
+      expect(selectedEvaluation.superseded).toBe(false);
       const evaluation = await evaluationDocument.view('model').rendering();
       expect(evaluation.superseded).toBe(false);
       if (evaluation.superseded || !evaluation.rendering.success) {
         throw new Error('Expected request-scoped GLB rendering.');
       }
-      expect(decoder.decode(evaluation.rendering.artifact.content as Uint8Array)).toBe('mesh:source-a');
+      expect(decoder.decode(evaluation.rendering.artifact.content as Uint8Array<ArrayBuffer>)).toBe('mesh:source-a');
 
       const exportDocument = client.open({ source: { files: { 'export.scope': 'source-b' } } });
-      expect((await exportDocument.evaluation()).superseded).toBe(false);
+      const exportEvaluation = await exportDocument.evaluation();
+      expect(exportEvaluation.superseded).toBe(false);
       const requestExport = await exportDocument.export('glb');
       expect(requestExport.success).toBe(true);
       if (!requestExport.success) {
@@ -348,7 +351,8 @@ describe('transport conformance — in-process (C2)', () => {
     const consumer = createClient();
     try {
       const consumerDocument = consumer.open({ source: { files: { 'main.compute': 'consumer' } } });
-      expect((await consumerDocument.evaluation()).superseded).toBe(false);
+      const consumerEvaluation = await consumerDocument.evaluation();
+      expect(consumerEvaluation.superseded).toBe(false);
       consumerDocument.close();
       expect(createCalls).toBe(2);
       expect(imports).toBe(1);
@@ -410,7 +414,7 @@ describe('transport conformance — in-process (C2)', () => {
    * on the consumer callable — same-isolate authors use {@link inProcessClient}
    * only; standalone host transports are sibling modules for worker kernels. */
 
-  /* S9: bundled transports wire `runtimeProtocolSchemas` by default at
+  /* S9: bundled transports wire `runtimeDocumentProtocolSchemas` by default at
    * both wire boundaries (client and dispatcher server), so a malformed
    * call frame is rejected at the channel layer with a typed
    * `WireValidationError` rather than reaching the kernel impl. */
@@ -419,11 +423,10 @@ describe('transport conformance — in-process (C2)', () => {
     try {
       const ready = await client.open();
       await ready.channel.ready;
-      /* `export` requires `format: FileExtension` (strict object); an
-       * empty payload triggers server-side validation before the impl
-       * runs. */
+      /* `export` requires document, operation, and target identities; an
+       * empty payload triggers server-side validation before the impl runs. */
       await expect(
-        // Validation test intentionally passes an invalid payload (missing `format`)
+        // Validation test intentionally passes an invalid payload (missing identities).
         ready.channel.call(
           'export',
           // oxlint-disable-next-line ban-ts-comment -- invalid payload exercises wire-validation path before impl runs
@@ -516,7 +519,7 @@ describe('transport conformance — web-worker (C2)', () => {
       expect(typeof client.describe).toBe('function');
       expect(typeof client.open).toBe('function');
       expect(typeof client.initialize).toBe('function');
-      expect(client.renderTimeoutRecovery.kind).toBe('terminable');
+      expect(client.operationTimeoutRecovery.kind).toBe('terminable');
       expect(typeof client.resolveBinary).toBe('function');
       expect(typeof client.close).toBe('function');
       expect(client.closed).toBeInstanceOf(Promise);
@@ -660,7 +663,7 @@ describe('transport conformance — web-worker (C2)', () => {
       try {
         const client = webWorkerTransport({ url: 'about:blank', workerCtor: fake.workerCtor }).materialize();
         await client.open();
-        const recovery = client.renderTimeoutRecovery;
+        const recovery = client.operationTimeoutRecovery;
         expect(recovery.kind).toBe('terminable');
         if (recovery.kind !== 'terminable') {
           throw new TypeError('Expected terminable Web Worker recovery');
@@ -669,7 +672,7 @@ describe('transport conformance — web-worker (C2)', () => {
         await recovery.terminate();
         await client.close();
 
-        await expect(client.closed).resolves.toEqual({ cause: 'render-timeout' });
+        await expect(client.closed).resolves.toEqual({ cause: 'operation-timeout' });
         expect(fake.terminateCalls()).toBe(1);
       } finally {
         fake.dispose();
@@ -699,7 +702,6 @@ describe('transport conformance — web-worker (C2)', () => {
     expect(host.id).toBe('web-worker');
     expect(typeof host.open).toBe('function');
     expect(typeof host.adoptInitialize).toBe('function');
-    expect(typeof host.encodeGeometry).toBe('function');
     expect(host.closed).toBeInstanceOf(Promise);
   });
 });
@@ -737,7 +739,7 @@ describe('transport conformance — node-worker (C2)', () => {
       expect(typeof client.describe).toBe('function');
       expect(typeof client.open).toBe('function');
       expect(typeof client.initialize).toBe('function');
-      expect(client.renderTimeoutRecovery.kind).toBe('terminable');
+      expect(client.operationTimeoutRecovery.kind).toBe('terminable');
       expect(typeof client.resolveBinary).toBe('function');
       expect(typeof client.close).toBe('function');
       expect(client.closed).toBeInstanceOf(Promise);
@@ -832,7 +834,7 @@ describe('transport conformance — node-worker (C2)', () => {
           workerCtor: fake.workerCtor,
         }).materialize();
         await client.open();
-        const recovery = client.renderTimeoutRecovery;
+        const recovery = client.operationTimeoutRecovery;
         expect(recovery.kind).toBe('terminable');
         if (recovery.kind !== 'terminable') {
           throw new TypeError('Expected terminable Node Worker recovery');
@@ -841,7 +843,7 @@ describe('transport conformance — node-worker (C2)', () => {
         await recovery.terminate();
         await client.close();
 
-        await expect(client.closed).resolves.toEqual({ cause: 'render-timeout' });
+        await expect(client.closed).resolves.toEqual({ cause: 'operation-timeout' });
         expect(fake.terminateCalls()).toBe(1);
       } finally {
         fake.dispose();
@@ -873,7 +875,6 @@ describe('transport conformance — node-worker (C2)', () => {
     expect(host.id).toBe('node-worker');
     expect(typeof host.open).toBe('function');
     expect(typeof host.adoptInitialize).toBe('function');
-    expect(typeof host.encodeGeometry).toBe('function');
     expect(host.closed).toBeInstanceOf(Promise);
   });
 });
@@ -907,7 +908,7 @@ describe('transport conformance — web-socket (C2)', () => {
     expect(typeof client.describe).toBe('function');
     expect(typeof client.open).toBe('function');
     expect(typeof client.initialize).toBe('function');
-    expect(client.renderTimeoutRecovery.kind).toBe('terminable');
+    expect(client.operationTimeoutRecovery.kind).toBe('terminable');
     expect(typeof client.resolveBinary).toBe('function');
     expect(typeof client.close).toBe('function');
     expect(client.closed).toBeInstanceOf(Promise);
@@ -1151,7 +1152,9 @@ describe('transport conformance — shared transport internals (T37)', () => {
         async call() {
           throw new Error('T37 conformance issues no calls');
         },
-        notify() {},
+        notify() {
+          /* The conformance peer sends no notifications. */
+        },
         listen: () => {
           throw new Error('T37 conformance subscribes to nothing');
         },

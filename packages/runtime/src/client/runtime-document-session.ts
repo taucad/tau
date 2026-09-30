@@ -18,8 +18,8 @@ import type {
 } from '#client/runtime-document.types.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import { materialiseDocumentExport, materialiseRendering } from '#transport/_internal/document-materialiser.js';
-import type { BinaryContentDelivery } from '#types/runtime-protocol.types.js';
-import { abortReason } from '#types/runtime-protocol.types.js';
+import type { BinaryContentDelivery } from '#types/runtime-wire.types.js';
+import { abortReason } from '#types/runtime-wire.types.js';
 
 type OpenArgs = RuntimeDocumentProtocol['notifies']['open']['args'];
 type UpdateArgs = RuntimeDocumentProtocol['notifies']['update']['args'];

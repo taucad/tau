@@ -14,7 +14,7 @@ import {
   requestElectronRuntimePort,
 } from '#electron/renderer.js';
 import { protocolVersion } from '#types/protocol-header.types.js';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 
 const runtimeRelayTag = 'tau-runtime-port';
 const hostExitRelayTag = 'tau-runtime-host-exit';
@@ -226,18 +226,18 @@ describe('Electron renderer runtime helpers', () => {
     });
 
     const transport = options.transport.materialize();
-    if (transport.renderTimeoutRecovery.kind !== 'terminable') {
+    if (transport.operationTimeoutRecovery.kind !== 'terminable') {
       throw new Error('Expected terminable Electron transport');
     }
-    await transport.renderTimeoutRecovery.terminate();
+    await transport.operationTimeoutRecovery.terminate();
     const nextTransport = nextOptions.transport.materialize();
-    if (nextTransport.renderTimeoutRecovery.kind !== 'terminable') {
+    if (nextTransport.operationTimeoutRecovery.kind !== 'terminable') {
       throw new Error('Expected terminable Electron transport');
     }
-    await nextTransport.renderTimeoutRecovery.terminate();
+    await nextTransport.operationTimeoutRecovery.terminate();
     expect(bridge.releaseRuntimeHost.mock.calls).toEqual([
-      ['host-1', 'render-timeout'],
-      ['host-2', 'render-timeout'],
+      ['host-1', 'operation-timeout'],
+      ['host-2', 'operation-timeout'],
     ]);
   });
 
@@ -302,13 +302,13 @@ describe('Electron renderer runtime helpers', () => {
       }),
       removeEventListener: vi.fn(),
     } as unknown as Window;
-    let server: ChannelServerHandle<RuntimeProtocol> | undefined;
+    let server: ChannelServerHandle<RuntimeDocumentProtocol> | undefined;
     const bridge = {
       requestRuntimePort: vi.fn((requestId: string) => {
         listener?.(relayEvent({ taucadRelay: runtimeRelayTag, hostId: 'host-warm', requestId }, [port1]));
         /* A warm utility serves the moment main hands it the other leg, so its
          * hello is on the wire before the renderer has built the client. */
-        server = createChannelServer<RuntimeProtocol>({
+        server = createChannelServer<RuntimeDocumentProtocol>({
           port: wrapMessagePort<unknown>(port2, { label: 'warm-utility' }),
           sessionKey: 'tau.runtime/v1',
           hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion },

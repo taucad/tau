@@ -24,7 +24,7 @@ import type { MachineClient } from '#machines/machine-client.js';
 
 import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
-import type { BinaryContentDelivery, RuntimeInitializeResult } from '#types/runtime-protocol.types.js';
+import type { BinaryContentDelivery, RuntimeInitializeResult } from '#types/runtime-wire.types.js';
 import type {
   RuntimeInitializeMemoryHandle,
   RuntimeInitializePayload,
@@ -338,10 +338,10 @@ export const webSocketClient = (
     signalDocumentAbort() {
       return false;
     },
-    renderTimeoutRecovery: {
+    operationTimeoutRecovery: {
       kind: 'terminable',
       async terminate(): Promise<void> {
-        await finish({ cause: 'render-timeout' });
+        await finish({ cause: 'operation-timeout' });
       },
     },
     describe(): TransportDescriptor<WebSocketId> {

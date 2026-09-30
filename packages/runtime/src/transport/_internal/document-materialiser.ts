@@ -1,6 +1,6 @@
 import type { Rendering, ExportResult } from '#client/runtime-document.types.js';
 import type { WireRendering, WireExportResult } from '#types/runtime-document-protocol.types.js';
-import type { BinaryContentDelivery } from '#types/runtime-protocol.types.js';
+import type { BinaryContentDelivery } from '#types/runtime-wire.types.js';
 import { asKnownArtifact } from '#types/runtime-artifact.js';
 
 /** Decode a view and admit it only after asynchronous binary ownership is released. @internal */
@@ -31,18 +31,17 @@ export async function materialiseDocumentExport(
     return isCurrent() ? wire : undefined;
   }
   const [first, ...rest] = wire.files;
-  let firstError: Error | undefined;
-  const resolved: Uint8Array<ArrayBuffer>[] = [];
-  for (const file of wire.files) {
-    try {
-      resolved.push(await resolveBinary(file.bytes));
-    } catch (error) {
-      firstError ??= error instanceof Error ? error : new Error(String(error));
+  const deliveries = await Promise.allSettled(wire.files.map(async (file) => resolveBinary(file.bytes)));
+  const failed = deliveries.find((delivery) => delivery.status === 'rejected');
+  if (failed?.status === 'rejected') {
+    throw failed.reason instanceof Error ? failed.reason : new Error(String(failed.reason));
+  }
+  const resolved = deliveries.map((delivery) => {
+    if (delivery.status === 'rejected') {
+      throw new Error('Export payload was not materialised.');
     }
-  }
-  if (firstError) {
-    throw firstError;
-  }
+    return delivery.value;
+  });
   const firstBytes = resolved[0];
   if (!firstBytes) {
     throw new Error('Export payload was not materialised.');

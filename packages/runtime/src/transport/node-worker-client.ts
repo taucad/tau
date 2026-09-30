@@ -29,7 +29,7 @@ import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { materialiseBinaryContent } from '#transport/_internal/export-materialiser.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
-import type { BinaryContentDelivery, RuntimeInitializeResult } from '#types/runtime-protocol.types.js';
+import type { BinaryContentDelivery, RuntimeInitializeResult } from '#types/runtime-wire.types.js';
 import { allocatePools } from '#transport/_internal/sab-pools.js';
 import { signalDocumentAbort } from '#transport/_internal/abort-channel.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
@@ -270,10 +270,10 @@ export const nodeWorkerClient = (
     signalDocumentAbort(evaluationId, generation, reason) {
       return signalDocumentAbort(ensurePools().signalBuffer, evaluationId, generation, reason);
     },
-    renderTimeoutRecovery: {
+    operationTimeoutRecovery: {
       kind: 'terminable',
       async terminate(): Promise<void> {
-        await finish({ cause: 'render-timeout' });
+        await finish({ cause: 'operation-timeout' });
       },
     },
     describe(): TransportDescriptor<NodeWorkerId> {

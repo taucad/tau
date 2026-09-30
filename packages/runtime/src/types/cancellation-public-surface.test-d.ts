@@ -20,7 +20,7 @@ describe('public cancellation declarations', () => {
   });
 
   it('exposes terminable timeout recovery and typed transport closure', () => {
-    expectTypeOf<RuntimeTransportClient['renderTimeoutRecovery']>().toEqualTypeOf<RuntimeTransportTimeoutRecovery>();
+    expectTypeOf<RuntimeTransportClient['operationTimeoutRecovery']>().toEqualTypeOf<RuntimeTransportTimeoutRecovery>();
     expectTypeOf<RuntimeTransportClient['closed']>().toEqualTypeOf<Promise<RuntimeTransportCloseResult>>();
     type TerminableRecovery = Extract<RuntimeTransportTimeoutRecovery, { kind: 'terminable' }>;
     expectTypeOf<TerminableRecovery['terminate']>().toEqualTypeOf<() => Promise<void>>();

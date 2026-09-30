@@ -2,7 +2,7 @@ import type { RpcProtocol } from '@taucad/rpc';
 import type { z } from 'zod';
 import type { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
 import type { CadUnits } from '@taucad/types';
-import type { BinaryContentDelivery } from '#types/runtime-protocol.types.js';
+import type { BinaryContentDelivery } from '#types/runtime-wire.types.js';
 import type { ExportResult, Rendering } from '#client/runtime-document.types.js';
 
 /** A public artifact encoded for transport-owned binary delivery. @public */

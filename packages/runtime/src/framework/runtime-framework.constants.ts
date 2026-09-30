@@ -19,7 +19,7 @@ export const logFlushDebounce = 250;
 export const waitAsyncPollInterval = 16;
 
 /** Grace allowed for an isolated host to acknowledge render cancellation before termination. Milliseconds. */
-export const renderTimeoutRecoveryGrace = 1000;
+export const operationTimeoutRecoveryGrace = 1000;
 
 /** Default wall-clock deadline for one direct transcode. Milliseconds. */
 export const defaultTranscodeTimeout = 60_000;

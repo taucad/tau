@@ -92,11 +92,8 @@ describe('document wire', () => {
         artifact: { mimeType: 'model/gltf-binary', content: { delivery: 'inline', bytes: new Uint8Array([1]) } },
       },
       async (content) => {
-        const bytes = await client.resolveBinary?.(content);
+        const bytes = await client.resolveBinary(content);
         current = false;
-        if (!bytes) {
-          throw new Error('Transport lacks binary materialisation.');
-        }
         return bytes;
       },
       () => current,
@@ -122,11 +119,7 @@ describe('document wire', () => {
         ],
       },
       async (content) => {
-        const bytes = await client.resolveBinary?.(content);
-        if (!bytes) {
-          throw new Error('Transport lacks binary materialisation.');
-        }
-        return bytes;
+        return client.resolveBinary(content);
       },
       () => true,
     );

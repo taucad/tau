@@ -36,7 +36,7 @@ const stubClient = <Id extends string>(
     signalDocumentAbort() {
       return false;
     },
-    renderTimeoutRecovery: { kind: 'unsupported' },
+    operationTimeoutRecovery: { kind: 'unsupported' },
     async resolveBinary() {
       throw new Error('stub');
     },

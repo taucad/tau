@@ -8,9 +8,9 @@
  * - {@link RuntimeTransportClient} — consumer-facing handle. Owns SAB
  *   cancellation, binary pool, FS bridge, and timeout recovery.
  *   Exposes `open` / `initialize` / `resolveBinary` / `close` / `closed`.
- * - {@link RuntimeTransportHost} — fat kernel-host-facing handle. Owns wire
- *   encoding tiers. Exposes `open` / `adoptInitialize` / `encodeGeometry`
- *   / `close` / `closed`.
+ * - {@link RuntimeTransportHost} — kernel-host-facing handle. Owns wire
+ *   encoding tiers through initialize bindings and exposes `open` /
+ *   `adoptInitialize` / `close` / `closed`.
  *
  * The runtime core (`createRuntimeClient` + document session +
  * `createRuntimeHost` + dispatcher) calls these methods only. It never
@@ -21,17 +21,15 @@
  */
 
 import type { Channel, ChannelServerHandle, RpcProtocol } from '@taucad/rpc';
-import type { Geometry } from '@taucad/types';
 import type { MachineClient } from '#machines/machine-client.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type {
-  GeometryGltfTransport,
   BinaryContentDelivery,
   InitializeMemoryHandle,
   RuntimeInitializeArgs,
   RuntimeInitializeResult,
-} from '#types/runtime-protocol.types.js';
+} from '#types/runtime-wire.types.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 
 /**
@@ -49,7 +47,7 @@ export type RuntimeTransportTimeoutRecovery =
       readonly kind: 'terminable';
       /**
        * Terminate this client's isolated host and settle `closed` as
-       * `{ cause: 'render-timeout' }`.
+       * `{ cause: 'operation-timeout' }`.
        *
        * @returns A promise that resolves after host termination is requested.
        */
@@ -68,7 +66,7 @@ export type RuntimeTransportTimeoutRecovery =
  */
 export type RuntimeTransportCloseResult =
   | { readonly cause: 'requested' }
-  | { readonly cause: 'render-timeout' }
+  | { readonly cause: 'operation-timeout' }
   | {
       readonly cause: 'host-exit';
       /**
@@ -162,21 +160,6 @@ export type RuntimeInitializeMemoryHandle = InitializeMemoryHandle;
  * Encoded delivery descriptors                                  *
  * ============================================================ */
 
-/**
- * Result of {@link RuntimeTransportHost.encodeGeometry}. The host
- * transport picks the fastest delivery tier its wire allows
- * (`pool` > `transfer` > `copy`); the dispatcher publishes the
- * returned descriptor over the channel; the transport supplies the
- * matching transferables list at the wire layer.
- *
- * @public
- */
-export type EncodedGeometry = {
-  readonly value: GeometryGltfTransport | unknown;
-  readonly transferables: readonly Transferable[];
-  readonly tier: 'pool' | 'transfer' | 'copy';
-};
-
 /** Transport-owned binary-delivery descriptor and wire transfer list. @public */
 export type EncodedBinary = {
   readonly value: BinaryContentDelivery;
@@ -189,15 +172,13 @@ export type EncodedBinary = {
  * ============================================================ */
 
 /**
- * Geometry-delivery binding produced by the host transport. The
- * dispatcher hands a `Geometry` to `publish()` and receives the
- * matching {@link EncodedGeometry} the wire layer should send.
+ * Binary-delivery binding produced by the host transport. The
+ * dispatcher encodes render and export bytes through the same pool.
  *
  * @public
  */
-export type HostGeometryDeliveryBinding = {
+export type HostBinaryDeliveryBinding = {
   readonly tier: 'pool' | 'transfer' | 'copy';
-  publish(geometry: Geometry): EncodedGeometry;
   publishBytes(key: string, bytes: Uint8Array<ArrayBuffer>): EncodedBinary;
   acknowledge(key: string): void;
 };
@@ -215,7 +196,7 @@ export type HostGeometryDeliveryBinding = {
  * @public
  */
 export type HostInitializeBindingsCore = {
-  readonly geometryDelivery: HostGeometryDeliveryBinding;
+  readonly binaryDelivery: HostBinaryDeliveryBinding;
 };
 
 /**
@@ -294,7 +275,7 @@ export type RuntimeTransportClient<
    * Behavioral timeout recovery. Runtime code uses this union directly and
    * never infers enforceability from the diagnostic descriptor.
    */
-  readonly renderTimeoutRecovery: RuntimeTransportTimeoutRecovery;
+  readonly operationTimeoutRecovery: RuntimeTransportTimeoutRecovery;
 
   /**
    * Phantom carrier so RuntimeClient can project BindingsExtra.
@@ -373,12 +354,6 @@ export type RuntimeTransportHost<
    * returned {@link HostInitializeBindings}.
    */
   adoptInitialize(handle: RuntimeInitializeMemoryHandle): HostInitializeBindings<BindingsExtra>;
-
-  /**
-   * Encode a kernel geometry for transmission. The host transport
-   * picks the fastest delivery tier its wire allows.
-   */
-  encodeGeometry(geometry: Geometry): EncodedGeometry;
 
   close(reason?: string): Promise<void>;
 };

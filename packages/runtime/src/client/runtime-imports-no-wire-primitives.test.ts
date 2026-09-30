@@ -29,7 +29,7 @@ const transportPublicSurfaceFiles = [
 ];
 
 // `Transferable[]` is intentional on the host-binding contract
-// (`HostGeometryDeliveryBinding.encode -> { transferables }`) — that
+// (`HostBinaryDeliveryBinding.publishBytes -> { transferables }`) — that
 // is the transport <-> dispatcher protocol, not the consumer-facing
 // client surface. The sentinel polices the consumer wire primitives
 // only: raw `MessagePort` (bridge port), `SharedArrayBuffer` (caller

@@ -139,13 +139,28 @@ const rendering = z.discriminatedUnion('success', [
     .strip(),
 ]);
 const exportFile = z.object({ name: id, mimeType: mediaType, bytes: binary }).strip();
+const exportFiles = z
+  .tuple([exportFile], exportFile)
+  .readonly()
+  .superRefine((files, context) => {
+    for (const issue of validateArtifactPaths(files)) {
+      context.addIssue({
+        code: 'custom',
+        path: [issue.index, 'name'],
+        message:
+          issue.reason === 'duplicate-path'
+            ? 'Artifact path duplicates an earlier file.'
+            : 'Expected a safe relative artifact path.',
+      });
+    }
+  });
 const exportResult = z.discriminatedUnion('success', [
   z
     .object({
       success: z.literal(true),
       exportId: id,
       evaluationId: id,
-      files: z.tuple([exportFile], exportFile).readonly(),
+      files: exportFiles,
       issues,
       ...provenance,
     })

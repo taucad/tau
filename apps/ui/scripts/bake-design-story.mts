@@ -38,9 +38,14 @@ const main = async () => {
   try {
     await client.connect();
     for (const parameters of [{ module: 0 }, { backlash: 0 }, { gearWidth: 0 }, { part: 'unknown' }]) {
-      const invalid = await client.export('glb', { source: { path: 'main.js' }, parameters });
-      if (invalid.success) {
-        throw new Error(`Invalid parameters were accepted: ${JSON.stringify(parameters)}`);
+      const document = client.open({ source: { path: 'main.js' }, parameters, watch: false });
+      try {
+        const invalid = await document.export('glb');
+        if (invalid.success) {
+          throw new Error(`Invalid parameters were accepted: ${JSON.stringify(parameters)}`);
+        }
+      } finally {
+        document.close();
       }
     }
     const loader = createModelLoader({ runtime: client, projectPath: sourcePath });
@@ -75,15 +80,19 @@ const main = async () => {
         throw new Error(`Geometry qualification failed; see ${reportPath}/geospec-${module}.json`);
       }
       const start = performance.now();
-      const exported = await client.export('glb', {
-        source: { path: 'main.js' },
-        parameters: { module },
-        exportOptions: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
-      });
-      if (!exported.success || !exported.data[0]) {
-        throw new Error(`Export failed: ${JSON.stringify(exported)}`);
+      const document = client.open({ source: { path: 'main.js' }, parameters: { module }, watch: false });
+      let geometry: Uint8Array<ArrayBuffer>;
+      try {
+        const exported = await document.export('glb', {
+          options: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+        });
+        if (!exported.success) {
+          throw new Error(`Export failed: ${JSON.stringify(exported)}`);
+        }
+        geometry = exported.files[0].bytes;
+      } finally {
+        document.close();
       }
-      const geometry = exported.data[0].bytes;
       const filename = module === 3 ? 'planetary.glb' : 'planetary-oversized.glb';
       await writeFile(resolve(assetPath, filename), geometry);
       const gltf = await new GLTFLoader().parseAsync(new Uint8Array(geometry).buffer, '');
@@ -155,7 +164,7 @@ const main = async () => {
     );
     console.log('Hero geometry and evidence baked successfully');
   } finally {
-    client.terminate();
+    await client.shutdown();
   }
 };
 
@@ -188,40 +197,41 @@ const benchmark = async (referencePath: string) => {
           },
         };
         const start = performance.now();
-        const evaluated = await client.evaluate({
-          ...input,
-          renderOptions: kernel === 'replicad' ? { tessellation: { linearTolerance: 0.05, angularTolerance: 10 } } : {},
-        });
-        if (!evaluated.success) {
-          throw new Error(JSON.stringify(evaluated));
+        const document = client.open({ ...input, watch: false });
+        try {
+          const evaluated = await document.evaluation();
+          if (evaluated.superseded || !evaluated.evaluation.success) {
+            throw new Error(JSON.stringify(evaluated));
+          }
+          const evaluationDuration = performance.now() - start;
+          const exportStart = performance.now();
+          const result = await document.export('glb', {
+            options: {
+              coordinateSystem: 'z-up',
+              unit: { length: 'millimeter' },
+              ...(kernel === 'replicad' ? { tessellation: { linearTolerance: 0.05, angularTolerance: 10 } } : {}),
+            },
+          });
+          if (!result.success) {
+            throw new Error(JSON.stringify(result));
+          }
+          const entry = {
+            kernel,
+            trial,
+            backlash,
+            initializationDuration,
+            evaluationDuration,
+            exportDuration: performance.now() - exportStart,
+            bytes: result.files[0].bytes.length,
+          };
+          results.push(entry);
+          console.log(JSON.stringify(entry));
+        } finally {
+          document.close();
         }
-        const evaluationDuration = performance.now() - start;
-        const exportStart = performance.now();
-        const result = await client.export('glb', {
-          ...input,
-          exportOptions: {
-            coordinateSystem: 'z-up',
-            unit: { length: 'millimeter' },
-            ...(kernel === 'replicad' ? { tessellation: { linearTolerance: 0.05, angularTolerance: 10 } } : {}),
-          },
-        });
-        if (!result.success) {
-          throw new Error(JSON.stringify(result));
-        }
-        const entry = {
-          kernel,
-          trial,
-          backlash,
-          initializationDuration,
-          evaluationDuration,
-          exportDuration: performance.now() - exportStart,
-          bytes: result.data[0]?.bytes.length,
-        };
-        results.push(entry);
-        console.log(JSON.stringify(entry));
       }
     } finally {
-      client.terminate();
+      await client.shutdown();
     }
   }
   await writeFile(

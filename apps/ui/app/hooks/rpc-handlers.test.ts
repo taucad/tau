@@ -329,6 +329,23 @@ describe('rpc-handlers', () => {
       fileSystem = deps.fileSystem;
     });
 
+    it('reads owned exact binary bytes without text decoding', async () => {
+      const bytes = new Uint8Array([0, 255, 239, 187, 191]);
+      mockFm.readFile.mockResolvedValue(bytes);
+      const result = await fileSystem.readBinaryFile('part.glb');
+      expect(result).toEqual(bytes);
+      result[0] = 42;
+      expect(bytes[0]).toBe(0);
+    });
+
+    it('rejects foreign paths and oversized binary reads before reading content', async () => {
+      await expect(fileSystem.readBinaryFile('../foreign.glb')).rejects.toThrow();
+      expect(mockFm.stat).not.toHaveBeenCalled();
+      mockFm.stat.mockResolvedValue(textFileStat(256 * 1024 * 1024 + 1));
+      await expect(fileSystem.readBinaryFile('part.glb')).rejects.toMatchObject({ code: 'RESULT_TOO_LARGE' });
+      expect(mockFm.readFile).not.toHaveBeenCalled();
+    });
+
     it('routes checked mutations through the owning live root', async () => {
       mockFm.workbenchFiles.writeFileChecked.mockResolvedValue({ status: 'applied', content: new Uint8Array([1]) });
       mockFm.workbenchFiles.deleteFileChecked.mockResolvedValue({ status: 'applied', content: new Uint8Array() });

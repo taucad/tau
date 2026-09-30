@@ -65,6 +65,24 @@ beforeEach(async () => {
 });
 
 describe('createProviderRpcFileSystem', () => {
+  it('should expose an exact owned byte reader through the existing rooted view', async () => {
+    const original = Uint8Array.from([0, 255, 239, 187, 191]);
+    await provider.writeFile('part.glb', original);
+    const read = await fileSystemFor().readBinaryFile('part.glb');
+    expect(read).toEqual(original);
+    read[1] = 0;
+    expect(await provider.readFile('part.glb')).toEqual(original);
+    await expect(fileSystemFor().readBinaryFile('../foreign.glb')).rejects.toThrow();
+  });
+
+  it('should refuse oversized byte reads before asking the provider for content', async () => {
+    await provider.writeFile('part.glb', Uint8Array.from([0, 255]));
+    const metadata = await provider.stat('part.glb');
+    vi.spyOn(provider, 'stat').mockResolvedValue({ ...metadata, size: 256 * 1024 * 1024 + 1 });
+    const read = vi.spyOn(provider, 'readFile');
+    await expect(fileSystemFor().readBinaryFile('part.glb')).rejects.toMatchObject({ code: 'RESULT_TOO_LARGE' });
+    expect(read).not.toHaveBeenCalled();
+  });
   it('reads and writes text through the provider', async () => {
     const fileSystem = fileSystemFor();
 

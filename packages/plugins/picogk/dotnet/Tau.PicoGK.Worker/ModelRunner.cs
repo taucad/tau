@@ -203,11 +203,14 @@ internal static class ModelRunner
 
     internal static float[] VertexNormals(ref float[] positions, ref uint[] indices, out int[] sources)
     {
-        var sourceVertices = Enumerable.Range(0, positions.Length / 3).ToList();
+        var vertexCount = positions.Length / 3;
         var creaseCosine = MathF.Cos(MathF.PI / 6);
         var faces = new Vector3[indices.Length / 3];
         var directions = new Vector3[faces.Length];
-        var incident = new List<int>?[positions.Length / 3];
+        var edges = new ulong[indices.Length];
+        var corners = new int[indices.Length];
+        var parents = new int[indices.Length];
+        Array.Fill(parents, -1);
         for (var triangle = 0; triangle < indices.Length; triangle += 3)
         {
             var a = checked((int)indices[triangle]) * 3;
@@ -219,70 +222,129 @@ internal static class ModelRunner
             faces[triangle / 3] = face;
             directions[triangle / 3] = face.LengthSquared() > 0 ? Vector3.Normalize(face) : Vector3.Zero;
             for (var corner = triangle; corner < triangle + 3; corner++)
-                (incident[indices[corner]] ??= []).Add(corner);
+            {
+                var first = indices[corner];
+                var second = indices[NextCorner(corner)];
+                edges[corner] = first == second ? ulong.MaxValue : ((ulong)Math.Min(first, second) << 32) | Math.Max(first, second);
+                corners[corner] = corner;
+            }
         }
 
-        var remapped = new uint[indices.Length];
-        var visited = new bool[indices.Length];
-        var expanded = new List<float>(positions);
-        var sums = new List<Vector3>(new Vector3[incident.Length]);
-        var fan = new List<int>();
-        for (var vertex = 0; vertex < incident.Length; vertex++)
+        // Compact edge adjacency: O(T log T) sorting, with no scan of a vertex's entire fan.
+        Array.Sort(edges, corners);
+        for (var start = 0; start < edges.Length;)
         {
-            var first = true;
-            foreach (var seed in incident[vertex] ?? [])
+            var end = start + 1;
+            while (end < edges.Length && edges[end] == edges[start]) end++;
+            // Boundary, collapsed and nonmanifold edges are shading boundaries. In particular,
+            // do not join an arbitrary pair before discovering a third incident triangle.
+            if (end - start == 2 && edges[start] != ulong.MaxValue)
             {
-                if (visited[seed]) continue;
-                var target = vertex;
-                if (!first)
+                var first = corners[start];
+                var second = corners[start + 1];
+                if (Vector3.Dot(directions[first / 3], directions[second / 3]) >= creaseCosine)
                 {
-                    target = sums.Count;
-                    expanded.Add(positions[vertex * 3]);
-                    expanded.Add(positions[vertex * 3 + 1]);
-                    expanded.Add(positions[vertex * 3 + 2]);
-                    sums.Add(Vector3.Zero);
-                    sourceVertices.Add(vertex);
-                }
-                first = false;
-                fan.Clear();
-                fan.Add(seed);
-                visited[seed] = true;
-                // ponytail: quadratic in vertex valence, normally ~6; use an edge map if unusually dense fans dominate.
-                for (var next = 0; next < fan.Count; next++)
-                {
-                    var corner = fan[next];
-                    remapped[corner] = checked((uint)target);
-                    sums[target] += faces[corner / 3];
-                    var triangle = corner / 3 * 3;
-                    var edgeA = indices[triangle + (corner + 1) % 3];
-                    var edgeB = indices[triangle + (corner + 2) % 3];
-                    foreach (var candidate in incident[vertex]!)
+                    var firstEnd = NextCorner(first);
+                    var secondEnd = NextCorner(second);
+                    if (indices[first] == indices[second])
                     {
-                        if (visited[candidate] || Vector3.Dot(directions[corner / 3], directions[candidate / 3]) < creaseCosine) continue;
-                        var other = candidate / 3 * 3;
-                        var otherA = indices[other + (candidate + 1) % 3];
-                        var otherB = indices[other + (candidate + 2) % 3];
-                        // Sharing only a point does not make disconnected surfaces a smooth fan.
-                        if (edgeA != otherA && edgeA != otherB && edgeB != otherA && edgeB != otherB) continue;
-                        visited[candidate] = true;
-                        fan.Add(candidate);
+                        Join(first, second);
+                        Join(firstEnd, secondEnd);
+                    }
+                    else
+                    {
+                        Join(first, secondEnd);
+                        Join(firstEnd, second);
                     }
                 }
             }
+            start = end;
         }
-        sources = sourceVertices.ToArray();
-        positions = expanded.ToArray();
+
+        // Reuse the sorted corner buffer as root -> render vertex storage.
+        Array.Fill(corners, -1);
+        var used = new bool[vertexCount];
+        var duplicates = new List<int>();
+        var remapped = new uint[indices.Length];
+        for (var corner = 0; corner < indices.Length; corner++)
+        {
+            var root = Find(corner);
+            if (corners[root] < 0)
+            {
+                var source = checked((int)indices[corner]);
+                if (!used[source])
+                {
+                    corners[root] = source;
+                    used[source] = true;
+                }
+                else
+                {
+                    corners[root] = checked(vertexCount + duplicates.Count);
+                    duplicates.Add(source);
+                }
+            }
+            remapped[corner] = checked((uint)corners[root]);
+        }
+        sources = new int[checked(vertexCount + duplicates.Count)];
+        for (var vertex = 0; vertex < vertexCount; vertex++) sources[vertex] = vertex;
+        if (duplicates.Count > 0)
+        {
+            var expanded = new float[checked(sources.Length * 3)];
+            positions.CopyTo(expanded, 0);
+            for (var duplicate = 0; duplicate < duplicates.Count; duplicate++)
+            {
+                var target = vertexCount + duplicate;
+                var source = duplicates[duplicate];
+                sources[target] = source;
+                Array.Copy(positions, source * 3, expanded, target * 3, 3);
+            }
+            positions = expanded;
+        }
         indices = remapped;
         var normals = new float[positions.Length];
-        for (var vertex = 0; vertex < sums.Count; vertex++)
+        for (var corner = 0; corner < indices.Length; corner++)
         {
-            var normal = Vector3.Normalize(sums[vertex]);
+            var offset = checked((int)indices[corner]) * 3;
+            var face = faces[corner / 3];
+            normals[offset] += face.X;
+            normals[offset + 1] += face.Y;
+            normals[offset + 2] += face.Z;
+        }
+        for (var vertex = 0; vertex < sources.Length; vertex++)
+        {
+            var offset = vertex * 3;
+            var normal = Vector3.Normalize(new Vector3(normals[offset], normals[offset + 1], normals[offset + 2]));
             if (!float.IsFinite(normal.X)) normal = Vector3.UnitZ;
-            normals[vertex * 3] = normal.X;
-            normals[vertex * 3 + 1] = normal.Y;
-            normals[vertex * 3 + 2] = normal.Z;
+            normals[offset] = normal.X;
+            normals[offset + 1] = normal.Y;
+            normals[offset + 2] = normal.Z;
         }
         return normals;
+
+        static int NextCorner(int corner) => corner / 3 * 3 + (corner + 1) % 3;
+
+        int Find(int corner)
+        {
+            var root = corner;
+            while (parents[root] >= 0) root = parents[root];
+            while (corner != root)
+            {
+                var next = parents[corner];
+                parents[corner] = root;
+                corner = next;
+            }
+            return root;
+        }
+
+        void Join(int first, int second)
+        {
+            first = Find(first);
+            second = Find(second);
+            if (first == second) return;
+            if (parents[first] > parents[second]) (first, second) = (second, first);
+            parents[first] += parents[second];
+            parents[second] = first;
+        }
     }
 
     private static WorkerException RuntimeError(string message) =>

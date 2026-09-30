@@ -144,6 +144,85 @@ const chooseUsdzAndDownload = async (
   await expectUsdzDownload(path, options.expectTexture ?? false);
 };
 
+test('[completed-artifact] should fullscreen the viewer with settings and restore its existing canvas', async () => {
+  session = await launchDesktopApp({ packaged: true, token: 'fullscreen-package-probe' });
+  const { page, application } = session;
+  await openRoute(page, '/convert');
+  const input = page.locator('input[type="file"]').first();
+  await expect.poll(async () => input.isEnabled(), { timeout: 120_000 }).toBe(true);
+  await input.setInputFiles(glbFixture);
+  const viewer = page.locator('[data-viewer-frame]');
+  await viewer.locator('canvas').first().waitFor({ state: 'visible' });
+  const canvas = await viewer.locator('canvas').first().elementHandle();
+  expect(canvas).not.toBeNull();
+  const originalSize = await viewer.boundingBox();
+  // The suite normally hides its windows; native fullscreen must exercise a visible window.
+  await application.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]!;
+    window.show();
+    window.focus();
+  });
+  const nativeFullscreen = async (): Promise<boolean> =>
+    application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isFullScreen());
+  // On macOS isFullScreen updates before its transition completes; await the native event before interacting again.
+  const fullscreenTransition = async (event: 'enter-full-screen' | 'leave-full-screen'): Promise<void> =>
+    application.evaluate(
+      async ({ BrowserWindow }, transition) =>
+        new Promise<void>((resolve) => {
+          const window = BrowserWindow.getAllWindows()[0]!;
+          if (transition === 'enter-full-screen') {
+            window.once('enter-full-screen', resolve);
+          } else {
+            window.once('leave-full-screen', resolve);
+          }
+        }),
+      event,
+    );
+
+  let transition = fullscreenTransition('enter-full-screen');
+  await page.getByRole('button', { name: 'Enter fullscreen', exact: true }).click();
+  await transition;
+  await expect.poll(nativeFullscreen, { timeout: 15_000 }).toBe(true);
+  expect(await viewer.evaluate((element) => document.fullscreenElement === element)).toBe(true);
+  expect(
+    await viewer.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.width === window.innerWidth && bounds.height === window.innerHeight;
+    }),
+  ).toBe(true);
+  expect(await canvas.evaluate((element) => element.isConnected && element === document.querySelector('canvas'))).toBe(
+    true,
+  );
+
+  transition = fullscreenTransition('leave-full-screen');
+  await page.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
+  await transition;
+  await expect.poll(nativeFullscreen, { timeout: 15_000 }).toBe(false);
+  expect(await page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+  await expect.poll(async () => viewer.boundingBox(), { timeout: 15_000 }).toEqual(originalSize);
+
+  transition = fullscreenTransition('enter-full-screen');
+  await page.getByRole('button', { name: 'Enter fullscreen', exact: true }).click();
+  await transition;
+  await expect.poll(nativeFullscreen, { timeout: 15_000 }).toBe(true);
+  await page.getByRole('button', { name: 'Viewer settings', exact: true }).click();
+  const menu = page.getByRole('menu');
+  await menu.waitFor({ state: 'visible' });
+  expect(await menu.evaluate((element) => document.fullscreenElement?.contains(element))).toBe(true);
+  await page.screenshot({ path: join(workspaceRoot, 'out/test-results/desktop-e2e/viewer-fullscreen.png') });
+  await page.keyboard.press('Escape');
+  await menu.waitFor({ state: 'hidden' });
+  transition = fullscreenTransition('leave-full-screen');
+  await page.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
+  await transition;
+  await expect.poll(nativeFullscreen, { timeout: 15_000 }).toBe(false);
+  expect(await page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+  expect(await canvas.evaluate((element) => element.isConnected && element === document.querySelector('canvas'))).toBe(
+    true,
+  );
+  await expect.poll(async () => viewer.boundingBox(), { timeout: 15_000 }).toEqual(originalSize);
+});
+
 test('[completed-artifact] converts GLB, OBJ sidecars, and STEP to USDZ without persisting scratch projects', async () => {
   session = await launchDesktopApp({
     packaged: true,

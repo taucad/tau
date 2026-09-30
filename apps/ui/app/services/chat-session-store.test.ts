@@ -415,6 +415,44 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     store.release(chatId);
   });
 
+  it('should prepare the latest transcript when another projection supersedes an in-flight handoff', async () => {
+    const store = createStore();
+    const session = store.acquire('chat_handoff', 'project_handoff');
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    publishLogRows(store, session.chatId, [
+      lifecycleRow(0, 'admitted'),
+      logRow(1, { type: 'message.appended', message: { id: 'old-message', role: 'user', content: 'Original' } }),
+      lifecycleRow(2, 'completed'),
+    ]);
+    const prepared = store.preparePresentation(session.chatId, new AbortController().signal);
+    const alsoPrepared = store.preparePresentation(session.chatId, new AbortController().signal);
+    // Both readers enter the existing materialization before the next projection supersedes it.
+    await Promise.resolve();
+    publishLogRows(
+      store,
+      session.chatId,
+      [
+        lifecycleRow(3, 'admitted', 'run_2'),
+        logRow(4, {
+          runId: 'run_2',
+          type: 'message.appended',
+          message: { id: 'new-message', role: 'user', content: 'Updated' },
+        }),
+        lifecycleRow(5, 'completed', 'run_2'),
+      ],
+      3,
+    );
+    await Promise.all([prepared, alsoPrepared]);
+    expect(session.chat.messages.filter((message) => message.role === 'user').map((message) => message.id)).toEqual([
+      'old-message',
+      'new-message',
+    ]);
+    store.release(session.chatId);
+    expect(store.get(session.chatId)).toBeUndefined();
+  });
+
   it('materializes a reopened completed chat from a foreign segment and refreshes changed bytes', async () => {
     const projectId = 'project_remote_transcript';
     const chatId = 'chat_remote_transcript';

@@ -110,7 +110,7 @@ const main = async (): Promise<void> => {
   environment['DOTNET_MULTILEVEL_LOOKUP'] = '0';
   environment['DOTNET_NOLOGO'] = '1';
   environment['DOTNET_ROOT'] = dotnetRoot;
-  environment['DYLD_LIBRARY_PATH'] = resolve(picoGkRoot, 'native/osx-arm64');
+  environment['DYLD_LIBRARY_PATH'] = resolve(workspaceRoot, 'apps/desktop/resources/picogk/darwin-arm64');
   environment['NUGET_PACKAGES'] = resolve(cacheRoot, 'nuget-packages');
   environment['TAU_PICOGK_COMPATIBILITY_FIXTURE'] = resolve(
     workspaceRoot,

@@ -24,7 +24,7 @@ export type ParameterSelectGroup = Readonly<{
 }>;
 
 export const parameterSelectTriggerClass =
-  'h-(--param-field-h) min-w-0 flex-1 rounded-(--param-field-radius) border-border/50 bg-muted text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)';
+  'min-w-0 flex-1 border-border/50 bg-muted text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)';
 
 /** The Parameters select presentation, shared by schema fields and print setup. */
 export function ParameterSelect({
@@ -51,7 +51,7 @@ export function ParameterSelect({
   readonly onBlur?: () => void;
 }): React.JSX.Element {
   const item = (option: ParameterSelectOption): React.JSX.Element => (
-    <SelectItem key={option.value} value={option.value} disabled={option.disabled} className='h-7'>
+    <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
       <span className='flex min-w-0 items-center gap-1.5'>
         {option.swatch === undefined ? null : (
           <MaterialSwatch materials={[{ color: option.swatch, roughness: 0.35, metalness: 0 }]} />
@@ -64,11 +64,10 @@ export function ParameterSelect({
     </SelectItem>
   );
   return (
-    <Select value={value} disabled={isDisabled} onValueChange={onChange}>
+    <Select size='sm' value={value} disabled={isDisabled} onValueChange={onChange}>
       <SelectTrigger
         id={id}
         autoFocus={shouldAutoFocus}
-        size='sm'
         aria-label={label}
         className={parameterSelectTriggerClass}
         onFocus={onFocus}
@@ -81,7 +80,7 @@ export function ParameterSelect({
           group.label === undefined ? (
             group.options.map(item)
           ) : (
-            <SelectGroup key={`${group.label}-${String(index)}`} className='gap-0 p-0'>
+            <SelectGroup key={`${group.label}-${String(index)}`} className='gap-0'>
               <SelectLabel>{group.label}</SelectLabel>
               {group.options.map(item)}
             </SelectGroup>

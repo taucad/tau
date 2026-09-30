@@ -62,7 +62,7 @@ import {
   getKinematicsStructure,
 } from '#utils/kinematics-structure.utils.js';
 import type { KinematicsStructure } from '#utils/kinematics-structure.utils.js';
-import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import { WorkspaceLanesContext } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 type GraphicsRef = ActorRefFrom<typeof graphicsMachine>;
@@ -1362,7 +1362,7 @@ function KinematicsContent({
   readonly isShown: boolean;
   readonly reveal: KinematicsReveal | undefined;
 }): React.JSX.Element {
-  const { geometryUnits, mainEntryPath, viewGraphics, viewRecords, projectRef } = useProject();
+  const { geometryUnits, mainEntryPath, viewGraphics, viewRecords, viewEntryPaths, projectRef } = useProject();
   const entryPaths = useMemo(
     () => listGeometryEntryPaths(geometryUnits, viewRecords, mainEntryPath),
     [geometryUnits, mainEntryPath, viewRecords],
@@ -1386,10 +1386,10 @@ function KinematicsContent({
   const entries = useMemo(
     () =>
       entryPaths.map((entryPath): KinematicsEntry => {
-        const graphicsRef = [...viewGraphics].find(([viewId]) => viewRecords.get(viewId)?.entryPath === entryPath)?.[1];
+        const graphicsRef = findEntryGraphics(viewGraphics, viewEntryPaths, entryPath);
         return [entryPath, geometryUnits.get(entryPath), graphicsRef];
       }),
-    [entryPaths, geometryUnits, viewGraphics, viewRecords],
+    [entryPaths, geometryUnits, viewGraphics, viewEntryPaths],
   );
 
   if (entries.length === 0) {

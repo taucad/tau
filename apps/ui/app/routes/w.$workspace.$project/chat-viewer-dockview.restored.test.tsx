@@ -8,6 +8,9 @@ const fixture = vi.hoisted(() => ({
   projectSend: vi.fn(),
   nextProjectSend: vi.fn(),
   editorSend: vi.fn(),
+  setViewEntryPath: vi.fn(),
+  mainEntryPath: 'main.ts',
+  emptyMain: false,
   revealSecondary: () => undefined,
   hideSecondary: () => undefined,
   switchProject: () => undefined,
@@ -39,7 +42,12 @@ vi.mock('#hooks/use-project.js', () => {
       send: fixture.editorSend,
       getSnapshot: () => fixture.editorSnapshot,
     },
-    mainEntryPath: 'main.ts',
+    get mainEntryPath() {
+      return fixture.mainEntryPath;
+    },
+    viewRecords: new Map(),
+    setViewEntryPath: fixture.setViewEntryPath,
+    entriesRecord: undefined,
     geometryUnits: new Map(),
   };
   fixture.switchProject = () => {
@@ -50,6 +58,10 @@ vi.mock('#hooks/use-project.js', () => {
   };
   return { useProject: () => project };
 });
+
+vi.mock('#workbench-records/view-actions.js', () => ({
+  useWorkbenchViewCommands: () => ({ edit: vi.fn(async () => true), remove: vi.fn(async () => true) }),
+}));
 
 vi.mock('#routes/w.$workspace.$project/chat-viewer.js', () => ({
   ChatViewer: ({ entryPath }: { entryPath: string }) => <div data-testid={`content:${entryPath}`} />,
@@ -68,8 +80,15 @@ vi.mock('#components/panes/dockview.js', () => ({
       const visibilityListeners = new Set<() => void>();
       const main = {
         id: 'main-view',
-        params: { viewId: 'main-view', entryPath: 'main.ts' },
-        api: { isVisible: true, onDidVisibilityChange: () => ({ dispose: () => undefined }) },
+        params: { viewId: 'main-view', entryPath: fixture.emptyMain ? undefined : 'main.ts' },
+        api: {
+          isVisible: true,
+          setTitle: vi.fn(),
+          updateParameters: (next: { entryPath: string }) => {
+            Object.assign(main.params, next);
+          },
+          onDidVisibilityChange: () => ({ dispose: () => undefined }),
+        },
       };
       const secondary = {
         id: 'secondary-view',
@@ -82,7 +101,7 @@ vi.mock('#components/panes/dockview.js', () => ({
           },
         },
       };
-      const panels: Array<typeof main | typeof secondary> = [];
+      const panels: Array<typeof main | typeof secondary> = [main, secondary];
       fixture.revealSecondary = () => {
         secondary.api.isVisible = true;
         for (const listener of visibilityListeners) {
@@ -101,10 +120,6 @@ vi.mock('#components/panes/dockview.js', () => ({
       return {
         panels,
         groups: [{}],
-        fromJSON: () => {
-          panels.push(main, secondary);
-          refresh((value) => value + 1);
-        },
         onDidLayoutChange: subscribe,
         onDidActivePanelChange: subscribe,
         onDidAddPanel: subscribe,
@@ -115,7 +130,8 @@ vi.mock('#components/panes/dockview.js', () => ({
     });
     useEffect(() => {
       onReady({ api } as DockviewReadyEvent);
-    }, [api, onReady]);
+      // oxlint-disable-next-line react-hooks/exhaustive-deps -- Dockview emits ready once per mounted API.
+    }, [api]);
     return createElement(
       'div',
       undefined,
@@ -138,6 +154,19 @@ describe('restored viewer layout admission', () => {
     fixture.projectSend.mockClear();
     fixture.nextProjectSend.mockClear();
     fixture.editorSend.mockClear();
+    fixture.setViewEntryPath.mockClear();
+    fixture.mainEntryPath = 'main.ts';
+    fixture.emptyMain = false;
+  });
+
+  it('should publish the resolved main entry when a viewer starts before its manifest', () => {
+    fixture.mainEntryPath = '';
+    fixture.emptyMain = true;
+    const view = render(<ViewerDockview />);
+    fixture.setViewEntryPath.mockClear();
+    fixture.mainEntryPath = 'main.ts';
+    view.rerender(<ViewerDockview profile='shared' />);
+    expect(fixture.setViewEntryPath).toHaveBeenCalledWith('main-view', 'main.ts');
   });
 
   it('admits main immediately and defers a distinct hidden entry until reveal', () => {

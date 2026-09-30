@@ -223,13 +223,15 @@ export const ChatViewer = memo(function ({
       }
       graphicsActor?.send({ type: 'cancelCurrentMeasurement' });
 
-      void viewCommands.edit(viewId, (current) => ({
-        ...(current ?? newViewRecord(path)),
-        entryPath: path,
-        camera: { kind: 'preset', preset: 'isometric' },
-        section: { active: false, cuts: [] },
-        measurements: [],
-      }));
+      if (profile === 'editor') {
+        void viewCommands.edit(viewId, (current) => ({
+          ...(current ?? newViewRecord(path)),
+          entryPath: path,
+          camera: { kind: 'preset', preset: 'isometric' },
+          section: { active: false, cuts: [] },
+          measurements: [],
+        }));
+      }
       setViewEntryPath(viewId, path);
 
       // Update Dockview panel params so the component re-renders with new entryPath
@@ -248,6 +250,7 @@ export const ChatViewer = memo(function ({
       setViewEntryPath,
       viewCommands,
       viewRecord,
+      profile,
     ],
   );
 

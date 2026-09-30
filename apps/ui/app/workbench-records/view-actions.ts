@@ -87,7 +87,7 @@ export function useWorkbenchViewCommands(): Readonly<{
   remove: (viewId: string) => Promise<boolean>;
 }> {
   const { parameterFiles, workbenchFiles } = useFileManager();
-  const { projectId } = useProject();
+  const { projectId, profile } = useProject();
   const root = `/projects/${projectId}`;
   const files = useMemo(() => ({ ...parameterFiles, ...workbenchFiles }), [parameterFiles, workbenchFiles]);
   const onError = (error: unknown): void => {
@@ -95,9 +95,12 @@ export function useWorkbenchViewCommands(): Readonly<{
   };
   const edit = useCallback(
     async (viewId: string, change: (current: WorkbenchView | undefined) => WorkbenchView) =>
-      editViewFile({ root, viewId, files, change, onError }),
-    [files, root],
+      profile === 'shared' ? false : editViewFile({ root, viewId, files, change, onError }),
+    [files, root, profile],
   );
-  const remove = useCallback(async (viewId: string) => deleteViewFile({ root, viewId, files, onError }), [files, root]);
+  const remove = useCallback(
+    async (viewId: string) => (profile === 'shared' ? false : deleteViewFile({ root, viewId, files, onError })),
+    [files, root, profile],
+  );
   return useMemo(() => ({ edit, remove }), [edit, remove]);
 }

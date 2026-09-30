@@ -1,5 +1,6 @@
 /* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 /* oxlint-disable eslint/no-await-in-loop -- Interleaving cases intentionally run in sequence. */
+import { mock } from 'vitest-mock-extended';
 import { describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { workbenchRecords } from '@taucad/workbench';
@@ -11,8 +12,9 @@ const encoder = new TextEncoder();
 const base = () => workbenchRecords.view.schema.parse({ version: 1, entryPath: 'a.ts' });
 const path = '/projects/p/.tau/workbench/views/v-abcd1234.json';
 let fileManager: unknown;
+let projectProfile: 'editor' | 'shared' = 'editor';
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => fileManager }));
-vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', profile: projectProfile }) }));
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown }, select: (snapshot: unknown) => unknown) =>
     select(actor.getSnapshot()),
@@ -222,4 +224,29 @@ describe('view panel record commands', () => {
     old.dispose();
     fresh.dispose();
   });
+});
+
+it('should refuse durable view commands in a shared preview before any filesystem access', async () => {
+  const files = mock<Parameters<typeof editViewFile>[0]['files']>();
+  files.exists.mockResolvedValue(false);
+  const client = {
+    exists: files.exists,
+    readFile: files.readFile,
+    writeFileChecked: files.writeFileChecked,
+    deleteFileChecked: files.deleteFileChecked,
+  };
+  fileManager = { parameterFiles: client, workbenchFiles: client };
+  projectProfile = 'shared';
+  const { result, unmount } = renderHook(() => useWorkbenchViewCommands());
+  try {
+    expect(await result.current.edit('v-1234abcd', () => base())).toBe(false);
+    expect(await result.current.remove('v-1234abcd')).toBe(false);
+    expect(files.exists).not.toHaveBeenCalled();
+    expect(files.readFile).not.toHaveBeenCalled();
+    expect(files.writeFileChecked).not.toHaveBeenCalled();
+    expect(files.deleteFileChecked).not.toHaveBeenCalled();
+  } finally {
+    unmount();
+    projectProfile = 'editor';
+  }
 });

@@ -80,6 +80,7 @@ type QueuedJob = {
 
 export const headlessImageFailureCodeSchema = z.enum([
   'adapter-unavailable',
+  'cold-start-deferred',
   'device-lost',
   'driver-unsupported',
   'gpu',
@@ -197,6 +198,7 @@ export class HeadlessImageService {
   private readonly dependencies: HeadlessImageServiceDependencies;
   private readonly backend: HeadlessImageBackend;
   private imageClient: AppRuntimeClient | undefined;
+  private successfulGlbRender = false;
   private queue: QueuedJob[] = [];
   private activeJob: QueuedJob | undefined;
   private running = false;
@@ -239,6 +241,17 @@ export class HeadlessImageService {
       throw new HeadlessImageError(
         'driver-unsupported',
         'Automatic part previews are deferred on this software WebGPU adapter.',
+      );
+    }
+    if (
+      job.kind === 'automatic-thumbnail' &&
+      job.sourceFormat === 'glb' &&
+      job.exportOptions.mode === 'batch' &&
+      !this.successfulGlbRender
+    ) {
+      throw new HeadlessImageError(
+        'cold-start-deferred',
+        'Automatic part previews are deferred until the image worker is ready. Retry a part to render it now.',
       );
     }
     if (job.kind === 'automatic-thumbnail' && this.failedAutomaticIdentities.has(job.identity)) {
@@ -484,6 +497,9 @@ export class HeadlessImageService {
     if (!result.success) {
       throw issueToError(result.issues[0]);
     }
+    if (job.sourceFormat === 'glb') {
+      this.successfulGlbRender = true;
+    }
     return result.data;
   }
 
@@ -534,5 +550,6 @@ export class HeadlessImageService {
     this.unsubscribeTelemetry = undefined;
     this.imageClient?.terminate();
     this.imageClient = undefined;
+    this.successfulGlbRender = false;
   }
 }

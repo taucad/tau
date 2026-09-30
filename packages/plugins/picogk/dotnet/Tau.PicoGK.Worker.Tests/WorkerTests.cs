@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Collections;
 using System.Numerics;
 using System.Security.Cryptography;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using PicoGK;
@@ -1038,6 +1039,211 @@ Library.Go(1f, () =>
         Assert.All(normals, value => Assert.True(float.IsFinite(value)));
         Assert.Equal(Vector3.UnitZ, Normal(6));
         Assert.Equal(new float[] { 0, 0, 1 }, normals[18..21]); // Unused source vertex.
+    }
+
+    [Fact]
+    public void BulkReadbackMatchesFallbackAndBoundsCallerBuffers()
+    {
+        using var library = new Library(1f);
+        Library.RegisterGlobalLibrary(library);
+        try
+        {
+            using var mesh = new Mesh();
+            Assert.Empty(mesh.TauCopyGeometry().Positions);
+            mesh.nAddVertex(new Vector3(1, 2, 3));
+            mesh.nAddVertex(new Vector3(4, 5, 6));
+            mesh.nAddVertex(new Vector3(7, 8, 9));
+            mesh.nAddTriangle(0, 1, 2);
+            var bulk = mesh.TauCopyGeometry(); var fallback = mesh.TauCopyGeometry(false);
+            Assert.Equal(1, (int)typeof(Mesh).GetField("m_tauBulkAvailable", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.GetValue(null)!);
+            Assert.Equal(new float[] { 1, 2, 3, 4, 5, 6, 7, 8, 9 }, bulk.Positions);
+            Assert.Equal(new uint[] { 0, 1, 2 }, bulk.Indices);
+            Assert.Equal(fallback.Positions, bulk.Positions);
+            Assert.Equal(fallback.Indices, bulk.Indices);
+            var native = NativeLibrary.Load("tau-picogk-readback", typeof(Mesh).Assembly, null);
+            try
+            {
+                var vertices = Marshal.GetDelegateForFunctionPointer<Readback>(NativeLibrary.GetExport(native, "Mesh_GetVertices"));
+                var triangles = Marshal.GetDelegateForFunctionPointer<Readback>(NativeLibrary.GetExport(native, "Mesh_GetTriangles"));
+                var buffer = Marshal.AllocHGlobal(48);
+                try
+                {
+                    foreach (var read in new[] { vertices, triangles })
+                    {
+                        for (var offset = 0; offset < 48; offset += 4) Marshal.WriteInt32(buffer, offset, 123456);
+                        Assert.Equal(0, read(library.hThis.Value, mesh.hThis.Value, IntPtr.Zero, 100));
+                        Assert.Equal(0, read(library.hThis.Value, mesh.hThis.Value, buffer, -1));
+                        Assert.Equal(0, read(library.hThis.Value, mesh.hThis.Value, buffer, 0));
+                        Assert.Equal(1, read(library.hThis.Value, mesh.hThis.Value, buffer, 1));
+                        for (var offset = 12; offset < 48; offset += 4) Assert.Equal(123456, Marshal.ReadInt32(buffer, offset));
+                        Assert.Equal(read == vertices ? 3 : 1, read(library.hThis.Value, mesh.hThis.Value, buffer, 100));
+                        Assert.Equal(123456, Marshal.ReadInt32(buffer, 36));
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            finally { NativeLibrary.Free(native); }
+            mesh.Dispose();
+            Assert.Throws<ObjectDisposedException>(() => mesh.TauCopyGeometry());
+            Assert.Throws<ObjectDisposedException>(() => mesh.nAddVertex(Vector3.Zero));
+            Assert.Throws<ObjectDisposedException>(() => mesh.nAddTriangle(0, 1, 2));
+            using var nonfinite = new Mesh();
+            nonfinite.nAddVertex(new Vector3(float.NaN, 0, 0));
+            Assert.Equal("PicoGK readback returned a nonfinite vertex.", Assert.Throws<InvalidOperationException>(() => nonfinite.TauCopyGeometry()).Message);
+        }
+        finally { Library.UnregisterGlobalLibrary(); }
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Readback(long library, long mesh, IntPtr buffer, int capacity);
+
+    [Fact]
+    public async Task MeshReadbackFreezesConcurrentMutationAndViewerSnapshots()
+    {
+        using var library = new Library(1f);
+        Library.RegisterGlobalLibrary(library);
+        try
+        {
+            using var mesh = new Mesh(library);
+            mesh.nAddVertex(Vector3.Zero); mesh.nAddVertex(Vector3.UnitX); mesh.nAddVertex(Vector3.UnitY);
+            mesh.nAddTriangle(0, 1, 2);
+            using var backend = new CaptureViewerBackend(Path.Combine(root, "frozen-mesh"));
+            backend.Add(mesh, 0);
+            var original = Assert.Single(backend.Extract().Components);
+            var mutation = Task.Run(() => {
+                for (var index = 0; index < 256; index++) { mesh.nAddVertex(new Vector3(index, 0, 1)); mesh.nAddTriangle(0, 1, index + 3); }
+            });
+            for (var snapshot = 0; snapshot < 50; snapshot++)
+            {
+                var geometry = mesh.TauCopyGeometry();
+                Assert.All(geometry.Indices, index => Assert.True(index < geometry.Positions.Length / 3));
+                Assert.Equal(geometry.Indices, mesh.TauCopyGeometry(false).Indices.Take(geometry.Indices.Length));
+            }
+            await mutation;
+            Assert.Same(original.Positions, Assert.Single(backend.Extract().Components).Positions);
+            backend.Add(mesh, 0);
+            Assert.Equal(257 * 3, Assert.Single(backend.Extract().Components).Indices.Length);
+        }
+        finally { Library.UnregisterGlobalLibrary(); }
+    }
+
+    [Fact]
+    public void PresentationChangesReuseNormalsAndTextureGeometryButTransformsInvalidateThem()
+    {
+        using var library = new Library(1f);
+        Library.RegisterGlobalLibrary(library);
+        try
+        {
+            using var backend = new CaptureViewerBackend(Path.Combine(root, "cached-geometry"));
+            using var mesh = Utils.mshCreateCube(Vector3.One);
+            backend.Add(mesh, "Part", 0);
+            var firstScene = backend.Extract();
+            var first = Assert.Single(firstScene.Components);
+            backend.SetGroupMaterial(0, new ColorFloat("ff0000"), .3f, .4f);
+            var recoloredScene = backend.Extract();
+            var recolored = Assert.Single(recoloredScene.Components);
+            Assert.Equal(new float[] { 1, 0, 0, 1 }, recolored.Color);
+            Assert.Equal(.3f, recolored.Metallic);
+            Assert.Equal(.4f, recolored.Roughness);
+            Assert.Same(first.Positions, recolored.Positions);
+            Assert.Same(first.Indices, recolored.Indices);
+            Assert.Same(first.Normals, recolored.Normals);
+            Assert.Equal(firstScene.NormalGeneration, recoloredScene.NormalGeneration);
+
+            backend.SetGroupMaterial(0, new global::PicoGK.Material { Anisotropy = new() { Strength = .5f } });
+            var texturedScene = backend.Extract();
+            var textured = Assert.Single(texturedScene.Components);
+            Assert.NotNull(textured.TexCoords);
+            Assert.NotNull(textured.Tangents);
+            Assert.Equal(firstScene.NormalGeneration, texturedScene.NormalGeneration);
+            backend.SetGroupMaterial(0, new global::PicoGK.Material { Anisotropy = new() { Strength = .8f } });
+            var changedTexture = Assert.Single(backend.Extract().Components);
+            Assert.Same(textured.Positions, changedTexture.Positions);
+            Assert.Same(textured.Normals, changedTexture.Normals);
+            Assert.Same(textured.TexCoords, changedTexture.TexCoords);
+            Assert.Same(textured.Tangents, changedTexture.Tangents);
+            backend.SetGroupMaterial(0, new ColorFloat("00ff00"), 0, 1);
+            Assert.Same(first.Normals, Assert.Single(backend.Extract().Components).Normals);
+
+            var matrix = Matrix4x4.CreateScale(-2, 3, .5f);
+            matrix.M21 = .2f;
+            backend.SetGroupMatrix(0, matrix);
+            var transformed = Assert.Single(backend.Extract().Components);
+            Assert.NotSame(first.Normals, transformed.Normals);
+            foreach (var corner in Enumerable.Range(0, first.Indices.Length))
+            {
+                var original = checked((int)first.Indices[corner]) * 3;
+                var output = checked((int)transformed.Indices[corner]) * 3;
+                var expected = Vector3.Transform(new Vector3(first.Positions[original], first.Positions[original + 1], first.Positions[original + 2]), matrix);
+                Assert.Equal(expected, new Vector3(transformed.Positions[output], transformed.Positions[output + 1], transformed.Positions[output + 2]));
+            }
+            backend.SetGroupMaterial(0, new global::PicoGK.Material { Anisotropy = new() { Strength = .8f } });
+            var transformedTexture = Assert.Single(backend.Extract().Components);
+            Assert.NotSame(textured.Tangents, transformedTexture.Tangents);
+            Assert.NotSame(textured.Normals, transformedTexture.Normals);
+            Assert.All(transformedTexture.Tangents!, value => Assert.True(float.IsFinite(value)));
+            backend.SetGroupMatrix(0, Matrix4x4.CreateScale(1, 1, 0));
+            Assert.All(Assert.Single(backend.Extract().Components).Normals, value => Assert.True(float.IsFinite(value)));
+        }
+        finally { Library.UnregisterGlobalLibrary(); }
+    }
+
+    [Fact]
+    public void SameDirectionSharedEdgesJoinMatchingEndpoints()
+    {
+        float[] positions = [0,0,0, 1,0,0, 0,1,0, 0,2,.2f];
+        uint[] indices = [0,1,2, 0,1,3];
+        var normals = ModelRunner.VertexNormals(ref positions, ref indices);
+        Assert.Equal(4 * 3, positions.Length);
+        Assert.Equal(indices[0], indices[3]);
+        Assert.Equal(indices[1], indices[4]);
+        var expected = Vector3.Normalize(new Vector3(0, -.2f, 3));
+        Assert.True(Vector3.Distance(expected, new Vector3(normals[0], normals[1], normals[2])) < 1e-6f);
+    }
+
+    [Theory]
+    [InlineData(128)]
+    [InlineData(4096)]
+    public void DensePlanarFansRemainSmoothAndPreserveEveryTriangle(int count)
+    {
+        var positions = new float[(count + 1) * 3];
+        var indices = new uint[count * 3];
+        for (var side = 0; side < count; side++)
+        {
+            var angle = MathF.Tau * side / count;
+            positions[(side + 1) * 3] = MathF.Cos(angle);
+            positions[(side + 1) * 3 + 1] = MathF.Sin(angle);
+            indices[side * 3] = 0;
+            indices[side * 3 + 1] = (uint)(side + 1);
+            indices[side * 3 + 2] = (uint)((side + 1) % count + 1);
+        }
+        var sourcePositions = positions.ToArray(); var sourceIndices = indices.ToArray();
+        var normals = ModelRunner.VertexNormals(ref positions, ref indices, out var sources);
+        Assert.Equal(sourcePositions, positions);
+        Assert.Equal(sourceIndices, indices);
+        Assert.Equal(Enumerable.Range(0, count + 1), sources);
+        for (var vertex = 0; vertex <= count; vertex++)
+            Assert.Equal(Vector3.UnitZ, new Vector3(normals[vertex * 3], normals[vertex * 3 + 1], normals[vertex * 3 + 2]));
+    }
+
+    [Fact]
+    public void NonmanifoldEdgesAndDuplicatedPositionSeamsRemainShadingBoundaries()
+    {
+        float[] positions = [0,0,0, 1,0,0, 0,1,0, 0,2,.1f, 0,3,.2f, 0,0,0, 1,0,0, 0,1,.1f];
+        uint[] indices = [0,1,2, 0,1,3, 0,1,4, 5,6,7];
+        var sourcePositions = positions.ToArray(); var sourceIndices = indices.ToArray();
+        var normals = ModelRunner.VertexNormals(ref positions, ref indices, out var sources);
+        Assert.Equal(3, new[] { indices[0], indices[3], indices[6] }.Distinct().Count());
+        Assert.NotEqual(indices[0], indices[9]);
+        for (var corner = 0; corner < indices.Length; corner++)
+        {
+            Assert.Equal(sourceIndices[corner], (uint)sources[indices[corner]]);
+            for (var axis = 0; axis < 3; axis++)
+                Assert.Equal(sourcePositions[sourceIndices[corner] * 3 + axis], positions[indices[corner] * 3 + axis]);
+        }
+        Assert.All(normals, value => Assert.True(float.IsFinite(value)));
+        float[] emptyPositions = []; uint[] emptyIndices = [];
+        Assert.Empty(ModelRunner.VertexNormals(ref emptyPositions, ref emptyIndices));
     }
 
     [Fact]

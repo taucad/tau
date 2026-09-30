@@ -61,6 +61,7 @@ const dotnetProjectRoot = resolve(workspaceRoot, 'packages/plugins/picogk/dotnet
 const workerProject = resolve(dotnetProjectRoot, 'Tau.PicoGK.Worker/Tau.PicoGK.Worker.csproj');
 const picoGkLock = resolve(dotnetProjectRoot, 'PicoGK.packages.lock.json');
 const picoGkHostedPatch = resolve(dotnetProjectRoot, 'PicoGK.hosted.patch');
+const nativeSourceRoot = resolve(dotnetProjectRoot, 'native');
 const topologySchema = resolve(workspaceRoot, 'packages/core/geometry/schema/tau-cad-topology.schema.json');
 
 const digest = async (path: string, algorithm: 'sha256' | 'sha512' = 'sha256'): Promise<string> =>
@@ -89,6 +90,7 @@ const download = async (options: {
 }): Promise<string> => {
   await mkdir(cacheRoot, { recursive: true });
   const path = resolve(cacheRoot, options.name);
+  await mkdir(resolve(path, '..'), { recursive: true });
   try {
     if ((await digest(path, options.algorithm)) === options.expected) {
       return path;
@@ -224,6 +226,141 @@ const manifestIsCurrent = async (options: {
   }
 };
 
+/** Build the bulk-readback native payload from pinned archives, without optional repos/. */
+const prepareNative = async (): Promise<string> => {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+    throw new Error('Building the PicoGK Darwin payload requires a Darwin arm64 host.');
+  }
+  const sources = JSON.parse(await readFile(resolve(nativeSourceRoot, 'sources.json'), 'utf8')) as ReadonlyArray<{
+    readonly name: string;
+    readonly repository: string;
+    readonly commit: string;
+    readonly url: string;
+    readonly sha256: string;
+  }>;
+  const compilerPath = execFileSync('xcrun', ['--find', 'clang++'], { encoding: 'utf8' }).trim();
+  const compiler = execFileSync(compilerPath, ['--version'], { encoding: 'utf8' }).trim();
+  const sdkPath = execFileSync('xcrun', ['--show-sdk-path'], { encoding: 'utf8' }).trim();
+  const picoGkLibrary = resolve(picoGkSourceRoot, 'native/osx-arm64/picogk.26.2.dylib');
+  const sdk = execFileSync('xcrun', ['--show-sdk-version'], { encoding: 'utf8' }).trim();
+  const cmake = execFileSync('cmake', ['--version'], { encoding: 'utf8' }).trim();
+  const fingerprint = createHash('sha256')
+    .update(compilerPath)
+    .update(compiler)
+    .update(sdkPath)
+    .update(sdk)
+    .update(cmake)
+    .update(await digest(picoGkLibrary));
+  for (const path of [...(await filesUnder(nativeSourceRoot)), import.meta.filename]) {
+    // oxlint-disable-next-line no-await-in-loop -- deterministic build-input fingerprint.
+    fingerprint.update(await readFile(path));
+  }
+  const sourceSha256 = fingerprint.digest('hex');
+  const root = resolve(cacheRoot, `native-${sourceSha256}`);
+  const output = resolve(root, 'resources');
+  try {
+    const receipt = JSON.parse(await readFile(resolve(output, 'tau-picogk-native-build.json'), 'utf8')) as {
+      readonly sourceSha256: string;
+      readonly files: ReadonlyArray<{ readonly name: string; readonly sha256: string }>;
+    };
+    if (receipt.sourceSha256 === sourceSha256 && receipt.files.length > 0) {
+      let valid = true;
+      for (const file of receipt.files) {
+        // oxlint-disable-next-line no-await-in-loop -- verify the cached payload before accepting it.
+        if ((await digest(resolve(output, file.name))) !== file.sha256) {
+          valid = false;
+        }
+      }
+      if (valid) {
+        return output;
+      }
+    }
+  } catch {
+    // Build below.
+  }
+  const runtime = sources.find((source) => source.name === 'runtime');
+  if (!runtime) {
+    throw new Error('PicoGK native source pins require a runtime entry.');
+  }
+  const runtimeRoot = resolve(cacheRoot, `PicoGKRuntime-${runtime.commit}`);
+  const archive = await download({
+    algorithm: 'sha256',
+    expected: runtime.sha256,
+    name: `native-sources/runtime-${runtime.commit}.tar.gz`,
+    url: runtime.url,
+  });
+  await ensureExtracted({
+    archive,
+    root: runtimeRoot,
+    markerName: '.tau-archive-sha256',
+    expectedMarker: runtime.sha256,
+  });
+  const build = resolve(root, 'build');
+  execFileSync(
+    'cmake',
+    [
+      '-S',
+      nativeSourceRoot,
+      '-B',
+      build,
+      '-DCMAKE_BUILD_TYPE=Release',
+      `-DCMAKE_CXX_COMPILER=${compilerPath}`,
+      `-DCMAKE_OSX_SYSROOT=${sdkPath}`,
+      '-DCMAKE_OSX_ARCHITECTURES=arm64',
+      '-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0',
+      `-DPICOGK_SOURCE=${runtimeRoot}`,
+      `-DPICOGK_LIBRARY=${picoGkLibrary}`,
+    ],
+    { stdio: 'inherit' },
+  );
+  execFileSync('cmake', ['--build', build, '--parallel', '2'], { stdio: 'inherit' });
+  const temporary = `${output}.${String(process.pid)}.tmp`;
+  await rm(temporary, { recursive: true, force: true });
+  await mkdir(temporary, { recursive: true });
+  const library = resolve(temporary, 'tau-picogk-readback.dylib');
+  await cp(resolve(build, 'tau-picogk-readback.dylib'), library);
+  const linked = execFileSync('otool', ['-L', library], { encoding: 'utf8' }).split('\n').slice(2);
+  if (
+    linked.some(
+      (line) =>
+        line.trim() && !/^\s*(?:@loader_path\/picogk\.26\.2\.dylib|\/usr\/lib\/|\/System\/Library\/)/u.test(line),
+    )
+  ) {
+    throw new Error(`Unbundled native dependency in ${library}: ${linked.join('\n')}`);
+  }
+  execFileSync('codesign', ['--force', '--sign', '-', library], { stdio: 'inherit' });
+  await cp(resolve(runtimeRoot, 'LICENSE'), resolve(temporary, 'PicoGKRuntime-LICENSE'));
+  const nativeFiles = await filesUnder(temporary);
+  const files = await Promise.all(
+    nativeFiles.map(async (path) => ({
+      name: relative(temporary, path),
+      sha256: await digest(path),
+    })),
+  );
+  await writeFile(
+    resolve(temporary, 'tau-picogk-native-build.json'),
+    `${JSON.stringify(
+      {
+        sourceSha256,
+        sources,
+        picoGkLibrarySha256: await digest(picoGkLibrary),
+        compilerPath,
+        compiler,
+        sdkPath,
+        sdk,
+        cmake,
+        target: 'darwin-arm64',
+        files,
+      },
+      undefined,
+      2,
+    )}\n`,
+  );
+  await rm(output, { recursive: true, force: true });
+  await rename(temporary, output);
+  return output;
+};
+
 const prepareTarget = async (targetName: string): Promise<void> => {
   const target = targets[targetName];
   if (!target) {
@@ -307,6 +444,9 @@ const prepareTarget = async (targetName: string): Promise<void> => {
     const nativeRoot = resolve(picoGkSourceRoot, 'native', target.nativeDirectory);
     const nativeLibraries = await readdir(nativeRoot);
     await Promise.all(nativeLibraries.map(async (name) => cp(resolve(nativeRoot, name), resolve(temporary, name))));
+    const readbackRoot = await prepareNative();
+    const readbackFiles = await readdir(readbackRoot);
+    await Promise.all(readbackFiles.map(async (name) => cp(resolve(readbackRoot, name), resolve(temporary, name))));
   }
   await Promise.all([
     cp(resolve(picoGkSourceRoot, 'LICENSE'), resolve(temporary, 'PicoGK-LICENSE')),

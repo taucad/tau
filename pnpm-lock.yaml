@@ -333,6 +333,9 @@ catalogs:
     '@tscircuit/infgrid-ijump-astar':
       specifier: 0.0.35
       version: 0.0.35
+    '@tscircuit/manifold-2d':
+      specifier: 0.0.6
+      version: 0.0.6
     '@tscircuit/matchpack':
       specifier: 0.0.91
       version: 0.0.91
@@ -4533,9 +4536,28 @@ importers:
       '@gltf-transform/core':
         specifier: 'catalog:'
         version: 4.4.0
+      '@resvg/resvg-wasm':
+        specifier: 2.6.2
+        version: 2.6.2
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
+      '@tscircuit/manifold-2d':
+        specifier: 'catalog:'
+        version: 0.0.6
+    devDependencies:
+      '@taucad/esbuild':
+        specifier: workspace:*
+        version: link:../esbuild
+      '@taucad/middleware':
+        specifier: workspace:*
+        version: link:../middleware
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
       '@tscircuit/alphabet':
         specifier: 'catalog:'
         version: 0.0.26(typescript@5.9.3)
@@ -4613,7 +4635,7 @@ importers:
         version: 0.0.30(typescript@5.9.3)
       circuit-json-to-gltf:
         specifier: 'catalog:'
-        version: 0.0.123(@resvg/resvg-js@2.6.2)(@resvg/resvg-wasm@2.6.2)(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(@tscircuit/circuit-json-util@0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0))(@tscircuit/footprinter@0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(circuit-to-svg@0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(typescript@5.9.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0)(typescript@5.9.3)
+        version: 0.0.123(@resvg/resvg-js@2.6.2)(@resvg/resvg-wasm@2.6.2)(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(@tscircuit/circuit-json-util@0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0))(@tscircuit/footprinter@0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(circuit-to-svg@0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(supports-color@10.2.2)(typescript@5.9.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0)(typescript@5.9.3)
       circuit-json-to-readable-netlist:
         specifier: 'catalog:'
         version: 0.0.17(@tscircuit/circuit-json-util@0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0))(circuit-json-to-connectivity-map@0.0.30(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3)
@@ -4622,7 +4644,7 @@ importers:
         version: 0.0.46(@tscircuit/circuit-json-util@0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(spicets@0.0.5(typescript@5.9.3))(typescript@5.9.3)
       circuit-to-svg:
         specifier: 'catalog:'
-        version: 0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(typescript@5.9.3)
+        version: 0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(supports-color@10.2.2)(typescript@5.9.3)
       connectivity-map:
         specifier: 'catalog:'
         version: 1.0.0(typescript@5.9.3)
@@ -4638,6 +4660,9 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.2.7
+      rolldown:
+        specifier: 'catalog:'
+        version: 1.2.3
       schematic-symbols:
         specifier: 'catalog:'
         version: 0.0.244(typescript@5.9.3)
@@ -4647,19 +4672,9 @@ importers:
       spicey:
         specifier: 'catalog:'
         version: 0.0.14(typescript@5.9.3)
-    devDependencies:
-      '@taucad/esbuild':
-        specifier: workspace:*
-        version: link:../esbuild
-      '@taucad/middleware':
-        specifier: workspace:*
-        version: link:../middleware
-      '@taucad/runtime':
-        specifier: workspace:*
-        version: link:../../runtime
-      '@taucad/runtime-testing':
-        specifier: workspace:*
-        version: link:../../runtime-testing
+      tsdown:
+        specifier: 'catalog:'
+        version: 0.22.14(@arethetypeswrong/core@0.18.3)(@typescript/native-preview@7.0.0-dev.20260223.1)(@volar/typescript@2.4.28)(oxc-resolver@11.21.3)(publint@0.3.21)(tsx@4.22.4)(typescript@5.9.3)
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -41995,12 +42010,12 @@ snapshots:
       '@tscircuit/math-utils': 0.0.9(typescript@5.9.3)
       typescript: 5.9.3
 
-  circuit-json-to-gltf@0.0.123(@resvg/resvg-js@2.6.2)(@resvg/resvg-wasm@2.6.2)(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(@tscircuit/circuit-json-util@0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0))(@tscircuit/footprinter@0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(circuit-to-svg@0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(typescript@5.9.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0)(typescript@5.9.3):
+  circuit-json-to-gltf@0.0.123(@resvg/resvg-js@2.6.2)(@resvg/resvg-wasm@2.6.2)(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(@tscircuit/circuit-json-util@0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0))(@tscircuit/footprinter@0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(circuit-to-svg@0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(supports-color@10.2.2)(typescript@5.9.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0)(typescript@5.9.3):
     dependencies:
       '@jscad/modeling': 2.13.0
       '@tscircuit/circuit-json-util': 0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0)
       circuit-json: 0.0.485(format-si-unit@0.0.14(typescript@5.9.3))
-      circuit-to-svg: 0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(typescript@5.9.3)
+      circuit-to-svg: 0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(supports-color@10.2.2)(typescript@5.9.3)
       earcut: 3.2.4
       jscad-electronics: 0.0.159(@jscad/modeling@2.13.0)(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(@tscircuit/footprinter@0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0)(typescript@5.9.3)
       jscad-planner: 0.0.14(typescript@5.9.3)
@@ -42038,7 +42053,7 @@ snapshots:
       format-si-unit: 0.0.14(typescript@5.9.3)
       zod: 3.25.76
 
-  circuit-to-svg@0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(typescript@5.9.3):
+  circuit-to-svg@0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(supports-color@10.2.2)(typescript@5.9.3):
     dependencies:
       '@tscircuit/alphabet': 0.0.26(typescript@5.9.3)
       '@types/node': 22.20.4

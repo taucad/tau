@@ -11,6 +11,6 @@
       "#*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "tsdown.engine.ts"],
   "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "src/**/*.test-d.ts"]
 }

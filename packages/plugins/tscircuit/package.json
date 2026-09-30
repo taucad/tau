@@ -21,7 +21,9 @@
     "agent",
     "LICENSE",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "THIRD_PARTY_LICENSES.md",
+    "check-vendored-licenses.mjs"
   ],
   "keywords": [
     "cad",
@@ -51,9 +53,12 @@
       "./agent/*": "./agent/*",
       "./package.json": "./package.json"
     },
-    "imports": {}
+    "imports": {
+      "#engine/*.js": "./dist/engine/*.mjs"
+    }
   },
   "imports": {
+    "#engine/*.js": "./src/engine/*.ts",
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
@@ -66,14 +71,6 @@
     "@taucad/middleware": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
-    "zod": "catalog:"
-  },
-  "taucad": {
-    "hostTarget": "browser"
-  },
-  "dependencies": {
-    "@gltf-transform/core": "catalog:",
-    "@taucad/geometry-core": "workspace:*",
     "@tscircuit/alphabet": "catalog:",
     "@tscircuit/capacity-autorouter": "catalog:",
     "@tscircuit/checks": "catalog:",
@@ -108,11 +105,26 @@
     "graphics-debug": "catalog:",
     "minicssgrid": "catalog:",
     "react": "catalog:",
+    "rolldown": "catalog:",
     "schematic-symbols": "catalog:",
     "spicets": "catalog:",
-    "spicey": "catalog:"
+    "spicey": "catalog:",
+    "tsdown": "catalog:",
+    "zod": "catalog:"
+  },
+  "taucad": {
+    "hostTarget": "browser"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "catalog:",
+    "@resvg/resvg-wasm": "2.6.2",
+    "@taucad/geometry-core": "workspace:*",
+    "@tscircuit/manifold-2d": "catalog:"
   },
   "tau": {
     "skills": "./agent/skills.json"
+  },
+  "scripts": {
+    "prepublishOnly": "node check-vendored-licenses.mjs"
   }
 }

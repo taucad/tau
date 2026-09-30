@@ -266,6 +266,41 @@ const assertSingleZodInstance = (appRoot: string): void => {
   console.log(`zod: one instance in the installed tree (${[...installs][0]!}).`);
 };
 
+/** The vendored graph must not reappear as consumer dependencies. */
+const assertTscircuitInstallShape = (appRoot: string): void => {
+  const listing = spawnSync('npm', ['ls', '--json', '--all'], {
+    cwd: appRoot,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  type Node = { readonly dependencies?: Record<string, Node> };
+  invariant(
+    listing.status === 0,
+    `Cannot verify tscircuit install tree: npm ls failed (${String(listing.status)}). ${listing.error?.message ?? listing.stderr}`,
+  );
+  const tree = JSON.parse(listing.stdout) as Node;
+  invariant(tree.dependencies?.['@taucad/tscircuit'], 'npm ls omitted installed @taucad/tscircuit.');
+  const forbidden = new Set([
+    '@resvg/resvg-js',
+    'occt-import-js',
+    '@tscircuit/props',
+    'circuit-json',
+    'circuit-json-to-gltf',
+    'graphics-debug',
+  ]);
+  const found = new Set<string>();
+  const walk = (node: Node): void => {
+    for (const [name, child] of Object.entries(node.dependencies ?? {})) {
+      if (forbidden.has(name)) {
+        found.add(name);
+      }
+      walk(child);
+    }
+  };
+  walk(tree);
+  invariant(found.size === 0, `Vendored tscircuit packages leaked into the consumer install: ${[...found].join(', ')}`);
+};
+
 const quickStartSource = (readme: string): string => {
   const source = /## Quick start\s+[\s\S]*?```(?:typescript|javascript|ts|js)\n(?<source>[\s\S]*?)\n```/u.exec(readme)
     ?.groups?.['source'];
@@ -565,6 +600,57 @@ const runInstalledReactRuntime = async (appRoot: string): Promise<void> => {
   console.log('Packed React/runtime Chromium lifecycle: current → stale → current.');
 };
 
+const installedTscircuitSource = `
+import { createRuntimeClient, defineRuntime, fromMemoryFs } from '@taucad/runtime';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { esbuild } from '@taucad/esbuild';
+import { tscircuit } from '@taucad/tscircuit';
+
+const source = \`import React from 'react';
+export default () => { const [width] = React.useState('20mm'); return <board width={width} height="20mm">
+  <resistor name="R1" resistance="1k" footprint="0402" pcbX={-4} pcbY={0} />
+  <led name="LED1" color="red" footprint="0603" pcbX={4} pcbY={0} />
+  <trace from=".R1 > .pin2" to=".LED1 > .anode" />
+</board>; };\`;
+const runtime = defineRuntime({ plugins: [esbuild(), tscircuit()] });
+const client = createRuntimeClient({ transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs({}) }) });
+const document = client.open({ source: { files: { 'main.tsx': source } }, watch: false });
+const board = document.view('board');
+const schematic = document.view('schematic');
+try {
+  const evaluated = await document.evaluation();
+  if (evaluated.superseded || !evaluated.evaluation.success) throw new Error('tscircuit evaluation failed: ' + JSON.stringify(evaluated));
+  const glb = await board.rendering();
+  if (glb.superseded || !glb.rendering.success) throw new Error('tscircuit board failed: ' + JSON.stringify(glb));
+  const bytes = glb.rendering.artifact.content;
+  if (!(bytes instanceof Uint8Array) || new TextDecoder().decode(bytes.subarray(0, 4)) !== 'glTF') throw new Error('tscircuit board omitted GLB');
+  const svg = await schematic.rendering();
+  if (svg.superseded || !svg.rendering.success || !String(svg.rendering.artifact.content).includes('<svg')) throw new Error('tscircuit schematic omitted SVG');
+  console.log('tscircuit GLB ' + bytes.byteLength + ' bytes; schematic SVG passed');
+  if (typeof window !== 'undefined') globalThis.document.querySelector('#root').textContent = 'tscircuit GLB and SVG passed';
+} finally {
+  board.close(); schematic.close(); document.close(); await client.shutdown();
+}
+`;
+
+/** Render the installed tscircuit package in Node and an alias-free browser bundle. */
+const runInstalledTscircuit = async (appRoot: string): Promise<void> => {
+  const source = join(appRoot, 'tscircuit-render.mjs');
+  const bundle = join(appRoot, 'tscircuit-render.browser.mjs');
+  writeFileSync(source, installedTscircuitSource);
+  run(process.execPath, [source], appRoot);
+  const esbuildRoot = dirname(createRequire(import.meta.url).resolve('esbuild/package.json'));
+  run(
+    join(esbuildRoot, 'bin/esbuild'),
+    [source, '--bundle', '--platform=browser', '--format=esm', '--external:node:*', `--outfile=${bundle}`],
+    appRoot,
+  );
+  await runBrowserModule(bundle, async (page) => {
+    await page.waitForFunction(() => document.querySelector('#root')?.textContent === 'tscircuit GLB and SVG passed');
+  });
+  console.log('Packed tscircuit Node and Chromium GLB/SVG render passed.');
+};
+
 /** Installed-consumer probe: load modules and JSON; resolve and read exported documentation. */
 export const probeSource = `
 import { readFileSync } from 'node:fs';
@@ -627,7 +713,16 @@ const main = async (): Promise<void> => {
         return root === undefined || requested.includes(root) ? [] : [root];
       })
     : [];
-  const packageDirectories = requested.length > 0 ? [...requested, ...quickStartDirectories] : releaseTrainDirectories;
+  const tscircuitDirectories = requested.includes('packages/plugins/tscircuit')
+    ? publishableClosure(resolved, ['tscircuit', 'esbuild']).flatMap((name) => {
+        const root = projectByName.get(name)?.root;
+        return root === undefined ? [] : [root];
+      })
+    : [];
+  const packageDirectories =
+    requested.length > 0
+      ? [...new Set([...requested, ...quickStartDirectories, ...tscircuitDirectories])]
+      : releaseTrainDirectories;
   const temporaryRoot = mkdtempSync(join(tmpdir(), 'tau-npm-local-'));
   const artifactRoot = join(temporaryRoot, 'artifact');
   const appRoot = join(temporaryRoot, 'app');
@@ -680,6 +775,9 @@ const main = async (): Promise<void> => {
     };
 
     assertSingleZodInstance(appRoot);
+    if (packageDirectories.includes('packages/plugins/tscircuit')) {
+      assertTscircuitInstallShape(appRoot);
+    }
 
     const specifiers: string[] = [];
     const instantiations: Record<string, string> = {};
@@ -745,6 +843,9 @@ const main = async (): Promise<void> => {
       `Imported ${String(specifiers.length)} published subpaths and instantiated ${String(Object.keys(instantiations).length)} native payload(s).`,
     );
 
+    if (existsSync(join(appRoot, 'node_modules/@taucad/tscircuit'))) {
+      await runInstalledTscircuit(appRoot);
+    }
     const runtimeRoot = join(appRoot, 'node_modules/@taucad/runtime');
     if (existsSync(runtimeRoot)) {
       runRuntimeQuickStart(appRoot, runtimeRoot);

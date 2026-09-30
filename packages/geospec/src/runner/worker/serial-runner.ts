@@ -193,9 +193,17 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
           result.lineage?.loads.flatMap((load) => {
             const { evidence } = load;
             const primary = evidence?.artifacts[0];
-            return evidence?.sourcePath === undefined || evidence.exportOptions !== undefined || primary === undefined
-              ? []
-              : [{ [evidence.sourcePath]: `sha256:${primary.sha256}` }];
+            if (evidence?.exportOptions !== undefined) {
+              return [];
+            }
+            return [
+              ...(evidence?.artifacts ?? []).flatMap((artifact) =>
+                artifact.sourcePath === undefined ? [] : [{ [artifact.sourcePath]: `sha256:${artifact.sha256}` }],
+              ),
+              ...(evidence?.sourcePath === undefined || primary === undefined
+                ? []
+                : [{ [evidence.sourcePath]: `sha256:${primary.sha256}` }]),
+            ];
           }) ?? [];
         for (const graph of [
           ...(result.lineage?.modules.map((module_) => module_.files) ?? []),

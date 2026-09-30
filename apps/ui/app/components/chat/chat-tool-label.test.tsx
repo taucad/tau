@@ -9,7 +9,7 @@ describe('ChatToolLabel', () => {
 
     const verbSpan = screen.getByText('Read');
     expect(verbSpan).toHaveClass('font-medium');
-    expect(verbSpan).toHaveClass('text-foreground/60');
+    expect(verbSpan).toHaveClass('text-muted-foreground');
   });
 
   it('should brighten the verb on hover when nested in a chat-tool trigger group', () => {
@@ -17,7 +17,10 @@ describe('ChatToolLabel', () => {
 
     const verbSpan = screen.getByText('Read');
     expect(verbSpan).toHaveClass('transition-colors');
-    expect(verbSpan).toHaveClass('group-hover/chat-tool-trigger:text-foreground');
+    expect(verbSpan).toHaveClass(
+      'group-hover/chat-tool-trigger:text-foreground',
+      'group-focus-visible/chat-tool-trigger:text-foreground',
+    );
   });
 
   it('should brighten ChatToolDescription on hover one tier behind the verb', () => {
@@ -29,7 +32,10 @@ describe('ChatToolLabel', () => {
 
     const detail = screen.getByText('react testing');
     expect(detail).toHaveClass('transition-colors');
-    expect(detail).toHaveClass('group-hover/chat-tool-trigger:text-foreground/80');
+    expect(detail).toHaveClass(
+      'group-hover/chat-tool-trigger:text-foreground/80',
+      'group-focus-visible/chat-tool-trigger:text-foreground/80',
+    );
   });
 
   it('should render verb + plain text child separated by a single literal space', () => {
@@ -46,7 +52,7 @@ describe('ChatToolLabel', () => {
     );
 
     const detail = screen.getByText('react testing');
-    expect(detail).toHaveClass('text-foreground/50');
+    expect(detail).toHaveClass('text-muted-foreground');
     expect(detail).toHaveClass('font-normal');
   });
 

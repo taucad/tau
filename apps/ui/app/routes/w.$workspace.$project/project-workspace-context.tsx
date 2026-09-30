@@ -142,7 +142,8 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
           layoutListenersRef.current.delete(listener);
         };
       },
-      restorePreviousArrangement: async () => layoutControllerRef.current?.restorePreviousArrangement() ?? false,
+      restorePreviousArrangement: async (expected) =>
+        layoutControllerRef.current?.restorePreviousArrangement(expected) ?? false,
       registerViewer: (apply) => layoutControllerRef.current?.registerViewer(apply) ?? (() => undefined),
       registerWorkbench: (apply) => layoutControllerRef.current?.registerWorkbench(apply) ?? (() => undefined),
       personViewerChanged: (node) => layoutControllerRef.current?.personViewerChanged(node),

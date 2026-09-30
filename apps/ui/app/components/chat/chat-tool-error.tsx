@@ -32,6 +32,8 @@ type ChatToolErrorProps = {
    */
   readonly noun: string;
   readonly className?: string;
+  readonly isOpen?: boolean;
+  readonly onOpenChange?: (open: boolean) => void;
 };
 
 const errorIcons = {
@@ -86,13 +88,27 @@ function ToolErrorHeader({ icon, verb, noun }: ToolErrorHeaderProps): React.JSX.
  * present). The same header shape is used for parsed and unparseable
  * `errorText`.
  */
-export function ChatToolError({ errorText, icon, noun, className }: ChatToolErrorProps): React.JSX.Element {
+export function ChatToolError({
+  errorText,
+  icon,
+  noun,
+  className,
+  isOpen,
+  onOpenChange,
+}: ChatToolErrorProps): React.JSX.Element {
   const error = parseToolErrorText(errorText);
 
   if (!error) {
     const code = parseToolErrorEnvelope(errorText)?.errorCode;
     return (
-      <ChatToolCard variant='minimal' status='error' isDefaultOpen={false} className={className}>
+      <ChatToolCard
+        variant='minimal'
+        status='error'
+        isDefaultOpen={false}
+        className={className}
+        isOpen={isOpen}
+        onOpenChange={onOpenChange}
+      >
         <ToolErrorHeader
           icon={icon}
           verb={code?.replaceAll('_', ' ').toLowerCase() ?? unparseableErrorVerb}
@@ -109,16 +125,32 @@ export function ChatToolError({ errorText, icon, noun, className }: ChatToolErro
     );
   }
 
-  return <StructuredToolErrorBody error={error} noun={noun} className={className} />;
+  return (
+    <StructuredToolErrorBody
+      error={error}
+      noun={noun}
+      className={className}
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+    />
+  );
 }
 
 type StructuredToolErrorBodyProps = {
   readonly error: ToolExecutionError;
   readonly noun: string;
   readonly className?: string;
+  readonly isOpen?: boolean;
+  readonly onOpenChange?: (open: boolean) => void;
 };
 
-function StructuredToolErrorBody({ error, noun, className }: StructuredToolErrorBodyProps): React.JSX.Element {
+function StructuredToolErrorBody({
+  error,
+  noun,
+  className,
+  isOpen,
+  onOpenChange,
+}: StructuredToolErrorBodyProps): React.JSX.Element {
   const headerIcon = errorIcons[error.errorCode];
   const verb = getToolErrorTitle(error.errorCode);
   const description = error.message || getToolErrorDescription(error.errorCode);
@@ -131,7 +163,14 @@ function StructuredToolErrorBody({ error, noun, className }: StructuredToolError
   const cardStatus = isMuted ? 'warning' : 'error';
 
   return (
-    <ChatToolCard variant='minimal' status={cardStatus} isDefaultOpen={false} className={className}>
+    <ChatToolCard
+      variant='minimal'
+      status={cardStatus}
+      isDefaultOpen={false}
+      className={className}
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+    >
       <ToolErrorHeader icon={headerIcon} verb={verb} noun={noun} />
       <ChatToolCardContent>
         <div className='space-y-2 px-2 py-2 text-xs'>

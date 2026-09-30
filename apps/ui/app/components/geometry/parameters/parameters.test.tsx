@@ -1,4 +1,5 @@
 /* oxlint-disable max-lines -- test file */
+import { useState } from 'react';
 import type { Mock } from 'vitest';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
@@ -3796,4 +3797,91 @@ describe('Parameters - onChange Only Modified Values', () => {
 
   // Note: "Reset all parameters" button visibility test is now in ChatParameters header,
   // not within the Parameters component.
+});
+
+describe('virtual collection state', () => {
+  const nestedSchema: RJSFSchema = {
+    type: 'object',
+    properties: {
+      handrails: {
+        type: 'object',
+        properties: { colors: { type: 'object', properties: { post: { type: 'string' } } } },
+      },
+    },
+  };
+  const defaults = { handrails: { colors: { post: 'copper' } } };
+
+  it('should retain descendants when search matches their ancestor group', () => {
+    render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaults}
+          jsonSchema={nestedSchema}
+          units={defaultUnits}
+          onParametersChange={vi.fn()}
+          filterTerm='handrails'
+        />
+      </TestWrapper>,
+    );
+    expect(screen.getByRole('textbox', { name: 'Input for Post' })).toHaveValue('copper');
+  });
+
+  it('should retain disclosure choices across transient editor wrapper changes', async () => {
+    const props = {
+      parameters: {},
+      defaultParameters: defaults,
+      jsonSchema: nestedSchema,
+      units: defaultUnits,
+      onParametersChange: vi.fn(),
+    };
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters {...props} />
+      </TestWrapper>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Group: Handrails' }));
+    rerender(
+      <TestWrapper>
+        <Parameters {...props} parameterEdit={{ kind: 'transient' }} />
+      </TestWrapper>,
+    );
+    expect(screen.getByRole('button', { name: 'Group: Handrails' })).toHaveAttribute('aria-expanded', 'false');
+  });
+});
+
+it('should keep array disclosure choices on the surviving item after removal', async () => {
+  const schema: RJSFSchema = {
+    type: 'object',
+    properties: {
+      parts: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            config: { type: 'object', properties: { value: { type: 'string' } } },
+          },
+        },
+      },
+    },
+  };
+  const defaults = { parts: [{ config: { value: 'first' } }, { config: { value: 'second' } }] };
+  function ControlledForm() {
+    const [parameters, setParameters] = useState<Record<string, unknown>>({});
+    return (
+      <TestWrapper>
+        <Parameters
+          parameters={parameters}
+          defaultParameters={defaults}
+          jsonSchema={schema}
+          units={defaultUnits}
+          onParametersChange={setParameters}
+        />
+      </TestWrapper>
+    );
+  }
+  render(<ControlledForm />);
+  await userEvent.click(screen.getAllByRole('button', { name: 'Group: Config' })[1]!);
+  await userEvent.click(screen.getByRole('button', { name: 'Remove Parts 1' }));
+  expect(screen.getByRole('button', { name: 'Group: Config' })).toHaveAttribute('aria-expanded', 'false');
 });

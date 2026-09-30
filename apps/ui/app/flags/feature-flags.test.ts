@@ -28,6 +28,15 @@ beforeEach(() => {
 });
 
 describe('isFeatureEnabled', () => {
+  it('should disable WebGPU by default and persist an opt-in', () => {
+    const storage = createMockStorage();
+    expect(isFeatureEnabled('webGpu', storage)).toBe(false);
+    setFlagOverrides({ webGpu: true }, storage);
+    expect(isFeatureEnabled('webGpu', storage)).toBe(true);
+    setFlagOverrides({ webGpu: false }, storage);
+    expect(isFeatureEnabled('webGpu', storage)).toBe(false);
+  });
+
   it('should return default value when no overrides exist', () => {
     const storage = createMockStorage();
     expect(isFeatureEnabled('planMode', storage)).toBe(false);

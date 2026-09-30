@@ -423,6 +423,84 @@ describe('the chat-run registry (RA-S3)', () => {
   });
 });
 
+describe('deliberate Stop continuation', () => {
+  it('should resume the committed stopped turn once on the same run after reload', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [
+      ...orphanedRun.slice(1),
+      {
+        type: 'turn.history-projection-committed',
+        runId: 'run-1',
+        retainedMessageIds: [],
+        message: { id: 'turn-1', role: 'user', content: 'First.' },
+        context: { version: 1, systemPrompt: '', initialMessages: [], postCompactionMessages: [] },
+      },
+      {
+        type: 'run.lifecycle',
+        runId: 'run-1',
+        state: 'cancelled',
+        detail: { code: 'USER_STOPPED', message: 'Stopped.' },
+      },
+    ]);
+    const model = heldTransport();
+    const host = createTauAgentHost(
+      hostOptions({ openEventLog: file.open, transport: model.transport, toolRegistry: idle, idPrefix: 'stopped' }),
+    );
+    const command = {
+      type: 'resume',
+      commandId: 'resume-stopped',
+      payload: { chatId: 'chat-stopped', runId: 'run-1' },
+    } as const;
+    const answer = await host.command(command);
+    expect(answer).toMatchObject({ status: 'applied', effect: 'durable' });
+    await vi.waitFor(() => {
+      expect(model.calls()).toBe(1);
+    });
+    expect(await host.command(command)).toMatchObject({ status: 'replayed' });
+    const resumed = await host.ledger('chat-stopped');
+    expect(resumed.runs['run-1']).toMatchObject({ attempt: 2, lifecycle: 'running' });
+    const rows = await readLog(file);
+    expect(rows.filter((row) => row.type === 'turn.history-projection-committed')).toHaveLength(1);
+    await host.cancel({ runId: 'run-1', commandId: 'stop-again' });
+    const stopped = await host.ledger('chat-stopped');
+    expect(stopped.runs['run-1']).toMatchObject({ lifecycle: 'cancelled', failure: { code: 'USER_STOPPED' } });
+    await host.close();
+  });
+
+  it.each([true, false])(
+    'should refuse cancellation without retained Stop evidence (committed=%s)',
+    async (committed) => {
+      const file = createMemoryLogFile();
+      await seedLog(file, [
+        ...orphanedRun.filter((row) => committed || row.type !== 'turn.history-projection-committed'),
+        {
+          type: 'run.lifecycle',
+          runId: 'run-1',
+          state: 'cancelled',
+          ...(committed ? {} : { detail: { code: 'USER_STOPPED', message: 'Stopped.' } }),
+        },
+      ]);
+      const model = heldTransport();
+      const host = createTauAgentHost(
+        hostOptions({
+          openEventLog: file.open,
+          transport: model.transport,
+          toolRegistry: idle,
+          idPrefix: 'not-stopped',
+        }),
+      );
+      const answer = await host.command({
+        type: 'resume',
+        commandId: key(),
+        payload: { chatId: 'chat-not-stopped', runId: 'run-1' },
+      });
+      expect(answer).toMatchObject({ status: 'refused', code: 'RESUME_UNAVAILABLE' });
+      expect(model.calls()).toBe(0);
+      await host.close();
+    },
+  );
+});
+
 describe('keyed commands (RA-S6)', () => {
   it('should apply a resume once when the host dies before answering', async () => {
     const file = createMemoryLogFile();

@@ -55,3 +55,26 @@ const externalStopIsResumable = (failure: RunFailureDetail): boolean => {
  */
 export const isResumableRunFailure = (failure: RunFailureDetail | undefined): boolean =>
   failure?.code !== undefined && (isResumable(failure.code) || externalStopIsResumable(failure));
+
+/**
+ * Whether an intentional Stop retained a committed turn for continuation.
+ *
+ * @param run - The durable run ledger entry.
+ * @returns True only for a committed user stop, including a dispatched external prompt.
+ * @public
+ */
+export const isUserStoppedRun = (
+  run:
+    | Readonly<{
+        lifecycle?: string;
+        failure?: RunFailureDetail;
+        committed: boolean;
+        kind: 'tau' | 'external';
+        externalPrompted?: boolean;
+      }>
+    | undefined,
+): boolean =>
+  run?.lifecycle === 'cancelled' &&
+  run.failure?.code === 'USER_STOPPED' &&
+  run.committed &&
+  (run.kind === 'tau' || run.externalPrompted === true);

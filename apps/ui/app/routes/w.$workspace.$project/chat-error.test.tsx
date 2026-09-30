@@ -97,6 +97,43 @@ describe('ChatError', () => {
     vi.clearAllMocks();
   });
 
+  it('offers compact Resume for a committed intentional Stop from the caught-up log', async () => {
+    const projection = createActor(chatProjectionLogic).start();
+    projection.send({
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        cursor: 0,
+        nextCursor: 4,
+        endCursor: 4,
+        events: [
+          lifecycleRow(0, 'admitted'),
+          lifecycleRow(1, 'running'),
+          logRow(2, {
+            type: 'turn.history-projection-committed',
+            retainedMessageIds: [],
+            message: { id: 'user_1', role: 'user', content: 'Work' },
+            context: { version: 1, systemPrompt: '', initialMessages: [], postCompactionMessages: [] },
+          }),
+          logRow(3, {
+            type: 'run.lifecycle',
+            state: 'cancelled',
+            detail: { code: 'USER_STOPPED', message: 'Stopped.' },
+          }),
+        ],
+      },
+    });
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({ projection: projection.getSnapshot().context, attachmentStatus: 'attached' } as CombinedChatState),
+    );
+    render(<ChatErrorBanner />);
+    expect(screen.getByText('You stopped this turn')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).not.toHaveBeenCalled();
+    projection.stop();
+  });
+
   it('retires an untyped legacy connection card only after the current host log catches up', () => {
     const projection = createActor(chatProjectionLogic).start();
     const legacy: ChatErrorPayload = {
@@ -822,9 +859,8 @@ describe('ChatError', () => {
       ),
     });
 
-    expect(
-      screen.getByText('Tau paused this turn: 13 more credits needed for openai-gpt-6-astra.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('13 more credits needed for openai-gpt-6-astra.')).toBeInTheDocument();
+    expect(screen.getByText('Add credits, then send your message.')).toBeInTheDocument();
   });
 
   /* The useSyncExternalStore contract requires a cached snapshot. Parsing inside the selector
@@ -867,8 +903,7 @@ describe('ChatError', () => {
 
   /* The funded boundary's own 402 copy is credit-denominated and reaches the
    * banner verbatim — the chat never restates a charge in dollars (B4 R2). */
-  it('should render a credit error as warning Resume UI outside the tool-error fallback', async () => {
-    const user = userEvent.setup();
+  it('should keep an unretained credit refusal in the funding and send flow', async () => {
     const creditMessage = 'Insufficient Tau credit for this model request.';
     const creditError: ChatErrorPayload = {
       category: errorCategory.credits,
@@ -899,9 +934,8 @@ describe('ChatError', () => {
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /resume/i }));
-
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
+    expect(continueChat).not.toHaveBeenCalled();
     expect(regenerate).not.toHaveBeenCalled();
   });
 

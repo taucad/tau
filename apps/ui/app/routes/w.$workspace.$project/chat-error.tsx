@@ -22,7 +22,7 @@ import { ChatErrorTool } from '#routes/w.$workspace.$project/chat-error-tool.js'
 import { ChatErrorAgentStop } from '#routes/w.$workspace.$project/chat-error-agent-stop.js';
 import { ChatErrorProviderAccount } from '#routes/w.$workspace.$project/chat-error-provider-account.js';
 import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.js';
-import { isResumableRunFailure } from '@taucad/agent-host';
+import { isResumableRunFailure, isUserStoppedRun } from '@taucad/agent-host';
 import { externalAgentStopCodes, externalAgentStopSchema } from '@taucad/agent-host/wire';
 import { selectCaughtUp, selectCurrentRun, selectRunFailure } from '#machines/chat-projection.logic.js';
 
@@ -35,7 +35,10 @@ export function selectVisibleChatError(
   const { projection } = state;
   const caughtUp = projection !== undefined && selectCaughtUp(projection);
   const run = projection === undefined || !caughtUp ? undefined : selectCurrentRun(projection);
-  if (projection !== undefined && run?.lifecycle === 'failed') {
+  if (
+    projection !== undefined &&
+    (run?.lifecycle === 'failed' || (run?.lifecycle === 'cancelled' && run.failure?.code === 'USER_STOPPED'))
+  ) {
     const failure = selectRunFailure(projection, run.runId);
     if (failure !== undefined) {
       const key = projection.failure;
@@ -113,6 +116,9 @@ function codedErrorCard({
   readonly canOpenNewChat: boolean;
 }): React.ReactNode | undefined {
   const { code } = error;
+  if (code === 'USER_STOPPED') {
+    return <ChatErrorPausedTurn className={className} title='You stopped this turn' resumable={resumable} />;
+  }
   const { category, retry } = cardOf(code, error.category);
   const rawDetail = error.raw ? tryFormatJson(error.raw) : undefined;
   const raw = rawDetail === undefined ? {} : { raw: rawDetail };
@@ -176,7 +182,11 @@ function codedErrorCard({
         reason={code === 'RUN_ABANDONED' || code === 'NETWORK_ERROR' ? undefined : error.message}
         resumable={retry === 'resume' && resumable}
         icon={error.category === errorCategory.overloaded ? WifiOff : CircleAlert}
-        {...raw}
+        raw={
+          code === 'RUN_ABANDONED' || code === 'NETWORK_ERROR'
+            ? `${error.message}${rawDetail === undefined ? '' : `\n\n${rawDetail}`}`
+            : rawDetail
+        }
       />
     );
   }
@@ -345,6 +355,12 @@ function codedErrorCard({
 export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
   // Derive parsed error inside selector - prefer runtime error, fallback to persisted
   const parsedError = useChatSelector(selectVisibleChatError);
+  const stopped = useChatSelector(
+    (state) =>
+      state.projection !== undefined &&
+      selectCaughtUp(state.projection) &&
+      isUserStoppedRun(selectCurrentRun(state.projection)),
+  );
   const { regenerate } = useChatActions();
   const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
 
@@ -368,7 +384,13 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
         icon={CircleAlert}
         title={parsedError.message || parsedError.title || 'Unable to send the message.'}
         actions={
-          <Button variant='outline' size='xs' onClick={() => { regenerate(); }}>
+          <Button
+            variant='outline'
+            size='xs'
+            onClick={() => {
+              regenerate();
+            }}
+          >
             <RefreshCcw className='size-3.5' />
             Try again
           </Button>
@@ -387,7 +409,7 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
    * again* and makes no promise. The parsed error carries the same `message`,
    * `code` and `details` the run's terminal record did, which is all the
    * predicate reads. */
-  const resumable = isResumableRunFailure(parsedError);
+  const resumable = parsedError.code === 'USER_STOPPED' ? stopped : isResumableRunFailure(parsedError);
 
   // An external agent's own stop carries its classification; it outranks the category.
   const agentStop = (externalAgentStopCodes as readonly string[]).includes(parsedError.code ?? '')

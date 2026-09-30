@@ -28,7 +28,7 @@ GeoSpecAssertion: {
     passed?: boolean;
     /** Structured diagnostics from matcher evaluation. */
     diagnostics?: GeometryDiagnostic[];
-    /** Exact native report, including core-owned bytes and polarity; present only on the opt-in path. */
+    /** Exact compiled assertion report, including core-owned bytes and polarity. */
     report?: GeoSpecCanonicalClaimReport;
     /** The host load which admitted this assertion's subject; independent of equal geometry hashes. */
     loadId?: string;
@@ -1633,12 +1633,12 @@ RunGeoSpecModuleOptions: {
     /** Emit structured forensic events for this run. */
     forensic?: boolean;
     /**
-     * Opt in to the protocol-3 native assertion client. The host owns engine and
-     * admitted subject lifetimes. Supply native identities through builtinModules;
-     * native runs do not use the legacy mesh/BRep evidence helpers.
+     * Host-provided protocol-3 compiled assertion client. The host owns engine and
+     * admitted subject lifetimes and supplies bindings through builtinModules;
+     * authored tests use the canonical GeoSpec API, not a separate native dialect.
      */
     nativeAssertions?: GeoSpecAssertionClientOptions;
-    /** Native identity loader exposed through `geospec/runner/native` for opt-in native runs. */
+    /** Host-composed identity loader; authored tests use the canonical `geospec/model` API. */
     nativeModelLoader?: (options: Parameters<GeoSpecNativeModelLoader>[0]) => Promise<GeoSpecNativeSubject & {
         readonly load?: GeoSpecModelLoadEvidence;
     }>;

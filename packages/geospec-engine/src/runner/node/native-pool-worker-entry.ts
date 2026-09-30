@@ -1,4 +1,4 @@
-/** Opt-in native Node pool worker: owns one protocol-3 engine per isolate. @module */
+/** Compiled Node pool worker: owns one protocol-3 engine per isolate. @module */
 
 import { memoryUsage } from 'node:process';
 import { parentPort, workerData } from 'node:worker_threads';

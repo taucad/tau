@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseGcode } from '@taucad/slicer/toolpath';
+import { bambuA1MiniManifest } from '@taucad/bambu';
 import {
   derivePrinterGeometry,
   framedPartBox,
@@ -50,6 +51,16 @@ describe('derivePrinterGeometry', () => {
     expect(x1c.plate).toEqual({ center: [128, 128, -2], size: [256, 256, 4] });
     // The plate descends through the envelope, so it sits below the nozzle plane in world space.
     expect(x1c.envelope).toEqual({ center: [128, 128, -128], size: [256, 256, 256] });
+  });
+
+  it('should use Mini dimensions and moving-bed geometry without X1C-specific model assets', () => {
+    const mini = derivePrinterGeometry(bambuA1MiniManifest);
+    expect(mini.model).toBe('a1-mini');
+    expect(mini.buildVolume).toEqual([180, 180, 180]);
+    expect(mini.motion).toBe('head-rises');
+    expect(mini.plate.size).toEqual([180, 180, 4]);
+    expect(mini.light).toBeUndefined();
+    expect(mini.panels).toHaveLength(0);
   });
 
   it('should keep the nozzle plane at z = 0 with headroom above and the base below', () => {

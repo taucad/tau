@@ -223,6 +223,7 @@ export function Parameters({
             </div>
           ) : null}
           <Form<Record<string, unknown>, RJSFSchema, RJSFContext>
+            tagName={presentation === 'embedded' ? 'div' : 'form'}
             validator={rjsfValidator}
             templates={templates}
             schema={jsonSchema}

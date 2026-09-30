@@ -515,7 +515,8 @@ function PrinterPlateSurface({
   'use no memo'; // R3F owns imperative Three.js objects.
   const invalidate = useThree((state) => state.invalidate);
   const flat = useMemo(() => createFlatPlate(geometry, plate), [geometry, plate]);
-  const [loaded, setLoaded] = useState<Readonly<{ plate: PrinterPlateModel; scene: THREE.Object3D }>>();
+  const [loaded, setLoaded] =
+    useState<Readonly<{ plate: PrinterPlateModel; model: string | undefined; scene: THREE.Object3D }>>();
   useEffect(
     () => () => {
       flat.dispose();
@@ -523,7 +524,7 @@ function PrinterPlateSurface({
     [flat],
   );
   useEffect(() => {
-    const url = plate.model;
+    const url = geometry.model === 'x1c' ? plate.model : undefined;
     if (!url) {
       return;
     }
@@ -545,7 +546,7 @@ function PrinterPlateSurface({
         liftPlateSurface(surfaceMesh.material.color);
       }
       if (isActive) {
-        setLoaded({ plate, scene });
+        setLoaded({ plate, model: geometry.model, scene });
       } else {
         disposeLoadedModel(scene);
       }
@@ -558,8 +559,8 @@ function PrinterPlateSurface({
         disposeLoadedModel(scene);
       }
     };
-  }, [plate]);
-  const surface = loaded?.plate === plate ? loaded.scene : flat.object;
+  }, [geometry.model, plate]);
+  const surface = loaded?.plate === plate && loaded.model === geometry.model ? loaded.scene : flat.object;
   const isSeeThrough = useRef(false);
   useEffect(() => {
     parent.add(surface);
@@ -664,7 +665,7 @@ function PrinterObjects({
       {/* Keyed: R3F keeps the first object when a primitive's `object` alone changes. */}
       <primitive key={machine.root.uuid} object={machine.root} />
       <PrinterPlateSurface geometry={geometry} plate={plate} parent={machine.plateGroup} />
-      {isWholePrinter ? null : (
+      {isWholePrinter || geometry.model !== 'x1c' ? null : (
         <PrinterHotendModel
           toolhead={machine.toolhead}
           standIn={machine.hotendStandIn}

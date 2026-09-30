@@ -28,7 +28,13 @@ vi.mock('mqtt', async () => {
     readonly #listeners = new Map<string, Set<Listener>>();
 
     public constructor(streamBuilder: () => Duplex) {
-      streamBuilder().resume();
+      const stream = streamBuilder();
+      stream.resume();
+      // Match MQTT.js packet encoding: cork header and payload until the whole packet is ready.
+      stream.cork();
+      stream.write(Buffer.from([0x10, 0x02]));
+      stream.write(Buffer.from([0x00, 0x00]));
+      stream.uncork();
       queueMicrotask(() => {
         this.connected = true;
         this.#emit('connect');
@@ -723,6 +729,95 @@ describe('Bambu read-only controller', () => {
     versionReply.serial = '00M00A391800004';
   });
 
+  it('should keep Mini model facts and capture a fragmented bounded TLS JPEG, closing failed captures', async () => {
+    const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]);
+    const header = Buffer.alloc(16);
+    header.writeUInt32LE(jpeg.length);
+    const cameraBytes = Buffer.concat([header, jpeg]);
+    const cameraClose = vi.fn(async () => undefined);
+    const cameraWrite = vi.fn(async (_bytes: Uint8Array<ArrayBuffer>) => undefined);
+    const mqttWrite = vi.fn(async (_bytes: Uint8Array<ArrayBuffer>) => undefined);
+    let invalidFrame = false;
+    const connectStream = vi.fn(
+      async ({
+        endpoint,
+      }: Parameters<MachineConnectionRuntime['connectStream']>[0]): Promise<MachineNetworkStream> => ({
+        readable: (async function* () {
+          if (endpoint.port === 6000) {
+            yield invalidFrame ? Buffer.alloc(16, 255) : cameraBytes.subarray(0, 5);
+            if (!invalidFrame) {
+              yield cameraBytes.subarray(5, 18);
+              yield cameraBytes.subarray(18);
+            }
+          }
+        })(),
+        write: endpoint.port === 6000 ? cameraWrite : mqttWrite,
+        close: endpoint.port === 6000 ? cameraClose : vi.fn(async () => undefined),
+      }),
+    );
+    try {
+      versionReply.serial = '0300EA652800550';
+      statusReply.printerType = 'N1';
+      const session = await connectBambuMachine(
+        {
+          candidate: { ...candidate, claimedIdentity: { model: 'A1 mini', serial: versionReply.serial } },
+          configuration: { logicalId: 'Mini' },
+          connection: {
+            secretRef: 'vault:mini',
+            serviceTrust: {
+              mqtt: { type: 'pinned', digest: pinnedDigest },
+              camera: { type: 'pinned', digest: pinnedDigest },
+            },
+          },
+          signal: new AbortController().signal,
+        },
+        {
+          clock: { now: () => '2026-09-30T00:00:00.000Z' },
+          log: vi.fn(async () => undefined),
+          connectStream,
+          resolveSecret: vi.fn(async () => '12345678'),
+          async *readArtifact() {
+            yield* [];
+          },
+        },
+        'A1 mini',
+      );
+      expect(mqttWrite).toHaveBeenCalledExactlyOnceWith(Uint8Array.from([0x10, 0x02, 0x00, 0x00]));
+      expect(await session.getDescriptor({ signal: new AbortController().signal })).toMatchObject({
+        model: 'A1 mini',
+        printableEnvelope: { width: 0.18, depth: 0.18, height: 0.18 },
+        materialSystem: { slotCount: 4 },
+      });
+      const snapshot = await session.getSnapshot({ signal: new AbortController().signal });
+      expect(snapshot.lights?.chamber).toBeUndefined();
+      expect(snapshot.temperatures?.chamber).toBeUndefined();
+      expect(snapshot.fans?.auxiliary).toBeUndefined();
+      if (session.stillCapture.type !== 'supported') {
+        throw new Error('Expected Mini camera');
+      }
+      const still = await session.stillCapture.capture({ signal: new AbortController().signal });
+      expect(still.bytes).toEqual(jpeg);
+      expect(connectStream).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          endpoint: { address: '192.0.2.10', port: 6000 },
+          trust: { type: 'pinned', digest: pinnedDigest },
+          maximumWriteBytes: 80,
+        }),
+      );
+      expect(cameraWrite.mock.calls[0]?.[0]).toHaveLength(80);
+      expect(cameraClose).toHaveBeenCalledTimes(1);
+      invalidFrame = true;
+      await expect(session.stillCapture.capture({ signal: new AbortController().signal })).rejects.toThrow(
+        'BAMBU_CAMERA_FRAME_INVALID',
+      );
+      expect(cameraClose).toHaveBeenCalledTimes(2);
+      await session.close();
+    } finally {
+      versionReply.serial = '00M00A391800004';
+      statusReply.printerType = 'BL-P001';
+    }
+  });
+
   it('should offer stills only for an X1C whose host captures them over the pinned camera', async () => {
     const captureNetworkStill: NonNullable<MachineConnectionRuntime['captureNetworkStill']> = vi.fn();
     const connect = async (hostCaptures: boolean) =>
@@ -759,11 +854,7 @@ describe('Bambu read-only controller', () => {
     try {
       // Another model's camera needs its own manifest and pin; the X1C's pinned camera service never reaches it.
       statusReply.printerType = 'C12';
-      const other = await connect(true);
-      expect(other.stillCapture).toEqual({ type: 'unsupported' });
-      const descriptor = await other.getDescriptor({ signal: new AbortController().signal });
-      expect(descriptor.operations).not.toContain('still');
-      await other.close();
+      await expect(connect(true)).rejects.toThrow('BAMBU_MQTT_CONNECT_FAILED');
       statusReply.printerType = 'BL-P001';
       const withoutHostCapture = await connect(false);
       expect(withoutHostCapture.stillCapture).toEqual({ type: 'unsupported' });

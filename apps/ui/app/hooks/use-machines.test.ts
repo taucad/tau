@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { entry } from '#routes/w.$workspace.$project/chat-print.fixture.js';
+import { useMachinesSelection } from '#hooks/use-machines-selection.js';
 import { mock } from 'vitest-mock-extended';
 import type { MachineChannelClient, MachineClient, MachineDirectorySnapshot } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import {
   createMachinesFacet,
   printersInUseElsewhere,
+  projectMachineDirectoryFrame,
   useMachineDirectory,
   useMachinesFacet,
 } from '#hooks/use-machines.js';
@@ -162,5 +165,59 @@ describe('useMachinesFacet', () => {
     expect(second.result.current).toBe(first.result.current);
     // Nothing dials until a caller uses the facet.
     expect(connect).not.toHaveBeenCalled();
+  });
+});
+
+describe('machine identity across telemetry', () => {
+  it('preserves order when either printer updates and appends a new machine', () => {
+    const x1 = entry({ machineId: 'x1' });
+    const mini = entry({ machineId: 'mini' });
+    let directory: MachineDirectorySnapshot = { ...snapshot, entries: [x1, mini] };
+    for (const machineId of ['mini', 'x1', 'mini', 'x1']) {
+      const updated = entry({ machineId, name: `${machineId} updated` });
+      directory = projectMachineDirectoryFrame(directory, {
+        type: 'event',
+        cursor: snapshot.cursor,
+        event: {
+          hostId: 'host',
+          authorityId: 'authority',
+          revision: 1,
+          type: 'machine-directory-upserted',
+          entry: updated,
+        },
+      });
+      expect(directory.entries.map((candidate) => candidate.machineId)).toEqual(['x1', 'mini']);
+      expect(directory.entries.find((candidate) => candidate.machineId === machineId)).toBe(updated);
+    }
+    const added = entry({ machineId: 'third' });
+    expect(
+      projectMachineDirectoryFrame(directory, {
+        type: 'event',
+        cursor: snapshot.cursor,
+        event: {
+          hostId: 'host',
+          authorityId: 'authority',
+          revision: 1,
+          type: 'machine-directory-upserted',
+          entry: added,
+        },
+      }).entries.map((candidate) => candidate.machineId),
+    ).toEqual(['x1', 'mini', 'third']);
+  });
+
+  it('shares an explicit selection between mounted panes within one project only', () => {
+    const entries = [entry({ machineId: 'x1' }), entry({ machineId: 'mini' })];
+    const panes = renderHook(() => ({
+      print: useMachinesSelection('selection-sync', entries),
+      preview: useMachinesSelection('selection-sync', entries),
+      other: useMachinesSelection('selection-other', entries),
+    }));
+    act(() => {
+      panes.result.current.print.select('mini');
+    });
+    expect(panes.result.current.preview.selected?.machineId).toBe('mini');
+    expect(panes.result.current.other.selected?.machineId).toBe('x1');
+    panes.unmount();
+    globalThis.localStorage.removeItem('tau:print:selected-machine:selection-sync');
   });
 });

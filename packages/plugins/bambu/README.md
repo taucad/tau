@@ -11,7 +11,7 @@ Bambu Lab Developer LAN machine plugin
 ## Why @taucad/bambu?
 
 - **One call composes it** — `bambu()` registers this package's capabilities with `defineRuntime`.
-- **Role factories** — `bambuMachine()` support direct authoring, isolated tests, and whole-role ordering outside plugin expansion.
+- **Role factories** — `bambuMachine()` and `bambuA1MiniMachine()` support direct authoring, isolated tests, and whole-role ordering outside plugin expansion.
 - **No module-scope networking** — host protocol libraries load only when discovery or connection is requested.
 
 ## Install
@@ -37,13 +37,25 @@ certificate trust, sockets, and device lifetime; importing this package does not
 
 ## API
 
-| Export         | Kind            | Use                                                                           |
-| -------------- | --------------- | ----------------------------------------------------------------------------- |
-| `bambu`        | toolkit factory | package-named authoring factory; presets select capabilities                  |
-| `plugin`       | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key |
-| `bambuMachine` | machine factory | direct `machines` composition, with options                                   |
+| Export                | Kind            | Use                                                                           |
+| --------------------- | --------------- | ----------------------------------------------------------------------------- |
+| `bambu`               | toolkit factory | package-named authoring factory; presets select capabilities                  |
+| `plugin`              | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key |
+| `bambuMachine`        | machine factory | X1C registration                                                              |
+| `bambuA1MiniMachine`  | machine factory | A1 mini registration                                                          |
+| `bambuA1MiniManifest` | manifest        | A1 mini hardware, setup and qualification facts                               |
 
-One preset, `default`, selecting `machines.default`.
+The `default` preset retains the X1C registration (`machines.default`). Select the `a1Mini` preset to register `machines.a1Mini`, or compose both directly:
+
+```typescript
+import { bambuA1MiniMachine, bambuMachine } from '@taucad/bambu';
+
+const runtime = defineRuntime({ machines: [bambuMachine(), bambuA1MiniMachine()] });
+```
+
+Each discovered printer has its own binding, certificate pins, credential and session.
+Mini advertises a 180 mm build volume and captures a bounded JPEG still through pinned TLS port 6000.
+Its physical write actions remain designed until qualified on the actual printer.
 
 ### Build plate models (`@taucad/bambu/plate`)
 

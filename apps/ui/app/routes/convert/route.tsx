@@ -1,10 +1,10 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { MetaFunction } from 'react-router';
 import { formatConfigurations } from '@taucad/types/constants';
+import { asKnownArtifact } from '@taucad/runtime';
 import { Cpu, Download, Upload, RotateCcw } from 'lucide-react';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { projectToManifest } from '@taucad/types';
-import type { Geometry } from '@taucad/types';
 import type { ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import { Button } from '@taucad/ui/components/button';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
@@ -36,7 +36,6 @@ import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
 import { PageNotice } from '#components/layout/page-notice.js';
 import { createConverterSource } from '@taucad/converter/contracts';
-import type { ConverterSource } from '@taucad/converter/contracts';
 import type { ConverterExportFormat, ConverterImportFormat, ConverterRuntimeClient } from '@taucad/converter/runtime';
 import { createConverterClient } from '#runtime/converter-client-options.js';
 import { beginConverterOperation, createActiveConverterClient } from '#routes/convert/converter-client-lifecycle.js';
@@ -88,9 +87,11 @@ function ConverterContent(): React.JSX.Element {
  */
 export const ConverterViewer = memo(function ({
   glbData,
+  hash,
   fileName,
 }: {
   readonly glbData: Uint8Array<ArrayBuffer>;
+  readonly hash: string;
   readonly fileName: string;
 }): React.JSX.Element {
   const enableSurfaces = useGraphicsSelector((state) => state.context.enableSurfaces);
@@ -101,7 +102,7 @@ export const ConverterViewer = memo(function ({
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
 
-  const geometry = useMemo<Geometry>(() => ({ format: 'gltf', content: glbData, hash: 'converter' }), [glbData]);
+  const artifact = useMemo(() => ({ mimeType: 'model/gltf-binary', content: glbData }) as const, [glbData]);
 
   return (
     <div data-viewer-frame className='absolute inset-0'>
@@ -116,7 +117,8 @@ export const ConverterViewer = memo(function ({
           enableGrid={enableGrid}
           enableGizmo={enableGizmo}
           enableSurfaces={enableSurfaces}
-          geometry={geometry}
+          artifact={artifact}
+          artifactHash={hash}
         />
       </div>
 
@@ -174,7 +176,10 @@ export function ConverterExportPanel({ children }: Readonly<{ children: React.Re
 function ConverterContentInner(): React.JSX.Element {
   const [uploadedFile, setUploadedFile] = useState<UploadedFileInfo | undefined>(undefined);
   const [glbData, setGlbData] = useState<Uint8Array<ArrayBuffer> | undefined>(undefined);
-  const [source, setSource] = useState<ConverterSource | undefined>(undefined);
+  const [glbHash, setGlbHash] = useState<string | undefined>(undefined);
+  const [runtimeDocument, setRuntimeDocument] = useState<ReturnType<ConverterRuntimeClient['open']> | undefined>();
+  const documentRef = useRef<ReturnType<ConverterRuntimeClient['open']> | undefined>(undefined);
+  const pendingDocumentRef = useRef<ReturnType<ConverterRuntimeClient['open']> | undefined>(undefined);
   const [client, setClient] = useState<ConverterRuntimeClient | undefined>(undefined);
   const [converterImportFormats, setConverterImportFormats] = useState<ConverterImportFormat[]>([]);
   const [converterExportFormats, setConverterExportFormats] = useState<ConverterExportFormat[]>([]);
@@ -239,6 +244,10 @@ function ConverterContentInner(): React.JSX.Element {
     return () => {
       active = false;
       conversionGeneration.current += 1;
+      pendingDocumentRef.current?.close();
+      pendingDocumentRef.current = undefined;
+      documentRef.current?.close();
+      documentRef.current = undefined;
       unsubscribe?.();
       runtimeClient?.terminate();
     };
@@ -256,6 +265,8 @@ function ConverterContentInner(): React.JSX.Element {
   const handleFileSelect = useCallback(
     async (files: File[]) => {
       const isCurrentOperation = beginConverterOperation(conversionGeneration);
+      pendingDocumentRef.current?.close();
+      pendingDocumentRef.current = undefined;
       setOpeningFileName(files[0]?.name);
       setIsConverting(true);
       setConversionError(undefined);
@@ -284,19 +295,35 @@ function ConverterContentInner(): React.JSX.Element {
           return;
         }
         const nextSource = createConverterSource(entries, entryFile.webkitRelativePath || entryFile.name);
-        const outcome = await client.render({ source: nextSource });
+        const opened = client.open({ source: nextSource, watch: false });
+        pendingDocumentRef.current = opened;
+        const outcome = await opened.evaluation();
         if (!isCurrentOperation() || outcome.superseded) {
           return;
         }
-        if (!outcome.geometry.success) {
-          throw new Error(outcome.geometry.issues.map((issue) => issue.message).join('\n'));
+        if (!outcome.evaluation.success) {
+          throw new Error(outcome.evaluation.issues.map((issue) => issue.message).join('\n'));
         }
-        if (outcome.geometry.data.format !== 'gltf') {
-          throw new Error(`Converter returned unsupported preview geometry: ${outcome.geometry.data.format}`);
+        const view = opened.view();
+        const preview = await view.rendering();
+        view.close();
+        if (!isCurrentOperation() || preview.superseded) {
+          return;
+        }
+        if (!preview.rendering.success) {
+          throw new Error(preview.rendering.issues.map((issue) => issue.message).join('\n'));
+        }
+        const artifact = asKnownArtifact(preview.rendering.artifact);
+        if (artifact?.mimeType !== 'model/gltf-binary') {
+          throw new Error(`Converter returned unsupported preview media: ${preview.rendering.artifact.mimeType}`);
         }
         setUploadedFile({ name: entryFile.name, format, size: entryFile.size });
-        setSource(nextSource);
-        setGlbData(outcome.geometry.data.content);
+        documentRef.current?.close();
+        documentRef.current = opened;
+        pendingDocumentRef.current = undefined;
+        setRuntimeDocument(opened);
+        setGlbData(artifact.content);
+        setGlbHash(preview.rendering.hash);
       } catch (error) {
         if (isCurrentOperation()) {
           let message = 'Failed to process file';
@@ -306,6 +333,10 @@ function ConverterContentInner(): React.JSX.Element {
           setConversionError(message);
         }
       } finally {
+        if (pendingDocumentRef.current && isCurrentOperation()) {
+          pendingDocumentRef.current.close();
+          pendingDocumentRef.current = undefined;
+        }
         if (isCurrentOperation()) {
           setIsConverting(false);
         }
@@ -329,11 +360,16 @@ function ConverterContentInner(): React.JSX.Element {
 
   const handleReset = useCallback(() => {
     conversionGeneration.current += 1;
+    pendingDocumentRef.current?.close();
+    pendingDocumentRef.current = undefined;
     setIsConverting(false);
     setConversionError(undefined);
     setUploadedFile(undefined);
-    setSource(undefined);
+    documentRef.current?.close();
+    documentRef.current = undefined;
+    setRuntimeDocument(undefined);
     setGlbData(undefined);
+    setGlbHash(undefined);
   }, []);
 
   const handleClearFormats = useCallback(() => {
@@ -358,16 +394,16 @@ function ConverterContentInner(): React.JSX.Element {
 
   const exportFormat = useCallback(
     async (format: ConverterExportFormat) => {
-      if (!client || !source) {
+      if (!runtimeDocument) {
         throw new Error('No model is loaded');
       }
-      const result = await client.export(format, { source });
+      const result = await runtimeDocument.export(format);
       if (!result.success) {
         throw new Error(result.issues.map((issue) => issue.message).join('\n'));
       }
-      return result.data;
+      return [...result.files];
     },
-    [client, source],
+    [runtimeDocument],
   );
 
   const hasModel = glbData !== undefined;
@@ -420,7 +456,9 @@ function ConverterContentInner(): React.JSX.Element {
         >
           {isConverting || hasModel ? (
             <>
-              {glbData ? <ConverterViewer glbData={glbData} fileName={uploadedFile?.name ?? 'Model'} /> : undefined}
+              {glbData && glbHash ? (
+                <ConverterViewer glbData={glbData} hash={glbHash} fileName={uploadedFile?.name ?? 'Model'} />
+              ) : undefined}
               {isConverting ? (
                 <div
                   role='status'

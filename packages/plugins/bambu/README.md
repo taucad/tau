@@ -64,6 +64,8 @@ Its physical write actions remain designed until qualified on the actual printer
 | `bambuX1cPlates`       | descriptor | the four X1C plates: GLB URL, bounds, surface colour and finish, bed names |
 | `bambuPlateForBedType` | function   | map a sliced file's `curr_bed_type`, `plate_N.json` `bed_type` or Tau id   |
 | `bambuX1cHotend`       | descriptor | the hotend tip GLB, with the nozzle tip at its origin                      |
+| `bambuA1MiniPlates`    | descriptor | Mini Smooth/Textured PEI sheets, with their own tabs, cutouts and bounds   |
+| `bambuA1MiniHotend`    | descriptor | Mini installed silicone sock and nozzle tip                                |
 
 ```typescript
 import { bambuPlateForBedType } from '@taucad/bambu/plate';
@@ -73,8 +75,8 @@ const plate = bambuPlateForBedType('Textured PEI Plate');
 
 The GLBs are glTF (Y-up, metres). Rotate +90° about X and scale by 1000 to place one in the plate frame: millimetres,
 X right, Y toward the rear, Z up, origin at the printable area's front-left corner, Z = 0 on the print surface. They are
-clean-room models built from public product facts in `models/x1c`; regenerate them with
-`pnpm nx run bambu:render-plates`. They carry no Bambu Lab logo or real plate-detection code.
+independently authored models built from public product facts in `models/x1c` and `models/a1-mini`; regenerate them with
+`pnpm nx run bambu:render-plates`. X1C retains its existing unbranded markings. Mini includes an independently drawn outline brand mark and fitted Geist labels from the official product silhouette; no real plate-detection code is simulated. The Mini Textured PEI sheet is 0.55 mm thick (0.4 mm steel plus two 0.075 mm coatings), distinct from the 180 mm printable area. Appearance-derived ink and hotend dimensions are estimates, documented in the research blueprint.
 
 ## Environment
 

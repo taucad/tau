@@ -13,9 +13,8 @@ const createGraphicsActor = () =>
     { input: {} },
   );
 
-const geometry = (hash: string): { format: 'gltf'; hash: string; content: Uint8Array<ArrayBuffer> } => ({
-  format: 'gltf',
-  hash,
+const artifact = (): { mimeType: 'model/gltf-binary'; content: Uint8Array<ArrayBuffer> } => ({
+  mimeType: 'model/gltf-binary',
   content: new TextEncoder().encode('{}'),
 });
 
@@ -82,9 +81,9 @@ describe('graphics GLTF presentation projection', () => {
     actor.start();
     try {
       actor.send({
-        type: 'updateGeometry',
-        geometry: geometry('a'),
-        units: { length: 'mm' },
+        type: 'updateArtifact',
+        artifact: artifact(),
+        hash: 'a',
       });
       actor.send({
         type: 'gltfPresentationCommitted',
@@ -94,9 +93,9 @@ describe('graphics GLTF presentation projection', () => {
         manifest,
       });
       actor.send({
-        type: 'updateGeometry',
-        geometry: geometry('b'),
-        units: { length: 'mm' },
+        type: 'updateArtifact',
+        artifact: artifact(),
+        hash: 'b',
       });
 
       expect(actor.getSnapshot().context.gltfPresentation).toMatchObject({

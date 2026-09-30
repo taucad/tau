@@ -2,7 +2,7 @@
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PanzoomObject, PanzoomOptions } from '@panzoom/panzoom';
-import type { GeometrySvg } from '@taucad/types';
+import type { KnownArtifact } from '@taucad/runtime';
 import { SvgViewer } from '#components/geometry/graphics/svg/svg-viewer.js';
 
 type GraphicsEvent = {
@@ -83,13 +83,13 @@ class TestResizeObserver implements ResizeObserver {
 const testStrokeColor = '#ff0000';
 // oxlint-disable-next-line tau-lint/no-hardcoded-color -- test asserts staging SVG grid parity.
 const expectedLightGridStroke = 'rgba(128, 128, 128, 0.15)';
-const geometry: GeometrySvg = {
-  format: 'svg',
+const geometry: Extract<KnownArtifact, { mimeType: 'image/svg+xml' }> = {
+  mimeType: 'image/svg+xml',
   content: `<svg viewBox="0 0 20 10"><script>alert("x")</script><path d="M0 0 C5 10 15 10 20 0" fill="none" stroke="${testStrokeColor}" stroke-width="1" vector-effect="non-scaling-stroke"/></svg>`,
 };
 
-const legacyStrokedGeometry: GeometrySvg = {
-  format: 'svg',
+const legacyStrokedGeometry: Extract<KnownArtifact, { mimeType: 'image/svg+xml' }> = {
+  mimeType: 'image/svg+xml',
   content: `<svg viewBox="-3.2 -33.31 26.4 56.63"><script>alert("x")</script><path d="M 0 0 C 5.78509 -6.8944 14.21491 -6.8944 20 0" fill="none" stroke="${testStrokeColor}"/></svg>`,
 };
 
@@ -119,23 +119,45 @@ const getRegisteredReset = (): (() => void) => {
   return mocks.resetListener;
 };
 
+const viewerRoot = (): ShadowRoot => {
+  const shadow = document.querySelector('[data-testid="svg-viewer-host"]')?.shadowRoot;
+  if (!shadow) {
+    throw new Error('Expected isolated SVG viewer root');
+  }
+  return shadow;
+};
+
 describe('SvgViewer', () => {
+  it('keeps authored SVG styles inside the viewer shadow root', async () => {
+    const styledArtifact: typeof geometry = {
+      mimeType: 'image/svg+xml',
+      content:
+        '<svg viewBox="0 0 10 10"><style>body { color: red } path { stroke: blue }</style><path d="M0 0L10 10"/></svg>',
+    };
+    render(<SvgViewer artifact={styledArtifact} />);
+
+    await waitFor(() => expect(mocks.panzoom).toHaveBeenCalledOnce());
+    expect(viewerRoot().querySelector('style')?.textContent).toContain('path { stroke: blue }');
+    expect(document.querySelector('style')).toBeNull();
+    expect(viewerRoot().querySelector('path')).not.toBeNull();
+  });
+
   it('should render sanitized SVG document content inside a Panzoom viewport', async () => {
-    render(<SvgViewer geometry={geometry} />);
+    render(<SvgViewer artifact={geometry} />);
 
     await waitFor(() => {
       expect(mocks.panzoom).toHaveBeenCalledOnce();
     });
 
-    const root = document.querySelector('#panzoom-root');
+    const root = viewerRoot().querySelector('#panzoom-root');
     expect(root?.tagName.toLowerCase()).toBe('g');
     expect(document.querySelector('script')).toBeNull();
-    const geometryPath = document.querySelector('[data-slot="geometry"] path');
+    const geometryPath = viewerRoot().querySelector('[data-slot="geometry"] path');
     expect(geometryPath?.getAttribute('stroke')).toBe(testStrokeColor);
     expect(geometryPath?.getAttribute('stroke-width')).toBe('1');
     expect(geometryPath?.getAttribute('vector-effect')).toBe('non-scaling-stroke');
 
-    const gridPaths = [...document.querySelectorAll('pattern path')];
+    const gridPaths = [...viewerRoot().querySelectorAll('pattern path')];
     expect(gridPaths).toHaveLength(2);
     const [smallGridPath, largeGridPath] = gridPaths;
     expect(smallGridPath?.getAttribute('stroke')).toBe(expectedLightGridStroke);
@@ -168,26 +190,26 @@ describe('SvgViewer', () => {
   });
 
   it('should apply constant-screen stroke defaults to sanitized stroked geometry paths', async () => {
-    render(<SvgViewer geometry={legacyStrokedGeometry} />);
+    render(<SvgViewer artifact={legacyStrokedGeometry} />);
 
     await waitFor(() => {
       expect(mocks.panzoom).toHaveBeenCalledOnce();
     });
 
     expect(document.querySelector('script')).toBeNull();
-    const geometryPath = document.querySelector('[data-slot="geometry"] path');
+    const geometryPath = viewerRoot().querySelector('[data-slot="geometry"] path');
     expect(geometryPath?.getAttribute('stroke')).toBe(testStrokeColor);
     expect(geometryPath?.getAttribute('vector-effect')).toBe('non-scaling-stroke');
     expect(geometryPath?.hasAttribute('stroke-width')).toBe(false);
   });
 
   it('should zoom with the mouse wheel and notify graphics state on Panzoom changes', async () => {
-    render(<SvgViewer geometry={geometry} />);
+    render(<SvgViewer artifact={geometry} />);
     await waitFor(() => {
       expect(mocks.panzoom).toHaveBeenCalledOnce();
     });
 
-    const root = document.querySelector('#panzoom-root');
+    const root = viewerRoot().querySelector('#panzoom-root');
     const container = root?.closest('div');
     expect(root?.tagName.toLowerCase()).toBe('g');
     expect(container).toBeInstanceOf(HTMLDivElement);
@@ -214,7 +236,7 @@ describe('SvgViewer', () => {
       root.dispatchEvent(new Event('panzoomzoom'));
     });
 
-    const patternTransforms = [...document.querySelectorAll('pattern')].map((pattern) =>
+    const patternTransforms = [...viewerRoot().querySelectorAll('pattern')].map((pattern) =>
       pattern.getAttribute('patternTransform'),
     );
     expect(patternTransforms).toEqual(['translate(0 0)', 'translate(0 0)']);
@@ -226,7 +248,7 @@ describe('SvgViewer', () => {
   });
 
   it('should reset the SVG view through the renderer-neutral reset event', async () => {
-    render(<SvgViewer geometry={geometry} />);
+    render(<SvgViewer artifact={geometry} />);
     await waitFor(() => {
       expect(mocks.panzoom).toHaveBeenCalledOnce();
     });
@@ -240,7 +262,7 @@ describe('SvgViewer', () => {
   });
 
   it('should destroy Panzoom on unmount', async () => {
-    const { unmount } = render(<SvgViewer geometry={geometry} />);
+    const { unmount } = render(<SvgViewer artifact={geometry} />);
     await waitFor(() => {
       expect(mocks.panzoom).toHaveBeenCalledOnce();
     });

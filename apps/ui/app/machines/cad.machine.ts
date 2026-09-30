@@ -1,22 +1,21 @@
 import { setup, types, waitFor } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
-import type { CodeIssue, Geometry, LogLevel, LogOrigin } from '@taucad/types';
+import type { CodeIssue, LogLevel, LogOrigin } from '@taucad/types';
 import type {
-  GetParametersResult,
-  HashedGeometryResult,
+  Description,
+  Evaluation,
   KernelIssue,
-  RenderPhase,
+  Rendering,
+  RuntimeDocument,
   TelemetryBatch,
   TelemetrySpanRecord,
-  WorkerState,
+  ViewSubscription,
 } from '@taucad/runtime';
-import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ParameterManifest } from '@taucad/parameters';
-import { isRenderTimeoutError } from '@taucad/runtime/client';
 import { isKernelIssueCode } from '@taucad/runtime/types';
 import { safeDispose } from '@taucad/utils/dispose';
 import type { LengthSymbol } from '#constants/length-units.js';
-import { defaultRenderTimeout } from '#constants/editor.constants.js';
+import { defaultOperationTimeout } from '#constants/editor.constants.js';
 import { actorIdOf, eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import type { logMachine } from '#machines/logs.machine.js';
@@ -27,7 +26,7 @@ import type {
   AppRuntimeClient,
   LazyKernelOptionsFactory,
 } from '#types/runtime-client.alias.js';
-export type LatestGeometryOutcome = 'success' | 'failure' | undefined;
+export type LatestRenderingOutcome = 'success' | 'failure' | undefined;
 
 type CadTag = 'cad-loading' | 'cad-runtime-error';
 
@@ -37,10 +36,14 @@ export type CadContext = {
   /** What the next render carries beyond the entry, cleared by any other render trigger. */
   parameterRender: ParameterRender | undefined;
   units: { length: LengthSymbol };
-  /** Outcome of the latest selected runtime geometry event. */
-  latestGeometryOutcome: LatestGeometryOutcome;
-  /** Last successful artifact retained for display across later render failures. */
-  geometry: Geometry | undefined;
+  /** Outcome of the latest default-view projection. */
+  latestRenderingOutcome: LatestRenderingOutcome;
+  /** Last successful default projection retained across later failures. */
+  rendering: Rendering | undefined;
+  /** Latest projection verdict, including failures, for operation correlation. */
+  lastProjection: Rendering | undefined;
+  /** Latest document evaluation, including offered views and exports. */
+  evaluation: Evaluation | undefined;
   kernelIssues: Map<string, KernelIssue[]>;
   codeIssues: CodeIssue[];
   shouldInitializeKernelOnStart: boolean;
@@ -50,31 +53,20 @@ export type CadContext = {
   kernelOptionsFactory: LazyKernelOptionsFactory;
   fileSystemRoot: string;
   parameterManifest?: ParameterManifest;
-  renderPhase: RenderPhase | undefined;
+  renderPhase: string | undefined;
   telemetryEntries: TelemetrySpanRecord[];
-  renderTimeout: number;
-  /** Kernel render options (for example an output kind) sent with every render request. */
-  renderOptions: Record<string, unknown>;
+  operationTimeout: number;
   kernelClient?: AppRuntimeClient;
+  document?: RuntimeDocument;
+  defaultView?: ViewSubscription;
   capabilities?: AppCapabilitiesManifest;
   activeKernelId?: string;
   eventCleanups: Array<() => void>;
+  documentCleanups: Array<() => void>;
   /** A park requested during connection or rendering runs after the unit settles. */
   parkWhenIdle: boolean;
-  /**
-   * Monotonically increasing render identifier. Bumped whenever the UI
-   * issues a render-triggering event (`setEntryPath`, `setRenderOptions`, `initializeModel`).
-   * Consumed by `awaitFreshRender` to detect when a
-   * settled geometry result corresponds to a request issued at-or-after a
-   * given baseline.
-   */
-  lastRequestedRenderId: number;
-  /**
-   * Highest render identifier that has been observed as settled via a
-   * `geometryComputed` or `geometryFailed` event. Always less-than-or-equal to
-   * `lastRequestedRenderId`.
-   */
-  lastSettledRenderId: number;
+  /** Invalidates an asynchronous document opening superseded by newer actor intent. */
+  openAttempt: number;
 };
 
 type KernelConnectedEvent = {
@@ -97,14 +89,25 @@ type CadEvent =
     }
   | { type: 'setEntryPath'; entryPath: string }
   | { type: 'commitParameters'; stage: Record<string, Uint8Array<ArrayBuffer>> }
+  | { type: 'setPreviewParameters'; parameters: Record<string, unknown> }
   | { type: 'scrubParameters'; parameters: Record<string, unknown> }
   | { type: 'restoreParameters' }
   | { type: 'setCodeIssues'; errors: CadContext['codeIssues'] }
-  | { type: 'geometryComputed'; geometry: Geometry; issues: KernelIssue[] }
-  | { type: 'geometryFailed'; issues: KernelIssue[] }
+  | { type: 'defaultRendered'; rendering: Rendering }
+  | { type: 'documentEvaluated'; evaluation: Evaluation }
+  | { type: 'documentDescribed'; description: Description }
+  | {
+      type: 'documentOpened';
+      document: RuntimeDocument;
+      defaultView: ViewSubscription;
+      cleanups: Array<() => void>;
+      requestId: number;
+    }
+  | { type: 'documentStatusChanged'; status: 'evaluating' | 'ready' | 'error' | 'closed' }
+  | { type: 'defaultViewStatusChanged'; status: 'rendering' | 'ready' | 'error' | 'closed' }
   | { type: 'parametersParsed'; manifest: ParameterManifest }
   | { type: 'kernelIssue'; errors: KernelIssue[] }
-  | { type: 'kernelProgress'; phase: RenderPhase }
+  | { type: 'kernelProgress'; phase: string }
   | { type: 'kernelTelemetry'; batch: TelemetryBatch }
   | {
       type: 'kernelLog';
@@ -113,9 +116,8 @@ type CadEvent =
       origin?: LogOrigin;
       data?: unknown;
     }
-  | { type: 'stateChanged'; state: WorkerState; detail?: string }
-  | { type: 'setRenderTimeout'; renderTimeout: number }
-  | { type: 'setRenderOptions'; renderOptions: Record<string, unknown> }
+  | { type: 'stateChanged'; state: 'idle' | 'busy' | 'error'; detail?: string }
+  | { type: 'setOperationTimeout'; operationTimeout: number }
   | { type: 'capabilitiesUpdated'; capabilities: AppCapabilitiesManifest }
   | { type: 'activeKernelChanged'; kernelId: string | undefined }
   | { type: 'parkRuntime' }
@@ -123,7 +125,7 @@ type CadEvent =
   | KernelConnectedEvent
   | FileSystemBindingChangedEvent;
 
-type CadEmitted = { type: 'geometryEvaluated'; geometry: Geometry };
+type CadEmitted = { type: 'defaultRendered'; rendering: Rendering };
 
 const consoleLogData = (data: unknown): string => {
   if (data === undefined) {
@@ -144,11 +146,18 @@ type CadInput = {
   kernelOptionsFactory: LazyKernelOptionsFactory;
   fileSystemRoot: string;
   /** Milliseconds. Create-only seed from the entry's durable record; the actor owns it afterwards. */
-  renderTimeout?: number;
+  operationTimeout?: number;
 };
 
 /** Release the runtime resources held by one CAD unit. */
-export const disposeCadRuntime = (context: Pick<CadContext, 'eventCleanups' | 'kernelClient'>): void => {
+export const disposeCadRuntime = (
+  context: Pick<CadContext, 'eventCleanups' | 'documentCleanups' | 'document' | 'defaultView' | 'kernelClient'>,
+): void => {
+  for (const cleanup of context.documentCleanups) {
+    safeDispose(cleanup);
+  }
+  safeDispose(() => context.defaultView?.close());
+  safeDispose(() => context.document?.close());
   for (const cleanup of context.eventCleanups) {
     safeDispose(cleanup);
   }
@@ -164,11 +173,11 @@ type ConnectKernelInput = {
 
 type RenderModelInput = {
   client: AppRuntimeClient | undefined;
+  document: RuntimeDocument | undefined;
+  machineRef: AnyActorRef;
+  requestId: number;
   entryPath: string | undefined;
   parameterRender: ParameterRender | undefined;
-  renderOptions: Record<string, unknown>;
-  /** Whether no newer UI render was requested since this one. */
-  isLatestRequest: () => boolean;
 };
 
 /**
@@ -177,6 +186,7 @@ type RenderModelInput = {
  */
 type ParameterRender =
   | Readonly<{ kind: 'commit'; stage: Record<string, Uint8Array<ArrayBuffer>> }>
+  | Readonly<{ kind: 'preview'; parameters: Record<string, unknown> }>
   | Readonly<{ kind: 'scrub'; parameters: Record<string, unknown> }>
   | Readonly<{
       kind: 'initial';
@@ -291,30 +301,8 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   client = createRuntimeClient(kernelOptions);
 
   cleanups.push(
-    client.on('geometry', (result: HashedGeometryResult) => {
-      if (result.success) {
-        machineRef.send({
-          type: 'geometryComputed',
-          geometry: result.data,
-          issues: result.issues,
-        });
-      } else {
-        machineRef.send({ type: 'geometryFailed', issues: result.issues });
-      }
-    }),
-    client.on('state', (state: WorkerState) => {
+    client.on('state', (state) => {
       machineRef.send({ type: 'stateChanged', state });
-    }),
-    client.on('progress', (phase: RenderPhase) => {
-      machineRef.send({ type: 'kernelProgress', phase });
-    }),
-    client.on('parametersResolved', (parametersResult: GetParametersResult) => {
-      if (parametersResult.success) {
-        machineRef.send({
-          type: 'parametersParsed',
-          manifest: parametersResult.data,
-        });
-      }
     }),
     client.on('log', (entry: { level: string; message: string; origin?: LogOrigin; data?: unknown }) => {
       machineRef.send({
@@ -328,14 +316,11 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
     client.on('telemetry', (batch: TelemetryBatch) => {
       machineRef.send({ type: 'kernelTelemetry', batch });
     }),
-    client.on('error', (issues: KernelIssue[]) => {
-      machineRef.send({ type: 'kernelIssue', errors: issues });
+    client.on('error', (issues) => {
+      machineRef.send({ type: 'kernelIssue', errors: [...issues] });
     }),
     client.on('capabilities', (capabilities) => {
       machineRef.send({ type: 'capabilitiesUpdated', capabilities });
-    }),
-    client.on('activeKernelChanged', (kernelId: string | undefined) => {
-      machineRef.send({ type: 'activeKernelChanged', kernelId });
     }),
   );
 
@@ -368,7 +353,7 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   return { type: 'kernelConnected', client, cleanups };
 });
 
-const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input }) => {
+const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, signal }) => {
   if (!input.client) {
     throw new Error('Kernel client is not connected');
   }
@@ -376,40 +361,58 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
     throw new Error('No model file is selected');
   }
 
-  /* Stored values are never a second copy in this machine: a committed edit carries the sidecar
-   * bytes the authority just wrote (D1) and the runtime resolves the values from them, and a drag
-   * sample carries values that are on no disk at all and are never persisted (D2). */
-  // The runtime projects its topology default only onto render routes that support it.
-  const entry = {
-    source: { path: input.entryPath },
-    content: { includeEdges: true },
-    // An empty object and an omitted field are the same render identity; send only what is set.
-    ...(Object.keys(input.renderOptions).length > 0 ? { renderOptions: input.renderOptions } : {}),
-  } as const;
-  const request = {
-    ...entry,
-    ...(input.parameterRender?.kind === 'commit' ? { stage: input.parameterRender.stage } : {}),
-    ...(input.parameterRender?.kind === 'initial'
-      ? {
-          ...(input.parameterRender.parameters ? { parameters: input.parameterRender.parameters } : {}),
-          ...(input.parameterRender.stage ? { stage: input.parameterRender.stage } : {}),
-        }
-      : {}),
-    ...(input.parameterRender?.kind === 'scrub'
-      ? { parameters: input.parameterRender.parameters, transient: true }
-      : {}),
-  } as const;
-  const outcome = await input.client.render(request);
-  // Runtime state events usually stop this actor before the render settles, so ask the machine
-  // whether this is still the latest request. If so, the runtime's watched rerender won, and it
-  // drops a concurrent open of another file (a rename races the watcher reporting the old path
-  // gone). Re-assert this unit's file once.
-  // ponytail: one retry; loop only if a render can keep losing to repeated external edits.
-  // A superseded drag sample is simply stale; only a committed render re-asserts itself. The first
-  // attempt already staged a commit's bytes, so the re-assert renders what storage now holds.
-  if (outcome.superseded && input.parameterRender?.kind !== 'scrub' && input.isLatestRequest()) {
-    await input.client.render(input.parameterRender?.kind === 'commit' ? entry : request);
+  if (!input.document) {
+    const initial = input.parameterRender?.kind === 'initial' ? input.parameterRender : undefined;
+    const document = input.client.open({
+      source: { path: input.entryPath },
+      ...(initial?.parameters === undefined ? {} : { parameters: initial.parameters }),
+      ...(initial?.stage === undefined ? {} : { stage: initial.stage }),
+      watch: true,
+    });
+    const defaultView = document.view();
+    const cleanups = [
+      document.on('described', (description) => {
+        input.machineRef.send({ type: 'documentDescribed', description });
+      }),
+      document.on('evaluated', (evaluation) => {
+        input.machineRef.send({ type: 'documentEvaluated', evaluation });
+      }),
+      document.on('progress', ({ phase }) => {
+        input.machineRef.send({ type: 'kernelProgress', phase });
+      }),
+      document.on('status', (status) => {
+        input.machineRef.send({ type: 'documentStatusChanged', status });
+      }),
+      defaultView.on('rendered', (rendering) => {
+        input.machineRef.send({ type: 'defaultRendered', rendering });
+      }),
+      defaultView.on('status', (status) => {
+        input.machineRef.send({ type: 'defaultViewStatusChanged', status });
+      }),
+    ];
+    signal.throwIfAborted();
+    input.machineRef.send({ type: 'documentOpened', document, defaultView, cleanups, requestId: input.requestId });
+    await document.evaluation({ signal });
+    return;
   }
+
+  /* Committed sidecar bytes reach the watched document once; transient drag parameters never
+   * become the export baseline. An empty update cancels a drag and restores committed values. */
+  const change = input.parameterRender;
+  const update =
+    change?.kind === 'commit'
+      ? { stage: change.stage }
+      : change?.kind === 'preview'
+        ? { parameters: change.parameters }
+        : change?.kind === 'scrub'
+          ? { parameters: change.parameters, transient: true }
+          : change?.kind === 'initial'
+            ? {
+                ...(change.parameters === undefined ? {} : { parameters: change.parameters }),
+                ...(change.stage === undefined ? {} : { stage: change.stage }),
+              }
+            : {};
+  await input.document.update(update);
 });
 
 /** Traces retained for the telemetry pane. A root span closes its trace, so the cut is trace-aligned. */
@@ -452,7 +455,7 @@ type CadArgs<EventType extends CadEvent['type']> = Readonly<{
 }>;
 type RenderTrigger = Extract<
   CadEvent,
-  { type: 'initializeModel' | 'setEntryPath' | 'setRenderOptions' | 'commitParameters' | 'scrubParameters' }
+  { type: 'initializeModel' | 'setEntryPath' | 'commitParameters' | 'setPreviewParameters' | 'scrubParameters' }
 >;
 
 /*
@@ -477,23 +480,48 @@ const notifyKernelRefusal = (
 
 /** Release the kernel. The disposal runs as an effect; the refs clear with the transition. */
 const destroyKernel = (context: CadContext, enq: CadEnqueue): CadPatch => {
-  const { eventCleanups, kernelClient } = context;
+  const { eventCleanups, documentCleanups, document, defaultView, kernelClient } = context;
   enq(() => {
-    disposeCadRuntime({ eventCleanups, kernelClient });
+    disposeCadRuntime({ eventCleanups, documentCleanups, document, defaultView, kernelClient });
   });
-  return { eventCleanups: [], kernelClient: undefined };
+  return {
+    eventCleanups: [],
+    documentCleanups: [],
+    document: undefined,
+    defaultView: undefined,
+    kernelClient: undefined,
+  };
 };
 
-/** What a render-triggering event does to context, bumping the request watermark first. */
+/** Close a source's document and every default-view listener before opening another source. */
+const destroyDocument = (context: CadContext, enq: CadEnqueue): CadPatch => {
+  const { documentCleanups, document, defaultView } = context;
+  enq(() => {
+    for (const cleanup of documentCleanups) {
+      safeDispose(cleanup);
+    }
+    safeDispose(() => defaultView?.close());
+    safeDispose(() => document?.close());
+  });
+  return {
+    documentCleanups: [],
+    document: undefined,
+    defaultView: undefined,
+    evaluation: undefined,
+    lastProjection: undefined,
+  };
+};
+
+/** Record new actor intent so a superseded asynchronous document open can be closed. */
 const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch => {
-  const bumped = { lastRequestedRenderId: context.lastRequestedRenderId + 1 };
+  const bumped = { openAttempt: context.openAttempt + 1 };
   switch (event.type) {
     case 'initializeModel': {
       return {
         ...bumped,
         entryPath: event.entryPath,
         codeIssues: [],
-        latestGeometryOutcome: undefined,
+        latestRenderingOutcome: undefined,
         parameterManifest: undefined,
         /* The initial stage rides only this render; a later commit or scrub replaces it. */
         parameterRender:
@@ -514,7 +542,7 @@ const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch
         entryPath: event.entryPath,
         // The staged bytes belong to the entry that was open; the new entry re-supplies its own.
         parameterRender: undefined,
-        latestGeometryOutcome: undefined,
+        latestRenderingOutcome: undefined,
         codeIssues: [],
         kernelIssues,
       };
@@ -522,22 +550,20 @@ const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch
     /* Persistence has already landed these bytes; carrying them makes the runtime observe the
      * revision it is about to be told about, so the sidecar's watch event renders nothing. */
     case 'commitParameters': {
-      return { ...bumped, parameterRender: { kind: 'commit', stage: event.stage }, latestGeometryOutcome: undefined };
+      return { ...bumped, parameterRender: { kind: 'commit', stage: event.stage }, latestRenderingOutcome: undefined };
+    }
+    case 'setPreviewParameters': {
+      return {
+        ...bumped,
+        parameterRender: { kind: 'preview', parameters: event.parameters },
+        latestRenderingOutcome: undefined,
+      };
     }
     case 'scrubParameters': {
       return {
         ...bumped,
         parameterRender: { kind: 'scrub', parameters: event.parameters },
-        latestGeometryOutcome: undefined,
-      };
-    }
-    /* A render option (for example the output kind) is part of the render identity, so a
-     * change is a new render; the runtime serves an already-published identity from cache. */
-    case 'setRenderOptions': {
-      return {
-        ...bumped,
-        renderOptions: { ...context.renderOptions, ...event.renderOptions },
-        latestGeometryOutcome: undefined,
+        latestRenderingOutcome: undefined,
       };
     }
   }
@@ -551,20 +577,16 @@ const renderRequest =
      * an in-flight render just because a parameter sidecar settled. */
     const parkPending = context.parkWhenIdle;
     const destroyed = options.destroy === true && !parkPending ? destroyKernel(context, enq) : {};
+    const replaced =
+      event.type === 'initializeModel' || event.type === 'setEntryPath'
+        ? destroyDocument({ ...context, ...destroyed }, enq)
+        : {};
     return {
       ...(target === undefined || parkPending ? {} : { target }),
       ...(options.reenter === true && !parkPending ? { reenter: true } : {}),
-      context: { ...destroyed, ...renderRequestPatch({ ...context, ...destroyed }, event) },
+      context: { ...destroyed, ...replaced, ...renderRequestPatch({ ...context, ...destroyed, ...replaced }, event) },
     };
   };
-
-/** An output-kind change renders the open entry; with no entry open it only records the choice. */
-const renderOptionsRequest =
-  (target?: string, options: Readonly<{ reenter?: boolean; destroy?: boolean }> = {}) =>
-  (args: CadArgs<'setRenderOptions'>, enq: CadEnqueue) =>
-    args.context.entryPath === undefined
-      ? { context: { renderOptions: { ...args.context.renderOptions, ...args.event.renderOptions } } }
-      : renderRequest(target, options)(args, enq);
 
 /** Record issues against the entry this unit renders; nothing to key them by without one. */
 const withEntryIssues = (
@@ -620,37 +642,78 @@ const runtimeSignals = {
 const resultSignals = {
   ...runtimeSignals,
   setCodeIssues: ({ event }: CadArgs<'setCodeIssues'>) => ({ context: { codeIssues: event.errors } }),
-  geometryComputed: ({ context, event }: CadArgs<'geometryComputed'>, enq: CadEnqueue) => {
-    // A drag sample is never persisted, so it is not the model's geometry to publish.
-    if (context.parameterRender?.kind !== 'scrub') {
-      enq.emit({ type: 'geometryEvaluated', geometry: event.geometry });
+  defaultRendered: ({ context, event }: CadArgs<'defaultRendered'>, enq: CadEnqueue) => {
+    // A successful export-only build offers no default projection. Its automatic
+    // VIEW_UNAVAILABLE reply must not turn the document's success into failure.
+    if (context.evaluation?.success && context.evaluation.views.length === 0) {
+      return {};
+    }
+    if (!event.rendering.transient) {
+      enq.emit({ type: 'defaultRendered', rendering: event.rendering });
+    }
+    const combinedIssues = [...(context.evaluation?.issues ?? [])];
+    for (const issue of event.rendering.issues) {
+      if (
+        !combinedIssues.some(
+          (existing) =>
+            existing.code === issue.code &&
+            existing.message === issue.message &&
+            existing.type === issue.type &&
+            existing.severity === issue.severity,
+        )
+      ) {
+        combinedIssues.push(issue);
+      }
+    }
+    if (!event.rendering.success) {
+      const patch: CadPatch = {
+        lastProjection: event.rendering,
+        latestRenderingOutcome: 'failure',
+        kernelIssues: withEntryIssues(context, (issues, entryPath) => {
+          issues.set(entryPath, combinedIssues);
+        }),
+      };
+      return {
+        context: patch,
+      };
     }
     const patch: CadPatch = {
-      geometry: event.geometry,
-      latestGeometryOutcome: 'success',
+      rendering: event.rendering,
+      lastProjection: event.rendering,
+      latestRenderingOutcome: 'success',
       kernelIssues: withEntryIssues(context, (issues, entryPath) => {
-        if (event.issues.length > 0) {
-          issues.set(entryPath, event.issues);
+        if (combinedIssues.length > 0) {
+          issues.set(entryPath, combinedIssues);
         } else {
           issues.delete(entryPath);
         }
       }),
-      // Geometry result corresponds to the most recently requested render;
-      // settled watermark advances to whatever the UI has asked for.
-      lastSettledRenderId: context.lastRequestedRenderId,
     };
     return { context: patch };
   },
-  geometryFailed: ({ context, event }: CadArgs<'geometryFailed'>) => {
+  documentEvaluated: ({ context, event }: CadArgs<'documentEvaluated'>) => {
     const patch: CadPatch = {
-      latestGeometryOutcome: 'failure',
+      evaluation: event.evaluation,
+      ...(event.evaluation.success && event.evaluation.views.length === 0
+        ? { rendering: undefined, latestRenderingOutcome: 'success' }
+        : {}),
+      ...(event.evaluation.success ? {} : { latestRenderingOutcome: 'failure' }),
       kernelIssues: withEntryIssues(context, (issues, entryPath) => {
-        issues.set(entryPath, event.issues);
+        if (event.evaluation.issues.length > 0) {
+          issues.set(entryPath, [...event.evaluation.issues]);
+        } else {
+          issues.delete(entryPath);
+        }
       }),
-      lastSettledRenderId: context.lastRequestedRenderId,
     };
     return { context: patch };
   },
+  documentDescribed: ({ event }: CadArgs<'documentDescribed'>) => ({
+    context: {
+      activeKernelId: event.description.kernelId,
+      ...(event.description.success ? { parameterManifest: event.description.parameters } : {}),
+    },
+  }),
   parametersParsed: ({ event }: CadArgs<'parametersParsed'>) => ({ context: { parameterManifest: event.manifest } }),
   kernelIssue: ({ context, event }: CadArgs<'kernelIssue'>) => ({
     context: {
@@ -662,13 +725,6 @@ const resultSignals = {
 };
 
 /** Follow the runtime's own state report, from wherever it is not already. */
-const followWorkerState =
-  (targets: Partial<Record<WorkerState, string>>) =>
-  ({ event }: CadArgs<'stateChanged'>) => {
-    const target = targets[event.state];
-    return target === undefined ? undefined : { target };
-  };
-
 const errorMessageOf = (error: unknown, fallback: string): string =>
   error instanceof Error || error instanceof DOMException ? error.message : fallback;
 
@@ -698,8 +754,10 @@ export const cadMachine = setup({
     screenshot: undefined,
     units: { length: 'mm' },
     parameterRender: undefined,
-    latestGeometryOutcome: undefined,
-    geometry: undefined,
+    latestRenderingOutcome: undefined,
+    rendering: undefined,
+    lastProjection: undefined,
+    evaluation: undefined,
     kernelIssues: new Map(),
     codeIssues: [],
     shouldInitializeKernelOnStart: input.shouldInitializeKernelOnStart,
@@ -711,38 +769,82 @@ export const cadMachine = setup({
     parameterManifest: undefined,
     renderPhase: undefined,
     telemetryEntries: [],
-    renderTimeout: input.renderTimeout ?? defaultRenderTimeout,
-    renderOptions: {},
+    operationTimeout: input.operationTimeout ?? defaultOperationTimeout,
     kernelClient: undefined,
+    document: undefined,
+    defaultView: undefined,
     capabilities: undefined,
     activeKernelId: undefined,
     eventCleanups: [],
+    documentCleanups: [],
     parkWhenIdle: false,
-    lastRequestedRenderId: 0,
-    lastSettledRenderId: 0,
+    openAttempt: 0,
   }),
   exit: ({ context }, enq) => ({ context: destroyKernel(context, enq) }),
   on: {
+    stateChanged: ({ event }) => (event.state === 'error' ? { target: '.error' } : {}),
+    documentOpened: ({ context, event }, enq) => {
+      if (event.requestId !== context.openAttempt || context.parkWhenIdle) {
+        enq(() => {
+          for (const cleanup of event.cleanups) {
+            safeDispose(cleanup);
+          }
+          event.defaultView.close();
+          event.document.close();
+        });
+        return {};
+      }
+      return {
+        context: { document: event.document, defaultView: event.defaultView, documentCleanups: event.cleanups },
+      };
+    },
+    documentStatusChanged: ({ event }) => {
+      if (event.status === 'evaluating') {
+        return { target: '.rendering.active' };
+      }
+      if (event.status === 'error') {
+        return { target: '.error' };
+      }
+      if (event.status === 'ready') {
+        return { target: '.idle' };
+      }
+      return {};
+    },
+    defaultViewStatusChanged: ({ context, event }) => {
+      if (context.evaluation?.success && context.evaluation.views.length === 0) {
+        return {};
+      }
+      if (event.status === 'rendering') {
+        return { target: '.rendering.active' };
+      }
+      if (event.status === 'error') {
+        return { target: '.error' };
+      }
+      if (event.status === 'ready') {
+        return { target: '.idle' };
+      }
+      return {};
+    },
     parkRuntime: { context: { parkWhenIdle: true } },
     resumeRuntime: { context: { parkWhenIdle: false } },
     restoreParameters: ({ context }) => ({
       ...(context.parkWhenIdle ? {} : { target: '.rendering.submitting' }),
       context: {
-        lastRequestedRenderId: context.lastRequestedRenderId + 1,
+        openAttempt: context.openAttempt + 1,
         parameterRender: undefined,
-        latestGeometryOutcome: undefined,
+        latestRenderingOutcome: undefined,
       },
     }),
     /* Re-entering from the root runs the root's `exit`, which releases the
      * kernel; releasing it here as well would dispose the same client twice,
      * because this transition reads the context from before that exit (S12). */
     filesystemBindingChanged: { target: '.connecting', reenter: true },
-    setRenderTimeout: ({ context, event }, enq) => {
+    setOperationTimeout: ({ context, event }, enq) => {
       const client = context.kernelClient;
       enq(() => {
-        client?.setRenderTimeout(event.renderTimeout);
+        client?.setOperationTimeout(event.operationTimeout);
       });
-      return { context: { renderTimeout: event.renderTimeout } };
+      return { context: { operationTimeout: event.operationTimeout } };
     },
   },
   initial: 'connecting',
@@ -776,9 +878,9 @@ export const cadMachine = setup({
       on: {
         kernelConnected: ({ context, event }, enq) => {
           const { client } = event;
-          const { renderTimeout } = context;
+          const { operationTimeout } = context;
           enq(() => {
-            client.setRenderTimeout(renderTimeout);
+            client.setOperationTimeout(operationTimeout);
           });
           if (context.parkWhenIdle) {
             return {
@@ -796,7 +898,6 @@ export const cadMachine = setup({
         },
         initializeModel: renderRequest(),
         setEntryPath: renderRequest(),
-        setRenderOptions: renderOptionsRequest(),
         ...runtimeSignals,
       },
     },
@@ -815,11 +916,10 @@ export const cadMachine = setup({
         }),
         initializeModel: renderRequest('#cad.rendering.submitting'),
         setEntryPath: renderRequest('#cad.rendering.submitting'),
-        setRenderOptions: renderOptionsRequest('#cad.rendering.submitting'),
         commitParameters: renderRequest('#cad.rendering.submitting'),
+        setPreviewParameters: renderRequest('#cad.rendering.submitting'),
         scrubParameters: renderRequest('#cad.rendering.submitting'),
         ...resultSignals,
-        stateChanged: followWorkerState({ buffering: 'buffering', rendering: 'rendering', error: 'error' }),
       },
     },
 
@@ -828,11 +928,10 @@ export const cadMachine = setup({
       on: {
         initializeModel: renderRequest('#cad.rendering.submitting'),
         setEntryPath: renderRequest('#cad.rendering.submitting'),
-        setRenderOptions: renderOptionsRequest('#cad.rendering.submitting'),
         commitParameters: renderRequest('#cad.rendering.submitting'),
+        setPreviewParameters: renderRequest('#cad.rendering.submitting'),
         scrubParameters: renderRequest('#cad.rendering.submitting'),
         ...resultSignals,
-        stateChanged: followWorkerState({ rendering: 'rendering', idle: 'idle', error: 'error' }),
       },
     },
 
@@ -848,18 +947,18 @@ export const cadMachine = setup({
               client: context.kernelClient,
               entryPath: context.entryPath,
               parameterRender: context.parameterRender,
-              renderOptions: context.renderOptions,
-              isLatestRequest: () => self.getSnapshot().context.lastRequestedRenderId === context.lastRequestedRenderId,
+              document: context.document,
+              machineRef: self,
+              requestId: context.openAttempt,
             }),
             onDone: { target: '#cad.idle' },
             onError: ({ context, event }) => {
               const entryPath = context.entryPath ?? '__render__';
-              const errorCode = isRenderTimeoutError(event.error)
-                ? 'OPERATION_TIMEOUT'
-                : event.error &&
-                    typeof event.error === 'object' &&
-                    'code' in event.error &&
-                    isKernelIssueCode(event.error.code)
+              const errorCode =
+                event.error &&
+                typeof event.error === 'object' &&
+                'code' in event.error &&
+                isKernelIssueCode(event.error.code)
                   ? event.error.code
                   : 'RUNTIME';
               const kernelIssues = new Map(context.kernelIssues);
@@ -874,25 +973,17 @@ export const cadMachine = setup({
               return { target: '#cad.error', context: { kernelIssues } };
             },
           },
-          on: {
-            stateChanged: followWorkerState({
-              buffering: '#cad.buffering',
-              rendering: '#cad.rendering.active',
-              idle: '#cad.idle',
-              error: '#cad.error',
-            }),
-          },
+          on: {},
         },
         active: {},
       },
       on: {
         initializeModel: renderRequest('#cad.rendering.submitting', { reenter: true }),
         setEntryPath: renderRequest('#cad.rendering.submitting', { reenter: true }),
-        setRenderOptions: renderOptionsRequest('#cad.rendering.submitting', { reenter: true }),
         commitParameters: renderRequest('#cad.rendering.submitting', { reenter: true }),
+        setPreviewParameters: renderRequest('#cad.rendering.submitting', { reenter: true }),
         scrubParameters: renderRequest('#cad.rendering.submitting', { reenter: true }),
         ...resultSignals,
-        stateChanged: followWorkerState({ buffering: 'buffering', idle: 'idle', error: 'error' }),
       },
     },
 
@@ -909,17 +1000,17 @@ export const cadMachine = setup({
         resumeRuntime: { target: 'connecting', context: { parkWhenIdle: false } },
         /* Changes while parked retarget the unit; rendering happens on resume. */
         setEntryPath: renderRequest(),
-        setRenderOptions: renderOptionsRequest(),
         commitParameters: renderRequest(),
+        setPreviewParameters: renderRequest(),
         scrubParameters: renderRequest(),
         /* The root's `restoreParameters` renders, and there is no client to render
          * with: take the intent (drop the staged values) and leave the render to
          * the reconnect, instead of failing into `error` (V1-4). */
         restoreParameters: ({ context }) => ({
           context: {
-            lastRequestedRenderId: context.lastRequestedRenderId + 1,
+            openAttempt: context.openAttempt + 1,
             parameterRender: undefined,
-            latestGeometryOutcome: undefined,
+            latestRenderingOutcome: undefined,
           },
         }),
         setCodeIssues: resultSignals.setCodeIssues,
@@ -946,9 +1037,8 @@ export const cadMachine = setup({
         }),
         initializeModel: renderRequest('connecting', { destroy: true }),
         setEntryPath: renderRequest('connecting', { destroy: true }),
-        setRenderOptions: renderOptionsRequest('connecting', { destroy: true }),
+        setPreviewParameters: renderRequest('connecting', { destroy: true }),
         ...resultSignals,
-        stateChanged: followWorkerState({ buffering: 'buffering', idle: 'idle', rendering: 'rendering' }),
       },
     },
   },
@@ -958,7 +1048,7 @@ type CadSnapshot = SnapshotFrom<typeof cadMachine>;
 
 /** Select the canonical issues for the latest failed CAD result without allocating a derived view model. */
 export const selectCadFailureIssues = (snapshot: CadSnapshot): readonly KernelIssue[] | undefined => {
-  if (snapshot.context.latestGeometryOutcome === 'failure') {
+  if (snapshot.context.latestRenderingOutcome === 'failure') {
     return selectIssuesByPrecedence(snapshot.context, [snapshot.context.entryPath, '__render__', '__connection__']);
   }
   if (!snapshot.hasTag('cad-runtime-error')) {
@@ -991,30 +1081,11 @@ export const selectCadEntryIssues =
   (snapshot: CadSnapshot): readonly KernelIssue[] | undefined =>
     snapshot.context.kernelIssues.get(entryPath);
 
-export const selectCadRenderTimeout = (snapshot: CadSnapshot): number => snapshot.context.renderTimeout;
+export const selectCadOperationTimeout = (snapshot: CadSnapshot): number => snapshot.context.operationTimeout;
 
-const selectActiveRenderCapability = (
-  snapshot: CadSnapshot,
-): AppCapabilitiesManifest['renderCapabilities'][string] | undefined => {
-  const { activeKernelId, capabilities } = snapshot.context;
-  return activeKernelId === undefined ? undefined : capabilities?.renderCapabilities[activeKernelId];
-};
-
-/** Select the active kernel's render-option schema; stable across snapshots because it is a manifest reference. */
-export const selectRenderOptionsSchema = (snapshot: CadSnapshot): JSONSchema7 | undefined =>
-  selectActiveRenderCapability(snapshot)?.renderOptions.schema;
-
-/** Select the active kernel's render-option defaults. */
-export const selectRenderOptionsDefaults = (snapshot: CadSnapshot): Record<string, unknown> | undefined => {
-  // The wide manifest projection types kernel defaults as `any`; narrow before returning.
-  const defaults: unknown = selectActiveRenderCapability(snapshot)?.renderOptions.defaults;
-  return typeof defaults === 'object' && defaults !== null ? (defaults as Record<string, unknown>) : undefined;
-};
-
-/** Select the render options this unit sends with every render. */
-export const selectRenderOptions = (snapshot: CadSnapshot): Record<string, unknown> => snapshot.context.renderOptions;
-
-export const selectCadGeometry = (snapshot: CadSnapshot): Geometry | undefined => snapshot.context.geometry;
+export const selectCadRendering = (snapshot: CadSnapshot): Rendering | undefined => snapshot.context.rendering;
+export const selectCadEvaluation = (snapshot: CadSnapshot): Evaluation | undefined => snapshot.context.evaluation;
+export const selectCadDocument = (snapshot: CadSnapshot): RuntimeDocument | undefined => snapshot.context.document;
 export const selectCadUnits = (snapshot: CadSnapshot): CadContext['units'] => snapshot.context.units;
 export const selectCadKernelClient = (snapshot: CadSnapshot): AppRuntimeClient | undefined =>
   snapshot.context.kernelClient;

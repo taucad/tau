@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import DOMPurify from 'dompurify';
 import type { ReactNode, RefObject } from 'react';
 import type { PanzoomObject } from '@panzoom/panzoom';
-import type { GeometrySvg } from '@taucad/types';
+import type { KnownArtifact } from '@taucad/runtime';
 // @ts-expect-error - no types available for the ESM build.
 import panzoom from '@panzoom/panzoom/dist/panzoom.es.js';
 import { usePanzoomReset } from '#components/geometry/graphics/svg/use-panzoom-reset.js';
@@ -457,7 +458,11 @@ function SvgWindow({ viewBox, innerHtml, enableGrid, enableAxes, defaultColor, s
   }, [adaptedViewBox, onChange, onWheel]);
 
   return (
-    <div ref={canvasRef} className='flex h-full w-full flex-1 touch-none overflow-hidden bg-background'>
+    <div
+      ref={canvasRef}
+      className='flex h-full w-full flex-1 touch-none overflow-hidden bg-background'
+      style={{ width: '100%', height: '100%', overflow: 'hidden', touchAction: 'none' }}
+    >
       <svg
         ref={svgRef}
         viewBox={stringifyViewBox(adaptedViewBox)}
@@ -480,21 +485,27 @@ function SvgWindow({ viewBox, innerHtml, enableGrid, enableAxes, defaultColor, s
 }
 
 type SvgViewerProps = {
-  readonly geometry: GeometrySvg;
+  readonly artifact: Extract<KnownArtifact, { mimeType: 'image/svg+xml' }>;
   readonly enableGrid?: boolean;
   readonly enableAxes?: boolean;
   readonly defaultColor?: string;
 };
 
-export function SvgViewer({ geometry, enableGrid = true, enableAxes = true, defaultColor }: SvgViewerProps): ReactNode {
+export function SvgViewer({ artifact, enableGrid = true, enableAxes = true, defaultColor }: SvgViewerProps): ReactNode {
   const svgRef = useRef<SVGSVGElement>(null);
+  const [shadowRoot, setShadowRoot] = useState<ShadowRoot | null>(null);
+  const attachHost = useCallback((host: HTMLDivElement | null): void => {
+    if (host) {
+      setShadowRoot(host.shadowRoot ?? host.attachShadow({ mode: 'open' }));
+    }
+  }, []);
   const parsed = useMemo<ParsedSvgResult>(() => {
     try {
-      return { data: parseSvgDocument(geometry.content), error: undefined };
+      return { data: parseSvgDocument(artifact.content), error: undefined };
     } catch (error) {
       return { data: undefined, error: error instanceof Error ? error : new Error('Invalid SVG document') };
     }
-  }, [geometry.content]);
+  }, [artifact.content]);
 
   if (parsed.error !== undefined) {
     return (
@@ -505,15 +516,20 @@ export function SvgViewer({ geometry, enableGrid = true, enableAxes = true, defa
   }
 
   return (
-    <div className='relative h-full w-full bg-background'>
-      <SvgWindow
-        viewBox={parsed.data.viewBox}
-        innerHtml={parsed.data.innerHtml}
-        enableGrid={enableGrid}
-        enableAxes={enableAxes}
-        defaultColor={defaultColor}
-        svgRef={svgRef}
-      />
+    <div ref={attachHost} className='relative h-full w-full bg-background' data-testid='svg-viewer-host'>
+      {shadowRoot
+        ? createPortal(
+            <SvgWindow
+              viewBox={parsed.data.viewBox}
+              innerHtml={parsed.data.innerHtml}
+              enableGrid={enableGrid}
+              enableAxes={enableAxes}
+              defaultColor={defaultColor}
+              svgRef={svgRef}
+            />,
+            shadowRoot,
+          )
+        : null}
     </div>
   );
 }

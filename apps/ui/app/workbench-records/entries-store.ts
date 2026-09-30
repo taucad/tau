@@ -20,7 +20,7 @@ type Files = Readonly<{
 type Components = NonNullable<Entry['components']>;
 type Patch = Readonly<{
   path: string;
-  fields: Partial<Pick<Entry, 'renderTimeout'>> & { components?: Partial<Components> };
+  fields: Partial<Pick<Entry, 'operationTimeout'>> & { components?: Partial<Components> };
 }>;
 export type EntryPathChange = Readonly<
   { type: 'rename'; oldPath: string; newPath: string } | { type: 'delete'; path: string }
@@ -31,7 +31,7 @@ const rewritePath = (path: string, oldPath: string, newPath: string): string =>
   `${newPath}${path.slice(oldPath.length)}`;
 const mergeEntry = (existing: Entry | undefined, fields: Patch['fields']): Entry => ({
   ...existing,
-  ...(fields.renderTimeout === undefined ? {} : { renderTimeout: fields.renderTimeout }),
+  ...(fields.operationTimeout === undefined ? {} : { operationTimeout: fields.operationTimeout }),
   ...(fields.components === undefined
     ? {}
     : {
@@ -330,8 +330,8 @@ export function createWorkbenchEntriesStore(
     edit: async (path, next) => {
       const base = intended.get(path) ?? state.record?.entries[path];
       const fields: Patch['fields'] = {};
-      if (!same(base?.renderTimeout, next.renderTimeout)) {
-        fields.renderTimeout = next.renderTimeout;
+      if (!same(base?.operationTimeout, next.operationTimeout)) {
+        fields.operationTimeout = next.operationTimeout;
       }
       const defaults: Components = { hidden: [], isolated: [], opacity: [] };
       const before = base?.components ?? defaults;

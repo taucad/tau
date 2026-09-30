@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
-import { createMockRuntimeClient } from '@taucad/runtime-testing';
+import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { strictModeRemount } from '#lib/xstate-test.utils.js';
 import { cadMachine } from '#machines/cad.machine.js';
@@ -10,7 +10,11 @@ import { cadPreviewMachine } from '#machines/cad-preview.machine.js';
 import type { PrepareFilesInput } from '#machines/cad-preview.machine.js';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
-const createMockAppRuntimeClient = () => createMockRuntimeClient();
+const createMockAppRuntimeClient = () => {
+  const client = createMockRuntimeClient();
+  vi.mocked(client.open).mockReturnValue(createMockRuntimeDocument().document);
+  return client;
+};
 
 const createKernelOptionsFactory = (): LazyKernelOptionsFactory => async () => () =>
   mock<ReturnType<KernelOptionsFactory>>({
@@ -80,12 +84,51 @@ describe('cadPreviewMachine + cadMachine integration', () => {
       setTimeout(resolve, 0);
     });
 
-    expect(mockClient.render).toHaveBeenCalledWith({
+    expect(mockClient.open).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      content: { includeEdges: true },
+      watch: true,
       parameters: { width: 42 },
     });
 
+    cadRef.stop();
+    previewRef.stop();
+  });
+
+  it('updates preview parameters on the same watched document without reopening', async () => {
+    const mockClient = createMockAppRuntimeClient();
+    const runtime = createMockRuntimeDocument();
+    vi.mocked(mockClient.open).mockReturnValue(runtime.document);
+    const cadRef = createActor(
+      cadMachine.provide({
+        actors: {
+          connectKernelActor: fromSafeAsync(async () => ({
+            type: 'kernelConnected' as const,
+            client: mockClient,
+            cleanups: [] as Array<() => void>,
+          })),
+        },
+      }),
+      {
+        input: {
+          shouldInitializeKernelOnStart: false,
+          fileSystemRoot: '/previews/test',
+          kernelOptionsFactory: createKernelOptionsFactory(),
+        },
+      },
+    );
+    const previewRef = createActor(
+      cadPreviewMachine.provide({ actors: { prepareFiles: fromSafeAsync(async () => undefined) } }),
+      { input: { cadRef, projectId: 'proj_test', mainFile: 'main.ts' } },
+    );
+    cadRef.start();
+    previewRef.start();
+    previewRef.send({ type: 'start' });
+    await waitFor(previewRef, (state) => state.value === 'active');
+    await vi.waitFor(() => expect(mockClient.open).toHaveBeenCalledOnce());
+    previewRef.send({ type: 'setParameters', parameters: { width: 42 } });
+    await vi.waitFor(() => expect(runtime.document.update).toHaveBeenCalledWith({ parameters: { width: 42 } }));
+    expect(mockClient.open).toHaveBeenCalledOnce();
+    expect(previewRef.getSnapshot().context.parameters).toEqual({ width: 42 });
     cadRef.stop();
     previewRef.stop();
   });
@@ -121,9 +164,9 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     previewRef.send({ type: 'start' });
 
     await vi.waitFor(() => {
-      expect(mockClient.render).toHaveBeenCalledWith({
+      expect(mockClient.open).toHaveBeenCalledWith({
         source: { path: 'main.ts' },
-        content: { includeEdges: true },
+        watch: true,
         stage,
       });
     });
@@ -207,9 +250,9 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadSnapshot = cadRef.getSnapshot();
     expect(cadSnapshot.value).toBe('idle');
     expect(cadSnapshot.context.entryPath).toBe('main.ts');
-    expect(mockClient.render).toHaveBeenCalledWith({
+    expect(mockClient.open).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      content: { includeEdges: true },
+      watch: true,
       parameters: { width: 42 },
     });
 
@@ -288,9 +331,9 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     await waitFor(previewRef, (s) => s.value === 'active', { timeout: 5000 });
 
     // InitializeModel should have been sent to cadRef (now in idle)
-    expect(mockClient.render).toHaveBeenCalledWith({
+    expect(mockClient.open).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      content: { includeEdges: true },
+      watch: true,
     });
 
     cadRef.stop();
@@ -383,9 +426,9 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadSnapshot = cadRef.getSnapshot();
     expect(cadSnapshot.value).toBe('idle');
     expect(cadSnapshot.context.entryPath).toBe('main.ts');
-    expect(mockClient.render).toHaveBeenCalledWith({
+    expect(mockClient.open).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      content: { includeEdges: true },
+      watch: true,
       parameters: { width: 42 },
     });
 
@@ -514,9 +557,9 @@ describe('cadPreviewMachine + cadMachine integration', () => {
 
     // CadRef should have the file and parameters sent directly to kernel
     expect(cadRef.getSnapshot().context.entryPath).toBe('main.ts');
-    expect(mockClient.render).toHaveBeenCalledWith({
+    expect(mockClient.open).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      content: { includeEdges: true },
+      watch: true,
       parameters: { width: 42 },
     });
 

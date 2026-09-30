@@ -18,8 +18,8 @@
 // EVAL(system-rules): pending benchmark-2026-04-20 — new <system_rules> static section codifies no-identical-retry on permission denial and bans URL hallucination. Validates zero retries after denial errors and zero invented URLs in citations.
 // EVAL(safety): pending benchmark-2026-04-20 — new condensed <safety> static section codifies destructive-action confirmation for delete_file, export overwrite, and mount-path mutation. Validates zero un-confirmed destructive operations.
 // EVAL(when-not-to-use-trim): pending benchmark-2026-04-21 — removes universal "When NOT to use" sections from 11 tool descriptions (6 dropped entirely, 5 collapsed to a single positive trailing redirect), keeps trimmed single-bullet form on high-overuse-risk tools only. Validates no regression in tool-selection accuracy on tool-use,smoke benchmarks, with measurable static-prompt token reduction. New context-engineering-policy `Negative Guidance Is Selective` rule codifies the ratio (≤ 20% of toolbelt).
-// EVAL(export-geometry-workflow): pending benchmark — surfaces export_geometry as an optional interchange deliverables step distinct from iterative verification; validates fewer wrong-format guesses and aligns with MIME-registry extensions only.
-// EVAL(export-opt-in): pending benchmark — drops export_geometry from the workflow happy path and gates it behind an explicit user request in <safety>; validates fewer unsolicited exports per task on tool-use,smoke benchmarks. Repro: Gemini 3.1 Pro auto-emitted Exported .glb after a Pi Pico replica build with no user export request.
+// EVAL(export-model-workflow): pending benchmark — surfaces export_model as an optional interchange deliverables step distinct from iterative verification; validates fewer wrong-format guesses and aligns with MIME-registry extensions only.
+// EVAL(export-evidence): before board benchmark recorded in W9-AGENT-PARITY-1; permits text/JSON evidence reads while binary/mixed deliverables still require a user export request.
 // EVAL(multi-file-pattern): pending benchmark — adds a per-kernel <multi_file_pattern> static section sourced from KernelConfig.multiFileExample. Each kernel ships a minimal entry+library pair demonstrating the correct import idiom (OpenSCAD `use <…>` not `include`, TS-based kernels relative `./lib/x.js`, KCL flat `import x from "x.kcl"`). Validates the dollhouse `include`-duplicate failure mode (a copy of every imported component re-rendered next to the assembly) disappears on tool-use,smoke and that non-OpenSCAD-language kernels also stop guessing import paths.
 // EVAL(production-grade-role): pending benchmark — rewrites <role> to communicate audience (architects/engineers/product designers handing output to manufacturing) and the production-grade quality bar (dimensionally faithful, fully detailed, manufacturable as-is; not a hobbyist sketch; model visible features that would exist on the real part). Closes the deferred R11/F9 "<complex_task> override" from docs/research/system-prompt-audit.md by baking the quality bar into the persistent identity (universal reframe) rather than a conditional section. Addresses Finding 6 of docs/research/complex-task-agent-gap-analysis.md ("Anti-Gold-Plating Rules Conflict with Engineering Detail"). Validates closer feature-count and proportion fidelity on detail-demanding reference-image prompts (rocket engine, mechanical assemblies) on tool-use,smoke benchmarks.
 // EVAL(constraints-code-scope): pending benchmark — rescopes <constraints> bullet 1 anti-gold-plating from "no features beyond what was asked" to "code-level over-engineering only", explicitly carving out geometric/engineering detail as part of the implicit CAD deliverable. Resolves the gold-plating-vs-detail conflict (Finding 6 of docs/research/complex-task-agent-gap-analysis.md) without introducing a conditional <complex_task> override. Validates no regression on anti-gold-plating code-level benchmarks (no defensive validation, no unused abstractions) and measurable lift on detail-demanding geometry prompts.
@@ -106,14 +106,14 @@ export function getCadSystemPrompt(
 1. **Plan**: Outline parameters, components, and assembly order
 2. **Test Setup**: Activate the \`geospec-authoring\` skill, then use \`${toolName.createFile}\` or \`${toolName.editFile}\` to define repeatable checks in \`*.geospec.ts\` (TDD approach)
 3. **Implement**: Use \`${toolName.editFile}\` to write code in the project entry file
-4. **Verify**: Call \`${toolName.getKernelResult}\` after file changes
+4. **Verify**: Call \`${toolName.evaluateModel}\` after file changes
 5. **Test**: Call \`${toolName.testModel}\` to validate the GeoSpec tests
 6. **Inspect & iterate**: After tests pass, ${inspectStep}. If any defect is found, fix and re-render. Continue iterating until no defects remain — do not declare done after a single render when defects were observed.`
     : `${decomposeStep}
 1. **Plan**: Outline parameters, components, and assembly order
 2. **Implement**: Use \`${toolName.editFile}\` to write code in the project entry file
-3. **Verify**: Call \`${toolName.getKernelResult}\` after file changes
-4. **Inspect & iterate**: ${supportsImageInput ? `Use \`${toolName.screenshot}\` and evaluate as if reviewing someone else's work against the \`<visual_inspection>\` checklist` : `Use \`${toolName.getKernelResult}\`, targeted measurements, and exported geometry evidence when needed`}. If any defect is found, fix and re-render. Continue iterating until no defects remain — do not declare done after a single render when defects were observed.`;
+3. **Verify**: Call \`${toolName.evaluateModel}\` after file changes
+4. **Inspect & iterate**: ${supportsImageInput ? `Use \`${toolName.screenshot}\` and evaluate as if reviewing someone else's work against the \`<visual_inspection>\` checklist` : `Use \`${toolName.evaluateModel}\`, targeted measurements, and exported geometry evidence when needed`}. If any defect is found, fix and re-render. Continue iterating until no defects remain — do not declare done after a single render when defects were observed.`;
 
   const tddNote = testingEnabled
     ? `\n\n**TDD Pattern**: Update tests BEFORE implementing. This ensures you don't forget requirements and catches regressions.`
@@ -139,7 +139,7 @@ Recognize and resist these avoidance patterns:
 
 If you catch yourself writing an explanation instead of calling screenshot, stop. Call screenshot.
 
-Screenshot budget: at most 2 screenshots per inspection cycle. Do not chain a single screenshot after multi_angle — multi_angle already covers all six orthographic views.
+Screenshot budget: 2 captures per view. Select its instance if offered. Do not capture that view after multi_angle.
 </visual_inspection>`;
 
   const textOnlySpatialAwareness = supportsImageInput
@@ -147,7 +147,7 @@ Screenshot budget: at most 2 screenshots per inspection cycle. Do not chain a si
     : `<text_only_spatial_awareness>
 This model cannot receive images. Use GeoSpec as the spatial feedback channel: write focused tests for dimensions, bounding boxes, centers, connected components, watertightness, overlaps, topology, and color/part identity.
 
-Use \`${toolName.getKernelResult}\` after edits and \`${toolName.testModel}\` before claiming completion. Use \`${toolName.exportGeometry}\` only when artifact evidence is explicitly useful.
+Use \`${toolName.evaluateModel}\` after edits and \`${toolName.testModel}\` before claiming completion. Use \`${toolName.exportModel}\` only when artifact evidence is explicitly useful.
 
 Do not claim visual inspection was performed.
 </text_only_spatial_awareness>`;
@@ -274,7 +274,7 @@ When you see a \`<system-reminder>\`, you MUST:
     cacheBreak: false,
     compute: () => `<safety>
 - Before \`${toolName.deleteFile}\`, confirm the file is not referenced by any other source file or GeoSpec test.
-- Before calling \`${toolName.exportGeometry}\`, confirm the user explicitly asked for a downloadable file or named an interchange format (e.g. "export as .stl"). \`${toolName.getKernelResult}\` covers the build loop on its own — exporting is a user-driven deliverable.
+- For design questions, \`${toolName.exportModel}\` may produce text/JSON evidence only when its declaration and every output file qualify. Read the artifact with \`${toolName.readFile}\` and compare \`sourceRevision\` to current source. Binary or mixed exports require the user's request; \`${toolName.evaluateModel}\` needs no export.
 - Before exporting and overwriting a previously-committed artifact path, surface the change to the user.
 - Before mutating a mounted filesystem path (mounts under \`/workspace/mounts/*\`), confirm with the user.
 </safety>`,

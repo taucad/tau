@@ -1,13 +1,13 @@
-import type { ExportGeometryRpcInput, ExportGeometryRpcResult } from '#schemas/rpc.schema.js';
+import type { ExportModelRpcInput, ExportModelRpcResult } from '#schemas/rpc.schema.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import type { RpcDependencies, RpcInvocationContext } from '#rpc/rpc-dependencies.js';
 import { writeArtifactSet } from '#rpc/handlers/write-artifact.js';
 
-export async function handleExportGeometry(
-  input: ExportGeometryRpcInput,
+export async function handleExportModel(
+  input: ExportModelRpcInput,
   dependencies: Pick<RpcDependencies, 'graphics' | 'fileSystem'>,
   context?: RpcInvocationContext,
-): Promise<ExportGeometryRpcResult> {
+): Promise<ExportModelRpcResult> {
   context?.signal?.throwIfAborted();
   const { graphics, fileSystem } = dependencies;
   if (!graphics) {
@@ -18,11 +18,11 @@ export async function handleExportGeometry(
     };
   }
 
-  const result = await graphics.exportGeometry(
+  const result = await graphics.exportModel(
     {
       targetFile: input.targetFile,
-      format: input.format,
-      ...(input.exportOptions === undefined ? {} : { exportOptions: input.exportOptions }),
+      to: input.to,
+      ...(input.options === undefined ? {} : { options: input.options }),
     },
     context,
   );
@@ -36,7 +36,7 @@ export async function handleExportGeometry(
     {
       toolCallId: input.toolCallId,
       targetFile: input.targetFile,
-      format: input.format,
+      format: input.to,
       files: result.files,
     },
     fileSystem,
@@ -55,8 +55,10 @@ export async function handleExportGeometry(
   const warnings = result.issues?.filter((issue) => issue.severity === 'warning') ?? [];
   return {
     success: true,
-    format: input.format,
+    to: input.to,
+    exportId: result.exportId,
     files,
+    ...(result.sourceRevision === undefined ? {} : { sourceRevision: result.sourceRevision }),
     ...(warnings.length === 0 ? {} : { warnings }),
   };
 }

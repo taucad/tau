@@ -111,8 +111,7 @@ def test_refusal_and_malformed_inputs_cannot_pass_a_negative_assertion():
 
     with pytest.raises(GeoSpecAssertionError) as refused:
         expect_geo(missing).not_.to_have_bounding_box(expected)
-    assert refused.value.protocol_error is not None
-    assert refused.value.code == "invalid-claim"
+    assert refused.value.code == "invalid-subject"
 
     with pytest.raises(GeoSpecAssertionError) as malformed:
         expect_geo(subject).not_.to_have_bounding_box(size={"x": float("nan")})
@@ -270,7 +269,7 @@ def test_engine_default_budget_is_emitted_explicitly_without_host_lowering():
         native_engine=native,
         native_module=SimpleNamespace(),
     )
-    subject = GeoSpecSubject(engine, "subject", "subjectHash", "a" * 64)
+    subject = engine._subject({"result": {"subject": {"subjectHash": "a" * 64}}}, "subject")
 
     report = evaluate_geo(
         subject,

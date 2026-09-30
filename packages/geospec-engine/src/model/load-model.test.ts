@@ -61,7 +61,7 @@ const createOpenScadSourceAdapter = (): GeoSpecRuntimeSourceAdapter => ({
   extensions: ['.scad'],
   async createRuntime({ projectPath }) {
     const runtime = defineRuntime({ plugins: [openrscad()] });
-    return (await createNodeClient({ runtime, projectPath })) as unknown as GeoSpecRuntimeClient;
+    return createNodeClient({ runtime, projectPath });
   },
 });
 
@@ -157,25 +157,37 @@ const fakeRuntime = (options?: {
     terminate: () => {
       state.terminated += 1;
     },
-    export: async (_format: string, request: { source?: unknown; parameters?: unknown; exportOptions?: unknown }) => {
-      state.exports.push(request);
-      if (options?.throws !== undefined) {
-        // oxlint-disable-next-line typescript/only-throw-error -- a runtime that throws a non-Error is exactly the case under test.
-        throw options.throws;
-      }
-      return options?.fail === true
-        ? {
-            success: false,
-            issues: [
-              { code: 'KERNEL_ERROR', message: 'boom', severity: 'error' },
-              { message: 'no code at all', severity: 'error' },
-            ],
+    open(openRequest: { source?: unknown; parameters?: unknown }) {
+      return {
+        close: vi.fn(),
+        export: async (format: string, request: { options?: unknown }) => {
+          state.exports.push({
+            source: openRequest.source,
+            parameters: openRequest.parameters,
+            exportOptions: request.options,
+          });
+          if (options?.throws !== undefined) {
+            // oxlint-disable-next-line typescript/only-throw-error -- a runtime that throws a non-Error is exactly the case under test.
+            throw options.throws;
           }
-        : {
-            success: true,
-            issues: options?.issues ?? [],
-            data: options?.empty === true ? [] : [{ name: 'model.glb', bytes: options?.bytes ?? new Uint8Array(0) }],
-          };
+          return options?.fail === true
+            ? {
+                success: false,
+                issues: [
+                  { code: 'KERNEL_ERROR', message: 'boom', severity: 'error' },
+                  { message: 'no code at all', severity: 'error' },
+                ],
+              }
+            : {
+                success: true,
+                exportId: format,
+                evaluationId: 'evaluation-1',
+                issues: options?.issues ?? [],
+                files:
+                  options?.empty === true ? [] : [{ name: 'model.glb', bytes: options?.bytes ?? new Uint8Array(0) }],
+              };
+        },
+      };
     },
     ...(options?.render === true
       ? {

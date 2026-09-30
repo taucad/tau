@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import type { FileStat } from '@taucad/types';
 import { fileStatFromBytes } from '@taucad/filesystem';
+import type { SourceRevision } from '@taucad/runtime/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GeoSpecRunnerWorkerRequest, GeoSpecRunnerWorkerResponse } from '#workers/geospec-runner.types.js';
 
@@ -308,7 +309,9 @@ const writeProjectFiles = async (options: {
 type NodeRuntimeExportResult =
   | {
       readonly success: true;
-      readonly data: readonly [
+      readonly evaluationId: string;
+      readonly sourceRevision?: SourceRevision;
+      readonly files: readonly [
         {
           readonly bytes: Uint8Array<ArrayBuffer>;
           readonly name: string;
@@ -322,6 +325,7 @@ type NodeRuntimeExportResult =
 const exportProjectWithNodeRuntime = async (options: {
   format: string;
   input: unknown;
+  request: unknown;
   localRootPath: string;
   files: Record<string, string>;
 }): Promise<NodeRuntimeExportResult> => {
@@ -349,26 +353,27 @@ const exportProjectWithNodeRuntime = async (options: {
       import { jscad } from '@taucad/jscad';
       const runtime = defineRuntime({ plugins: [esbuild(), jscad()] });
       const client = await createNodeClient({ runtime, projectPath: ${JSON.stringify(projectPath)} });
-      const result = await client.export(${JSON.stringify(options.format)}, {
+      const document = client.open({
         source: {
           path: ${JSON.stringify(file)},
         },
         parameters: ${JSON.stringify(input.parameters)},
-        exportOptions: {
-          coordinateSystem: 'z-up',
-          unit: { length: 'millimeter' },
-        },
+        watch: false,
       });
+      const result = await document.export(${JSON.stringify(options.format)}, ${JSON.stringify(options.request)});
+      document.close();
       client.terminate();
       if (!result.success) {
         console.log(JSON.stringify({ success: false, issues: result.issues }));
       } else {
-        if (result.data.length !== 1) {
-          throw new Error('Expected exactly one runtime export artifact, received ' + result.data.length);
+        if (result.files.length !== 1) {
+          throw new Error('Expected exactly one runtime export artifact, received ' + result.files.length);
         }
-        const file = result.data[0];
+        const file = result.files[0];
         console.log(JSON.stringify({
           success: true,
+          evaluationId: result.evaluationId,
+          sourceRevision: result.sourceRevision,
           name: file.name,
           mimeType: file.mimeType,
           bytes: Buffer.from(file.bytes).toString('base64'),
@@ -385,6 +390,8 @@ const exportProjectWithNodeRuntime = async (options: {
     );
     const payload = JSON.parse(stdout.trim().split('\n').at(-1) ?? '{}') as {
       success: boolean;
+      evaluationId?: string;
+      sourceRevision?: SourceRevision;
       bytes?: string;
       name?: string;
       mimeType?: string;
@@ -393,10 +400,15 @@ const exportProjectWithNodeRuntime = async (options: {
     if (!payload.success) {
       return { success: false, issues: payload.issues ?? [] };
     }
+    if (!payload.evaluationId) {
+      throw new Error('The runtime export did not identify its evaluation.');
+    }
     const bytes = Uint8Array.from(Buffer.from(payload.bytes ?? '', 'base64'));
     return {
       success: true,
-      data: [
+      evaluationId: payload.evaluationId,
+      sourceRevision: payload.sourceRevision,
+      files: [
         {
           bytes,
           name: payload.name ?? 'model.glb',
@@ -431,24 +443,31 @@ describe('geospec-runner.worker JSCAD integration', () => {
       'package.json': '{"type":"module"}\n',
     };
     const projectFileSystem = createInMemoryProjectFileSystem(projectFiles);
-    const exportCalls: Array<{ format: string; input: unknown; bytes: number }> = [];
+    const exportCalls: Array<{ format: string; input: unknown; request: unknown; bytes: number }> = [];
     workerMocks.createFileSystemBridgeProxy.mockReturnValue(projectFileSystem);
     workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
     workerMocks.createRuntimeClient.mockReturnValue({
       connect: vi.fn().mockResolvedValue(undefined),
-      async export(format: string, input: unknown) {
-        const exported = await exportProjectWithNodeRuntime({
-          format,
-          input,
-          localRootPath,
-          files: projectFiles,
-        });
-        exportCalls.push({
-          format,
-          input,
-          bytes: exported.success ? exported.data[0].bytes.byteLength : 0,
-        });
-        return exported;
+      open(input: unknown) {
+        return {
+          async export(format: string, request: unknown) {
+            const exported = await exportProjectWithNodeRuntime({
+              format,
+              input,
+              request,
+              localRootPath,
+              files: projectFiles,
+            });
+            exportCalls.push({
+              format,
+              input,
+              request,
+              bytes: exported.success ? exported.files[0].bytes.byteLength : 0,
+            });
+            return exported;
+          },
+          close: vi.fn(),
+        };
       },
       terminate: vi.fn(),
     });
@@ -512,6 +531,7 @@ describe('geospec-runner.worker JSCAD integration', () => {
       'cube with cylinder cutout > should be one connected component',
     ]);
     expect(resultMessage.result.passes.every((pass) => pass.targetFile === 'main.geospec.ts')).toBe(true);
+    expect(resultMessage.result.sourceRevisions).toEqual([expect.objectContaining({ entry: 'main.ts' })]);
     expect(exportCalls).toHaveLength(2);
     const [defaultExport, parameterizedExport] = exportCalls;
     if (!defaultExport || !parameterizedExport) {
@@ -520,6 +540,9 @@ describe('geospec-runner.worker JSCAD integration', () => {
     expect(defaultExport.format).toBe('glb');
     expect(defaultExport.input).toMatchObject({
       source: { path: 'main.ts' },
+    });
+    expect(defaultExport.request).toMatchObject({
+      options: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
     });
     expect((defaultExport.input as { parameters?: unknown }).parameters).toBeUndefined();
     expect(parameterizedExport.input).toMatchObject({

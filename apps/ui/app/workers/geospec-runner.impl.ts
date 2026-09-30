@@ -19,6 +19,7 @@
 import { createProjectModelLoader, runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { ProjectModelLoader } from '@taucad/agent-tools/geospec';
 import { createRuntimeClient } from '@taucad/runtime/client';
+import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import { fromFsLike } from '@taucad/runtime/filesystem';
 import type { SourceRevision } from '@taucad/runtime/types';
 import type { FsLike } from '@taucad/runtime/filesystem';
@@ -31,6 +32,7 @@ import type { GeoSpecWebRunnerOptions } from 'geospec/runner/web';
 import { z } from 'zod';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
+import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import type {
   GeoSpecRunnerWorkerInitializeRequest,
   GeoSpecRunnerWorkerRequest,
@@ -143,7 +145,7 @@ const formatRuntimeConfigError = (error: unknown): string => {
 type WorkerSession = {
   sessionId: string;
   fileSystem: ProjectFileSystemBridge;
-  runtimeClient: ReturnType<typeof createRuntimeClient>;
+  runtimeClient: AppRuntimeClient;
   runner: GeoSpecRunner;
   resetFatalModelLoadError?: (() => void) | undefined;
   closeEngine?: (() => void) | undefined;
@@ -200,7 +202,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
   }
 
   let fileSystem: ProjectFileSystemBridge | undefined;
-  let runtimeClient: ReturnType<typeof createRuntimeClient> | undefined;
+  let runtimeClient: AppRuntimeClient | undefined;
   let runner: GeoSpecRunner | undefined;
   let closeEngine: (() => void) | undefined;
   try {
@@ -211,7 +213,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
 
     fileSystem = await createProjectFileSystemProxy(request.fileSystemPort);
     const runtimeFileSystem = fromFsLike(createRuntimeFsLike(fileSystem));
-    runtimeClient = createRuntimeClient(
+    runtimeClient = createRuntimeClient<AnyRuntimeDefinition>(
       createDefaultKernelOptions({
         fileSystem: runtimeFileSystem,
         runtimeConfig: runtimeConfigResult.data,
@@ -233,15 +235,25 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       const revisions = new Map<string, SourceRevision>();
       const trackedRuntime = new Proxy(runtimeClient, {
         get(target, property, receiver: unknown): unknown {
-          if (property !== 'export') {
+          if (property !== 'open') {
             return Reflect.get(target, property, receiver) as unknown;
           }
-          return async (...args: Parameters<typeof target.export>) => {
-            const result = await target.export(...args);
-            if (result.sourceRevision) {
-              revisions.set(result.sourceRevision.entry, result.sourceRevision);
-            }
-            return result;
+          return (...args: Parameters<AppRuntimeClient['open']>) => {
+            const document = target.open(...args);
+            return new Proxy(document, {
+              get(owner, method, documentReceiver: unknown): unknown {
+                if (method !== 'export') {
+                  return Reflect.get(owner, method, documentReceiver) as unknown;
+                }
+                return async (...exportArgs: Parameters<typeof owner.export>) => {
+                  const result = await owner.export(...exportArgs);
+                  if (result.sourceRevision) {
+                    revisions.set(result.sourceRevision.entry, result.sourceRevision);
+                  }
+                  return result;
+                };
+              },
+            });
           };
         },
       });

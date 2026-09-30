@@ -18,13 +18,17 @@ Library.Go(1.0f, () =>
 
 Tau captures the final scene as mesh topology, not precise BRep. Smaller voxels raise memory and runtime cost sharply. Use project-relative assets.
 
+## Materials
+
+For PBR or textures, read `materials-reference.md`. Assign `PicoGK.Material` with `Viewer.SetGroupMaterial(groupId, material)`; the legacy overload remains valid. Appearance does not certify material grade.
+
 ## Part names and mechanisms
 
-Name each part with `Viewer.Add(geometry, name, nGroupID)`; use unique full labels and indexes in loops. Groups control appearance/transforms; slash labels do not create assemblies. Unnamed parts get `Shape N`.
+Use unique `Viewer.Add(geometry, name, nGroupID)` labels, indexed in loops. Groups control appearance/transforms; slash labels do not create assemblies. Unnamed parts get `Shape N`.
 
-For naming or moving parts, read `kinematics-reference.md`. Keep moving parts separate; call `Viewer.SetMechanism(source)` inside `Library.Go` with lowercase JSON-equivalent data referencing exact authored names. Author a clip for every intended independent motion. Use the as-built millimetre/Z-up frame; Tau converts metadata with the GLB. PicoGK `Animation` does not declare Tau motion.
+For motion, read `kinematics-reference.md`. Keep moving parts separate; call `Viewer.SetMechanism(source)` inside `Library.Go` with lowercase JSON-equivalent data and exact part names. Give each independent motion a clip. Use millimetre/Z-up; Tau converts metadata with the GLB. PicoGK `Animation` does not declare Tau motion.
 
-Inspect `get_kernel_result` and fix mechanism warnings even when geometry renders. Verify named hover, each clip's direction/travel, coupled followers and Reset in the Kinematics pane; check a changed parameter or filtered view. Validate geometry with GeoSpec separately; playback does not prove clearance.
+Fix `get_kernel_result` warnings. Verify named hover, clip direction/travel, followers and Reset; check changed parameters or filtered views. Use GeoSpec for clearance; playback does not prove it.
 
 ## Interactive parameters
 

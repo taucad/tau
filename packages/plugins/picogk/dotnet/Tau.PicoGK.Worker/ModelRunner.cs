@@ -18,7 +18,10 @@ internal sealed record ExtractedComponent(
     float Roughness,
     float[] Positions,
     float[] Normals,
-    uint[] Indices);
+    uint[] Indices,
+    JsonElement? Material = null,
+    float[]? TexCoords = null,
+    float[]? Tangents = null);
 
 internal sealed record ModelTimings(
     double EntryPointInvoke,
@@ -34,7 +37,8 @@ internal sealed record ModelExecutionResult(
     bool RecycleAfterResponse,
     ModelTimings Timings,
     JsonElement? Mechanism,
-    IReadOnlyList<Issue> Warnings);
+    IReadOnlyList<Issue> Warnings,
+    MaterialResources? Resources = null);
 
 internal static class ModelRunner
 {
@@ -195,7 +199,11 @@ internal static class ModelRunner
     // triangle coordinates and winding stay unchanged. Thirty degrees separates hex/chamfer faces
     // while keeping finely tessellated round surfaces smooth.
     internal static float[] VertexNormals(ref float[] positions, ref uint[] indices)
+        => VertexNormals(ref positions, ref indices, out _);
+
+    internal static float[] VertexNormals(ref float[] positions, ref uint[] indices, out int[] sources)
     {
+        var sourceVertices = Enumerable.Range(0, positions.Length / 3).ToList();
         var creaseCosine = MathF.Cos(MathF.PI / 6);
         var faces = new Vector3[indices.Length / 3];
         var directions = new Vector3[faces.Length];
@@ -233,6 +241,7 @@ internal static class ModelRunner
                     expanded.Add(positions[vertex * 3 + 1]);
                     expanded.Add(positions[vertex * 3 + 2]);
                     sums.Add(Vector3.Zero);
+                    sourceVertices.Add(vertex);
                 }
                 first = false;
                 fan.Clear();
@@ -261,6 +270,7 @@ internal static class ModelRunner
                 }
             }
         }
+        sources = sourceVertices.ToArray();
         positions = expanded.ToArray();
         indices = remapped;
         var normals = new float[positions.Length];

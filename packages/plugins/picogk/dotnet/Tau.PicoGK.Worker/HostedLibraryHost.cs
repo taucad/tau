@@ -104,7 +104,8 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
                     captured.NormalGeneration,
                     0),
                 captured.Mechanism,
-                captured.Warnings);
+                captured.Warnings,
+                captured.Resources);
         }
         finally
         {
@@ -132,7 +133,8 @@ internal sealed record CapturedScene(
     double MeshExtraction,
     double NormalGeneration,
     JsonElement? Mechanism,
-    IReadOnlyList<Issue> Warnings);
+    IReadOnlyList<Issue> Warnings,
+    MaterialResources? Resources = null);
 
 internal sealed record GeometrySnapshot(string Kind, float[] Positions, uint[] Indices, ColorFloat? LineColor);
 
@@ -326,6 +328,12 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             materials[nGroupID] = new Material(clr, fMetallic, fRoughness);
         }));
 
+    public void SetGroupMaterial(int groupId, global::PicoGK.Material material)
+    {
+        var snapshot = MaterialCapture.Snapshot(material, groupId);
+        Enqueue(new ViewerCommand(() => materials[groupId] = new Material(snapshot.Color, snapshot.Metallic, snapshot.Roughness, snapshot)));
+    }
+
     public void SetGroupMatrix(int nGroupID, Matrix4x4 mat) => Enqueue(new ViewerCommand(() =>
     {
         groupMatrices[nGroupID] = mat;
@@ -371,7 +379,8 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         {
             ThrowIfDisposed();
             // An empty viewer is an empty scene, not an error: new projects start with no geometry.
-            return new CapturedScene(MaterializeComponents(), meshConstruction, meshExtraction, normalGeneration, mechanism, warnings.ToArray());
+            var resources = new MaterialResources();
+            return new CapturedScene(MaterializeComponents(resources), meshConstruction, meshExtraction, normalGeneration, mechanism, warnings.ToArray(), resources);
         }
     }
 
@@ -559,7 +568,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         }
     }
 
-    private List<ExtractedComponent> MaterializeComponents()
+    private List<ExtractedComponent> MaterializeComponents(MaterialResources resources)
     {
         var components = new List<ExtractedComponent>();
         var names = new HashSet<string>(StringComparer.Ordinal);
@@ -570,19 +579,33 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                 throw InvalidName($"Duplicate PicoGK authored name '{name}' in the final scene.");
             var matrix = MatrixFor(item);
             var material = MaterialFor(item);
+            var authored = material.Authored;
+            if (item.Geometry.Kind == "lines" && authored is not null && MaterialCapture.NeedsCoordinates(authored))
+                throw MaterialCapture.Invalid($"group {item.Group}", "cannot apply texture maps or anisotropy to a PolyLine; use a surface mesh");
+            var materialJson = authored is null ? (JsonElement?)null : MaterialCapture.Project(authored, resources);
             if (materialized.TryGetValue(item.Identity, out var cached) &&
                 cached.Group == item.Group && cached.Matrix == matrix && cached.Material == material && cached.Component.Name == item.Name)
             {
-                components.Add(cached.Component);
+                components.Add(cached.Component with { Material = materialJson });
                 continue;
             }
             var positions = TransformPositions(item.Geometry.Positions, matrix);
             var indices = item.Geometry.Indices;
+            float[]? texCoords = null; float[]? tangents = null;
             var normals = Array.Empty<float>();
             if (item.Geometry.Kind == "triangles")
             {
                 var generation = Stopwatch.StartNew();
-                normals = ModelRunner.VertexNormals(ref positions, ref indices);
+                normals = ModelRunner.VertexNormals(ref positions, ref indices, out var sources);
+                if (authored is not null && MaterialCapture.NeedsCoordinates(authored))
+                {
+                    var modelPositions = RemapVectors(item.Geometry.Positions, sources);
+                    var coordinates = SurfaceCoordinates.Project(modelPositions, indices);
+                    positions = RemapVectors(positions, coordinates.Sources);
+                    normals = RemapVectors(normals, coordinates.Sources);
+                    indices = coordinates.Indices;
+                    (texCoords, tangents) = SurfaceCoordinates.Expand(coordinates, normals, matrix);
+                }
                 generation.Stop();
                 normalGeneration += generation.Elapsed.TotalMilliseconds;
             }
@@ -595,7 +618,8 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                 material.Roughness,
                 positions,
                 normals,
-                indices);
+                indices,
+                materialJson, texCoords, tangents);
             materialized[item.Identity] = new MaterializedComponent(item.Group, matrix, material, component);
             components.Add(component);
         }
@@ -608,6 +632,14 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     {
         if (materials.TryGetValue(item.Group, out var material)) return material;
         return item.Geometry.LineColor is { } color ? DefaultMaterial with { Color = color } : DefaultMaterial;
+    }
+
+    private static float[] RemapVectors(float[] values, int[] sources)
+    {
+        var output = new float[sources.Length * 3];
+        for (var vertex = 0; vertex < sources.Length; vertex++)
+            Array.Copy(values, sources[vertex] * 3, output, vertex * 3, 3);
+        return output;
     }
 
     private static float[] TransformPositions(float[] source, Matrix4x4 matrix)
@@ -668,5 +700,5 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         GeometrySnapshot Geometry,
         Matrix4x4 Matrix);
     private sealed record MaterializedComponent(int Group, Matrix4x4 Matrix, Material Material, ExtractedComponent Component);
-    private sealed record Material(ColorFloat Color, float Metallic, float Roughness);
+    private sealed record Material(ColorFloat Color, float Metallic, float Roughness, global::PicoGK.Material? Authored = null);
 }

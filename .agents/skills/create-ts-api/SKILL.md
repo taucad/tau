@@ -16,3 +16,6 @@ and [library API policy](../../../docs/policy/library-api-policy.md).
   Remove one expectation once to prove the compiler catches a real error.
 - Apply TS conventions from the library API policy: named inputs, inference without casts, right
   package/subpath, and a minimal public export set.
+- Serve through the shared `canvas:dev` runner under Portless with a stable `<subject>-api` name,
+  following [create-api's launch contract](../create-api/authoring.md#serve-and-build).
+  Open and verify the printed named localhost URL; retain it in the guide index for restarts.

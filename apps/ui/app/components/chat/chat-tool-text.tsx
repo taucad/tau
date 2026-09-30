@@ -31,7 +31,7 @@ export function ChatToolAction({ children, className }: ChatToolActionProps): Re
   return (
     <span
       className={cn(
-        'font-medium text-foreground/60 transition-colors group-hover/chat-tool-trigger:text-foreground',
+        'font-medium text-muted-foreground transition-colors group-hover/chat-tool-trigger:text-foreground group-focus-visible/chat-tool-trigger:text-foreground',
         className,
       )}
     >
@@ -78,7 +78,7 @@ export function ChatToolDescription({ children, className }: ChatToolDescription
   return (
     <span
       className={cn(
-        'font-normal text-foreground/50 transition-colors group-hover/chat-tool-trigger:text-foreground/80',
+        'font-normal text-muted-foreground transition-colors group-hover/chat-tool-trigger:text-foreground/80 group-focus-visible/chat-tool-trigger:text-foreground/80',
         className,
       )}
     >

@@ -132,7 +132,7 @@ function ChatToolCardHeader({ children, className }: ChatToolCardHeaderProps): R
         {isCollapsible ? (
           <ChevronRight
             className={cn(
-              'size-3 shrink-0 opacity-0 transition-[opacity,transform] duration-200 group-hover/chat-tool-trigger:opacity-100 group-focus-visible/chat-tool-trigger:opacity-100',
+              'size-3 shrink-0 transition-transform duration-200 motion-reduce:transition-none',
               isOpen && 'rotate-90',
             )}
           />

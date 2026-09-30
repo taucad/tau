@@ -77,6 +77,22 @@ describe('@taucad/kinematics public surface', () => {
     expectTypeOf<readonly DegreeOfFreedom[]>().toExtend<Json>();
   });
 
+  it('should narrow authored shape names optionally without changing resolved identity', () => {
+    type Names = 'Base' | 'Lid';
+    expectTypeOf<LinkSource<Names>>().toEqualTypeOf<Readonly<{ shapes: readonly Names[] }>>();
+    expectTypeOf<MechanismSource<Names>['links'][string]>().toEqualTypeOf<LinkSource<Names>>();
+    expectTypeOf<MechanismSource<Names>>().toExtend<MechanismSource>();
+    expectTypeOf<MechanismSource<Names>>().toExtend<Json>();
+
+    const named = { shapes: ['Base', 'Lid'] } satisfies LinkSource<Names>;
+    expectTypeOf<(typeof named.shapes)[number]>().toEqualTypeOf<Names>();
+    // @ts-expect-error a misspelled name is not in the selected model's name union
+    const misspelled: LinkSource<Names> = { shapes: ['Ldi'] };
+    expectTypeOf(misspelled).toEqualTypeOf<LinkSource<Names>>();
+    // @ts-expect-error names must remain strings
+    expectTypeOf<LinkSource<number>>().toBeObject();
+  });
+
   it('should reject renderer objects where the contract expects data', () => {
     const element = { tagName: 'DIV', getBoundingClientRect: () => ({ x: 0 }) };
 

@@ -309,12 +309,13 @@ export function DataTablePagination<Data>({
         <div className='flex items-center gap-2'>
           <p className='hidden text-sm font-medium whitespace-nowrap sm:block'>Items per page</p>
           <Select
+            size='sm'
             value={`${pageSize}`}
             onValueChange={(value) => {
               table.setPageSize(Number(value));
             }}
           >
-            <SelectTrigger size='sm' aria-label='Items per page'>
+            <SelectTrigger aria-label='Items per page'>
               <SelectValue placeholder={pageSize} />
             </SelectTrigger>
             <SelectContent position='popper' side='top'>

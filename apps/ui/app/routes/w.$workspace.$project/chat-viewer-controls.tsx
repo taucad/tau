@@ -24,7 +24,7 @@ import { useViewerShortcuts } from '#hooks/use-viewer-shortcuts.js';
 type Tool = 'section' | 'measure';
 
 /** Never the first thing on its line: the grid readout before it renders nothing until the grid has a size. */
-const Hairline = ({ className = '-mx-1' }: { readonly className?: string }): React.JSX.Element => (
+const Hairline = ({ className = 'mx-0' }: { readonly className?: string }): React.JSX.Element => (
   <Separator
     orientation='vertical'
     className={cn(

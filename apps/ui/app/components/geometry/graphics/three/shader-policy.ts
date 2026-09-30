@@ -203,11 +203,19 @@ export const shaderEvidence = {
       'apps/ui-e2e/src/section-view-overlap-performance-diagnostics.spec.ts::captures overlap and no-overlap diagnostics in',
     ],
   },
-  'fat-lines': evidence(
-    'apps/ui/app/components/geometry/graphics/three/materials/line2.material.test.ts',
-    'fails deterministically when the exact Three revision',
-    'apps/ui/app/components/geometry/graphics/three/materials/line2.material.test.ts::matches stable stripped WebGPU line2 node material JSON snapshot',
-  ),
+  'fat-lines': {
+    ...evidence(
+      'apps/ui/app/components/geometry/graphics/three/materials/line2.material.test.ts',
+      'fails deterministically when the exact Three revision',
+      'apps/ui/app/components/geometry/graphics/three/materials/line2.material.test.ts::matches stable stripped WebGPU line2 node material JSON snapshot',
+    ),
+    reference: [
+      'apps/ui/app/components/geometry/graphics/three/materials/line2.material.test.ts::should preserve native reversed depth without a fragment-depth rewrite',
+      'apps/ui/app/components/geometry/graphics/three/materials/line2.material.test.ts::emits geometric viewZToLogarithmicDepth',
+    ],
+    pixels: [`${graphicsBackendEndToEnd}::grid, axes and model shading display the same`],
+    'gpu-whole-frame': [`${graphicsBackendEndToEnd}::records warmed whole-frame benchmark`],
+  },
   'morphing-points': evidence(
     'apps/ui/app/components/geometry/splash/morphing-points-semantics.test.ts',
     'starts exactly at source, ends at target',

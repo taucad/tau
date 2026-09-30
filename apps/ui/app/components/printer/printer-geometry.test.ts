@@ -9,6 +9,7 @@ import {
   partBounds,
   partFramingFill,
   plateOffsetForHeight,
+  plateOffsetForY,
   printerCameraFov,
   toolheadLiftForHeight,
 } from '#components/printer/printer-geometry.js';
@@ -48,7 +49,7 @@ describe('derivePrinterGeometry', () => {
     expect(x1c.enclosure.size).toEqual([389, 389, 457]);
     expect(x1c.enclosure.center[0]).toBe(128);
     expect(x1c.enclosure.center[1]).toBe(128);
-    expect(x1c.plate).toEqual({ center: [128, 128, -2], size: [256, 256, 4] });
+    expect(x1c.plate).toEqual({ center: [128, 128, -0.325], size: [256, 256, 0.65] });
     // The plate descends through the envelope, so it sits below the nozzle plane in world space.
     expect(x1c.envelope).toEqual({ center: [128, 128, -128], size: [256, 256, 256] });
   });
@@ -58,9 +59,10 @@ describe('derivePrinterGeometry', () => {
     expect(mini.model).toBe('a1-mini');
     expect(mini.buildVolume).toEqual([180, 180, 180]);
     expect(mini.motion).toBe('head-rises');
-    expect(mini.plate.size).toEqual([180, 180, 4]);
+    expect(mini.plate.size).toEqual([180, 180, 0.55]);
     expect(mini.light).toBeUndefined();
     expect(mini.panels).toHaveLength(0);
+    expect(mini.gantry.rails).toEqual([{ center: [-30, 90, 103], size: [12, 12, 206] }]);
   });
 
   it('should keep the nozzle plane at z = 0 with headroom above and the base below', () => {
@@ -112,6 +114,15 @@ describe('derivePrinterGeometry', () => {
     expect(slinger.panels.every(({ isDoor }) => !isDoor)).toBe(true);
     expect(slinger.toolhead.home).toEqual([1, 1, 1]);
     expect(slinger.envelope.center[2]).toBe(125);
+  });
+
+  it('should move Mini’s bed oppositely to toolpath Y while the head stays centred', () => {
+    const mini = derivePrinterGeometry(bambuA1MiniManifest);
+    for (const y of [0, 90, 180]) {
+      expect(plateOffsetForY(mini, y)).toBe(90 - y);
+      expect(y + plateOffsetForY(mini, y)).toBe(90);
+      expect(plateOffsetForY(x1c, y)).toBe(0);
+    }
   });
 
   it('should give a delta three posts and no beam', () => {

@@ -1,9 +1,9 @@
 #!/usr/bin/env -S node --import @oxc-node/core/register
 /**
- * Renders the X1C build-plate and hotend GLBs from their Replicad sources.
+ * Renders the X1C and A1 mini build-plate and hotend GLBs from their Replicad sources.
  *
- * Exports each model under `models/x1c` to binary glTF with the built Tau CLI
- * (`tau export --ext=glb`), writes them to `src/assets/x1c-<id>.glb`, and
+ * Exports each model under `models/{x1c,a1-mini}` to binary glTF with the built Tau CLI
+ * (`tau export --ext=glb`), writes them to `src/assets/<printer>-<id>.glb`, and
  * records a SHA-256 of the sources in `models/x1c/render.sha256`; the unit
  * tests fail when the sources change without a re-render.
  *
@@ -26,12 +26,12 @@ import { fileURLToPath } from 'node:url';
 
 const packageRoot = resolve(import.meta.dirname, '..');
 const repoRoot = resolve(packageRoot, '../../..');
-const modelDirectory = join(packageRoot, 'models/x1c');
+const modelDirectory = join(packageRoot, 'models');
 const assetDirectory = join(packageRoot, 'src/assets');
 const cliPath = join(repoRoot, 'packages/cli/dist/bin/tau.mjs');
 
 /** Where the recorded source hash lives. */
-export const renderHashPath = join(modelDirectory, 'render.sha256');
+export const renderHashPath = join(modelDirectory, 'x1c/render.sha256');
 
 /**
  * Coarser than the 0.02 mm default: keeps each GLB well under 300 KB while
@@ -42,10 +42,16 @@ const exportOptions = { tessellation: { linearTolerance: 0.05, angularTolerance:
 const renders: ReadonlyArray<{ asset: string; source: string; params?: Record<string, string> }> = [
   ...['cool', 'engineering', 'high-temperature', 'textured-pei'].map((plate) => ({
     asset: `x1c-${plate}.glb`,
-    source: 'plate.ts',
+    source: 'x1c/plate.ts',
     params: { plate },
   })),
-  { asset: 'x1c-hotend.glb', source: 'hotend.ts' },
+  { asset: 'x1c-hotend.glb', source: 'x1c/hotend.ts' },
+  ...['high-temperature', 'textured-pei'].map((plate) => ({
+    asset: `a1-mini-${plate}.glb`,
+    source: 'a1-mini/plate.ts',
+    params: { plate },
+  })),
+  { asset: 'a1-mini-hotend.glb', source: 'a1-mini/hotend.ts' },
 ];
 
 /**
@@ -54,7 +60,7 @@ const renders: ReadonlyArray<{ asset: string; source: string; params?: Record<st
  * @returns Hex SHA-256 over each file's name and bytes, in name order.
  */
 export const hashRenderInputs = async (): Promise<string> => {
-  const names = await readdir(modelDirectory);
+  const names = await readdir(modelDirectory, { recursive: true });
   const sources = names.filter((name) => name.endsWith('.ts')).toSorted();
   const inputs: Array<[name: string, path: string]> = [
     ...sources.map((source): [string, string] => [source, join(modelDirectory, source)]),

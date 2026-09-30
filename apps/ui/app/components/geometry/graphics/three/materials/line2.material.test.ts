@@ -15,8 +15,6 @@ import {
   sRGBTransferOETF,
   vec4,
   viewZToLogarithmicDepth,
-  viewZToPerspectiveDepth,
-  viewZToReversedPerspectiveDepth,
 } from 'three/tsl';
 import { Line2NodeMaterial as ThreeLine2NodeMaterial, NodeMaterial as ThreeNodeMaterial } from 'three/webgpu';
 import {
@@ -294,15 +292,8 @@ describe('Line2NodeMaterial.setup parent dispatch (regression guard)', () => {
 
 /* eslint-disable @typescript-eslint/naming-convention -- mirrors three.js external API names (`renderer.getMRT()`, `node.toJSON()`) inside test stubs and ad-hoc type aliases */
 describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard)', () => {
-  /**
-   * Smoking-gun regression: hardcoding `material.depthNode = viewZToReversedPerspectiveDepth(...)`
-   * at construction time emits reversed-Z `[1..0]` depth values into renderers that don't
-   * use reversed-Z (`offscreen`/`screenshot` WebGPU runs with `logarithmicDepthBuffer: true`,
-   * `reversedDepthBuffer: false`). Surfaces emit log-depth, lines emit reversed-perspective —
-   * the comparison breaks and occluded line fragments leak into the saved PNG. The override
-   * dispatches per `builder.renderer` flags, mirroring three.js's own `PointShadowNode` and
-   * `NodeMaterial.setupDepth` patterns. See class JSDoc "Divergence 3".
-   */
+  // Native sample depth protects MSAA edge visibility; inherited log-depth still matches
+  // offscreen surfaces. No per-renderer depth encoder belongs in the factory.
   type DepthAssignDescriptor = PropertyDescriptor | undefined;
   type CapturedAssign = { node: unknown };
 
@@ -344,7 +335,7 @@ describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard
       worldUnits: false,
     });
 
-  it('emits geometric viewZToReversedPerspectiveDepth when renderer.reversedDepthBuffer is true (viewport)', () => {
+  it('should preserve native reversed depth without a fragment-depth rewrite', () => {
     const material = buildMaterial();
 
     const stubBuilder = {
@@ -354,14 +345,12 @@ describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard
 
     const { captured, restore } = captureDepthAssign();
     try {
-      material.setupDepth(stubBuilder);
+      Reflect.apply(material.setupDepth, material, [stubBuilder]);
     } finally {
       restore();
     }
 
-    expect(captured.node).toBeDefined();
-    const expected = viewZToReversedPerspectiveDepth(positionView.z, cameraNear, cameraFar);
-    expect(fingerprint(captured.node)).toBe(fingerprint(expected));
+    expect(captured.node).toBeUndefined();
   });
 
   it('emits geometric viewZToLogarithmicDepth when renderer.logarithmicDepthBuffer is true (screenshot occlusion fix)', () => {
@@ -374,7 +363,7 @@ describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard
 
     const { captured, restore } = captureDepthAssign();
     try {
-      material.setupDepth(stubBuilder);
+      Reflect.apply(material.setupDepth, material, [stubBuilder]);
     } finally {
       restore();
     }
@@ -384,7 +373,7 @@ describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard
     expect(fingerprint(captured.node)).toBe(fingerprint(expected));
   });
 
-  it('emits geometric viewZToPerspectiveDepth when neither renderer flag is set', () => {
+  it('should preserve native standard depth without a fragment-depth rewrite', () => {
     const material = buildMaterial();
 
     const stubBuilder = {
@@ -394,14 +383,12 @@ describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard
 
     const { captured, restore } = captureDepthAssign();
     try {
-      material.setupDepth(stubBuilder);
+      Reflect.apply(material.setupDepth, material, [stubBuilder]);
     } finally {
       restore();
     }
 
-    expect(captured.node).toBeDefined();
-    const expected = viewZToPerspectiveDepth(positionView.z, cameraNear, cameraFar);
-    expect(fingerprint(captured.node)).toBe(fingerprint(expected));
+    expect(captured.node).toBeUndefined();
   });
 
   it('honours material.depthNode when a caller has manually overridden it', () => {
@@ -416,7 +403,7 @@ describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard
 
     const { captured, restore } = captureDepthAssign();
     try {
-      material.setupDepth(stubBuilder);
+      Reflect.apply(material.setupDepth, material, [stubBuilder]);
     } finally {
       restore();
     }
@@ -450,7 +437,7 @@ describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard
     };
 
     try {
-      material.setupDepth(stubBuilder);
+      Reflect.apply(material.setupDepth, material, [stubBuilder]);
     } finally {
       nodeMaterialPrototypeShim.setupDepth = original;
     }
@@ -478,7 +465,7 @@ describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard
     };
 
     try {
-      material.setupDepth(stubBuilder);
+      Reflect.apply(material.setupDepth, material, [stubBuilder]);
     } finally {
       nodeMaterialPrototypeShim.setupDepth = original;
     }

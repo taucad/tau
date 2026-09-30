@@ -2,7 +2,8 @@
  * Image Transcoder
  *
  * Wraps nanoraster's timed `renderImages` plan (Rust/wgpu wasm+napi core) as a
- * transcoder plugin: kernel GLB → factor-only PBR PNG/WebP/JPEG thumbnail via the
+ * transcoder plugin: kernel GLB → PBR PNG/WebP/JPEG thumbnail, including embedded maps and
+ * standard physical materials supported by nanoraster, via the
  * runtime route planner. The renderer module is loaded once during capability
  * initialization and retained in context; its free functions serialize onto one
  * lazily created renderer per process, so every render after the first reuses a

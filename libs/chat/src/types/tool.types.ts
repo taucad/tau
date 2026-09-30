@@ -12,8 +12,8 @@ import type { CreateFileInput, CreateFileOutput } from '#schemas/tools/create-fi
 import type { DeleteFileInput, DeleteFileOutput } from '#schemas/tools/delete-file.tool.schema.js';
 import type { GrepInput, GrepOutput } from '#schemas/tools/grep.tool.schema.js';
 import type { GlobSearchInput, GlobSearchOutput } from '#schemas/tools/glob-search.tool.schema.js';
-import type { GetKernelResultInput, GetKernelResultOutput } from '#schemas/tools/get-kernel-result.tool.schema.js';
-import type { ExportGeometryInput, ExportGeometryOutput } from '#schemas/tools/export-geometry.tool.schema.js';
+import type { EvaluateModelInput, EvaluateModelOutput } from '#schemas/tools/evaluate-model.tool.schema.js';
+import type { ExportModelInput, ExportModelOutput } from '#schemas/tools/export-model.tool.schema.js';
 import type { ScreenshotInput, ScreenshotOutput } from '#schemas/tools/screenshot.tool.schema.js';
 import type { RevisionsInput, RevisionsOutput } from '#schemas/tools/revisions.tool.schema.js';
 import type { UpdateTodosInput, UpdateTodosOutput } from '#schemas/tools/update-todos.tool.schema.js';
@@ -223,8 +223,8 @@ export type MyTools = InferUITools<{
   [toolName.deleteFile]: AiTool<DeleteFileInput, DeleteFileOutput>;
   [toolName.grep]: AiTool<GrepInput, GrepOutput>;
   [toolName.globSearch]: AiTool<GlobSearchInput, GlobSearchOutput>;
-  [toolName.getKernelResult]: AiTool<GetKernelResultInput, GetKernelResultOutput>;
-  [toolName.exportGeometry]: AiTool<ExportGeometryInput, ExportGeometryOutput>;
+  [toolName.evaluateModel]: AiTool<EvaluateModelInput, EvaluateModelOutput>;
+  [toolName.exportModel]: AiTool<ExportModelInput, ExportModelOutput>;
   [toolName.screenshot]: AiTool<ScreenshotInput, ScreenshotOutput>;
   [toolName.revisions]: AiTool<RevisionsInput, RevisionsOutput>;
   [toolName.getParameters]: AiTool<GetParametersInput, GetParametersOutput>;

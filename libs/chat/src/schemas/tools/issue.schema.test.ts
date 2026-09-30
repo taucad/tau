@@ -2,7 +2,7 @@ import { kernelIssueCodeValues } from '@taucad/runtime/types';
 import { describe, expect, it } from 'vitest';
 import { rpcName } from '#constants/rpc.constants.js';
 import { rpcSchemasRegistry } from '#schemas/rpc.schema.js';
-import { getKernelResultOutputSchema } from '#schemas/tools/get-kernel-result.tool.schema.js';
+import { evaluateModelOutputSchema } from '#schemas/tools/evaluate-model.tool.schema.js';
 import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
 
 const geometryInvalidIssue = {
@@ -72,16 +72,16 @@ describe('kernelIssueSchema', () => {
     expect(extensible.diagnosticSource).toBe('runtime-worker');
   });
 
-  it('should allow get_kernel_result outputs to carry runtime GEOMETRY_INVALID issues', () => {
+  it('should allow evaluate_model outputs to carry runtime GEOMETRY_INVALID issues', () => {
     expect(
-      getKernelResultOutputSchema.safeParse({
+      evaluateModelOutputSchema.safeParse({
         status: 'ready',
         kernelIssues: [geometryInvalidIssue],
       }).success,
     ).toBe(true);
 
     expect(
-      rpcSchemasRegistry[rpcName.getKernelResult].resultSchema.safeParse({
+      rpcSchemasRegistry[rpcName.evaluateModel].resultSchema.safeParse({
         success: true,
         status: 'ready',
         kernelIssues: [geometryInvalidIssue],

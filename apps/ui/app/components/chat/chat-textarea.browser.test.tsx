@@ -149,7 +149,7 @@ afterEach(() => {
 for (const width of [320, 600]) {
   for (const mode of ['main', 'edit'] as const) {
     describe(`${width}px ${mode} composer`, () => {
-      it.each(scenarios)('should balance outer spacing with $name', async ({ name, props }) => {
+      it.each(scenarios)('should preserve top padding and bottom inset with $name', async ({ name, props }) => {
         await page.viewport(width, 720);
         globalThis.document.documentElement.classList.toggle('dark', width === 600);
         const { containerReference } = renderComposer({ ...props, mode });
@@ -164,7 +164,11 @@ for (const width of [320, 600]) {
           bounds.bottom - action.getBoundingClientRect().bottom - Number.parseFloat(style.borderBottomWidth);
 
         expect(top).toBeCloseTo(12, 1);
-        expect(bottom).toBeCloseTo(12, 1);
+        expect(bottom).toBeCloseTo(8, 1);
+        if (mode === 'main' && action.getAttribute('aria-label') !== 'Resume') {
+          const right = bounds.right - action.getBoundingClientRect().right - Number.parseFloat(style.borderRightWidth);
+          expect(bottom).toBeCloseTo(right, 1);
+        }
         expect(container.scrollWidth).toBe(container.clientWidth);
         if (mode === 'main' && ['empty', 'mixed attachments', 'blocked attachment', 'context chip'].includes(name)) {
           await page.screenshot({

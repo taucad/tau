@@ -301,6 +301,19 @@ test.describe('Chat viewer model component context menu', () => {
     await target.expectVisible(selectors.getByText('Opacity'));
     await target.expectVisible(opacityInput);
     await target.expectVisible(resetOpacityMenuItem);
+    if (target.currentWebGpuProfile() === 'hardware') {
+      const preview = selectors.getByRole('menu').getByCss('img[src^="blob:"]').first();
+      await target.expectVisible(preview, 15_000);
+      await expect
+        .poll(async () => target.evaluateLocator(preview, (image) => (image as HTMLImageElement).naturalWidth))
+        .toBeGreaterThan(0);
+      expect(
+        await target.evaluateLocator(preview, (image) => (image as HTMLImageElement).getBoundingClientRect().width),
+      ).toBe(24);
+    } else if (target.currentWebGpuProfile() === 'software') {
+      await target.expectVisible(selectors.getByRole('alert', { name: 'Preview status' }));
+      await target.expectVisible(selectors.getByRole('menuitem', { name: 'Retry preview' }));
+    }
 
     const rowSpacing = await target.evaluateLocator(resetOpacityMenuItem, (resetOpacityElement) => {
       const menu = resetOpacityElement.parentElement;

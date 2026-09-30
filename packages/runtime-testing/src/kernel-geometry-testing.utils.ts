@@ -18,12 +18,8 @@ import {
   validateGlbData,
 } from '#gltf-inspection.utils.js';
 
-/** Temporary input for direct legacy kernel callers still being migrated. */
-type LegacyGeometryResult =
-  | { readonly success: true; readonly data: unknown; readonly issues: readonly unknown[] }
-  | { readonly success: false; readonly issues: readonly unknown[] };
-type RuntimeResult = LegacyGeometryResult | RenderResult | Rendering;
-type ExportCandidate = LegacyGeometryResult | WriteResult | ExportResult;
+type RuntimeResult = RenderResult | Rendering;
+type ExportCandidate = WriteResult | ExportResult;
 
 // =============================================================================
 // Types
@@ -95,24 +91,6 @@ export const getSignedVolumeFromGlb = async (glbData: Uint8Array<ArrayBuffer>): 
 // Result Extraction
 // =============================================================================
 
-/**
- * Type guard to check if a geometry response is GLTF format.
- *
- * @param response - the geometry response to check
- * @returns whether the response contains GLTF format data
- */
-const isGltfResponse = (response: unknown): response is { format: 'gltf'; content: Uint8Array<ArrayBuffer> } => {
-  if (typeof response !== 'object' || response === null) {
-    return false;
-  }
-  return (
-    'format' in response &&
-    response.format === 'gltf' &&
-    'content' in response &&
-    response.content instanceof Uint8Array
-  );
-};
-
 const isArtifact = (value: unknown): value is Artifact =>
   typeof value === 'object' &&
   value !== null &&
@@ -144,8 +122,7 @@ export function extractGltfFromResult(result: RuntimeResult): Uint8Array<ArrayBu
     const artifact = asKnownArtifact(result.data);
     return artifact?.mimeType === 'model/gltf-binary' ? artifact.content : undefined;
   }
-  // Direct legacy kernel callers still supply format/content until their test suites migrate.
-  return isGltfResponse(result.data) ? result.data.content : undefined;
+  return undefined;
 }
 
 /**

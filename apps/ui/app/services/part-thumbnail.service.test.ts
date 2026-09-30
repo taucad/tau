@@ -47,7 +47,9 @@ describe('PartThumbnailService', () => {
     expect(service.snapshot()).toBe(pending);
 
     pendingExport.resolve([image(0)]);
-    await vi.waitFor(() => expect(service.snapshot().get('gear')?.status).toBe('ready'));
+    await vi.waitFor(() => {
+      expect(service.snapshot().get('gear')?.status).toBe('ready');
+    });
     const ready = service.snapshot();
     expect(ready).not.toBe(pending);
     expect(ready.get('gear')?.bytes).toBe(service.get('gear')?.bytes);
@@ -58,8 +60,10 @@ describe('PartThumbnailService', () => {
   it('makes a decoded image failure retryable and ignores an error from a superseded image', async () => {
     const service = fixture(async () => [image(0)]);
     service.request(source, [part('gear', 0)]);
-    await vi.waitFor(() => expect(service.get('gear')?.status).toBe('ready'));
-    const bytes = service.get('gear')?.bytes!;
+    await vi.waitFor(() => {
+      expect(service.get('gear')?.status).toBe('ready');
+    });
+    const bytes = service.get('gear')!.bytes!;
     service.failDecode('gear', new Uint8Array([7]));
     expect(service.get('gear')?.status).toBe('ready');
     service.failDecode('gear', bytes);
@@ -76,19 +80,25 @@ describe('PartThumbnailService', () => {
     const service = fixture(exportImage);
     const gear = part('gear', 0);
     service.request(source, [gear]);
-    await vi.waitFor(() => expect(service.get('gear')?.status).toBe('ready'));
-    const goodBytes = service.get('gear')?.bytes!;
+    await vi.waitFor(() => {
+      expect(service.get('gear')?.status).toBe('ready');
+    });
+    const goodBytes = service.get('gear')!.bytes!;
     service.markDecoded('gear', goodBytes);
 
     const updated = { ...source, geometryHash: 'updated-glb' };
     service.request(updated, [gear]);
-    await vi.waitFor(() => expect(service.get('gear')?.bytes?.[0]).toBe(2));
-    const corruptBytes = service.get('gear')?.bytes!;
+    await vi.waitFor(() => {
+      expect(service.get('gear')?.bytes?.[0]).toBe(2);
+    });
+    const corruptBytes = service.get('gear')!.bytes!;
     service.failDecode('gear', corruptBytes);
     expect(service.get('gear')).toMatchObject({ status: 'failed', bytes: goodBytes });
 
     service.request(updated, [gear], { manualPartId: 'gear' });
-    await vi.waitFor(() => expect(service.get('gear')?.bytes?.[0]).toBe(3));
+    await vi.waitFor(() => {
+      expect(service.get('gear')?.bytes?.[0]).toBe(3);
+    });
     expect(exportImage).toHaveBeenCalledTimes(3);
   });
 
@@ -96,9 +106,13 @@ describe('PartThumbnailService', () => {
     const exportImage = vi.fn(async () => [image(0)]);
     const service = fixture(exportImage);
     service.requestForOwner('explorer', source, [part('gear', 0)]);
-    await vi.waitFor(() => expect(service.get('gear')?.status).toBe('ready'));
+    await vi.waitFor(() => {
+      expect(service.get('gear')?.status).toBe('ready');
+    });
     service.requestForOwner('viewer', source, [part('shaft', 1)]);
-    await vi.waitFor(() => expect(service.get('shaft')?.status).toBe('ready'));
+    await vi.waitFor(() => {
+      expect(service.get('shaft')?.status).toBe('ready');
+    });
     expect(service.get('gear')?.status).toBe('ready');
     service.releaseOwner('explorer');
     expect(service.get('gear')).toBeUndefined();
@@ -116,14 +130,20 @@ describe('PartThumbnailService', () => {
       source,
       Array.from({ length: 128 }, (_, index) => part(`row-${index}`, index)),
     );
-    await vi.waitFor(() => expect(service.get('row-127')?.status).toBe('ready'));
+    await vi.waitFor(() => {
+      expect(service.get('row-127')?.status).toBe('ready');
+    });
     service.requestForOwner('viewer', source, [part('viewer-only', 128)]);
-    await vi.waitFor(() => expect(service.get('viewer-only')?.status).toBe('ready'));
+    await vi.waitFor(() => {
+      expect(service.get('viewer-only')?.status).toBe('ready');
+    });
     expect(service.snapshot().size).toBe(128);
     expect(service.get('row-0')?.status).toBe('ready');
     expect(service.get('row-127')).toBeUndefined();
     service.releaseOwner('viewer');
-    await vi.waitFor(() => expect(service.get('row-127')?.status).toBe('ready'));
+    await vi.waitFor(() => {
+      expect(service.get('row-127')?.status).toBe('ready');
+    });
     expect(service.get('viewer-only')).toBeUndefined();
     expect(service.snapshot().size).toBe(128);
   });
@@ -132,7 +152,9 @@ describe('PartThumbnailService', () => {
     const exportImage = vi.fn(async () => [image(0)]);
     const service = fixture(exportImage);
     service.requestForOwner('viewer', source, [part('shaft', 1)]);
-    await vi.waitFor(() => expect(service.get('shaft')?.status).toBe('ready'));
+    await vi.waitFor(() => {
+      expect(service.get('shaft')?.status).toBe('ready');
+    });
     service.failPreparationForOwner('explorer', [part('shaft', 1), part('gear', 0)], new Error('Invalid source GLB'));
     expect(service.get('gear')?.status).toBe('failed');
     expect(service.get('shaft')?.status).toBe('ready');
@@ -148,12 +170,16 @@ describe('PartThumbnailService', () => {
     const service = fixture(exportImage);
     const gear = part('gear', 0);
     service.request(source, [gear]);
-    await vi.waitFor(() => expect(service.get('gear')?.status).toBe('ready'));
+    await vi.waitFor(() => {
+      expect(service.get('gear')?.status).toBe('ready');
+    });
     const oldBytes = service.get('gear')?.bytes;
     service.failPreparation([gear], new Error('Invalid source GLB'));
     expect(service.snapshot().get('gear')).toMatchObject({ status: 'failed', bytes: oldBytes });
     service.request(source, [gear]);
-    await vi.waitFor(() => expect(service.get('gear')?.status).toBe('ready'));
+    await vi.waitFor(() => {
+      expect(service.get('gear')?.status).toBe('ready');
+    });
     expect(exportImage).toHaveBeenCalledTimes(2);
   });
 
@@ -166,9 +192,13 @@ describe('PartThumbnailService', () => {
     });
     const service = fixture(exportImage);
     service.request(source, [part('gear', 0)]);
-    await vi.waitFor(() => expect(service.get('gear')?.status).toBe('failed'));
+    await vi.waitFor(() => {
+      expect(service.get('gear')?.status).toBe('failed');
+    });
     service.request(source, [part('gear', 0)], { manualPartId: 'gear' });
-    await vi.waitFor(() => expect(service.get('gear')?.status).toBe('ready'));
+    await vi.waitFor(() => {
+      expect(service.get('gear')?.status).toBe('ready');
+    });
     expect(exportImage.mock.calls.map(([job]) => job.kind)).toEqual(['automatic-thumbnail', 'manual-thumbnail']);
   });
 
@@ -185,9 +215,13 @@ describe('PartThumbnailService', () => {
       source,
       Array.from({ length: 5 }, (_, index) => part(`part-${index}`, index)),
     );
-    await vi.waitFor(() => expect(service.get('part-4')?.status).toBe('failed'));
+    await vi.waitFor(() => {
+      expect(service.get('part-4')?.status).toBe('failed');
+    });
     service.requestForOwner('viewer', source, [part('part-2', 2)], { manualPartId: 'part-2' });
-    await vi.waitFor(() => expect(service.get('part-2')?.status).toBe('ready'));
+    await vi.waitFor(() => {
+      expect(service.get('part-2')?.status).toBe('ready');
+    });
     expect(service.get('part-0')?.status).toBe('failed');
     expect(service.get('part-4')?.status).toBe('failed');
     expect(exportImage.mock.calls.filter(([job]) => job.kind === 'manual-thumbnail')).toHaveLength(1);
@@ -248,7 +282,9 @@ describe('PartThumbnailService', () => {
     const service = fixture(exportImage);
     const gear = { ...part('gear', 0), visualKey: 'same-canonical-visual' };
     service.request({ ...source, renderContent: renderFirst }, [gear]);
-    await vi.waitFor(() => expect(service.get('gear')?.status).toBe('ready'));
+    await vi.waitFor(() => {
+      expect(service.get('gear')?.status).toBe('ready');
+    });
     expect(renderFirst).toHaveBeenCalledOnce();
     expect(exportImage.mock.calls[0]?.[0].content).toEqual(new Uint8Array([11]));
 
@@ -264,7 +300,9 @@ describe('PartThumbnailService', () => {
     expect(renderMoved).not.toHaveBeenCalled();
 
     service.request(moved, [gear, { ...part('new-part', 1), visualKey: 'new-canonical-visual' }]);
-    await vi.waitFor(() => expect(service.get('new-part')?.status).toBe('ready'));
+    await vi.waitFor(() => {
+      expect(service.get('new-part')?.status).toBe('ready');
+    });
     expect(renderMoved).toHaveBeenCalledOnce();
     const secondJob = exportImage.mock.calls[1]?.[0];
     if (secondJob?.sourceFormat !== 'glb') {
@@ -296,9 +334,10 @@ describe('PartThumbnailService', () => {
     service.announcePresentedSource('new-glb');
     expect(service.get('old')).toMatchObject({ status: 'ready', bytes: new Uint8Array([6]) });
     const preparation = Promise.withResolvers<void>();
-    const preparedRequest = preparation.promise.then(() => {
+    const preparedRequest = (async () => {
+      await preparation.promise;
       service.request({ ...source, geometryHash: 'new-glb' }, [part('new', 1)]);
-    });
+    })();
     pending.resolve([image(0, 8)]);
     await Promise.resolve();
     expect(service.get('old')?.bytes).toEqual(new Uint8Array([6]));
@@ -319,9 +358,13 @@ describe('PartThumbnailService', () => {
     const service = fixture(exportImage);
     service.announcePresentedSource('old-glb');
     service.requestForOwner('explorer', source, [part('old', 0)]);
-    await vi.waitFor(() => expect(service.get('old')?.status).toBe('ready'));
+    await vi.waitFor(() => {
+      expect(service.get('old')?.status).toBe('ready');
+    });
     service.requestForOwner('explorer', { ...source, geometryHash: 'pending-glb' }, [part('old', 0)]);
-    await vi.waitFor(() => expect(exportImage).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => {
+      expect(exportImage).toHaveBeenCalledTimes(2);
+    });
     service.announcePresentedSource('new-glb');
     expect(service.get('old')?.bytes).toEqual(new Uint8Array([6]));
     service.releaseOwner('explorer');
@@ -460,11 +503,11 @@ describe('PartThumbnailService', () => {
     });
     const service = fixture(imageService.export.bind(imageService));
     try {
-      service.request(source, [part('gear', 1)]);
+      service.request(source, [part('gear', 1)], { manualPartId: 'gear' });
       await vi.waitFor(() => {
         expect(service.get('gear')?.status).toBe('failed');
       });
-      service.request(source, [part('gear', 1)]);
+      service.request(source, [part('gear', 1)], { manualPartId: 'gear' });
       await vi.waitFor(() => {
         expect(service.get('gear')?.status).toBe('ready');
       });
@@ -523,6 +566,7 @@ describe('PartThumbnailService', () => {
       issues: [],
     };
     vi.mocked(imageClient.transcode)
+      .mockResolvedValueOnce(successful)
       .mockImplementationOnce(async () => {
         await captureGate.promise;
         return successful;
@@ -534,6 +578,16 @@ describe('PartThumbnailService', () => {
       isAutomaticGpuAvailable: () => true,
     });
     try {
+      await imageService.export({
+        kind: 'manual-thumbnail',
+        identity: 'warm-shared-worker',
+        sourceFormat: 'glb',
+        sourcePath: 'main.ts',
+        geometryHash: 'warm',
+        content: source.content,
+        format: 'webp',
+        exportOptions: { width: 16, height: 16 },
+      });
       const capture = imageService.export({
         kind: 'capture',
         identity: 'blocking-capture',
@@ -545,7 +599,7 @@ describe('PartThumbnailService', () => {
         exportOptions: { width: 16, height: 16 },
       });
       await vi.waitFor(() => {
-        expect(imageClient.transcode).toHaveBeenCalledOnce();
+        expect(imageClient.transcode).toHaveBeenCalledTimes(2);
       });
       const owners = Array.from({ length: 9 }, (_, index) => {
         const owner = fixture(imageService.export.bind(imageService));
@@ -555,13 +609,13 @@ describe('PartThumbnailService', () => {
       await vi.waitFor(() => {
         expect(owners[8]?.get('part-8')?.status).toBe('failed');
       });
-      expect(imageClient.transcode).toHaveBeenCalledOnce();
+      expect(imageClient.transcode).toHaveBeenCalledTimes(2);
       captureGate.resolve();
       await capture;
       await vi.waitFor(() => {
         expect(owners[7]?.get('part-7')?.status).toBe('ready');
       });
-      expect(imageClient.transcode).toHaveBeenCalledTimes(9);
+      expect(imageClient.transcode).toHaveBeenCalledTimes(10);
       expect(owners[8]?.get('part-8')?.bytes).toBeUndefined();
     } finally {
       captureGate.resolve();

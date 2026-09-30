@@ -867,3 +867,78 @@ test('defers a cold part preview worker and resumes automatic previews after exp
   );
   await target.screenshot(selectors.getByCss('body'), 'model-pane-mixed-previews.png');
 });
+
+test('admits previews for newly mounted virtual Model rows after scrolling', async () => {
+  await target.setViewport({ width: 1440, height: 900 });
+  await target.navigate(`${seedRoute}?main=preview-secondary`);
+  await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
+  await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
+  await openSecondGeometryUnit('public/models/preview-virtual.js');
+  await openCommand('Open model structure');
+  const list = selectors.getByRole('list', { name: 'Model components for public/models/preview-virtual.js' });
+  await target.expectVisible(list, 60_000);
+  const mountedBefore = await target.evaluateLocator(
+    list,
+    (element) => element.querySelectorAll('[data-model-component-row]').length,
+  );
+  expect(mountedBefore).toBeLessThan(48);
+  expect(
+    await target.evaluateLocator(list, (element) => Boolean(element.querySelector('[data-virtuoso-scroller]'))),
+  ).toBe(true);
+  const filter = selectors.getByRole('textbox', { name: 'Filter parts' });
+  await target.fill(filter, 'Preview part 1');
+  const first = list.getByRole('button', { name: 'Preview part 1', exact: true });
+  await target.expectVisible(first);
+  await target.click(first);
+  await target.hover(first);
+  await target.click(list.getByRole('button', { name: 'Actions for Preview part 1', exact: true }));
+  await target.click(selectors.getByRole('menuitem', { name: /Retry preview/iu }));
+  await target.keyboardPress('Escape');
+  await target.expectVisible(first.getByCss('img[src^="blob:"]'), 60_000);
+  await target.fill(filter, '');
+  await target.expectVisible(list.getByCss('[data-virtuoso-scroller]'));
+  await target.evaluateLocator(list, (element) => {
+    const scroller = element.querySelector<HTMLElement>('[data-virtuoso-scroller]');
+    if (!scroller) {
+      throw new Error('Virtual Model scroller was missing');
+    }
+    scroller.scrollTop = scroller.scrollHeight;
+  });
+  const last = list.getByRole('button', { name: 'Preview part 48', exact: true });
+  await target.expectVisible(last, 60_000);
+  const lastImage = last.getByCss('img[src^="blob:"]');
+  await target.expectVisible(lastImage, 60_000);
+  await target.click(last);
+  const propertiesImage = selectors.getByCss('[data-slot="part-properties"] img[src^="blob:"]').first();
+  await target.expectVisible(propertiesImage, 60_000);
+  expect(
+    await target.evaluateLocator(propertiesImage, (image) => (image as HTMLImageElement).getBoundingClientRect().width),
+  ).toBe(40);
+  await target.hover(last);
+  await target.click(list.getByRole('button', { name: 'Actions for Preview part 48', exact: true }));
+  const menuImage = selectors.getByRole('menu').getByCss('img[src^="blob:"]').first();
+  await target.expectVisible(menuImage);
+  expect(await target.evaluateLocator(menuImage, (image) => image.getBoundingClientRect().width)).toBe(24);
+  await target.writeArtifact(
+    'c2-virtual-model-preview-smoke.json',
+    JSON.stringify(
+      {
+        source: 'public/models/preview-virtual.js',
+        parts: 48,
+        mountedBefore,
+        row: await target.evaluateLocator(lastImage, (image) => ({
+          width: image.getBoundingClientRect().width,
+          decoded: image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0,
+        })),
+        mountedAfter: await target.evaluateLocator(
+          list,
+          (element) => element.querySelectorAll('[data-model-component-row]').length,
+        ),
+        adapter: await target.qualifyWebGpu(target.currentWebGpuProfile()),
+      },
+      undefined,
+      2,
+    ),
+  );
+  await target.screenshot(selectors.getByCss('body'), 'c2-virtual-model-preview-smoke.png');
+});

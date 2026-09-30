@@ -10,6 +10,7 @@ import { StrictMode } from 'react';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { createSourceModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { PartThumbnailService } from '#services/part-thumbnail.service.js';
 import {
   ChatExplorerTree,
   ComponentRow,
@@ -342,6 +343,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   for (const [name, original] of [
     ['createObjectURL', originalCreateObjectUrl],
     ['revokeObjectURL', originalRevokeObjectUrl],
@@ -387,6 +390,78 @@ describe('ChatExplorerTree', () => {
         views: [{ visiblePrimitives: part.primitiveRefs }],
       },
     });
+  });
+
+  it('should observe newly mounted rows and releases removed-row preview demand', async () => {
+    const demands = vi.spyOn(PartThumbnailService.prototype, 'requestForOwner');
+    const observe = vi.fn();
+    const unobserve = vi.fn();
+    const disconnect = vi.fn();
+    let intersect: IntersectionObserverCallback | undefined;
+    const observer = mock<IntersectionObserver>({ observe, unobserve, disconnect });
+    vi.stubGlobal(
+      'IntersectionObserver',
+      vi.fn(function (callback: IntersectionObserverCallback) {
+        intersect = callback;
+        return observer;
+      }),
+    );
+    const exportImage = vi.fn().mockResolvedValue(undefined);
+    mocks.imageService = { export: exportImage };
+    const parts = [firstComponentId, secondComponentId].map((id, index) => ({
+      ...createNode(id, `Part ${index + 1}`),
+      primitiveRefs: [{ nodeIndex: index, meshIndex: index, primitiveIndex: 0 }],
+    }));
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([
+        [
+          'mainView',
+          createGraphicsRefForUnit('src/main.ts', parts, {
+            previewGeometry: { hash: 'presented-glb', content: new Uint8Array([1, 2, 3]) },
+          }),
+        ],
+      ]),
+    });
+    renderExplorerTree();
+    const first = screen.getByRole('button', { name: 'Part 1' }).closest<HTMLElement>('[data-model-component-row]')!;
+    const second = screen.getByRole('button', { name: 'Part 2' }).closest<HTMLElement>('[data-model-component-row]')!;
+    expect(observe).toHaveBeenCalledWith(first);
+    expect(observe).toHaveBeenCalledWith(second);
+    act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: first, isIntersecting: true }], observer));
+    await waitFor(() => {
+      expect(exportImage).toHaveBeenCalledTimes(1);
+    });
+    first.remove();
+    await waitFor(() => {
+      expect(unobserve).toHaveBeenCalledWith(first);
+    });
+    await waitFor(() => {
+      expect(demands.mock.lastCall?.[2]).toEqual([]);
+    });
+    act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: first, isIntersecting: true }], observer));
+    expect(demands.mock.lastCall?.[2]).toEqual([]);
+    const parent = second.parentElement!;
+    second.remove();
+    await waitFor(() => {
+      expect(unobserve).toHaveBeenCalledWith(second);
+    });
+    act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: second, isIntersecting: true }], observer));
+    expect(exportImage).toHaveBeenCalledTimes(1);
+    const mounts = observe.mock.calls.length;
+    parent.append(second);
+    await waitFor(() => {
+      expect(observe.mock.calls.length).toBeGreaterThan(mounts);
+    });
+    act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: second, isIntersecting: true }], observer));
+    await waitFor(() => {
+      expect(exportImage).toHaveBeenCalledTimes(2);
+    });
+    expect(exportImage.mock.calls[1]?.[0].exportOptions.views).toMatchObject([
+      { visiblePrimitives: parts[1]!.primitiveRefs },
+    ]);
   });
 
   it('keeps the selected unit preview when another unit finishes later', async () => {

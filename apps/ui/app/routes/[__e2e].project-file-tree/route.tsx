@@ -95,6 +95,7 @@ const seedFiles = Object.fromEntries([
   ['package.json', { content: encode(packageJson) }],
   ['public/models/honeycomb.js', { content: encode(honeycombModel) }],
   ['public/models/preview-mixed.js', { content: encode(previewMixedModel) }],
+  ['public/models/preview-virtual.js', { content: encode(previewMixedModel.replace('length: 12', 'length: 48')) }],
   ['public/models/preview-shell.js', { content: encode(previewShellModel) }],
   ['public/models/box-corner.js', { content: encode(boxCornerModel) }],
   ['public/models/nested/strainer.js', { content: encode(honeycombModel) }],

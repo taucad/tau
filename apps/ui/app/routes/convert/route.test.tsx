@@ -41,7 +41,11 @@ const renderViewer = (): void => {
     <KeyboardProvider>
       <TooltipProvider>
         <GraphicsProvider graphicsRef={activeActor}>
-          <ConverterViewer glbData={new Uint8Array([0x67, 0x6c, 0x54, 0x46])} fileName='bracket.step' />
+          <ConverterViewer
+            glbData={new Uint8Array([0x67, 0x6c, 0x54, 0x46])}
+            hash='bracket-hash'
+            fileName='bracket.step'
+          />
         </GraphicsProvider>
       </TooltipProvider>
     </KeyboardProvider>,

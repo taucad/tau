@@ -43,6 +43,7 @@ import {
 import type { ReadSkillResource } from '@taucad/agent-tools/registry';
 import { createSkillResolver } from '@taucad/agent-tools/skills';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
+import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { createProjectModelLoader, runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
@@ -100,7 +101,8 @@ export type HostExportFile = ExportFile;
  *
  * @public
  */
-export type HostRuntimeClient = Pick<RuntimeClient, 'open' | 'describe' | 'transcode' | 'connect' | 'capabilities'>;
+export type HostRuntimeClient = Pick<RuntimeClient, 'describe' | 'transcode' | 'connect' | 'capabilities'> &
+  Pick<RuntimeAgentClient, 'open'>;
 
 /** Filesystem capability the host tool registry consumes. @public */
 export type HostToolFileSystem = Omit<RuntimeFileSystemBase, 'watch'>;

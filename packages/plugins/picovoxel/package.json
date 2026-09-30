@@ -63,6 +63,7 @@
   },
   "dependencies": {
     "@taucad/geometry-core": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
     "picovoxel": "catalog:"
   },
   "peerDependencies": {

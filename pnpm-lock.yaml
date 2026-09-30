@@ -4243,6 +4243,9 @@ importers:
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../../kinematics
       picovoxel:
         specifier: 'catalog:'
         version: 0.1.0(three@0.184.0)

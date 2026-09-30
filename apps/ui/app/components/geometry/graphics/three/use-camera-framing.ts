@@ -31,16 +31,19 @@ const directionFromRotation = ({
  *
  * The first real geometry uses configured angles. Later significant bounds/aspect
  * changes and Fit view preserve the user's direction: they only recentre and zoom.
+ * Kinematic pose updates refresh bounds without changing the camera.
  */
 export function useCameraFraming<
   Options extends {
     geometryRadius: number;
     geometryBounds: THREE.Box3;
+    isPoseUpdate?: boolean;
     stageOptions?: StageOptions;
   },
 >({
   geometryRadius,
   geometryBounds,
+  isPoseUpdate = false,
   stageOptions = defaultStageOptions,
 }: Options): (options?: { enableConfiguredAngles?: boolean }) => void {
   const rig = useCameraRig();
@@ -116,8 +119,8 @@ export function useCameraFraming<
       return;
     }
 
-    if (previousRadiusRef.current === undefined) {
-      // A remount over a camera the person already placed: keep the pose, refresh the bounds only.
+    if (previousRadiusRef.current === undefined || isPoseUpdate) {
+      // Remounts and kinematic pose changes keep the camera the person already placed; only refresh bounds.
       rig.actorRef.send({ type: 'setBounds', bounds: toCameraBounds(geometryBounds) });
       commit();
       return;
@@ -143,7 +146,7 @@ export function useCameraFraming<
       previousRadiusRef.current = geometryRadius;
       previousBoundsRef.current = geometryBounds.clone();
     }
-  }, [framing, frame, geometryBounds, geometryRadius, rig, viewportAspect]);
+  }, [framing, frame, geometryBounds, geometryRadius, isPoseUpdate, rig, viewportAspect]);
 
   useLayoutEffect(() => {
     if (previousRadiusRef.current === undefined || geometryRadius <= 0) {

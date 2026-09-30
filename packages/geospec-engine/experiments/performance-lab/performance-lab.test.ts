@@ -21,7 +21,11 @@ import {
   performanceLabScaleQueries,
 } from '../../../geospec-engine-native/bench/performance-lab.ts';
 /* oxlint-enable no-restricted-imports */
-import { selectLabProducts, toRunCase } from '#experiments/performance-lab/performance-lab-cli.js';
+import {
+  selectLabProducts,
+  toRunCase,
+  verifySourceAuthority,
+} from '#experiments/performance-lab/performance-lab-cli.js';
 import { runPerformanceLabCell } from '#experiments/performance-lab/performance-lab-runner.js';
 
 const root = resolve(import.meta.dirname, '../../../..');
@@ -328,29 +332,7 @@ void describe('performance lab catalog', () => {
     assert.ok(frozenNative);
     assert.equal(frozenNative.path, currentAuthority.nativeContract.path);
     assert.equal(frozenNative.sha256, currentAuthority.nativeContract.frozenSha256);
-    const files = [
-      {
-        path: 'packages/geospec-engine-native/bench/fixtures/performance-lab/authority-cases.json',
-        sha256: manifest.analyticAuthority.m3CasesUnchangedSha256,
-      },
-      {
-        path: 'packages/geospec-engine-native/bench/fixtures/performance-lab/authority-queries.json',
-        sha256: manifest.analyticAuthority.m3QueriesUnchangedSha256,
-      },
-      ...manifest.analyticAuthority.sources,
-    ];
-    await Promise.all(
-      files.map(async (source) => {
-        const bytes = await readFile(resolve(root, source.path));
-        assert.equal(
-          createHash('sha256').update(bytes).digest('hex'),
-          source.path === currentAuthority.nativeContract.path
-            ? currentAuthority.nativeContract.currentSha256
-            : source.sha256,
-          source.path,
-        );
-      }),
-    );
+    await verifySourceAuthority();
     const sources = new Map(manifest.analyticAuthority.sources.map((source) => [source.id, source]));
     const fixtures = new Map(performanceLabFixtures.map((entry) => [entry.id, entry]));
     for (const entry of performanceLabAnalyticCases) {

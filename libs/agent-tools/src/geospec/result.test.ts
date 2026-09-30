@@ -94,6 +94,100 @@ describe('model-facing diagnostics', () => {
 });
 
 describe('canonical reports', () => {
+  it('should not certify a selection containing only intentional skips', () => {
+    const output = runnerResultToTestModelOutput(
+      {
+        success: true,
+        passed: 0,
+        failed: 0,
+        selectedTests: 1,
+        lineageStatus: 'complete',
+        accounting: {
+          discovered: 1,
+          selected: 1,
+          completed: 0,
+          passed: 0,
+          failed: 0,
+          unsupported: 0,
+          inconclusive: 0,
+          skipped: 1,
+          notRun: 0,
+          requestedFiles: ['gear.geospec.ts'],
+          completedFiles: ['gear.geospec.ts'],
+          notRunFiles: [],
+          discoveryComplete: true,
+          cancelled: false,
+          bailed: false,
+        },
+        files: [
+          {
+            file: 'gear.geospec.ts',
+            result: {
+              success: true,
+              passed: true,
+              tests: [{ name: 'skipped', suite: [], status: 'skipped', assertions: [], diagnostics: [] }],
+              bundle: { success: true, code: '', issues: [], dependencies: [], unresolvedPaths: [] },
+            },
+          },
+        ],
+      },
+      ['gear.geospec.ts'],
+    );
+    expect(output.runStatus).toBe('not-run');
+    expect(output.failures[0]?.id).toBe('NO_MATCHING_GEOSPEC_TESTS');
+    expect(output.accounting?.skipped).toBe(1);
+  });
+  it.each(['passed', 'skipped', 'not-run', 'unsupported', 'inconclusive'] as const)(
+    'should qualify only completed selected work while retaining excluded definitions (%s)',
+    (status) => {
+      const complete = status === 'passed' || status === 'skipped';
+      const accounting = {
+        discovered: 3,
+        selected: 2,
+        completed: status === 'skipped' || status === 'not-run' ? 1 : 2,
+        passed: status === 'passed' ? 2 : 1,
+        failed: 0,
+        unsupported: status === 'unsupported' ? 1 : 0,
+        inconclusive: status === 'inconclusive' ? 1 : 0,
+        skipped: status === 'skipped' ? 1 : 0,
+        notRun: status === 'not-run' ? 2 : 1,
+        requestedFiles: ['gear.geospec.ts'],
+        completedFiles: ['gear.geospec.ts'],
+        notRunFiles: [],
+        discoveryComplete: true,
+        cancelled: false,
+        bailed: false,
+      };
+      const output = runnerResultToTestModelOutput(
+        {
+          success: complete,
+          passed: accounting.passed,
+          failed: 0,
+          selectedTests: 2,
+          accounting,
+          lineageStatus: 'complete',
+          files: [
+            {
+              file: 'gear.geospec.ts',
+              result: {
+                success: true,
+                passed: complete,
+                tests: [
+                  { name: 'control', suite: [], status: 'passed', assertions: [], diagnostics: [] },
+                  { name: 'selected', suite: [], status, assertions: [], diagnostics: [] },
+                ],
+                bundle: { success: true, code: '', issues: [], dependencies: [], unresolvedPaths: [] },
+              },
+            },
+          ],
+        },
+        ['gear.geospec.ts'],
+      );
+      expect(output.runStatus).toBe(status === 'not-run' ? 'inconclusive' : status === 'skipped' ? 'passed' : status);
+      expect(output.accounting).toEqual(accounting);
+      expect(output.tests?.map((test) => test.status)).toEqual(['passed', status]);
+    },
+  );
   it('should retain completed claim bytes and registered tests when the module later fails', () => {
     const report = claimReport({ claimId: 'before-crash', status: 'passed', polarity: 'positive', seed: 60 });
     const output = runnerResultToTestModelOutput(

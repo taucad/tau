@@ -44,6 +44,28 @@ export async function editViewFile(
   }
 }
 
+/** Recreate a saved seed only while absent; a concurrent valid view keeps all its settings. */
+export async function ensureViewFile(
+  input: Readonly<{
+    root: string;
+    viewId: string;
+    files: ViewFiles;
+    seed: WorkbenchView;
+    eligible: () => boolean;
+    onError: (error: unknown) => void;
+  }>,
+): Promise<boolean> {
+  const store = createWorkbenchViewStore({ ...input, onChange: () => undefined });
+  try {
+    if (!(await store.read()) || store.snapshot().refusal) {
+      return false;
+    }
+    return await store.ensure(input.seed, input.eligible);
+  } finally {
+    store.dispose();
+  }
+}
+
 /** A person-closing a viewer deletes exactly the view bytes last observed. */
 export async function deleteViewFile(
   input: Readonly<{

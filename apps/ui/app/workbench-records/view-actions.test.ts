@@ -5,7 +5,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { workbenchRecords } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
-import { deleteViewFile, editViewFile, useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
+import {
+  deleteViewFile,
+  editViewFile,
+  ensureViewFile,
+  useWorkbenchViewCommands,
+} from '#workbench-records/view-actions.js';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 
 const encoder = new TextEncoder();
@@ -92,6 +97,49 @@ describe('view panel record commands', () => {
     expect(await deleteViewFile({ root: '/projects/p', viewId: 'v-abcd1234', files, onError })).toBe(true);
     expect(bytes).toBeNull();
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('should preserve a foreign view recreated while Restore is creating a missing seed', async () => {
+    let bytes: Uint8Array<ArrayBuffer> | null = null;
+    const gate = Promise.withResolvers<void>();
+    const foreign = { ...base(), name: 'Foreign camera settings', fieldOfView: 40 };
+    const files = {
+      exists: async () => bytes !== null,
+      readFile: async () => bytes!,
+      deleteFileChecked: vi.fn(),
+      writeFileChecked: vi.fn(
+        async ({
+          data,
+          preconditions,
+        }: {
+          data: string;
+          preconditions: ReadonlyArray<{ expected: Uint8Array<ArrayBuffer> | null }>;
+        }): Promise<CheckedFileWriteResult> => {
+          await gate.promise;
+          if (preconditions[0]!.expected === null && bytes !== null) {
+            return { status: 'conflict', conflicts: [{ path, actual: bytes }] };
+          }
+          bytes = encoder.encode(data);
+          return { status: 'applied', content: bytes };
+        },
+      ),
+    };
+    const creating = ensureViewFile({
+      root: '/projects/p',
+      viewId: 'v-abcd1234',
+      files,
+      seed: base(),
+      eligible: () => true,
+      onError: vi.fn(),
+    });
+    await vi.waitFor(() => {
+      expect(files.writeFileChecked).toHaveBeenCalledOnce();
+    });
+    bytes = encoder.encode(workbenchRecords.view.serialize(foreign));
+    gate.resolve();
+    expect(await creating).toBe(true);
+    expect(workbenchRecords.view.read(bytes)).toMatchObject({ status: 'current', record: foreign });
+    expect(files.writeFileChecked).toHaveBeenCalledOnce();
   });
 
   it('treats an already deleted view as an idempotent close without a write', async () => {

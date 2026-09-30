@@ -526,6 +526,27 @@ describe('createChatToolRegistry invocation', () => {
     expect(JSON.stringify(result.content)).toContain('export const main');
   });
 
+  it('preserves reviewed digest input and non-retryable conflict through the normal tool wire', async () => {
+    const fileSystem = emptyFileSystem();
+    const editFile = vi.fn<RpcFileSystem['editFile']>(async () => {
+      throw Object.assign(new Error('Reviewed bytes changed'), { code: 'EDIT_CONFLICT' });
+    });
+    fileSystem.editFile = editFile;
+    const registry = build({ fileSystemFor: () => fileSystem });
+    const input = { targetFile: 'main.ts', oldString: '1', newString: '2', expectedDigest: `sha256:${'a'.repeat(64)}` };
+    const refusal = await invoke(registry, 'edit_file', { input });
+    expect(refusal).toMatchObject({
+      isError: true,
+      content: { errorCode: 'EDIT_CONFLICT' },
+    });
+    expect(refusal.content).not.toHaveProperty('retryable');
+    expect(editFile).toHaveBeenCalledExactlyOnceWith(input);
+    await expect(
+      invoke(registry, 'edit_file', { input: { ...input, expectedDigest: 'missing' } }),
+    ).resolves.toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+    expect(editFile).toHaveBeenCalledTimes(1);
+  });
+
   it('uses the trusted invocation ID for exported artifact paths', async () => {
     const exportGeometry = vi.fn<RpcGraphicsClient['exportGeometry']>(async () => ({
       success: true,

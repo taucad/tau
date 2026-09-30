@@ -422,12 +422,40 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
         await provider.writeFile(assertRootedPath(path), next);
       });
     },
-    // oxlint-disable-next-line max-params -- RpcFileSystem owns this four-argument compatibility signature.
-    async editFile(path, oldString, newString, replaceAll) {
+    async editFile({ targetFile: path, oldString, newString, replaceAll, expectedDigest }) {
       const result = await applyClientTextMutation({
         targetFile: path,
-        fileSystem: { stat, readFileBytes: bytes, writeFileIfUnchanged: writeIfUnchanged },
-        plan: createExactReplacementPlan({ oldString, newString, replaceAll }),
+        expectedDigest,
+        fileSystem: {
+          stat,
+          readFileBytes: bytes,
+          writeFileIfUnchanged:
+            expectedDigest === undefined
+              ? writeIfUnchanged
+              : async (target, expected, replacement) => {
+                  await assertManifestReplacement(target, replacement, expected);
+                  assertNotAborted(signal);
+                  if (provider.writeFileChecked === undefined) {
+                    throw Object.assign(new Error('Reviewed edits require atomic checked-write authority.'), {
+                      code: 'CHECKED_WRITE_UNSUPPORTED',
+                      applicationState: 'known-not-applied',
+                    });
+                  }
+                  const committed = await provider.writeFileChecked({
+                    path: target,
+                    data: replacement,
+                    preconditions: [{ path: target, expected }],
+                  });
+                  if (committed.status === 'conflict') {
+                    throw Object.assign(
+                      new Error('Reviewed bytes changed before commit. Read and review the file again.'),
+                      { code: rpcClientErrorCode.editConflict },
+                    );
+                  }
+                  return { status: 'committed', committedBytes: new Uint8Array(committed.content) };
+                },
+        },
+        plan: createExactReplacementPlan({ oldString, newString, replaceAll, expectedDigest }),
       });
       if (!result.ok) {
         throw Object.assign(new Error(result.message), { code: result.errorCode });

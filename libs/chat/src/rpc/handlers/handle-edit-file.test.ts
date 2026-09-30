@@ -2,13 +2,56 @@ import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
-import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
+import { rpcClientErrorCode, rpcSchemasRegistry } from '#schemas/rpc.schema.js';
+import { rpcName } from '#constants/rpc.constants.js';
 import { handleEditFile } from '#rpc/handlers/handle-edit-file.js';
 
 /** `expect.stringMatching` is untyped, so the matcher is named once and typed at its declaration. */
 const anyContentDigest = expect.stringMatching(/^sha256:[0-9a-f]{64}$/u) as unknown as string;
 
 describe('handleEditFile', () => {
+  it('passes reviewed input canonically and makes failures non-blind-retryable', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    const input = {
+      targetFile: 'main.ts',
+      oldString: 'foo',
+      newString: 'bar',
+      expectedDigest: `sha256:${'a'.repeat(64)}`,
+    };
+    fileSystem.editFile.mockRejectedValue(
+      Object.assign(new Error('Reviewed bytes changed. Read and review the file again.'), { code: 'EDIT_CONFLICT' }),
+    );
+    const refusal = await handleEditFile(input, fileSystem);
+    expect(rpcSchemasRegistry[rpcName.editFile].resultSchema.safeParse(refusal).success).toBe(true);
+    expect(refusal).toMatchObject({
+      success: false,
+      errorCode: 'EDIT_CONFLICT',
+    });
+    expect(refusal).not.toHaveProperty('retryable');
+    expect(refusal.message).toContain('Read and review');
+    expect(rpcSchemasRegistry[rpcName.editFile].resultSchema.safeParse({ ...refusal, retryable: false }).success).toBe(
+      false,
+    );
+    expect(fileSystem.editFile).toHaveBeenCalledWith(input);
+    fileSystem.editFile.mockResolvedValue({
+      occurrences: 1,
+      diffStats: { linesAdded: 1, linesRemoved: 1, originalContent: 'foo', modifiedContent: 'bar' },
+    });
+    const unproved = await handleEditFile(input, fileSystem);
+    expect(unproved).toMatchObject({ success: false, errorCode: 'IO_ERROR' });
+    expect(unproved).not.toHaveProperty('retryable');
+    expect(rpcSchemasRegistry[rpcName.editFile].resultSchema.safeParse(unproved).success).toBe(true);
+    fileSystem.editFile.mockRejectedValue(
+      Object.assign(new Error('Atomic checked write unavailable'), {
+        code: 'CHECKED_WRITE_UNSUPPORTED',
+        applicationState: 'known-not-applied',
+      }),
+    );
+    const unsupported = await handleEditFile(input, fileSystem);
+    expect(unsupported).toMatchObject({ success: false, errorCode: 'IO_ERROR' });
+    expect(unsupported).not.toHaveProperty('retryable');
+    expect(rpcSchemasRegistry[rpcName.editFile].resultSchema.safeParse(unsupported).success).toBe(true);
+  });
   it('should replace a single occurrence and return count', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.editFile.mockResolvedValue({
@@ -25,7 +68,7 @@ describe('handleEditFile', () => {
       diffStats: { linesAdded: 1, linesRemoved: 1, originalContent: 'foo', modifiedContent: 'bar' },
       revision: { path: 'main.ts', digest: anyContentDigest },
     });
-    expect(fileSystem.editFile).toHaveBeenCalledWith('main.ts', 'foo', 'bar', undefined);
+    expect(fileSystem.editFile).toHaveBeenCalledWith({ targetFile: 'main.ts', oldString: 'foo', newString: 'bar' });
     expect(fileSystem.readFile).not.toHaveBeenCalled();
   });
 
@@ -48,7 +91,12 @@ describe('handleEditFile', () => {
       diffStats: { linesAdded: 1, linesRemoved: 1, originalContent: 'xxx', modifiedContent: 'yyy' },
       revision: { path: 'main.ts', digest: anyContentDigest },
     });
-    expect(fileSystem.editFile).toHaveBeenCalledWith('main.ts', 'x', 'y', true);
+    expect(fileSystem.editFile).toHaveBeenCalledWith({
+      targetFile: 'main.ts',
+      oldString: 'x',
+      newString: 'y',
+      replaceAll: true,
+    });
     expect(fileSystem.readFile).not.toHaveBeenCalled();
   });
 

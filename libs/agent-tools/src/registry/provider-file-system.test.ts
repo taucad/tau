@@ -1,8 +1,13 @@
-import { ResourceQueue } from '@taucad/filesystem';
+import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { NodeFsAuthorityHost, serveNodeFsProvider } from '@taucad/filesystem/backend/node';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
-import { MemoryProvider } from '@taucad/filesystem/backend';
+import { MemoryProvider, NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -187,13 +192,147 @@ describe('createProviderRpcFileSystem', () => {
   it('edits a file by exact replacement and reports the occurrence count', async () => {
     const fileSystem = fileSystemFor();
 
-    const result = await fileSystem.editFile('main.ts', 'main = 1', 'main = 2');
+    const result = await fileSystem.editFile({ targetFile: 'main.ts', oldString: 'main = 1', newString: 'main = 2' });
     expect(result.occurrences).toBe(1);
     expect(await fileSystem.readFile('main.ts')).toBe('export const main = 2;\n');
   });
 
   it('refuses an edit whose old string is not present', async () => {
-    await expect(fileSystemFor().editFile('main.ts', 'nope', 'yes')).rejects.toThrow();
+    await expect(
+      fileSystemFor().editFile({ targetFile: 'main.ts', oldString: 'nope', newString: 'yes' }),
+    ).rejects.toThrow();
+  });
+
+  it('commits reviewed bytes through the real rooted Node authority and refuses drift without replan', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-strict-edit-'));
+    const root = join(directory, 'content');
+    const metadata = join(directory, 'authority');
+    mkdirSync(root);
+    mkdirSync(metadata);
+    const authority = new NodeFsAuthorityHost({ authorityDirectory: () => metadata, authorityIdentity: () => root });
+    const { port1, port2 } = new MessageChannel();
+    const stop = serveNodeFsProvider(port2, {
+      policy: tauPathPolicy,
+      allowRoot: (candidate) => candidate === root,
+      authority,
+    });
+    const channel = new NodeFsChannel(port1);
+    const client = new NodeFsProviderClient(channel, root);
+    const mountTable = new MountTable();
+    mountTable.mount('/', client, { class: 'authored', backend: 'node', storageRootKey: root });
+    const workspace = new WorkspaceFileService({
+      providerRegistry: new ProviderRegistry(),
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      mountTable,
+    });
+    try {
+      const rooted = workspace.createRootedFileSystem('/');
+      const original = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode('alpha\r\nbeta\r\n')]);
+      await rooted.writeFile('main.ts', original);
+      const expectedDigest = `sha256:${createHash('sha256').update(original).digest('hex')}`;
+      const checkedWrite = client.writeFileChecked.bind(client);
+      const checked = vi.spyOn(client, 'writeFileChecked');
+      const fileSystem = createProviderRpcFileSystem({
+        provider: composeView({ filesystem: rooted }, { consumer: 'agent', policy: tauPathPolicy }),
+        mutations: new ResourceQueue(),
+      });
+      const input = { targetFile: 'main.ts', oldString: 'alpha', newString: 'alpha', expectedDigest };
+      await expect(fileSystem.editFile(input)).resolves.toMatchObject({ occurrences: 1, digest: expectedDigest });
+      expect(checked).toHaveBeenCalledTimes(1);
+      const committed = await fileSystem.editFile({ ...input, oldString: 'alpha\r\nbeta', newString: 'gamma\ndelta' });
+      const replacement = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode('gamma\ndelta\r\n')]);
+      expect(await rooted.readFile('main.ts')).toEqual(replacement);
+      expect(committed.digest).toBe(`sha256:${createHash('sha256').update(replacement).digest('hex')}`);
+      checked.mockImplementationOnce(async (write) => {
+        await client.writeFile('main.ts', '// person\ngamma\ndelta\r\n');
+        return checkedWrite(write);
+      });
+      await expect(
+        fileSystem.editFile({
+          targetFile: 'main.ts',
+          oldString: 'gamma',
+          newString: 'changed',
+          expectedDigest: committed.digest,
+        }),
+      ).rejects.toMatchObject({ code: 'EDIT_CONFLICT' });
+      expect(checked).toHaveBeenCalledTimes(3);
+      expect(decoder.decode(await rooted.readFile('main.ts'))).toBe('// person\ngamma\ndelta\r\n');
+    } finally {
+      workspace.dispose();
+      channel.close();
+      await stop();
+      port2.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses reviewed no-op without actual checked authority, with no fallback write', async () => {
+    const original = await provider.readFile('main.ts');
+    const write = vi.spyOn(provider, 'writeFile');
+    const input = {
+      targetFile: 'main.ts',
+      oldString: 'main = 1',
+      newString: 'main = 1',
+      expectedDigest: `sha256:${createHash('sha256').update(original).digest('hex')}`,
+    };
+    await expect(fileSystemFor().editFile(input)).rejects.toMatchObject({
+      code: 'CHECKED_WRITE_UNSUPPORTED',
+      applicationState: 'known-not-applied',
+    });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it.each(['ENOENT', 'EIO'])('preserves a known reviewed CAS conflict without a failing reread (%s)', async (code) => {
+    const raced = new RacedProvider();
+    await raced.writeFile('main.ts', 'alpha');
+    const original = await raced.readFile('main.ts');
+    const read = vi.spyOn(raced, 'readFile');
+    let readsAtConflict = 0;
+    const checked = vi.spyOn(raced, 'writeFileChecked').mockImplementation(async () => {
+      readsAtConflict = read.mock.calls.length;
+      read.mockRejectedValue(Object.assign(new Error('read refused after conflict'), { code }));
+      return { status: 'conflict', conflicts: [{ path: 'main.ts', actual: null }] };
+    });
+    const fileSystem = createProviderRpcFileSystem({
+      provider: composeView({ filesystem: raced }, { consumer: 'agent', policy: tauPathPolicy }),
+      mutations: new ResourceQueue(),
+    });
+    await expect(
+      fileSystem.editFile({
+        targetFile: 'main.ts',
+        oldString: 'alpha',
+        newString: 'beta',
+        expectedDigest: `sha256:${createHash('sha256').update(original).digest('hex')}`,
+      }),
+    ).rejects.toMatchObject({ code: 'EDIT_CONFLICT' });
+    expect(checked).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(readsAtConflict);
+  });
+
+  it('performs one reviewed no-op CAS and never replans an otherwise applicable external edit', async () => {
+    const raced = new RacedProvider();
+    await raced.writeFile('main.ts', 'export const main = 1;\n');
+    const original = await raced.readFile('main.ts');
+    const checked = vi.spyOn(raced, 'writeFileChecked');
+    const fileSystem = createProviderRpcFileSystem({
+      provider: composeView({ filesystem: raced }, { consumer: 'agent', policy: tauPathPolicy }),
+      mutations: new ResourceQueue(),
+    });
+    const input = {
+      targetFile: 'main.ts',
+      oldString: 'main = 1',
+      newString: 'main = 1',
+      expectedDigest: `sha256:${createHash('sha256').update(original).digest('hex')}`,
+    };
+    await expect(fileSystem.editFile(input)).resolves.toMatchObject({ occurrences: 1, digest: input.expectedDigest });
+    expect(checked).toHaveBeenCalledTimes(1);
+    raced.beforeNextWrite = async () => raced.writeFile('main.ts', '// person\nexport const main = 1;\n');
+    await expect(fileSystem.editFile({ ...input, newString: 'main = 2' })).rejects.toMatchObject({
+      code: 'EDIT_CONFLICT',
+    });
+    expect(checked).toHaveBeenCalledTimes(2);
+    expect(decoder.decode(await raced.readFile('main.ts'))).toBe('// person\nexport const main = 1;\n');
   });
 
   it('deletes a file, and surfaces ENOTEMPTY rather than deleting a subtree', async () => {
@@ -396,7 +535,9 @@ describe('createProviderRpcFileSystem', () => {
       mutations: new ResourceQueue(),
     });
 
-    await expect(fileSystem.editFile('main.ts', 'main = 1', 'main = 2')).rejects.toMatchObject({
+    await expect(
+      fileSystem.editFile({ targetFile: 'main.ts', oldString: 'main = 1', newString: 'main = 2' }),
+    ).rejects.toMatchObject({
       code: 'EDIT_CONFLICT',
     });
     expect(decoder.decode(await raced.readFile('main.ts'))).toBe('export const main = 3;\n');
@@ -418,8 +559,19 @@ describe('createProviderRpcFileSystem', () => {
       mutations: new ResourceQueue(),
     });
 
-    await fileSystem.editFile('main.ts', 'main = 1', 'main = 2');
+    await fileSystem.editFile({ targetFile: 'main.ts', oldString: 'main = 1', newString: 'main = 2' });
     expect(decoder.decode(await unchecked.readFile('main.ts'))).toBe('export const main = 2;\n');
+    const original = await unchecked.readFile('main.ts');
+    const write = vi.spyOn(unchecked, 'writeFile');
+    await expect(
+      fileSystem.editFile({
+        targetFile: 'main.ts',
+        oldString: 'main = 2',
+        newString: 'main = 2',
+        expectedDigest: `sha256:${createHash('sha256').update(original).digest('hex')}`,
+      }),
+    ).rejects.toMatchObject({ code: 'CHECKED_WRITE_UNSUPPORTED', applicationState: 'known-not-applied' });
+    expect(write).not.toHaveBeenCalled();
   });
 
   /* The incident this guards: asked for a second model, an agent added
@@ -443,7 +595,7 @@ describe('createProviderRpcFileSystem', () => {
       const fileSystem = fileSystemFor();
 
       await fileSystem.writeFile('tau.json', text({ ...manifest, name: 'Renamed' }));
-      await fileSystem.editFile('tau.json', '"Renamed"', '"Renamed again"');
+      await fileSystem.editFile({ targetFile: 'tau.json', oldString: '"Renamed"', newString: '"Renamed again"' });
 
       expect(JSON.parse(await fileSystem.readFile('tau.json'))).toMatchObject({ name: 'Renamed again' });
     });
@@ -458,7 +610,9 @@ describe('createProviderRpcFileSystem', () => {
         /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest types asymmetric matchers as `any`. */
         message: expect.stringContaining('assets: Unrecognized key: "second"'),
       });
-      await expect(fileSystem.editFile('tau.json', '"main.ts"\n', '"main.ts", "extra": 1\n')).rejects.toMatchObject({
+      await expect(
+        fileSystem.editFile({ targetFile: 'tau.json', oldString: '"main.ts"\n', newString: '"main.ts", "extra": 1\n' }),
+      ).rejects.toMatchObject({
         code: 'VALIDATION_ERROR',
       });
       await expect(

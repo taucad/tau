@@ -24,7 +24,7 @@ import { setup, types } from 'xstate';
 import { chatRunState, executionRefusal, reopens } from '#log/chat-ledger.js';
 import type { ChatLedger, LogRowBody, RunEntry } from '#log/chat-ledger.js';
 import type { JsonValue, RunFailureDetail, TurnPlacement } from '#log/event-types.js';
-import { isResumableRunFailure } from '#log/resumable.js';
+import { isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
 import { chatRunCommandSchemas } from '#host/chat-run-events.js';
 import type {
   ApprovalRequest,
@@ -347,7 +347,17 @@ const endingRows = (context: SlotContext): readonly ChatRunRow[] => {
       ? cancelPending(ledger, runId).filter((row) => row.type !== 'interrupt.recorded' || row.interruptId !== deciding)
       : [];
   if (ending.reason === 'cancel' && ending.outcome !== 'completed') {
-    return [...external, lifecycle('cancelled', { executed })].map((body) => withCommand(body));
+    const entry = ledger.runs[runId];
+    const retained = entry?.committed === true && (entry.kind === 'tau' || entry.externalPrompted === true);
+    return [
+      ...external,
+      lifecycle('cancelled', {
+        executed,
+        ...(retained
+          ? { detail: { code: 'USER_STOPPED', message: 'You stopped this turn. Resume to continue it.' } }
+          : {}),
+      }),
+    ].map((body) => withCommand(body));
   }
   if (ending.reason === 'interrupt' && ending.outcome === 'aborted' && ending.interrupt !== undefined) {
     const { interrupt } = ending;
@@ -553,7 +563,7 @@ const resumable = (entry: RunEntry | undefined): boolean => {
   if (entry.lifecycle === 'paused') {
     return entry.kind === 'tau' && Object.keys(entry.pendingInterrupts).length === 0;
   }
-  if (entry.lifecycle !== 'failed' || !isResumableRunFailure(entry.failure)) {
+  if (!isUserStoppedRun(entry) && (entry.lifecycle !== 'failed' || !isResumableRunFailure(entry.failure))) {
     return false;
   }
   return entry.appendState !== 'settled' || reopens(entry, { state: 'running' });
@@ -1190,7 +1200,14 @@ export const chatRunMachine = setup({
               const next = minted(context, 'cancel');
               enq(actions.appendRows, {
                 key: next.key,
-                rows: [...cancelPending(context.ledger, runId), lifecycle('cancelled')].map((body) => ({
+                rows: [
+                  ...cancelPending(context.ledger, runId),
+                  lifecycle('cancelled', {
+                    ...(context.ledger.runs[runId]?.committed
+                      ? { detail: { code: 'USER_STOPPED', message: 'You stopped this turn. Resume to continue it.' } }
+                      : {}),
+                  }),
+                ].map((body) => ({
                   runId,
                   body,
                   commandId: event.commandId,

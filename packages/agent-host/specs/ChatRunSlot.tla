@@ -170,7 +170,8 @@ Wrote(k) == \E i \in DOMAIN log : log[i].k = k
 \* A native pause ends its attempt; an external run's pause is the same attempt waiting.
 EndingRow(i) == log[i].t \in Terminals \/ (log[i].t = "paused" /\ log[i].r = T)
 EndedAttempt(r) == \E i \in DOMAIN log : log[i].r = r /\ log[i].a = Att(r) /\ EndingRow(i)
-Resumable == LastOf(T) \in {"failed", "abandoned", "paused"}   \* W3's reopen predicate
+Resumable == LastOf(T) \in {"failed", "abandoned", "paused"}
+  \/ (LastOf(T) = "cancelled" /\ log[Max(LifeIdx(T))].k = Cancel /\ HasRow("commit", T))   \* W3's reopen predicate
 
 Key(r) == [r |-> r, a |-> Att(r)]
 Executed(r) == ~Has("placement") \/ Key(r) \in started

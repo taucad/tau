@@ -2131,7 +2131,12 @@ export class ChatSessionStore {
       session.watchedRunId = undefined;
       session.materializeVersion++;
     }
-    if (run?.lifecycle === 'cancelled' && session.stopRequested && session.restoredStoppedRunId !== run.runId) {
+    if (
+      run?.lifecycle === 'cancelled' &&
+      run.failure?.code !== 'USER_STOPPED' &&
+      session.stopRequested &&
+      session.restoredStoppedRunId !== run.runId
+    ) {
       session.restoredStoppedRunId = run.runId;
       const view = projection.views[run.runId];
       if (view?.user !== undefined && view.chunks.every((chunk) => nonOutputChunkTypes.has(chunk.type))) {

@@ -42,7 +42,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type { Chat } from '@ai-sdk/react';
-import { isResumableRunFailure } from '@taucad/agent-host';
+import { isResumableRunFailure, isUserStoppedRun } from '@taucad/agent-host';
 import { createAsyncLogic } from 'xstate';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
 import type { ActorRefFrom } from 'xstate';
@@ -755,8 +755,7 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
   const canResume = (current = projection): boolean => {
     const run = current !== undefined && selectCaughtUp(current) ? selectCurrentRun(current) : undefined;
     return (
-      run?.lifecycle === 'failed' &&
-      isResumableRunFailure(run.failure) &&
+      (isUserStoppedRun(run) || (run?.lifecycle === 'failed' && isResumableRunFailure(run.failure))) &&
       turn === undefined &&
       persistence.matches({ requestLifecycle: 'idle', chatLoading: 'idle' }) &&
       !persistence.context.isLoadingChat &&
@@ -768,8 +767,7 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
     const current = store.getProjection(chatId);
     const run = current !== undefined && selectCaughtUp(current) ? selectCurrentRun(current) : undefined;
     if (
-      run?.lifecycle !== 'failed' ||
-      !isResumableRunFailure(run.failure) ||
+      !(isUserStoppedRun(run) || (run?.lifecycle === 'failed' && isResumableRunFailure(run.failure))) ||
       session.stateActorRef.getSnapshot().context.turn !== undefined ||
       !session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle', chatLoading: 'idle' })
     ) {

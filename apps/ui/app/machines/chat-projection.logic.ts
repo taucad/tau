@@ -154,7 +154,10 @@ const applyFailureRow = (failure: ChatProjection['failure'], row: unknown): Chat
   if (!isRecord(row) || row['type'] !== 'run.lifecycle' || typeof row['runId'] !== 'string') {
     return failure;
   }
-  if (row['state'] === 'failed') {
+  if (
+    row['state'] === 'failed' ||
+    (row['state'] === 'cancelled' && isRecord(row['detail']) && row['detail']['code'] === 'USER_STOPPED')
+  ) {
     return { runId: row['runId'], text: runFailureText(row['detail']) };
   }
   return failure?.runId === row['runId'] ? undefined : failure;

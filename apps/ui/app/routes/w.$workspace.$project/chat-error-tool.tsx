@@ -50,7 +50,7 @@ export const ChatErrorTool = memo(function ({
       actions={
         <Button
           variant='outline'
-          size='sm'
+          size='xs'
           onClick={() => {
             regenerate();
           }}

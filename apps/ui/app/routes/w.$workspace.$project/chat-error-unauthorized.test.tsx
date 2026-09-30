@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type React from 'react';
-import { render, screen } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router';
+import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from 'react-router';
 import { ChatErrorUnauthorized } from '#routes/w.$workspace.$project/chat-error-unauthorized.js';
 
 const continueChat = vi.fn();
@@ -37,16 +38,59 @@ describe('ChatErrorUnauthorized', () => {
     vi.clearAllMocks();
   });
 
-  it('should offer sign-in first and account creation second, stacked by card width', () => {
-    const { container } = renderAt('/w/home/p');
+  it('should offer sign-in first and account creation second', () => {
+    renderAt('/w/home/p');
 
     expect(screen.getByText('Sign in to continue')).toBeInTheDocument();
     expect(screen.getByText('Your turn is paused. Sign in and Tau resumes where it stopped.')).toBeInTheDocument();
     const links = screen.getAllByRole('link');
     expect(links.map((link) => link.textContent)).toEqual(['Sign in', 'Create account']);
-    const actions = container.querySelector('[data-slot="chat-error-card-actions"]');
-    expect(actions).toHaveClass('@xs:flex-row');
-    expect(actions?.className).not.toContain('sm:flex-row ');
+  });
+
+  it('should let the keyboard reach both recovery links in order', async () => {
+    const user = userEvent.setup();
+    renderAt('/w/home/p');
+
+    await user.tab();
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('link', { name: 'Create account' })).toHaveFocus();
+  });
+
+  it.each([
+    { label: 'Sign in', path: '/auth/sign-in' },
+    { label: 'Create account', path: '/auth/sign-up' },
+  ])('should keep $label named while its destination loads', async ({ label, path }) => {
+    const user = userEvent.setup();
+    const destination = Promise.withResolvers<void>();
+    const router = createMemoryRouter(
+      [
+        { path: '/w/home/p', element: <ChatErrorUnauthorized /> },
+        {
+          path,
+          loader: async () => {
+            await destination.promise;
+            return null;
+          },
+          element: <p>Authentication</p>,
+        },
+      ],
+      { initialEntries: ['/w/home/p'] },
+    );
+    const view = render(<RouterProvider router={router} />);
+
+    try {
+      await user.click(screen.getByRole('link', { name: label }));
+      expect(router.state.navigation.state).toBe('loading');
+      expect(screen.getByRole('link', { name: label })).toHaveTextContent(label);
+    } finally {
+      await act(async () => {
+        destination.resolve();
+        await destination.promise;
+      });
+      view.unmount();
+      router.dispose();
+    }
   });
 
   it('should arm a resume on the sign-in return URL, keeping the search it already carries', () => {

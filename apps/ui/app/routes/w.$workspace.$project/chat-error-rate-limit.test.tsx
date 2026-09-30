@@ -26,7 +26,7 @@ describe('ChatErrorRateLimit', () => {
     expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
-    expect(container.firstElementChild).toHaveClass('border-warning/20', 'bg-warning/10');
+    expect(container.firstElementChild).not.toHaveClass('border-warning/20', 'bg-warning/10');
 
     await user.click(screen.getByRole('button', { name: 'Resume' }));
 

@@ -46,7 +46,7 @@ export const ChatErrorServiceUnavailable = memo(function ({
       actions={
         <Button
           variant='outline'
-          size='sm'
+          size='xs'
           onClick={() => {
             if (resumable) {
               continueChat();

@@ -1,18 +1,17 @@
-import { memo, useState } from 'react';
+import { memo } from 'react';
 import type React from 'react';
-import { Bot, ChevronRight, CircleAlert, RefreshCcw, WifiOff } from 'lucide-react';
+import { Bot, CircleAlert, RefreshCcw, WifiOff } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { CodeViewer } from '#components/code/code-viewer.js';
-import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { chatHistoryTidyFailureMessage, parseErrorForPersistence } from '#utils/error.utils.js';
 import { cardOf } from '#utils/chat-error-card.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
+import { ChatErrorDetails } from '#routes/w.$workspace.$project/chat-error-details.js';
 import { ChatErrorPausedTurn } from '#routes/w.$workspace.$project/chat-error-paused-turn.js';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
 import { ChatErrorUnauthorized } from '#routes/w.$workspace.$project/chat-error-unauthorized.js';
@@ -160,7 +159,7 @@ function codedErrorCard({
         title='Update Tau on this host'
         description='This host runs a version of Tau this page cannot talk to. Update Tau there, then try again.'
         actions={
-          <Button variant='outline' size='sm' onClick={onTryAgain}>
+          <Button variant='outline' size='xs' onClick={onTryAgain}>
             <RefreshCcw className='size-3.5' />
             Try again
           </Button>
@@ -173,7 +172,8 @@ function codedErrorCard({
     return (
       <ChatErrorPausedTurn
         className={className}
-        reason={error.message}
+        title={code === 'RUN_ABANDONED' ? 'Chat paused' : code === 'NETWORK_ERROR' ? 'Connection lost' : undefined}
+        reason={code === 'RUN_ABANDONED' || code === 'NETWORK_ERROR' ? undefined : error.message}
         resumable={retry === 'resume' && resumable}
         icon={error.category === errorCategory.overloaded ? WifiOff : CircleAlert}
         {...raw}
@@ -215,7 +215,7 @@ function codedErrorCard({
         title='Nothing left to continue'
         description={error.message}
         actions={
-          <Button variant='outline' size='sm' onClick={onRegenerate}>
+          <Button variant='outline' size='xs' onClick={onRegenerate}>
             <RefreshCcw className='size-3.5' />
             Try again
           </Button>
@@ -248,7 +248,7 @@ function codedErrorCard({
         title='Tau could not start this turn'
         description={error.message}
         actions={
-          <Button variant='outline' size='sm' onClick={onTryAgain}>
+          <Button variant='outline' size='xs' onClick={onTryAgain}>
             <RefreshCcw className='size-3.5' />
             Try again
           </Button>
@@ -293,7 +293,7 @@ function codedErrorCard({
         actions={
           <Button
             variant='outline'
-            size='sm'
+            size='xs'
             onClick={() => {
               globalThis.location.reload();
             }}
@@ -314,7 +314,7 @@ function codedErrorCard({
         title="Tau can't read this chat's history"
         description='Start a new chat to keep working.'
         actions={
-          <Button variant='outline' size='sm' disabled={!canOpenNewChat} onClick={onNewChat}>
+          <Button variant='outline' size='xs' disabled={!canOpenNewChat} onClick={onNewChat}>
             New chat
           </Button>
         }
@@ -331,7 +331,7 @@ function codedErrorCard({
         title='Tau restarted while the agent waited for your approval'
         description="Its turn can't be resumed. Send a message to continue."
         actions={
-          <Button variant='outline' size='sm' onClick={onRegenerate}>
+          <Button variant='outline' size='xs' onClick={onRegenerate}>
             Try again
           </Button>
         }
@@ -343,7 +343,6 @@ function codedErrorCard({
 }
 
 export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
-  const [genericDetailsOpen, setGenericDetailsOpen] = useState(false);
   // Derive parsed error inside selector - prefer runtime error, fallback to persisted
   const parsedError = useChatSelector(selectVisibleChatError);
   const { regenerate } = useChatActions();
@@ -363,51 +362,22 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
     const formattedError = parsedError.raw ? tryFormatJson(parsedError.raw) : parsedError.message;
 
     return (
-      <div className={cn('min-w-0', className)}>
-        <Collapsible
-          open={genericDetailsOpen}
-          className={cn(
-            'group/collapsible flex flex-col justify-center overflow-hidden rounded-md border border-destructive/20 bg-destructive/10 text-sm',
-          )}
-          onOpenChange={setGenericDetailsOpen}
-        >
-          <div className='@container'>
-            <div className='flex w-full flex-col transition-colors hover:bg-destructive/15 @xs:flex-row @xs:items-center @xs:gap-2'>
-              <CollapsibleTrigger className='flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left outline-none focus-visible:focus-outline'>
-                <ChevronRight className='size-4 shrink-0 transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90' />
-                <div className='min-w-0 flex-1'>
-                  <MarkdownViewer
-                    className={cn(
-                      'inline w-auto! text-sm text-foreground',
-                      // Inline-code styles for error messages
-                      '[&_code]:text-destructive',
-                      '[&_code]:border-destructive/30',
-                      '[&_code]:bg-background/80',
-                      'line-clamp-none',
-                    )}
-                  >
-                    {parsedError.message || parsedError.title || 'Unable to send the message.'}
-                  </MarkdownViewer>
-                </div>
-              </CollapsibleTrigger>
-              <Button
-                variant='outline'
-                className='mx-2 mb-2 h-auto min-h-7 whitespace-normal hover:border-neutral/50 @xs:mb-0 @xs:ml-0'
-                size='sm'
-                onClick={() => {
-                  handleTryAgain();
-                }}
-              >
-                <RefreshCcw className='size-3.5' />
-                Try again
-              </Button>
-            </div>
-          </div>
-          <CollapsibleContent className='overflow-x-scroll px-2 pb-2'>
-            <CodeViewer text={formattedError} language='json' className='text-xs whitespace-pre-wrap' />
-          </CollapsibleContent>
-        </Collapsible>
-      </div>
+      <ChatErrorCard
+        className={cn('min-w-0', className)}
+        tone='warning'
+        icon={CircleAlert}
+        title={parsedError.message || parsedError.title || 'Unable to send the message.'}
+        actions={
+          <Button variant='outline' size='xs' onClick={() => { regenerate(); }}>
+            <RefreshCcw className='size-3.5' />
+            Try again
+          </Button>
+        }
+      >
+        <ChatErrorDetails>
+          <CodeViewer text={formattedError} language='json' className='mt-1 text-xs whitespace-pre-wrap' />
+        </ChatErrorDetails>
+      </ChatErrorCard>
     );
   };
 

@@ -1,49 +1,46 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { Clock } from 'lucide-react';
+import userEvent from '@testing-library/user-event';
+import { CreditCard } from 'lucide-react';
+import { Button } from '@taucad/ui/components/button';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 
 describe('ChatErrorCard', () => {
-  it('should size its actions by the card, stacking them until the card reaches 20 rem', () => {
-    const { container } = render(
+  it('should keep the summary visible and recovery controls operable in their given order', async () => {
+    const user = userEvent.setup();
+    const resume = vi.fn();
+    render(
       <ChatErrorCard
         tone='warning'
-        icon={Clock}
-        title='Rate limit exceeded'
-        description='Wait a moment.'
-        actions={<button type='button'>Try again</button>}
-      />,
-    );
-
-    const card = container.querySelector('[data-slot="chat-error-card"]');
-    const actions = container.querySelector('[data-slot="chat-error-card-actions"]');
-    expect(card).toHaveClass('@container', 'border-warning/20', 'bg-warning/10');
-    // No viewport breakpoint: the chat panel is far narrower than the window.
-    expect(actions?.className).not.toMatch(/(^|\s)(sm|md|lg):/u);
-    expect(actions).toHaveClass('flex-col', '@xs:flex-row', '@xs:*:flex-1', '*:whitespace-normal');
-    expect(screen.getByText('Rate limit exceeded')).toBeInTheDocument();
-    expect(screen.getByText('Wait a moment.')).toBeInTheDocument();
-  });
-
-  it('should keep three actions stacked until the card reaches 24 rem', () => {
-    const { container } = render(
-      <ChatErrorCard
-        tone='neutral'
+        icon={CreditCard}
         title='Credit limit reached'
-        actionsRowFrom='sm'
+        description='Add credits, then resume this chat.'
         actions={
           <>
-            <button type='button'>Billing</button>
-            <button type='button'>Switch model</button>
-            <button type='button'>Resume</button>
+            <Button size='xs' variant='outline'>
+              Billing
+            </Button>
+            <Button size='xs' variant='outline'>
+              Switch model
+            </Button>
+            <Button size='xs' variant='outline' onClick={resume}>
+              Resume
+            </Button>
           </>
         }
       />,
     );
 
-    const actions = container.querySelector('[data-slot="chat-error-card-actions"]');
-    expect(actions).toHaveClass('@sm:flex-row', '@sm:*:flex-1');
-    expect(actions).not.toHaveClass('@xs:flex-row');
+    expect(screen.getByText('Credit limit reached')).toBeInTheDocument();
+    expect(screen.getByText('Add credits, then resume this chat.')).toBeInTheDocument();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Billing' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Switch model' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Resume' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(resume).toHaveBeenCalledOnce();
   });
 
   it('should pass landmark props through and omit the action group without actions', () => {

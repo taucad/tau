@@ -10,6 +10,11 @@ const regenerate = vi.fn();
 const openNewChat = vi.fn(async () => undefined);
 const execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' } as const;
 const agentSelection = vi.hoisted(() => ({ isOffered: true, label: 'Codex' }));
+const debug = vi.hoisted(() => ({ enabled: false }));
+
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: () => debug.enabled,
+}));
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => ({ continueChat, regenerate }),
@@ -48,6 +53,7 @@ describe('ChatErrorAgentStop', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     agentSelection.isOffered = true;
+    debug.enabled = false;
   });
 
   it('should present a usage limit with no structured reset as the agent wrote it, Switch agent then a live Resume', () => {
@@ -63,7 +69,7 @@ describe('ChatErrorAgentStop', () => {
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Switch agent', 'Resume']);
     expect(screen.getByRole('button', { name: 'Resume' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Details' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /details/iu })).not.toBeInTheDocument();
     expect(notice).not.toHaveClass('bg-destructive/10');
   });
 
@@ -172,7 +178,25 @@ describe('ChatErrorAgentStop', () => {
     expect(openNewChat).toHaveBeenCalledWith({ activeExecution: execution });
   });
 
-  it('should alert an unexpected failure and keep its diagnostics collapsed until asked', async () => {
+  it('should hide diagnostic actions for an unexpected failure when Tau Debug is off', () => {
+    render(
+      <ChatErrorAgentStop
+        resumable
+        stop={stopOf(
+          { category: 'internal', title: 'Internal error', actions: ['retry'] },
+          { diagnostics: '[SYSTEM_ERROR] Prompt for session s-1 failed' },
+        )}
+      />,
+    );
+
+    expect(screen.getByRole('alert', { name: 'Codex stopped unexpectedly' })).toHaveTextContent('Internal error');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /details/iu })).not.toBeInTheDocument();
+    expect(screen.queryByText(/SYSTEM_ERROR/u)).not.toBeInTheDocument();
+  });
+
+  it('should disclose diagnostics for an unexpected failure when Tau Debug is enabled', async () => {
+    debug.enabled = true;
     const user = userEvent.setup();
     render(
       <ChatErrorAgentStop
@@ -188,7 +212,7 @@ describe('ChatErrorAgentStop', () => {
     expect(alert).toHaveTextContent('Internal error');
     expect(screen.queryByText(/SYSTEM_ERROR/u)).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Details' }));
+    await user.click(screen.getByRole('button', { name: 'Debug details' }));
 
     expect(screen.getByText(/SYSTEM_ERROR/u)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Try again' }));

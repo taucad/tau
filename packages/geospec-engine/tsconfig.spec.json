@@ -173,6 +173,7 @@
     "src/runner/pool/worker-host.test.ts",
     "src/runner/node/node-runner.ts",
     "src/runner/node/node-runner.test.ts",
+    "src/runner/node/native-pool-worker-entry.test.ts",
     "src/runner/node/compiled-module-fanout.bench.test.ts",
     "src/runner/node/pool-worker-entry.ts",
     "src/runner/web/web-runner.ts",

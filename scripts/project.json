@@ -138,7 +138,9 @@
             "rpc",
             "kinematics",
             "filesystem",
-            "revisions"
+            "revisions",
+            "picogk",
+            "native-process-core"
           ]
         }
       ],

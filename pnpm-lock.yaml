@@ -3610,6 +3610,9 @@ importers:
       '@libcascade/toolchain':
         specifier: 'catalog:'
         version: 3.0.2
+      '@taucad/picogk':
+        specifier: workspace:^
+        version: link:../plugins/picogk
       '@taucad/tau-examples':
         specifier: workspace:*
         version: link:../../libs/tau-examples

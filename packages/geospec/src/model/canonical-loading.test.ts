@@ -7,7 +7,7 @@ import type { GeoSpecNativeModelEngine } from '#model/native-model-loader.js';
 
 const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
 const engine = () => {
-  const releaseSubject = vi.fn(() => encode({ result: {} }));
+  const releaseSubject = vi.fn((_request: Uint8Array<ArrayBuffer>) => encode({ result: {} }));
   const evaluateClaim = vi.fn((request: Uint8Array<ArrayBuffer>) => {
     const { plan } = JSON.parse(new TextDecoder().decode(request)) as {
       plan: {
@@ -46,7 +46,11 @@ const engine = () => {
           canonicalProfile: 'geospec-jcs-v1',
           protocolVersion: 3,
           registryVersion: 5,
-          configuration: { configurationProfile: 'geospec-entry-config-v1', defaultWorkUnitBudget: 10_000 },
+          configuration: {
+            configurationProfile: 'geospec-entry-config-v1',
+            defaultWorkUnitBudget: 10_000,
+            binaryAdmissionLimits: { maxSubjectBytes: 1024, maxTotalBinaryBytes: 1024 },
+          },
         },
       }),
   };
@@ -54,6 +58,69 @@ const engine = () => {
 };
 
 describe('canonical model admission', () => {
+  it('should preserve a shared same-hash owner when another loader is disposed', async () => {
+    const fixture = engine();
+    const first = createModelLoader({ engine: fixture.host });
+    const second = createModelLoader({ engine: fixture.host });
+    try {
+      const left = await first({ source: Uint8Array.of(1) });
+      const right = await second({ source: Uint8Array.of(1) });
+      await first.dispose();
+      expect(fixture.releaseSubject).not.toHaveBeenCalled();
+      expect(() => expectGeo(left)).toThrow('not admitted');
+      expect(expectGeo(right).toHaveVolume({ value: 1 }).passed).toBe(true);
+      await second.dispose();
+      expect(fixture.releaseSubject).toHaveBeenCalledOnce();
+    } finally {
+      await first.dispose();
+      await second.dispose();
+    }
+  });
+  it('should restore earlier live subjects synchronously from immutable admission bytes after resident eviction', async () => {
+    const fixture = engine();
+    const resident = new Set<string>();
+    const ingested: number[] = [];
+    fixture.host.ingestSubject = (_request, primary) => {
+      const hash = primary[0]!.toString(16).padStart(64, '0');
+      if (!resident.has(hash) && resident.size === 2) {
+        throw Object.assign(new Error('Engine exceeds the configured retained subject count.'), {
+          code: 'limit-exceeded',
+        });
+      }
+      resident.add(hash);
+      ingested.push(primary[0]!);
+      return encode({ result: { subject: { subjectHash: hash } } });
+    };
+    fixture.host.subjectHandle = (request) => {
+      const { subjectHash } = JSON.parse(new TextDecoder().decode(request)) as { subjectHash: string };
+      return encode({ result: { subjectHandle: { subjectHash, generation: 1 } } });
+    };
+    fixture.releaseSubject.mockImplementation((request?: Uint8Array<ArrayBuffer>) => {
+      const { subjectHandle } = JSON.parse(new TextDecoder().decode(request)) as {
+        subjectHandle: { subjectHash: string };
+      };
+      resident.delete(subjectHandle.subjectHash);
+      return encode({ result: {} });
+    });
+    const load = createModelLoader({ engine: fixture.host });
+    const source = Uint8Array.of(1);
+    try {
+      const first = await load({ source });
+      const firstChain = expectGeo(first);
+      source[0] = 9;
+      await load({ source: Uint8Array.of(2) });
+      await load({ source: Uint8Array.of(3) });
+      expect(firstChain.toHaveVolume({ value: 1 })).toMatchObject({ passed: true });
+      expect(resident).toContain('1'.padStart(64, '0'));
+      expect(ingested).toEqual([1, 2, 3, 1]);
+      expect(resident.size).toBe(2);
+      await load.dispose();
+      expect(resident.size).toBe(0);
+      expect(() => firstChain.toHaveVolume({ value: 1 })).toThrow('not admitted');
+    } finally {
+      await load.dispose();
+    }
+  });
   it('should complete bare and awaited assertions, preserve polarity and reject expired or forged subjects', async () => {
     const fixture = engine();
     const loadModel = createModelLoader({ engine: fixture.host });

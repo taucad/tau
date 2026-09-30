@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
@@ -190,34 +191,86 @@ internal static class ModelRunner
         }
     }
 
-    internal static float[] VertexNormals(float[] positions, uint[] indices)
+    // One normal per smooth connected triangle fan. Sharp edges need duplicate render vertices;
+    // triangle coordinates and winding stay unchanged. Thirty degrees separates hex/chamfer faces
+    // while keeping finely tessellated round surfaces smooth.
+    internal static float[] VertexNormals(ref float[] positions, ref uint[] indices)
     {
-        var normals = new float[positions.Length];
-        for (var index = 0; index < indices.Length; index += 3)
+        var creaseCosine = MathF.Cos(MathF.PI / 6);
+        var faces = new Vector3[indices.Length / 3];
+        var directions = new Vector3[faces.Length];
+        var incident = new List<int>?[positions.Length / 3];
+        for (var triangle = 0; triangle < indices.Length; triangle += 3)
         {
-            var a = checked((int)indices[index]) * 3;
-            var b = checked((int)indices[index + 1]) * 3;
-            var c = checked((int)indices[index + 2]) * 3;
-            var ab = new System.Numerics.Vector3(positions[b] - positions[a], positions[b + 1] - positions[a + 1], positions[b + 2] - positions[a + 2]);
-            var ac = new System.Numerics.Vector3(positions[c] - positions[a], positions[c + 1] - positions[a + 1], positions[c + 2] - positions[a + 2]);
-            var normal = System.Numerics.Vector3.Cross(ab, ac);
-            foreach (var vertex in new[] { a, b, c })
+            var a = checked((int)indices[triangle]) * 3;
+            var b = checked((int)indices[triangle + 1]) * 3;
+            var c = checked((int)indices[triangle + 2]) * 3;
+            var ab = new Vector3(positions[b] - positions[a], positions[b + 1] - positions[a + 1], positions[b + 2] - positions[a + 2]);
+            var ac = new Vector3(positions[c] - positions[a], positions[c + 1] - positions[a + 1], positions[c + 2] - positions[a + 2]);
+            var face = Vector3.Cross(ab, ac);
+            faces[triangle / 3] = face;
+            directions[triangle / 3] = face.LengthSquared() > 0 ? Vector3.Normalize(face) : Vector3.Zero;
+            for (var corner = triangle; corner < triangle + 3; corner++)
+                (incident[indices[corner]] ??= []).Add(corner);
+        }
+
+        var remapped = new uint[indices.Length];
+        var visited = new bool[indices.Length];
+        var expanded = new List<float>(positions);
+        var sums = new List<Vector3>(new Vector3[incident.Length]);
+        var fan = new List<int>();
+        for (var vertex = 0; vertex < incident.Length; vertex++)
+        {
+            var first = true;
+            foreach (var seed in incident[vertex] ?? [])
             {
-                normals[vertex] += normal.X;
-                normals[vertex + 1] += normal.Y;
-                normals[vertex + 2] += normal.Z;
+                if (visited[seed]) continue;
+                var target = vertex;
+                if (!first)
+                {
+                    target = sums.Count;
+                    expanded.Add(positions[vertex * 3]);
+                    expanded.Add(positions[vertex * 3 + 1]);
+                    expanded.Add(positions[vertex * 3 + 2]);
+                    sums.Add(Vector3.Zero);
+                }
+                first = false;
+                fan.Clear();
+                fan.Add(seed);
+                visited[seed] = true;
+                // ponytail: quadratic in vertex valence, normally ~6; use an edge map if unusually dense fans dominate.
+                for (var next = 0; next < fan.Count; next++)
+                {
+                    var corner = fan[next];
+                    remapped[corner] = checked((uint)target);
+                    sums[target] += faces[corner / 3];
+                    var triangle = corner / 3 * 3;
+                    var edgeA = indices[triangle + (corner + 1) % 3];
+                    var edgeB = indices[triangle + (corner + 2) % 3];
+                    foreach (var candidate in incident[vertex]!)
+                    {
+                        if (visited[candidate] || Vector3.Dot(directions[corner / 3], directions[candidate / 3]) < creaseCosine) continue;
+                        var other = candidate / 3 * 3;
+                        var otherA = indices[other + (candidate + 1) % 3];
+                        var otherB = indices[other + (candidate + 2) % 3];
+                        // Sharing only a point does not make disconnected surfaces a smooth fan.
+                        if (edgeA != otherA && edgeA != otherB && edgeB != otherA && edgeB != otherB) continue;
+                        visited[candidate] = true;
+                        fan.Add(candidate);
+                    }
+                }
             }
         }
-        for (var index = 0; index < normals.Length; index += 3)
+        positions = expanded.ToArray();
+        indices = remapped;
+        var normals = new float[positions.Length];
+        for (var vertex = 0; vertex < sums.Count; vertex++)
         {
-            var normal = System.Numerics.Vector3.Normalize(new(normals[index], normals[index + 1], normals[index + 2]));
-            if (!float.IsFinite(normal.X))
-            {
-                normal = System.Numerics.Vector3.UnitZ;
-            }
-            normals[index] = normal.X;
-            normals[index + 1] = normal.Y;
-            normals[index + 2] = normal.Z;
+            var normal = Vector3.Normalize(sums[vertex]);
+            if (!float.IsFinite(normal.X)) normal = Vector3.UnitZ;
+            normals[vertex * 3] = normal.X;
+            normals[vertex * 3 + 1] = normal.Y;
+            normals[vertex * 3 + 2] = normal.Z;
         }
         return normals;
     }

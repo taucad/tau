@@ -44,6 +44,29 @@ describe('@taucad/tscircuit', () => {
     }
   });
 
+  it('keeps the board skill and shipped resources aligned with the kernel declarations', async () => {
+    const definition = tscircuitKernel();
+    const doctrine = readFileSync(new URL('../agent/doctrine.md', import.meta.url), 'utf8');
+    const skill = readFileSync(new URL('../agent/cad-tscircuit/SKILL.md', import.meta.url), 'utf8');
+    const manifest: unknown = JSON.parse(readFileSync(new URL('../agent/skills.json', import.meta.url), 'utf8'));
+    const resourcesModule = await import('../agent/resources.js');
+    const resources = resourcesModule.default;
+
+    for (const id of Object.keys(definition.views)) {
+      expect(doctrine).toContain(`\`${id}\``);
+    }
+    for (const [id, declaration] of Object.entries(definition.exports)) {
+      expect(doctrine).toContain(`\`${id}\` (\`${declaration.extension}\`)`);
+    }
+    expect(doctrine).toContain('## Check a board');
+    expect(doctrine).toContain('`evaluate_model`');
+    expect(doctrine).toContain('`export_model`');
+    expect(doctrine).not.toMatch(/`output` render option selects/u);
+    expect(skill).toContain(doctrine.trim());
+    expect(manifest).toMatchObject({ bundles: [{ body: skill }] });
+    expect(resources[0]?.body).toBe(skill);
+  });
+
   it('keeps native, Python, and Node-only payloads out of browser source', () => {
     const sourceDirectory = dirname(fileURLToPath(import.meta.url));
     const nodeBuiltins = new Set([...builtinModules, ...builtinModules.map((name) => `node:${name}`)]);

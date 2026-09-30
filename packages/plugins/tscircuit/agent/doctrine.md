@@ -6,8 +6,14 @@
 4. Set `footprint` as a footprinter string such as `"0402"`, `"0603"`, `"soic8"`, `"dip8"`, `"tssop16"`; place with `pcbX`/`pcbY` in millimetres and `schX`/`schY` for the schematic.
 5. Wire with `<trace from=".R1 > .pin1" to=".U1 > .VCC" />` selectors or `<net name="GND" />` plus `connections` on a `<chip>`. Prefer named nets for power and ground.
 6. Optional parameters: export `defaultParameters` (a plain object); Tau passes edited values as component props.
-7. Rendering is offline. The local autorouter runs in the worker; no parts engine. `http(s)://` footprint and `cadModel` URLs are never fetched (each attempt becomes a warning issue), and `kicad:`/`jlcpcb:` references produce a warning and an unplaced part — use footprinter strings instead.
-8. The `output` render option selects the artifact: `3d` (GLB board, default), `schematic` or `pcb` (SVG). Exports: `glb`, `csv` (BOM), `txt` (readable netlist), `json` (circuit JSON).
+7. Rendering and routing are offline. URL-based footprints/CAD models are never fetched; `kicad:`/`jlcpcb:` parts remain unplaced. Use footprinter strings.
+8. Views: `board` (3D GLB, default), `schematic` (SVG sheets), `pcb` (SVG, `pinNumbers` option). Select with `screenshot.view` and a sheet with `screenshot.instance`; no `output` option. Export IDs: `board` (`glb`), `bom` (`csv`), `netlist` (`txt`), `circuit` (`json`). Use ID or unambiguous extension as `export_model.to`.
+
+## Check a board
+
+1. After edits, call `evaluate_model` and read every issue. `ready` may still carry error-severity findings. Fix open pins, routing and placement before calling the board clean. Request `includeCapabilities` for options.
+2. Capture `schematic` and `pcb` separately; a sheet is an instance, not a camera angle. Limit each view to two captures per inspection cycle. Use `board` for mechanical fit.
+3. For parts/open pins, prefer `netlist` (`txt`) and `bom` (`csv`) to large circuit JSON. Where the export-evidence gate permits text, call `export_model`, then `read_file` on its artifact path; compare `sourceRevision` with current source. Binary/mixed outputs still require a user export request.
 
 ## Canonical pattern
 

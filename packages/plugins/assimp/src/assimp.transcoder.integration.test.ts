@@ -183,18 +183,21 @@ describe('assimp transcoder integration', () => {
         `,
       },
     });
+    const document = client.open({ source: { path: 'two-material-box.ts' }, watch: false });
     const exported = await (async () => {
       try {
-        return await client.export('glb', {
-          source: { path: 'two-material-box.ts' },
-          exportOptions: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
+        return await document.export('glb', {
+          options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
         });
       } finally {
+        document.close();
         await client.shutdown();
       }
     })();
-    assertSuccess(exported, 'Manifold two-material box');
-    const sourceFile = exported.data.find(({ name }) => name.endsWith('.glb'));
+    if (!exported.success) {
+      throw new Error(`Manifold two-material box: ${exported.issues.map(({ message }) => message).join('; ')}`);
+    }
+    const sourceFile = exported.files.find(({ name }) => name.endsWith('.glb'));
     if (sourceFile === undefined) {
       throw new Error('Manifold returned no GLB file');
     }

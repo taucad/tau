@@ -89,7 +89,7 @@ const buildAndExport = async (
     },
   });
   const context = await definition.initialize({}, runtime);
-  const created = await definition.evaluate({ entryPath, parameters, options }, runtime, context);
+  const created = await definition.evaluate({ entryPath, parameters, options: {} }, runtime, context);
   const exported =
     format === 'glb'
       ? await definition.write!(

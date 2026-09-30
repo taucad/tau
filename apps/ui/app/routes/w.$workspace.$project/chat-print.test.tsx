@@ -337,6 +337,42 @@ describe('Print pane orientation', () => {
     expect(screen.queryByText(entry().descriptor.name)).not.toBeInTheDocument();
   });
 
+  it('should abort a camera capture when selecting another machine and discard its late image', async () => {
+    const first = entry();
+    const mini = entry({ machineId: 'mini', name: 'Mini' });
+    const { client } = createFixture({ entries: [first, mini] });
+    const pending = Promise.withResolvers<Awaited<ReturnType<MachineClient['captureStill']>>>();
+    let captureSignal: AbortSignal | undefined;
+    const captureClient: MachineClient = {
+      ...client,
+      captureStill: vi.fn(async ({ signal }: Parameters<MachineClient['captureStill']>[0]) => {
+        captureSignal = signal;
+        return pending.promise;
+      }),
+    };
+    globalThis.localStorage.setItem(`tau:print:selected-machine:${projectId}`, first.machineId);
+    renderPane(captureClient);
+    fireEvent.click(await screen.findByRole('button', { name: /^Environment and camera/u }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Capture still' }));
+    await waitFor(() => {
+      expect(captureSignal).toBeDefined();
+    });
+    const user = userEvent.setup();
+    await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Mini');
+    expect(captureSignal?.aborted).toBe(true);
+    fireEvent.click(await screen.findByRole('button', { name: /^Environment and camera/u }));
+    expect(screen.getByRole('button', { name: 'Capture still' })).toBeEnabled();
+    await act(async () => {
+      pending.resolve({
+        bytes: Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
+        mediaType: 'image/jpeg',
+        capturedAt: timestamp,
+        expiresAt: later,
+      });
+    });
+    expect(screen.queryByRole('img', { name: /Latest still/u })).not.toBeInTheDocument();
+  });
+
   it('offers slice, then send, then review, and never a physical step', () => {
     const prepare: Parameters<typeof nextAction>[0]['prepare'] = {
       slice: undefined,
@@ -615,6 +651,22 @@ describe('Print pane prepare and send', () => {
       });
     });
     expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+  });
+
+  it('should discard a prepared slice when switching printers and prepare again for the selected machine', async () => {
+    const first = entry();
+    const mini = entry({ machineId: 'mini', name: 'Mini' });
+    const fixture = createFixture({ entries: [first, mini] });
+    globalThis.localStorage.setItem(`tau:print:selected-machine:${projectId}`, first.machineId);
+    const user = userEvent.setup();
+    renderPane(fixture.client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+    await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Mini');
+    expect(screen.queryByRole('button', { name: 'Send to Mini' })).not.toBeInTheDocument();
+    expect(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
+    expect(fixture.requestPrint).not.toHaveBeenCalled();
   });
 
   it('clears a slice error once the model renders again, since it described the geometry before', async () => {

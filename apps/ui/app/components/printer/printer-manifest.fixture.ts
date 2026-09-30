@@ -13,7 +13,7 @@ import type { MachineManifest } from '@taucad/runtime/machine';
 
 /** The manifest facts the scene consumes; a full `MachineManifest` satisfies it. */
 export type PrinterManifest = Readonly<{
-  identity: Readonly<{ displayName: string }>;
+  identity: Readonly<{ displayName: string; model?: string }>;
   geometry: MachineManifest['geometry'];
   chamber: Pick<MachineManifest['chamber'], 'enclosed' | 'light' | 'fans'>;
   materialSystem: Pick<MachineManifest['materialSystem'], 'units' | 'slotsPerUnit' | 'externalSpool'>;
@@ -21,7 +21,7 @@ export type PrinterManifest = Readonly<{
 
 /** Bambu Lab X1 Carbon: 256 mm cube, CoreXY, plate on Z, four-slot AMS on the lid. */
 export const x1cReferenceGeometry: PrinterManifest = Object.freeze({
-  identity: { displayName: 'Bambu Lab X1 Carbon' },
+  identity: { displayName: 'Bambu Lab X1 Carbon', model: 'x1c' },
   geometry: {
     unit: 'mm',
     buildVolume: { x: 256, y: 256, z: 256 },

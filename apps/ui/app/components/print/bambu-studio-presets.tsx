@@ -110,7 +110,7 @@ export function BambuStudioPresets({
             value={filament}
             presets={studio.filaments}
             swatch={tray.color}
-            description={chosen.filaments?.[tray.slot] === undefined ? 'Synced from the AMS.' : undefined}
+            description={chosen.filaments?.[tray.slot] === undefined ? 'Synced from the printer.' : undefined}
             isModified={chosen.filaments?.[tray.slot] !== undefined}
             onChange={(name) => {
               studio.chooseFilament(tray.slot, name);

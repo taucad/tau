@@ -577,11 +577,12 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                 continue;
             }
             var positions = TransformPositions(item.Geometry.Positions, matrix);
+            var indices = item.Geometry.Indices;
             var normals = Array.Empty<float>();
             if (item.Geometry.Kind == "triangles")
             {
                 var generation = Stopwatch.StartNew();
-                normals = ModelRunner.VertexNormals(positions, item.Geometry.Indices);
+                normals = ModelRunner.VertexNormals(ref positions, ref indices);
                 generation.Stop();
                 normalGeneration += generation.Elapsed.TotalMilliseconds;
             }
@@ -594,7 +595,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                 material.Roughness,
                 positions,
                 normals,
-                item.Geometry.Indices);
+                indices);
             materialized[item.Identity] = new MaterializedComponent(item.Group, matrix, material, component);
             components.Add(component);
         }

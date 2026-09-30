@@ -82,21 +82,29 @@ describe('subdirectory entry importing a sibling directory', () => {
     });
     const errors: unknown[] = [];
     const stopErrors = client.on('error', (issues) => errors.push(issues));
+    const document = client.open({ source: { path: 'test-exports/assembly.ts' }, parameters: {}, watch: false });
+    const view = document.view('model');
 
     try {
-      await client.connect();
-      const rendered = await client.render({ source: { path: 'test-exports/assembly.ts' }, parameters: {} });
-
-      expect(rendered.superseded).toBe(false);
-      if (rendered.superseded) {
-        return;
+      const evaluation = await document.evaluation();
+      expect(evaluation.superseded).toBe(false);
+      if (evaluation.superseded || !evaluation.evaluation.success) {
+        throw new Error('Sibling-import evaluation did not complete.');
       }
-      expect(rendered.geometry.success).toBe(true);
+      expect(evaluation.evaluation.success).toBe(true);
+      const rendered = await view.rendering();
+      expect(rendered.superseded).toBe(false);
+      if (rendered.superseded || !rendered.rendering.success) {
+        throw new Error('Sibling-import model did not render.');
+      }
+      expect(rendered.rendering.success).toBe(true);
       expect(errors).toEqual([]);
       // The sibling file is outside the entry's own directory but inside the runtime root.
       expect(dependencies?.resolved).toContain('lib/frame.ts');
       expect(dependencies?.unresolved ?? []).toEqual([]);
     } finally {
+      view.close();
+      document.close();
       stopErrors();
       client.terminate();
     }

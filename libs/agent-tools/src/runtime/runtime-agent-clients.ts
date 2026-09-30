@@ -485,13 +485,6 @@ export const createRuntimeAgentClients = (
             ...(rendering.instance === undefined ? {} : { instance: rendering.instance }),
           };
           if (artifact.mimeType === 'image/svg+xml') {
-            if (captureInput.mode === 'multi_angle') {
-              return {
-                success: false,
-                errorCode: rpcClientErrorCode.unknown,
-                message: 'Planar SVG drawings have one canonical view',
-              };
-            }
             const files = requireImageFiles(
               await input.exportImage({
                 kind: 'capture',

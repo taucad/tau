@@ -275,11 +275,8 @@ describe('createRuntimeAgentClients', () => {
     });
     await expect(
       clients.images.captureImages({ targetFile: 'drawing.ts', mode: 'multi_angle', view: 'drawing' }),
-    ).resolves.toMatchObject({
-      success: false,
-      message: 'Planar SVG drawings have one canonical view',
-    });
-    expect(clients.exporter).toHaveBeenCalledTimes(1);
+    ).resolves.toEqual({ success: true, images: [{ view: 'drawing', dataUrl: 'data:image/png;base64,AQ==' }] });
+    expect(clients.exporter).toHaveBeenCalledTimes(2);
     const unitless = clientsFor(
       runtimeFixture({
         evaluate: () => evaluation([{ id: 'drawing', title: 'Drawing', mimeType: 'image/svg+xml' }]),
@@ -288,11 +285,12 @@ describe('createRuntimeAgentClients', () => {
       }),
       exporter,
     );
-    await expect(unitless.images.captureImages({ targetFile: 'drawing.ts', mode: 'single' })).resolves.toMatchObject({
+    await expect(unitless.images.captureImages({ targetFile: 'drawing.ts', mode: 'multi_angle' })).resolves.toEqual({
       success: true,
+      images: [{ view: 'drawing', dataUrl: 'data:image/png;base64,AQ==' }],
     });
-    expect(unitless.exporter.mock.calls[1]?.[0]).toMatchObject({
-      exportOptions: { scaleBar: false, lengthSymbol: '' },
+    expect(unitless.exporter.mock.calls[2]?.[0]).toMatchObject({
+      exportOptions: { axes: false, scaleBar: false, lengthSymbol: '' },
     });
   });
 

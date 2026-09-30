@@ -84,6 +84,7 @@ describe('ChatViewerControls', () => {
         'Section view',
         'Measure',
         'Fit view',
+        'Enter fullscreen',
         'Capture view to chat',
         'Viewer settings',
       ]);
@@ -126,6 +127,7 @@ describe('ChatViewerControls', () => {
         'Section view',
         'Measure',
         'Fit view',
+        'Enter fullscreen',
         'Viewer settings',
       ]);
     });
@@ -140,6 +142,7 @@ describe('ChatViewerControls', () => {
       expect(controlNames()).toEqual([
         'Grid 10 mm, units and grid',
         'Fit view',
+        'Enter fullscreen',
         'Capture view to chat',
         'Viewer settings',
       ]);

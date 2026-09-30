@@ -699,7 +699,7 @@ const ViewerContent = memo(function ({
       ref={viewerLayoutRef}
       data-testid='chat-viewer-layout'
       data-viewer-frame
-      className='group/viewer @container/viewer relative flex h-full flex-col'
+      className='group/viewer fullscreen:bg-background @container/viewer relative flex h-full flex-col'
     >
       {/* Status overlays */}
       <div className='absolute top-[10%] right-2 left-2 z-10 mx-auto flex w-fit max-w-full flex-col gap-2'>

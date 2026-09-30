@@ -4,6 +4,7 @@ import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from 'lucide-react';
 import { cn } from '#utils/cn.js';
 import { menuItemVariants, menuLabelVariants, menuSeparatorVariants } from '#components/menu.variants.js';
 import { popoverSurfaceVariants } from '#components/popover.variants.js';
+import { useFullscreenElement } from '#hooks/use-fullscreen-element.js';
 
 /**
  * Owns the selected value, open state, and keyboard interaction for a select.
@@ -119,8 +120,9 @@ function SelectContent({
   align = 'center',
   ...properties
 }: React.ComponentProps<typeof SelectPrimitive.Content>): React.JSX.Element {
+  const fullscreenElement = useFullscreenElement();
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal container={fullscreenElement}>
       <SelectPrimitive.Content
         data-slot='select-content'
         data-align-trigger={position === 'item-aligned'}

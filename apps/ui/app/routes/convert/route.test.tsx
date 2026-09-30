@@ -57,7 +57,14 @@ describe('ConverterViewer', () => {
       within(bar)
         .getAllByRole('button')
         .map((button) => button.getAttribute('aria-label') ?? button.textContent),
-    ).toEqual(['Grid 10 mm, units and grid', 'Section view', 'Measure', 'Fit view', 'Viewer settings']);
+    ).toEqual([
+      'Grid 10 mm, units and grid',
+      'Section view',
+      'Measure',
+      'Fit view',
+      'Enter fullscreen',
+      'Viewer settings',
+    ]);
     expect(bar.closest('[data-viewer-frame]')).toContainElement(screen.getByRole('img', { name: 'Model' }));
   });
 

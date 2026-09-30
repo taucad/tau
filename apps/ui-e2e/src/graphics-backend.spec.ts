@@ -1620,6 +1620,12 @@ test.describe('Graphics backend regression guard', () => {
     // edge anti-aliasing leaves about 3.7 and 4%. With post-processing on, the backends run
     // different AO, so only the plain render is compared.
     const modelDifference = await compareCentreLuminance(screenshots['webgl']!, screenshots['webgpu']!);
+    expect(modelDifference.firstDarkPixels).toBeGreaterThan(1000);
+    expect(
+      modelDifference.secondDarkPixels / modelDifference.firstDarkPixels,
+      'visible CAD edges must survive surface rendering; whole-image averages hide missing lines',
+    ).toBeGreaterThan(0.75);
+    expect(modelDifference.secondDarkPixels / modelDifference.firstDarkPixels).toBeLessThan(1.6);
     expect(modelDifference.meanLuminanceDifference, JSON.stringify(modelDifference)).toBeLessThan(8);
     expect(modelDifference.differingPixelRatio, JSON.stringify(modelDifference)).toBeLessThan(0.15);
 

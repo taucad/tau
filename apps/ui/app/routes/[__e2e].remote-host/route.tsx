@@ -52,13 +52,14 @@ export default function RemoteHostDebugRoute(): React.JSX.Element {
         fileSystem: fromMemoryFs({ 'main.ts': source }),
       }),
     });
+    const document = client.open({ source: { path: 'main.ts' }, watch: false });
     const run = async (): Promise<void> => {
       try {
-        const exported = await client.export('glb', { source: { path: 'main.ts' } });
+        const exported = await document.export('glb');
         if (!exported.success) {
           throw new Error(exported.issues.map((issue) => issue.message).join('; '));
         }
-        const bytes = exported.data.find((artifact) => artifact.name.endsWith('.glb'))?.bytes;
+        const bytes = exported.files.find((artifact) => artifact.name.endsWith('.glb'))?.bytes;
         if (!bytes) {
           throw new Error('Remote runtime did not return GLB bytes.');
         }
@@ -72,6 +73,7 @@ export default function RemoteHostDebugRoute(): React.JSX.Element {
     };
     void run();
     return () => {
+      document.close();
       client.terminate();
     };
   }, [url]);

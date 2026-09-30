@@ -38,12 +38,13 @@ export function HeroViewer(): React.JSX.Element {
   const [isExporting, setIsExporting] = useState(false);
 
   const {
-    geometry,
+    artifact,
+    artifactHash,
     status,
     defaultParameters,
     jsonSchema,
     parameterManifest,
-    exportGeometry,
+    exportModel,
     capabilities,
     setParameters,
   } = useRuntime({ clientOptions: heroClientOptions, source: { files: heroCode } });
@@ -76,10 +77,10 @@ export function HeroViewer(): React.JSX.Element {
     // oxlint-disable-next-line tau-lint/no-async-iife -- export is async.
     void (async () => {
       try {
-        const result = await exportGeometry(activeFormat.format);
+        const result = await exportModel(activeFormat.format);
         if (result.success) {
           const filename = `qrcode.${activeFormat.format}`;
-          await downloadExportArtifactSet(result.data, {
+          await downloadExportArtifactSet(result.files, {
             singleFileName: filename,
             archiveName: `qrcode-${activeFormat.format}.zip`,
           });
@@ -95,7 +96,7 @@ export function HeroViewer(): React.JSX.Element {
         setIsExporting(false);
       }
     })();
-  }, [activeFormat, isExporting, exportGeometry]);
+  }, [activeFormat, isExporting, exportModel]);
 
   const handleFormatSelect = useCallback(
     (value: string) => {
@@ -169,7 +170,12 @@ export function HeroViewer(): React.JSX.Element {
             {isCreatingProject ? <Loader className='size-4' /> : <ArrowUpRight className='size-4' />}
           </Button>
 
-          <ModelViewer geometry={geometry} enablePan graphicsOptions={{ enableGrid: true, enableAxes: true }} />
+          <ModelViewer
+            artifact={artifact}
+            artifactHash={artifactHash}
+            enablePan
+            graphicsOptions={{ enableGrid: true, enableAxes: true }}
+          />
         </div>
 
         {hasParameters ? (

@@ -1,6 +1,4 @@
-import type { FileExtension } from '@taucad/types';
-
-export type ExportFormatOption<Format extends FileExtension = FileExtension> = {
+export type ExportFormatOption<Format extends string = string> = {
   format: Format;
   label: string;
 };
@@ -13,15 +11,13 @@ export type ExportFormatOption<Format extends FileExtension = FileExtension> = {
  * sufficient (unlike ChatConverter which filters by activeKernelId).
  */
 export function deriveExportFormatOptions<
-  const Capabilities extends { routes: ReadonlyArray<{ targetFormat: FileExtension }> },
->(
-  capabilities: Capabilities | undefined,
-): Array<ExportFormatOption<Capabilities['routes'][number]['targetFormat'] & FileExtension>> {
+  const Capabilities extends { routes: ReadonlyArray<{ targetFormat: string }> },
+>(capabilities: Capabilities | undefined): Array<ExportFormatOption<Capabilities['routes'][number]['targetFormat']>> {
   if (!capabilities) {
     return [];
   }
-  const seen = new Set<FileExtension>();
-  const options: Array<ExportFormatOption<Capabilities['routes'][number]['targetFormat'] & FileExtension>> = [];
+  const seen = new Set<string>();
+  const options: Array<ExportFormatOption<Capabilities['routes'][number]['targetFormat']>> = [];
   for (const route of capabilities.routes) {
     if (seen.has(route.targetFormat)) {
       continue;

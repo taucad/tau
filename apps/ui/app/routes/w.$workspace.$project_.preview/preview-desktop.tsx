@@ -24,7 +24,7 @@ import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/f
 export const PreviewDesktop = memo(function (): React.JSX.Element {
   const navigate = useNavigate();
   const { project } = usePreviewProject();
-  const { geometry, jsonSchema, cadRef } = useCadPreview();
+  const { artifact, jsonSchema, cadRef } = useCadPreview();
   const fileManager = useFileManager();
   const files = usePreviewFileList();
 
@@ -155,7 +155,7 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
 
             {/* Sidebar - About Section */}
             <div className='w-80 border-l bg-sidebar'>
-              <PreviewDetails project={project} hasGeometry={Boolean(geometry)} cadRef={cadRef} />
+              <PreviewDetails project={project} hasGeometry={Boolean(artifact)} cadRef={cadRef} />
               <Separator />
               <div className='hidden p-6'>
                 <h3 className='mb-3 text-sm font-semibold'>Version Control</h3>

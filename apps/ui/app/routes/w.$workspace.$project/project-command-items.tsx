@@ -60,11 +60,13 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
   const projectName = useSelector(projectRef, (state) => state.context.project?.name) ?? 'file';
 
   const mainCadRef = geometryUnits.get(mainEntryPath);
-  const geometryFormat = useSelector(mainCadRef, (state) => state?.context.geometry?.format);
+  const artifactMimeType = useSelector(mainCadRef, (state) =>
+    state?.context.rendering?.success ? state.context.rendering.artifact.mimeType : undefined,
+  );
   const hasCameraRig = useGraphicsCameraRigQuery();
   const cameraReady = hasCameraRig(mainGraphicsRef);
   const canCapturePng = Boolean(
-    geometryFormat && geometryFormat !== 'webrtc' && (geometryFormat !== 'gltf' || cameraReady),
+    artifactMimeType === 'image/svg+xml' || (artifactMimeType === 'model/gltf-binary' && cameraReady),
   );
   const fileCount = fileTree.size;
 

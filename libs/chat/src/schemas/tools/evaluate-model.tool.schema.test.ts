@@ -1,7 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { toolName } from '#constants/tool.constants.js';
 import { toolDescriptions } from '#constants/tool-description.constants.js';
-import { evaluateModelOutputSchema } from '#schemas/tools/evaluate-model.tool.schema.js';
+import { evaluateModelInputSchema, evaluateModelOutputSchema } from '#schemas/tools/evaluate-model.tool.schema.js';
+
+describe('evaluateModelInputSchema', () => {
+  it('rejects obsolete geometry and rendering request keys', () => {
+    for (const request of [
+      { targetFile: 'main.ts', format: 'gltf' },
+      { targetFile: 'main.ts', renderOptions: { wireframe: true } },
+    ]) {
+      expect(evaluateModelInputSchema.safeParse(request).success).toBe(false);
+    }
+    expect(evaluateModelInputSchema.safeParse({ targetFile: 'main.ts', includeCapabilities: true }).success).toBe(true);
+  });
+});
 
 describe('evaluateModelOutputSchema', () => {
   it('should admit only the two statuses a request-scoped evaluation can produce (I9)', () => {

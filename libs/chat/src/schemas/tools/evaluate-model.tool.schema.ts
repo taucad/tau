@@ -4,10 +4,12 @@ import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 
 /** @public */
-export const evaluateModelInputSchema = z.object({
-  targetFile: rootedFilePathSchema.describe('The project-relative CAD source file to evaluate.'),
-  includeCapabilities: z.boolean().optional().describe('Include view/export option schemas and reachable targets.'),
-});
+export const evaluateModelInputSchema = z
+  .object({
+    targetFile: rootedFilePathSchema.describe('The project-relative CAD source file to evaluate.'),
+    includeCapabilities: z.boolean().optional().describe('Include view/export option schemas and reachable targets.'),
+  })
+  .strict();
 
 const optionMetadataSchema = z.object({
   schema: z.record(z.string(), z.json()),

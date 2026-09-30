@@ -67,6 +67,27 @@ describe('HeadlessImageService', () => {
     });
   });
 
+  it('defers only cold automatic part batches and lets one explicit retry warm the shared worker', async () => {
+    const { imageClient, service } = createFixture();
+    vi.mocked(imageClient.transcode).mockRejectedValueOnce(new Error('Invalid GLB'));
+    const partBatch = {
+      ...thumbnailJob('cold-part'),
+      exportOptions: { mode: 'batch' as const, width: 256, height: 256, views: [] },
+    };
+    await expect(service.export(partBatch)).rejects.toMatchObject({ code: 'cold-start-deferred' });
+    expect(imageClient.connect).not.toHaveBeenCalled();
+    expect(imageClient.transcode).not.toHaveBeenCalled();
+
+    await expect(service.export({ ...partBatch, kind: 'manual-thumbnail' })).rejects.toThrow('Invalid GLB');
+    expect(imageClient.connect).toHaveBeenCalledOnce();
+    await expect(service.export(partBatch)).rejects.toMatchObject({ code: 'cold-start-deferred' });
+    expect(imageClient.transcode).toHaveBeenCalledOnce();
+
+    await expect(service.export({ ...partBatch, kind: 'manual-thumbnail' })).resolves.toEqual(files());
+    await expect(service.export({ ...partBatch, identity: 'warm-part' })).resolves.toEqual(files());
+    expect(imageClient.transcode).toHaveBeenCalledTimes(3);
+  });
+
   it('transcodes settled GLB bytes without a kernel render or filesystem', async () => {
     const { imageClient, service } = createFixture();
     const job = captureJob('capture');

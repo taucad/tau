@@ -230,6 +230,42 @@ describe('PicoGK kernel', () => {
     expect(requestedMethods(value.session.request)).toEqual(['resolve', 'analyze', 'build']);
   });
 
+  it('preserves worker warnings and shared mechanism warnings alongside valid geometry', async () => {
+    const value = context();
+    value.session.request.mockResolvedValueOnce({
+      ...buildResult(),
+      warnings: [
+        {
+          message: 'Invalid authored mechanism; corrected properties can be retried',
+          code: 'CS_TAU_MECHANISM',
+          type: 'validation',
+          severity: 'warning',
+        },
+      ],
+      mechanism: { schemaVersion: 2 },
+    });
+    const result = await definition.createGeometry(
+      { entryPath: 'main.cs', parameters: {}, options: {} },
+      runtime,
+      value,
+    );
+    expect(result.geometry).toMatchObject({ format: 'gltf' });
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'INVALID_ANNOTATION',
+          severity: 'warning',
+          details: { producer: { kernelId: 'picogk' }, workerCode: 'CS_TAU_MECHANISM', workerType: 'validation' },
+        }),
+        expect.objectContaining({
+          code: 'INVALID_ANNOTATION',
+          severity: 'warning',
+          details: expect.objectContaining({ mechanism: expect.any(Object) }),
+        }),
+      ]),
+    );
+  });
+
   it('returns parameters, canonical inline geometry, immutable handles, and GLB exports', async () => {
     const value = context();
     value.session.request.mockResolvedValueOnce({

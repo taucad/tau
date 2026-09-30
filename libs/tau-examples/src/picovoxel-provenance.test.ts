@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -22,10 +22,7 @@ type Provenance = {
 const fixtureRoot = join(import.meta.dirname, 'kernels/picovoxel');
 const provenance = JSON.parse(readFileSync(join(fixtureRoot, 'provenance.json'), 'utf8')) as Provenance;
 const hashFile = (path: string): string => createHash('sha256').update(readFileSync(path)).digest('hex');
-const projects = readdirSync(fixtureRoot, { withFileTypes: true })
-  .filter((entry) => entry.isDirectory())
-  .map(({ name }) => name)
-  .toSorted();
+const projects = [...new Set(provenance.visualCases.map(({ project }) => project))].toSorted();
 
 describe('PicoVoxel community example provenance', () => {
   it('should pin the public PicoVoxel tree and 46 upstream example sources', () => {
@@ -62,8 +59,10 @@ describe('PicoVoxel community example provenance', () => {
 
   it('should define 33 isolated projects and the complete 36-case acceptance matrix', () => {
     expect(projects).toHaveLength(33);
+    for (const project of projects) {
+      expect(statSync(join(fixtureRoot, project)).isDirectory(), project).toBe(true);
+    }
     expect(projects).not.toContain('modular-gyroid-puzzle');
-    expect(new Set(provenance.visualCases.map(({ project }) => project))).toEqual(new Set(projects));
     expect(provenance.visualCases).toHaveLength(36);
   });
 

@@ -173,6 +173,119 @@ describe('PicoGK mesh artifact adapter', () => {
     expect(viewBytes(glb, primitive.indices!)).toEqual(new Uint8Array(new Uint32Array(indices).buffer));
   });
 
+  it('validates mapped material attributes and encoded resource ranges before GLB writing', () => {
+    const base = artifact();
+    const uv = new Float32Array([0, 0, 1, 0, 0, 1]);
+    const tangent = new Float32Array([1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1]);
+    const image = Uint8Array.from(
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=',
+        'base64',
+      ),
+    );
+    const bytes = Uint8Array.from([
+      ...base.bytes,
+      ...new Uint8Array(uv.buffer),
+      ...new Uint8Array(tangent.buffer),
+      ...image,
+    ]);
+    const component = {
+      ...base.result.components[0]!,
+      texCoordOffset: 84,
+      texCoordCount: 6,
+      tangentOffset: 108,
+      tangentCount: 12,
+      material: { pbrMetallicRoughness: { baseColorTexture: { index: 0 } } },
+    };
+    const result: PicogkBuild = {
+      ...base.result,
+      components: [component],
+      byteLength: bytes.length,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      images: [{ offset: 156, byteLength: image.length, mimeType: 'image/png' }],
+      textures: [{ source: 0 }],
+    };
+    const glb = picogkArtifactToGlb(bytes, result);
+    const primitive = glbJson(glb).meshes[0]!.primitives[0]!;
+    // Optional offsets default to zero; the encoded attribute may precede the geometry ranges.
+    for (const variant of [
+      {
+        bytes: Uint8Array.from([
+          ...new Uint8Array(uv.buffer),
+          ...base.bytes,
+          ...new Uint8Array(tangent.buffer),
+          ...image,
+        ]),
+        component: { ...component, positionOffset: 24, normalOffset: 60, indexOffset: 96, texCoordOffset: undefined },
+      },
+      {
+        bytes: Uint8Array.from([
+          ...new Uint8Array(tangent.buffer),
+          ...base.bytes,
+          ...new Uint8Array(uv.buffer),
+          ...image,
+        ]),
+        component: {
+          ...component,
+          positionOffset: 48,
+          normalOffset: 84,
+          indexOffset: 120,
+          texCoordOffset: 132,
+          tangentOffset: undefined,
+        },
+      },
+    ]) {
+      const encoded = picogkArtifactToGlb(variant.bytes, {
+        ...result,
+        components: [variant.component],
+        sha256: createHash('sha256').update(variant.bytes).digest('hex'),
+      });
+      const { attributes } = glbJson(encoded).meshes[0]!.primitives[0]!;
+      expect(viewBytes(encoded, attributes['TEXCOORD_0']!)).toEqual(new Uint8Array(uv.buffer));
+    }
+
+    expect(viewBytes(glb, primitive.attributes['TEXCOORD_0']!)).toEqual(new Uint8Array(uv.buffer));
+    expect(viewBytes(glb, primitive.attributes['TANGENT']!)).toEqual(
+      new Uint8Array(new Float32Array([1, 0, -0, 1, 1, 0, -0, 1, 1, 0, -0, 1]).buffer),
+    );
+    for (const change of [{ texCoordCount: 4 }, { tangentCount: 8 }, { texCoordOffset: 0 }, { tangentOffset: 1000 }]) {
+      expect(() => picogkArtifactToGlb(bytes, { ...result, components: [{ ...component, ...change }] })).toThrow();
+    }
+    for (const range of [
+      { offset: 0, byteLength: image.length },
+      { offset: 156, byteLength: 1000 },
+    ]) {
+      expect(() => picogkArtifactToGlb(bytes, { ...result, images: [{ ...result.images![0]!, ...range }] })).toThrow(
+        'image artifact range',
+      );
+    }
+    expect(() => picogkArtifactToGlb(bytes, { ...result, textures: [{ source: 99 }] })).toThrow();
+    expect(() =>
+      picogkArtifactToGlb(bytes, {
+        ...result,
+        components: [{ ...component, kind: 'lines', normalCount: 0, indexCount: 2 }],
+      }),
+    ).toThrow('material attribute counts');
+    const invalid = Uint8Array.from(bytes);
+    new DataView(invalid.buffer).setFloat32(84, Number.NaN, true);
+    expect(() =>
+      picogkArtifactToGlb(invalid, { ...result, sha256: createHash('sha256').update(invalid).digest('hex') }),
+    ).toThrow();
+  });
+
+  it('rejects duplicate authored names and warns on invalid mechanism structure', () => {
+    const { bytes, result } = artifact();
+    expect(() =>
+      picogkArtifactToGlb(bytes, { ...result, components: [result.components[0]!, result.components[0]!] }),
+    ).toThrow('already in use');
+    const warnings: unknown[] = [];
+    const glb = picogkArtifactToGlb(bytes, { ...result, mechanism: { schemaVersion: 2 } }, (issues) =>
+      warnings.push(...issues),
+    );
+    expect(warnings).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'INVALID_ANNOTATION' })]));
+    expect(topologyOf(glb).mechanism).toBeUndefined();
+  });
+
   it('keeps the worker component id stable when its display name changes', () => {
     const { bytes, result } = artifact({ color: [0, 1, 0, 1] });
     const glb = picogkArtifactToGlb(bytes, {

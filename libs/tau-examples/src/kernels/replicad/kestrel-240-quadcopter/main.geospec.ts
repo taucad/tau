@@ -40,8 +40,8 @@ describe('SYS / complete racing quadcopter', () => {
         allowances: [1, 2, 3, 4].map(
           (i): GeoSpecComponentInterferenceAllowance => ({
             kind: 'intentionalInterference',
-            left: `AF-008 Shell screw ${i}`,
-            right: `AF-009 Insert ${i}`,
+            left: new RegExp(`^AF-008 Shell screw ${i}(?:#\\d+)?$`),
+            right: new RegExp(`^AF-009 Insert ${i}(?:#\\d+)?$`),
             maxVolume: 6.5,
             reason:
               'Nominal M2.5 shank and insert tap bore represent mating helical threads; 4 mm engagement.',

@@ -49,6 +49,7 @@ const renderTessellationSchema = z.object({
     })
     .default({}),
 });
+const defaultPreviewTessellation = renderTessellationSchema.parse({}).tessellation;
 
 /** Render-time OpenSCAD tessellation options. @public */
 export const openrscadRenderSchema = renderTessellationSchema;
@@ -507,7 +508,7 @@ export const createOpenrscadKernel = ({
     extensions: ['scad'],
     name: 'OpenRSCADKernel',
     version,
-    evaluateOptionsSchema: openrscadRenderSchema,
+    evaluateOptionsSchema: z.object({}),
     views: {
       model: {
         title: 'Model',
@@ -571,7 +572,7 @@ export const createOpenrscadKernel = ({
       });
     },
 
-    async evaluate({ entryPath, parameters, options }, { filesystem, logger, tracer }, context) {
+    async evaluate({ entryPath, parameters }, { filesystem, logger, tracer }, context) {
       const normalizedEntryPath = assertRootedPath(entryPath);
       if (context.entryPath !== normalizedEntryPath) {
         await context.backend.clearCache();
@@ -596,7 +597,7 @@ export const createOpenrscadKernel = ({
               files: bundle.files,
               binaryFiles: bundle.binaryFiles,
               parameters,
-              tessellation: options.tessellation,
+              tessellation: defaultPreviewTessellation,
               exportOptions: {
                 includeEdges,
               },
@@ -613,7 +614,7 @@ export const createOpenrscadKernel = ({
       const preview = asBuffer(result.bytes);
       const nativeHandle: OpenRscadNativeHandle = {
         previewGlb: preview,
-        previewGlbTessellation: JSON.stringify(options.tessellation),
+        previewGlbTessellation: JSON.stringify(defaultPreviewTessellation),
         source: bundle.source,
         files: bundle.files,
         binaryFiles: bundle.binaryFiles,

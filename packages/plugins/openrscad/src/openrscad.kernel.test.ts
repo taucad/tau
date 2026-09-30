@@ -8,6 +8,7 @@ import JSZip from 'jszip';
 import type { ExportShape3DOutput } from '@taulabs/openrscad-engine';
 import {
   createMockKernelRuntime,
+  createTestRuntimeClient,
   getBoundingBoxFromInspect,
   getAllMaterialBaseColors,
   getGeometryStatsFromInspect,
@@ -19,6 +20,7 @@ import {
   validateGlbData,
 } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
+import { defineRuntime } from '@taucad/runtime/worker';
 import {
   createOpenrscadKernel,
   openrscadExportSchemas,
@@ -52,11 +54,12 @@ const renderModel = async (input: {
   entryPath: string;
   parameters?: Record<string, unknown>;
   content?: { includeEdges?: boolean };
+  options?: typeof renderOptions;
 }) => {
   const request = {
     entryPath: input.entryPath,
     parameters: input.parameters ?? {},
-    options: renderOptions,
+    options: {},
   };
   const created = await input.definition.evaluate(request, input.runtime, input.context);
   if (!input.definition.render) {
@@ -66,7 +69,7 @@ const renderModel = async (input: {
     {
       handle: created.handle,
       view: 'model',
-      options: renderOptions,
+      options: input.options ?? { tessellation: {} },
       content: input.content,
     },
     input.runtime,
@@ -247,29 +250,73 @@ describe('OpenRSCADKernel', () => {
     });
   });
 
+  it('reuses the authored-quality preview for a public default model view', async () => {
+    const backend = await import('@taulabs/openrscad-engine');
+    const renderToGlb = vi.fn(backend.renderToGlb);
+    const runtime = defineRuntime({
+      kernels: [createOpenrscadKernel({ loadBackend: async () => ({ ...backend, renderToGlb }) })()],
+    });
+    const client = createTestRuntimeClient({
+      runtime,
+      files: { 'main.scad': '$fn = 64; sphere(10);' },
+    });
+    try {
+      const document = client.open({ source: { path: 'main.scad' } });
+      const outcome = await document.view('model').rendering();
+      expect(outcome.superseded).toBe(false);
+      if (outcome.superseded) {
+        return;
+      }
+      expect(outcome.rendering.success).toBe(true);
+      expect(renderToGlb).toHaveBeenCalledTimes(1);
+      document.close();
+    } finally {
+      await client.shutdown();
+    }
+  });
+
   it('preserves tessellation authored in the model unless Tau explicitly overrides it', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const runtime = createRuntime({
       'project/model.scad': '$fn = 64; sphere(10);',
     });
     const context = await definition.initialize({}, runtime);
-    const render = async (tessellation: Record<string, number>) =>
-      definition.evaluate(
-        {
-          entryPath: 'project/model.scad',
-          parameters: {},
-          options: { tessellation },
-        },
+    const evaluated = await definition.evaluate(
+      { entryPath: 'project/model.scad', parameters: {}, options: {} },
+      runtime,
+      context,
+    );
+    if (!definition.render) {
+      throw new Error('Expected OpenRSCAD model render');
+    }
+    const renderModelAt = definition.render;
+    const render = async (tessellation: Record<string, number>): Promise<number> => {
+      const result = await renderModelAt(
+        { handle: evaluated.handle, view: 'model', options: { tessellation } },
         runtime,
         context,
       );
+      if (typeof result.content === 'string') {
+        throw new TypeError('Expected binary GLB render content');
+      }
+      const json = readGlbJson(result.content);
+      return (json.meshes ?? []).reduce(
+        (total, mesh) =>
+          total +
+          mesh.primitives.reduce(
+            (count, primitive) => count + (json.accessors?.[primitive.indices ?? -1]?.count ?? 0) / 3,
+            0,
+          ),
+        0,
+      );
+    };
 
     const modelQuality = await render(openrscadRenderSchema.parse({}).tessellation);
     const matchingOverride = await render({ segments: 64 });
     const draftOverride = await render({ segments: 16 });
 
-    expect(modelQuality.handle.stats.triangleCount).toBe(matchingOverride.handle.stats.triangleCount);
-    expect(modelQuality.handle.stats.triangleCount).toBeGreaterThan(draftOverride.handle.stats.triangleCount);
+    expect(modelQuality).toBe(matchingOverride);
+    expect(modelQuality).toBeGreaterThan(draftOverride);
   });
 
   it('advertises native edges only for render and GLB while exposing native 3MF', async () => {
@@ -791,7 +838,7 @@ translate([0, 0, 4]) color("blue") cube(2);
       {
         entryPath: 'project/model.scad',
         parameters: {},
-        options: renderOptions,
+        options: {},
       },
       runtime,
       context,
@@ -876,7 +923,7 @@ roof_frame();
       {
         entryPath: 'project/model.scad',
         parameters: {},
-        options: renderOptions,
+        options: {},
       },
       runtime,
       context,
@@ -934,12 +981,13 @@ roof_frame();
       runtime,
       context,
       entryPath: 'project/main.scad',
+      options: renderOptions,
     });
 
     const json = readGlbJson(rendered.geometry.content);
     const manifest = readSemanticManifest(json);
     expect(manifest).toEqual(expected);
-    expect(rendered.handle.stats.triangleCount).toBe(4160);
+    expect(rendered.handle.stats.triangleCount).toBe(21_698);
     expect(manifest.reduce((total, node) => total + node.triangleCount, 0)).toBe(1884);
     expect(json.scenes?.[json.scene ?? 0]?.nodes).toEqual([0]);
     expect(json.nodes?.some((node) => node.name?.includes('Shape'))).toBe(false);
@@ -1112,12 +1160,13 @@ roof_frame();
       runtime,
       context,
       entryPath: 'project/main.scad',
+      options: renderOptions,
     });
     const json = readGlbJson(rendered.geometry.content);
     const manifest = readSemanticManifest(json);
 
     expect(manifest).toEqual(expected);
-    expect(rendered.handle.stats.triangleCount).toBe(35_084);
+    expect(rendered.handle.stats.triangleCount).toBe(51_116);
     expect(manifest.reduce((total, node) => total + node.triangleCount, 0)).toBe(35_216);
     expect(json.scenes?.[json.scene ?? 0]?.nodes).toEqual([0]);
   }, 30_000);
@@ -1132,7 +1181,7 @@ roof_frame();
       {
         entryPath: 'project/model.scad',
         parameters: {},
-        options: renderOptions,
+        options: {},
       },
       runtime,
       context,
@@ -1191,7 +1240,7 @@ roof_frame();
       {
         entryPath: 'project/model.scad',
         parameters: {},
-        options: renderOptions,
+        options: {},
       },
       runtime,
       context,
@@ -1243,7 +1292,7 @@ roof_frame();
         {
           entryPath: 'project/model.scad',
           parameters: {},
-          options: renderOptions,
+          options: {},
         },
         runtime,
         context,
@@ -1269,7 +1318,7 @@ roof_frame();
       {
         entryPath: 'project/model.scad',
         parameters: {},
-        options: renderOptions,
+        options: {},
       },
       runtime,
       context,
@@ -1339,7 +1388,7 @@ endsolid tetrahedron`);
       {
         entryPath: 'project/model.scad',
         parameters: { size: 7 },
-        options: renderOptions,
+        options: {},
       },
       runtime,
       context,
@@ -1478,7 +1527,7 @@ endsolid tetrahedron`);
       {
         entryPath: 'project/model.scad',
         parameters: {},
-        options: renderOptions,
+        options: {},
       },
       runtime,
       context,
@@ -1512,7 +1561,7 @@ endsolid tetrahedron`);
         {
           entryPath: 'project/model.scad',
           parameters: {},
-          options: renderOptions,
+          options: {},
         },
         runtime,
         context,

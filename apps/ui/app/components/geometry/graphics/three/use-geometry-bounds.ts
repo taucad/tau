@@ -26,6 +26,8 @@ type GeometryBoundsResult = {
   geometryCenter: THREE.Vector3;
   /** Immutable snapshot of the geometry's world-space bounding box. */
   geometryBounds: THREE.Box3;
+  /** Whether these bounds came from posing existing geometry rather than loading new geometry. */
+  isPoseUpdate: boolean;
 };
 
 /**
@@ -50,14 +52,11 @@ export function useGeometryBounds(
   const geometryKey = useGraphicsSelector(selectPresentedGeometryKey);
   const renderFrame = useRenderFrame();
 
-  const [{ geometryRadius, geometryCenter, geometryBounds }, set] = useState<{
-    geometryRadius: number;
-    geometryCenter: THREE.Vector3;
-    geometryBounds: THREE.Box3;
-  }>({
+  const [{ geometryRadius, geometryCenter, geometryBounds, isPoseUpdate }, set] = useState<GeometryBoundsResult>({
     geometryRadius: 0,
     geometryCenter: new THREE.Vector3(),
     geometryBounds: new THREE.Box3(),
+    isPoseUpdate: false,
   });
 
   // Track geometry key changes to avoid expensive per-frame scene traversal.
@@ -65,9 +64,10 @@ export function useGeometryBounds(
   // then skipped entirely during orbit/pan/zoom.
   const lastGeometryKeyRef = useRef<string | undefined>(undefined);
   const boundsStableRef = useRef(false);
+  const isPoseUpdateRef = useRef(false);
 
   // A pose moves parts without a new geometry key, so bounds are measured again once it settles. Measuring
-  // mid-drag could re-frame the camera under the pointer, which moves the drag target and feeds the pose.
+  // mid-drag would move the bounds under the pointer. Settled pose bounds keep the camera where the user put it.
   const kinematicsRef = useKinematicsRef();
   const invalidate = useThree((state) => state.invalidate);
   useEffect(() => {
@@ -77,6 +77,7 @@ export function useGeometryBounds(
         return;
       }
       measuredRevision = context.revision;
+      isPoseUpdateRef.current = true;
       boundsStableRef.current = false;
       invalidate();
     });
@@ -94,6 +95,7 @@ export function useGeometryBounds(
     if (geometryKey !== lastGeometryKeyRef.current) {
       lastGeometryKeyRef.current = geometryKey;
       boundsStableRef.current = false;
+      isPoseUpdateRef.current = false;
     }
 
     // Skip expensive scene traversal and matrix updates once bounds have
@@ -132,6 +134,7 @@ export function useGeometryBounds(
     // to guard against cross-contamination if React batches updates across
     // multiple Canvas instances sharing the same module-level _sphere / _centerPoint.
     const snapshotRadius = _sphere.radius;
+    const snapshotIsPoseUpdate = isPoseUpdateRef.current;
 
     // Only update state when the measured bounds have actually changed.
     set((previous) => {
@@ -148,6 +151,7 @@ export function useGeometryBounds(
         geometryRadius: snapshotRadius,
         geometryCenter: centerChanged ? snapshotCenter : previous.geometryCenter,
         geometryBounds: boundsChanged ? snapshotBounds : previous.geometryBounds,
+        isPoseUpdate: snapshotIsPoseUpdate,
       };
     });
   });
@@ -166,5 +170,5 @@ export function useGeometryBounds(
     }
   }, [geometryCenter, graphicsActor, geometryRadius]);
 
-  return { geometryRadius, geometryCenter, geometryBounds };
+  return { geometryRadius, geometryCenter, geometryBounds, isPoseUpdate };
 }

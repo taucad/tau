@@ -147,7 +147,7 @@ export function Stage({
   }, []);
   useRenderFrameRetarget(retargetScene);
 
-  const { geometryRadius, geometryCenter, geometryBounds } = useGeometryBounds(innerRef, outer);
+  const { geometryRadius, geometryCenter, geometryBounds, isPoseUpdate } = useGeometryBounds(innerRef, outer);
 
   React.useLayoutEffect(() => {
     if (
@@ -170,6 +170,7 @@ export function Stage({
     geometryRadius,
     geometryCenter,
     geometryBounds,
+    isPoseUpdate,
     stageOptions,
   });
 

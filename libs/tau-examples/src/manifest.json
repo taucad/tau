@@ -720,6 +720,18 @@
     "kind": "model",
     "geometry": "3d",
     "kernel": "picovoxel",
+    "name": "material-sensor",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
     "name": "mesh-painter",
     "mainFile": "main.ts",
     "files": [

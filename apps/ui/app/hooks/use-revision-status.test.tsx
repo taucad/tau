@@ -434,7 +434,7 @@ describe('the page client of the worker revision root', () => {
         client.send({ command: 'setDeviceId', deviceId: 'device-1' });
         client.remoteCredential({ apiBaseUrl: 'http://api.test' });
         client.open();
-        client.send({ command: 'setActor', actor: { kind: 'system' } });
+        client.send({ command: 'setActor', actor: { kind: 'user', id: 'user-1' } });
         const waiter = client.saveRevision();
         const rejection = expect(waiter).rejects.toMatchObject({
           name: 'RevisionConnectionError',

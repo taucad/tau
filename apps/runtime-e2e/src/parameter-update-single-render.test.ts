@@ -8,7 +8,8 @@ import {
   openFileSystemBridge,
   workspaceBridgeService,
 } from '@taucad/fs-bridge';
-import { createRuntimeClient, fromFileSystemBridge } from '@taucad/runtime';
+import { asKnownArtifact, createRuntimeClient, fromFileSystemBridge } from '@taucad/runtime';
+import type { Description, Rendering } from '@taucad/runtime';
 import { esbuild } from '@taucad/esbuild';
 import { replicad } from '@taucad/replicad';
 import { geometryCache, parameterFileResolver } from '@taucad/middleware';
@@ -17,7 +18,6 @@ import { getBoundingBoxFromInspect, getInspectReport } from '@taucad/runtime-tes
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
 import { fileParameterEntrySchema, parametersDirectory } from '@taucad/types';
-import type { GetParametersResult, HashedGeometryResult, WorkerState } from '@taucad/runtime/types';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 const mainSource = `
@@ -29,10 +29,10 @@ const mainSource = `
 `;
 const projectId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
 
-const nextGeometry = async (
-  subscribe: (handler: (result: HashedGeometryResult) => void) => () => void,
-  predicate: (result: HashedGeometryResult) => boolean = () => true,
-): Promise<HashedGeometryResult> =>
+const nextRendering = async (
+  subscribe: (handler: (result: Rendering) => void) => () => void,
+  predicate: (result: Rendering) => boolean = () => true,
+): Promise<Rendering> =>
   new Promise((resolve) => {
     let settled = false;
     const unsubscribe = subscribe((result) => {
@@ -45,16 +45,20 @@ const nextGeometry = async (
     });
   });
 
-const replicadWidth = async (geometry: HashedGeometryResult): Promise<number | undefined> => {
-  if (!geometry.success || geometry.data.format !== 'gltf') {
+const replicadWidth = async (rendering: Rendering): Promise<number | undefined> => {
+  if (!rendering.success) {
     throw new Error('Expected Replicad to return GLTF geometry');
   }
-  const bounds = getBoundingBoxFromInspect(await getInspectReport(geometry.data.content));
+  const artifact = asKnownArtifact(rendering.artifact);
+  if (artifact?.mimeType !== 'model/gltf-binary') {
+    throw new Error('Expected Replicad to return GLTF geometry');
+  }
+  const bounds = getBoundingBoxFromInspect(await getInspectReport(artifact.content));
   return bounds?.size[0];
 };
 
-const expectReplicadWidth = async (geometry: HashedGeometryResult, width: number): Promise<void> => {
-  expect(await replicadWidth(geometry)).toBeCloseTo(width);
+const expectReplicadWidth = async (rendering: Rendering, width: number): Promise<void> => {
+  expect(await replicadWidth(rendering)).toBeCloseTo(width);
 };
 
 /** Sidecar bytes exactly as `@taucad/parameters` writes them for one committed value. */
@@ -73,48 +77,47 @@ const unitBoundaryKernel = (observe: (parameters: Record<string, unknown>) => vo
     extensions: ['unit'],
     name: 'UnitBoundaryFixture',
     version: '1.0.0',
-    exportFormats: {},
+    views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+    exports: {},
     async initialize() {
       return {};
     },
-    async getDependencies({ entryPath }) {
+    async resolve({ entryPath }) {
       return { resolved: [entryPath], unresolved: [] };
     },
-    async getParameters() {
+    async describe() {
       return createKernelSuccess({
-        schema: {
-          $schema: 'https://json-structure.org/meta/extended/v0/#',
-          $id: 'urn:taucad:test:unit-boundary',
-          $uses: ['JSONSchemaUnits'],
-          name: 'UnitBoundary',
-          type: 'object',
-          properties: { width: { type: 'double', ...(unit ? { ucumUnit: unit } : {}) } },
-        },
-        defaults: { width: 10 },
-        ...(unit
-          ? {
-              bindings: {
-                '/width': {
-                  unit,
-                  quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
-                  space: 'linear',
-                  sourceUnitCapability: 'change-source-unit:preserve-size:v1',
+        parameters: {
+          schema: {
+            $schema: 'https://json-structure.org/meta/extended/v0/#',
+            $id: 'urn:taucad:test:unit-boundary',
+            $uses: ['JSONSchemaUnits'],
+            name: 'UnitBoundary',
+            type: 'object',
+            properties: { width: { type: 'double', ...(unit ? { ucumUnit: unit } : {}) } },
+          },
+          defaults: { width: 10 },
+          ...(unit
+            ? {
+                bindings: {
+                  '/width': {
+                    unit,
+                    quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
+                    space: 'linear',
+                    sourceUnitCapability: 'change-source-unit:preserve-size:v1',
+                  },
                 },
-              },
-            }
-          : {}),
+              }
+            : {}),
+        },
       });
     },
-    async createGeometry({ parameters }) {
+    async evaluate({ parameters }) {
       observe(parameters);
-      return {
-        geometry: { format: 'gltf', content: new Uint8Array([1]) },
-        nativeHandle: {},
-        issues: [],
-      };
+      return { handle: {}, views: ['model'] as const, exports: [] as const };
     },
-    async exportGeometry() {
-      throw new Error('The unit-boundary fixture does not export.');
+    async render() {
+      return { content: new Uint8Array([1]) };
     },
   });
 };
@@ -203,28 +206,34 @@ describe('autonomous preview invalidation', () => {
     const client = createRuntimeClient({
       transport: inProcessTransport({ runtime, fileSystem }),
     });
-    const states: WorkerState[] = [];
-    const parameterFrames: GetParametersResult[] = [];
-    const stopStates = client.on('state', (state) => states.push(state));
-    const stopParameters = client.on('parametersResolved', (result) => parameterFrames.push(result));
+    const document = client.open({ source: { path: 'main.ts' }, watch: true });
+    const view = document.view('model');
+    const renderings: Rendering[] = [];
+    const descriptions: Description[] = [];
+    const stopRendering = view.on('rendered', (rendering) => renderings.push(rendering));
+    const stopDescription = document.on('described', (description) => descriptions.push(description));
 
     try {
-      const initial = await client.render({ source: { path: 'main.ts' } });
+      const initial = await view.rendering();
       expect(initial.superseded).toBe(false);
-      if (initial.superseded || !initial.geometry.success) {
+      if (initial.superseded || !initial.rendering.success) {
         throw new Error('Expected the initial Replicad preview to render successfully');
       }
 
-      states.length = 0;
+      renderings.length = 0;
       /* The record is a watched dependency of the render, so the checked write alone brings the
        * geometry up to date. Nothing else forwards the value to the kernel. */
-      const firstUpdate = nextGeometry((handler) => client.on('geometry', handler));
+      const firstUpdate = nextRendering(
+        (handler) => view.on('rendered', handler),
+        (rendering) => rendering.evaluationId !== initial.rendering.evaluationId,
+      );
       await service.writeFile(
         `/projects/${projectId}/.tau/parameters/main.ts.json`,
         JSON.stringify({ activeGroup: 'default', groups: { default: { values: { width: 20 } } } }),
       );
-      await expectReplicadWidth(await firstUpdate, 0.02);
-      expect(states.filter((state) => state === 'rendering')).toEqual(['rendering']);
+      const firstRendering = await firstUpdate;
+      await expectReplicadWidth(firstRendering, 0.02);
+      expect(renderings).toHaveLength(1);
 
       // Automatic thumbnail generation writes through a separate filesystem
       // client after the primary render settles. This derived artifact is not a
@@ -238,22 +247,30 @@ describe('autonomous preview invalidation', () => {
 
       // A second relevant edit is the event barrier for both unrelated writes: once it renders,
       // every earlier filesystem event has crossed the runtime's watch/debounce queue.
-      const secondUpdate = nextGeometry((handler) => client.on('geometry', handler));
+      const secondUpdate = nextRendering(
+        (handler) => view.on('rendered', handler),
+        (rendering) => rendering.evaluationId !== firstRendering.evaluationId,
+      );
       await service.writeFile(
         `/projects/${projectId}/.tau/parameters/main.ts.json`,
         JSON.stringify({ activeGroup: 'default', groups: { default: { values: { width: 30 } } } }),
       );
       await expectReplicadWidth(await secondUpdate, 0.03);
 
-      expect(states.filter((state) => state === 'rendering')).toEqual(['rendering', 'rendering']);
-      expect(parameterFrames).toHaveLength(3);
-      expect(parameterFrames[1]).toStrictEqual(parameterFrames[0]);
-      expect(parameterFrames[2]).toStrictEqual(parameterFrames[0]);
+      expect(renderings).toHaveLength(2);
+      expect(descriptions).toHaveLength(3);
+      const [firstDescription, secondDescription, thirdDescription] = descriptions;
+      if (!firstDescription?.success || !secondDescription?.success || !thirdDescription?.success) {
+        throw new Error('Expected successful parameter descriptions for each watched evaluation');
+      }
+      expect(secondDescription.parameters).toStrictEqual(firstDescription.parameters);
+      expect(thirdDescription.parameters).toStrictEqual(firstDescription.parameters);
     } finally {
-      stopParameters();
-      stopStates();
-      await client.shutdown({ drain: true });
-      client.terminate();
+      stopDescription();
+      stopRendering();
+      view.close();
+      document.close();
+      await client.shutdown();
       dispose();
     }
   }, 60_000);
@@ -276,20 +293,29 @@ describe('transient drag lane', () => {
         `/projects/${projectId}/${parametersDirectory}/main.ts.json`,
         sidecarBytes({ width: 20 }),
       );
-      const stored = await client.render({ source });
-      const scrubbed = await client.render({ source, parameters: { width: 40 }, transient: true });
-      if (stored.superseded || scrubbed.superseded || !stored.geometry.success || !scrubbed.geometry.success) {
+      const document = client.open({ source });
+      const view = document.view('model');
+      const stored = await view.rendering();
+      const next = nextRendering(
+        (handler) => view.on('rendered', handler),
+        (rendering) => rendering.evaluationId !== (stored.superseded ? '' : stored.rendering.evaluationId),
+      );
+      const updated = await document.update({ parameters: { width: 40 }, transient: true });
+      const scrubbed = await next;
+      if (stored.superseded || updated.superseded || !stored.rendering.success || !scrubbed.success) {
         throw new Error('Expected both Replicad renders to succeed');
       }
-      if (scrubbed.geometry.data.format !== 'gltf') {
+      const artifact = asKnownArtifact(scrubbed.artifact);
+      if (artifact?.mimeType !== 'model/gltf-binary') {
         throw new Error('Expected Replicad to return GLTF geometry');
       }
 
-      const bounds = getBoundingBoxFromInspect(await getInspectReport(scrubbed.geometry.data.content));
+      const bounds = getBoundingBoxFromInspect(await getInspectReport(artifact.content));
       expect(bounds?.size[0]).toBeCloseTo(0.04);
+      view.close();
+      document.close();
     } finally {
-      await client.shutdown({ drain: true });
-      client.terminate();
+      await client.shutdown();
       dispose();
     }
   }, 60_000);
@@ -301,19 +327,20 @@ describe('transient drag lane', () => {
 
     try {
       await service.writeFile(`/projects/${projectId}/main.unit`, 'fixture');
-      const rendered = await client.render({ source: { path: 'main.unit' }, parameters: { width: '20 in' } });
+      const document = client.open({ source: { path: 'main.unit' }, parameters: { width: '20 in' } });
+      const rendered = await document.view('model').rendering();
       if (rendered.superseded) {
         throw new Error('Expected the request-scoped render to settle');
       }
-      expect(rendered.geometry.success).toBe(false);
-      if (rendered.geometry.success) {
+      expect(rendered.rendering.success).toBe(false);
+      if (rendered.rendering.success) {
         throw new Error('Expected unit-bearing text for unitless width to be refused');
       }
-      expect(rendered.geometry.issues[0]?.code).toBe('SEMANTICS_UNRESOLVED');
-      expect(rendered.geometry.issues[0]?.message).toMatch(/\/width.*20 in.*number|unit declaration/iu);
+      expect(rendered.rendering.issues[0]?.code).toBe('SEMANTICS_UNRESOLVED');
+      expect(rendered.rendering.issues[0]?.message).toMatch(/\/width.*20 in.*number|unit declaration/iu);
+      document.close();
     } finally {
-      await client.shutdown({ drain: true });
-      client.terminate();
+      await client.shutdown();
       dispose();
     }
   }, 60_000);
@@ -329,45 +356,56 @@ describe('transient drag lane', () => {
     const client = createRuntimeClient({
       transport: inProcessTransport({ runtime, fileSystem }),
     });
-    const geometries: HashedGeometryResult[] = [];
-    const stopGeometry = client.on('geometry', (result) => geometries.push(result));
     const source = { path: 'main.ts' } as const;
+    const document = client.open({ source, parameters: { width: 10 } });
+    const view = document.view('model');
+    const renderings: Rendering[] = [];
+    const stopRendering = view.on('rendered', (rendering) => renderings.push(rendering));
 
     try {
-      const committed = await client.render({ source, parameters: { width: 10 } });
-      if (committed.superseded || !committed.geometry.success) {
+      const committed = await view.rendering();
+      if (committed.superseded || !committed.rendering.success) {
         throw new Error('Expected the committed render to succeed');
       }
       // D2 gates the lane on a kernel declaring it; Replicad aborts cooperatively, so it qualifies.
       expect(client.capabilities?.renderCapabilities['replicad']?.cancellation).toBe('cooperative');
-      const committedExport = await client.export('glb');
+      const committedExport = await document.export('glb');
       if (!committedExport.success) {
         throw new Error('Expected the committed export to succeed');
       }
 
-      geometries.length = 0;
-      const transient = await client.render({ source, parameters: { width: 40 }, transient: true });
-      if (transient.superseded || !transient.geometry.success) {
+      renderings.length = 0;
+      const next = nextRendering(
+        (handler) => view.on('rendered', handler),
+        (rendering) => rendering.evaluationId !== committed.rendering.evaluationId,
+      );
+      const transient = await document.update({ parameters: { width: 40 }, transient: true });
+      if (transient.superseded) {
         throw new Error('Expected the transient render to succeed');
       }
+      const transientRendering = await next;
+      if (!transientRendering.success) {
+        throw new Error('Expected the transient rendering to succeed');
+      }
       // The drag frame reaches the viewer.
-      expect(geometries).toHaveLength(1);
-      expect(transient.geometry.data.hash).not.toBe(committed.geometry.data.hash);
+      expect(renderings).toHaveLength(1);
+      expect(transientRendering.hash).not.toBe(committed.rendering.hash);
 
       // ...but it never became the artifact, so the export still answers the committed width.
-      const afterTransient = await client.export('glb');
+      const afterTransient = await document.export('glb');
       if (!afterTransient.success) {
         throw new Error('Expected the export after the transient render to succeed');
       }
       // A box's GLB has the same byte length at every size, so the bytes themselves are the check.
-      expect(afterTransient.data[0]?.bytes).toStrictEqual(committedExport.data[0]?.bytes);
+      expect(afterTransient.files[0].bytes).toStrictEqual(committedExport.files[0].bytes);
 
       // Nothing was persisted for the transient value.
       await expect(service.exists(`/projects/${projectId}/${parametersDirectory}/main.ts.json`)).resolves.toBe(false);
     } finally {
-      stopGeometry();
-      await client.shutdown({ drain: true });
-      client.terminate();
+      stopRendering();
+      view.close();
+      document.close();
+      await client.shutdown();
       dispose();
     }
   }, 60_000);
@@ -395,14 +433,15 @@ describe('committed parameter edit', () => {
           },
         ),
       );
-      const rendered = await client.render({ source: { path: 'main.unit' }, parameters });
-      if (rendered.superseded || !rendered.geometry.success) {
+      const document = client.open({ source: { path: 'main.unit' }, parameters });
+      const rendered = await document.view('model').rendering();
+      if (rendered.superseded || !rendered.rendering.success) {
         throw new Error('Expected the unit-boundary fixture to render');
       }
       expect(observed.at(-1)?.['width']).toBeCloseTo(508);
+      document.close();
     } finally {
-      await client.shutdown({ drain: true });
-      client.terminate();
+      await client.shutdown();
       dispose();
     }
   };
@@ -437,25 +476,24 @@ describe('committed parameter edit', () => {
         `/projects/${projectId}/${parametersDirectory}/main.ts.json`,
         sidecarBytes({ width: 20, height: 16 }),
       );
-      const actual = await client.export('glb', { source, parameters: { width: 40 } });
-      const expected = await referenceClient.export('glb', { source, parameters: { width: 40, height: 16 } });
+      const document = client.open({ source, parameters: { width: 40 } });
+      const referenceDocument = referenceClient.open({ source, parameters: { width: 40, height: 16 } });
+      const actual = await document.export('glb');
+      const expected = await referenceDocument.export('glb');
       if (!actual.success || !expected.success) {
         throw new Error('Expected both Replicad exports to succeed');
       }
 
-      const actualFile = actual.data[0];
-      const expectedFile = expected.data[0];
-      if (!actualFile || !expectedFile) {
-        throw new Error('Expected both exports to contain a GLB');
-      }
+      const actualFile = actual.files[0];
+      const expectedFile = expected.files[0];
       const actualBounds = getBoundingBoxFromInspect(await getInspectReport(actualFile.bytes));
       const expectedBounds = getBoundingBoxFromInspect(await getInspectReport(expectedFile.bytes));
       expect(actualBounds).toEqual(expectedBounds);
+      document.close();
+      referenceDocument.close();
     } finally {
-      await referenceClient.shutdown({ drain: true });
-      referenceClient.terminate();
-      await client.shutdown({ drain: true });
-      client.terminate();
+      await referenceClient.shutdown();
+      await client.shutdown();
       dispose();
     }
   }, 60_000);
@@ -474,22 +512,25 @@ describe('committed parameter edit', () => {
         `/projects/${projectId}/${parametersDirectory}/main.ts.json`,
         sidecarBytes({ width: 20 }),
       );
-      const first = await client.render({ source, parameters: { width: 40 } });
-      const repeated = await client.render({ source, parameters: { width: 40 } });
-      if (first.superseded || repeated.superseded || !first.geometry.success || !repeated.geometry.success) {
+      const document = client.open({ source, parameters: { width: 40 } });
+      const view = document.view('model');
+      const first = await view.rendering();
+      const repeated = await view.rendering();
+      if (first.superseded || repeated.superseded || !first.rendering.success || !repeated.rendering.success) {
         throw new Error('Expected both identical overrides to render');
       }
-      expect(repeated.geometry.data.hash).toBe(first.geometry.data.hash);
+      expect(repeated.rendering.hash).toBe(first.rendering.hash);
 
-      const published = await client.export('glb');
-      if (!published.success || !published.data[0]) {
+      const published = await document.export('glb');
+      if (!published.success) {
         throw new Error(`Expected the repeated render to remain published: ${JSON.stringify(published)}`);
       }
-      const bounds = getBoundingBoxFromInspect(await getInspectReport(published.data[0].bytes));
+      const bounds = getBoundingBoxFromInspect(await getInspectReport(published.files[0].bytes));
       expect(bounds?.size[0]).toBeCloseTo(0.04);
+      view.close();
+      document.close();
     } finally {
-      await client.shutdown({ drain: true });
-      client.terminate();
+      await client.shutdown();
       dispose();
     }
   }, 60_000);
@@ -506,28 +547,33 @@ describe('committed parameter edit', () => {
     const client = createRuntimeClient({
       transport: inProcessTransport({ runtime, fileSystem }),
     });
-    const states: WorkerState[] = [];
-    const stopStates = client.on('state', (state) => states.push(state));
     const sidecarPath = `/projects/${projectId}/${parametersDirectory}/main.ts.json`;
+    await service.writeFile(sidecarPath, sidecarBytes({ width: 11 }));
+    const document = client.open({ source: { path: 'main.ts' }, parameters: {}, watch: true });
+    const view = document.view('model');
+    const renderings: Rendering[] = [];
+    const stopRendering = view.on('rendered', (rendering) => renderings.push(rendering));
 
     try {
-      await service.writeFile(sidecarPath, sidecarBytes({ width: 11 }));
-      const source = { path: 'main.ts' } as const;
-      await client.render({ source, parameters: {} });
+      const initial = await view.rendering();
       // The workbench re-issues the render command on every committed edit, so the steady state
       // this assertion protects is the second and later open of the same entry.
-      await client.render({ source, parameters: {} });
+      await view.rendering();
 
-      states.length = 0;
-      const updated = nextGeometry((handler) => client.on('geometry', handler));
+      renderings.length = 0;
+      const updated = nextRendering(
+        (handler) => view.on('rendered', handler),
+        (rendering) => rendering.evaluationId !== (initial.superseded ? '' : initial.rendering.evaluationId),
+      );
       await service.writeFile(sidecarPath, sidecarBytes({ width: 30 }));
       await expectReplicadWidth(await updated, 0.03);
 
-      expect(states.filter((state) => state === 'rendering')).toEqual(['rendering']);
+      expect(renderings).toHaveLength(1);
     } finally {
-      stopStates();
-      await client.shutdown({ drain: true });
-      client.terminate();
+      stopRendering();
+      view.close();
+      document.close();
+      await client.shutdown();
       dispose();
     }
   }, 60_000);
@@ -546,51 +592,61 @@ describe('committed parameter edit', () => {
       const client = createRuntimeClient({
         transport: inProcessTransport({ runtime, fileSystem }),
       });
-      const states: WorkerState[] = [];
-      const parameterFrames: GetParametersResult[] = [];
-      const stopStates = client.on('state', (state) => states.push(state));
-      const stopParameters = client.on('parametersResolved', (result) => parameterFrames.push(result));
+      const document = client.open({ source: { path: 'main.ts' }, parameters: {}, watch: true });
+      const view = document.view('model');
+      const renderings: Rendering[] = [];
+      const descriptions: Description[] = [];
+      const stopRendering = view.on('rendered', (rendering) => renderings.push(rendering));
+      const stopDescription = document.on('described', (description) => descriptions.push(description));
       const sidecarPath = `${parametersDirectory}/main.ts.json`;
 
       try {
-        const initial = await client.render({ source: { path: 'main.ts' }, parameters: {} });
-        if (initial.superseded || !initial.geometry.success) {
+        const initial = await view.rendering();
+        if (initial.superseded || !initial.rendering.success) {
           throw new Error('Expected the initial Replicad preview to render successfully');
         }
 
-        states.length = 0;
-        parameterFrames.length = 0;
+        renderings.length = 0;
+        descriptions.length = 0;
         const bytes = sidecarBytes({ width: 20 });
         const persist = async (): Promise<void> => service.writeFile(`/projects/${projectId}/${sidecarPath}`, bytes);
         // The shipped UI shape: one synchronous turn dispatches the value and persists it.
-        const dispatched = client.render({
-          source: { path: 'main.ts' },
+        const next = nextRendering(
+          (handler) => view.on('rendered', handler),
+          (rendering) => rendering.evaluationId !== initial.rendering.evaluationId,
+        );
+        const dispatched = document.update({
           parameters: { width: 20 },
           stage: { [sidecarPath]: bytes },
         });
         const persisted = persistence === 'during the render' ? persist() : undefined;
         const committed = await dispatched;
         await (persisted ?? persist());
-        if (committed.superseded || !committed.geometry.success) {
+        if (committed.superseded || !committed.evaluation.success) {
           throw new Error('Expected the committed edit to render successfully');
         }
-        await expectReplicadWidth(committed.geometry, 0.02);
+        const committedRendering = await next;
+        await expectReplicadWidth(committedRendering, 0.02);
 
-        // A repeated command is the event barrier for the persisted echo: it is issued after the
-        // filesystem delivered that write, so any watch-driven duplicate would precede this one.
-        const barrier = await client.render({ source: { path: 'main.ts' }, parameters: { width: 20 } });
-        if (barrier.superseded || !barrier.geometry.success) {
+        // Repeating the same committed update is an evaluation barrier for the persisted echo.
+        const barrierRendering = nextRendering(
+          (handler) => view.on('rendered', handler),
+          (rendering) => rendering.evaluationId !== committedRendering.evaluationId,
+        );
+        const barrier = await document.update({ parameters: { width: 20 } });
+        if (barrier.superseded || !barrier.evaluation.success) {
           throw new Error('Expected the repeated committed render to succeed');
         }
-        await expectReplicadWidth(barrier.geometry, 0.02);
+        await expectReplicadWidth(await barrierRendering, 0.02);
 
-        expect(states.filter((state) => state === 'rendering')).toEqual(['rendering', 'rendering']);
-        expect(parameterFrames).toHaveLength(2);
+        expect(renderings).toHaveLength(2);
+        expect(descriptions).toHaveLength(2);
       } finally {
-        stopParameters();
-        stopStates();
-        await client.shutdown({ drain: true });
-        client.terminate();
+        stopDescription();
+        stopRendering();
+        view.close();
+        document.close();
+        await client.shutdown();
         dispose();
       }
     },

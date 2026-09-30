@@ -463,7 +463,7 @@ describe('startHostDaemon', () => {
       expect(create.isError).toBe(false);
       outcome = await registry.invoke({
         toolCallId: 'runtime-authority-render',
-        toolName: 'get_kernel_result',
+        toolName: 'evaluate_model',
         input: { targetFile: 'main.scad' },
         signal: new AbortController().signal,
       });

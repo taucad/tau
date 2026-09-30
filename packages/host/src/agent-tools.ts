@@ -12,8 +12,8 @@
  * the native raster backend, which resolves and runs under plain Node — probed
  * on this machine at 512² webp in 16.6 ms cold and ~2.9 ms warm on the Metal
  * adapter (`substrate/capture/nanoraster-node-probe.txt`). `screenshot` and
- * `export_geometry` are therefore offered whenever a runtime client is
- * attached, exactly like `get_kernel_result`.
+ * `export_model` are therefore offered whenever a runtime client is
+ * attached, exactly like `evaluate_model`.
  *
  * `test_model` and `use_skill` were the two absentees, both for the same
  * reason: their adapters lived in `apps/ui`. They now live in
@@ -100,7 +100,7 @@ export type HostExportFile = ExportFile;
  *
  * @public
  */
-export type HostRuntimeClient = Pick<RuntimeClient, 'evaluate' | 'export' | 'transcode' | 'connect' | 'capabilities'>;
+export type HostRuntimeClient = Pick<RuntimeClient, 'open' | 'describe' | 'transcode' | 'connect' | 'capabilities'>;
 
 /** Filesystem capability the host tool registry consumes. @public */
 export type HostToolFileSystem = Omit<RuntimeFileSystemBase, 'watch'>;
@@ -136,7 +136,7 @@ const issueMessage = (issues: ReadonlyArray<{ readonly message: string }>, fallb
  * 'error' }` with its kernel issues — so the only way to reach this is a child
  * that would not start, an engine that would not load, or a wire that died.
  * Routing that through `toRpcError` classified it by *message*: the G4 live
- * proof answered six `get_kernel_result` calls and one `screenshot` with
+ * proof answered six `evaluate_model` calls and one `screenshot` with
  * `{"errorCode":"IO_ERROR","message":"Runtime render failed"}` while the
  * daemon's log named the real cause, and `IO_ERROR` on a file the model had
  * just written reads as "your geometry is wrong". The reason now travels
@@ -285,15 +285,25 @@ export const createHostNativeGeoSpecRunner = async (
     const revisions = new Map<string, SourceRevision>();
     const trackedRuntime = new Proxy(runtime, {
       get(target, property, receiver: unknown): unknown {
-        if (property !== 'export') {
+        if (property !== 'open') {
           return Reflect.get(target, property, receiver) as unknown;
         }
-        return async (...args: Parameters<HostGeoSpecRuntimeClient['export']>) => {
-          const result = await target.export(...args);
-          if (result.sourceRevision) {
-            revisions.set(result.sourceRevision.entry, result.sourceRevision);
-          }
-          return result;
+        return (...args: Parameters<HostGeoSpecRuntimeClient['open']>) => {
+          const document = target.open(...args);
+          return new Proxy(document, {
+            get(owner, method, documentReceiver: unknown): unknown {
+              if (method !== 'export') {
+                return Reflect.get(owner, method, documentReceiver) as unknown;
+              }
+              return async (...exportArgs: Parameters<typeof owner.export>) => {
+                const result = await owner.export(...exportArgs);
+                if (result.sourceRevision) {
+                  revisions.set(result.sourceRevision.entry, result.sourceRevision);
+                }
+                return result;
+              };
+            },
+          });
         };
       },
     });
@@ -496,18 +506,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       return client;
     };
 
-    const runtime = {
-      async evaluate(input: Parameters<HostRuntimeClient['evaluate']>[0]) {
-        const client = await requireRuntime(input);
-        return client.evaluate(input);
-      },
-      async export(format: string, exportOptions: Parameters<HostRuntimeClient['export']>[1]) {
-        const client = await requireRuntime(exportOptions);
-        return client.export(format, exportOptions);
-      },
-    };
     const { kernelClient, graphics, images } = createRuntimeAgentClients({
-      runtime,
+      runtime: async () => requireRuntime(),
       mapRuntimeError: runtimeFailure,
       async exportImage(job) {
         const client = await requireRuntime(job);

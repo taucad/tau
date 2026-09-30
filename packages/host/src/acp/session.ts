@@ -88,10 +88,10 @@ import { maskedPathCode } from '@taucad/agent-tools/registry';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
 import {
-  exportGeometryInputSchema,
-  exportGeometryOutputSchema,
-  getKernelResultInputSchema,
-  getKernelResultOutputSchema,
+  exportModelInputSchema,
+  exportModelOutputSchema,
+  evaluateModelInputSchema,
+  evaluateModelOutputSchema,
   screenshotInputSchema,
   screenshotMcpOutputSchema,
   testModelInputSchema,
@@ -571,10 +571,10 @@ type JsonSchema = {
 
 const tauMcpSchemas = {
   [toolName.arrangeWorkbench]: { input: arrangeWorkbenchInputSchema, output: arrangeWorkbenchOutputSchema },
-  [toolName.getKernelResult]: { input: getKernelResultInputSchema, output: getKernelResultOutputSchema },
+  [toolName.evaluateModel]: { input: evaluateModelInputSchema, output: evaluateModelOutputSchema },
   [toolName.testModel]: { input: testModelInputSchema, output: testModelOutputSchema },
   [toolName.screenshot]: { input: screenshotInputSchema, output: screenshotMcpOutputSchema },
-  [toolName.exportGeometry]: { input: exportGeometryInputSchema, output: exportGeometryOutputSchema },
+  [toolName.exportModel]: { input: exportModelInputSchema, output: exportModelOutputSchema },
 } as const;
 
 /** Tau MCP errors emitted outside the shared business RPC schema. */

@@ -166,10 +166,10 @@ afterEach(async () => {
 
 describe('createHostMcpEndpoint capability', () => {
   it.each([
-    { name: 'get_kernel_result', input: { targetFile: 'main.scad' } },
+    { name: 'evaluate_model', input: { targetFile: 'main.scad' } },
     { name: 'test_model', input: {} },
     { name: 'screenshot', input: { targetFile: 'main.scad', mode: 'single' } },
-    { name: 'export_geometry', input: { targetFile: 'main.scad', format: 'glb' } },
+    { name: 'export_model', input: { targetFile: 'main.scad', to: 'glb' } },
   ])('does not release admitted $name work until it settles', async ({ name, input }) => {
     const entered = Promise.withResolvers<void>();
     const unblock = Promise.withResolvers<void>();
@@ -235,10 +235,10 @@ describe('createHostMcpEndpoint capability', () => {
     expect(claims).toMatchObject({ v: 1, runId: 'run-1', chatId: 'chat-1' });
     expect(claims.sessionKey).toMatch(/^[\w-]+$/u);
     expect(claims.allowedTools).toEqual([
-      'get_kernel_result',
+      'evaluate_model',
       'test_model',
       'screenshot',
-      'export_geometry',
+      'export_model',
       'arrange_workbench',
       'get_print_profiles',
       'request_print',
@@ -366,7 +366,7 @@ describe('the mounted /mcp route', () => {
           jsonrpc: '2.0',
           id: 1,
           method: 'tools/call',
-          params: { name: 'get_kernel_result', arguments: { targetFile: 'main.ts' } },
+          params: { name: 'evaluate_model', arguments: { targetFile: 'main.ts' } },
         }),
       );
       const reply = await response;
@@ -660,10 +660,10 @@ describe('the mounted /mcp route', () => {
     const { tools } = toolsListSchema.parse(listed.result);
     /* The grant, in order; the registry's other machine tools are never registered. */
     expect(tools.map(({ name }) => name)).toEqual([
-      'get_kernel_result',
+      'evaluate_model',
       'test_model',
       'screenshot',
-      'export_geometry',
+      'export_model',
       'get_print_profiles',
       'request_print',
       'get_print_request',
@@ -679,7 +679,7 @@ describe('the mounted /mcp route', () => {
     });
     expect(
       tools
-        .filter(({ name }) => ['get_kernel_result', 'test_model', 'screenshot'].includes(name))
+        .filter(({ name }) => ['evaluate_model', 'test_model', 'screenshot'].includes(name))
         .map(({ annotations }) => annotations),
     ).toEqual(
       Array.from({ length: 3 }, () => ({
@@ -689,7 +689,7 @@ describe('the mounted /mcp route', () => {
         openWorldHint: false,
       })),
     );
-    expect(tools.find(({ name }) => name === 'export_geometry')?.annotations).toEqual({
+    expect(tools.find(({ name }) => name === 'export_model')?.annotations).toEqual({
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,

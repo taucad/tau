@@ -6,11 +6,11 @@ icon: lucide:cpu
 wordBudgetOverride: 450
 ---
 
-tscircuit is Tau's EDA kernel. `@taucad/tscircuit` claims `.tsx` and `.jsx` files, bundles them with the runtime bundler, evaluates the board once with `@tscircuit/core`, and keeps the settled circuit JSON as the native handle. It runs in browser workers and Node hosts and never reaches the network while rendering or exporting.
+`@taucad/tscircuit` evaluates `.tsx` and `.jsx` boards in browser workers and Node hosts, retaining settled circuit JSON for views and exports.
 
 ## Authoring contract
 
-Each entry file default-exports one board component. `React` is provided as a global by the worker, so the import is optional. Every component needs a unique `name`; footprints are footprinter strings such as `0402`, `0603`, `soic8`, or `dip8`; positions are millimetres.
+Each entry file default-exports one board component. `React` is provided as a global by the worker, so the import is optional. Give each part a unique `name`; footprints are footprinter strings such as `0402`, `0603`, `soic8`, or `dip8`; positions are millimetres.
 
 ```tsx
 export default () => (

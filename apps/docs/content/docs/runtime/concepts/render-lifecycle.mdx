@@ -1,179 +1,72 @@
 ---
 title: Render Lifecycle
-description: How the autonomous render loop, cancellation strategies, and abort channel work together.
+description: How document evaluation, independent views, exports, and cancellation share runtime ownership.
 docType: explanation
 icon: lucide:refresh-cw
 ---
 
-The runtime worker manages its own render lifecycle. After `render`, it renders immediately, discovers dependencies, watches for changes, and re-renders on file or parameter updates -- a watched-file rerender can supersede the originating call without a second API call. Every admitted preview reaches `idle` or `error` before its successor becomes active, and settled geometry is published over the `geometry` event. Three cancellation strategies abort superseded renders as early as possible while guaranteeing that stale results never surface.
-
-## Context and Motivation
-
-In a command-driven model the main thread decides when to render, yet it lacks the information that decision needs: the dependency graph, cache state, whether a render is stale. The autonomous model moves scheduling into the worker, which has all of it. The result is lower latency (no main-thread round-trips) and simpler client code (subscribe to events instead of orchestrating renders).
+A runtime document owns a source and its evaluated model. A view projects that model into an artifact; an export writes files from an evaluated source. Keeping these operations separate lets a board expose PCB and schematic views, a geometry kernel expose a model, and an export-only kernel offer files without a viewer.
 
 ## How It Works
 
-### The Render Loop
-
 ```mermaid
 flowchart TD
-    Render["render(source, parameters)"] --> Render1["render immediately"]
-    Render1 --> Deps["discover dependencies"]
-    Deps --> Watch["set up watch subscription"]
-    Watch --> Push1["push geometry event"]
-
-    Watch --> FileChange["watch event: file changed"]
-    FileChange --> Invalidate["invalidate caches"]
-    Invalidate --> Debounce200["200ms debounce timer"]
-    Debounce200 --> Render2["render"]
-    Render2 --> DiffWatch["diff watch set"]
-    DiffWatch --> Push2["push geometry event"]
-
-    UpdateParams["updateParameters(params)"] --> StoreParams["store new params"]
-    StoreParams --> Immediate["schedule (no added delay)"]
-    Immediate --> Render3["render"]
-    Render3 --> Push3["push geometry event"]
-
-    Export["export(format)"] --> Write["write(selected export, retained handle)"]
-    Write --> Resolve["resolve export call"]
+    Source["open(source, parameters)"] --> Evaluation["evaluate model"]
+    Changes["source watch / document.update"] --> Evaluation
+    Evaluation --> Offers["evaluation: views, instances, exports, issues"]
+    Offers --> Model["view: model"]
+    Offers --> Drawing["view: drawing"]
+    Model --> ModelArtifact["rendering: GLB artifact"]
+    Drawing --> DrawingArtifact["rendering: SVG artifact"]
+    Offers --> Export["document.export(target)"]
+    Export --> Files["ordered files + source revision"]
+    ViewUpdate["view.update(options, content, instance)"] --> Model
 ```
 
-**render(source, parameters):** normalize the entry to a [runtime path](./path-namespaces), store it with the parameters, and render immediately, aborting any in-progress render. Afterwards, discover the entry's dependencies and subscribe to filesystem watches scoped to that set. Push the `geometry` event.
+### Document Evaluation
 
-**Watch event:** the change arrives directly from the File Manager Worker over the [filesystem bridge](./worker-model#filesystem-bridge) -- never relayed through the main thread. Invalidate the relevant caches (synchronous `Map.delete()`), then start or reset a 200ms debounce timer. When it fires, render again, diff the watch set against the new dependency list (add new paths, drop stale ones), and push `geometry`.
+`client.open()` creates a document synchronously and starts its work asynchronously. `document.evaluation()` waits for an outcome. A successful evaluation lists the views and exports offered by that particular model, which can differ from the kernel's static declarations. An empty view list is a valid success.
 
-**updateParameters(params):** store the new parameters and schedule a re-render with no added delay. Parameter changes are user-driven and latency-sensitive; there is nothing to batch.
+Source changes and parameter replacement produce a new evaluation. With watching enabled, the worker observes the entry and discovered dependencies, including paths needed to heal a failed build. Watches are scoped to rooted filesystem paths; the filesystem owns reachability. A watcherless filesystem requires source revalidation rather than assuming cached bytes are fresh.
 
-**export(format):** the current client bridges a file extension to an offered v2 export, calls `write` with the retained evaluation handle, and resolves with nonempty artifact files. W3 will expose the export ID directly.
+Each outcome carries an identity. If a newer document intent replaces pending work, the earlier outcome reports `superseded`; it cannot publish as the current evaluation.
 
-### Why File Changes Debounce and Parameter Changes Do Not
+### Independent Views
 
-File changes debounce at 200ms because several files often change together -- a save-all, a formatter pass, a filesystem sync -- and one batched render beats five aborted ones. Parameter changes carry no such burst pattern; they schedule immediately, and when a slider produces a genuine flood, supersession abort keeps each stale render cheap. When a file change and a parameter change land in the same window, the earlier-firing schedule wins and the render uses the latest state for both.
+`document.view(id, request)` creates a subscription with its own options, content, and optional instance. `view.rendering()` waits for that subscription's rendering. Different panes can project the same evaluation without changing each other's view settings.
 
-## Render Cancellation
+A view update changes the projection request. It does not replace document parameters or evaluate an unchanged source again merely to change presentation. View and evaluation identities associate each rendering with the exact request it answered. Applications can retain their last successful artifact while newer work is pending or fails.
 
-Two goals hold simultaneously:
+### Exports
 
-1. **Start the latest render as soon as possible** -- never queue behind an in-progress render.
-2. **Abort the superseded render as early as possible** -- never spend CPU on geometry nobody will see.
+`document.export(target, request)` resolves a declared export ID or an unambiguous reachable extension. It can evaluate and export before any view has rendered. Its successful result contains an ordered, nonempty `files` tuple and the resolved export ID. Required companion files remain together.
 
-Three strategies deliver this.
+Transient parameter work is separate from committed document state. Export uses the committed state rather than treating an in-progress drag as a saved model. Source provenance identifies the bytes used; applications should compare revisions when external edits can race an operation.
 
-### Strategy 1: Proxy-Based Cooperative Abort (OC-Based Kernels)
+## Cancellation and Concurrency
 
-The OC tracing Proxy intercepts every OpenCASCADE API call -- constructors, methods, property access. A typical user `main()` makes 500--5000 OC calls. On each one, the proxy reads the abort generation from the active [transport](../api/transport): an `Atomics.load` against a transport-owned `SharedArrayBuffer` where available, a slot bumped by the worker's wire-format `abort` handler elsewhere. That yields sub-millisecond abort granularity during the heaviest synchronous phase. Conceptually the checkpoint is:
+The host serializes access to shared kernel, cache, and native-handle state. A superseding intent marks older work stale immediately, but synchronous kernel code must reach a cooperative checkpoint before it can release the worker's event loop. There is no universal cancellation-latency guarantee.
 
-```typescript
-// Internal worker-side sketch — the abort throw is plumbing the consumer
-// never sees. From the consumer's point of view, the superseded render's
-// Promise resolves to `RenderOutcome.superseded === true`.
+Transport-owned shared memory can carry a targeted stop signal while a worker is blocked in synchronous native code. The active operation is identified precisely, so a late abort cannot stop its successor. Kernel bindings that check the signal can interrupt at their checkpoints. Wire-only cancellation requires the host to process its queued notification; it cannot interrupt a blocked event loop by itself.
 
-const readAbortGeneration = (): number => {
-  return 0; // worker implementation: transport-owned SAB / wire-backed slot
-};
+All paths still check ownership before publishing. Work that finishes after supersession cannot become the current result, even if its kernel could not stop early. Closing a document cancels its owned work; closing a view stops that subscription without closing sibling views.
 
-class InternalRenderAbort extends Error {}
-
-const expectedGeneration = readAbortGeneration();
-
-function checkpoint() {
-  if (readAbortGeneration() !== expectedGeneration) {
-    throw new InternalRenderAbort();
-  }
-}
-
-checkpoint();
-```
-
-Overhead: one read per OC call, about a nanosecond on the SAB-backed path -- noise against calls that take microseconds to milliseconds. This strategy covers the Replicad and OpenCASCADE kernels. Consumers never see `Atomics`, `SharedArrayBuffer`, or the slot layout; those live inside the transport.
-
-### Strategy 2: Async Boundary Abort (All Kernels)
-
-Between `await` points in the pipeline (bundle, execute, compute, tessellate, encode), the worker checks the generation counter:
-
-```typescript
-let renderGeneration = 0;
-
-async function bundle(file: string): Promise<{ code: string }> {
-  return { code: `/* bundled ${file} */` };
-}
-async function execute(code: string): Promise<{ output: unknown }> {
-  return { output: code };
-}
-async function computeGeometry(input: { output: unknown }): Promise<unknown> {
-  return input.output;
-}
-
-async function step(file: string, generation: number): Promise<unknown> {
-  const bundleResult = await bundle(file);
-  if (generation !== renderGeneration) return; // abort checkpoint
-
-  const executeResult = await execute(bundleResult.code);
-  if (generation !== renderGeneration) return; // abort checkpoint
-
-  const geometry = await computeGeometry(executeResult);
-  if (generation !== renderGeneration) return; // abort checkpoint
-  return geometry;
-}
-
-renderGeneration += 1;
-step('main.ts', renderGeneration).then((result) => console.log(result));
-```
-
-For JSCAD, Manifold, and other kernels without a WASM proxy, these boundary checks are the abort mechanism.
-
-### Strategy 3: Generation Counter (Universal Correctness Guarantee)
-
-Even when neither strategy interrupts in time -- one long WASM invocation cannot be unwound mid-call -- the generation counter guarantees correctness: a completed render whose generation no longer matches is silently discarded. Stale geometry never reaches the UI.
-
-## Concurrency Model
-
-A single-threaded worker cannot run two renders in parallel, but there is a window between "abort signalled" and "old render stops" where both exist:
-
-```
-t=0.000  Render A starts (generation=1), enters user main()
-t=0.200  Slider tick -> updateParameters
-           Main thread: transport.reservePreview() bumps abort generation  <- synchronous
-           Main thread: updateParameters notify                            <- queues
-t=0.200  Render A: next OC Proxy call reads generation -> mismatch
-           internal abort throw
-t=0.201  Event loop processes the queued updateParameters
-t=0.201  Render B starts (generation=2)
-t=0.401  Render B completes -> geometry event
-```
-
-Slider tick to geometry: about **200ms** (render B's own duration). Without abort, render A would run to completion first -- for a 3-second render, roughly **3200ms**.
-
-### Overlap is Bounded and Safe
-
-The overlap spans `reservePreview()` to the next proxy check -- typically under a millisecond on the SAB-backed path. During it, render A is still executing synchronously, render B is intended but queued, and there are no data races: the worker is single-threaded and cache mutations are sequential.
-
-### Cache Invalidation During Overlap
-
-Invalidation (`Map.delete()`) is synchronous and monotonically correct:
-
-1. Render A consumed old data before invalidation: the result is stale, and the generation counter discards it.
-2. Render A reads the invalidated cache after the watch event: it re-reads fresh data.
-3. Invalidation never produces partial or corrupt state.
+An operation deadline rejects with an operation-specific timeout error. On a terminable transport, failure to recover within the bounded grace can terminate that host. In-process execution cannot isolate an infinite synchronous loop. See [Configure Operation Timeouts](../guides/render-timeouts).
 
 ## Key Relationships
 
-- **Render loop and worker:** the loop is worker-internal; the main thread never orchestrates scheduling.
-- **Abort and transport:** the abort channel crosses the thread boundary outside MessagePort. SAB-capable transports let the worker observe it mid-WASM; SAB-less transports serialise it as a wire `abort` notification. Either way, the client only calls `reservePreview()` before posting the superseding command.
-- **Dependencies and watch:** kernel `resolve` returns runtime paths; the worker subscribes to them over the filesystem bridge, and watch events use the same namespace.
-- **Debounce and parameters:** the 200ms file debounce is independent of immediate parameter scheduling; the earlier schedule wins when both change.
+- [Worker Model](./worker-model) explains execution isolation and filesystem connections.
+- [Kernel Selection](./kernel-selection) explains source-to-kernel matching.
+- [Client API](../api/client) defines document, view, export, and outcome types.
 
 ## Implications
 
-- **Latency** -- proxy-based abort gives sub-millisecond cancellation for OC-based kernels; slider drags feel live.
-- **Correctness** -- the generation counter is the universal safety net.
-- **Memory** -- one render's geometry is live at a time; superseded geometry is discarded before transfer.
-- **OpenRSCAD limitation** -- OpenRSCAD evaluates a model synchronously with no abort checkpoints. The generation counter preserves correctness, but the current evaluation runs to completion before a newer render begins.
+A successful evaluation does not guarantee every view succeeds. Diagnostics can accompany successful results, so consumers inspect `issues` as well as `success`. Unsupported view and export requests return structured failures instead of requiring a geometry-shaped fallback.
+
+Close subscriptions and documents when their owners disappear, and shut down the client when the application releases the runtime. These lifetimes keep watches and native resources bounded.
 
 ## Further Reading
 
-- [Worker Model](./worker-model) -- worker isolation, the abort channel, and per-kernel abort capabilities
-- [Architecture](./architecture) -- how the render loop fits the layered design
-- [Path Namespaces](./path-namespaces) -- the shared namespace for entries, dependencies, and watch events
-- [Handle Errors](../guides/error-handling) -- `RenderTimeoutError` and `RenderOutcome` supersession
-- [API: Client](../api/client) -- `render`, `updateParameters`, and event subscription
+- [Render Live Geometry](../guides/live-rendering)
+- [Handle Errors](../guides/error-handling)
+- [Protocol API](../api/protocol)

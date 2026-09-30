@@ -5,7 +5,7 @@ docType: how-to
 icon: lucide:package-plus
 ---
 
-Integrate a new CAD engine by implementing the kernel lifecycle with `defineKernel` from `@taucad/runtime/kernel`. The returned value is a callable [`KernelPlugin`](../api/kernels) factory with the executable implementation attached — no wrapper file, no second factory step.
+Integrate a new CAD engine by implementing the kernel lifecycle with `defineKernel` from `@taucad/runtime/kernel`. The returned [`KernelPlugin`](../api/kernels) factory registers the executable implementation.
 
 ## Prerequisites
 
@@ -16,7 +16,7 @@ Integrate a new CAD engine by implementing the kernel lifecycle with `defineKern
 
 ### 1. Implement the kernel definition
 
-`defineKernel` takes one definition with static `views` and `exports` maps. Provide `initialize`, `resolve`, `describe`, and `evaluate`; add `render` when views are declared and `write` when exports are declared. `evaluate` returns an opaque handle and the ordered IDs offered for this result. The first offered view is the default. `render` returns only the selected view's content, and a successful `write` returns a nonempty file tuple:
+Declare static `views` and `exports`. Provide `initialize`, `resolve`, `describe`, and `evaluate`; declared views require `render`, exports require `write`. Evaluation returns a handle and offered IDs, default view first. Render returns selected content; write returns nonempty files:
 
 ```typescript
 import {
@@ -73,7 +73,7 @@ export const myKernel = defineKernel({
 });
 ```
 
-Lifecycle methods receive the `KernelServices` as their second parameter: `filesystem`, `logger`, `signal`, `fileContentCache`, `bundler`, `tracer`, and `execute`. The value `initialize` returns is your context, passed as the third parameter to every later call.
+Lifecycle methods receive `KernelServices` second and initialized context third. The inferred handle flows from `evaluate` into `render`, `write`, and `releaseHandle`.
 
 ### 2. Register and use the kernel
 
@@ -95,22 +95,26 @@ const runtime = defineRuntime({
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
-const result = await client.export('svg', {
-  source: { files: { 'model.myformat': '/* my custom format */' } },
-});
-
-if (result.success) {
-  for (const file of result.data) {
-    console.log(`Custom kernel exported ${file.name}: ${file.bytes.byteLength} bytes`);
+try {
+  const document = client.open({
+    source: { files: { 'model.myformat': '/* my custom format */' } },
+  });
+  const result = await document.export('drawing');
+  if (result.success) {
+    for (const file of result.files) {
+      console.log(`${file.name}: ${file.bytes.byteLength} bytes`);
+    }
   }
+} finally {
+  await client.shutdown();
 }
 ```
 
-The `myformat` extension selects the kernel. The current client bridges to the first offered view and still addresses exports by file extension. Explicit view and export IDs in the client are part of the W3 document-view migration; the kernel authoring contract already uses them. See [Live Rendering](./live-rendering) for UI viewers.
+The `myformat` extension selects the kernel. `document.view('drawing')` projects its SVG independently of export. See [Live Rendering](./live-rendering).
 
 ### 3. Report real dependencies
 
-`resolve` returns every file path that affects the geometry. The framework uses the set for change detection, cache keys, and — in autonomous mode — watch-subscription scoping. Resolve relative import specifiers against the entry with `resolveImportPath`:
+Return dependencies for watches and cache identity, including missing paths needed for recovery. Resolve relative imports with `resolveImportPath`:
 
 ```typescript
 import { resolveImportPath } from '@taucad/runtime/kernel';
@@ -130,7 +134,7 @@ export async function resolve(
 }
 ```
 
-`entryPath` and every returned path share one [runtime-path namespace](../concepts/path-namespaces): canonical root-relative paths inside the supplied filesystem. Do not accept a host project root or clamp traversal yourself — the shared rooted-path boundary rejects noncanonical and escaping paths.
+Entries and dependencies share the canonical, root-relative [runtime-path namespace](../concepts/path-namespaces). The rooted boundary rejects escaping paths.
 
 ### 4. Extract parameters for parametric models
 

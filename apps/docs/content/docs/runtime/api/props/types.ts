@@ -1,12 +1,20 @@
 export type {
+  DescribeInput,
+  DescribeResult,
+  ResolveInput,
+  ResolveOutput,
+  MediaType,
+  JSONSchema7,
+  TranscodeInput,
+  TranscodeResult,
+  TranscoderServices,
   KernelSuccessResult,
   KernelErrorResult,
   KernelIssue,
   KernelStackFrame,
   ErrorLocation,
-  WorkerState,
-  RenderPhase,
   SpanHandle,
+  TelemetryEntry,
   RuntimeSpanTracer,
   RuntimeFileSystemBase,
   KernelFileSystem,
@@ -36,10 +44,6 @@ export type {
   KernelBundler,
   BundleResult,
   BuiltinModule,
-  CreateGeometryResult,
-  Rendering,
-  GetParametersResult,
-  ExportGeometryResult,
   CapabilitiesManifest,
   RuntimeCapabilityRegistration,
   ExportRoute,
@@ -49,3 +53,14 @@ export type {
   RuntimeContentKey,
 } from '@taucad/runtime/types';
 export type { RuntimeFileSystem } from '@taucad/runtime';
+export type {
+  Description,
+  Evaluation,
+  Rendering,
+  ExportResult,
+  ViewOffer,
+  ExportOffer,
+  DocumentStatus,
+  ViewStatus,
+} from '@taucad/runtime/client';
+export type { KnownArtifact } from '@taucad/runtime/client';

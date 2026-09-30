@@ -85,10 +85,6 @@ export type KernelPlugin<
   id: Id;
   /** File extensions this kernel handles (e.g., ['scad'], ['ts', 'js']). '*' is a catch-all. */
   extensions: Extensions;
-  /** Serialisable V2 export declarations keyed by export ID. */
-  exports?: unknown extends Exports
-    ? Readonly<Record<string, Readonly<{ extension: string }>>>
-    : Readonly<{ [Key in keyof Exports]: Readonly<{ extension: string }> }>;
   /** Regex to match against file content for kernel selection */
   detectImport?: RegExp | Readonly<{ source: string; flags: string }>;
   /** Bare-specifier module names this kernel provides for bundler-assisted detection */
@@ -127,7 +123,15 @@ export type KernelPlugin<
   readonly [__views]?: Views;
   /** @internal */
   readonly [__exports]?: Exports;
-};
+} & (unknown extends Exports
+    ? { readonly exports?: Readonly<Record<string, Readonly<{ extension: string }>>> }
+    : {
+        readonly exports: Readonly<{
+          [Key in keyof Exports]: Readonly<{
+            extension: Exports[Key] extends { readonly extension: infer Extension extends string } ? Extension : string;
+          }>;
+        }>;
+      });
 
 /**
  * Registration object for a middleware plugin. Returned by factory functions like `parameterCache()`.

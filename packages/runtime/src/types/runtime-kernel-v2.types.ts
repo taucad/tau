@@ -69,7 +69,7 @@ type InstanceFor<Declaration> = Declaration extends { readonly instances: true }
   : { readonly instance?: never };
 
 /** Operation-scoped services passed to kernel hooks. @public */
-export type KernelServices = Omit<KernelRuntime, 'emitEvent'>;
+export type KernelServices = KernelRuntime;
 /** File whose dependencies are being resolved. @public */
 export type ResolveInput = Readonly<{ entryPath: string }>;
 /** Resolved and unresolved source dependencies. @public */
@@ -484,6 +484,6 @@ export function defineKernelV2<
       },
       () => ({ ...implementation, views, exports }),
     );
-  }) as KernelFactoryV2<Id, Extensions, OptionsSchema, EvaluateSchema, Views, Exports, typeof definition>;
+  }) as unknown as KernelFactoryV2<Id, Extensions, OptionsSchema, EvaluateSchema, Views, Exports, typeof definition>;
   return attachRuntimePluginFactoryOptions(factory, acceptsOptions);
 }

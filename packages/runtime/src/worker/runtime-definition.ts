@@ -8,7 +8,6 @@ import {
   runtimePluginAbiVersionOf,
 } from '#plugins/plugin.js';
 import { runtimePluginAbiVersion } from '#plugins/plugin-runtime-definition.js';
-import type { runtimePluginDefinitionSymbol } from '#plugins/plugin-runtime-definition.js';
 import type {
   AnyPluginInstance,
   ExpandPluginBundlers,
@@ -36,11 +35,30 @@ type RuntimePluginOptions<
 
 type AwaitedRuntimeOptions<Runtime> = Awaited<Runtime>;
 
-type PublicKernelPlugin<Plugin> = Plugin extends AnyKernelPlugin
-  ? typeof runtimePluginDefinitionSymbol extends keyof Plugin
-    ? Omit<Plugin, typeof runtimePluginDefinitionSymbol> & KernelPlugin
-    : Plugin
-  : never;
+type PublicKernelPlugin<Plugin> =
+  Plugin extends KernelPlugin<
+    infer FormatMap,
+    infer RenderOptions,
+    infer Id,
+    infer RenderContent,
+    infer ExportContent,
+    infer Extensions,
+    infer EvaluateSchema,
+    infer Views,
+    infer Exports
+  >
+    ? KernelPlugin<
+        FormatMap,
+        RenderOptions,
+        Id,
+        RenderContent,
+        ExportContent,
+        Extensions,
+        EvaluateSchema,
+        Views,
+        Exports
+      >
+    : never;
 
 type PublicMiddlewarePlugin<Plugin> =
   Plugin extends MiddlewarePlugin<infer Id, infer RenderContent, infer ExportContent, infer ViewContent>

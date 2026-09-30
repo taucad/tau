@@ -174,6 +174,50 @@ const expectQuickResult = async (desktop: DesktopSession, projectRoot: string, p
   );
   expect(result).toMatchObject({ passed: 1, total: 1 });
   expect(result.passes.map((row) => row.requirement)).toEqual(['checks the product Runtime mesh']);
+  expect(result).toMatchObject({
+    runStatus: 'passed',
+    lineageStatus: 'complete',
+    accounting: {
+      discovered: 1,
+      selected: 1,
+      completed: 1,
+      passed: 1,
+      failed: 0,
+      unsupported: 0,
+      inconclusive: 0,
+      skipped: 0,
+      notRun: 0,
+      requestedFiles: ['quick.geospec.ts'],
+      completedFiles: ['quick.geospec.ts'],
+      notRunFiles: [],
+      discoveryComplete: true,
+      cancelled: false,
+      bailed: false,
+    },
+  });
+  expect(result.fullResult?.path).toMatch(/^\.tau\/artifacts\/[\w.-]+\/result\.json$/u);
+  const retainedBytes = await readFile(join(projectRoot, result.fullResult!.path));
+  expect(retainedBytes.byteLength).toBe(result.fullResult!.byteLength);
+  expect(createHash('sha256').update(retainedBytes).digest('hex')).toBe(result.fullResult!.sha256);
+  const retained = testModelOutputSchema.parse(JSON.parse(retainedBytes.toString('utf8')));
+  expect(retained.accounting).toEqual(result.accounting);
+  expect(retained.lineage).toEqual(result.lineage);
+  expect(retained.sourceRevisions).toEqual(result.sourceRevisions);
+  expect(retained.lineage).toHaveLength(1);
+  const { lineage } = retained.lineage![0]!;
+  expect(lineage.loads).toHaveLength(1);
+  const load = lineage.loads[0]!;
+  expect(load).toMatchObject({ status: 'complete', evidence: { loadId: load.loadId, parameters: {} } });
+  expect(load.subject?.subjectHash ?? load.subject?.contentHash).toMatch(/^[\da-f]{64}$/u);
+  expect(lineage.modules[0]?.files['quick.geospec.ts']).toBe(
+    `sha256:${createHash('sha256').update(quickSpec).digest('hex')}`,
+  );
+  const { reports } = retained.passes[0]!;
+  expect(reports).toHaveLength(1);
+  expect(reports![0]).toMatchObject({ status: 'passed', loadId: load.loadId });
+  expect(JSON.parse(Buffer.from(reports![0]!.canonical!.result).toString('utf8')).results).toEqual([
+    reports![0]!.result,
+  ]);
 };
 
 let session: DesktopSession | undefined;

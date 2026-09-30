@@ -1,4 +1,5 @@
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
+import { asKnownArtifact } from '@taucad/runtime';
 import { canonicalCaptureViews, captureFilesToDataUrls as encodeCaptureDataUrls } from '@taucad/agent-tools/capture';
 import type { ExportFile } from '@taucad/types';
 import type { CameraState } from '@taucad/camera';
@@ -10,7 +11,7 @@ import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
-import type { HeadlessImageService } from '#services/headless-image.service.js';
+import type { HeadlessImageJob, HeadlessImageService } from '#services/headless-image.service.js';
 import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
 import {
   buildGltfComponentManifest,
@@ -148,17 +149,28 @@ const recipeSize = (recipe: HeadlessCaptureRecipe, cameraState?: CameraState): r
 
 const captureBackground = '#242424';
 const tauWorld = { up: '+z', forward: '-y', unit: 'meter' } as const;
+type GlbCaptureOptions = Extract<HeadlessImageJob, { sourceFormat: 'glb' }>['exportOptions'];
+type SingleGlbCamera = Extract<GlbCaptureOptions, { mode?: 'single' }>['camera'];
+const copyCameraVector = (vector: readonly [number, number, number]): [number, number, number] => [
+  vector[0],
+  vector[1],
+  vector[2],
+];
 
-const requireSettledGeometry = (snapshot: SnapshotFrom<typeof cadMachine>) => {
+const requireSettledArtifact = (snapshot: SnapshotFrom<typeof cadMachine>) => {
   const { context } = snapshot;
   const failedIssues = selectCadFailureIssues(snapshot);
   if (failedIssues) {
     throw new Error(failedIssues.map((issue) => issue.message).join('; '));
   }
-  if (!context.geometry || !context.entryPath) {
-    throw new Error('The selected CAD view has no settled geometry');
+  if (!context.rendering?.success || context.rendering.transient || !context.entryPath) {
+    throw new Error('The selected CAD view has no committed rendering');
   }
-  return { geometry: context.geometry, entryPath: context.entryPath };
+  const artifact = asKnownArtifact(context.rendering.artifact);
+  if (!artifact) {
+    throw new Error(`Unsupported CAD artifact: ${context.rendering.artifact.mimeType}`);
+  }
+  return { artifact, rendering: context.rendering, entryPath: context.entryPath };
 };
 
 const requireImages = (
@@ -187,23 +199,17 @@ const requireImages = (
 /** Capture from an already-settled CAD snapshot through the shared image service. */
 export const captureSettledCadImages = async (options: CaptureSettledCadImagesOptions): Promise<ExportFile[]> => {
   const { cadSnapshot, cameraState, imageService, presentation, recipe } = options;
-  const { geometry, entryPath } = requireSettledGeometry(cadSnapshot);
-  if (geometry.format === 'webrtc') {
-    throw new Error('Live WebRTC geometry cannot be captured headlessly');
-  }
-  const [width, height] = recipeSize(recipe, geometry.format === 'svg' ? undefined : cameraState);
+  const { artifact, rendering, entryPath } = requireSettledArtifact(cadSnapshot);
+  const [width, height] = recipeSize(recipe, artifact.mimeType === 'image/svg+xml' ? undefined : cameraState);
   const annotated = recipe.purpose !== 'utility';
 
-  if (geometry.format === 'svg') {
-    if (recipe.mode === 'orthographic') {
-      throw new Error('Planar SVG drawings have one canonical view; use a single drawing capture');
-    }
+  if (artifact.mimeType === 'image/svg+xml') {
     const files = await imageService.export({
       kind: 'capture',
-      identity: `capture:${entryPath}:${geometry.hash}:${recipe.purpose}:drawing`,
+      identity: `capture:${entryPath}:${rendering.hash}:${recipe.purpose}:drawing`,
       sourceFormat: 'svg',
       sourcePath: entryPath,
-      content: geometry.content,
+      content: artifact.content,
       format: 'png',
       exportOptions: {
         width,
@@ -222,10 +228,10 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
   const visiblePrimitives =
     presentation && (presentation.hiddenComponentIds.length > 0 || presentation.isolatedComponentIds.length > 0)
       ? filterVisibleGltfPrimitives({
-          primitives: listReachableGltfPrimitiveReferences(geometry.content),
-          manifest: buildGltfComponentManifest(geometry.content, {
+          primitives: listReachableGltfPrimitiveReferences(artifact.content),
+          manifest: buildGltfComponentManifest(artifact.content, {
             sourceFile: entryPath,
-            geometryHash: geometry.hash,
+            geometryHash: rendering.hash,
           }),
           hiddenComponentIds: presentation.hiddenComponentIds,
           isolatedComponentIds: presentation.isolatedComponentIds,
@@ -243,7 +249,7 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
     ...toSectionExportOptions(presentation?.sectionCuts),
     ...(annotated ? { axes: true, scaleBar: true } : {}),
   } as const;
-  let exportOptions;
+  let exportOptions: GlbCaptureOptions;
   if (recipe.mode === 'orthographic') {
     exportOptions = {
       ...common,
@@ -253,8 +259,8 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
         label: annotated ? normalizeImageLabel(view.label) : view.label,
         camera: {
           framing: 'bounds',
-          direction: view.direction,
-          up: view.up,
+          direction: copyCameraVector(view.direction),
+          up: copyCameraVector(view.up),
           margin: 0.1,
           projection: { kind: 'orthographic' },
         },
@@ -262,20 +268,27 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
       quality: 1,
     } as const;
   } else {
-    const camera =
-      recipe.mode === 'isometric'
-        ? ({
-            framing: 'bounds',
-            direction: [0.6123724357, -0.6123724357, 0.5],
-            up: [0, 0, 1],
-            margin: 0.1,
-            projection: { kind: 'perspective', verticalFieldOfView: 45 },
-          } as const)
-        : cameraState
-          ? toNanorasterCamera({
-              cameraState,
-            })
-          : undefined;
+    let camera: SingleGlbCamera | undefined;
+    if (recipe.mode === 'isometric') {
+      camera = {
+        framing: 'bounds',
+        direction: [0.6123724357, -0.6123724357, 0.5],
+        up: [0, 0, 1],
+        margin: 0.1,
+        projection: { kind: 'perspective', verticalFieldOfView: 45 },
+      };
+    } else if (cameraState) {
+      const fixed = toNanorasterCamera({ cameraState });
+      if (fixed.framing !== 'fixed') {
+        throw new Error('The selected viewer camera state is not fixed');
+      }
+      camera = {
+        ...fixed,
+        position: copyCameraVector(fixed.position),
+        target: copyCameraVector(fixed.target),
+        up: copyCameraVector(fixed.up),
+      };
+    }
     if (!camera) {
       throw new Error('The selected viewer camera state is not ready');
     }
@@ -288,17 +301,17 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
     } as const;
   }
 
-  const identity = `capture:${entryPath}:${geometry.hash}:${recipe.purpose}:${recipe.mode}`;
-  const files = await imageService.export({
+  const identity = `capture:${entryPath}:${rendering.hash}:${recipe.purpose}:${recipe.mode}`;
+  const job = {
     kind: 'capture',
     identity,
     sourceFormat: 'glb',
     sourcePath: entryPath,
-    geometryHash: geometry.hash,
-    content: geometry.content,
-    format,
+    geometryHash: rendering.hash,
+    content: artifact.content,
     exportOptions,
-  });
+  } as const;
+  const files = await imageService.export(format === 'webp' ? { ...job, format: 'webp' } : { ...job, format: 'png' });
   return requireImages(files, {
     count: recipe.mode === 'orthographic' ? canonicalCaptureViews.length : 1,
     mimeType: format === 'webp' ? 'image/webp' : 'image/png',

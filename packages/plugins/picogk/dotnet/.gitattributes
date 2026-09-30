@@ -1,0 +1,2 @@
+# Preserve whitespace in upstream patch context.
+PicoGK.hosted.patch whitespace=-blank-at-eol,-blank-at-eof

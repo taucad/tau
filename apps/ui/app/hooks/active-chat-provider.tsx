@@ -391,8 +391,9 @@ export function HomeNewProjectComposerProvider({
 /**
  * Session-backed provider. Acquires the live `ChatSession` for `chatId` in its
  * own project from the app-shell `ChatSessionStore`, then populates the unified
- * composer contract from chat-row + cookie sources. It renders nothing until the
- * acquisition has committed, so consumers below it can call
+ * composer contract from chat-row + cookie sources. Cold starts wait for acquisition;
+ * same-project switches keep the previous session until the destination is prepared, so panes
+ * stay mounted and consumers below it can call
  * {@link useActiveChatSession} freely.
  */
 export function ActiveChatProvider({
@@ -409,8 +410,10 @@ export function ActiveChatProvider({
     return undefined;
   }
   return (
-    <ActiveChatSessionProvider chatId={chatId} session={session}>
-      {children}
+    <ActiveChatSessionProvider chatId={session.chatId} session={session}>
+      <div className='contents' inert={session.chatId !== chatId}>
+        {children}
+      </div>
     </ActiveChatSessionProvider>
   );
 }

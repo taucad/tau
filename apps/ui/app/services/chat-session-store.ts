@@ -33,7 +33,7 @@ import type { Chat } from '@ai-sdk/react';
 import { UIMessageStreamError } from 'ai';
 import type { ChatStatus } from 'ai';
 import { Topic } from '@taucad/events';
-import { createActor, createAsyncLogic } from 'xstate';
+import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
 import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -331,6 +331,7 @@ type InternalSession = ChatSession & {
   watch: Actor<typeof sdkWatch> | undefined;
   watchedRunId: string | undefined;
   materializeVersion: number;
+  transcriptMaterialization: Promise<void> | undefined;
   recoveredRunId: string | undefined;
   blockedPresentationRunId: string | undefined;
   recoveringPresentation: boolean;
@@ -880,7 +881,12 @@ export class ChatSessionStore {
     }
     const projection = this.#projectionContext(chatId);
     if (projection !== undefined && selectCaughtUp(projection)) {
-      await this.#applyProjectedTranscript(session, projection, ++session.materializeVersion);
+      session.transcriptMaterialization = this.#applyProjectedTranscript(
+        session,
+        projection,
+        ++session.materializeVersion,
+      );
+      await session.transcriptMaterialization;
     }
   }
 
@@ -917,6 +923,39 @@ export class ChatSessionStore {
     }
     session.viewRefcount -= 1;
     this.#disposeIfUnreferenced(session);
+  }
+
+  /**
+   * Prepare a warm view handoff using the existing metadata and projected transcript owners.
+   * Cold or incomplete log projections keep their existing loading behavior; a failed read is
+   * also a completed handoff, preserving the existing metadata error and transcript warning behavior.
+   *
+   * @param chatId - An acquired destination chat.
+   * @param signal - Cancels a superseded view without retaining its metadata subscription.
+   */
+  public async preparePresentation(chatId: string, signal: AbortSignal): Promise<void> {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      return;
+    }
+    try {
+      await waitFor(session.persistenceActorRef, (snapshot) => !snapshot.context.isLoadingChat, { signal });
+    } catch (error) {
+      if (!signal.aborted) {
+        console.warn('[ChatSessionStore] handoff metadata could not be prepared', { chatId, error });
+      }
+      return;
+    }
+    // Observe the existing owner, never start a competing materialization/version producer.
+    let pending = session.transcriptMaterialization;
+    while (!signal.aborted && this.#sessions.get(chatId) === session && pending !== undefined) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Follow the task that superseded this materialization, never parallel producers.
+      await pending;
+      if (pending === session.transcriptMaterialization) {
+        return;
+      }
+      pending = session.transcriptMaterialization;
+    }
   }
 
   public get(chatId: string): ChatSession | undefined {
@@ -2159,7 +2198,7 @@ export class ChatSessionStore {
       !session.recoveringPresentation &&
       session.blockedPresentationRunId !== run.runId
     ) {
-      void this.#watchProjectedRun(session, projection, run.runId);
+      session.transcriptMaterialization = this.#watchProjectedRun(session, projection, run.runId);
     }
     if (run !== undefined && present !== 'none' && (present !== 'open' || opensRun(phase) || phase === 'paused')) {
       this.#presentRun(session, { runId: run.runId, phase, reason: selectRunFailure(projection, run.runId) });
@@ -2313,7 +2352,7 @@ export class ChatSessionStore {
       return;
     }
     const version = ++session.materializeVersion;
-    void this.#applyProjectedTranscript(session, projection, version);
+    session.transcriptMaterialization = this.#applyProjectedTranscript(session, projection, version);
   }
 
   async #applyProjectedTranscript(
@@ -2804,6 +2843,7 @@ export class ChatSessionStore {
       watch: undefined,
       watchedRunId: undefined,
       materializeVersion: 0,
+      transcriptMaterialization: undefined,
       recoveredRunId: undefined,
       blockedPresentationRunId: undefined,
       recoveringPresentation: false,

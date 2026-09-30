@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useCallback } from 'react';
 import { mock } from 'vitest-mock-extended';
 import { writeBambuContainer } from '@taucad/slicer/container';
+import { bambuA1MiniManifest } from '@taucad/bambu';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
@@ -220,7 +221,12 @@ const mount = async (
   const frame = within(root).getByTestId('frame');
   resize(frame, size);
   await nextFrames(6);
-  return { frame, scene: within(frame).getByRole('img', { name: `Bambu Lab X1 Carbon printing ${file.name}` }) };
+  return {
+    frame,
+    scene: within(frame).getByRole('img', {
+      name: `${mocks.live?.manifest?.identity.displayName ?? 'Bambu Lab X1 Carbon'} printing ${file.name}`,
+    }),
+  };
 };
 
 const resize = (frame: HTMLElement, [width, height]: readonly [number, number]): void => {
@@ -430,6 +436,23 @@ describe('Printer viewer framing', () => {
     await capture(frame, 'plate-underside-light.png');
     const extent = await measurePrint(scene);
     expect(extent.width, 'the finished print shows through the plate').toBeGreaterThan(0.05);
+  });
+
+  it('draws Mini’s own thin pierced sheet and restricts its plate menu', async () => {
+    mocks.live = { ...idleLive, machineName: 'Mini', manifest: bambuA1MiniManifest };
+    const { frame, scene } = await mount('dark', [1280, 720]);
+    await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
+    await userEvent.click(within(frame).getByRole('button', { name: 'More' }));
+    expect(await screen.findByRole('menuitemradio', { name: 'Textured PEI Plate' })).toBeVisible();
+    expect(screen.getByRole('menuitemradio', { name: 'Smooth PEI Plate' })).toBeVisible();
+    expect(screen.queryByRole('menuitemradio', { name: 'Cool Plate' })).toBeNull();
+    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Textured PEI Plate' }));
+    await nextFrames(60);
+    await capture(frame, 'a1-mini-textured-pei-dark.png');
+    expectFramed(await measurePrint(scene), 0.1);
+    await chooseFromMore(frame, 'menuitemcheckbox', 'Show the whole printer');
+    await capture(frame, 'a1-mini-whole-printer-dark.png');
+    expectFramed(await measurePrint(scene), 0.05);
   });
 
   it('shows the whole printer from the More menu', async () => {

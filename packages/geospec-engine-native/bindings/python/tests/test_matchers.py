@@ -144,7 +144,8 @@ def test_safe_integer_boundary_is_enforced_before_json_rounding():
 
 def test_pytest_fixture_uses_the_same_native_engine(geospec_engine):
     assert "toHaveBoundingBox" in geospec_engine.capabilities
-    assert len(geospec_engine.capabilities) == 31
+    assert "minimumDistance" in geospec_engine.capabilities
+    assert len(geospec_engine.capabilities) == 32
 
 
 @pytest.mark.parametrize("ingest_options", [None, {"name": "assembly.part#0"}])

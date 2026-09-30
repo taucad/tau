@@ -1,47 +1,36 @@
 /* oxlint-disable typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return `any` */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createMockRuntime, createMockInput, createMockCreateGeometryHandler } from '@taucad/runtime-testing';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createMockRuntime } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import type { ExportGeometryHandler, ExportGeometryInput, ExportGeometryResult } from '@taucad/runtime/types';
 import { IngestEntryName } from '@taucad/telemetry';
 import { observabilityMiddleware } from '#runtime/observability/observability.middleware.js';
-import type { FileExtension } from '@taucad/types';
+import { reportToApi } from '#runtime/observability/report-to-api.js';
 
-vi.mock('#runtime/observability/report-to-api.js', () => ({
-  reportToApi: vi.fn(),
-}));
+vi.mock('#runtime/observability/report-to-api.js', () => ({ reportToApi: vi.fn() }));
 
-const getReportToApiMock = async () => {
-  const reportModule = await import('#runtime/observability/report-to-api.js');
-  return vi.mocked(reportModule.reportToApi);
-};
+const reportUrl = 'https://api.test/ingest';
+const evaluateInput = { entryPath: 'main.ts', parameters: {}, options: {} };
+const renderInput = { view: 'model', mimeType: 'model/gltf-binary', options: {} };
+const writeInput = { exportId: 'step', mimeType: 'model/step', extension: 'step', options: {} };
+const evaluateResult = { success: true, data: { views: ['model'] }, issues: [] } as const;
+const renderResult = {
+  success: true,
+  data: { mimeType: 'model/gltf-binary', content: new Uint8Array([1, 2, 3]) },
+  issues: [],
+} as const;
+const writeResult = {
+  success: true,
+  data: [{ name: 'output.step', bytes: new Uint8Array([1]), mimeType: 'model/step' }],
+  issues: [],
+} as const;
+const services = (url = reportUrl) => createMockRuntime({ options: { reportUrl: url } });
 
-const createMockExportInput = (format: FileExtension = 'step'): ExportGeometryInput => ({
-  format,
-  options: {},
-  nativeHandle: {},
-});
-
-const createMockExportHandler = (result?: ExportGeometryResult) =>
-  vi.fn<ExportGeometryHandler>().mockResolvedValue(
-    result ?? {
-      success: true,
-      data: [{ name: 'output.stl', bytes: new Uint8Array([1, 2, 3]), mimeType: 'model/stl' }],
-      issues: [],
-    },
-  );
-
-const reportUrlForMeasurements = 'https://api.test/ingest';
-const resolveObservabilityMiddleware = async () =>
-  resolveRuntimePluginDefinition('middleware', observabilityMiddleware());
+const resolve = async () => resolveRuntimePluginDefinition('middleware', observabilityMiddleware());
 
 describe('observabilityMiddleware', () => {
   let measureSpy: ReturnType<typeof vi.spyOn>;
-  let reportToApiMock: ReturnType<typeof vi.fn>;
-  let observabilityMiddleware: Awaited<ReturnType<typeof resolveObservabilityMiddleware>>;
 
-  beforeEach(async () => {
-    observabilityMiddleware = await resolveObservabilityMiddleware();
+  beforeEach(() => {
     measureSpy = vi.spyOn(performance, 'measure').mockReturnValue({
       name: '',
       entryType: 'measure',
@@ -51,7 +40,6 @@ describe('observabilityMiddleware', () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- PerformanceMeasure interface method
       toJSON: () => ({}),
     } satisfies PerformanceMeasure);
-    reportToApiMock = await getReportToApiMock();
   });
 
   afterEach(() => {
@@ -59,260 +47,142 @@ describe('observabilityMiddleware', () => {
     vi.clearAllMocks();
   });
 
-  describe('wrapCreateGeometry', () => {
-    it('should call handler and return its result on success', async () => {
-      const handler = createMockCreateGeometryHandler();
-      const input = createMockInput();
-      const runtime = createMockRuntime({ options: { reportUrl: '' } });
+  it('passes evaluate, render, and write through unchanged without a reporting URL', async () => {
+    const middleware = await resolve();
+    const runtime = services('');
+    const evaluate = vi.fn(async () => evaluateResult);
+    const render = vi.fn(async () => renderResult);
+    const write = vi.fn(async () => writeResult);
+    expect(await middleware.wrapEvaluate!(evaluateInput, evaluate, runtime)).toBe(evaluateResult);
+    expect(await middleware.wrapRender!(renderInput, render, runtime)).toBe(renderResult);
+    expect(await middleware.wrapWrite!(writeInput, write, runtime)).toBe(writeResult);
+    expect(evaluate).toHaveBeenCalledWith(evaluateInput);
+    expect(render).toHaveBeenCalledWith(renderInput);
+    expect(write).toHaveBeenCalledWith(writeInput);
+    expect(measureSpy).not.toHaveBeenCalled();
+    expect(reportToApi).not.toHaveBeenCalled();
+  });
 
-      const result = await observabilityMiddleware.wrapCreateGeometry!(input, handler, runtime);
-
-      expect(handler).toHaveBeenCalledWith(input);
-      expect(result.success).toBe(true);
-    });
-
-    it('should not call performance.measure when reportUrl is empty', async () => {
-      const handler = createMockCreateGeometryHandler();
-      const input = createMockInput();
-      const runtime = createMockRuntime({ options: { reportUrl: '' } });
-
-      await observabilityMiddleware.wrapCreateGeometry!(input, handler, runtime);
-
-      expect(measureSpy).not.toHaveBeenCalled();
-    });
-
-    it('should emit performance.measure with correct name and success detail on success', async () => {
-      const handler = createMockCreateGeometryHandler();
-      const input = createMockInput();
-      const runtime = createMockRuntime({ options: { reportUrl: reportUrlForMeasurements } });
-
-      await observabilityMiddleware.wrapCreateGeometry!(input, handler, runtime);
-
-      expect(measureSpy).toHaveBeenCalledWith(
-        IngestEntryName.KERNEL_CREATE_GEOMETRY,
-        expect.objectContaining({ detail: { status: 'success' } }),
-      );
-    });
-
-    it('should emit performance.measure with error detail on failure', async () => {
-      const handler = vi.fn().mockRejectedValue(new Error('kernel crash'));
-      const input = createMockInput();
-      const runtime = createMockRuntime({ options: { reportUrl: reportUrlForMeasurements } });
-
-      await expect(observabilityMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toThrow(
-        'kernel crash',
-      );
-
-      expect(measureSpy).toHaveBeenCalledWith(
-        IngestEntryName.KERNEL_CREATE_GEOMETRY,
-        expect.objectContaining({ detail: { status: 'error', error: 'kernel crash' } }),
-      );
-    });
-
-    it('should propagate handler rejection unchanged when reportUrl is empty', async () => {
-      const originalError = new Error('original');
-      const handler = vi.fn().mockRejectedValue(originalError);
-      const input = createMockInput();
-      const runtime = createMockRuntime({ options: { reportUrl: '' } });
-
-      await expect(observabilityMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toBe(originalError);
-
-      expect(runtime.logger.error).not.toHaveBeenCalled();
-    });
-
-    it('should call reportToApi when reportUrl option is set on success', async () => {
-      const handler = createMockCreateGeometryHandler();
-      const input = createMockInput();
-      const runtime = createMockRuntime({ options: { reportUrl: 'https://api.test/ingest' } });
-
-      await observabilityMiddleware.wrapCreateGeometry!(input, handler, runtime);
-
-      expect(reportToApiMock).toHaveBeenCalledWith({
-        reportUrl: 'https://api.test/ingest',
-        name: IngestEntryName.KERNEL_CREATE_GEOMETRY,
+  it('measures evaluation and selected-view rendering as distinct phases', async () => {
+    const middleware = await resolve();
+    const runtime = services();
+    expect(await middleware.wrapEvaluate!(evaluateInput, async () => evaluateResult, runtime)).toBe(evaluateResult);
+    expect(await middleware.wrapRender!(renderInput, async () => renderResult, runtime)).toBe(renderResult);
+    expect(measureSpy).toHaveBeenCalledWith(
+      IngestEntryName.KERNEL_CREATE_GEOMETRY,
+      expect.objectContaining({
+        start: expect.any(Number),
         duration: expect.any(Number),
-        detail: { status: 'success' },
-      });
-    });
-
-    it('should call reportToApi when reportUrl option is set on failure', async () => {
-      const handler = vi.fn().mockRejectedValue(new Error('fail'));
-      const input = createMockInput();
-      const runtime = createMockRuntime({ options: { reportUrl: 'https://api.test/ingest' } });
-
-      await expect(observabilityMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toThrow('fail');
-
-      expect(reportToApiMock).toHaveBeenCalledWith({
-        reportUrl: 'https://api.test/ingest',
-        name: IngestEntryName.KERNEL_CREATE_GEOMETRY,
-        duration: expect.any(Number),
-        detail: { status: 'error' },
-      });
-    });
-
-    it('should not call reportToApi when reportUrl is empty', async () => {
-      const handler = createMockCreateGeometryHandler();
-      const input = createMockInput();
-      const runtime = createMockRuntime({ options: { reportUrl: '' } });
-
-      await observabilityMiddleware.wrapCreateGeometry!(input, handler, runtime);
-
-      expect(reportToApiMock).not.toHaveBeenCalled();
-    });
-
-    it('should log error message on failure when reportUrl is set', async () => {
-      const handler = vi.fn().mockRejectedValue(new Error('bad geometry'));
-      const input = createMockInput();
-      const runtime = createMockRuntime({ options: { reportUrl: reportUrlForMeasurements } });
-
-      await expect(observabilityMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toThrow();
-
-      expect(runtime.logger.error).toHaveBeenCalledWith('Geometry creation failed: bad geometry');
-    });
-
-    it('should measure correct duration (positive elapsed time)', async () => {
-      const handler = createMockCreateGeometryHandler();
-      const input = createMockInput();
-      const runtime = createMockRuntime({ options: { reportUrl: reportUrlForMeasurements } });
-
-      await observabilityMiddleware.wrapCreateGeometry!(input, handler, runtime);
-
-      expect(measureSpy).toHaveBeenCalledWith(
-        IngestEntryName.KERNEL_CREATE_GEOMETRY,
-        expect.objectContaining({
-          duration: expect.any(Number),
-          start: expect.any(Number),
-        }),
-      );
+        detail: { status: 'success', phase: 'evaluate' },
+      }),
+    );
+    expect(measureSpy).toHaveBeenCalledWith(
+      IngestEntryName.KERNEL_CREATE_GEOMETRY,
+      expect.objectContaining({ detail: { status: 'success', phase: 'render', view: 'model' } }),
+    );
+    expect(reportToApi).toHaveBeenCalledWith({
+      reportUrl,
+      name: IngestEntryName.KERNEL_CREATE_GEOMETRY,
+      duration: expect.any(Number),
+      detail: { status: 'success' },
     });
   });
 
-  describe('wrapExportGeometry', () => {
-    it('should call handler and return its result on success', async () => {
-      const handler = createMockExportHandler();
-      const input = createMockExportInput('stl');
-      const runtime = createMockRuntime({ options: { reportUrl: '' } });
-
-      const result = await observabilityMiddleware.wrapExportGeometry!(input, handler, runtime);
-
-      expect(handler).toHaveBeenCalledWith(input);
-      expect(result.success).toBe(true);
+  it('reports the selected export extension and returns the writer result', async () => {
+    const middleware = await resolve();
+    const result = await middleware.wrapWrite!(writeInput, async () => writeResult, services());
+    expect(result).toBe(writeResult);
+    expect(measureSpy).toHaveBeenCalledWith(
+      IngestEntryName.KERNEL_EXPORT_GEOMETRY,
+      expect.objectContaining({ detail: { status: 'success', exportFormat: 'step' } }),
+    );
+    expect(reportToApi).toHaveBeenCalledWith({
+      reportUrl,
+      name: IngestEntryName.KERNEL_EXPORT_GEOMETRY,
+      duration: expect.any(Number),
+      detail: { status: 'success', exportFormat: 'step' },
     });
+  });
 
-    it('should not call performance.measure when reportUrl is empty', async () => {
-      const handler = createMockExportHandler();
-      const input = createMockExportInput('stl');
-      const runtime = createMockRuntime({ options: { reportUrl: '' } });
-
-      await observabilityMiddleware.wrapExportGeometry!(input, handler, runtime);
-
-      expect(measureSpy).not.toHaveBeenCalled();
+  it('records resolved failures without changing their issues or logging an exception', async () => {
+    const middleware = await resolve();
+    const runtime = services();
+    const failure = {
+      success: false,
+      issues: [{ code: 'TEST_FAILURE', message: 'invalid model', severity: 'error', type: 'kernel' }],
+    } as const;
+    expect(await middleware.wrapEvaluate!(evaluateInput, async () => failure, runtime)).toBe(failure);
+    expect(await middleware.wrapRender!(renderInput, async () => failure, runtime)).toBe(failure);
+    expect(await middleware.wrapWrite!(writeInput, async () => failure, runtime)).toBe(failure);
+    expect(failure.issues[0].message).toBe('invalid model');
+    expect(measureSpy).toHaveBeenCalledWith(
+      IngestEntryName.KERNEL_CREATE_GEOMETRY,
+      expect.objectContaining({ detail: { status: 'error', phase: 'evaluate' } }),
+    );
+    expect(measureSpy).toHaveBeenCalledWith(
+      IngestEntryName.KERNEL_CREATE_GEOMETRY,
+      expect.objectContaining({ detail: { status: 'error', phase: 'render', view: 'model' } }),
+    );
+    expect(measureSpy).toHaveBeenCalledWith(
+      IngestEntryName.KERNEL_EXPORT_GEOMETRY,
+      expect.objectContaining({ detail: { status: 'error', exportFormat: 'step' } }),
+    );
+    expect(reportToApi).toHaveBeenCalledWith({
+      reportUrl,
+      name: IngestEntryName.KERNEL_CREATE_GEOMETRY,
+      duration: expect.any(Number),
+      detail: { status: 'error' },
     });
-
-    it('should emit performance.measure with correct name and success detail on success', async () => {
-      const handler = createMockExportHandler();
-      const input = createMockExportInput('step');
-      const runtime = createMockRuntime({ options: { reportUrl: reportUrlForMeasurements } });
-
-      await observabilityMiddleware.wrapExportGeometry!(input, handler, runtime);
-
-      expect(measureSpy).toHaveBeenCalledWith(
-        IngestEntryName.KERNEL_EXPORT_GEOMETRY,
-        expect.objectContaining({ detail: { status: 'success', exportFormat: 'step' } }),
-      );
+    expect(reportToApi).toHaveBeenCalledWith({
+      reportUrl,
+      name: IngestEntryName.KERNEL_EXPORT_GEOMETRY,
+      duration: expect.any(Number),
+      detail: { status: 'error', exportFormat: 'step' },
     });
+    expect(reportToApi).toHaveBeenCalledTimes(3);
+    expect(runtime.logger.error).not.toHaveBeenCalled();
+  });
 
-    it('should emit performance.measure with export format in detail on success', async () => {
-      const handler = createMockExportHandler();
-      const input = createMockExportInput('3mf');
-      const runtime = createMockRuntime({ options: { reportUrl: reportUrlForMeasurements } });
+  it('records and rethrows evaluation, render, and write failures with their phase', async () => {
+    const middleware = await resolve();
+    const runtime = services();
+    const error = new Error('kernel crash');
+    const reject = async () => {
+      throw error;
+    };
+    await expect(middleware.wrapEvaluate!(evaluateInput, reject, runtime)).rejects.toBe(error);
+    await expect(middleware.wrapRender!(renderInput, reject, runtime)).rejects.toBe(error);
+    await expect(middleware.wrapWrite!(writeInput, reject, runtime)).rejects.toBe(error);
+    expect(measureSpy).toHaveBeenCalledWith(
+      IngestEntryName.KERNEL_CREATE_GEOMETRY,
+      expect.objectContaining({ detail: { status: 'error', phase: 'evaluate', error: 'kernel crash' } }),
+    );
+    expect(measureSpy).toHaveBeenCalledWith(
+      IngestEntryName.KERNEL_CREATE_GEOMETRY,
+      expect.objectContaining({ detail: { status: 'error', phase: 'render', view: 'model', error: 'kernel crash' } }),
+    );
+    expect(measureSpy).toHaveBeenCalledWith(
+      IngestEntryName.KERNEL_EXPORT_GEOMETRY,
+      expect.objectContaining({ detail: { status: 'error', exportFormat: 'step', error: 'kernel crash' } }),
+    );
+    expect(runtime.logger.error).toHaveBeenCalledWith('Kernel evaluation failed: kernel crash');
+    expect(runtime.logger.error).toHaveBeenCalledWith('View rendering failed: kernel crash');
+    expect(runtime.logger.error).toHaveBeenCalledWith('Geometry export failed: kernel crash');
+    expect(reportToApi).toHaveBeenCalledTimes(3);
+  });
 
-      await observabilityMiddleware.wrapExportGeometry!(input, handler, runtime);
-
-      expect(measureSpy).toHaveBeenCalledWith(
-        IngestEntryName.KERNEL_EXPORT_GEOMETRY,
-        expect.objectContaining({
-          detail: expect.objectContaining({ exportFormat: '3mf' }),
-        }),
-      );
-    });
-
-    it('should emit performance.measure with correct name on failure (bug fix)', async () => {
-      const handler = vi.fn().mockRejectedValue(new Error('export failed'));
-      const input = createMockExportInput('stl');
-      const runtime = createMockRuntime({ options: { reportUrl: reportUrlForMeasurements } });
-
-      await expect(observabilityMiddleware.wrapExportGeometry!(input, handler, runtime)).rejects.toThrow(
-        'export failed',
-      );
-
-      expect(measureSpy).toHaveBeenCalledWith(
-        IngestEntryName.KERNEL_EXPORT_GEOMETRY,
-        expect.objectContaining({
-          detail: expect.objectContaining({ status: 'error', exportFormat: 'stl' }),
-        }),
-      );
-    });
-
-    it('should call reportToApi when reportUrl is set on success', async () => {
-      const handler = createMockExportHandler();
-      const input = createMockExportInput('step');
-      const runtime = createMockRuntime({ options: { reportUrl: 'https://api.test/ingest' } });
-
-      await observabilityMiddleware.wrapExportGeometry!(input, handler, runtime);
-
-      expect(reportToApiMock).toHaveBeenCalledWith({
-        reportUrl: 'https://api.test/ingest',
-        name: IngestEntryName.KERNEL_EXPORT_GEOMETRY,
-        duration: expect.any(Number),
-        detail: { status: 'success', exportFormat: 'step' },
-      });
-    });
-
-    it('should call reportToApi when reportUrl is set on failure', async () => {
-      const handler = vi.fn().mockRejectedValue(new Error('fail'));
-      const input = createMockExportInput('stl');
-      const runtime = createMockRuntime({ options: { reportUrl: 'https://api.test/ingest' } });
-
-      await expect(observabilityMiddleware.wrapExportGeometry!(input, handler, runtime)).rejects.toThrow();
-
-      expect(reportToApiMock).toHaveBeenCalledWith({
-        reportUrl: 'https://api.test/ingest',
-        name: IngestEntryName.KERNEL_EXPORT_GEOMETRY,
-        duration: expect.any(Number),
-        detail: { status: 'error', exportFormat: 'stl' },
-      });
-    });
-
-    it('should not call reportToApi when reportUrl is empty', async () => {
-      const handler = createMockExportHandler();
-      const input = createMockExportInput('stl');
-      const runtime = createMockRuntime({ options: { reportUrl: '' } });
-
-      await observabilityMiddleware.wrapExportGeometry!(input, handler, runtime);
-
-      expect(reportToApiMock).not.toHaveBeenCalled();
-    });
-
-    it('should propagate handler rejection unchanged when reportUrl is empty', async () => {
-      const originalError = new Error('export rejected');
-      const handler = vi.fn().mockRejectedValue(originalError);
-      const input = createMockExportInput('stl');
-      const runtime = createMockRuntime({ options: { reportUrl: '' } });
-
-      await expect(observabilityMiddleware.wrapExportGeometry!(input, handler, runtime)).rejects.toBe(originalError);
-
-      expect(runtime.logger.error).not.toHaveBeenCalled();
-    });
-
-    it('should log error message on failure when reportUrl is set', async () => {
-      const handler = vi.fn().mockRejectedValue(new Error('export crash'));
-      const input = createMockExportInput('stl');
-      const runtime = createMockRuntime({ options: { reportUrl: reportUrlForMeasurements } });
-
-      await expect(observabilityMiddleware.wrapExportGeometry!(input, handler, runtime)).rejects.toThrow();
-
-      expect(runtime.logger.error).toHaveBeenCalledWith('Geometry export failed: export crash');
-    });
+  it('propagates rejection without telemetry or extra logging when reporting is disabled', async () => {
+    const middleware = await resolve();
+    const runtime = services('');
+    const error = new Error('original');
+    const reject = async () => {
+      throw error;
+    };
+    await expect(middleware.wrapEvaluate!(evaluateInput, reject, runtime)).rejects.toBe(error);
+    await expect(middleware.wrapRender!(renderInput, reject, runtime)).rejects.toBe(error);
+    await expect(middleware.wrapWrite!(writeInput, reject, runtime)).rejects.toBe(error);
+    expect(runtime.logger.error).not.toHaveBeenCalled();
+    expect(measureSpy).not.toHaveBeenCalled();
+    expect(reportToApi).not.toHaveBeenCalled();
   });
 });

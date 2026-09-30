@@ -32,7 +32,8 @@ export const paneviewStyleOverrides = cn(
 /** Paneview layout overrides for headers visually attached to bordered panel bodies. */
 export const paneviewAttachedSurfaceStyleOverrides = cn(
   paneviewStyleOverrides,
-  '[&_.dv-pane-body]:overflow-y-hidden! [&_.dv-pane-body]:px-2! [&_.dv-pane-body]:pb-2!',
+  'pb-2',
+  '[&_.dv-pane-body]:overflow-y-hidden! [&_.dv-pane-body]:px-2!',
   '[&_[data-slot=paneview-header]]:mt-2! [&_[data-slot=paneview-header]]:mb-0!',
   '[&_[data-slot=paneview-header][data-state=open]]:rounded-b-none!',
   '[&_[data-slot=paneview-header][data-state=open]]:border-b-0!',

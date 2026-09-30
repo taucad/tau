@@ -160,8 +160,8 @@ const serializableReport = (report: GeoSpecCanonicalClaimReport) => ({
   status: report.status,
 });
 
-describe('native authoring helper', () => {
-  it('rejects an authored native assertion in legacy VM mode', async () => {
+describe('canonical authoring admission', () => {
+  it('rejects canonical loading without a compiled host', async () => {
     const result = await runGeoSpecModule({ filesystem, entryPath: legacyGuardEntryPath });
     expect(result.success).toBe(true);
     if (!result.success) {
@@ -171,7 +171,7 @@ describe('native authoring helper', () => {
     expect(result.tests).toHaveLength(1);
     expect(result.tests[0]?.status).toBe('failed');
     expect(result.tests[0]?.diagnostics).toEqual([
-      expect.objectContaining({ message: 'Native expectGeo requires a collector configured with nativeAssertions.' }),
+      expect.objectContaining({ message: 'No GeoSpec model loader is active for this runner.' }),
     ]);
   });
 });
@@ -192,6 +192,7 @@ for (const route of routes) {
 
       const inner = new native.Engine();
       const releases: unknown[] = [];
+      const admittedSubjectHashes: string[] = [];
       const timeline: string[] = [];
       const ingests: Array<{
         request: {
@@ -211,7 +212,10 @@ for (const route of routes) {
             primaryByteLength: primary.byteLength,
             resourceByteLengths: resources.map((resource) => resource.byteLength),
           });
-          return inner.ingestSubject(request, primary, resources);
+          const response = inner.ingestSubject(request, primary, resources);
+          const admitted = JSON.parse(decoder.decode(response)) as { result: { subject: { subjectHash: string } } };
+          admittedSubjectHashes.push(admitted.result.subject.subjectHash);
+          return response;
         },
         subjectHandle: (request) => inner.subjectHandle(request),
         releaseSubject(request) {
@@ -272,7 +276,9 @@ for (const route of routes) {
 
       try {
         const result = await runner.run({ files: [entryPath] });
-        expect(result.success).toBe(true);
+        // This controlled Runtime exports pinned bytes without compiling a source graph.
+        // Claims can pass, but that fixture must not qualify coherent source execution.
+        expect(result.success).toBe(false);
         expect([result.passed, result.failed, result.selectedTests]).toEqual([3, 0, 3]);
         expect(result.files[0]?.result.success).toBe(true);
         expect(releases).toHaveLength(2);
@@ -316,6 +322,10 @@ for (const route of routes) {
             resourceByteLengths: [],
           },
         ]);
+        expect(admittedSubjectHashes).toHaveLength(4);
+        expect(admittedSubjectHashes[2]).toBe(admittedSubjectHashes[0]);
+        expect(admittedSubjectHashes[3]).toBe(admittedSubjectHashes[0]);
+        expect(admittedSubjectHashes[1]).not.toBe(admittedSubjectHashes[0]);
         expect(runtimeCalls).toEqual([
           {
             format: 'glb',
@@ -332,6 +342,8 @@ for (const route of routes) {
         if (fileResult?.success !== true) {
           throw new Error('Native model host did not return test results.');
         }
+        expect(fileResult.passed).toBe(false);
+        expect(fileResult.lineage?.status).toBe('unavailable');
         const assertions = fileResult.tests.flatMap((test) => test.assertions);
         expect(assertions).toHaveLength(7);
 
@@ -350,7 +362,7 @@ for (const route of routes) {
         });
         try {
           for (const assertion of assertions) {
-            const report = assertion.nativeReport;
+            const { report } = assertion;
             if (report === undefined) {
               throw new Error('Native model assertion omitted its canonical report.');
             }
@@ -395,7 +407,7 @@ for (const route of routes) {
                 runtimeCalls,
                 releases: releases.length,
                 tests: fileResult.tests,
-                reports: assertions.map((assertion) => serializableReport(assertion.nativeReport!)),
+                reports: assertions.map((assertion) => serializableReport(assertion.report!)),
               },
               null,
               2,

@@ -97,25 +97,22 @@ describe('createChatToolRegistry listing', () => {
   it('offers arrange_workbench with only a filesystem', () => {
     expect(listOf()).toContain('arrange_workbench');
   });
-  it.each([undefined, 'legacy', 'native'] as const)(
-    'should advertise the selected %s authoring API before any tool invocation',
-    (geospecAuthoringMode) => {
-      const runTests = vi.fn();
-      const definitions = build({ geospec: { runTests }, geospecAuthoringMode }).list();
-      const description = definitions.find((tool) => tool.name === 'test_model')?.description;
-      const native = geospecAuthoringMode === 'native';
-      expect(description).toContain(native ? 'Selected GeoSpec API: native' : 'Selected GeoSpec API: legacy');
-      expect(description).toContain(native ? 'expectNativeGeo' : 'expectGeo');
-      expect(description).toContain(native ? 'loadNativeModel' : 'loadModel');
-      expect(description).toContain(native ? "'geospec/runner/native'" : "'geospec/model'");
-      expect(description).not.toContain(native ? 'expectGeo' : 'expectNativeGeo');
-      expect(description).not.toContain(native ? 'loadModel' : 'loadNativeModel');
-      for (const definition of definitions.filter((tool) => tool.name !== 'test_model')) {
-        expect(definition.description).toBe(toolDescriptions[definition.name as keyof typeof toolDescriptions]);
-      }
-      expect(runTests).not.toHaveBeenCalled();
-    },
-  );
+  it('should advertise only the canonical authoring API before any tool invocation', () => {
+    const runTests = vi.fn();
+    const definitions = build({ geospec: { runTests } }).list();
+    const description = definitions.find((tool) => tool.name === 'test_model')?.description;
+    expect(description).toContain('Selected GeoSpec API: canonical');
+    expect(description).toContain('expectGeo');
+    expect(description).toContain('loadModel');
+    expect(description).toContain("'geospec/model'");
+    expect(description).not.toContain('expectNativeGeo');
+    expect(description).not.toContain('loadNativeModel');
+    expect(description).not.toContain('legacy');
+    for (const definition of definitions.filter((tool) => tool.name !== 'test_model')) {
+      expect(definition.description).toBe(toolDescriptions[definition.name as keyof typeof toolDescriptions]);
+    }
+    expect(runTests).not.toHaveBeenCalled();
+  });
 
   it.each([
     {

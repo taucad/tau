@@ -79,7 +79,6 @@ export type AgentHostGatewayState = {
 type Session = {
   geospecFault?: TargetDiagnostics['geospecFault'];
   geospecWasm?: Promise<TargetDiagnostics['geospecWasm']>;
-  geospecResponseCleanup?: () => void;
   readonly agentHostApiRequests: string[];
   readonly agentHostGatewayRequests: unknown[];
   readonly consoleMessages: Array<{
@@ -211,48 +210,6 @@ const pageFor = (session: Session, surface: TargetSurface = 'primary'): TargetPa
 };
 
 const observePage = (session: Session, page: TargetPage): void => {
-  if (session.geospecResponseCleanup === undefined) {
-    const listener = (response: Awaited<ReturnType<TargetPage['waitForResponse']>>) => {
-      if (
-        session.geospecWasm !== undefined ||
-        response.headers()['x-tau-geospec-fault'] === 'corrupt' ||
-        !/\/geospec_engine_native(?:-[\w-]+)?\.wasm$/u.test(new URL(response.url()).pathname)
-      ) {
-        return;
-      }
-      session.geospecWasm = (async () => {
-        try {
-          const bytes = await response.body();
-          const sourceBytes = await readFile(
-            resolve(
-              import.meta.dirname,
-              '../../../../packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.wasm',
-            ),
-          );
-          return {
-            url: response.url(),
-            status: response.status(),
-            byteLength: bytes.byteLength,
-            sha256: createHash('sha256').update(bytes).digest('hex'),
-            sourceSha256: createHash('sha256').update(sourceBytes).digest('hex'),
-            sourceByteLength: sourceBytes.byteLength,
-            expectedSha256: process.env['TAU_E2E_GEOSPEC_WASM_SHA256'],
-            expectedByteLength:
-              process.env['TAU_E2E_GEOSPEC_WASM_BYTES'] === undefined
-                ? undefined
-                : Number(process.env['TAU_E2E_GEOSPEC_WASM_BYTES']),
-          };
-        } catch (error) {
-          session.pageErrors.push(
-            `GeoSpec WASM response capture failed: ${error instanceof Error ? error.message : String(error)}`,
-          );
-          return undefined;
-        }
-      })();
-    };
-    session.context.on('response', listener);
-    session.geospecResponseCleanup = () => session.context.off('response', listener);
-  }
   page.on('console', (message) =>
     session.consoleMessages.push({
       text: message.text(),
@@ -263,7 +220,6 @@ const observePage = (session: Session, page: TargetPage): void => {
 };
 
 const disposeSession = async (session: Session): Promise<void> => {
-  session.geospecResponseCleanup?.();
   const errors: unknown[] = [];
   for (const gate of session.agentHostGatewayGates.splice(0)) {
     gate.release();
@@ -679,13 +635,9 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
 > = async (commandContext, script = browserHostScript, options = {}) => {
   const session = sessionFor(commandContext);
   let geospecFaultActive = options.geospecFault !== undefined;
-  if (options.geospecFault !== undefined) {
-    const kind = options.geospecFault;
-    await session.context.route(/\/geospec_engine_native(?:-[\w-]+)?\.wasm(?:\?.*)?$/u, async (route) => {
-      if (!geospecFaultActive) {
-        await route.continue();
-        return;
-      }
+  await session.context.route(/\/geospec_engine_native(?:-[\w-]+)?\.wasm(?:\?.*)?$/u, async (route) => {
+    if (geospecFaultActive && options.geospecFault !== undefined) {
+      const kind = options.geospecFault;
       session.geospecFault = {
         kind,
         url: session.geospecFault?.url ?? route.request().url(),
@@ -700,8 +652,53 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
           body: Buffer.from([0, 1, 2, 3]),
         });
       }
-    });
-  }
+      return;
+    }
+    if (session.geospecWasm !== undefined) {
+      await route.continue();
+      return;
+    }
+    // Capture and forward this intercepted request once, not a second asset fetch.
+    // APIResponse.body is decoded; inspector Response.body can evict this large asset.
+    session.geospecWasm = (async () => {
+      try {
+        const response = await route.fetch();
+        const bytes = await response.body();
+        const headers = response.headers();
+        // The decoded body must not advertise its old compressed framing.
+        delete headers['content-encoding'];
+        delete headers['transfer-encoding'];
+        headers['content-length'] = String(bytes.byteLength);
+        await route.fulfill({ status: response.status(), headers, body: bytes });
+        const sourceBytes = await readFile(
+          resolve(
+            import.meta.dirname,
+            '../../../../packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.wasm',
+          ),
+        );
+        return {
+          url: response.url(),
+          status: response.status(),
+          byteLength: bytes.byteLength,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+          sourceSha256: createHash('sha256').update(sourceBytes).digest('hex'),
+          sourceByteLength: sourceBytes.byteLength,
+          expectedSha256: process.env['TAU_E2E_GEOSPEC_WASM_SHA256'],
+          expectedByteLength:
+            process.env['TAU_E2E_GEOSPEC_WASM_BYTES'] === undefined
+              ? undefined
+              : Number(process.env['TAU_E2E_GEOSPEC_WASM_BYTES']),
+        };
+      } catch (error) {
+        session.pageErrors.push(
+          `GeoSpec WASM response capture failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        await route.abort('failed').catch(() => undefined);
+        return undefined;
+      }
+    })();
+    await session.geospecWasm;
+  });
   session.agentHostGatewayRequests.length = 0;
   session.agentHostApiRequests.length = 0;
   for (const gate of session.agentHostGatewayGates.splice(0)) {

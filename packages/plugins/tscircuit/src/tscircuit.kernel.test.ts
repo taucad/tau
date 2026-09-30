@@ -5,9 +5,12 @@ import { createNodeIo } from '@taucad/geometry-core';
 import { esbuildBundler } from '@taucad/esbuild';
 import { middleware } from '@taucad/middleware';
 import { asKnownArtifact, defineRuntime } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime/client';
 import type { Rendering } from '@taucad/runtime/client';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { isRecordObject } from '@taucad/runtime/kernel';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import {
   createMockKernelRuntime,
   createTestRuntimeClient,
@@ -75,7 +78,9 @@ const documents = new Set<ReturnType<TestClient['open']>>();
 const createClient = (files: Record<string, string>) => {
   const client = createTestRuntimeClient({ runtime: createRuntime(), files });
   const path = Object.keys(files)[0];
-  if (!path) throw new Error('Test fixture has no source file.');
+  if (!path) {
+    throw new Error('Test fixture has no source file.');
+  }
   const document = client.open({ source: { path }, watch: false });
   clients.add(client);
   documents.add(document);
@@ -146,9 +151,6 @@ const readSettledCircuitJson = async (session: TestSession): Promise<CircuitElem
     throw new Error(result.issues.map((issue) => issue.message).join('; '));
   }
   const file = result.files[0];
-  if (!file) {
-    throw new TypeError('Circuit JSON export returned no file.');
-  }
   const parsed: unknown = JSON.parse(new TextDecoder().decode(file.bytes));
   if (!isCircuitElementArray(parsed)) {
     throw new TypeError('Circuit JSON export is not an element array.');
@@ -210,7 +212,9 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
-  for (const document of documents) document.close();
+  for (const document of documents) {
+    document.close();
+  }
   documents.clear();
   await Promise.all([...clients].map(async (client) => client.shutdown()));
   clients.clear();
@@ -841,6 +845,71 @@ describe('TscircuitKernel', () => {
       expect(result.success).toBe(false);
     });
   });
+
+  it('reuses one real build across board, schematic, PCB, board and exports without middleware or compute', async () => {
+    const { RootCircuit: rootCircuit } = await import('#engine/core.js');
+    const nativeBuild = vi.spyOn(rootCircuit.prototype, 'renderUntilSettled');
+    const runtime = defineRuntime({ kernels: [tscircuitKernel()], bundlers: [esbuildBundler()] });
+    const client = createRuntimeClient({
+      transport: inProcessTransport({
+        runtime,
+        fileSystem: fromMemoryFs({ 'main.tsx': fixtureBoard }),
+        compute: { mode: 'off' },
+      }),
+    });
+    const document = client.open({ source: { path: 'main.tsx' }, watch: false });
+    try {
+      const evaluated = await document.evaluation();
+      expect(evaluated.superseded).toBe(false);
+      if (evaluated.superseded || !evaluated.evaluation.success) {
+        throw new Error('The fixture board did not evaluate');
+      }
+      expect(evaluated.evaluation.views.map(({ id }) => id)).toEqual(['board', 'schematic', 'pcb']);
+      expect(evaluated.evaluation.sourceRevision).toBeDefined();
+
+      const durations: Record<string, number> = {};
+      const project = async (viewId: 'board' | 'schematic' | 'pcb', label: string = viewId) => {
+        const view = document.view(viewId);
+        const start = performance.now();
+        const outcome = await view.rendering();
+        durations[label] = performance.now() - start;
+        view.close();
+        if (outcome.superseded || !outcome.rendering.success) {
+          throw new Error(`${label} did not render`);
+        }
+        expect(outcome.rendering.evaluationId).toBe(evaluated.evaluation.id);
+        expect(outcome.rendering.sourceRevision).toEqual(evaluated.evaluation.sourceRevision);
+        return outcome.rendering;
+      };
+      const firstBoard = await project('board', 'board first');
+      validateGlbData(expectGlb(firstBoard));
+      for (const id of ['schematic', 'pcb'] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- these are ordered view switches on one document.
+        const rendering = await project(id);
+        const artifact = asKnownArtifact(rendering.artifact);
+        expect(artifact?.mimeType).toBe('image/svg+xml');
+        if (artifact?.mimeType !== 'image/svg+xml') {
+          throw new Error(`${id} returned no SVG`);
+        }
+        expect(artifact.content).toContain('<svg');
+      }
+      const lastBoard = await project('board', 'board return');
+      expectGlb(lastBoard);
+      expect(lastBoard.hash).toBe(firstBoard.hash);
+      const exported = await document.export('circuit');
+      expect(exported.success).toBe(true);
+      if (!exported.success) {
+        throw new Error('Circuit export failed');
+      }
+      expect(exported.evaluationId).toBe(evaluated.evaluation.id);
+      expect(exported.sourceRevision).toEqual(evaluated.evaluation.sourceRevision);
+      expect(nativeBuild).toHaveBeenCalledTimes(1);
+      console.info('[W4 real view latency, ms]', durations);
+    } finally {
+      document.close();
+      await client.shutdown();
+    }
+  }, 30_000);
 
   describe('native handle snapshots', () => {
     it('should round-trip circuit JSON as UTF-8 JSON bytes', async () => {

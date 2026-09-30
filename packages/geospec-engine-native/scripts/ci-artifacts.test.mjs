@@ -831,12 +831,16 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     }
     let priorArchives = renewedDelivery.archives;
     for (const [index, path] of sourceOnlyPaths.entries()) {
+      const previousCacheKey = deliveryCacheKey(producer);
       put(join(producer, path), `second source-only edit ${path}`);
+      const currentCacheKey = deliveryCacheKey(producer);
+      assert.notEqual(currentCacheKey, previousCacheKey, `source-only edit ${path} invalidates the Nx cache key`);
       assert.deepEqual(verifyArtifacts(producer).artifacts, inventory.artifacts);
       assert.throws(() => verifyDelivery(producer), /source kit differs/);
       process.env['GITHUB_RUN_ID'] = 'assembly-C';
       process.env['GITHUB_RUN_ATTEMPT'] = '3';
       const second = withProducerMarker(producer, () => ensureDelivery(producer), { pgid: process.pid });
+      assert.equal(deliveryCacheKey(producer), currentCacheKey, `assembly retains the Nx cache key after ${path}`);
       assert.deepEqual(second.artifacts, inventory.artifacts);
       assert.deepEqual(
         second.producerSource,
@@ -853,6 +857,8 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
         `all three archives renew after source-only edit ${path}`,
       );
       priorArchives = archives;
+      assert.deepEqual(ensureDelivery(producer), second, `warm delivery reuses the selected trio after ${path}`);
+      assert.equal(deliveryCacheKey(producer), currentCacheKey, `warm reuse retains the Nx cache key after ${path}`);
       assert.deepEqual(targets, [...builtTargets, ...Array.from({ length: index + 2 }, () => 'assemble-package')]);
     }
     for (const [path, value] of [

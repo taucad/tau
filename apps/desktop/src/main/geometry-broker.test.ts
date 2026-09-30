@@ -1,7 +1,14 @@
 import { spawn } from 'node:child_process';
+import { MessageChannel } from 'node:worker_threads';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { HostGeoSpecRunner } from '@taucad/host/agent-tools';
+import type { GeoSpecRunnerEvent, GeoSpecRunnerResult } from 'geospec/runner/worker';
 import type { GeometryBrokerOptions } from '#main/geometry-broker.js';
 import { createGeometryBroker } from '#main/geometry-broker.js';
+import { createGeometryHost } from '#tau/geometry-host.impl.js';
+import { createGeometryRunnerClient } from '#tau/geometry-runner-client.js';
+import type { UtilityPort } from '#tau/services-host.impl.js';
 
 type FakePort = {
   readonly posted: unknown[];
@@ -19,8 +26,14 @@ const fakePort = (): FakePort => {
   const posted: unknown[] = [];
   return {
     posted,
-    postMessage: vi.fn((value: unknown) => { posted.push(value); }),
-    close: vi.fn(() => { for (const listener of closes) { listener(); } }),
+    postMessage: vi.fn((value: unknown) => {
+      posted.push(value);
+    }),
+    close: vi.fn(() => {
+      for (const listener of closes) {
+        listener();
+      }
+    }),
     on(event, listener) {
       if (event === 'message') {
         messages.push(listener);
@@ -28,9 +41,19 @@ const fakePort = (): FakePort => {
         closes.push(listener);
       }
     },
-    send(value) { for (const listener of messages) { listener({ data: value }); } },
-    disconnect() { for (const listener of closes) { listener(); } },
-    start() { /* Electron starts the transferred port; fake delivers synchronously. */ },
+    send(value) {
+      for (const listener of messages) {
+        listener({ data: value });
+      }
+    },
+    disconnect() {
+      for (const listener of closes) {
+        listener();
+      }
+    },
+    start() {
+      /* Electron starts the transferred port; fake delivers synchronously. */
+    },
   };
 };
 
@@ -51,7 +74,9 @@ const fakeUtility = (): FakeUtility => {
   return {
     posted,
     kill: vi.fn(),
-    postMessage(value) { posted.push(value); },
+    postMessage(value) {
+      posted.push(value);
+    },
     on(event, listener) {
       if (event === 'message') {
         messages.push(listener);
@@ -59,9 +84,19 @@ const fakeUtility = (): FakeUtility => {
         exits.push(listener);
       }
     },
-    once(_event, listener) { exits.push(listener); },
-    message(value) { for (const listener of messages) { listener(value); } },
-    exit() { for (const listener of exits) { listener(); } },
+    once(_event, listener) {
+      exits.push(listener);
+    },
+    message(value) {
+      for (const listener of messages) {
+        listener(value);
+      }
+    },
+    exit() {
+      for (const listener of exits) {
+        listener();
+      }
+    },
   };
 };
 
@@ -75,10 +110,18 @@ const validMeasurementResult = (id: number) => ({
   result: {
     status: 'complete',
     fact: {
-      source: 'ap242', assurance: 'exact-brep', unit: 'mm', coordinateSystem: 'z-up',
-      subjectHash: 'sha256:fixture', algorithmProfile: 'geospec-minimum-distance-v1',
-      occurrences: ['root.part-a', 'root.part-b'], distance: 2,
-      points: [[0, 0, 0], [2, 0, 0]],
+      source: 'ap242',
+      assurance: 'exact-brep',
+      unit: 'mm',
+      coordinateSystem: 'z-up',
+      subjectHash: 'sha256:fixture',
+      algorithmProfile: 'geospec-minimum-distance-v1',
+      occurrences: ['root.part-a', 'root.part-b'],
+      distance: 2,
+      points: [
+        [0, 0, 0],
+        [2, 0, 0],
+      ],
     },
   },
 });
@@ -108,20 +151,158 @@ const harness = (sampleResidentBytes?: GeometryBrokerOptions['sampleResidentByte
       return lease;
     },
     sampleResidentBytes: sampleResidentBytes ?? (() => 0),
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Electron ports and utilities cannot be constructed in a Node unit test; the fake implements only broker-used methods.
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Electron ports and utilities cannot be constructed in a Node unit test; the fake implements only broker-used methods.
   } as unknown as GeometryBrokerOptions;
   const broker = createGeometryBroker(options);
   return { broker, channels, utilities, leases, fork };
 };
 
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('geometry broker', () => {
+  it('delivers a multi-test report above the progress limit through host, broker and actual client port once', async () => {
+    const { broker, channels, utilities, leases } = harness();
+    broker.connectSuite({
+      root: '/project',
+      context: { projectRoot: '/project' },
+      engine: 'native',
+      stillAuthorized: () => true,
+    });
+    const { port1, port2 } = new MessageChannel();
+    const client = createGeometryRunnerClient(port1);
+    const result: GeoSpecRunnerResult = {
+      success: false,
+      passed: 0,
+      failed: 2,
+      selectedTests: 2,
+      files: [
+        {
+          file: 'model.test.ts',
+          durationMs: 12,
+          result: {
+            success: true,
+            passed: false,
+            tests: ['first', 'second'].map((name) => ({
+              suite: ['volume control'],
+              name,
+              status: 'failed',
+              diagnostics: [{ code: 'GEOSPEC_CONTROL', severity: 'error', message: 'x'.repeat(40_000) }],
+              assertions: [
+                {
+                  kind: 'watertight',
+                  subject: { subjectHash: 'fixture' },
+                  expected: true,
+                  passed: false,
+                  report: {
+                    claimId: name,
+                    status: 'failed',
+                    polarity: 'positive',
+                    claim: { claimId: name },
+                    result: { claimId: name, status: 'failed' },
+                    diagnostics: [],
+                    canonicalPlan: new Uint8Array([123, 125]),
+                    canonicalClaim: new Uint8Array([123, 125]),
+                    canonicalResult: new Uint8Array([123, 125]),
+                  },
+                },
+              ],
+            })),
+            bundle: { success: true, code: '', issues: [], dependencies: ['model.test.ts'], unresolvedPaths: [] },
+          },
+        },
+      ],
+    };
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeGreaterThan(64 * 1024);
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(8 * 1024 * 1024);
+    const fileComplete = vi.fn();
+    const runComplete = vi.fn();
+    client.on('file-complete', fileComplete);
+    client.on('run-complete', runComplete);
+    channels[0]!.broker.postMessage.mockImplementation((frame: unknown) => {
+      port2.postMessage(frame);
+    });
+    const runner = mock<HostGeoSpecRunner>();
+    const observers = new Set<(event: GeoSpecRunnerEvent) => void>();
+    runner.on.mockImplementation((type, listener) => {
+      const observe = (event: GeoSpecRunnerEvent): void => {
+        if (event.type === type) {
+          listener(event);
+        }
+      };
+      observers.add(observe);
+      return () => {
+        observers.delete(observe);
+      };
+    });
+    runner.sourceRevisions = () => [{ entry: 'main.ts', files: { 'main.ts': 'missing' } }];
+    runner.run.mockImplementation(async () => {
+      for (const event of [
+        { type: 'run-start', files: ['model.test.ts'] },
+        { type: 'file-start', file: 'model.test.ts' },
+        { type: 'file-complete', ...result.files[0]! },
+        { type: 'run-complete', result },
+      ] satisfies GeoSpecRunnerEvent[]) {
+        for (const observer of observers) {
+          observer(event);
+        }
+      }
+      return result;
+    });
+    port2.once('message', (input: unknown) => {
+      channels[0]!.broker.send(input);
+      const host = createGeometryHost({
+        post: (frame) => {
+          utilities[0]!.message(frame);
+        },
+        createRunner: async () => runner,
+        measure: vi.fn(),
+        performance: vi.fn(),
+      });
+      host.handle({
+        data: {
+          type: 'geometry-run',
+          generation: 1,
+          requestId: 1,
+          kind: 'suite',
+          root: '/project',
+          engine: 'native',
+          input,
+          runtimeConfig: { tauApiUrl: 'http://localhost', tauWebSocketUrl: 'ws://localhost' },
+        },
+        ports: [mock<UtilityPort>()],
+      });
+    });
+    try {
+      await expect(client.run({ files: ['model.test.ts'] })).resolves.toEqual(result);
+      expect(fileComplete).toHaveBeenCalledExactlyOnceWith({ type: 'file-complete', ...result.files[0]! });
+      expect(runComplete).toHaveBeenCalledExactlyOnceWith({ type: 'run-complete', result });
+      expect(client.sourceRevisions?.()).toEqual(runner.sourceRevisions());
+      expect(runner.abort).not.toHaveBeenCalled();
+      expect(runner.close).toHaveBeenCalledOnce();
+      expect(leases[0]!.dispose).toHaveBeenCalledOnce();
+      expect(utilities[0]!.kill).not.toHaveBeenCalled();
+      expect(observers.size).toBe(0);
+    } finally {
+      await client.close();
+      port2.close();
+      const disposed = broker.dispose();
+      utilities[0]?.exit();
+      await disposed;
+    }
+  });
+
   it('refuses malformed or oversized input before process allocation', () => {
     const { broker, channels, fork } = harness();
     broker.connectMeasurement();
-    channels[0]!.broker.send({ ...validMeasurement(1), source: { ...validMeasurement(1).source, bytes: new Uint8Array(32 * 1024 * 1024 + 1) } });
-    expect(channels[0]!.broker.posted).toMatchObject([{ id: 1, result: { status: 'interrupted', code: 'engine-error' } }]);
+    channels[0]!.broker.send({
+      ...validMeasurement(1),
+      source: { ...validMeasurement(1).source, bytes: new Uint8Array(32 * 1024 * 1024 + 1) },
+    });
+    expect(channels[0]!.broker.posted).toMatchObject([
+      { id: 1, result: { status: 'interrupted', code: 'engine-error' } },
+    ]);
     expect(fork).not.toHaveBeenCalled();
   });
 
@@ -131,7 +312,9 @@ describe('geometry broker', () => {
     await broker.dispose();
     expect(channels[0]!.broker.close).toHaveBeenCalledOnce();
     channels[0]!.broker.send(validMeasurement(8));
-    expect(channels[0]!.broker.posted).toMatchObject([{ id: 8, result: { status: 'interrupted', code: 'executor-exited' } }]);
+    expect(channels[0]!.broker.posted).toMatchObject([
+      { id: 8, result: { status: 'interrupted', code: 'executor-exited' } },
+    ]);
     expect(fork).not.toHaveBeenCalled();
   });
 
@@ -173,9 +356,19 @@ describe('geometry broker', () => {
     channels[2]!.broker.send({ type: 'run', id: 9, input: { engine: 'native-desktop' } });
     expect(fork).toHaveBeenCalledOnce();
     expect(utilities[0]!.posted).toHaveLength(1);
-    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 1, value: { id: 7, result: { status: 'interrupted', code: 'engine-error', message: 'fixture' } } });
+    utilities[0]!.message({
+      type: 'geometry-result',
+      generation: 1,
+      requestId: 1,
+      value: { id: 7, result: { status: 'interrupted', code: 'engine-error', message: 'fixture' } },
+    });
     expect(utilities[0]!.posted[1]).toMatchObject({ kind: 'performance', requestId: 2 });
-    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 2, value: { id: 9, type: 'result', result: { benchmark: 'complete' } } });
+    utilities[0]!.message({
+      type: 'geometry-result',
+      generation: 1,
+      requestId: 2,
+      value: { id: 9, type: 'result', result: { benchmark: 'complete' } },
+    });
     expect(channels[2]!.broker.posted).toEqual([{ id: 9, type: 'result', result: { benchmark: 'complete' } }]);
     const disposed = broker.dispose();
     utilities[0]!.exit();
@@ -189,11 +382,15 @@ describe('geometry broker', () => {
     channels[0]!.broker.send(validMeasurement(3));
     channels[1]!.broker.send(validMeasurement(4));
     utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 1, value: validMeasurementResult(4) });
-    expect(channels[0]!.broker.posted).toMatchObject([{ id: 3, result: { status: 'interrupted', code: 'engine-error' } }]);
+    expect(channels[0]!.broker.posted).toMatchObject([
+      { id: 3, result: { status: 'interrupted', code: 'engine-error' } },
+    ]);
     const malformed = validMeasurementResult(4);
     malformed.result.fact.distance = Number.NaN;
     utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 2, value: malformed });
-    expect(channels[1]!.broker.posted).toMatchObject([{ id: 4, result: { status: 'interrupted', code: 'engine-error' } }]);
+    expect(channels[1]!.broker.posted).toMatchObject([
+      { id: 4, result: { status: 'interrupted', code: 'engine-error' } },
+    ]);
     const disposed = broker.dispose();
     utilities[0]!.exit();
     await disposed;
@@ -205,14 +402,23 @@ describe('geometry broker', () => {
     let authorized = true;
     const stillAuthorized = (): boolean => authorized;
     for (let index = 0; index < 2; index += 1) {
-      broker.connectSuite({ root: '/project/checkout', context: { projectRoot: '/project/checkout' }, engine: 'native', stillAuthorized });
+      broker.connectSuite({
+        root: '/project/checkout',
+        context: { projectRoot: '/project/checkout' },
+        engine: 'native',
+        stillAuthorized,
+      });
       channels[index]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
     }
     expect(leases).toHaveLength(1);
     authorized = false;
     broker.revokeUnauthorized();
-    expect(channels[0]!.broker.posted).toMatchObject([{ type: 'error', message: 'The GeoSpec runner root grant was revoked.' }]);
-    expect(channels[1]!.broker.posted).toMatchObject([{ type: 'error', message: 'The GeoSpec runner root grant was revoked.' }]);
+    expect(channels[0]!.broker.posted).toMatchObject([
+      { type: 'error', message: 'The GeoSpec runner root grant was revoked.' },
+    ]);
+    expect(channels[1]!.broker.posted).toMatchObject([
+      { type: 'error', message: 'The GeoSpec runner root grant was revoked.' },
+    ]);
     await vi.advanceTimersByTimeAsync(250);
     expect(utilities[0]!.kill).toHaveBeenCalledOnce();
     utilities[0]!.exit();
@@ -224,11 +430,18 @@ describe('geometry broker', () => {
     const { broker, channels, utilities, fork } = harness();
     let firstGenerationAuthorized = true;
     broker.connectSuite({
-      root: '/project/checkout', context: { projectRoot: '/project/checkout' }, engine: 'native',
+      root: '/project/checkout',
+      context: { projectRoot: '/project/checkout' },
+      engine: 'native',
       stillAuthorized: () => firstGenerationAuthorized,
     });
     channels[0]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
-    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 1, value: { type: 'result', result: { success: true } } });
+    utilities[0]!.message({
+      type: 'geometry-result',
+      generation: 1,
+      requestId: 1,
+      value: { type: 'result', result: { success: true } },
+    });
     expect(channels[0]!.broker.posted).toMatchObject([{ type: 'result' }]);
     expect(utilities[0]!.kill).not.toHaveBeenCalled();
 
@@ -236,7 +449,9 @@ describe('geometry broker', () => {
     broker.revokeUnauthorized();
     expect(utilities[0]!.kill).toHaveBeenCalledOnce();
     broker.connectSuite({
-      root: '/project/checkout', context: { projectRoot: '/project/checkout', attachmentGeneration: '2' }, engine: 'native',
+      root: '/project/checkout',
+      context: { projectRoot: '/project/checkout', attachmentGeneration: '2' },
+      engine: 'native',
       stillAuthorized: () => true,
     });
     channels[1]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
@@ -253,18 +468,32 @@ describe('geometry broker', () => {
     const { broker, channels, utilities, fork } = harness();
     let aAuthorized = true;
     broker.connectSuite({
-      root: '/project/A', context: { projectRoot: '/project/A' }, engine: 'native',
+      root: '/project/A',
+      context: { projectRoot: '/project/A' },
+      engine: 'native',
       stillAuthorized: () => aAuthorized,
     });
     channels[0]!.broker.send({ type: 'run', options: { files: ['a.test.ts'] } });
-    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 1, value: { type: 'result', result: { success: true } } });
+    utilities[0]!.message({
+      type: 'geometry-result',
+      generation: 1,
+      requestId: 1,
+      value: { type: 'result', result: { success: true } },
+    });
     broker.connectSuite({
-      root: '/project/B', context: { projectRoot: '/project/B' }, engine: 'legacy',
+      root: '/project/B',
+      context: { projectRoot: '/project/B' },
+      engine: 'legacy',
       stillAuthorized: () => true,
     });
     channels[1]!.broker.send({ type: 'run', options: { files: ['b.test.ts'] } });
     expect(fork).toHaveBeenCalledOnce();
-    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 2, value: { type: 'result', result: { success: true } } });
+    utilities[0]!.message({
+      type: 'geometry-result',
+      generation: 1,
+      requestId: 2,
+      value: { type: 'result', result: { success: true } },
+    });
     aAuthorized = false;
     broker.revokeUnauthorized();
     expect(utilities[0]!.kill).toHaveBeenCalledOnce();
@@ -275,13 +504,35 @@ describe('geometry broker', () => {
   it('keeps the prior native grant after a failed second-root suite', async () => {
     const { broker, channels, utilities } = harness();
     let aAuthorized = true;
-    broker.connectSuite({ root: '/project/A', context: { projectRoot: '/project/A' }, engine: 'native', stillAuthorized: () => aAuthorized });
+    broker.connectSuite({
+      root: '/project/A',
+      context: { projectRoot: '/project/A' },
+      engine: 'native',
+      stillAuthorized: () => aAuthorized,
+    });
     channels[0]!.broker.send({ type: 'run', options: { files: ['a.test.ts'] } });
-    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 1, value: { type: 'result', result: { success: true } } });
-    broker.connectSuite({ root: '/project/B', context: { projectRoot: '/project/B' }, engine: 'native', stillAuthorized: () => true });
+    utilities[0]!.message({
+      type: 'geometry-result',
+      generation: 1,
+      requestId: 1,
+      value: { type: 'result', result: { success: true } },
+    });
+    broker.connectSuite({
+      root: '/project/B',
+      context: { projectRoot: '/project/B' },
+      engine: 'native',
+      stillAuthorized: () => true,
+    });
     channels[1]!.broker.send({ type: 'run', options: { files: ['b.test.ts'] } });
-    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 2, value: { type: 'error', message: 'realpath failed before native session switch' } });
-    expect(channels[1]!.broker.posted).toEqual([{ type: 'error', message: 'realpath failed before native session switch' }]);
+    utilities[0]!.message({
+      type: 'geometry-result',
+      generation: 1,
+      requestId: 2,
+      value: { type: 'error', message: 'realpath failed before native session switch' },
+    });
+    expect(channels[1]!.broker.posted).toEqual([
+      { type: 'error', message: 'realpath failed before native session switch' },
+    ]);
     aAuthorized = false;
     broker.revokeUnauthorized();
     expect(utilities[0]!.kill).toHaveBeenCalledOnce();
@@ -294,14 +545,29 @@ describe('geometry broker', () => {
     let aAuthorized = true;
     const grantA = (): boolean => aAuthorized;
     for (let index = 0; index < 2; index += 1) {
-      broker.connectSuite({ root: '/project/A', context: { projectRoot: '/project/A' }, engine: 'native', stillAuthorized: grantA });
+      broker.connectSuite({
+        root: '/project/A',
+        context: { projectRoot: '/project/A' },
+        engine: 'native',
+        stillAuthorized: grantA,
+      });
       channels[index]!.broker.send({ type: 'run', options: { files: ['a.test.ts'] } });
-      utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: index + 1, value: { type: 'result', result: { success: true } } });
+      utilities[0]!.message({
+        type: 'geometry-result',
+        generation: 1,
+        requestId: index + 1,
+        value: { type: 'result', result: { success: true } },
+      });
     }
     expect(fork).toHaveBeenCalledOnce();
     expect(utilities[0]!.kill).not.toHaveBeenCalled();
     aAuthorized = false;
-    broker.connectSuite({ root: '/project/B', context: { projectRoot: '/project/B' }, engine: 'legacy', stillAuthorized: () => true });
+    broker.connectSuite({
+      root: '/project/B',
+      context: { projectRoot: '/project/B' },
+      engine: 'legacy',
+      stillAuthorized: () => true,
+    });
     channels[2]!.broker.send({ type: 'run', options: { files: ['b.test.ts'] } });
     expect(utilities[0]!.kill).toHaveBeenCalledOnce();
     expect(utilities[0]!.posted).toHaveLength(2);
@@ -317,10 +583,20 @@ describe('geometry broker', () => {
   it('rotates a long-lived slot before grant tracking can grow without bound', async () => {
     const { broker, channels, utilities, fork } = harness();
     for (let index = 0; index < 65; index += 1) {
-      broker.connectSuite({ root: '/project/A', context: { projectRoot: '/project/A' }, engine: 'native', stillAuthorized: () => true });
+      broker.connectSuite({
+        root: '/project/A',
+        context: { projectRoot: '/project/A' },
+        engine: 'native',
+        stillAuthorized: () => true,
+      });
       channels[index]!.broker.send({ type: 'run', options: { files: ['a.test.ts'] } });
       if (index < 64) {
-        utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: index + 1, value: { type: 'result', result: { success: true } } });
+        utilities[0]!.message({
+          type: 'geometry-result',
+          generation: 1,
+          requestId: index + 1,
+          value: { type: 'result', result: { success: true } },
+        });
       }
     }
     expect(utilities[0]!.posted).toHaveLength(64);
@@ -338,16 +614,27 @@ describe('geometry broker', () => {
     const { broker, channels, utilities } = harness();
     let predicateThrows = false;
     broker.connectSuite({
-      root: '/project', context: { projectRoot: '/project' }, engine: 'native',
+      root: '/project',
+      context: { projectRoot: '/project' },
+      engine: 'native',
       stillAuthorized: () => {
-        if (predicateThrows) { throw new Error('root generation unavailable'); }
+        if (predicateThrows) {
+          throw new Error('root generation unavailable');
+        }
         return true;
       },
     });
     channels[0]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
-    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 1, value: { type: 'result', result: { success: true } } });
+    utilities[0]!.message({
+      type: 'geometry-result',
+      generation: 1,
+      requestId: 1,
+      value: { type: 'result', result: { success: true } },
+    });
     predicateThrows = true;
-    expect(() => { broker.revokeUnauthorized(); }).not.toThrow();
+    expect(() => {
+      broker.revokeUnauthorized();
+    }).not.toThrow();
     expect(utilities[0]!.kill).toHaveBeenCalledOnce();
     utilities[0]!.exit();
     await broker.dispose();
@@ -356,17 +643,73 @@ describe('geometry broker', () => {
   it('cancels an active suite when a cyclic event cannot be bounded', async () => {
     vi.useFakeTimers();
     const { broker, channels, utilities } = harness();
-    broker.connectSuite({ root: '/project', context: { projectRoot: '/project' }, engine: 'native', stillAuthorized: () => true });
+    broker.connectSuite({
+      root: '/project',
+      context: { projectRoot: '/project' },
+      engine: 'native',
+      stillAuthorized: () => true,
+    });
     channels[0]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
     const cyclic: Record<string, unknown> = {};
     cyclic['self'] = cyclic;
     utilities[0]!.message({ type: 'geometry-event', generation: 1, requestId: 1, event: cyclic });
-    expect(channels[0]!.broker.posted).toMatchObject([{ type: 'error', message: 'The geometry event was malformed or exceeded its limit.' }]);
+    expect(channels[0]!.broker.posted).toMatchObject([
+      {
+        type: 'error',
+        transport: {
+          code: 'GEOSPEC_TRANSPORT_MALFORMED',
+          phase: 'event',
+          limitBytes: 64 * 1024,
+        },
+      },
+    ]);
     await vi.advanceTimersByTimeAsync(250);
     expect(utilities[0]!.kill).toHaveBeenCalledOnce();
     utilities[0]!.exit();
     await broker.dispose();
   });
+
+  it.each(['event', 'result'] as const)(
+    'reports an explicit %s size refusal without treating it as a geometry verdict',
+    async (phase) => {
+      vi.useFakeTimers();
+      const { broker, channels, utilities, leases } = harness();
+      broker.connectSuite({
+        root: '/project',
+        context: { projectRoot: '/project' },
+        engine: 'native',
+        stillAuthorized: () => true,
+      });
+      channels[0]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
+      const limitBytes = phase === 'event' ? 64 * 1024 : 8 * 1024 * 1024;
+      const payload = { type: 'fixture', payload: 'x'.repeat(limitBytes) };
+      utilities[0]!.message({
+        type: `geometry-${phase}`,
+        generation: 1,
+        requestId: 1,
+        ...(phase === 'event' ? { event: payload } : { value: payload }),
+      });
+      expect(channels[0]!.broker.posted).toMatchObject([
+        {
+          type: 'error',
+          transport: {
+            code: 'GEOSPEC_TRANSPORT_LIMIT',
+            phase,
+            bytes: Buffer.byteLength(JSON.stringify(payload)),
+            limitBytes,
+          },
+        },
+      ]);
+      if (phase === 'event') {
+        await vi.advanceTimersByTimeAsync(250);
+        expect(utilities[0]!.kill).toHaveBeenCalledOnce();
+      }
+      utilities[0]!.exit();
+      expect(leases[0]!.dispose).toHaveBeenCalledOnce();
+      expect(channels[0]!.broker.posted).toHaveLength(1);
+      await broker.dispose();
+    },
+  );
 
   it('terminates an oversized-RSS slot and waits for actual exit before serving its queue', async () => {
     vi.useFakeTimers();
@@ -379,7 +722,9 @@ describe('geometry broker', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(sampleResidentBytes).toHaveBeenCalledOnce();
     expect(utilities[0]!.kill).toHaveBeenCalledOnce();
-    expect(channels[0]!.broker.posted).toMatchObject([{ id: 1, result: { status: 'interrupted', code: 'engine-error' } }]);
+    expect(channels[0]!.broker.posted).toMatchObject([
+      { id: 1, result: { status: 'interrupted', code: 'engine-error' } },
+    ]);
     expect(fork).toHaveBeenCalledOnce();
     utilities[0]!.exit();
     expect(fork).toHaveBeenCalledTimes(2);
@@ -430,11 +775,21 @@ describe('geometry broker', () => {
 
   it('mints and disposes a separate Runtime lease for a suite', async () => {
     const { broker, channels, utilities, leases } = harness();
-    broker.connectSuite({ root: '/project/checkout', context: { projectRoot: '/project/checkout', computeMode: 'memory' }, engine: 'native', stillAuthorized: () => true });
+    broker.connectSuite({
+      root: '/project/checkout',
+      context: { projectRoot: '/project/checkout', computeMode: 'memory' },
+      engine: 'native',
+      stillAuthorized: () => true,
+    });
     channels[0]!.broker.send({ type: 'run', options: { files: ['tests/geospec.test.ts'] } });
     expect(leases).toHaveLength(1);
     expect(utilities[0]!.posted[0]).toMatchObject({ kind: 'suite', root: '/project/checkout', engine: 'native' });
-    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 1, value: { type: 'result', result: { success: true }, sourceRevisions: [] } });
+    utilities[0]!.message({
+      type: 'geometry-result',
+      generation: 1,
+      requestId: 1,
+      value: { type: 'result', result: { success: true }, sourceRevisions: [] },
+    });
     expect(leases[0]!.dispose).toHaveBeenCalledOnce();
     expect(channels[0]!.broker.posted).toMatchObject([{ type: 'result' }]);
     const disposed = broker.dispose();
@@ -444,9 +799,16 @@ describe('geometry broker', () => {
 
   it('rechecks suite root authorization at dispatch before leasing Runtime', () => {
     const { broker, channels, fork, leases } = harness();
-    broker.connectSuite({ root: '/project/checkout', context: { projectRoot: '/project/checkout' }, engine: 'native', stillAuthorized: () => false });
+    broker.connectSuite({
+      root: '/project/checkout',
+      context: { projectRoot: '/project/checkout' },
+      engine: 'native',
+      stillAuthorized: () => false,
+    });
     channels[0]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
-    expect(channels[0]!.broker.posted).toEqual([{ type: 'error', message: 'The GeoSpec runner root grant expired before execution.' }]);
+    expect(channels[0]!.broker.posted).toEqual([
+      { type: 'error', message: 'The GeoSpec runner root grant expired before execution.' },
+    ]);
     expect(fork).not.toHaveBeenCalled();
     expect(leases).toHaveLength(0);
   });
@@ -455,17 +817,23 @@ describe('geometry broker', () => {
     const { broker, channels, utilities } = harness();
     broker.connectMeasurement();
     channels[0]!.broker.send(validMeasurement(1));
-    utilities[0]!.kill.mockImplementationOnce(() => { utilities[0]!.exit(); });
+    utilities[0]!.kill.mockImplementationOnce(() => {
+      utilities[0]!.exit();
+    });
     await expect(broker.dispose()).resolves.toBeUndefined();
     expect(utilities[0]!.kill).toHaveBeenCalledOnce();
   });
 
   it('returns fork failure and retries only on a later admitted request', async () => {
     const { broker, channels, fork, utilities } = harness();
-    fork.mockImplementationOnce(() => { throw new Error('fork refused'); });
+    fork.mockImplementationOnce(() => {
+      throw new Error('fork refused');
+    });
     broker.connectMeasurement();
     channels[0]!.broker.send(validMeasurement(1));
-    expect(channels[0]!.broker.posted).toMatchObject([{ id: 1, result: { status: 'interrupted', code: 'engine-error' } }]);
+    expect(channels[0]!.broker.posted).toMatchObject([
+      { id: 1, result: { status: 'interrupted', code: 'engine-error' } },
+    ]);
     broker.connectMeasurement();
     channels[1]!.broker.send(validMeasurement(2));
     expect(fork).toHaveBeenCalledTimes(2);
@@ -490,15 +858,33 @@ describe('geometry broker', () => {
 
   it('observes an actual OS child exit before restarting the queued slot', async () => {
     const child = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1000)'], { stdio: 'ignore' });
-    const exited = new Promise<void>((resolve) => { child.once('exit', () => { resolve(); }); });
+    const exited = new Promise<void>((resolve) => {
+      child.once('exit', () => {
+        resolve();
+      });
+    });
     const realUtility: FakeUtility = {
       posted: [],
       kill: vi.fn(() => child.kill('SIGKILL')),
-      postMessage(value) { this.posted.push(value); },
-      on(event, listener) { child.on(event, () => { listener(undefined); }); },
-      once(_event, listener) { child.once('exit', () => { listener(); }); },
-      message() { /* The child is intentionally stalled. */ },
-      exit() { child.kill('SIGKILL'); },
+      postMessage(value) {
+        this.posted.push(value);
+      },
+      on(event, listener) {
+        child.on(event, () => {
+          listener(undefined);
+        });
+      },
+      once(_event, listener) {
+        child.once('exit', () => {
+          listener();
+        });
+      },
+      message() {
+        /* The child is intentionally stalled. */
+      },
+      exit() {
+        child.kill('SIGKILL');
+      },
     };
     const { broker, channels, fork, utilities } = harness();
     fork.mockImplementationOnce(() => realUtility);

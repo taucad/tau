@@ -26,6 +26,7 @@
     "@taucad/build123d": "workspace:*",
     "@taucad/converter": "workspace:*",
     "@taucad/esbuild": "workspace:*",
+    "@taucad/events": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",
     "@taucad/geospec-engine-native": "workspace:*",

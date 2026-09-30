@@ -1919,6 +1919,9 @@ importers:
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../../packages/plugins/esbuild
+      '@taucad/events':
+        specifier: workspace:*
+        version: link:../../libs/events
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../packages/filesystem

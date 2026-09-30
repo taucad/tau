@@ -93,8 +93,15 @@ import type {
 } from '#types/runtime-source-snapshot.types.js';
 import { signalSlot, abortReason as abortReasonEnum } from '#types/runtime-protocol.types.js';
 import type { TranscoderDefinition, TranscoderEdge, TranscoderRuntime } from '#types/runtime-transcoder.types.js';
-import { isRenderAbortedError, renderTimeoutIssue, RenderAbortedError } from '#framework/runtime-worker-client.js';
+import { isRenderAbortedError, renderTimeoutIssue, RenderAbortedError } from '#framework/runtime-operation-errors.js';
 import { setAbortContext, clearAbortContext } from '#framework/cooperative-abort.js';
+import {
+  beginDocumentAbort,
+  documentAbortGeneration,
+  documentAbortView,
+  endDocumentAbort,
+  nextDocumentAbortSequence,
+} from '#framework/document-abort-state.js';
 import { createRuntimeFileSystem } from '#filesystem/create-runtime-filesystem.js';
 import { createComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 import type { ComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
@@ -217,6 +224,7 @@ type DocumentRecord = {
   current?: DocumentEvaluation;
   committed?: DocumentEvaluation;
   pendingCommitted?: CommittedAdmission;
+  evaluationController?: AbortController;
   readonly views: Map<string, ViewRecord>;
   readonly operations: Set<AbortController>;
   watchPaths: Set<string>;
@@ -794,7 +802,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly tracer = new RuntimeTracer();
 
   /** Progress callback set during render, used by entry methods to emit phase transitions */
-  private onProgress?: (phase: RenderPhase) => void;
+  private onProgress?: (phase: RenderPhase, detail?: Readonly<Record<string, unknown>>) => void;
 
   /** Bundle result cache keyed by entry path. Selectively invalidated when dependencies change; fully cleared on reset. */
   private readonly bundleResultCache = new Map<string, BundleResult>();
@@ -848,9 +856,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private documentEvaluationSequence = 0;
   private activeRenderRecord: RenderCancellationRecord | undefined;
   private operationSignal: AbortSignal | undefined;
+  private activeDocumentEvaluationController: AbortController | undefined;
+  private activeDocumentEvaluationSequence = 0;
+  private activeDocumentNativeOperation:
+    | {
+        controller: AbortController;
+        progress: (phase: 'render' | 'write', sequence: number, generation?: number) => void;
+      }
+    | undefined;
 
   /** SharedArrayBuffer signal channel for bidirectional abort/state signaling. */
   private signalView: Int32Array | undefined;
+  private documentSignalView: BigInt64Array | undefined;
 
   /** Loaded transcoder instances keyed by plugin id. */
   private readonly loadedTranscoders = new Map<string, LoadedTranscoder>();
@@ -1090,6 +1107,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   public setSignalBuffer(buffer: SharedArrayBuffer): void {
     this.signalView = new Int32Array(buffer);
+    this.documentSignalView = documentAbortView(buffer);
   }
 
   /** Admit one live document and start its first evaluation. */
@@ -1301,17 +1319,35 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           phase: 'writing',
         });
         const activeMiddleware = this.getOuterExportExecutionList(plan);
-        const result = finalizeExportArtifactSet(
-          activeMiddleware.length === 0
-            ? await this.executeExportRequest(plan, artifact, evaluation.result.sourceRevision)
-            : await this.runExportMiddlewarePipeline({
-                plan,
-                renderIdentity: artifact.identity,
-                renderArtifact: artifact,
-                activeMiddleware,
-                pinnedSourceRevision: evaluation.result.sourceRevision,
-              }),
-        );
+        this.activeDocumentNativeOperation = {
+          controller,
+          progress: (phase, sequence, generation) => {
+            this.onDocumentProgressUpdate?.({
+              documentId: document.id,
+              intent: evaluation.intent,
+              evaluationId: evaluation.id,
+              operationId: input.operationId,
+              phase,
+              detail: { abortSequence: sequence, ...(generation === undefined ? {} : { abortGeneration: generation }) },
+            });
+          },
+        };
+        let result: ExportGeometryResult;
+        try {
+          result = finalizeExportArtifactSet(
+            activeMiddleware.length === 0
+              ? await this.executeExportRequest(plan, artifact, evaluation.result.sourceRevision)
+              : await this.runExportMiddlewarePipeline({
+                  plan,
+                  renderIdentity: artifact.identity,
+                  renderArtifact: artifact,
+                  activeMiddleware,
+                  pinnedSourceRevision: evaluation.result.sourceRevision,
+                }),
+          );
+        } finally {
+          this.activeDocumentNativeOperation = undefined;
+        }
         controller.signal.throwIfAborted();
         if (!result.success)
           return { success: false, issues: result.issues, sourceRevision: evaluation.result.sourceRevision };
@@ -1401,10 +1437,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     transient: boolean,
     stage?: Readonly<Record<string, Uint8Array<ArrayBuffer>>>,
   ): void {
-    const evaluationId = String(++this.documentEvaluationSequence);
+    // Preserve an export-pinned committed admission, but stop any superseded
+    // unpinned native build before the next evaluation enters the serial lane.
+    if (document.pendingCommitted?.pins === 0 || document.pendingCommitted === undefined) {
+      document.evaluationController?.abort(abortReasonEnum.superseded);
+    }
+    this.documentEvaluationSequence = nextDocumentAbortSequence(this.documentEvaluationSequence);
+    const evaluationId = String(this.documentEvaluationSequence);
     const operationId = `evaluate:${document.id}:${evaluationId}`;
     const admissionAlias = `${document.id}:${intent}`;
     const controller = new AbortController();
+    document.evaluationController = controller;
     this.documentOperations.set(operationId, controller);
     this.documentOperations.set(admissionAlias, controller);
     document.operations.add(controller);
@@ -1429,8 +1472,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.onDocumentStateChanged?.({ state: 'busy' });
     const pending = this.enqueueOperation(async () => {
       const previousProgress = this.onProgress;
-      this.onProgress = (phase) => {
-        this.onDocumentProgressUpdate?.({ documentId: document.id, intent, evaluationId, operationId, phase });
+      this.activeDocumentEvaluationController = controller;
+      this.activeDocumentEvaluationSequence = Number(evaluationId) >>> 0;
+      this.onProgress = (phase, detail) => {
+        this.onDocumentProgressUpdate?.({
+          documentId: document.id,
+          intent,
+          evaluationId,
+          operationId,
+          phase,
+          ...(detail ? { detail } : {}),
+        });
       };
       try {
         if (!this.shouldContinueDocumentEvaluation(document, controller, intent, pendingCommitted)) {
@@ -1544,6 +1596,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         for (const view of document.views.values()) this.scheduleDocumentView(view, evaluation);
         if (!document.watch) await this.reconcileObservedPaths();
       } finally {
+        this.activeDocumentEvaluationController = undefined;
+        this.activeDocumentEvaluationSequence = 0;
         this.onProgress = previousProgress;
       }
     }, controller.signal);
@@ -1581,6 +1635,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
       })
       .finally(() => {
+        if (document.evaluationController === controller) document.evaluationController = undefined;
         if (this.documentOperations.get(operationId) === controller) this.documentOperations.delete(operationId);
         if (this.documentOperations.get(admissionAlias) === controller) this.documentOperations.delete(admissionAlias);
         document.operations.delete(controller);
@@ -1683,16 +1738,37 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               ...artifact.identity,
               dependencyHash: await sha256String(canonicalJson([artifact.identity.dependencyHash, key])),
             };
-            projected = await this.runMeshPhase({
-              owner: artifact.owner,
-              identity,
-              selection,
-              renderOptions: view.options,
-              requestedContent: view.content,
-              resolvedMiddleware: this.getMeshExecutionList(artifact.owner, view.content ?? {}),
-              createResult: { success: true, data: undefined, issues: [...evaluation.result.issues] },
-              renderArtifact: artifact,
-            });
+            this.activeDocumentNativeOperation = {
+              controller,
+              progress: (phase, sequence, generation) => {
+                this.onDocumentProgressUpdate?.({
+                  documentId: document.id,
+                  intent: evaluation.intent,
+                  evaluationId: evaluation.id,
+                  operationId,
+                  requestId,
+                  phase,
+                  detail: {
+                    abortSequence: sequence,
+                    ...(generation === undefined ? {} : { abortGeneration: generation }),
+                  },
+                });
+              },
+            };
+            try {
+              projected = await this.runMeshPhase({
+                owner: artifact.owner,
+                identity,
+                selection,
+                renderOptions: view.options,
+                requestedContent: view.content,
+                resolvedMiddleware: this.getMeshExecutionList(artifact.owner, view.content ?? {}),
+                createResult: { success: true, data: undefined, issues: [...evaluation.result.issues] },
+                renderArtifact: artifact,
+              });
+            } finally {
+              this.activeDocumentNativeOperation = undefined;
+            }
             if (projected.success) {
               try {
                 projected = { ...projected, data: asKnownArtifact(projected.data) ?? projected.data };
@@ -1717,7 +1793,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 hash: await sha256String(canonicalJson([artifact.identity.dependencyHash, key])),
                 requestId,
                 evaluationId: evaluation.id,
-                instance: selection.instance,
+                ...(selection.instance === undefined ? {} : { instance: selection.instance }),
                 transient: evaluation.transient,
                 issues: projected.issues,
                 sourceRevision: evaluation.result.sourceRevision,
@@ -1727,7 +1803,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 view: selection.view,
                 requestId,
                 evaluationId: evaluation.id,
-                instance: selection.instance,
+                ...(selection.instance === undefined ? {} : { instance: selection.instance }),
                 transient: evaluation.transient,
                 issues: projected.issues,
                 sourceRevision: evaluation.result.sourceRevision,
@@ -4061,7 +4137,33 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           };
         }
         evaluationSlot.nativeBuildInput = kernelInput;
-        const result = await this.onEvaluateForOwner(owner, kernelInput, this.createRuntime(), evaluationSlot);
+        const documentController = this.activeDocumentEvaluationController;
+        const documentSignalView = !options.publish && documentController ? this.documentSignalView : undefined;
+        const sequence = this.activeDocumentEvaluationSequence;
+        const documentState = documentSignalView ? beginDocumentAbort(documentSignalView, sequence) : undefined;
+        if (documentController) {
+          setAbortContext({
+            signal: documentController.signal,
+            generation: 0,
+            ...(documentSignalView && documentState !== undefined
+              ? { documentSignalView, documentSignalState: documentState }
+              : {}),
+            onSharedAbort: (reason) => {
+              documentController.abort(reason);
+            },
+          });
+          this.onProgress?.(
+            'evaluate',
+            documentState !== undefined ? { abortGeneration: documentAbortGeneration(documentState) } : undefined,
+          );
+        }
+        let result: EvaluateResult;
+        try {
+          result = await this.onEvaluateForOwner(owner, kernelInput, this.createRuntime(), evaluationSlot);
+        } finally {
+          if (documentController) clearAbortContext();
+          if (documentSignalView) endDocumentAbort(documentSignalView, sequence);
+        }
         if (result.success) {
           evaluationSlot.offers = result.data;
           evaluationSlot.issues = result.issues;
@@ -4797,6 +4899,38 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     slot: EvaluationSlot,
   ): Promise<EvaluateResult>;
 
+  /** Expose an exact native render/write token only while its hook is running. */
+  private async withDocumentNativeAbort<Result>(
+    phase: 'render' | 'write',
+    hook: () => Promise<Result>,
+  ): Promise<Result> {
+    const active = this.activeDocumentNativeOperation;
+    if (!active) {
+      return hook();
+    }
+    this.documentEvaluationSequence = nextDocumentAbortSequence(this.documentEvaluationSequence);
+    const sequence = this.documentEvaluationSequence;
+    const view = this.documentSignalView;
+    const state = view ? beginDocumentAbort(view, sequence) : undefined;
+    setAbortContext({
+      signal: active.controller.signal,
+      generation: 0,
+      ...(view && state !== undefined ? { documentSignalView: view, documentSignalState: state } : {}),
+      onSharedAbort: (reason) => {
+        active.controller.abort(reason);
+      },
+    });
+    active.progress(phase, sequence, state === undefined ? undefined : documentAbortGeneration(state));
+    try {
+      return await hook();
+    } finally {
+      clearAbortContext();
+      if (view) {
+        endDocumentAbort(view, sequence);
+      }
+    }
+  }
+
   /** Allocate an identity before entering the terminal evaluate hook. */
   protected createEvaluationSlot(owner: OperationOwner, identityKey: string): EvaluationSlot {
     return {
@@ -5079,16 +5213,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             ? { success: false, issues: [] }
             : { success: false, issues: handle.result.issues };
         }
-        return this.onRenderForOwner(
-          owner,
-          this.withProviderRuntimeContent(
-            { ...handlerInput, nativeHandle: handle.handle },
-            selectedContent,
-            this.getNativeRenderContentKeys(owner, selection.view),
+        return this.withDocumentNativeAbort('render', async () =>
+          this.onRenderForOwner(
+            owner,
+            this.withProviderRuntimeContent(
+              { ...handlerInput, nativeHandle: handle.handle },
+              selectedContent,
+              this.getNativeRenderContentKeys(owner, selection.view),
+            ),
+            runtime,
+            renderArtifact.evaluationSlot ??
+              this.createEvaluationSlot(owner, createNativeHandleIdentityKey(renderArtifact.identity)),
           ),
-          runtime,
-          renderArtifact.evaluationSlot ??
-            this.createEvaluationSlot(owner, createNativeHandleIdentityKey(renderArtifact.identity)),
         );
       };
 
@@ -7002,20 +7138,22 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   ): Promise<ExportGeometryResult> {
     const { input, runtime, renderIdentity, evaluationSlot } = execution;
     if (plan.route.kind === 'direct') {
-      return this.onExportGeometryForOwner(
-        plan.owner,
-        this.withProviderRuntimeContent(
-          {
-            ...this.withoutRuntimeContent(input),
-            format: plan.route.targetFormat,
-            options: input.options,
-            ...(plan.route.exportId ? { exportId: plan.route.exportId } : {}),
-          },
-          plan.route.content,
-          this.getNativeExportContentKeys(plan.owner, plan.route.targetFormat, plan.route.exportId),
+      return this.withDocumentNativeAbort('write', async () =>
+        this.onExportGeometryForOwner(
+          plan.owner,
+          this.withProviderRuntimeContent(
+            {
+              ...this.withoutRuntimeContent(input),
+              format: plan.route.targetFormat,
+              options: input.options,
+              ...(plan.route.exportId ? { exportId: plan.route.exportId } : {}),
+            },
+            plan.route.content,
+            this.getNativeExportContentKeys(plan.owner, plan.route.targetFormat, plan.route.exportId),
+          ),
+          runtime,
+          evaluationSlot,
         ),
-        runtime,
-        evaluationSlot,
       );
     }
 
@@ -7069,15 +7207,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           },
         ]);
       }
-      const result = await this.onExportGeometryForOwner(
-        plan.owner,
-        this.withProviderRuntimeContent(
-          { ...sourceInput, options: handlerInput.options },
-          route.content,
-          this.getNativeExportContentKeys(plan.owner, route.sourceFormat, route.exportId),
+      const result = await this.withDocumentNativeAbort('write', async () =>
+        this.onExportGeometryForOwner(
+          plan.owner,
+          this.withProviderRuntimeContent(
+            { ...sourceInput, options: handlerInput.options },
+            route.content,
+            this.getNativeExportContentKeys(plan.owner, route.sourceFormat, route.exportId),
+          ),
+          runtime,
+          evaluationSlot,
         ),
-        runtime,
-        evaluationSlot,
       );
       if (!result.success) {
         return result;

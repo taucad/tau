@@ -23,13 +23,16 @@
 
 /* oxlint-disable unicorn/prefer-math-trunc, no-bitwise -- cancellation generations use ECMAScript ToUint32 wrap semantics. */
 
-import { RenderAbortedError } from '#framework/runtime-worker-client.js';
+import { RenderAbortedError } from '#framework/runtime-operation-errors.js';
 import { signalSlot } from '#types/runtime-protocol.types.js';
+import { documentAbortReason } from '#framework/document-abort-state.js';
 
 let abortSignalView: Int32Array | undefined;
 let abortGeneration = 0;
 let localAbortSignal: AbortSignal | undefined;
 let onSharedAbort: ((reason: number) => void) | undefined;
+let documentSignalView: BigInt64Array | undefined;
+let documentSignalState: bigint | undefined;
 
 /** Render-owned cooperative abort context. @internal @public */
 export type AbortContext = {
@@ -37,6 +40,8 @@ export type AbortContext = {
   readonly signalView?: Int32Array;
   readonly generation: number;
   readonly onSharedAbort?: (reason: number) => void;
+  readonly documentSignalView?: BigInt64Array;
+  readonly documentSignalState?: bigint;
 };
 
 /**
@@ -52,6 +57,8 @@ export function setAbortContext(context: AbortContext): void {
   abortSignalView = context.signalView;
   abortGeneration = context.generation >>> 0;
   onSharedAbort = context.onSharedAbort;
+  documentSignalView = context.documentSignalView;
+  documentSignalState = context.documentSignalState;
 }
 
 /**
@@ -64,6 +71,8 @@ export function clearAbortContext(): void {
   abortGeneration = 0;
   localAbortSignal = undefined;
   onSharedAbort = undefined;
+  documentSignalView = undefined;
+  documentSignalState = undefined;
 }
 
 /**
@@ -75,6 +84,13 @@ export function clearAbortContext(): void {
  */
 export function checkAbort(): void {
   localAbortSignal?.throwIfAborted();
+  if (documentSignalView && documentSignalState !== undefined) {
+    const current = Atomics.load(documentSignalView, 0);
+    if (current !== documentSignalState) {
+      onSharedAbort?.(documentAbortReason(current));
+      throw new RenderAbortedError();
+    }
+  }
   if (abortSignalView && Atomics.load(abortSignalView, signalSlot.abortGeneration) >>> 0 !== abortGeneration) {
     onSharedAbort?.(Atomics.load(abortSignalView, signalSlot.abortReason));
     throw new RenderAbortedError();

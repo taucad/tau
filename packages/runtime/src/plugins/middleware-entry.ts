@@ -19,5 +19,5 @@ export type {
 export type { MiddlewarePluginFactoryV2 as MiddlewarePluginFactory } from '#middleware/runtime-middleware-v2.js';
 export { nativeBuildInputSymbol } from '#framework/render-artifact.js';
 export type { NativeBuildInput, NativeBuildInputCarrier } from '#framework/render-artifact.js';
-export { describeResultSchema } from '#types/runtime-protocol.schemas.js';
+export { describeResultSchema } from '#middleware/middleware-describe-result.schemas.js';
 export { LruMap } from '@taucad/utils/cache';

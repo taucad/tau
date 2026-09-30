@@ -10,7 +10,7 @@
 
 import type { Geometry } from '@taucad/types';
 import type { EncodedGeometry } from '#transport/runtime-transport.types.js';
-import type { BinaryEncoder } from '#transport/_internal/runtime-worker-dispatcher.js';
+import type { BinaryEncoder } from '#transport/_internal/runtime-channel-bindings.js';
 
 const cloneBytes = (bytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => new Uint8Array(bytes);
 

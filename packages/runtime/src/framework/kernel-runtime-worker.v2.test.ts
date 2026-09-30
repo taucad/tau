@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
 import { createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { sourceRevisionFileDigest } from '#framework/kernel-worker.js';
@@ -8,6 +9,9 @@ import { defineMiddlewareV2 } from '#middleware/runtime-middleware-v2.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 import { abortReason } from '#types/runtime-protocol.types.js';
+import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
+import { checkAbort } from '#framework/cooperative-abort.js';
+import { signalDocumentAbort } from '#transport/_internal/abort-channel.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture. */
 import {
   createGeometryFile,
@@ -65,7 +69,7 @@ describe('v2 kernel boundary with the current client', () => {
     );
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
-    const evaluated: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0][] = [];
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
     worker.onEvaluated = (event) => {
       evaluated.push(event);
     };
@@ -83,7 +87,84 @@ describe('v2 kernel boundary with the current client', () => {
       expect(evaluated[0]?.success, JSON.stringify(evaluated[0]?.issues)).toBe(true);
       const files = evaluated[0]?.sourceRevision?.files;
       expect(Object.hasOwn(files ?? {}, '__proto__')).toBe(true);
-      expect(files?.['__proto__']).toMatch(/^sha256:[0-9a-f]{64}$/u);
+      expect(Object.getOwnPropertyDescriptor(files, '__proto__')?.value).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('admits own prototype-named views and instances without admitting inherited view names', async () => {
+    const kernel = defineKernelV2({
+      id: 'special-view-names',
+      extensions: ['circuit'] as const,
+      name: 'Special views',
+      version: '1.0.0',
+      views: {
+        ['__proto__']: { title: 'Prototype', mimeType: 'image/svg+xml', instances: true },
+        constructor: { title: 'Constructor', mimeType: 'image/svg+xml' },
+      },
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        return {
+          handle: {},
+          views: ['__proto__', 'constructor'] as const,
+          exports: [] as const,
+          instances: Object.fromEntries([['__proto__', [{ id: 'part', title: 'Part' }]]]),
+        };
+      },
+      async render() {
+        return { content: '<svg xmlns="http://www.w3.org/2000/svg"/>' };
+      },
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    worker.onRendered = (event) => {
+      rendered.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'special',
+        intent: 0,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      expect(evaluated[0]?.success).toBe(true);
+      if (evaluated[0]?.success) {
+        expect(evaluated[0].views.map((view) => view.id)).toEqual(['__proto__', 'constructor']);
+        expect(evaluated[0].views[0]?.instances).toEqual([{ id: 'part', title: 'Part' }]);
+      }
+      worker.handleOpenView({
+        documentId: 'special',
+        subscriptionId: 'own',
+        requestId: 'r1',
+        view: '__proto__',
+        instance: 'part',
+      });
+      worker.handleOpenView({ documentId: 'special', subscriptionId: 'inherited', requestId: 'r2', view: 'toString' });
+      await vi.waitFor(() => {
+        expect(rendered).toHaveLength(2);
+      });
+      expect(rendered.find((event) => event.subscriptionId === 'own')?.success).toBe(true);
+      expect(rendered.find((event) => event.subscriptionId === 'inherited')?.issues[0]?.code).toBe('VIEW_UNKNOWN');
     } finally {
       await worker.cleanup();
     }
@@ -120,7 +201,7 @@ describe('v2 kernel boundary with the current client', () => {
     await seedTestFileSystem({ 'model.circuit': 'board' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
-    const rendered: Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0][] = [];
+    const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
     worker.onRendered = (event) => {
       rendered.push(event);
     };
@@ -137,7 +218,9 @@ describe('v2 kernel boundary with the current client', () => {
         expect(rendered).toHaveLength(1);
       });
       expect(rendered[0]?.success).toBe(expectedCode === undefined);
-      if (expectedCode) expect(rendered[0]?.issues[0]?.code).toBe(expectedCode);
+      if (expectedCode) {
+        expect(rendered[0]?.issues[0]?.code).toBe(expectedCode);
+      }
     } finally {
       await worker.cleanup();
     }
@@ -171,8 +254,8 @@ describe('v2 kernel boundary with the current client', () => {
     await seedTestFileSystem({ 'model.circuit': 'board' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
-    const errors: Parameters<NonNullable<KernelRuntimeWorker['onDocumentError']>>[0][] = [];
-    const evaluations: Parameters<NonNullable<KernelRuntimeWorker['onEvaluating']>>[0][] = [];
+    const errors: Array<Parameters<NonNullable<KernelRuntimeWorker['onDocumentError']>>[0]> = [];
+    const evaluations: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluating']>>[0]> = [];
     worker.onDocumentError = (event) => {
       errors.push(event);
     };
@@ -204,6 +287,234 @@ describe('v2 kernel boundary with the current client', () => {
       });
     } finally {
       release.resolve();
+      await worker.cleanup();
+    }
+  });
+
+  it('aborts a superseded unpinned native document evaluation', async () => {
+    const entered = Promise.withResolvers<void>();
+    const stopped = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let calls = 0;
+    const kernel = defineKernelV2({
+      id: 'supersession',
+      extensions: ['circuit'] as const,
+      name: 'Supersession',
+      version: '1.0.0',
+      views: {},
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate(_input, runtime) {
+        calls++;
+        if (calls === 2) {
+          entered.resolve();
+          await Promise.race([
+            release.promise,
+            new Promise<void>((resolve) => {
+              runtime.signal.addEventListener(
+                'abort',
+                () => {
+                  resolve();
+                },
+                { once: true },
+              );
+            }),
+          ]);
+          if (runtime.signal.aborted) {
+            stopped.resolve();
+          }
+          runtime.signal.throwIfAborted();
+        }
+        return { handle: {}, views: [] as const, exports: [] as const };
+      },
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      worker.handleUpdateDocument({
+        documentId: 'doc',
+        intent: 2,
+        stage: { 'model.circuit': new TextEncoder().encode('heavy') },
+      });
+      await entered.promise;
+      worker.handleUpdateDocument({
+        documentId: 'doc',
+        intent: 3,
+        stage: { 'model.circuit': new TextEncoder().encode('light') },
+      });
+      await stopped.promise;
+      await vi.waitFor(() => {
+        expect(evaluated.at(-1)?.intent).toBe(3);
+      });
+      expect(evaluated.map((event) => event.intent)).toEqual([1, 3]);
+    } finally {
+      release.resolve();
+      await worker.cleanup();
+    }
+  });
+
+  it('uses an exact SAB generation to interrupt synchronous native work without aborting another document', async () => {
+    const kernel = defineKernelV2({
+      id: 'shared-abort',
+      extensions: ['circuit'] as const,
+      name: 'Shared abort',
+      version: '1.0.0',
+      views: {},
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        checkAbort();
+        return { handle: {}, views: [] as const, exports: [] as const };
+      },
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const signalBuffer = new SharedArrayBuffer(16);
+    worker.setSignalBuffer(signalBuffer);
+    let oldGeneration: number | undefined;
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    worker.onDocumentProgressUpdate = (event) => {
+      if (event.phase === 'evaluate' && event.documentId === 'first') {
+        oldGeneration = event.detail?.['abortGeneration'] as number;
+        // An evaluating notification already exposed the ID; the progress
+        // payload carrying the generation may still be in transit.
+        expect(signalDocumentAbort(signalBuffer, event.evaluationId, undefined, abortReason.superseded)).toBe(true);
+      }
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'first',
+        intent: 0,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(oldGeneration).toBeDefined();
+      });
+      worker.handleOpenDocument({
+        documentId: 'second',
+        intent: 0,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated.some((event) => event.documentId === 'second')).toBe(true);
+      });
+      expect(signalDocumentAbort(signalBuffer, '1', oldGeneration, abortReason.superseded)).toBe(false);
+      expect(evaluated.some((event) => event.documentId === 'first')).toBe(false);
+      expect(evaluated.find((event) => event.documentId === 'second')?.success).toBe(true);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('arms distinct shared abort tokens at native render and write hooks', async () => {
+    const render = vi.fn(async () => {
+      checkAbort();
+      return { content: '<svg xmlns="http://www.w3.org/2000/svg"/>' };
+    });
+    const write = vi.fn(async () => {
+      checkAbort();
+      return { files: [{ name: 'bom.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode('ok') }] as const };
+    });
+    const kernel = defineKernelV2({
+      id: 'native-hook-abort',
+      extensions: ['circuit'] as const,
+      name: 'Native hook abort',
+      version: '1.0.0',
+      views: { model: { title: 'Model', mimeType: 'image/svg+xml' } },
+      exports: { bom: { title: 'BOM', mimeType: 'text/plain', extension: 'txt' } },
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        return { handle: {}, views: ['model'] as const, exports: ['bom'] as const };
+      },
+      render,
+      write,
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const buffer = new SharedArrayBuffer(16);
+    worker.setSignalBuffer(buffer);
+    const phases: string[] = [];
+    worker.onDocumentProgressUpdate = (event) => {
+      if (event.phase !== 'render' && event.phase !== 'write') {
+        return;
+      }
+      phases.push(event.phase);
+      const sequence = event.detail?.['abortSequence'];
+      const generation = event.detail?.['abortGeneration'];
+      expect(typeof sequence).toBe('number');
+      expect(typeof generation).toBe('number');
+      expect(signalDocumentAbort(buffer, String(sequence), generation as number, abortReason.timeout)).toBe(true);
+    };
+    const errors: Array<Parameters<NonNullable<KernelRuntimeWorker['onDocumentError']>>[0]> = [];
+    worker.onDocumentError = (event) => {
+      errors.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 0,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      worker.handleOpenView({ documentId: 'doc', subscriptionId: 'view', requestId: 'r1', options: {} });
+      await vi.waitFor(() => {
+        expect(errors.some((event) => event.scope === 'operation' && event.phase === 'render')).toBe(true);
+      });
+      await expect(worker.exportDocument({ documentId: 'doc', operationId: 'write', target: 'bom' })).rejects.toThrow();
+      expect(errors.some((event) => event.scope === 'operation' && event.phase === 'write')).toBe(true);
+      expect(phases).toEqual(['render', 'write']);
+      expect(render).toHaveBeenCalledOnce();
+      expect(write).toHaveBeenCalledOnce();
+    } finally {
       await worker.cleanup();
     }
   });
@@ -308,7 +619,7 @@ describe('v2 kernel boundary with the current client', () => {
       transferables: { inlineFileSystem },
       options: {},
     });
-    const evaluated: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0][] = [];
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
     worker.onEvaluated = (event) => {
       evaluated.push(event);
     };
@@ -383,7 +694,7 @@ describe('v2 kernel boundary with the current client', () => {
       runtime: defineRuntime({ kernels: [kernel], transcoders: [transcoder] }),
     });
     await initializeWorkerForTesting(worker);
-    const evaluated: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0][] = [];
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
     worker.onEvaluated = (event) => {
       evaluated.push(event);
     };
@@ -433,7 +744,7 @@ describe('v2 kernel boundary with the current client', () => {
     await seedTestFileSystem({ 'model.circuit': 'board' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
-    const evaluated: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0][] = [];
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
     worker.onEvaluated = (event) => {
       evaluated.push(event);
     };
@@ -497,7 +808,7 @@ describe('v2 kernel boundary with the current client', () => {
     await seedTestFileSystem({ 'model.circuit': 'board' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
-    const rendered: Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0][] = [];
+    const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
     worker.onRendered = (event) => {
       rendered.push(event);
     };
@@ -531,6 +842,11 @@ describe('v2 kernel boundary with the current client', () => {
       });
       expect(rendered.map((event) => event.view)).toEqual(['primary', 'secondary', 'primary']);
       expect(rendered.map((event) => event.success)).toEqual([true, true, false]);
+      expect(rendered.every((event) => !Object.hasOwn(event, 'instance'))).toBe(true);
+      for (const event of rendered) {
+        const decoded = msgpackCodec.decode(msgpackCodec.encode(event));
+        expect(runtimeDocumentProtocolSchemas.notifies.rendered.safeParse(decoded).success).toBe(true);
+      }
       expect(evaluate).toHaveBeenCalledOnce();
       expect(render).toHaveBeenCalledTimes(2);
     } finally {
@@ -561,7 +877,7 @@ describe('v2 kernel boundary with the current client', () => {
     await seedTestFileSystem({ 'model.circuit': 'board' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
-    const evaluated: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0][] = [];
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
     worker.onEvaluated = (event) => {
       evaluated.push(event);
     };
@@ -633,7 +949,7 @@ describe('v2 kernel boundary with the current client', () => {
     await seedTestFileSystem({ 'model.circuit': 'board' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
-    const evaluated: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0][] = [];
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
     worker.onEvaluated = (event) => {
       evaluated.push(event);
     };
@@ -662,6 +978,150 @@ describe('v2 kernel boundary with the current client', () => {
       expect(unavailable.success).toBe(false);
       expect(unavailable.issues[0]?.code).toBe('EXPORT_UNKNOWN');
     } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('pins an in-flight committed evaluation for export while a newer update waits', async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const writes: number[] = [];
+    const kernel = defineKernelV2({
+      id: 'pending-export-pin',
+      extensions: ['circuit'] as const,
+      name: 'Pending export pin',
+      version: '1.0.0',
+      views: {},
+      exports: { bom: { title: 'BOM', mimeType: 'text/plain', extension: 'txt' } },
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate({ parameters: input }) {
+        const version = Number(input['version']);
+        if (version === 1) {
+          entered.resolve();
+          await release.promise;
+        }
+        return { handle: { version }, views: [] as const, exports: ['bom'] as const };
+      },
+      async write({ handle }) {
+        writes.push(handle.version);
+        return {
+          files: [
+            { name: 'bom.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode(String(handle.version)) },
+          ] as const,
+        };
+      },
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: { version: 1 },
+        watch: false,
+      });
+      await entered.promise;
+      const pinned = worker.exportDocument({ documentId: 'doc', operationId: 'pinned', target: 'bom' });
+      worker.handleUpdateDocument({ documentId: 'doc', intent: 2, parameters: { version: 2 } });
+      release.resolve();
+      const old = await pinned;
+      expect(old.success).toBe(true);
+      if (old.success) {
+        expect(new TextDecoder().decode(old.files[0].bytes)).toBe('1');
+      }
+      await vi.waitFor(() => {
+        expect(evaluated.at(-1)?.intent).toBe(2);
+      });
+      expect(writes).toEqual([1]);
+    } finally {
+      release.resolve();
+      await worker.cleanup();
+    }
+  });
+
+  it('settles a pinned export from a failed evaluation without borrowing a newer success', async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const write = vi.fn(async ({ handle }: { handle: { version: number } }) => ({
+      files: [
+        { name: 'bom.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode(String(handle.version)) },
+      ] as const,
+    }));
+    const kernel = defineKernelV2({
+      id: 'failed-export-pin',
+      extensions: ['circuit'] as const,
+      name: 'Failed export pin',
+      version: '1.0.0',
+      views: {},
+      exports: { bom: { title: 'BOM', mimeType: 'text/plain', extension: 'txt' } },
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate({ parameters: input }) {
+        const version = Number(input['version']);
+        if (version === 1) {
+          entered.resolve();
+          await release.promise;
+          throw new Error('Pinned evaluation failed.');
+        }
+        return { handle: { version }, views: [] as const, exports: ['bom'] as const };
+      },
+      write,
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: { version: 1 },
+        watch: false,
+      });
+      await entered.promise;
+      const pinned = worker.exportDocument({ documentId: 'doc', operationId: 'pinned-failure', target: 'bom' });
+      worker.handleUpdateDocument({ documentId: 'doc', intent: 2, parameters: { version: 2 } });
+      release.resolve();
+      const failed = await pinned;
+      expect(failed.success).toBe(false);
+      await vi.waitFor(() => {
+        expect(evaluated.at(-1)?.intent).toBe(2);
+      });
+      const failedEvent = evaluated[0];
+      expect(failedEvent).toBeDefined();
+      if (failedEvent) {
+        const decoded = msgpackCodec.decode(msgpackCodec.encode(failedEvent));
+        expect(runtimeDocumentProtocolSchemas.notifies.evaluated.safeParse(decoded).success).toBe(true);
+      }
+      expect(evaluated.at(-1)?.success).toBe(true);
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      release.resolve();
       await worker.cleanup();
     }
   });
@@ -1004,7 +1464,7 @@ describe('v2 kernel boundary with the current client', () => {
       expect(phases).toContain('evaluate:model.circuit');
       expect(phases).toContain('render:schematic:image/svg+xml:true');
       expect(phases).toContain('write:bom:text/csv:csv:true');
-      const evaluated: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0][] = [];
+      const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
       worker.onEvaluated = (event) => {
         evaluated.push(event);
       };

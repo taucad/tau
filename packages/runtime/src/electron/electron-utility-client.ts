@@ -110,7 +110,7 @@ const createElectronUtilityClient = (
    * machines port separately, and the facet dials it on first use. */
   const machines = createLazyMachineFacet(hooks.machines);
 
-  let openPromise: Promise<TransportClientReady<RuntimeDocumentProtocol>> | undefined;
+  let openPromise: Promise<TransportClientReady> | undefined;
   let channel: Channel<RuntimeDocumentProtocol> | undefined;
   let isClosed = false;
   /* A utility that dies before its hello failed to start; one that dies after
@@ -189,7 +189,7 @@ const createElectronUtilityClient = (
     void finish(hostExitResult(detail));
   });
 
-  const open = async (): Promise<TransportClientReady<RuntimeDocumentProtocol>> => {
+  const open = async (): Promise<TransportClientReady> => {
     if (openPromise) {
       return openPromise;
     }
@@ -225,6 +225,9 @@ const createElectronUtilityClient = (
     machines: machines.facet,
     reservePreview() {
       return {};
+    },
+    signalDocumentAbort() {
+      return false;
     },
     renderTimeoutRecovery: {
       kind: 'terminable',

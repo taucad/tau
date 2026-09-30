@@ -23,7 +23,6 @@ import type {
 } from '#types/runtime-protocol.types.js';
 import type {
   EncodedBinary,
-  EncodedGeometry,
   RuntimeInitializeMemoryHandle,
   RuntimeInitializePayload,
   RuntimeTransportCloseResult,
@@ -31,7 +30,7 @@ import type {
   TransportClientReady,
 } from '#transport/runtime-transport.types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
-import { runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
+import { runtimeChannelSessionKey } from '#transport/_internal/runtime-channel-bindings.js';
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { resolveRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
@@ -39,7 +38,7 @@ import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.
 import { materialiseBinaryContent, materialiseExportResult } from '#transport/_internal/export-materialiser.js';
 import { allocatePools } from '#transport/_internal/sab-pools.js';
 import type { AllocatedPools } from '#transport/_internal/sab-pools.js';
-import { reservePreview } from '#transport/_internal/abort-channel.js';
+import { reservePreview, signalDocumentAbort } from '#transport/_internal/abort-channel.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 import type { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { buildComputeStoreBridge } from '#transport/_internal/compute-store-bridge.js';
@@ -106,7 +105,7 @@ export const inProcessClient = (
   let channelPair: MessageChannel | undefined;
   let wrappedClientPort: ReturnType<typeof wrapMessagePort<unknown>> | undefined;
   let wrappedHostPort: ReturnType<typeof wrapMessagePort<unknown>> | undefined;
-  let openPromise: Promise<TransportClientReady<RuntimeDocumentProtocol>> | undefined;
+  let openPromise: Promise<TransportClientReady> | undefined;
   let channel: Channel<RuntimeDocumentProtocol> | undefined;
   let isClosed = false;
   let worker: KernelRuntimeWorker | undefined;
@@ -149,19 +148,7 @@ export const inProcessClient = (
     return { value: { delivery: 'inline', bytes }, transferables: [bytes.buffer], tier: 'transfer' };
   };
 
-  const encodeGeometry: (geometry: Geometry) => EncodedGeometry = (geometry) => {
-    if (geometry.format !== 'gltf') {
-      return { value: geometry, transferables: [], tier: 'copy' };
-    }
-    const encoded = encodeBinary(geometry.hash, geometry.content);
-    return {
-      value: { format: 'gltf', content: encoded.value, hash: geometry.hash },
-      transferables: encoded.transferables,
-      tier: encoded.tier,
-    };
-  };
-
-  const open = async (): Promise<TransportClientReady<RuntimeDocumentProtocol>> => {
+  const open = async (): Promise<TransportClientReady> => {
     if (openPromise) {
       return openPromise;
     }
@@ -186,7 +173,6 @@ export const inProcessClient = (
       worker = new kernelWorkerModule.KernelRuntimeWorker({ runtime });
       dispatcher = createDocumentWorkerDispatcher(worker, hostPort, {
         inlineFileSystem,
-        encodeGeometry,
         encodeBinary,
         acknowledgeBinary: (key) => ensurePoolsAndPorts().geometryPool?.acknowledge(key),
       });
@@ -205,6 +191,9 @@ export const inProcessClient = (
     id: inProcessId,
     reservePreview() {
       return reservePreview(ensurePoolsAndPorts().pooled.signalBuffer);
+    },
+    signalDocumentAbort(evaluationId, generation, reason) {
+      return signalDocumentAbort(ensurePoolsAndPorts().pooled.signalBuffer, evaluationId, generation, reason);
     },
     renderTimeoutRecovery: { kind: 'unsupported' },
     describe(): TransportDescriptor<typeof inProcessId> {

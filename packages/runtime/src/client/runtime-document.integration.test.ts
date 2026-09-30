@@ -116,7 +116,7 @@ it('reports transport.closed as termination for pending document, view, and expo
   const document = client.open({ source: { files: { 'model.circuit': 'board' } }, watch: false });
   await document.evaluation();
   const view = document.view('primary');
-  const viewUpdate = view.update({ options: {} });
+  const viewUpdate = view.update({});
   const viewRead = view.rendering();
   const exported = document.export('bom');
   const update = document.update({ parameters: { count: 2 } });

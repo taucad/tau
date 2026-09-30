@@ -44,7 +44,7 @@ import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.j
 import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
 import { materialiseBinaryContent, materialiseExportResult } from '#transport/_internal/export-materialiser.js';
 import { triggerDocumentTimeout } from '#transport/_internal/abort-channel.js';
-import { runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
+import { runtimeChannelSessionKey } from '#transport/_internal/runtime-channel-bindings.js';
 import {
   buildSocketUrl,
   closeCauseFor,
@@ -112,7 +112,7 @@ export const webSocketClientDescribe = (options: WebSocketTransportOptions): Tra
 export const webSocketClient = (
   options: WebSocketTransportOptions,
 ): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<never, never>>, WebSocketId> => {
-  let openPromise: Promise<TransportClientReady<RuntimeDocumentProtocol>> | undefined;
+  let openPromise: Promise<TransportClientReady> | undefined;
   let channel: Channel<RuntimeDocumentProtocol> | undefined;
   let runtimePort: Port<unknown> | undefined;
   let fileSystemPort: Port<unknown> | undefined;
@@ -245,7 +245,7 @@ export const webSocketClient = (
     });
   };
 
-  const open = async (): Promise<TransportClientReady<RuntimeDocumentProtocol>> => {
+  const open = async (): Promise<TransportClientReady> => {
     if (openPromise) {
       return openPromise;
     }
@@ -345,6 +345,9 @@ export const webSocketClient = (
     machines,
     reservePreview() {
       return {};
+    },
+    signalDocumentAbort() {
+      return false;
     },
     renderTimeoutRecovery: {
       kind: 'terminable',

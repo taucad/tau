@@ -1,5 +1,5 @@
 import { Topic } from '@taucad/events';
-import { OperationAbortedError, OperationTimeoutError } from '#framework/runtime-worker-client.js';
+import { OperationAbortedError, OperationTimeoutError } from '#framework/runtime-operation-errors.js';
 import { RuntimeTerminatedError } from '#client/runtime-terminated-error.js';
 import { randomUuid } from '@taucad/utils/id';
 import type { Channel } from '@taucad/rpc';
@@ -65,6 +65,7 @@ export class RuntimeDocumentSessionClient {
   readonly #timeoutMs: () => number;
   readonly #onTimeout: (operationId: string) => void;
   readonly #onTerminal: (operationId: string) => void;
+  readonly #signalAbort: (evaluationId: string, generation: number | undefined, reason: 1 | 2) => boolean;
   readonly #documents = new Map<string, ReturnType<RuntimeDocumentSessionClient['open']>>();
   readonly #terminators = new Map<string, (error: RuntimeTerminatedError) => void>();
   readonly #disposers: Array<() => void> = [];
@@ -77,6 +78,7 @@ export class RuntimeDocumentSessionClient {
       operationTimeout?: () => number;
       onTimeout?: (operationId: string) => void;
       onTerminal?: (operationId: string) => void;
+      signalAbort?: (evaluationId: string, generation: number | undefined, reason: 1 | 2) => boolean;
     } = {},
   ) {
     this.#channel = channel;
@@ -84,6 +86,7 @@ export class RuntimeDocumentSessionClient {
     this.#timeoutMs = settings.operationTimeout ?? (() => 0);
     this.#onTimeout = settings.onTimeout ?? (() => undefined);
     this.#onTerminal = settings.onTerminal ?? (() => undefined);
+    this.#signalAbort = settings.signalAbort ?? (() => false);
     this.#disposers.push(
       channel.onClose(() => {
         this.terminate(new RuntimeTerminatedError());
@@ -129,8 +132,10 @@ export class RuntimeDocumentSessionClient {
     const onTerminal = this.#onTerminal;
     const armDeadline = (settings: {
       operationId: () => string | undefined;
+      signalTarget?: () => { evaluationId: string; generation?: number } | undefined;
       fallbackRecoveryId: string;
       isFresh: () => boolean;
+      needsRecovery?: () => boolean;
       callback: () => void;
     }): (() => void) => {
       const { operationId, fallbackRecoveryId, isFresh, callback } = settings;
@@ -143,6 +148,13 @@ export class RuntimeDocumentSessionClient {
           return;
         }
         callback();
+        if (settings.needsRecovery?.() === false) {
+          return;
+        }
+        const target = settings.signalTarget?.();
+        if (target) {
+          this.#signalAbort(target.evaluationId, target.generation, abortReason.timeout);
+        }
         const currentOperationId = operationId();
         if (currentOperationId) {
           try {
@@ -163,7 +175,14 @@ export class RuntimeDocumentSessionClient {
       progress: new Topic<DocumentEvents['progress']>(),
       status: new Topic<DocumentStatus>(),
     };
-    const views = new Map<string, { close: () => void; terminate: (error: RuntimeTerminatedError) => void }>();
+    const views = new Map<
+      string,
+      {
+        close: () => void;
+        terminate: (error: RuntimeTerminatedError) => void;
+        supersede: () => void;
+      }
+    >();
     const disposers: Array<() => void> = [];
     let closed = false;
     let intent = 0;
@@ -182,6 +201,11 @@ export class RuntimeDocumentSessionClient {
     let clearEvaluationDeadline: (() => void) | undefined;
     const reads = new Set<Waiter<UpdateOutcome>>();
     const exportsInFlight = new Map<string, Waiter<never>>();
+    const exportAbortTargets = new Map<string, { sequence: string; generation?: number }>();
+    const exportPins = new Map<string, string>();
+    let evaluationGeneration: number | undefined;
+    let evaluationTransient = false;
+    let committedEvaluationId: string | undefined;
     const settleReads = (outcome: UpdateOutcome): void => {
       for (const read of reads) {
         read.resolve(outcome);
@@ -235,6 +259,9 @@ export class RuntimeDocumentSessionClient {
       if (closed) {
         return;
       }
+      if (evaluationId !== undefined) {
+        this.#signalAbort(evaluationId, evaluationGeneration, abortReason.superseded);
+      }
       closed = true;
       clearEvaluationDeadline?.();
       documents.delete(documentId);
@@ -245,6 +272,10 @@ export class RuntimeDocumentSessionClient {
       }
       reads.clear();
       for (const [operationId, waiter] of exportsInFlight) {
+        const target = exportAbortTargets.get(operationId);
+        if (target) {
+          this.#signalAbort(target.sequence, target.generation, abortReason.superseded);
+        }
         waiter.reject(new OperationAbortedError());
         try {
           channel.notify('abort', { operationId, reason: 0 });
@@ -253,6 +284,7 @@ export class RuntimeDocumentSessionClient {
         }
       }
       exportsInFlight.clear();
+      exportAbortTargets.clear();
       for (const view of views.values()) {
         view.close();
       }
@@ -335,6 +367,8 @@ export class RuntimeDocumentSessionClient {
         }
         evaluationId = value.evaluationId;
         evaluationOperationId = `evaluate:${documentId}:${value.evaluationId}`;
+        evaluationGeneration = undefined;
+        evaluationTransient = value.transient;
         timedOutEvaluationId = undefined;
         evaluationPhase = 'evaluate';
         operationError = undefined;
@@ -344,6 +378,7 @@ export class RuntimeDocumentSessionClient {
           const admittedEvaluationId = value.evaluationId;
           clearEvaluationDeadline = armDeadline({
             operationId: () => evaluationOperationId,
+            signalTarget: () => (evaluationId ? { evaluationId, generation: evaluationGeneration } : undefined),
             fallbackRecoveryId: `pending:${documentId}:${admittedIntent}:${admittedEvaluationId}`,
             isFresh: () =>
               !closed && intent === admittedIntent && evaluationId === admittedEvaluationId && !timedOutEvaluationId,
@@ -372,6 +407,10 @@ export class RuntimeDocumentSessionClient {
           return;
         }
         evaluationId = value.id;
+        evaluationGeneration = undefined;
+        if (!value.transient) {
+          committedEvaluationId = value.id;
+        }
         clearEvaluationDeadline?.();
         latestCurrent = value;
         operationError = undefined;
@@ -383,15 +422,15 @@ export class RuntimeDocumentSessionClient {
         setStatus(value.success ? 'ready' : 'error');
       }),
       channel.onNotify('progress', (value) => {
-        if (
-          isCurrent(value.intent, value.evaluationId) &&
-          value.documentId === documentId &&
-          value.operationId === `evaluate:${documentId}:${value.evaluationId}` &&
-          !value.requestId
-        ) {
-          evaluationOperationId = value.operationId;
-          if (value.phase !== 'queued') {
-            evaluationPhase = value.phase;
+        if (isCurrent(value.intent, value.evaluationId) && value.documentId === documentId) {
+          if (value.operationId === `evaluate:${documentId}:${value.evaluationId}` && !value.requestId) {
+            evaluationOperationId = value.operationId;
+            if (value.phase === 'evaluate' && typeof value.detail?.['abortGeneration'] === 'number') {
+              evaluationGeneration = value.detail['abortGeneration'];
+            }
+            if (value.phase !== 'queued') {
+              evaluationPhase = value.phase;
+            }
           }
           topics.progress.emit({ phase: value.phase, ...(value.detail ? { detail: value.detail } : {}) });
         }
@@ -461,6 +500,12 @@ export class RuntimeDocumentSessionClient {
       if (wireChange.transient === true && wireChange.stage !== undefined) {
         throw new TypeError('A transient document update cannot stage files.');
       }
+      if (evaluationId !== undefined && ![...exportPins.values()].includes(evaluationId)) {
+        this.#signalAbort(evaluationId, evaluationGeneration, abortReason.superseded);
+      }
+      for (const currentView of views.values()) {
+        currentView.supersede();
+      }
       pending.resolve({ superseded: true });
       clearEvaluationDeadline?.();
       settleReads({ superseded: true });
@@ -470,6 +515,7 @@ export class RuntimeDocumentSessionClient {
       intent += 1;
       evaluationId = undefined;
       evaluationOperationId = undefined;
+      evaluationGeneration = undefined;
       timedOutEvaluationId = undefined;
       timedOutUnknownIntent = false;
       operationError = undefined;
@@ -494,6 +540,7 @@ export class RuntimeDocumentSessionClient {
       const dispatchedIntent = intent;
       clearEvaluationDeadline = armDeadline({
         operationId: () => evaluationOperationId,
+        signalTarget: () => (evaluationId ? { evaluationId, generation: evaluationGeneration } : undefined),
         fallbackRecoveryId: `pending:${documentId}:${dispatchedIntent}`,
         isFresh: () => !closed && intent === dispatchedIntent && !pendingSettled,
         callback: () => {
@@ -528,6 +575,12 @@ export class RuntimeDocumentSessionClient {
       let rendered: Rendering | undefined;
       let viewOperationError: Error | undefined;
       let viewOperationId: string | undefined;
+      let viewAbortTarget: { sequence: string; generation?: number } | undefined;
+      const signalViewAbort = (reason: 1 | 2): void => {
+        if (viewAbortTarget) {
+          this.#signalAbort(viewAbortTarget.sequence, viewAbortTarget.generation, reason);
+        }
+      };
       let viewPhase = 'render';
       let timedOutViewToken: string | undefined;
       let timedOutViewRequestId: string | undefined;
@@ -557,6 +610,7 @@ export class RuntimeDocumentSessionClient {
             viewStatus === 'rendering' &&
             (dispatchedEvaluationId === undefined || viewEvaluationId === dispatchedEvaluationId),
           callback: () => {
+            signalViewAbort(abortReason.timeout);
             timedOutViewRequestId = dispatchedRequestId;
             if (dispatchedEvaluationId) {
               timedOutViewToken = `${dispatchedEvaluationId}:${dispatchedRequestId}`;
@@ -580,6 +634,7 @@ export class RuntimeDocumentSessionClient {
         if (viewClosed) {
           return;
         }
+        signalViewAbort(abortReason.superseded);
         viewClosed = true;
         clearViewDeadline?.();
         views.delete(subscriptionId);
@@ -626,6 +681,9 @@ export class RuntimeDocumentSessionClient {
       const receiveRendered = async (wire: RuntimeDocumentProtocol['notifies']['rendered']['args']): Promise<void> => {
         if (wire.subscriptionId === subscriptionId) {
           onTerminal(`render:${subscriptionId}:${wire.evaluationId}:${wire.requestId}`);
+          if (wire.requestId === requestId) {
+            viewAbortTarget = undefined;
+          }
         }
         if (wire.subscriptionId !== subscriptionId || viewClosed) {
           return;
@@ -690,6 +748,7 @@ export class RuntimeDocumentSessionClient {
           }
           viewEvaluationId = value.evaluationId;
           viewOperationId = undefined;
+          viewAbortTarget = undefined;
           if (newViewEvaluation) {
             clearViewDeadline?.();
             timedOutViewToken = undefined;
@@ -753,6 +812,14 @@ export class RuntimeDocumentSessionClient {
             viewOperationId = value.operationId;
             if (value.phase !== 'queued') {
               viewPhase = value.phase;
+            }
+            if (value.phase === 'render' && typeof value.detail?.['abortSequence'] === 'number') {
+              viewAbortTarget = {
+                sequence: String(value.detail['abortSequence']),
+                ...(typeof value.detail['abortGeneration'] === 'number'
+                  ? { generation: value.detail['abortGeneration'] }
+                  : {}),
+              };
             }
           }
         }),
@@ -818,6 +885,7 @@ export class RuntimeDocumentSessionClient {
         if (viewClosed) {
           throw viewOperationError ?? new OperationAbortedError();
         }
+        signalViewAbort(abortReason.superseded);
         viewPending.resolve({ superseded: true });
         clearViewDeadline?.();
         settleViewReads({ superseded: true });
@@ -825,6 +893,7 @@ export class RuntimeDocumentSessionClient {
         hasViewUpdateWaiter = true;
         requestId = randomUuid();
         viewOperationId = undefined;
+        viewAbortTarget = undefined;
         timedOutViewToken = undefined;
         timedOutViewRequestId = undefined;
         request = { ...request, ...change };
@@ -851,7 +920,13 @@ export class RuntimeDocumentSessionClient {
         on: onView,
         close: closeView,
       };
-      views.set(subscriptionId, { close: closeView, terminate: terminateView });
+      views.set(subscriptionId, {
+        close: closeView,
+        terminate: terminateView,
+        supersede: () => {
+          signalViewAbort(abortReason.superseded);
+        },
+      });
       return handle;
     };
     const exportDocument = async (target: string, request: WideExportRequest = {}): Promise<ExportResult> => {
@@ -861,22 +936,46 @@ export class RuntimeDocumentSessionClient {
       const operationId = randomUuid();
       const closedExport = Promise.withResolvers<never>();
       const timedExport = Promise.withResolvers<never>();
+      let exportTimeoutError: OperationTimeoutError | undefined;
+      let workerReplied = false;
       exportsInFlight.set(operationId, closedExport);
+      const pinnedEvaluationId = evaluationTransient ? committedEvaluationId : (evaluationId ?? committedEvaluationId);
+      if (pinnedEvaluationId) {
+        exportPins.set(operationId, pinnedEvaluationId);
+      }
       let exportPhase = 'write';
       const disposeProgress = channel.onNotify('progress', (value) => {
         if (value.operationId === operationId) {
           exportPhase = value.phase === 'writing' ? 'write' : value.phase;
+          if (value.phase === 'write' && typeof value.detail?.['abortSequence'] === 'number') {
+            exportAbortTargets.set(operationId, {
+              sequence: String(value.detail['abortSequence']),
+              ...(typeof value.detail['abortGeneration'] === 'number'
+                ? { generation: value.detail['abortGeneration'] }
+                : {}),
+            });
+          }
         }
       });
       const clearExportDeadline = armDeadline({
         operationId: () => operationId,
         fallbackRecoveryId: `pending-export:${operationId}`,
         isFresh: () => !closed && exportsInFlight.has(operationId),
+        needsRecovery: () => !workerReplied,
         callback: () => {
-          timedExport.reject(new OperationTimeoutError(exportPhase, 'Document export timed out.'));
+          exportTimeoutError = new OperationTimeoutError(exportPhase, 'Document export timed out.');
+          timedExport.reject(exportTimeoutError);
+          const target = exportAbortTargets.get(operationId);
+          if (target) {
+            this.#signalAbort(target.sequence, target.generation, abortReason.timeout);
+          }
         },
       });
       const onAbort = (): void => {
+        const target = exportAbortTargets.get(operationId);
+        if (target) {
+          this.#signalAbort(target.sequence, target.generation, abortReason.superseded);
+        }
         channel.notify('abort', { operationId, reason: 0 });
       };
       request.signal?.addEventListener('abort', onAbort, { once: true });
@@ -896,13 +995,16 @@ export class RuntimeDocumentSessionClient {
             },
             request.signal,
           );
+          workerReplied = true;
+          exportAbortTargets.delete(operationId);
+          onTerminal(operationId);
           const result = await materialiseDocumentExport(
             wire,
             this.#resolveBinary,
-            () => !closed && !request.signal?.aborted,
+            () => !closed && !request.signal?.aborted && !exportTimeoutError,
           );
           if (!result) {
-            throw new OperationAbortedError();
+            throw exportTimeoutError ?? new OperationAbortedError();
           }
           return result;
         };
@@ -918,6 +1020,8 @@ export class RuntimeDocumentSessionClient {
         clearExportDeadline();
         disposeProgress();
         exportsInFlight.delete(operationId);
+        exportAbortTargets.delete(operationId);
+        exportPins.delete(operationId);
         request.signal?.removeEventListener('abort', onAbort);
       }
     };
@@ -927,6 +1031,7 @@ export class RuntimeDocumentSessionClient {
     channel.notify('open', { ...args, intent });
     clearEvaluationDeadline = armDeadline({
       operationId: () => evaluationOperationId,
+      signalTarget: () => (evaluationId ? { evaluationId, generation: evaluationGeneration } : undefined),
       fallbackRecoveryId: `pending:${documentId}:${intent}`,
       isFresh: () => !closed && !pendingSettled,
       callback: () => {

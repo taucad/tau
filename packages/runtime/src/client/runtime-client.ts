@@ -40,4 +40,4 @@ export {
   isOperationAbortedError,
   OperationTimeoutError,
   isOperationTimeoutError,
-} from '#framework/runtime-worker-client.js';
+} from '#framework/runtime-operation-errors.js';

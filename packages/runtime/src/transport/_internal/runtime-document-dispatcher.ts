@@ -18,8 +18,8 @@ import type {
 import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
 import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
 import { createComputeStoreChannelClient } from '#transport/_internal/compute-store-channel.js';
-import type { BinaryEncoder, WorkerDispatcherOptions } from '#transport/_internal/runtime-worker-dispatcher.js';
-import { runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
+import { runtimeChannelSessionKey } from '#transport/_internal/runtime-channel-bindings.js';
+import type { BinaryEncoder, DocumentWorkerDispatcherOptions } from '#transport/_internal/runtime-channel-bindings.js';
 
 const inlineBinary: BinaryEncoder = (_key, source) => {
   const bytes = new Uint8Array(source);
@@ -30,7 +30,7 @@ const inlineBinary: BinaryEncoder = (_key, source) => {
 export function createDocumentWorkerDispatcher(
   worker: KernelWorker,
   port: Port<unknown>,
-  options?: WorkerDispatcherOptions,
+  options?: DocumentWorkerDispatcherOptions,
 ): ChannelServerHandle<RuntimeDocumentProtocol> {
   // oxlint-disable-next-line eslint/prefer-const -- callbacks capture the server before its channel construction below.
   let server: ChannelServerHandle<RuntimeDocumentProtocol> | undefined;
@@ -46,6 +46,9 @@ export function createDocumentWorkerDispatcher(
     server?.notify(name, args);
   };
   const flushLogs = (): void => {
+    if (logTimer) {
+      clearTimeout(logTimer);
+    }
     if (pendingLogs.length > 0) {
       notify('logBatch', { entries: pendingLogs.splice(0) });
     }
@@ -73,6 +76,8 @@ export function createDocumentWorkerDispatcher(
     notify('evaluating', event);
   };
   worker.onEvaluated = (event) => {
+    flushLogs();
+    worker.flushTelemetry();
     notify('evaluated', event);
     worker.permitComputePublication();
   };
@@ -94,6 +99,8 @@ export function createDocumentWorkerDispatcher(
   worker.onRendered = (event) => {
     const transferables: Transferable[] = [];
     if (!event.success) {
+      flushLogs();
+      worker.flushTelemetry();
       notify('rendered', event);
       worker.permitComputePublication();
       return;
@@ -112,6 +119,8 @@ export function createDocumentWorkerDispatcher(
       artifact: { ...event.artifact, content: wireContent },
     };
     const envelope: WithTransferables<typeof value> = { value, transferables };
+    flushLogs();
+    worker.flushTelemetry();
     notify('rendered', envelope);
     worker.permitComputePublication();
   };
@@ -187,8 +196,12 @@ export function createDocumentWorkerDispatcher(
     }
     return { files: encoded as [WireExportFile, ...WireExportFile[]], transferables };
   };
-  type CallResult = Awaited<ReturnType<ChannelServer<RuntimeDocumentProtocol>['call']>>;
-  const impl: ChannelServer<RuntimeDocumentProtocol> = {
+  type CallResult = RuntimeDocumentProtocol['calls'][keyof RuntimeDocumentProtocol['calls']]['result'];
+  // The RPC callback is generic over the call name. The switch checks each
+  // branch against its schema result, but TypeScript cannot correlate N after
+  // narrowing a generic name; keep that assertion at this single boundary.
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- generic RPC call names cannot correlate across a switch.
+  const impl = {
     // oxlint-disable-next-line max-params -- fixed RPC server signature.
     async call(_context, name, args, signal) {
       switch (name) {
@@ -202,16 +215,22 @@ export function createDocumentWorkerDispatcher(
           )) as CallResult;
         }
         case 'export': {
-          const result = await worker.exportDocument(
-            args as RuntimeDocumentProtocol['calls']['export']['args'],
-            signal,
-          );
+          let result: Awaited<ReturnType<typeof worker.exportDocument>>;
+          try {
+            result = await worker.exportDocument(args as RuntimeDocumentProtocol['calls']['export']['args'], signal);
+          } finally {
+            flushLogs();
+            worker.flushTelemetry();
+          }
           if (!result.success) {
             return result as CallResult;
           }
           const { files, transferables } = encodeExport(result.files);
           const wire: WireExportResult = { ...result, files };
-          const response: CallResult = { value: wire, transferables };
+          const response: WithTransferables<RuntimeDocumentProtocol['calls']['export']['result']> = {
+            value: wire,
+            transferables,
+          };
           return response;
         }
         case 'snapshotSource': {
@@ -228,7 +247,10 @@ export function createDocumentWorkerDispatcher(
             transferables.push(content.buffer);
             return { ...file, content };
           });
-          const response: CallResult = { value: { ...result, data: { ...result.data, files } }, transferables };
+          const response: WithTransferables<RuntimeDocumentProtocol['calls']['snapshotSource']['result']> = {
+            value: { ...result, data: { ...result.data, files } },
+            transferables,
+          };
           return response;
         }
         case 'transcode': {
@@ -242,7 +264,11 @@ export function createDocumentWorkerDispatcher(
             transferables.push(...delivery.transferables);
             return { ...file, bytes: delivery.value };
           });
-          return { value: { ...result, data }, transferables } as unknown as CallResult;
+          const response: WithTransferables<RuntimeDocumentProtocol['calls']['transcode']['result']> = {
+            value: { ...result, data },
+            transferables,
+          };
+          return response;
         }
         case 'dispose': {
           if (logTimer) {
@@ -297,7 +323,7 @@ export function createDocumentWorkerDispatcher(
       yield* [] as never[];
       throw new Error('The document protocol declares no listen streams.');
     },
-  };
+  } as ChannelServer<RuntimeDocumentProtocol>;
   const deliveryPort: Port<unknown> = {
     ...port,
     postMessage(message, transferables) {

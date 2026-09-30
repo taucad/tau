@@ -45,7 +45,7 @@ import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import { KernelWorker } from '#framework/kernel-worker.js';
 import type { EvaluationSlot, KernelBinding, NativeBuildInput, OperationOwner } from '#framework/render-artifact.js';
-import { isRenderAbortedError } from '#framework/runtime-worker-client.js';
+import { isRenderAbortedError } from '#framework/runtime-operation-errors.js';
 import { preserveMethodNames } from '#framework/named.js';
 import { isWebAssemblyException } from '#framework/wasm-exception.js';
 import { createKernelError } from '#kernels/kernel-helpers.js';
@@ -403,10 +403,14 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         );
         if (!defaultOptions.success) return createKernelError(defaultOptions.issues);
       }
-      const instances: Record<string, readonly ViewInstance[]> = {};
+      const instances: Record<string, readonly ViewInstance[]> = Object.create(null);
       for (const [id, value] of Object.entries(output.instances ?? {})) {
         const candidate: unknown = value;
-        if (!viewIds.includes(id) || kernel.definition.views[id]?.instances !== true) {
+        if (
+          !viewIds.includes(id) ||
+          !Object.hasOwn(kernel.definition.views, id) ||
+          kernel.definition.views[id]?.instances !== true
+        ) {
           throw new TypeError(
             `Kernel ${kernel.entry.id} offered instances for unavailable or undeclared-instance view ${id}.`,
           );
@@ -511,12 +515,15 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     const kernel = this.getKernelForOwner(owner);
     if (!kernel) return [];
     return (offers?.views ?? Object.keys(kernel.definition.views)).map((id) => {
-      const declaration = kernel.definition.views[id]!;
+      const declaration = Object.hasOwn(kernel.definition.views, id) ? kernel.definition.views[id] : undefined;
+      if (!declaration) {
+        throw new TypeError(`Kernel ${kernel.entry.id} offered unknown view ${id}.`);
+      }
       return {
         id,
         title: declaration.title,
         mimeType: declaration.mimeType,
-        ...(offers?.instances?.[id] ? { instances: offers.instances[id] } : {}),
+        ...(offers?.instances && Object.hasOwn(offers.instances, id) ? { instances: offers.instances[id] } : {}),
         ...(declaration.optionsSchema
           ? { options: this.deriveJsonSchema(declaration.optionsSchema, `view:${kernel.entry.id}:${id}`) }
           : {}),
@@ -632,7 +639,8 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     const kernel = this.getKernelForOwner(owner);
     const offered = offers?.views ?? Object.keys(kernel?.definition.views ?? {});
     const view = requested ?? offered[0];
-    const declaration = view ? kernel?.definition.views[view] : undefined;
+    const declaration =
+      view && kernel && Object.hasOwn(kernel.definition.views, view) ? kernel.definition.views[view] : undefined;
     if (!view || !declaration || !offered.includes(view)) {
       return createKernelError([
         {
@@ -643,7 +651,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         },
       ]);
     }
-    const instances = offers?.instances?.[view];
+    const instances = offers?.instances && Object.hasOwn(offers.instances, view) ? offers.instances[view] : undefined;
     const selectedInstance = instance ?? instances?.[0]?.id;
     if (selectedInstance && (!instances || !instances.some((item) => item.id === selectedInstance))) {
       return createKernelError([
@@ -670,7 +678,8 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       return undefined;
     }
     const view = offers.views === undefined ? Object.keys(kernel.definition.views)[0] : offers.views[0];
-    const declaration = view ? kernel.definition.views[view] : undefined;
+    const declaration =
+      view && Object.hasOwn(kernel.definition.views, view) ? kernel.definition.views[view] : undefined;
     return view && declaration ? { view, mimeType: declaration.mimeType } : undefined;
   }
 

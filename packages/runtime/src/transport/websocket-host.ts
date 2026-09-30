@@ -36,7 +36,6 @@ import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-doc
 import { createWorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import type { WorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
-import { encodeGeometryAsOwnedCopy } from '#transport/_internal/owned-transfer-bytes.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import {
   createSessionPairing,
@@ -408,7 +407,6 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
       const dispatcher = createDocumentWorkerDispatcher(worker, port, {
         inlineFileSystem,
         ...(computeStorePort ? { computeStorePort } : {}),
-        encodeGeometry: encodeGeometryAsOwnedCopy,
       });
       dispatchers.add(dispatcher);
 

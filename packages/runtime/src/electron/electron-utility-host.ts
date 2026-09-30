@@ -52,7 +52,7 @@ export const electronUtilityHost = (
 
   debugLog('utility:host', 'constructed');
 
-  let openPromise: Promise<TransportHostReady<RuntimeDocumentProtocol>> | undefined;
+  let openPromise: Promise<TransportHostReady> | undefined;
   let dispatcherHandle: ChannelServerHandle<RuntimeDocumentProtocol> | undefined;
   let transferredFileSystem: WorkerFileSystemProxy | undefined;
   let receivedPortHandles: Array<{ close(): void }> = [];
@@ -96,11 +96,11 @@ export const electronUtilityHost = (
     return encodeGeometryAsOwnedCopy(geometry);
   };
 
-  const open = async (): Promise<TransportHostReady<RuntimeDocumentProtocol>> => {
+  const open = async (): Promise<TransportHostReady> => {
     if (openPromise) {
       return openPromise;
     }
-    openPromise = new Promise<TransportHostReady<RuntimeDocumentProtocol>>((resolve, reject) => {
+    openPromise = new Promise<TransportHostReady>((resolve, reject) => {
       rejectOpen = reject;
       if (isClosed) {
         reject(new Error('electronUtilityHost: closed before open()'));
@@ -213,7 +213,6 @@ export const electronUtilityHost = (
                 inlineFileSystem: transferredFileSystem ?? utilityFsBase!,
                 computeBindingMode: event.data?.computeBindingMode === 'off' ? 'off' : 'memory',
                 ...(wrappedComputeStorePort ? { computeStorePort: wrappedComputeStorePort } : {}),
-                encodeGeometry,
                 encodeBinary: encodeBinaryAsOwnedCopy,
               });
               dispatcherHandle = dispatcher;

@@ -720,7 +720,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
   });
 
   it('should switch a shared preview file without writing an editor view record', () => {
-    render(<ChatViewer viewId='view-1' panelApi={mockPanelApi} profile='shared' />);
+    render(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} profile='shared' />);
     fireEvent.click(screen.getByTestId('file-selector'));
     expect(mockPanelApi.updateParameters).toHaveBeenCalledWith({ entryPath: 'other.scad' });
     expect(mockViewActions.edit).not.toHaveBeenCalled();

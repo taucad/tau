@@ -96,7 +96,7 @@ export const offersFor = (
 ): {
   views: ReadonlyArray<'model' | 'drawing'>;
   exports: ReadonlyArray<'glb' | 'gltf'> | undefined;
-  instances: { drawing: ReadonlyArray<{ id: string; title: string }> };
+  instances?: { drawing: ReadonlyArray<{ id: string; title: string }> };
 } => {
   const drawings = handle.shapes.filter(({ shape }) => isDrawingShape(shape));
   const hasModel = handle.shapes.some(({ shape }) => !isDrawingShape(shape));
@@ -110,7 +110,7 @@ export const offersFor = (
   return {
     views: hasModel || drawings.length === 0 ? (drawings.length > 0 ? ['model', 'drawing'] : ['model']) : ['drawing'],
     exports: hasModel ? undefined : drawings.length === 0 ? ['glb', 'gltf'] : [],
-    instances: { drawing: instances },
+    ...(drawings.length > 0 ? { instances: { drawing: instances } } : {}),
   };
 };
 

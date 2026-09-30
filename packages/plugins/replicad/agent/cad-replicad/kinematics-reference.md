@@ -10,6 +10,21 @@ Return moving bodies as **separate, uniquely named** `ShapeConfig` shapes. `link
 
 Use the **as-built geometry frame**: `origin` is a point in the model's coordinate system at the rendered reference pose; `axis`, `normal`, and `xAxis` are directions in that same frame. Replicad geometry is typically Z-up. State `schemaVersion: 1` and explicit `units: { length: 'mm', angle: 'deg' }` or `{ length: 'm', angle: 'rad' }`; the kernel transforms the mechanism alongside vertices into the GLB frame and units. Joint coordinates are **deltas** from the rendered pose, so zero means Reset. If parameters already rotate or translate parts, calculate the corresponding as-built joint origins/axes and shift travel limits so zero remains inside every limit. Do not pre-pose the geometry a second time in `mechanism`.
 
+## Optional shared name vocabulary
+
+A literal palette used by both `main` and `mechanism` catches name typos without a runtime helper:
+
+```typescript
+import type { LinkSource, MechanismSource } from '@taucad/kinematics';
+
+const partNames = { base: 'Base', lid: 'Lid' } as const;
+type ShapeName = (typeof partNames)[keyof typeof partNames];
+const link = { shapes: [partNames.lid] } satisfies LinkSource<ShapeName>;
+// Check the complete export with `satisfies MechanismSource<ShapeName>`.
+```
+
+Omit the generic for dynamic names; `MechanismSource` and `LinkSource` still accept strings. The generic contains **names**, not `typeof main`. It constrains vocabulary only: the runtime still checks which shapes were returned for the current parameters, duplicate assignments and graph references. Keep identifiers in the shared palette and return the same names; avoid whitespace that naming normalization would trim.
+
 ## Complete hinged model
 
 ```typescript

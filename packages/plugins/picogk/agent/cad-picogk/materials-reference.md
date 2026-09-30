@@ -45,22 +45,22 @@ A newly constructed `Material` is white, nonmetallic, roughness `.35f`, double-s
 
 `ColorFloat` RGB values use PicoGK's sRGB authoring convention and are converted to linear glTF once; alpha is linear coverage. Numeric material factors are validated, not clamped. Choose factors for the requested finish rather than enabling every effect. Visual metalness, roughness or a name such as "Steel" does not declare density, alloy grade, heat treatment or manufacturing qualification.
 
-| Material property | Meaning |
-| --- | --- |
-| `Color`, `Metallic`, `Roughness` | Base color and metallic/roughness factors in `[0, 1]`. Use metallic `0` for dielectrics and `1` for bare metals. |
-| `NormalTexture`, `NormalScale` | Tangent-space normal detail and scale. |
-| `OcclusionTexture`, `OcclusionStrength` | Ambient occlusion and strength in `[0, 1]`. |
-| `Emissive`, `EmissiveStrength`, `EmissiveTexture` | Emission color, nonnegative strength and optional color map. |
-| `AlphaMode`, `AlphaCutoff`, `DoubleSided` | `Opaque`, `Mask` or `Blend`; cutoff in `[0, 1]` applies to mask. Alpha blending is ordinary transparency. |
-| `Anisotropy` | Brushed/spun direction: strength in `[0, 1]`, rotation in radians, optional direction/strength map. |
-| `Clearcoat` | Coating factor/roughness in `[0, 1]` and optional coat/roughness/normal maps; use for an actual coating. |
-| `Ior`, `Dispersion` | Dielectric refractive index and nonnegative dispersion; dispersion accompanies transmission. |
-| `Iridescence` | Thin-film factor, IOR, thickness range and optional maps; thickness is nanometres. |
-| `Sheen` | Fabric color/roughness and optional maps. |
-| `Specular` | Dielectric highlight factor/color and optional maps. |
-| `Transmission` | Light transmission factor in `[0, 1]` and optional map; use for glass with IOR and volume. |
-| `Volume` | Thickness and attenuation distance in **metres**, even when geometry is millimetres; attenuation color and optional thickness map. Omit attenuation distance for no attenuation. |
-| `Unlit` | Flat unshaded appearance; cannot combine with anisotropy. |
+| Material property                                 | Meaning                                                                                                                                                                          |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Color`, `Metallic`, `Roughness`                  | Base color and metallic/roughness factors in `[0, 1]`. Use metallic `0` for dielectrics and `1` for bare metals.                                                                 |
+| `NormalTexture`, `NormalScale`                    | Tangent-space normal detail and scale.                                                                                                                                           |
+| `OcclusionTexture`, `OcclusionStrength`           | Ambient occlusion and strength in `[0, 1]`.                                                                                                                                      |
+| `Emissive`, `EmissiveStrength`, `EmissiveTexture` | Emission color, nonnegative strength and optional color map.                                                                                                                     |
+| `AlphaMode`, `AlphaCutoff`, `DoubleSided`         | `Opaque`, `Mask` or `Blend`; cutoff in `[0, 1]` applies to mask. Alpha blending is ordinary transparency.                                                                        |
+| `Anisotropy`                                      | Brushed/spun direction: strength in `[0, 1]`, rotation in radians, optional direction/strength map.                                                                              |
+| `Clearcoat`                                       | Coating factor/roughness in `[0, 1]` and optional coat/roughness/normal maps; use for an actual coating.                                                                         |
+| `Ior`, `Dispersion`                               | Dielectric refractive index and nonnegative dispersion; dispersion accompanies transmission.                                                                                     |
+| `Iridescence`                                     | Thin-film factor, IOR, thickness range and optional maps; thickness is nanometres.                                                                                               |
+| `Sheen`                                           | Fabric color/roughness and optional maps.                                                                                                                                        |
+| `Specular`                                        | Dielectric highlight factor/color and optional maps.                                                                                                                             |
+| `Transmission`                                    | Light transmission factor in `[0, 1]` and optional map; use for glass with IOR and volume.                                                                                       |
+| `Volume`                                          | Thickness and attenuation distance in **metres**, even when geometry is millimetres; attenuation color and optional thickness map. Omit attenuation distance for no attenuation. |
+| `Unlit`                                           | Flat unshaded appearance; cannot combine with anisotropy.                                                                                                                        |
 
 These fields cover core glTF PBR and eleven implemented extensions: anisotropy, clearcoat, dispersion, emissive strength, IOR, iridescence, sheen, specular, transmission, unlit and volume. There is no arbitrary vendor-extension or generic `extras` authoring promise.
 
@@ -100,19 +100,19 @@ Library.Go(1f, () =>
 
 Image bytes remain encoded without color conversion. Base-color, emissive, sheen-color and specular-color maps use glTF sRGB interpretation; normal/numeric maps contain linear data. Texture transforms use UV offset/scale and radians for rotation. Sampler defaults repeat in both directions; optional filters use glTF defaults when omitted. Wrap options are `ClampToEdge`, `MirroredRepeat`, `Repeat`; filters are `Nearest`, `Linear` and the four named mipmap minification modes.
 
-| Texture slot | Channels |
-| --- | --- |
-| `ColorTexture` | RGB base color; A coverage. Multiplies `Color`. |
-| `MetallicRoughnessTexture` | G roughness, B metallic. Multiplies the corresponding factors. |
-| `NormalTexture`, `Clearcoat.NormalTexture` | RGB tangent-space normal; scale changes XY detail. |
-| `OcclusionTexture` | R ambient occlusion. |
-| `EmissiveTexture` | RGB emission. |
-| `Anisotropy.Texture` | RG direction mapped to `[-1, 1]`, B strength. |
-| `Clearcoat.Texture`, `.RoughnessTexture` | R coating factor, G coating roughness respectively. |
-| `Iridescence.Texture`, `.ThicknessTexture` | R factor, G film thickness within the authored bounds respectively. |
-| `Sheen.ColorTexture`, `.RoughnessTexture` | RGB color, A roughness respectively. |
-| `Specular.Texture`, `.ColorTexture` | A factor, RGB color respectively. |
-| `Transmission.Texture`, `Volume.ThicknessTexture` | R transmission, G thickness respectively. |
+| Texture slot                                      | Channels                                                            |
+| ------------------------------------------------- | ------------------------------------------------------------------- |
+| `ColorTexture`                                    | RGB base color; A coverage. Multiplies `Color`.                     |
+| `MetallicRoughnessTexture`                        | G roughness, B metallic. Multiplies the corresponding factors.      |
+| `NormalTexture`, `Clearcoat.NormalTexture`        | RGB tangent-space normal; scale changes XY detail.                  |
+| `OcclusionTexture`                                | R ambient occlusion.                                                |
+| `EmissiveTexture`                                 | RGB emission.                                                       |
+| `Anisotropy.Texture`                              | RG direction mapped to `[-1, 1]`, B strength.                       |
+| `Clearcoat.Texture`, `.RoughnessTexture`          | R coating factor, G coating roughness respectively.                 |
+| `Iridescence.Texture`, `.ThicknessTexture`        | R factor, G film thickness within the authored bounds respectively. |
+| `Sheen.ColorTexture`, `.RoughnessTexture`         | RGB color, A roughness respectively.                                |
+| `Specular.Texture`, `.ColorTexture`               | A factor, RGB color respectively.                                   |
+| `Transmission.Texture`, `Volume.ThicknessTexture` | R transmission, G thickness respectively.                           |
 
 ## Mapping, recovery and export
 

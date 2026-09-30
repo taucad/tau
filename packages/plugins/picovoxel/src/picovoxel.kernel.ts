@@ -17,7 +17,8 @@ import type {
   Voxels,
 } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
-import { createExportFile } from '@taucad/runtime/types';
+import { createExportFile, kernelIssueCodeValues } from '@taucad/runtime/types';
+import { z } from 'zod';
 import type { GeometryGltf, KernelIssue, KernelIssueCode } from '@taucad/runtime/types';
 import {
   asBuffer,
@@ -42,7 +43,12 @@ import {
   toVmEntryPath,
 } from '@taucad/runtime/kernel';
 import type { KernelRuntime, RuntimeLogger } from '@taucad/runtime/kernel';
-import { resolveShapeName, validateGlbMaterial, validateGlbResources } from '@taucad/geometry-core';
+import {
+  readMechanismExport,
+  resolveShapeName,
+  validateGlbMaterial,
+  validateGlbResources,
+} from '@taucad/geometry-core';
 import type { GlbMaterial, GlbResources } from '@taucad/geometry-core';
 
 import { dropZeroAreaTriangles, picovoxelToGlb, picovoxelToGltf } from '#picovoxel.geometry.js';
@@ -75,8 +81,8 @@ const picovoxelBuild = {
   scripts: 'e19aa9a77efb2c44cb0aa359ba7e3b64d2a022dbf98b2a4abf0126122aac9d7c',
 } as const;
 
-/** Kernel version: material/resource handle semantics plus the PicoVoxel build it runs. */
-const kernelVersion = `1.3.0+picovoxel.${picovoxelBuild.version}.serial-${picovoxelBuild.serial.slice(0, 12)}.multi-${picovoxelBuild.multi.slice(0, 12)}.scripts-${picovoxelBuild.scripts.slice(0, 12)}`;
+/** Kernel version: mechanism/name-evidence handle semantics plus the PicoVoxel build it runs. */
+const kernelVersion = `1.4.0+picovoxel.${picovoxelBuild.version}.serial-${picovoxelBuild.serial.slice(0, 12)}.multi-${picovoxelBuild.multi.slice(0, 12)}.scripts-${picovoxelBuild.scripts.slice(0, 12)}`;
 
 /**
  * Explicit URLs of the assets each artifact loads (D20): the WebAssembly binary and, for the
@@ -94,6 +100,26 @@ const picovoxelAssets = {
 
 const kernelId = 'picovoxel';
 const defaultVoxelSize = 0.5;
+
+type PicovoxelSerializedHandle = Omit<PicovoxelNativeHandle, 'shapes'> & {
+  shapes: Array<
+    Omit<PicovoxelShapeSnapshot, 'vertices' | 'triangles'> & {
+      vertices: Uint8Array<ArrayBuffer>;
+      triangles: Uint8Array<ArrayBuffer>;
+    }
+  >;
+};
+
+// Match the runtime cache's loose issue envelope while retaining source-map and producer evidence.
+const mechanismIssuesSchema = z.array(
+  z
+    .object({
+      message: z.string(),
+      code: z.enum(kernelIssueCodeValues),
+      severity: z.literal('warning'),
+    })
+    .loose(),
+);
 
 /**
  * Native memory above which a render logs a warning.
@@ -670,13 +696,18 @@ const normalizeResult = (result: unknown, sessionLane: PicovoxelLane): Picovoxel
       ({ name, shape } = value);
       authoredMaterial = value['material'];
     }
+    const trimmedName = name?.trim();
+    const authoredName = trimmedName?.length ? trimmedName : undefined;
     const part = { index, name: resolveShapeName({ index, name, source: 'authored' }) };
     const material = snapshotMaterial(
       authoredMaterial,
       `${part.name} (output ${index + 1})`,
       resources.textures?.length ?? 0,
     );
-    const appearance = material === undefined ? {} : { material };
+    const appearance = {
+      ...(material === undefined ? {} : { material }),
+      ...(authoredName === undefined ? {} : { authoredName }),
+    };
     if (isMesh(shape)) {
       return { ...snapshotMesh(shape, part, sessionLane), ...appearance };
     }
@@ -937,13 +968,13 @@ export const picovoxelKernel = defineKernel({
   version: kernelVersion,
   optionsSchema: picovoxelOptionsSchema,
   createOptionsSchema: picovoxelRenderSchema,
-  render: { optionsSchema: picovoxelRenderSchema, content: ['includeEdges'] },
+  render: { optionsSchema: picovoxelRenderSchema, content: ['includeEdges', 'includeTopology'] },
   // D21: every PicoVoxel call checks for a newer render first, so a superseded build stops between
   // native operations instead of running to completion.
   cancellation: 'cooperative',
   exportFormats: {
-    glb: { optionsSchema: picovoxelExportSchemas.glb, content: ['includeEdges'] },
-    gltf: { optionsSchema: picovoxelExportSchemas.gltf, content: ['includeEdges'] },
+    glb: { optionsSchema: picovoxelExportSchemas.glb, content: ['includeEdges', 'includeTopology'] },
+    gltf: { optionsSchema: picovoxelExportSchemas.gltf, content: ['includeEdges', 'includeTopology'] },
     stl: { optionsSchema: picovoxelExportSchemas.stl },
   },
 
@@ -1019,7 +1050,9 @@ export const picovoxelKernel = defineKernel({
       }
     }
 
-    const build = async (sessionArtifact: PicovoxelArtifact): Promise<PicovoxelNativeHandle> => {
+    const build = async (
+      sessionArtifact: PicovoxelArtifact,
+    ): Promise<{ nativeHandle: PicovoxelNativeHandle; issues: KernelIssue[] }> => {
       let pico: Pico | undefined;
       let recycleReason: string | undefined;
       try {
@@ -1033,8 +1066,29 @@ export const picovoxelKernel = defineKernel({
         );
         const result = await runMain(module, withAbortChecks(pico), parameters);
         const nativeHandle = normalizeResult(result, lane);
+        const { mechanism, issues } = await readMechanismExport({
+          module,
+          parameters,
+          kernelId,
+          formatError: (error) => {
+            if (isRenderAborted(error)) {
+              throw error;
+            }
+            if (isTrap(error)) {
+              recycleReason = 'the mechanism trapped';
+            }
+            return buildIssue(error, { ...issueContext, session: { lane, artifact: sessionArtifact } });
+          },
+        });
         logSessionMemory(runtime.logger, pico, sessionArtifact);
-        return nativeHandle;
+        return {
+          nativeHandle: {
+            ...nativeHandle,
+            ...(mechanism === undefined ? {} : { mechanism }),
+            ...(issues.length > 0 ? { mechanismIssues: issues } : {}),
+          },
+          issues,
+        };
       } catch (error) {
         if (isTrap(error)) {
           recycleReason = 'the build trapped';
@@ -1067,7 +1121,7 @@ export const picovoxelKernel = defineKernel({
 
     buildCalls = 0;
     try {
-      return { nativeHandle: await build(artifact) };
+      return await build(artifact);
     } catch (error) {
       if (artifact !== 'multi' || !isPicoError(error) || !serialRetryCodes.has(error.code)) {
         return fail(error, artifact);
@@ -1077,16 +1131,26 @@ export const picovoxelKernel = defineKernel({
       runtime.logger.warn(warning.message, { data: { picoCode: error.code } });
       buildCalls = 0;
       try {
-        return { nativeHandle: await build('serial'), issues: [warning] };
+        const result = await build('serial');
+        return { ...result, issues: [...result.issues, warning] };
       } catch (retryError) {
         return fail(retryError, 'serial', [warning]);
       }
     }
   },
 
-  async meshGeometry({ nativeHandle }) {
-    const geometry: GeometryGltf = { format: 'gltf', content: picovoxelToGlb(nativeHandle) };
-    return finalizeMeshOutput({ artifacts: [geometry] });
+  async meshGeometry({ nativeHandle, content }) {
+    let issues: KernelIssue[] = [];
+    const geometry: GeometryGltf = {
+      format: 'gltf',
+      content: picovoxelToGlb(nativeHandle, {
+        includeTopology: content?.includeTopology === true,
+        onMechanismIssues: (warnings) => {
+          issues = warnings;
+        },
+      }),
+    };
+    return finalizeMeshOutput({ artifacts: [geometry], issues });
   },
 
   async cleanup(context) {
@@ -1102,7 +1166,7 @@ export const picovoxelKernel = defineKernel({
     releaseRender(undefined, context.authorResources);
   },
 
-  serializeNativeHandle({ nativeHandle }) {
+  serializeNativeHandle({ nativeHandle }): PicovoxelSerializedHandle {
     // MessagePack retains Uint8Array but restores other typed arrays as raw bytes.
     return {
       ...nativeHandle,
@@ -1121,6 +1185,14 @@ export const picovoxelKernel = defineKernel({
     const resources = snapshotResources(serializedNativeHandle);
     return {
       ...resources,
+      ...(serializedNativeHandle.mechanism === undefined
+        ? {}
+        : { mechanism: snapshotJson(serializedNativeHandle.mechanism) }),
+      ...(serializedNativeHandle.mechanismIssues === undefined
+        ? {}
+        : {
+            mechanismIssues: mechanismIssuesSchema.parse(snapshotJson(serializedNativeHandle.mechanismIssues)),
+          }),
       shapes: serializedNativeHandle.shapes.map((value: unknown, index): PicovoxelShapeSnapshot => {
         if (
           !isRecordObject(value) ||
@@ -1134,6 +1206,15 @@ export const picovoxelKernel = defineKernel({
           );
         }
         const name = resolveShapeName({ index, name: value['name'], source: 'authored' });
+        const authoredName: unknown = value['authoredName'];
+        if (
+          authoredName !== undefined &&
+          (typeof authoredName !== 'string' || !authoredName.trim() || authoredName.trim() !== name)
+        ) {
+          throw new TypeError(
+            `Invalid PicoVoxel serialized shape ${index}: authoredName must match its nonblank display name.`,
+          );
+        }
         if (value['vertices'].byteLength % 12 !== 0 || value['triangles'].byteLength % 12 !== 0) {
           throw new TypeError(
             `Invalid PicoVoxel serialized shape ${index}: vertex/triangle bytes must contain scalar triples.`,
@@ -1153,6 +1234,7 @@ export const picovoxelKernel = defineKernel({
           vertices,
           triangles: kept,
           lane: value['lane'],
+          ...(authoredName === undefined ? {} : { authoredName: name }),
           ...(material === undefined ? {} : { material }),
         };
       }),
@@ -1168,11 +1250,19 @@ export const picovoxelKernel = defineKernel({
         if (input.options.lane === 'fast' || shapes.some((shape) => shape.lane === 'fast')) {
           return createKernelError([laneExportRefusal()]);
         }
+        let issues: KernelIssue[] = [];
         const bytes = (input.format === 'gltf' ? picovoxelToGltf : picovoxelToGlb)(input.nativeHandle, {
           coordinateSystem: input.options.coordinateSystem,
           unit: input.options.unit,
+          includeTopology: input.content?.includeTopology === true,
+          onMechanismIssues: (warnings) => {
+            issues = warnings;
+          },
         });
-        return createKernelSuccess([createExportFile(input.format, `model.${input.format}`, asBuffer(bytes))]);
+        return createKernelSuccess(
+          [createExportFile(input.format, `model.${input.format}`, asBuffer(bytes))],
+          [...(input.nativeHandle.mechanismIssues ?? []), ...issues],
+        );
       }
       case 'stl': {
         if (shapes.length === 0) {
@@ -1200,6 +1290,7 @@ export const picovoxelKernel = defineKernel({
               ),
             ),
           ),
+          [...(input.nativeHandle.mechanismIssues ?? [])],
         );
       }
       default: {

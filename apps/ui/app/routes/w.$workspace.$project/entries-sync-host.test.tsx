@@ -80,12 +80,12 @@ describe('entry owner reconciliation', () => {
       ),
     );
     const setEntriesRecord = vi.fn();
-    let renderTimeout = 30_000;
+    let operationTimeout = 30_000;
     const cad = {
-      getSnapshot: () => ({ context: { renderTimeout } }),
-      send: (event: { type: string; renderTimeout: number }) => {
-        if (event.type === 'setRenderTimeout') {
-          renderTimeout = event.renderTimeout;
+      getSnapshot: () => ({ context: { operationTimeout } }),
+      send: (event: { type: string; operationTimeout: number }) => {
+        if (event.type === 'setOperationTimeout') {
+          operationTimeout = event.operationTimeout;
         }
       },
     };
@@ -118,11 +118,11 @@ describe('entry owner reconciliation', () => {
     await waitFor(() => {
       expect(setEntriesRecord).toHaveBeenCalledWith(
         expect.objectContaining({
-          entries: { 'a.ts': expect.objectContaining({ renderTimeout: 45_000 }) },
+          entries: { 'a.ts': expect.objectContaining({ operationTimeout: 45_000 }) },
         }),
       );
     });
-    renderTimeout = 60_000;
+    operationTimeout = 60_000;
     view.rerender(<EntriesSyncHost />);
     await waitFor(
       () => {
@@ -146,8 +146,8 @@ describe('entry owner reconciliation', () => {
     );
     hostFiles.writeFileChecked.mockClear();
     hostContentService = undefined;
-    let renderTimeout = 30_000;
-    const cad = { getSnapshot: () => ({ context: { renderTimeout } }), send: vi.fn() };
+    let operationTimeout = 30_000;
+    const cad = { getSnapshot: () => ({ context: { operationTimeout } }), send: vi.fn() };
     const model = { getSnapshot: () => ({ context: { unitsById: {} } }), send: vi.fn() };
     const acknowledged = new Map<string, string>();
     hostProject = {
@@ -181,7 +181,7 @@ describe('entry owner reconciliation', () => {
         <EntriesSyncHost />
       </StrictMode>,
     );
-    renderTimeout = 45_000;
+    operationTimeout = 45_000;
     view.rerender(
       <StrictMode>
         <EntriesSyncHost />
@@ -191,7 +191,7 @@ describe('entry owner reconciliation', () => {
       () => {
         expect(workbenchRecords.entries.read(hostFiles.get()!)).toMatchObject({
           status: 'current',
-          record: { entries: { 'a.ts': { renderTimeout: 45_000 } } },
+          record: { entries: { 'a.ts': { operationTimeout: 45_000 } } },
         });
       },
       { timeout: 1500 },
@@ -215,7 +215,7 @@ describe('entry owner reconciliation', () => {
         acknowledged.delete(path);
       }
     });
-    const cad = { getSnapshot: () => ({ context: { renderTimeout: 30_000 } }), send: vi.fn() };
+    const cad = { getSnapshot: () => ({ context: { operationTimeout: 30_000 } }), send: vi.fn() };
     const model = { getSnapshot: () => ({ context: { unitsById: {} } }), send: vi.fn() };
     const geometryUnits = new Map([['a.ts', cad]]);
     hostProject = {
@@ -253,15 +253,15 @@ describe('entry owner reconciliation', () => {
     view.unmount();
   });
   it('persists a human hide without reverting it and adopts a foreign isolation independently', async () => {
-    let renderTimeout = 180_000;
+    let operationTimeout = 180_000;
     let hidden: string[] = [];
     let isolated: string[] = [];
     let opacity: Record<string, number> = {};
     const cad = {
-      getSnapshot: () => ({ context: { renderTimeout } }),
-      send: vi.fn((event: { type: string; renderTimeout: number }) => {
-        if (event.type === 'setRenderTimeout') {
-          renderTimeout = event.renderTimeout;
+      getSnapshot: () => ({ context: { operationTimeout } }),
+      send: vi.fn((event: { type: string; operationTimeout: number }) => {
+        if (event.type === 'setOperationTimeout') {
+          operationTimeout = event.operationTimeout;
         }
       }),
     } as unknown as ActorRefFrom<typeof cadMachine>;
@@ -301,7 +301,7 @@ describe('entry owner reconciliation', () => {
       ),
     } as unknown as ActorRefFrom<typeof modelInteractionMachine>;
     type Entry = WorkbenchEntries['entries'][string];
-    const empty: Entry = { renderTimeout: 180_000, components: { hidden: [], isolated: [], opacity: [] } };
+    const empty: Entry = { operationTimeout: 180_000, components: { hidden: [], isolated: [], opacity: [] } };
     const write = vi.fn(async (_path: string, _next: Entry) => true);
     const draw = (entry: Entry) => (
       <EntryOwner

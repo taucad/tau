@@ -3,7 +3,7 @@ title: 'Port Allocation Policy'
 description: 'Canonical port assignments for all Tau services across dev, test, production, and infrastructure contexts to prevent collisions and browser-unsafe port errors.'
 status: active
 created: '2026-03-18'
-updated: '2026-03-18'
+updated: '2026-09-30'
 related:
   - docs/research/observability-architecture.md
 ---
@@ -22,22 +22,28 @@ Tau runs multiple services concurrently in development: a UI dev server, an API 
 
 All port assignments must match the table below. Never introduce a new port without adding it here first.
 
-| Port  | Service                          | Context  | Configured In                                                      |
-| ----- | -------------------------------- | -------- | ------------------------------------------------------------------ |
-| 3000  | UI Vite dev server               | Dev      | `apps/ui/vite.config.ts`                                           |
-| 3000  | API (Fly.io internal)            | Prod     | `apps/api/fly.prod.toml`, `apps/api/fly.staging.toml`              |
-| 3000  | API (test env)                   | Test     | `apps/api/.env.test`                                               |
-| 4000  | API (NestJS dev server)          | Dev      | `apps/api/.env`                                                    |
-| 4001  | Dev WebSocket server (Socket.IO) | Dev      | `apps/api/app/api/websocket/dev-websocket.service.ts` (`PORT + 1`) |
-| 4317  | OTLP gRPC receiver               | Infra    | `infra/docker-compose.yml`                                         |
-| 4318  | OTLP HTTP receiver               | Infra    | `infra/docker-compose.yml`                                         |
-| 5432  | PostgreSQL                       | Infra    | `infra/docker-compose.yml`                                         |
-| 6100  | Grafana UI (otel-lgtm)           | Infra    | `infra/docker-compose.yml`                                         |
-| 6379  | Redis                            | Infra    | `infra/docker-compose.yml`                                         |
-| 9090  | Prometheus                       | Infra    | `infra/docker-compose.yml`                                         |
-| 9464  | OTEL Prometheus metrics exporter | Dev/Prod | `apps/api/app/telemetry/otel.ts`, `apps/api/fly.prod.toml`         |
-| 11434 | Ollama (local LLM)               | Dev      | `apps/api/app/api/providers/provider.service.ts`                   |
-| 42114 | SearXNG search                   | Infra    | `infra/search/docker-compose.yml`                                  |
+| Port  | Service                           | Context  | Configured In                                                      |
+| ----- | --------------------------------- | -------- | ------------------------------------------------------------------ |
+| 443   | Portless HTTPS localhost proxy    | Dev      | Portless default; interactive privileged startup                   |
+| 1355  | Portless unprivileged HTTPS proxy | Dev      | `pnpm exec portless proxy start --port 1355 --https`               |
+| 3000  | UI Vite dev server                | Dev      | `apps/ui/vite.config.ts`                                           |
+| 3000  | API (Fly.io internal)             | Prod     | `apps/api/fly.prod.toml`, `apps/api/fly.staging.toml`              |
+| 3000  | API (test env)                    | Test     | `apps/api/.env.test`                                               |
+| 4000  | API (NestJS dev server)           | Dev      | `apps/api/.env`                                                    |
+| 4001  | Dev WebSocket server (Socket.IO)  | Dev      | `apps/api/app/api/websocket/dev-websocket.service.ts` (`PORT + 1`) |
+| 4317  | OTLP gRPC receiver                | Infra    | `infra/docker-compose.yml`                                         |
+| 4318  | OTLP HTTP receiver                | Infra    | `infra/docker-compose.yml`                                         |
+| 5432  | PostgreSQL                        | Infra    | `infra/docker-compose.yml`                                         |
+| 6100  | Grafana UI (otel-lgtm)            | Infra    | `infra/docker-compose.yml`                                         |
+| 6379  | Redis                             | Infra    | `infra/docker-compose.yml`                                         |
+| 9090  | Prometheus                        | Infra    | `infra/docker-compose.yml`                                         |
+| 9464  | OTEL Prometheus metrics exporter  | Dev/Prod | `apps/api/app/telemetry/otel.ts`, `apps/api/fly.prod.toml`         |
+| 11434 | Ollama (local LLM)                | Dev      | `apps/api/app/api/providers/provider.service.ts`                   |
+| 42114 | SearXNG search                    | Infra    | `infra/search/docker-compose.yml`                                  |
+
+Named localhost previews share the Portless proxy. Their backend ports are allocated by
+Portless from 4000–4999 and passed through `PORT`; do not reserve a fixed port per guide.
+Port 1355 is Portless's unprivileged alternative when an interactive port-443 startup is unavailable.
 
 **Internal-only ports** (inside Docker containers, not exposed to host):
 

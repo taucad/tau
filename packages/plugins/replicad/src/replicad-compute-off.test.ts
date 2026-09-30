@@ -7,7 +7,7 @@
  * canonicalizing anything, and the off arm pays no keying cost (A5).
  */
 import { describe, expect, it, vi } from 'vitest';
-import { createTestGeometry, assertSuccess } from '@taucad/runtime-testing';
+import { createTestGeometry, assertRenderingSuccess } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { esbuildBundler } from '@taucad/esbuild';
 import { loadBinaryFile } from '@taucad/runtime/kernel';
@@ -39,9 +39,9 @@ describe('replicad compute reuse off arm', () => {
         bundlers: [esbuildBundler()],
       }),
       files,
-      mainFile: 'box.ts',
+      open: { source: { path: 'box.ts' } },
     });
-    assertSuccess(result);
+    assertRenderingSuccess(result);
 
     const urls = vi.mocked(loadBinaryFile).mock.calls.map(([url]) => String(url));
     expect(urls.filter((url) => url.endsWith('.wasm'))).toStrictEqual([]);

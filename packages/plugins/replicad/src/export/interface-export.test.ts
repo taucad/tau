@@ -15,7 +15,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
 import type { OpenCascadeInstance, Quantity_ColorRGBA, TDF_Label } from 'replicad-opencascadejs';
 import { esbuildBundler } from '@taucad/esbuild';
-import { assertSuccess, createTestGeometry } from '@taucad/runtime-testing';
+import { assertRenderingSuccess, createTestGeometry } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { exportSTEP } from '#export/interface-export.js';
 import { replicadKernel } from '#replicad.kernel.js';
@@ -79,13 +79,13 @@ describe('exportSTEP visual materials', () => {
   // The `replicad` library binds its OpenCASCADE instance process-globally through `setOC`, so one render
   // installs the kernel's instance for the shapes built below.
   beforeAll(async () => {
-    assertSuccess(
+    assertRenderingSuccess(
       await createTestGeometry({
         runtime,
         files: {
           'bootstrap.ts': `import { makeBox } from 'replicad'; export default () => makeBox([0, 0, 0], [1, 1, 1]);`,
         },
-        mainFile: 'bootstrap.ts',
+        open: { source: { path: 'bootstrap.ts' } },
       }),
     );
   }, 60_000);

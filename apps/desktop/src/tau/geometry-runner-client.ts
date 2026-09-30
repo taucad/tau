@@ -2,7 +2,6 @@
 import { toNodeFsPort } from '@taucad/filesystem/backend/node';
 import { Topic } from '@taucad/events';
 import type { HostGeoSpecRunner } from '@taucad/host/agent-tools';
-import type { SourceRevision } from '@taucad/runtime';
 import type { GeoSpecRunnerEvent, GeoSpecRunnerResult } from 'geospec/runner/worker';
 import type { UtilityPort } from '#tau/services-host.impl.js';
 
@@ -11,7 +10,7 @@ type RunnerFrame =
       type: 'event';
       event: GeoSpecRunnerEvent | Readonly<{ type: 'file-progress'; file: string; durationMs?: number }>;
     }>
-  | Readonly<{ type: 'result'; result: GeoSpecRunnerResult; sourceRevisions: readonly SourceRevision[] }>
+  | Readonly<{ type: 'result'; result: GeoSpecRunnerResult }>
   | Readonly<{
       type: 'error';
       message: string;
@@ -28,7 +27,6 @@ export const createGeometryRunnerClient = (port: UtilityPort): HostGeoSpecRunner
   const channel = toNodeFsPort(port);
   const events = new Topic<GeoSpecRunnerEvent>({ name: 'GeometryRunnerClient.events' });
   let pending: ReturnType<typeof Promise.withResolvers<GeoSpecRunnerResult>> | undefined;
-  let revisions: readonly SourceRevision[] = [];
   let closed = false;
   const rejectPending = (reason: string, transport?: Extract<RunnerFrame, { type: 'error' }>['transport']): void => {
     pending?.reject(
@@ -52,7 +50,6 @@ export const createGeometryRunnerClient = (port: UtilityPort): HostGeoSpecRunner
         break;
       }
       case 'result': {
-        revisions = frame.sourceRevisions;
         const current = pending;
         pending = undefined;
         current.resolve(frame.result);
@@ -106,6 +103,5 @@ export const createGeometryRunnerClient = (port: UtilityPort): HostGeoSpecRunner
       channel.close?.();
       events.dispose();
     },
-    sourceRevisions: () => revisions,
   };
 };

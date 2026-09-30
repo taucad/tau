@@ -35,8 +35,8 @@ describe('remote GeoSpec runner façade', () => {
       ],
     };
     port2.once('message', () => {
-      port2.postMessage({ type: 'result', result, sourceRevisions: [] });
-      port2.postMessage({ type: 'result', result, sourceRevisions: [] });
+      port2.postMessage({ type: 'result', result });
+      port2.postMessage({ type: 'result', result });
     });
     try {
       await expect(runner.run({ files: ['model.test.ts'] })).resolves.toEqual(result);
@@ -47,7 +47,7 @@ describe('remote GeoSpec runner façade', () => {
       port2.close();
     }
   });
-  it('preserves run events and source revisions over one geometry port', async () => {
+  it('should preserve run events and self-contained results over one geometry port', async () => {
     const { port1, port2 } = new MessageChannel();
     const runner = createGeometryRunnerClient(port1);
     const started = vi.fn();
@@ -57,13 +57,12 @@ describe('remote GeoSpec runner façade', () => {
       port2.postMessage({
         type: 'result',
         result: { success: true, passed: 1, failed: 0, selectedTests: 1, files: [] },
-        sourceRevisions: [],
       });
     });
     try {
       await expect(runner.run({ files: ['model.test.ts'] })).resolves.toMatchObject({ success: true, passed: 1 });
       expect(started).toHaveBeenCalledWith({ type: 'run-start', files: ['model.test.ts'] });
-      expect(runner.sourceRevisions?.()).toEqual([]);
+      expect(runner).not.toHaveProperty('sourceRevisions');
     } finally {
       await runner.close();
       port2.close();

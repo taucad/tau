@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { GeoSpecSubject } from 'geospec/model';
 import { geoSpecEngineImplementation } from '#register.js';
+import { getGeoSpecEngineProtocol, geoSpecMatcherRegistryVersion } from 'geospec/engine';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
 import { startGeoSpecPoolWorkerHost } from '#runner/pool/worker-host.js';
 import type { GeometrySubject } from '#mesh/types.js';
@@ -341,7 +344,7 @@ describe('startGeoSpecPoolWorkerHost', () => {
     expect(posted.at(-1)).toMatchObject({ type: 'list-error', shardId: 2, message: 'not an Error' });
   });
 
-  it('should carry the worker-lifetime loaders and report the affinity key', async () => {
+  it('should carry canonical loaders without obsolete reference affinity, retaining the low-level STEP hook', async () => {
     const subject = await loadedSubject();
     const host = startHost(
       {
@@ -355,7 +358,7 @@ describe('startGeoSpecPoolWorkerHost', () => {
         `,
       },
       {
-        modelLoader: async () => exposeEngineSubject(subject),
+        modelLoader: async () => mock<GeoSpecSubject>(),
         stepLoader: async () => exposeEngineSubject(subject),
         builtinModules: { 'project/extra': { version: '1', code: "export const tag = 'ok';" } },
       },
@@ -364,12 +367,12 @@ describe('startGeoSpecPoolWorkerHost', () => {
     const replies = await host.send({ type: 'run-shard', shard: { id: 0, file: 'a.geospec.ts' } });
     const done = replies.find((message) => message.type === 'shard-complete');
 
-    expect(done?.type === 'shard-complete' && done.result.success && done.result.passed).toBe(true);
-    expect(done?.type === 'shard-complete' && typeof done.primaryLoadKey).toBe('string');
+    expect(done?.type === 'shard-complete' && done.result.success).toBe(true);
+    expect(done).not.toHaveProperty('primaryLoadKey');
     expect(done?.type === 'shard-complete' && done.workerMemoryBytes).toBeUndefined();
   });
 
-  it('should load identical model options once across shards on one worker', async () => {
+  it('should load identical model options afresh across shards on one worker', async () => {
     const source = `
       import { describe, it } from 'geospec';
       import { loadModel } from 'geospec/model';
@@ -377,32 +380,39 @@ describe('startGeoSpecPoolWorkerHost', () => {
         it('loads', async () => { await loadModel({ file: 'assembly.ts', format: 'step', mesh: false }); });
       });
     `;
-    const subject = await loadedSubject();
-    const modelLoader = vi.fn(async () => exposeEngineSubject(subject));
+    const modelLoader = vi.fn(async () => mock<GeoSpecSubject>());
     const host = startHost({ 'a.geospec.ts': source, 'b.geospec.ts': source }, { modelLoader });
 
     await host.send({ type: 'run-shard', shard: { id: 0, file: 'a.geospec.ts' } });
     await host.send({ type: 'run-shard', shard: { id: 1, file: 'b.geospec.ts' } });
 
-    expect(modelLoader).toHaveBeenCalledTimes(1);
+    expect(modelLoader).toHaveBeenCalledTimes(2);
   });
 
-  it('should forward observed matcher spans with the shard identity', async () => {
-    const model = await loadedSubject();
+  it('should forward low-level protocol spans with the shard identity without projecting model subjects', async () => {
     const host = startHost(
       {
         'forensic.geospec.ts': `
-          import { describe, expectGeo, it } from 'geospec';
+          import { describe, it } from 'geospec';
           import { loadModel } from 'geospec/model';
           describe('forensic', () => {
             it('measures', async () => {
-              const model = await loadModel({ file: 'main.ts' });
-              expectGeo(model).toHaveVolume({ value: 0 });
+              await loadModel({ file: 'main.ts' });
             });
           });
         `,
       },
-      { modelLoader: async () => exposeEngineSubject(model) },
+      {
+        modelLoader: async () => {
+          await getGeoSpecEngineProtocol()?.submitClaims({
+            requestId: 'low-level-forensic',
+            registryVersion: geoSpecMatcherRegistryVersion,
+            execution: { matcherWallBackstop: 1000, forensic: true },
+            claims: [],
+          });
+          return mock<GeoSpecSubject>();
+        },
+      },
     );
 
     const replies = await host.send({

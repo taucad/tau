@@ -93,7 +93,6 @@ export type ServicesBrokerOptions = {
     input: Readonly<{
       root: string;
       context: Readonly<Record<string, string>>;
-      engine: 'native' | 'legacy';
       stillAuthorized: () => boolean;
     }>,
   ) => MessagePortMain;
@@ -355,20 +354,18 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       requestId.length > 0 &&
       requestId.length <= 128
     ) {
-      const { engine } = frame as Record<string, unknown>;
       const context = typeof workspaceRoot === 'string' ? runtimeContexts.get(canonicalRoot(workspaceRoot)) : undefined;
       if (
         utility !== spawned ||
         !acceptingConnections ||
         context === undefined ||
         typeof workspaceRoot !== 'string' ||
-        (engine !== 'native' && engine !== 'legacy') ||
         options.connectGeometry === undefined
       ) {
         spawned.postMessage({
           type: 'geometry-port-refused',
           requestId,
-          message: 'Main refused an unadmitted GeoSpec runner root or engine.',
+          message: 'Main refused an unadmitted GeoSpec runner root.',
         });
         return;
       }
@@ -377,7 +374,6 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         const port = options.connectGeometry({
           root: workspaceRoot,
           context,
-          engine,
           stillAuthorized: () =>
             acceptingConnections && utility === spawned && runtimeContexts.get(rootKey) === context,
         });

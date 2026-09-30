@@ -24,7 +24,8 @@ import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import workbenchBundles from '@taucad/workbench/agent/resources.js';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { MachineClient, MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
-import type { HashedGeometryResult } from '@taucad/runtime/types';
+import type { HashedGeometryResult, SourceRevision } from '@taucad/runtime/types';
+import { runtimeProtocolSchemas } from '@taucad/runtime/transport';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { createActor, createAsyncLogic } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
@@ -166,23 +167,19 @@ const waitForFileEvent = async (
 };
 
 describe('createHostToolRegistry', () => {
-  it.each([undefined, 'legacy', 'native'] as const)(
-    'should publish the explicit %s factory authoring contract before opening its runner',
-    async (geospecAuthoringMode) => {
-      const geospecRunner = vi.fn<() => Promise<GeoSpecRunner>>();
-      const registry = createHostToolRegistry({
-        workspaceRoot: await makeWorkspace(),
-        geospecRunner,
-        geospecAuthoringMode,
-      });
-      const description = registry.list().find((tool) => tool.name === 'test_model')?.description;
-      const native = geospecAuthoringMode === 'native';
-      expect(description).toContain(native ? 'expectNativeGeo' : 'expectGeo');
-      expect(description).toContain(native ? 'loadNativeModel' : 'loadModel');
-      expect(description).not.toContain(native ? 'expectGeo' : 'expectNativeGeo');
-      expect(geospecRunner).not.toHaveBeenCalled();
-    },
-  );
+  it('should publish only the canonical factory authoring contract before opening its runner', async () => {
+    const geospecRunner = vi.fn<() => Promise<GeoSpecRunner>>();
+    const registry = createHostToolRegistry({
+      workspaceRoot: await makeWorkspace(),
+      geospecRunner,
+    });
+    const description = registry.list().find((tool) => tool.name === 'test_model')?.description;
+    expect(description).toContain('expectGeo');
+    expect(description).toContain('loadModel');
+    expect(description).not.toContain('expectNativeGeo');
+    expect(description).not.toContain('loadNativeModel');
+    expect(geospecRunner).not.toHaveBeenCalled();
+  });
 
   it('offers the file tools and use_skill with no runtime, and never a geometry tool it cannot serve', async () => {
     const registry = createHostToolRegistry({ workspaceRoot: await makeWorkspace() });
@@ -325,29 +322,57 @@ describe('createHostToolRegistry', () => {
   it('names the source revision of every model test_model loaded (R4)', async () => {
     const workspaceRoot = await makeWorkspace();
     await writeFile(join(workspaceRoot, 'cube.geospec.ts'), 'export const spec = 1;\n', 'utf8');
-    const sourceRevision = { entry: 'cube.ts', files: { 'cube.ts': `sha256:${'a'.repeat(64)}` } };
-    const run = vi.fn(async ({ files }: { readonly files: readonly string[] }) => ({
+    const sourceRevision: SourceRevision = runtimeProtocolSchemas.calls.export.result.parse({
+      success: false,
+      issues: [],
+      sourceRevision: {
+        entry: 'cube.ts',
+        files: { 'cube.ts': `sha256:${await sha256Bytes(new TextEncoder().encode('cube source control'))}` },
+      },
+    }).sourceRevision!;
+    const run = vi.fn<GeoSpecRunner['run']>(async ({ files = [] }) => ({
       success: true,
       passed: 1,
       failed: 0,
       selectedTests: 1,
-      files: files.map(
-        (file) =>
-          ({
-            file,
-            result: {
-              success: true,
-              issues: [],
-              tests: [{ suite: ['cube'], name: 'is watertight', status: 'passed', assertions: [], diagnostics: [] }],
-            },
-          }) as const,
-      ),
+      files: files.map((file) => ({
+        file,
+        result: {
+          success: true,
+          passed: false,
+          bundle: { success: true, code: '', issues: [], dependencies: [], unresolvedPaths: [] },
+          issues: [],
+          tests: [{ suite: ['cube'], name: 'is watertight', status: 'passed', assertions: [], diagnostics: [] }],
+          lineage: {
+            status: 'unavailable',
+            modules: [],
+            loads: [
+              {
+                loadId: 'cube-load',
+                status: 'unavailable',
+                evidence: {
+                  loadId: 'cube-load',
+                  status: 'complete',
+                  format: 'glb',
+                  parameters: {},
+                  ingestOptions: {},
+                  sourceRevision,
+                  artifacts: [],
+                },
+              },
+            ],
+          },
+        },
+      })),
     }));
     const registry = createHostToolRegistry({
       workspaceRoot,
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake supplies exactly the runner slice the adapter drives, plus the provenance it reports.
-      geospecRunner: async () =>
-        ({ run, close: async () => undefined, sourceRevisions: () => [sourceRevision] }) as unknown as GeoSpecRunner,
+      geospecRunner: async () => ({
+        run,
+        on: () => () => undefined,
+        abort: () => undefined,
+        close: async () => undefined,
+      }),
     });
 
     const result = await invoke(registry, 'test_model', {});

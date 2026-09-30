@@ -54,7 +54,6 @@ describe('geometry utility dispatcher', () => {
       }
       return result;
     });
-    runner.sourceRevisions = () => [];
     const post = vi.fn<(frame: unknown) => void>();
     const host = createGeometryHost({ post, measure: vi.fn(), performance: vi.fn(), createRunner: async () => runner });
     host.handle({
@@ -64,7 +63,6 @@ describe('geometry utility dispatcher', () => {
         requestId: 1,
         kind: 'suite',
         root: '/project',
-        engine: 'native',
         runtimeConfig: { tauApiUrl: 'http://localhost', tauWebSocketUrl: 'ws://localhost' },
         input: { type: 'run', options: { files: ['model.test.ts'] } },
       },
@@ -91,9 +89,7 @@ describe('geometry utility dispatcher', () => {
       frames.filter(
         (frame) => frame !== null && typeof frame === 'object' && 'type' in frame && frame.type === 'geometry-result',
       ),
-    ).toEqual([
-      { type: 'geometry-result', generation: 1, requestId: 1, value: { type: 'result', result, sourceRevisions: [] } },
-    ]);
+    ).toEqual([{ type: 'geometry-result', generation: 1, requestId: 1, value: { type: 'result', result } }]);
     expect(listeners.size).toBe(0);
   });
   it('runs a diagnostic through the process-local evaluator and preserves its request id', async () => {
@@ -142,7 +138,6 @@ describe('geometry utility dispatcher', () => {
         requestId: 7,
         kind: 'suite',
         root: '/project',
-        engine: 'native',
         runtimeConfig: { tauApiUrl: 'http://localhost', tauWebSocketUrl: 'ws://localhost' },
         input: { type: 'run', options: { files: ['model.test.ts'] } },
       },

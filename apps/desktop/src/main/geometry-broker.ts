@@ -50,7 +50,6 @@ type Job = {
   readonly input: MeasurementRequest | SuiteRequest | PerformanceRequest;
   readonly context?: Readonly<Record<string, string>>;
   readonly root?: string;
-  readonly engine?: 'native' | 'legacy';
   readonly stillAuthorized?: () => boolean;
   deadline?: ReturnType<typeof setTimeout>;
   canceled: boolean;
@@ -84,7 +83,6 @@ export type GeometryBroker = {
     input: Readonly<{
       root: string;
       context: Readonly<Record<string, string>>;
-      engine: 'native' | 'legacy';
       stillAuthorized: () => boolean;
     }>,
   ): MessagePortMain;
@@ -528,7 +526,6 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
             requestId: job.id,
             kind: job.kind,
             root: job.root,
-            engine: job.engine,
             input: job.input,
             runtimeConfig: options.runtimeConfig,
           },
@@ -555,7 +552,6 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
     suite?: Readonly<{
       root: string;
       context: Readonly<Record<string, string>>;
-      engine: 'native' | 'legacy';
       stillAuthorized: () => boolean;
     }>,
   ): MessagePortMain => {
@@ -654,7 +650,6 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
         input,
         root: suite?.root,
         context: suite?.context,
-        engine: suite?.engine,
         stillAuthorized: suite?.stillAuthorized,
         canceled: false,
         finished: false,

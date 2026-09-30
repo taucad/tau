@@ -1,3 +1,4 @@
+import type { MechanismSource } from '@taucad/kinematics';
 import {
   draw,
   drawCircle,
@@ -122,7 +123,7 @@ function guard(front: boolean): Shape3D {
   return complete.rotate(front ? 180 : 0, [0, 0, 0], [0, 0, 1]);
 }
 
-export default function main(parameters = defaultParams): ShapeConfig[] {
+function resolveParams(parameters: Partial<typeof defaultParams>) {
   const params = { ...defaultParams, ...parameters };
   if (
     !Number.isFinite(params.headHeight) ||
@@ -145,6 +146,13 @@ export default function main(parameters = defaultParams): ShapeConfig[] {
     throw new Error('bladeCount must be an integer from 3 to 7');
   }
 
+  return params;
+}
+
+export default function main(
+  parameters: Partial<typeof defaultParams> = defaultParams,
+): ShapeConfig[] {
+  const params = resolveParams(parameters);
   const shapes: ShapeConfig[] = [];
   const centerHeight = params.headHeight;
   const pivot: [number, number, number] = [0, 35, centerHeight - 40];
@@ -232,7 +240,7 @@ export default function main(parameters = defaultParams): ShapeConfig[] {
   add(
     'inner-tube',
     'inner-tube',
-    () => tube(12, 10, centerHeight - 730).translate([0, 70, 620]),
+    () => tube(12, 10, 590).translate([0, 70, centerHeight - 700]),
     colors.steel,
   );
   add(
@@ -545,4 +553,164 @@ export default function main(parameters = defaultParams): ShapeConfig[] {
     throw new Error(`Unknown component: ${params.part}`);
   }
   return shapes;
+}
+
+/** Height, oscillation, tilt and rotor spin in the same as-built frame as the geometry. */
+export function mechanism(
+  parameters: Partial<typeof defaultParams> = {},
+): MechanismSource | undefined {
+  const p = resolveParams(parameters);
+  if (p.part !== 'all') {
+    return undefined;
+  }
+  const yaw = (p.yaw * Math.PI) / 180;
+  const tilt = (p.tilt * Math.PI) / 180;
+  const rotateYaw = ([x, y, z]: [number, number, number]): [
+    number,
+    number,
+    number,
+  ] => [
+    x * Math.cos(yaw) - (y - 70) * Math.sin(yaw),
+    70 + x * Math.sin(yaw) + (y - 70) * Math.cos(yaw),
+    z,
+  ];
+  return {
+    schemaVersion: 1,
+    units: { length: 'mm', angle: 'deg' },
+    root: 'base',
+    links: {
+      base: {
+        shapes: [
+          'base',
+          ...[1, 2, 3, 4].map((index) => `foot-${index}`),
+          'socket',
+          'outer-tube',
+          'height-collar',
+          'height-knob',
+          'control-body',
+          ...[1, 2, 3, 4].flatMap((index) => [
+            `button-${index}`,
+            `control-mark-${index}`,
+          ]),
+          'power-cord',
+          'plug',
+        ],
+      },
+      column: { shapes: ['inner-tube'] },
+      yoke: { shapes: ['neck', 'tilt-knob'] },
+      head: {
+        shapes: [
+          'motor-shell',
+          'motor-core',
+          'oscillation-knob',
+          'front-guard',
+          'rear-guard',
+          'guard-band',
+          ...[1, 2, 3, 4].flatMap((index) => [
+            `guard-clip-${index}`,
+            `motor-screw-${index}`,
+          ]),
+          'badge',
+          'badge-mark',
+        ],
+      },
+      rotor: {
+        shapes: [
+          'shaft',
+          'hub',
+          ...Array.from(
+            { length: p.bladeCount },
+            (_, index) => `blade-${index + 1}`,
+          ),
+        ],
+      },
+    },
+    joints: {
+      height: {
+        type: 'prismatic',
+        name: 'Head height',
+        parent: 'base',
+        child: 'column',
+        origin: [0, 70, p.headHeight - 110],
+        axis: [0, 0, 1],
+        limits: { lower: 1020 - p.headHeight, upper: 1320 - p.headHeight },
+      },
+      yaw: {
+        type: 'revolute',
+        name: 'Oscillation',
+        parent: 'column',
+        child: 'yoke',
+        origin: [0, 70, p.headHeight - 110],
+        axis: [0, 0, 1],
+        limits: { lower: -45 - p.yaw, upper: 45 - p.yaw },
+      },
+      tilt: {
+        type: 'revolute',
+        name: 'Head tilt',
+        parent: 'yoke',
+        child: 'head',
+        origin: rotateYaw([0, 35, p.headHeight - 40]),
+        axis: [Math.cos(yaw), Math.sin(yaw), 0],
+        limits: { lower: -15 - p.tilt, upper: 25 - p.tilt },
+      },
+      rotor: {
+        type: 'revolute',
+        name: 'Rotor',
+        parent: 'head',
+        child: 'rotor',
+        origin: rotateYaw([
+          0,
+          35 - 95 * Math.cos(tilt) - 40 * Math.sin(tilt),
+          p.headHeight - 40 - 95 * Math.sin(tilt) + 40 * Math.cos(tilt),
+        ]),
+        axis: [
+          -Math.cos(tilt) * Math.sin(yaw),
+          Math.cos(tilt) * Math.cos(yaw),
+          Math.sin(tilt),
+        ],
+      },
+    },
+    animations: [
+      {
+        id: 'spin',
+        name: 'Spin rotor',
+        duration: 3,
+        loop: 'repeat',
+        keyframes: [
+          { time: 0, coordinates: { rotor: 0 } },
+          { time: 3, coordinates: { rotor: 720 } },
+        ],
+      },
+      {
+        id: 'oscillate',
+        name: 'Oscillate head',
+        duration: 6,
+        loop: 'pingPong',
+        keyframes: [
+          { time: 0, coordinates: { yaw: -45 - p.yaw } },
+          { time: 6, coordinates: { yaw: 45 - p.yaw } },
+        ],
+      },
+      {
+        id: 'tilt',
+        name: 'Tilt head',
+        duration: 4,
+        loop: 'pingPong',
+        keyframes: [
+          { time: 0, coordinates: { tilt: -15 - p.tilt } },
+          { time: 4, coordinates: { tilt: 25 - p.tilt } },
+        ],
+      },
+      {
+        id: 'height',
+        name: 'Extend column',
+        duration: 4,
+        loop: 'pingPong',
+        keyframes: [
+          { time: 0, coordinates: { height: 1020 - p.headHeight } },
+          { time: 4, coordinates: { height: 1320 - p.headHeight } },
+        ],
+      },
+    ],
+  };
 }

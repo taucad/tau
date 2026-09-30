@@ -1069,6 +1069,7 @@
       "assemblies/motor-module.ts",
       "assemblies/propulsion.ts",
       "lib/airframe-geometry.ts",
+      "lib/kinematics.ts",
       "lib/naca-math.ts",
       "lib/naca.ts",
       "main.geospec.ts",
@@ -1325,6 +1326,7 @@
     "mainFile": "main.ts",
     "files": [
       "DESIGN.md",
+      "kinematics.geospec.ts",
       "main.geospec.ts",
       "main.ts",
       "tau.json"

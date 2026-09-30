@@ -315,11 +315,20 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'PicoVoxel authoring',
     title: 'PicoVoxel authoring',
     description:
-      'Guides PicoVoxel voxel, SDF and lattice CAD, named parts and PBR materials. Use for TypeScript PicoVoxel geometry, appearance or texture authoring.',
-    whenToUse: 'Use for TypeScript PicoVoxel models, named parts, physical materials and textures.',
+      'Guides PicoVoxel voxel, SDF and lattice CAD, PBR materials and mechanisms. Use for TypeScript geometry, textures or moving-part authoring.',
+    whenToUse: 'Use for TypeScript PicoVoxel models, materials, textures and moving mechanisms.',
     corpus: bundledTypescriptCorpus('picovoxel/picovoxel.bundled.json', 'picovoxel', 'packages/plugins/picovoxel'),
     groupBy: byKind,
-    authoredReferences: ['materials-reference.md'],
+    supplementalApi: {
+      corpus: bundledTypescriptCorpus(
+        'picovoxel/picovoxel.bundled.json',
+        '@taucad/picovoxel',
+        'packages/plugins/picovoxel',
+      ),
+      prefix: 'tau',
+      groupBy: byKind,
+    },
+    authoredReferences: ['materials-reference.md', 'kinematics-reference.md'],
   },
   {
     slug: 'cad-openscad',

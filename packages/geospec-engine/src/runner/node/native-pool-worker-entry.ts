@@ -1,6 +1,7 @@
 /** Compiled Node pool worker: owns one protocol-3 engine per isolate. @module */
 
 import { memoryUsage } from 'node:process';
+import { resolve } from 'node:path';
 import { parentPort, workerData } from 'node:worker_threads';
 import { Engine } from '@taucad/geospec-engine-native/node';
 import { createGeoSpecNativeModelLoader } from 'geospec/runner/native';
@@ -11,7 +12,9 @@ import '#register-node.js';
 import { createNodeVmFileSystem } from '#runner/node/node-vm-filesystem.js';
 import { startGeoSpecPoolWorkerHost } from '#runner/pool/worker-host.js';
 
+/** Rooted project and assigned caller-inclusive native CPU grant. @public */
 export type NativePoolWorkerOptions = { projectPath: string; grant: number };
+/** Parent-owned message boundary for the native worker. @public */
 export type NativePoolPort = {
   postMessage(message: GeoSpecPoolWorkerMessage): void;
   on(event: 'message', listener: (message: GeoSpecPoolHostMessage) => void): void;
@@ -35,7 +38,20 @@ export const startNativePoolWorker = (port: NativePoolPort, options: NativePoolW
           import('@taucad/runtime/node'),
           import('#model/default-runtime.js'),
         ]);
-        const runtime: RuntimeDefinition = defaultRuntime;
+        let runtime: RuntimeDefinition = defaultRuntime;
+        const resourceRoot = process.env['TAU_PICOGK_RESOURCE_ROOT'];
+        if (resourceRoot) {
+          const [{ defineRuntime }, { loadPicogkKernelOptions, picogk }] = await Promise.all([
+            import('@taucad/runtime/worker'),
+            import('@taucad/picogk'),
+          ]);
+          runtime = defineRuntime({
+            ...defaultRuntime,
+            plugins: [
+              picogk({ kernels: { default: loadPicogkKernelOptions({ resourceRoot: resolve(resourceRoot) }) } }),
+            ],
+          });
+        }
         return createNodeClient({ runtime, projectPath: options.projectPath });
       },
       readSource: async (source) => {

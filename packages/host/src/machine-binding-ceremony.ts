@@ -46,15 +46,17 @@ type PinnedTrust = Extract<MachineTransportTrust, { type: 'pinned' }>;
  *
  * @param probe - Reads one service's certificate pin.
  * @param address - The endpoint the provider will connect to.
+ * @param cameraPort - The camera service for the candidate model.
  * @returns The pins a binding records; no camera pin when the camera does not answer.
  */
 const pinServices = async (
   probe: typeof probeCertificateTrust,
   address: string,
+  cameraPort: number,
 ): Promise<Readonly<{ mqtt: PinnedTrust; camera?: PinnedTrust }>> => {
   const mqtt = await probe({ address, port: 8883 });
   try {
-    return { mqtt, camera: await probe({ address, port: 322 }) };
+    return { mqtt, camera: await probe({ address, port: cameraPort }) };
   } catch {
     /* Stills stay unsupported on this binding. */
     return { mqtt };
@@ -65,7 +67,7 @@ const pinServices = async (
  * Complete a ceremony `beginBinding` answered with `operator-action-required`.
  *
  * Trust is pinned on first use from the address the provider will connect to:
- * MQTT on 8883 is required, the camera on 322 is best effort. A typed code is
+ * MQTT on 8883 is required, the camera on the model-specific port is best effort. A typed code is
  * staged in memory for the connect and saved to the vault, beside its pins,
  * only once the binding commits, so a wrong code never reaches the vault.
  * Without a typed code the printer's saved code is reused only while its MQTT
@@ -117,7 +119,11 @@ export const completeMachineBinding = async (input: CompleteMachineBindingInput)
   if (accessCode === undefined && saved === undefined) {
     throw new Error('MACHINE_CREDENTIAL_REQUIRED');
   }
-  const serviceTrust = await pinServices(input.probeCertificateTrust ?? probeCertificateTrust, address);
+  const serviceTrust = await pinServices(
+    input.probeCertificateTrust ?? probeCertificateTrust,
+    address,
+    candidate.claimedIdentity.model === 'A1 mini' ? 6000 : 322,
+  );
   const { mqtt, camera } = serviceTrust;
   if (accessCode === undefined) {
     if (saved?.['mqtt'] !== mqtt.digest) {

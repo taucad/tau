@@ -5,7 +5,7 @@ import type { MachineAcceptedContainer } from '@taucad/runtime/machine';
 import { quantityKinds } from '@taucad/units/quantity';
 import { z } from 'zod';
 
-import { bambuX1cManifest } from '#bambu.manifest.js';
+import { bambuA1MiniManifest, bambuX1cManifest } from '#bambu.manifest.js';
 import { bambuExternalSpoolSlot } from '#bambu.protocol.js';
 
 const bindingConfiguration = defineConfiguration({
@@ -81,5 +81,49 @@ export const bambuMachine = defineMachine({
   async connect(input, runtime) {
     const { connectBambuMachine } = await import('#bambu.host.js');
     return connectBambuMachine(input, runtime);
+  },
+});
+
+/** A1 mini physical-machine capability, sharing the pinned Bambu LAN controller.
+ * @public
+ */
+export const bambuA1MiniMachine = defineMachine({
+  id: 'bambu-a1-mini',
+  name: 'Bambu Lab A1 mini LAN',
+  version: '1.0.0',
+  protocolVersion: 1,
+  vendor: 'Bambu Lab',
+  technologies: ['additive.fff'],
+  accepts: bambuAcceptedContainers,
+  manifest: bambuA1MiniManifest,
+  bindingConfiguration,
+  submissionConfiguration: defineConfiguration({
+    id: 'bambu.a1-mini.submission',
+    version: '1.0.0',
+    schema: bambuSubmissionConfiguration.schema.extend({
+      expectedModel: z.literal('A1 mini'),
+      amsMapping: z
+        .array(z.union([z.number().int().min(-1).max(3), z.literal(bambuExternalSpoolSlot)]))
+        .max(4)
+        .default([]),
+      expectedMaterials: z
+        .array(
+          z.strictObject({
+            slot: z.union([z.number().int().min(0).max(3), z.literal(bambuExternalSpoolSlot)]),
+            materialId: z.string().min(1).max(128),
+          }),
+        )
+        .min(1)
+        .max(4),
+    }),
+    ui: { version: 1, rjsf: {} },
+  }),
+  async *discover(input, runtime) {
+    const { discoverBambuMachines } = await import('#bambu.host.js');
+    yield* discoverBambuMachines(input, runtime, 'A1 mini');
+  },
+  async connect(input, runtime) {
+    const { connectBambuMachine } = await import('#bambu.host.js');
+    return connectBambuMachine(input, runtime, 'A1 mini');
   },
 });

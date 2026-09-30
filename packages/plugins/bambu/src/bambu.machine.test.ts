@@ -13,7 +13,7 @@ vi.mock('#bambu.host.js', () => {
 });
 
 // Importing the provider module is not the behavior under test; keep it outside the per-test budget.
-const { bambuMachine, bambuSubmissionConfiguration } = await import('#bambu.machine.js');
+const { bambuA1MiniMachine, bambuMachine, bambuSubmissionConfiguration } = await import('#bambu.machine.js');
 
 describe('bambuMachine', () => {
   it('declares diameters as positive millimetre quantities rather than editable metadata objects', async () => {
@@ -39,6 +39,22 @@ describe('bambuMachine', () => {
     expect(amsMapping.safeParse([255]).success).toBe(false);
     expect(expectedMaterials.safeParse([{ slot: 254, materialId: 'PETG' }]).success).toBe(true);
     expect(expectedMaterials.safeParse([{ slot: -1, materialId: 'PETG' }]).success).toBe(false);
+  });
+  it('declares Mini geometry and its four-tray setup without inheriting X1C hardware', async () => {
+    const definition = await resolveRuntimePluginDefinition('machine', bambuA1MiniMachine());
+    expect(definition.manifest).toMatchObject({
+      identity: { model: 'a1-mini' },
+      geometry: {
+        buildVolume: { x: 180, y: 180, z: 180 },
+        kinematics: 'cartesian-bedslinger',
+        bedMotion: 'y',
+        enclosure: { enclosed: false },
+      },
+      bed: { maximumTemperature: { value: 80 } },
+      materialSystem: { slotsPerUnit: 4, drying: false },
+    });
+    const schema = definition.submissionConfiguration.manifest.legacyProjection.inputSchema;
+    expect(schema).toMatchObject({ properties: { expectedModel: { const: 'A1 mini' }, amsMapping: { maxItems: 4 } } });
   });
   it('should keep host dependencies lazy until an explicit operation', async () => {
     expect(loaded.count).toBe(0);

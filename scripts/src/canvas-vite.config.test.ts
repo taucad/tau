@@ -12,7 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { relative, resolve } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { build, createServer } from 'vite';
 import type { UserConfig } from 'vite';
 import { chromium } from 'playwright';
@@ -22,12 +22,24 @@ import { createCanvasConfig, resolveCanvasRoot } from '#canvas-vite.config.js';
 const temporaryPaths: string[] = [];
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const path of temporaryPaths.splice(0)) {
     rmSync(path, { recursive: true, force: true });
   }
 });
 
 describe('canvas Vite config', () => {
+  it('should listen on the backend port allocated by Portless', () => {
+    const artifacts = mkdtempSync(resolve(tmpdir(), 'tau-canvas-artifacts-'));
+    temporaryPaths.push(artifacts);
+    writeFileSync(resolve(artifacts, 'index.html'), '');
+    writeFileSync(resolve(artifacts, 'main.tsx'), '');
+    vi.stubEnv('PORT', '4819');
+    expect(createCanvasConfig(artifacts, artifacts, artifacts).server?.port).toBe(4819);
+    vi.stubEnv('PORT', undefined);
+    expect(createCanvasConfig(artifacts, artifacts, artifacts).server?.port).toBeUndefined();
+  });
+
   it('should reject paths outside the allowed artifacts root', () => {
     const artifacts = mkdtempSync(resolve(tmpdir(), 'tau-canvas-artifacts-'));
     temporaryPaths.push(artifacts);

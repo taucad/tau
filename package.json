@@ -44,6 +44,7 @@
     "knip": "nx run scripts:validate-dead-code",
     "docs:validate": "nx run scripts:validate-frontmatter && node scripts/src/canvas-review.ts check",
     "canvas:review": "node scripts/src/canvas-review.ts",
+    "canvas:dev": "vite --config scripts/src/canvas-vite.config.ts",
     "canvas:typecheck": "node scripts/src/canvas-typecheck.ts",
     "size:build": "node tools/size-build.mjs",
     "prepare": "husky"

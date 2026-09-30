@@ -12,6 +12,15 @@ export const headlessImageBackend: HeadlessImageBackend = {
       config: createUiRuntimeConfig(ENV),
       context: { purpose: 'ephemeral', definition: 'default' },
     })();
-    return createRuntimeClient(options);
+    const client = createRuntimeClient(options);
+    const adapter: Awaited<ReturnType<HeadlessImageBackend['createImageClient']>> = {
+      connect: async () => client.connect(),
+      terminate: () => {
+        client.terminate();
+      },
+      on: (event, handler) => client.on(event, handler),
+      transcode: async (input) => client.transcode(input),
+    };
+    return adapter;
   },
 };

@@ -28,7 +28,7 @@ export const headlessImageBackend: HeadlessImageBackend = {
       import('@taucad/runtime/client'),
       import('@taucad/runtime/transport/web'),
     ]);
-    return createRuntimeClient<typeof imageRuntime>({
+    const client = createRuntimeClient<typeof imageRuntime>({
       transport: webWorkerTransport({
         createWorker: () =>
           new Worker(new URL('../runtime/image-runtime.worker.ts', import.meta.url), {
@@ -38,5 +38,19 @@ export const headlessImageBackend: HeadlessImageBackend = {
         fileSystem: fromMemoryFs(),
       }),
     });
+    const adapter: Awaited<ReturnType<HeadlessImageBackend['createImageClient']>> = {
+      connect: async () => client.connect(),
+      terminate: () => {
+        client.terminate();
+      },
+      on: (event, handler) => client.on(event, handler),
+      transcode: async (input) => {
+        if (input.from !== 'glb') {
+          throw new Error(`Image worker cannot transcode ${input.from}; SVG uses the direct renderer`);
+        }
+        return client.transcode(input);
+      },
+    };
+    return adapter;
   },
 };

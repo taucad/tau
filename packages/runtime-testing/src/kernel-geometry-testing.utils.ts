@@ -6,6 +6,9 @@
  */
 
 import type { InspectReport } from '@gltf-transform/functions';
+import { asKnownArtifact } from '@taucad/runtime';
+import type { ExportResult, Rendering } from '@taucad/runtime/client';
+import type { Artifact, RenderResult, WriteResult } from '@taucad/runtime/types';
 import { expect } from 'vitest';
 import {
   getBoundingBoxFromInspect,
@@ -15,9 +18,12 @@ import {
   validateGlbData,
 } from '#gltf-inspection.utils.js';
 
-type RuntimeResult =
+/** Temporary input for direct legacy kernel callers still being migrated. */
+type LegacyGeometryResult =
   | { readonly success: true; readonly data: unknown; readonly issues: readonly unknown[] }
   | { readonly success: false; readonly issues: readonly unknown[] };
+type RuntimeResult = LegacyGeometryResult | RenderResult | Rendering;
+type ExportCandidate = LegacyGeometryResult | WriteResult | ExportResult;
 
 // =============================================================================
 // Types
@@ -107,12 +113,19 @@ const isGltfResponse = (response: unknown): response is { format: 'gltf'; conten
   );
 };
 
+const isArtifact = (value: unknown): value is Artifact =>
+  typeof value === 'object' &&
+  value !== null &&
+  'mimeType' in value &&
+  typeof value.mimeType === 'string' &&
+  'content' in value &&
+  (typeof value.content === 'string' || value.content instanceof Uint8Array);
+
 /**
- * Extracts GLTF content from a CreateGeometryResult.
+ * Extracts GLB content from a successful public rendering or direct kernel result.
  *
- * Used at the kernel level (when calling `kernel.createGeometry(...)` directly
- * via the kernel-worker testing harness). For client-level tests using
- * `client.export('glb', ...)`, prefer {@link extractGltfFromExportResult}
+ * For document-level tests using `document.export('glb')`, prefer
+ * {@link extractGltfFromExportResult}
  * which validates the exact-one GLB contract.
  *
  * @param result - The geometry result to extract from
@@ -120,48 +133,50 @@ const isGltfResponse = (response: unknown): response is { format: 'gltf'; conten
  * @public
  */
 export function extractGltfFromResult(result: RuntimeResult): Uint8Array<ArrayBuffer> | undefined {
-  if (!result.success || result.data === undefined) {
+  if (!result.success) {
     return undefined;
   }
-
+  if ('artifact' in result) {
+    const artifact = asKnownArtifact(result.artifact);
+    return artifact?.mimeType === 'model/gltf-binary' ? artifact.content : undefined;
+  }
+  if (isArtifact(result.data)) {
+    const artifact = asKnownArtifact(result.data);
+    return artifact?.mimeType === 'model/gltf-binary' ? artifact.content : undefined;
+  }
+  // Direct legacy kernel callers still supply format/content until their test suites migrate.
   return isGltfResponse(result.data) ? result.data.content : undefined;
 }
 
 /**
- * Extracts the GLB bytes from an `ExportResult` returned by `client.export('glb', ...)`.
+ * Extracts the GLB bytes from an `ExportResult` returned by `document.export('glb')`.
  *
  * Returns `undefined` for a failed export and throws when a successful export
  * violates the format-specific exact-one GLB contract.
  *
- * @param result - The export result returned from `client.export('glb', ...)`
+ * @param result - The export result returned from `document.export('glb')`
  * @returns The GLB binary content, or `undefined` if the export failed
  * @public
  *
  * @example <caption>Asserting a glTF/GLB export at the client level</caption>
  * ```typescript
- * import type { ExportGeometryResult as ExportResult } from '@taucad/runtime/types';
+ * import type { RuntimeDocument } from '@taucad/runtime/client';
  * import { extractGltfFromExportResult } from '@taucad/runtime-testing';
  *
- * declare const client: {
- *   export: (
- *     format: 'glb',
- *     input: { source: { files: { 'main.ts': string } } },
- *   ) => Promise<ExportResult>;
- * };
+ * declare const document: RuntimeDocument;
  * declare const expect: (value: unknown) => { toBeInstanceOf: (ctor: unknown) => void };
- * declare const source: string;
  *
- * const result = await client.export('glb', { source: { files: { 'main.ts': source } } });
+ * const result = await document.export('glb');
  * const glb = extractGltfFromExportResult(result);
  * expect(glb).toBeInstanceOf(Uint8Array);
  * ```
  */
-export function extractGltfFromExportResult(result: RuntimeResult): Uint8Array<ArrayBuffer> | undefined {
+export function extractGltfFromExportResult(result: ExportCandidate): Uint8Array<ArrayBuffer> | undefined {
   if (!result.success) {
     return undefined;
   }
 
-  const { data }: { data: unknown } = result;
+  const data: unknown = 'data' in result ? result.data : result.files;
   if (!Array.isArray(data)) {
     throw new TypeError('GLB export returned an invalid artifact collection');
   }
@@ -186,7 +201,11 @@ export function extractGltfFromExportResult(result: RuntimeResult): Uint8Array<A
   if (!name.toLowerCase().endsWith('.glb') || mimeType !== 'model/gltf-binary') {
     throw new Error(`GLB export returned ${name} (${mimeType}); expected one .glb (model/gltf-binary)`);
   }
-  return bytes as Uint8Array<ArrayBuffer>;
+  const artifact = asKnownArtifact({ mimeType, content: new Uint8Array(bytes) });
+  if (artifact?.mimeType !== 'model/gltf-binary') {
+    throw new TypeError('GLB export returned an invalid known-media artifact');
+  }
+  return artifact.content;
 }
 
 // =============================================================================
@@ -250,7 +269,7 @@ const expectVector3ToBeCloseTo = ({
 };
 
 /**
- * Create geometry test helpers for asserting on HashedGeometryResult.
+ * Create geometry test helpers for public renderings and direct kernel results.
  *
  * @returns An object of assertion helpers for validating geometry results
  *

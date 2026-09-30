@@ -125,18 +125,15 @@ describe('geometryCache', () => {
     expect(runtime.tracer.startSpan).toHaveBeenCalledWith('cache.geometry.mesh.evaluate');
   });
 
-  it.each([['failed', createErrorResult() as RenderResult]])(
-    'does not publish a %s mesh result',
-    async (_name, result) => {
-      const runtime = createMockRuntime();
-      const handler = vi.fn(async () => result);
+  it.each([['failed', createErrorResult()]])('does not publish a %s mesh result', async (_name, result) => {
+    const runtime = createMockRuntime();
+    const handler = vi.fn(async () => result);
 
-      await middleware.wrapRender!({ view: 'model', mimeType: 'model/gltf-binary', options: {} }, handler, runtime);
-      await middleware.wrapRender!({ view: 'model', mimeType: 'model/gltf-binary', options: {} }, handler, runtime);
+    await middleware.wrapRender!({ view: 'model', mimeType: 'model/gltf-binary', options: {} }, handler, runtime);
+    await middleware.wrapRender!({ view: 'model', mimeType: 'model/gltf-binary', options: {} }, handler, runtime);
 
-      expect(handler).toHaveBeenCalledTimes(2);
-    },
-  );
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
 
   it('reuses exact export files with byte ownership', async () => {
     const runtime = createMockRuntime();
@@ -160,25 +157,22 @@ describe('geometryCache', () => {
     expect(runtime.tracer.startSpan).toHaveBeenCalledWith('cache.geometry.export.evaluate');
   });
 
-  it.each([['failed', createErrorResult() as WriteResult]])(
-    'does not publish a %s export result',
-    async (_name, result) => {
-      const runtime = createMockRuntime();
-      const handler = vi.fn(async () => result);
-      await middleware.wrapWrite!(
-        { exportId: 'step', extension: 'step', mimeType: 'application/step', options: {} },
-        handler,
-        runtime,
-      );
-      await middleware.wrapWrite!(
-        { exportId: 'step', extension: 'step', mimeType: 'application/step', options: {} },
-        handler,
-        runtime,
-      );
+  it.each([['failed', createErrorResult()]])('does not publish a %s export result', async (_name, result) => {
+    const runtime = createMockRuntime();
+    const handler = vi.fn(async () => result);
+    await middleware.wrapWrite!(
+      { exportId: 'step', extension: 'step', mimeType: 'application/step', options: {} },
+      handler,
+      runtime,
+    );
+    await middleware.wrapWrite!(
+      { exportId: 'step', extension: 'step', mimeType: 'application/step', options: {} },
+      handler,
+      runtime,
+    );
 
-      expect(handler).toHaveBeenCalledTimes(2);
-    },
-  );
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
 
   it('calls the handler directly and never evaluates when the compute capability is off', async () => {
     const runtime = { ...createMockRuntime(), compute: { status: 'off' } } as const;

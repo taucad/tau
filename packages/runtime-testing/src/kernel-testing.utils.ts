@@ -9,7 +9,19 @@ import {
 } from '@taucad/cache-core';
 import type { ActionDigest, ComputeEvaluationInput, ComputeEvaluationResult } from '@taucad/cache-core';
 import { createRuntimeClient } from '@taucad/runtime/client';
-import type { RuntimeClient } from '@taucad/runtime/client';
+import type {
+  Description,
+  Evaluation,
+  ExportResult,
+  Rendering,
+  RuntimeClient,
+  RuntimeDocument,
+  UpdateOutcome,
+  ViewStatus,
+  ViewSubscription,
+  ViewUpdateOutcome,
+  WideViewRequest,
+} from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { compileParameterManifest } from '@taucad/parameters';
 import type { ParameterManifest } from '@taucad/parameters';
@@ -25,12 +37,10 @@ import { assertRootedPath } from '@taucad/runtime/kernel';
 import type { EvaluateRequest, KernelMiddlewareServices, MiddlewareState } from '@taucad/runtime/middleware';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import type {
-  CreateGeometryResult,
   Dependency,
+  TranscodeResult,
   FileStat,
   FileStatEntry,
-  GeometryResponse,
-  HashedGeometryResult,
   DescribeInput,
   DescribeResult,
   EvaluateResult,
@@ -40,6 +50,7 @@ import type {
   KernelResult,
   KernelSuccessResult,
   RuntimeContentInput,
+  RuntimeSourceSnapshotResult,
 } from '@taucad/runtime/types';
 import type { AnyRuntimeDefinition, RuntimeDefinition } from '@taucad/runtime/worker';
 import { expect, vi } from 'vitest';
@@ -66,40 +77,83 @@ const normalizeInitialFiles = (
 export function createTestRuntimeClient<const Runtime extends RuntimeDefinition>(
   options: CreateTestRuntimeClientOptions<Runtime>,
 ): ReturnType<typeof createRuntimeClient<Runtime, ReturnType<typeof inProcessTransport<Runtime>>>>;
-/** Implements the projected public overload through the runtime's wide client implementation. @public */
-export function createTestRuntimeClient({ runtime, files = {} }: CreateTestRuntimeClientOptions): RuntimeClient {
+/** Implements the projected public overload through a wide unconfigured runtime. @public */
+export function createTestRuntimeClient({
+  runtime,
+  files = {},
+}: CreateTestRuntimeClientOptions): RuntimeClient<RuntimeDefinition> {
   return createRuntimeClient({
     transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs(normalizeInitialFiles(files)) }),
   });
 }
 
-/** Renders one fixture and releases its client before returning. @public */
-export const createTestGeometry = async <const Runtime extends RuntimeDefinition>({
-  runtime,
-  files,
-  mainFile,
-  parameters,
-  content,
-}: CreateTestRuntimeClientOptions<Runtime> & {
-  readonly mainFile: string;
-  readonly parameters?: Record<string, unknown>;
-  readonly content?: RuntimeContentInput;
-}): Promise<HashedGeometryResult> => {
+type TestGeometryClient<Runtime extends RuntimeDefinition> = ReturnType<typeof createTestRuntimeClient<Runtime>>;
+type TestGeometryDocument<Runtime extends RuntimeDefinition> = ReturnType<TestGeometryClient<Runtime>['open']>;
+type TestGeometryView<Runtime extends RuntimeDefinition> = ReturnType<TestGeometryDocument<Runtime>['view']>;
+
+/** Renders one fixture with the exact open contract of its runtime. @public */
+export function createTestGeometry<
+  const Runtime extends RuntimeDefinition,
+  SelectedView extends TestGeometryView<Runtime> = TestGeometryView<Runtime>,
+>(
+  input: CreateTestRuntimeClientOptions<Runtime> & {
+    readonly open: Parameters<TestGeometryClient<Runtime>['open']>[0];
+    readonly view?: (document: TestGeometryDocument<Runtime>) => SelectedView;
+  },
+): Promise<Rendering<Extract<SelectedView['view'], string>>>;
+/** Retains existing fixture call sites until their named views are migrated. @public */
+export function createTestGeometry(
+  input: CreateTestRuntimeClientOptions & {
+    readonly mainFile: string;
+    readonly parameters?: Record<string, unknown>;
+    readonly content?: RuntimeContentInput;
+  },
+): Promise<Rendering>;
+/** Implements both fixture entry forms over one actual document client. @public */
+export async function createTestGeometry(
+  input: CreateTestRuntimeClientOptions &
+    (
+      | {
+          readonly open: Parameters<TestGeometryClient<RuntimeDefinition>['open']>[0];
+          readonly view?: (document: TestGeometryDocument<RuntimeDefinition>) => ViewSubscription;
+        }
+      | {
+          readonly mainFile: string;
+          readonly parameters?: Record<string, unknown>;
+          readonly content?: RuntimeContentInput;
+        }
+    ),
+): Promise<Rendering> {
+  const { runtime, files } = input;
   const client = createTestRuntimeClient({ runtime, files });
+  let document: ReturnType<typeof client.open> | undefined;
+  let view: ViewSubscription | undefined;
   try {
-    const outcome = await client.render({
-      source: { path: mainFile },
-      ...(parameters ? { parameters } : {}),
-      ...(content ? { content } : {}),
-    });
+    document =
+      'open' in input
+        ? client.open(input.open)
+        : client.open({
+            source: { path: input.mainFile },
+            ...(input.parameters ? { parameters: input.parameters } : {}),
+            watch: false,
+          });
+    view =
+      'open' in input
+        ? (input.view?.(document) ?? document.view())
+        : input.content
+          ? document.view('model', { content: input.content })
+          : document.view();
+    const outcome = await view.rendering();
     if (outcome.superseded) {
       throw new Error('Test render was superseded');
     }
-    return outcome.geometry;
+    return outcome.rendering;
   } finally {
+    view?.close();
+    document?.close();
     await client.shutdown();
   }
-};
+}
 
 /**
  * Verify that two render projections and an optional write read one retained
@@ -135,35 +189,20 @@ export const expectKernelProjectionOrder = async <First, Intervening, Written = 
 };
 
 /** Resolves a fixture's parameter schema and releases its client. @public */
-export const getTestParameters = async <const Runtime extends RuntimeDefinition>({
+export const getTestParameters = async ({
   runtime,
   files,
   mainFile,
-}: CreateTestRuntimeClientOptions<Runtime> & {
+}: CreateTestRuntimeClientOptions & {
   readonly mainFile: string;
 }): Promise<ParameterManifest> => {
   const client = createTestRuntimeClient({ runtime, files });
   try {
-    const parameters = new Promise<ParameterManifest>((resolve, reject) => {
-      const unsubscribeError = client.on('error', (issues) => {
-        unsubscribeParameters();
-        reject(new Error(issues.map((issue) => issue.message).join('\n')));
-      });
-      const unsubscribeParameters = client.on('parametersResolved', (result) => {
-        unsubscribeError();
-        unsubscribeParameters();
-        if (!result.success) {
-          reject(new Error(result.issues.map((issue) => issue.message).join('\n')));
-          return;
-        }
-        resolve(result.data);
-      });
-    });
-    const outcome = await client.render({ source: { path: mainFile } });
-    if (outcome.superseded) {
-      throw new Error('Test parameter render was superseded');
+    const description = await client.describe({ source: { path: mainFile } });
+    if (!description.success) {
+      throw new Error(description.issues.map((issue) => issue.message).join('\n'));
     }
-    return await parameters;
+    return description.parameters;
   } finally {
     await client.shutdown();
   }
@@ -344,19 +383,8 @@ export const createMockRuntime = <
   };
 };
 
-/** Creates a successful geometry result. @public */
-export const createSuccessResult = (geometry: GeometryResponse): KernelSuccessResult<GeometryResponse> => ({
-  success: true,
-  data: geometry,
-  issues: [],
-});
-
-/** Creates a successful GLTF geometry result. @public */
-export const createGltfSuccessResult = (content: Uint8Array<ArrayBuffer>): KernelSuccessResult<GeometryResponse> =>
-  createSuccessResult({ format: 'gltf', content });
-
 /** Creates a failed geometry result. @public */
-export const createErrorResult = (issues?: KernelIssue[]): CreateGeometryResult => ({
+export const createErrorResult = (issues?: KernelIssue[]): KernelErrorResult => ({
   success: false,
   issues: issues ?? [{ message: 'Test error', code: 'RUNTIME', severity: 'error', type: 'kernel' }],
 });
@@ -370,6 +398,20 @@ export function assertSuccess<T>(result: KernelResult<T>, context?: string): ass
     );
   }
   expect(result.success).toBe(true);
+}
+
+/** Asserts and narrows a successful public document rendering. @public */
+export function assertRenderingSuccess(
+  rendering: Rendering,
+  context?: string,
+): asserts rendering is Extract<Rendering, { success: true }> {
+  if (!rendering.success) {
+    const prefix = context ? `[${context}] ` : '';
+    throw new Error(
+      `${prefix}Expected rendering success:\n${rendering.issues.map((issue) => issue.message).join('\n')}`,
+    );
+  }
+  expect(rendering.success).toBe(true);
 }
 
 /** Asserts and narrows a failed kernel result. @public */
@@ -499,12 +541,112 @@ export const createMockKernelRuntime = (options?: {
 
 const noop = (): void => undefined;
 
-/** Creates an explicit Vitest-backed RuntimeClient literal. @public */
-export function createMockRuntimeClient(): RuntimeClient;
-export function createMockRuntimeClient<Runtime extends AnyRuntimeDefinition>(): RuntimeClient<Runtime>;
-/** Implements the wide and runtime-projected mock client overloads. @public */
-export function createMockRuntimeClient(): unknown {
-  const client = {
+const subscribeMockEvent = (listeners: Map<string, Set<unknown>>, event: string, handler: unknown): (() => void) => {
+  let callbacks = listeners.get(event);
+  if (!callbacks) {
+    callbacks = new Set();
+    listeners.set(event, callbacks);
+  }
+  callbacks.add(handler);
+  return () => callbacks.delete(handler);
+};
+
+const emitMockEvent = (listeners: Map<string, Set<unknown>>, event: string, value: unknown): void => {
+  for (const listener of listeners.get(event) ?? []) {
+    if (typeof listener === 'function') {
+      Reflect.apply(listener, undefined, [value]);
+    }
+  }
+};
+
+/** Public document/view spies and event controls for one test. @public */
+export type MockRuntimeDocumentFixture = Readonly<{
+  document: RuntimeDocument;
+  view: ViewSubscription;
+  viewSpy: Mock<(id?: string, request?: WideViewRequest) => ViewSubscription>;
+  evaluation: Evaluation;
+  rendering: Rendering;
+  emitEvaluated(next: Evaluation): void;
+  emitRendered(next: Rendering): void;
+  emitDocumentStatus(status: 'evaluating' | 'ready' | 'error' | 'closed'): void;
+  emitViewStatus(status: ViewStatus): void;
+}>;
+
+/** A document/view test fixture with real public result shapes and controllable events. @public */
+export const createMockRuntimeDocument = (): MockRuntimeDocumentFixture => {
+  const documentListeners = new Map<string, Set<unknown>>();
+  const viewListeners = new Map<string, Set<unknown>>();
+  const evaluation: Evaluation = {
+    id: 'mock-evaluation',
+    success: true,
+    transient: false,
+    views: [{ id: 'model', title: 'Model', mimeType: 'model/gltf-binary' }],
+    exports: [],
+    issues: [],
+  };
+  const rendering: Rendering = {
+    success: true,
+    requestId: 'mock-rendering',
+    evaluationId: evaluation.id,
+    transient: false,
+    view: 'model',
+    artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array([1]) },
+    hash: 'mock-rendering',
+    issues: [],
+  };
+  const view: ViewSubscription = {
+    view: 'model',
+    request: {},
+    on: vi.fn((event: 'rendered' | 'status', handler: unknown) => subscribeMockEvent(viewListeners, event, handler)),
+    rendering: vi.fn(async (): Promise<ViewUpdateOutcome> => ({ superseded: false, rendering })),
+    update: vi.fn(async (): Promise<ViewUpdateOutcome> => ({ superseded: false, rendering })),
+    close: vi.fn(),
+  };
+  const viewSpy = vi.fn((_id?: string, _request?: WideViewRequest) => view);
+  function documentView(): ViewSubscription<string, Readonly<{ options?: never; instance?: never; content?: never }>>;
+  function documentView<Id extends string>(id: Id, request?: WideViewRequest): ViewSubscription<Id>;
+  function documentView(id?: string, request?: WideViewRequest): ViewSubscription {
+    return viewSpy(id, request);
+  }
+  const document: RuntimeDocument = {
+    id: 'mock-document',
+    view: documentView,
+    export: vi.fn(async (): Promise<ExportResult> => ({ success: false, issues: [] })),
+    evaluation: vi.fn(async (): Promise<UpdateOutcome> => ({ superseded: false, evaluation })),
+    update: vi.fn(async (): Promise<UpdateOutcome> => ({ superseded: false, evaluation })),
+    on: vi.fn((event: 'described' | 'evaluated' | 'progress' | 'status', handler: unknown) =>
+      subscribeMockEvent(documentListeners, event, handler),
+    ),
+    close: vi.fn(),
+  };
+  return {
+    document,
+    view,
+    viewSpy,
+    evaluation,
+    rendering,
+    emitEvaluated: (next: Evaluation): void => {
+      emitMockEvent(documentListeners, 'evaluated', next);
+    },
+    emitRendered: (next: Rendering): void => {
+      emitMockEvent(viewListeners, 'rendered', next);
+    },
+    emitDocumentStatus: (status: 'evaluating' | 'ready' | 'error' | 'closed'): void => {
+      emitMockEvent(documentListeners, 'status', status);
+    },
+    emitViewStatus: (status: ViewStatus): void => {
+      emitMockEvent(viewListeners, 'status', status);
+    },
+  };
+};
+
+/** Creates a Vitest-backed document client with typed public methods. @public */
+export function createMockRuntimeClient<
+  Runtime extends AnyRuntimeDefinition = AnyRuntimeDefinition,
+>(): RuntimeClient<Runtime> {
+  const client: RuntimeClient<Runtime> = {
+    machines: { available: false, reason: 'unsupported' },
+    jobs: { available: false, reason: 'unsupported' },
     transport: {
       id: 'in-process',
       descriptor: {
@@ -515,21 +657,14 @@ export function createMockRuntimeClient(): unknown {
       },
     },
     lifecycleState: 'connected',
-    renderStatus: 'idle',
-    activeKernelId: undefined,
     capabilities: undefined,
     connect: vi.fn(async () => undefined),
-    transcode: vi.fn(async () => ({ success: false, issues: [] })),
-    snapshotSource: vi.fn(async () => ({ success: false, issues: [] })),
-    render: vi.fn(async () => ({ superseded: true })),
-    updateParameters: vi.fn(async () => ({ superseded: true })),
-    setOptions: vi.fn(async () => ({ superseded: true })),
-    setRenderTimeout: vi.fn(),
-    export: vi.fn(async () => ({
-      success: true,
-      data: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.stl', mimeType: 'model/stl' }],
-      issues: [],
-    })),
+    transcode: vi.fn(async (): Promise<TranscodeResult> => ({ success: false, issues: [] })),
+    snapshotSource: vi.fn(async (): Promise<RuntimeSourceSnapshotResult> => ({ success: false, issues: [] })),
+    open: vi.fn<RuntimeClient<Runtime>['open']>(),
+    describe: vi.fn(async (): Promise<Description> => ({ success: false, kernelId: undefined, issues: [] })),
+    setOperationTimeout: vi.fn(),
+    setTranscodeTimeout: vi.fn(),
     routesFor: vi.fn(() => []),
     bestRouteFor: vi.fn(() => undefined),
     terminate: vi.fn(),
@@ -537,8 +672,7 @@ export function createMockRuntimeClient(): unknown {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- implements RuntimeClient event overloads.
     on: vi.fn(() => noop),
   };
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- explicit literal implements RuntimeClient overloads; the client type gained members this stub does not model, so the assertion routes through unknown.
-  return client as unknown as RuntimeClient;
+  return client;
 }
 
 /** Creates standard file, middleware, and framework dependencies. @public */

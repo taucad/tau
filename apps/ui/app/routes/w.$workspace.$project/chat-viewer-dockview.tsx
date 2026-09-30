@@ -44,6 +44,8 @@ import { Button } from '@taucad/ui/components/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { Toggle } from '@taucad/ui/components/toggle';
 import { cn } from '@taucad/ui/utils/cn';
+import { useCommandPaletteItems } from '#components/layout/command-palette.js';
+import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 
 /**
  * Params passed to each viewer panel via Dockview.
@@ -489,20 +491,8 @@ export function ViewerProjectionPicker({
   const selectedInstance = localForView?.instanceId ?? state?.authoredInstance ?? '';
   const choose = (id: string): void => {
     const nextId = id === '' ? undefined : id;
-    const nextOffer = evaluation.views.find((view) => view.id === nextId);
     setLocalInstanceChoice(viewId, undefined);
-    void viewCommands.edit(viewId, (current) => {
-      const record = current ?? newViewRecord(entryPath);
-      const states = record.kernelViews ?? [];
-      return workbenchRecords.view.schema.parse({
-        ...record,
-        selectedKernelView: nextId,
-        kernelViews:
-          nextId && nextOffer?.options && !states.some((state) => state.id === nextId)
-            ? [...states, { id: nextId, options: nextOffer.options.defaults }]
-            : states,
-      });
-    });
+    chooseProjection({ viewCommands, viewId, entryPath, evaluation, nextId });
   };
   const editViewState = (change: {
     readonly options?: Record<string, unknown>;
@@ -752,6 +742,114 @@ export function ViewerProjectionPicker({
   );
 }
 
+function chooseProjection({
+  viewCommands,
+  viewId,
+  entryPath,
+  evaluation,
+  nextId,
+}: {
+  readonly viewCommands: ReturnType<typeof useWorkbenchViewCommands>;
+  readonly viewId: string;
+  readonly entryPath: string;
+  readonly evaluation: Extract<Evaluation, { success: true }>;
+  readonly nextId: string | undefined;
+}): void {
+  const nextOffer = evaluation.views.find((view) => view.id === nextId);
+  void viewCommands.edit(viewId, (current) => {
+    const record = current ?? newViewRecord(entryPath);
+    const states = record.kernelViews ?? [];
+    return workbenchRecords.view.schema.parse({
+      ...record,
+      selectedKernelView: nextId,
+      kernelViews:
+        nextId && nextOffer?.options && !states.some((state) => state.id === nextId)
+          ? [...states, { id: nextId, options: nextOffer.options.defaults }]
+          : states,
+    });
+  });
+}
+
+function openProjectionBeside({
+  containerApi,
+  group,
+  viewCommands,
+  entryPath,
+  kernelViewId,
+}: {
+  readonly containerApi: DockviewApi;
+  readonly group: DockviewGroupPanel;
+  readonly viewCommands: ReturnType<typeof useWorkbenchViewCommands>;
+  readonly entryPath: string;
+  readonly kernelViewId: string;
+}): void {
+  const viewId = mintViewRecordId();
+  containerApi.addPanel({
+    id: viewId,
+    component: 'viewer',
+    title: entryPath.split('/').pop() ?? entryPath,
+    params: { viewId, entryPath },
+    position: { direction: 'right', referenceGroup: group },
+  });
+  void viewCommands.edit(viewId, () => ({ ...newViewRecord(entryPath), selectedKernelView: kernelViewId }));
+}
+
+/** Palette actions follow the active Dockview panel and the build's current offers. */
+export function ViewerProjectionCommandItems({
+  cadActor,
+  viewId,
+  entryPath,
+  api,
+}: {
+  readonly cadActor: ActorRefFrom<typeof cadMachine>;
+  readonly viewId: string;
+  readonly entryPath: string;
+  readonly api: DockviewApi;
+}): undefined {
+  const evaluation = useSelector(cadActor, selectCadEvaluation);
+  const viewCommands = useWorkbenchViewCommands();
+  useCommandPaletteItems(
+    'viewer-projections',
+    (): CommandPaletteItem[] =>
+      evaluation?.success && evaluation.views.length > 1
+        ? evaluation.views.flatMap((view): CommandPaletteItem[] => [
+            {
+              id: `show-view-${view.id}`,
+              label: `Show ${view.title}`,
+              detail: entryPath,
+              group: 'Viewer',
+              icon: <Box />,
+              action: () => {
+                setLocalInstanceChoice(viewId, undefined);
+                chooseProjection({ viewCommands, viewId, entryPath, evaluation, nextId: view.id });
+              },
+            },
+            {
+              id: `open-view-beside-${view.id}`,
+              label: `Open ${view.title} beside`,
+              detail: entryPath,
+              group: 'Viewer',
+              icon: <Box />,
+              disabled: !api.activeGroup,
+              action: () => {
+                if (api.activeGroup) {
+                  openProjectionBeside({
+                    containerApi: api,
+                    group: api.activeGroup,
+                    viewCommands,
+                    entryPath,
+                    kernelViewId: view.id,
+                  });
+                }
+              },
+            },
+          ])
+        : [],
+    [api, entryPath, evaluation, viewCommands, viewId],
+  );
+  return undefined;
+}
+
 export function ViewerRightActions(properties: IDockviewHeaderActionsProps): React.JSX.Element {
   const { geometryUnits } = useProject();
   const viewCommands = useWorkbenchViewCommands();
@@ -767,18 +865,13 @@ export function ViewerRightActions(properties: IDockviewHeaderActionsProps): Rea
           entryPath={entryPath}
           cadActor={cadActor}
           onOpenBeside={(kernelViewId) => {
-            const viewId = mintViewRecordId();
-            properties.containerApi.addPanel({
-              id: viewId,
-              component: 'viewer',
-              title: entryPath.split('/').pop() ?? entryPath,
-              params: { viewId, entryPath },
-              position: { direction: 'right', referenceGroup: properties.group },
+            openProjectionBeside({
+              containerApi: properties.containerApi,
+              group: properties.group,
+              viewCommands,
+              entryPath,
+              kernelViewId,
             });
-            void viewCommands.edit(viewId, () => ({
-              ...newViewRecord(entryPath),
-              selectedKernelView: kernelViewId,
-            }));
           }}
         />
       ) : null}
@@ -820,6 +913,13 @@ export const ViewerDockview = memo(function ({
   const adoptedProjectionRef = useRef<string | undefined>(undefined);
   // Track the active (focused) viewer panel for settings inheritance
   const [activeViewerPanelId, setActiveViewerPanelId] = useState<string | undefined>();
+  const activeViewerPanel = activeViewerPanelId
+    ? api?.panels.find((panel) => panel.id === activeViewerPanelId)
+    : api?.activePanel;
+  const activeViewerParams =
+    activeViewerPanel && isViewerPanelParameters(activeViewerPanel.params) ? activeViewerPanel.params : undefined;
+  const activeViewerEntryPath = activeViewerParams?.entryPath;
+  const activeViewerCadActor = activeViewerEntryPath ? geometryUnits.get(activeViewerEntryPath) : undefined;
 
   /* The entry's CAD actor owns its render timeout; a unit is seeded with the durable value at spawn
    * rather than pushed from a mount (Finding 4, E1). */
@@ -1269,6 +1369,14 @@ export const ViewerDockview = memo(function ({
 
   return (
     <DockviewFileActionProvider value={handleOpenFile}>
+      {profile === 'editor' && api && activeViewerParams && activeViewerEntryPath && activeViewerCadActor ? (
+        <ViewerProjectionCommandItems
+          cadActor={activeViewerCadActor}
+          viewId={activeViewerParams.viewId}
+          entryPath={activeViewerEntryPath}
+          api={api}
+        />
+      ) : null}
       <div className='@container/viewer relative size-full'>
         <Dockview
           components={components}

@@ -780,6 +780,7 @@ const ViewerContent = memo(function ({
           event.altKey ||
           event.ctrlKey ||
           event.metaKey ||
+          event.nativeEvent.isComposing ||
           evaluation?.success !== true ||
           evaluation.views.length < 2
         ) {

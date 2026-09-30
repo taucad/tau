@@ -2,6 +2,7 @@ import { ChevronDown } from 'lucide-react';
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { PaneviewPanelApi } from 'dockview-react';
 import { cn } from '@taucad/ui/utils/cn';
+import { paneSpacingClassName } from '#components/panes/pane-spacing.styles.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 
@@ -32,9 +33,12 @@ export const paneviewStyleOverrides = cn(
 /** Paneview layout overrides for headers visually attached to bordered panel bodies. */
 export const paneviewAttachedSurfaceStyleOverrides = cn(
   paneviewStyleOverrides,
-  'pb-2',
+  paneSpacingClassName,
+  'pb-(--pane-unit-gap)',
   '[&_.dv-pane-body]:overflow-y-hidden! [&_.dv-pane-body]:px-2!',
-  '[&_[data-slot=paneview-header]]:mt-2! [&_[data-slot=paneview-header]]:mb-0!',
+  '[&_[data-slot=paneview-header]]:mt-(--pane-unit-gap)! [&_[data-slot=paneview-header]]:mb-0!',
+  // oxlint-disable-next-line tau-lint/no-arbitrary-pixel-size -- Dockview allocates paneviewHeaderSize physical pixels, including the shared gap.
+  '[&_[data-slot=paneview-header]]:h-[calc(40px-var(--pane-unit-gap))]!',
   '[&_[data-slot=paneview-header][data-state=open]]:rounded-b-none!',
   '[&_[data-slot=paneview-header][data-state=open]]:border-b-0!',
 );

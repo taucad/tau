@@ -246,7 +246,7 @@ export class HeadlessImageService {
     if (
       job.kind === 'automatic-thumbnail' &&
       job.sourceFormat === 'glb' &&
-      job.exportOptions.mode === 'batch' &&
+      job.exportOptions['mode'] === 'batch' &&
       !this.successfulGlbRender
     ) {
       throw new HeadlessImageError(

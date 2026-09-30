@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { XIcon } from 'lucide-react';
 import { cn } from '#utils/cn.js';
+import { useFullscreenElement } from '#hooks/use-fullscreen-element.js';
 
 /**
  * Owns the modal dialog state and focus lifecycle.
@@ -48,7 +49,8 @@ function DialogTrigger({ ...properties }: React.ComponentProps<typeof DialogPrim
  * ```
  */
 function DialogPortal({ ...properties }: React.ComponentProps<typeof DialogPrimitive.Portal>): React.JSX.Element {
-  return <DialogPrimitive.Portal data-slot='dialog-portal' {...properties} />;
+  const fullscreenElement = useFullscreenElement();
+  return <DialogPrimitive.Portal data-slot='dialog-portal' container={fullscreenElement} {...properties} />;
 }
 
 /**

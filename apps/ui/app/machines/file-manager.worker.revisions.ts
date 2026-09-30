@@ -16,6 +16,7 @@
  */
 
 import { Topic } from '@taucad/events';
+import { sha256Bytes } from '@taucad/utils/hash';
 import {
   awaitCheckoutCuts,
   awaitSyncSettled,
@@ -69,7 +70,6 @@ import {
 } from '@taucad/revisions';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import { revisionId } from '@taucad/revisions/algorithms';
-import type { ImmutableRevisionTree } from '@taucad/revisions/algorithms';
 import type { MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import type { ChangeEvent } from '@taucad/types';
@@ -271,8 +271,15 @@ export type WorkerRevisionEvent =
   | TurnFinalizedEvent
   | Readonly<{ type: 'chats.projected'; projectId: string; chatIds: readonly string[] }>;
 
-/** One file's text on both sides of a revision. @public */
-export type RevisionFileComparison = Readonly<{ original: string; modified: string }>;
+/** One file's decoded text and exact byte identities on both sides of a revision. @public */
+export type RevisionFileComparison = Readonly<{
+  original: string;
+  modified: string;
+  // oxlint-disable-next-line typescript/no-restricted-types -- approved JSON wire contract distinguishes absent bytes (null) from an empty file (0).
+  originalBytes: Readonly<{ digest: string; byteLength: number | null }>;
+  // oxlint-disable-next-line typescript/no-restricted-types -- approved JSON wire contract distinguishes absent bytes (null) from an empty file (0).
+  modifiedBytes: Readonly<{ digest: string; byteLength: number | null }>;
+}>;
 
 /**
  * What a child of the tree asked the page to say.
@@ -1438,6 +1445,25 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       return readRevisionDiff(options.port, from ?? record?.parents[0], revision);
     },
     compare: async (revision, path, compareOptions) => {
+      const compareBytes = async (
+        original: Uint8Array<ArrayBuffer> | undefined,
+        modified: Uint8Array<ArrayBuffer> | undefined,
+      ): Promise<RevisionFileComparison> => {
+        const metadata = async (
+          bytes: Uint8Array<ArrayBuffer> | undefined,
+        ): Promise<RevisionFileComparison['originalBytes']> =>
+          bytes === undefined
+            ? { digest: 'missing', byteLength: null }
+            : { digest: `sha256:${await sha256Bytes(bytes)}`, byteLength: bytes.byteLength };
+        const [originalBytes, modifiedBytes] = await Promise.all([metadata(original), metadata(modified)]);
+        const decoder = new TextDecoder();
+        return {
+          original: original === undefined ? '' : decoder.decode(original),
+          modified: modified === undefined ? '' : decoder.decode(modified),
+          originalBytes,
+          modifiedBytes,
+        };
+      };
       /* S38's second half: the right-hand side is the working copy rather than
        * another revision, so a reader can see what they have changed since the
        * revision they are looking at. One round trip, same viewer. */
@@ -1448,31 +1474,40 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           options.port.readTree(revisionId(revision)),
           checkout === undefined ? undefined : options.filesystem(checkout.root),
         ]);
-        const decoder = new TextDecoder();
-        const recorded = tree?.get(path);
-        let working = '';
-        try {
-          working = filesystem === undefined ? '' : decoder.decode(await filesystem.readFile(path));
-        } catch {
-          /* The file is not in the checkout any more: an empty right-hand side
-           * is exactly "deleted since this revision". */
+        if (tree === undefined || filesystem === undefined) {
+          throw new Error('The selected revision or checkout is unavailable.');
         }
-        return { original: recorded === undefined ? '' : decoder.decode(recorded), modified: working };
+        const recorded = tree.get(path);
+        let working: Uint8Array<ArrayBuffer> | undefined;
+        try {
+          working = await filesystem.readFile(path);
+        } catch (error) {
+          if (
+            !(
+              typeof error === 'object' &&
+              error !== null &&
+              (('code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) ||
+                ('name' in error && error.name === 'NotFoundError'))
+            )
+          ) {
+            throw error;
+          }
+        }
+        return compareBytes(recorded, working);
       }
       const record = await options.port.readRevision(revisionId(revision));
-      const base = compareOptions?.from ?? record?.parents[0];
+      if (record === undefined) {
+        throw new Error('The selected revision is unavailable.');
+      }
+      const base = compareOptions?.from ?? record.parents[0];
       const [before, after] = await Promise.all([
         base === undefined ? undefined : options.port.readTree(revisionId(base)),
         options.port.readTree(revisionId(revision)),
       ]);
-      const decoder = new TextDecoder();
-      const read = (tree: ImmutableRevisionTree | undefined): string => {
-        const content = tree?.get(path);
-        /* An added path has no `before` and a deleted one has no `after`; the
-         * viewer reads an empty side as exactly that. */
-        return content === undefined ? '' : decoder.decode(content);
-      };
-      return { original: read(before), modified: read(after) };
+      if (after === undefined || (base !== undefined && before === undefined)) {
+        throw new Error('The selected revision tree is unavailable.');
+      }
+      return compareBytes(before?.get(path), after.get(path));
     },
     status: () => published,
     subscribe: (listener) => listeners.subscribe(listener),

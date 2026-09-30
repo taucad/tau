@@ -18,6 +18,7 @@ import type { RevisionPort } from '@taucad/revisions';
 import { revisionId } from '@taucad/revisions/algorithms';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
+import { sha256Bytes } from '@taucad/utils/hash';
 import {
   createCheckoutRoutes,
   createRemoteAttention,
@@ -796,7 +797,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     /* The older revision, named while the checkout's head is a newer one: the
      * comparison reads the revision it is given, never the head (W2c a1b). */
     const [, older] = await root.log();
-    expect(await root.compare(older!.revisionId, 'main.scad', { against: 'checkout' })).toEqual({
+    expect(await root.compare(older!.revisionId, 'main.scad', { against: 'checkout' })).toMatchObject({
       original: 'cube(10);',
       modified: 'cube(20);',
     });
@@ -805,17 +806,42 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
      * cannot answer "what have I changed since this". */
     await project.writeFile('main.scad', 'cube(30);');
 
-    expect(await root.compare(head!, 'main.scad', { against: 'checkout' })).toEqual({
+    expect(await root.compare(head!, 'main.scad', { against: 'checkout' })).toMatchObject({
       original: 'cube(20);',
       modified: 'cube(30);',
     });
     /* A file the checkout no longer holds reads as an empty right-hand side,
      * which is exactly "deleted since this revision" — never a thrown read. */
     await project.unlink('main.scad');
-    expect(await root.compare(head!, 'main.scad', { against: 'checkout' })).toEqual({
+    expect(await root.compare(head!, 'main.scad', { against: 'checkout' })).toMatchObject({
       original: 'cube(20);',
       modified: '',
     });
+    const missing = await root.compare(head!, 'main.scad', { against: 'checkout' });
+    expect(missing).toHaveProperty('modifiedBytes', { digest: 'missing', byteLength: null });
+    await project.writeFile('main.scad', new Uint8Array());
+    const empty = await root.compare(head!, 'main.scad', { against: 'checkout' });
+    expect(empty).toHaveProperty('modifiedBytes', {
+      digest: 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      byteLength: 0,
+    });
+    const bom = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode('cube(20);')]);
+    await project.writeFile('main.scad', bom);
+    const comparison = await root.compare(head!, 'main.scad', { against: 'checkout' });
+    expect(comparison.original).toBe(comparison.modified);
+    expect(comparison.originalBytes).toEqual({
+      digest: `sha256:${await sha256Bytes(new TextEncoder().encode('cube(20);'))}`,
+      byteLength: 9,
+    });
+    expect(comparison.modifiedBytes).toEqual({ digest: `sha256:${await sha256Bytes(bom)}`, byteLength: 12 });
+    await expect(root.compare('unknown-revision', 'main.scad', { against: 'checkout' })).rejects.toThrow();
+    await expect(root.compare('unknown-revision', 'main.scad')).rejects.toThrow();
+    const failure = new Error('Device read failed');
+    const rooted = vi.spyOn(fixture.service, 'createRootedFileSystem').mockReturnValue(project);
+    const read = vi.spyOn(project, 'readFile').mockRejectedValue(failure);
+    await expect(root.compare(head!, 'main.scad', { against: 'checkout' })).rejects.toBe(failure);
+    read.mockRestore();
+    rooted.mockRestore();
   });
 
   /*

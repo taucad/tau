@@ -225,7 +225,7 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
           .join('\n'),
       ),
   },
-  [toolName.getKernelResult]: {
+  [toolName.evaluateModel]: {
     input: (input) => `targetFile: ${input.targetFile}`,
     output(output) {
       const lines = [`Status: ${output.status}`];
@@ -237,11 +237,12 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
       return joinLines(...lines);
     },
   },
-  [toolName.exportGeometry]: {
-    input: (input) => joinLines(`targetFile: ${input.targetFile}`, `format: ${input.format}`),
+  [toolName.exportModel]: {
+    input: (input) => joinLines(`targetFile: ${input.targetFile}`, `to: ${input.to}`),
     output: (output) =>
       joinLines(
-        `format: ${output.format}`,
+        `to: ${output.to}`,
+        `exportId: ${output.exportId}`,
         ...output.files.map(
           (file) => `${file.name}: ${file.artifactPath} (${file.mimeType}, ${file.byteLength} bytes)`,
         ),

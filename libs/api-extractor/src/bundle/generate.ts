@@ -315,10 +315,11 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'PicoVoxel authoring',
     title: 'PicoVoxel authoring',
     description:
-      'Guides PicoVoxel voxel, SDF and lattice CAD in main.ts. Use when creating or editing TypeScript models that import picovoxel.',
-    whenToUse: 'Use when creating or editing TypeScript models that import picovoxel.',
+      'Guides PicoVoxel voxel, SDF and lattice CAD, named parts and PBR materials. Use for TypeScript PicoVoxel geometry, appearance or texture authoring.',
+    whenToUse: 'Use for TypeScript PicoVoxel models, named parts, physical materials and textures.',
     corpus: bundledTypescriptCorpus('picovoxel/picovoxel.bundled.json', 'picovoxel', 'packages/plugins/picovoxel'),
     groupBy: byKind,
+    authoredReferences: ['materials-reference.md'],
   },
   {
     slug: 'cad-openscad',

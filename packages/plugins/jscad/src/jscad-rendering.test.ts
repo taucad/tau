@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { jscadKernel } from '#jscad.kernel.js';
 import { esbuildBundler } from '@taucad/esbuild';
 import {
-  assertSuccess,
+  assertRenderingSuccess,
   colorParityCases,
   createTestGeometry,
   expectLinearBaseColor,
@@ -21,7 +21,7 @@ import {
 } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 
-import type { HashedGeometryResult } from '@taucad/runtime/types';
+import type { Rendering } from '@taucad/runtime/client';
 
 function hexToJscadTuple(hex: string, opacity: number): string {
   const clean = hex.startsWith('#') ? hex.slice(1) : hex;
@@ -39,15 +39,14 @@ export default function main() {
 
 const runtime = defineRuntime({ kernels: [jscadKernel()], bundlers: [esbuildBundler()] });
 
-async function renderColored(hex: string, opacity: number): Promise<HashedGeometryResult> {
+async function renderColored(hex: string, opacity: number): Promise<Rendering> {
   const file = 'colored.ts';
   const result = await createTestGeometry({
     runtime,
     files: { [file]: buildSourceFor(hex, opacity) },
-    mainFile: file,
-    parameters: {},
+    open: { source: { path: file } },
   });
-  assertSuccess(result, `jscad createGeometry (${hex}, alpha=${opacity})`);
+  assertRenderingSuccess(result, `jscad createGeometry (${hex}, alpha=${opacity})`);
   return result;
 }
 
@@ -79,10 +78,9 @@ export default function main() {
   ];
 }`,
       },
-      mainFile: file,
-      parameters: {},
+      open: { source: { path: file } },
     });
-    assertSuccess(result, 'jscad multi-color createGeometry');
+    assertRenderingSuccess(result, 'jscad multi-color createGeometry');
 
     const baseColors = await getTrianglePrimitiveBaseColors(result);
     expect(baseColors.length).toBeGreaterThanOrEqual(3);
@@ -102,10 +100,9 @@ export default function main() {
   return primitives.cube({ size: 10 });
 }`,
       },
-      mainFile: file,
-      parameters: {},
+      open: { source: { path: file } },
     });
-    assertSuccess(result, 'jscad uncoloured createGeometry');
+    assertRenderingSuccess(result, 'jscad uncoloured createGeometry');
 
     const baseColor = await getMaterialBaseColor(result);
     // JSCAD default is sRGB [0.8, 0.8, 0.8, 1] → linear ≈ 0.6038

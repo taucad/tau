@@ -345,6 +345,44 @@ fn should_keep_mesh_diagnostics_separate_across_closure_reuse() {
 }
 
 #[test]
+fn should_refuse_excessive_diagnostics_without_retaining_or_stripping_them() {
+    let mut config = EngineConfig::entry();
+    config.analysis.max_mesh_bytes = 2048;
+    let mut engine = Engine::with_backends(
+        config,
+        Box::new(ProjectionBrepConnector::default()),
+        Box::new(UnusedCsg),
+    );
+    let bytes = b"diagnostics byte budget";
+    let mut request: Value = serde_json::from_slice(&step_request(bytes, None)).unwrap();
+    request["diagnostics"] =
+        json!([{"code":"MODEL_WARNING","severity":"warning","message":"x".repeat(2048)}]);
+    let error = engine
+        .ingest_subject(&serde_json::to_vec(&request).unwrap(), bytes, vec![])
+        .unwrap_err();
+    assert_eq!(error.code(), "limit-exceeded");
+    request["diagnostics"][0]["message"] = json!("x".repeat(700));
+    let error = engine
+        .ingest_subject(&serde_json::to_vec(&request).unwrap(), bytes, vec![])
+        .unwrap_err();
+    assert_eq!(error.code(), "limit-exceeded");
+    request["diagnostics"][0]["message"] = json!("warning");
+    let admitted: Value = serde_json::from_slice(
+        &engine
+            .ingest_subject(&serde_json::to_vec(&request).unwrap(), bytes, vec![])
+            .unwrap(),
+    )
+    .unwrap();
+    let result = claim(
+        &engine,
+        json!({"slot":"subject","subjectHash":admitted["result"]["subject"]["subjectHash"]}),
+        "toHaveNoDiagnostics",
+        json!({"kind":"noDiagnostics"}),
+    );
+    assert_eq!(result["result"]["results"][0]["status"], "failed");
+}
+
+#[test]
 fn should_skip_step_open_only_for_exact_retained_source_options_and_profile() {
     let opens = Rc::new(Cell::new(0));
     let alternate_profile = Rc::new(Cell::new(false));

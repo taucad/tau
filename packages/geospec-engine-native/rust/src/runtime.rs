@@ -727,6 +727,28 @@ impl Engine {
     }
 
     pub(crate) fn admit_retained(&mut self, mut retained: Subject) -> Result<(), ProtocolError> {
+        let diagnostic_bytes = retained.diagnostics.iter().fold(
+            retained
+                .diagnostics
+                .capacity()
+                .saturating_mul(std::mem::size_of::<Diagnostic>()),
+            |sum, diagnostic| {
+                sum.saturating_add(diagnostic.code.capacity())
+                    .saturating_add(diagnostic.message.capacity())
+                    .saturating_add(diagnostic.suggestion.as_ref().map_or(0, String::capacity))
+            },
+        );
+        let descriptor_bytes = retained
+            .semantic_identity
+            .get()
+            .map_or(0, SubjectIdentity::diagnostics_owned_bytes);
+        if diagnostic_bytes.saturating_add(descriptor_bytes) as u64
+            > self.config.analysis.max_mesh_bytes
+        {
+            return Err(limit(
+                "Subject diagnostics exceed the configured retained analysis byte limit.",
+            ));
+        }
         retained.observations = Rc::clone(&self.observations);
         self.observations.add(WorkCounter::Admissions, 1);
         retained.retention_limits = self.config.analysis;
@@ -761,6 +783,7 @@ impl Engine {
                     .get()
                     .expect("rational identity")
                     .owned_bytes();
+            let metadata_bytes = metadata_bytes.saturating_add(diagnostic_bytes);
             plate
                 .attach(&self.plate_retention, metadata_bytes)
                 .map_err(|error| limit(error.to_string()))?;

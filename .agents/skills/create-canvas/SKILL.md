@@ -29,6 +29,8 @@ description: >-
 
 - Use the shared research-canvas runner and authoring contract in
   [authoring.md](authoring.md). Reuse an existing scene before creating a new one.
+- Launch previews through Portless with a stable scene name using the shared
+  `canvas:dev` command in that contract; deliver its verified named localhost URL.
 - Apply the canvas review guidance in [DESIGN.md](../../../DESIGN.md#design-and-critique-workflow).
   [authoring.md](authoring.md#styling-baseline) locates the retained reference;
   the reference does not define a second set of design rules.

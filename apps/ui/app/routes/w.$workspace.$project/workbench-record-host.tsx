@@ -1,6 +1,7 @@
 /* oxlint-disable eslint/no-await-in-loop -- Restore must create required view files in order before layout adoption. */
 /* oxlint-disable react/refs -- Store callbacks and Restore read refs only after commit. */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Topic } from '@taucad/events';
 import { useSelector } from '@xstate/react';
 import type { ViewerNode, WorkbenchLaneNode, WorkbenchLayout, WorkbenchTab, WorkbenchView } from '@taucad/workbench';
 import { workbenchPaths } from '@taucad/workbench';
@@ -14,7 +15,7 @@ import type {
   WorkbenchLayoutController,
   WorkbenchLayoutSnapshot,
 } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
-import { editViewFile } from '#workbench-records/view-actions.js';
+import { ensureViewFile } from '#workbench-records/view-actions.js';
 import type { PreviousWorkbenchLayout } from '#types/editor.types.js';
 
 const storeMounts = new WeakMap<ReturnType<typeof createWorkbenchLayoutStore>, number>();
@@ -59,7 +60,42 @@ export function WorkbenchRecordHost(): React.JSX.Element {
     message: string;
   }>();
   const snapshotRef = useRef<WorkbenchLayoutSnapshot | undefined>(undefined);
-  const listenersRef = useRef(new Set<() => void>());
+  const changes = useMemo(() => new Topic<void>({ name: 'WorkbenchRecordHost.changes' }), []);
+  const restoringRef = useRef(false);
+  const restoreAvailability = useCallback((): Pick<
+    WorkbenchLayoutSnapshot,
+    'restoreTarget' | 'restoreUnavailable' | 'restoring'
+  > => {
+    const previous = editorRef.getSnapshot().context.previousLayout;
+    const missing = previous && viewIdsIn(previous.layout.viewer).find((id) => !previous.views[id]);
+    return {
+      restoreTarget: previous ? JSON.stringify(previous) : undefined,
+      restoreUnavailable: previous
+        ? missing
+          ? `The prior view ${missing} has no saved record.`
+          : undefined
+        : 'No previous layout is saved.',
+      restoring: restoringRef.current,
+    };
+  }, [editorRef]);
+  const refreshRestore = useCallback((): void => {
+    if (snapshotRef.current) {
+      snapshotRef.current = { ...snapshotRef.current, ...restoreAvailability() };
+      changes.emit();
+    }
+  }, [changes, restoreAvailability]);
+  useEffect(() => {
+    let previous = editorRef.getSnapshot().context.previousLayout;
+    const subscription = editorRef.subscribe((state) => {
+      if (state.context.previousLayout !== previous) {
+        previous = state.context.previousLayout;
+        refreshRestore();
+      }
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [editorRef, refreshRestore]);
   const viewerRef = useRef<((node: ViewerNode, applied: () => void) => void) | undefined>(undefined);
   const workbenchRef = useRef<((node: WorkbenchLaneNode, applied: () => void) => void) | undefined>(undefined);
   const applicationRef = useRef({ epoch: 0, viewer: false, workbench: false });
@@ -124,9 +160,7 @@ export function WorkbenchRecordHost(): React.JSX.Element {
             setRefusal(state.refusal);
             announce(state.refusal.message);
             snapshotRef.current = undefined;
-            for (const listener of listenersRef.current) {
-              listener();
-            }
+            changes.emit();
             return;
           }
           setRefusal(undefined);
@@ -134,9 +168,7 @@ export function WorkbenchRecordHost(): React.JSX.Element {
             appliedViewerRef.current = undefined;
             appliedWorkbenchRef.current = undefined;
             snapshotRef.current = undefined;
-            for (const listener of listenersRef.current) {
-              listener();
-            }
+            changes.emit();
             return;
           }
           const previous = appliedRef.current;
@@ -153,10 +185,9 @@ export function WorkbenchRecordHost(): React.JSX.Element {
             layout: next,
             refused,
             layoutDigest: state.digest,
+            ...restoreAvailability(),
           };
-          for (const listener of listenersRef.current) {
-            listener();
-          }
+          changes.emit();
           if (source === 'read' && previous && JSON.stringify(previous) !== JSON.stringify(next)) {
             editorRef.send({
               type: 'setPreviousLayout',
@@ -241,7 +272,17 @@ export function WorkbenchRecordHost(): React.JSX.Element {
           announce(error instanceof Error ? error.message : 'Workbench record could not be read.');
         },
       }),
-    [acknowledge, announce, editorRef, parameterFiles, rollback, root, setAppliedWorkbenchRevision],
+    [
+      acknowledge,
+      announce,
+      changes,
+      editorRef,
+      parameterFiles,
+      restoreAvailability,
+      rollback,
+      root,
+      setAppliedWorkbenchRevision,
+    ],
   );
   const firstReadRef = useRef<{ store: typeof store; promise: Promise<boolean> } | undefined>(undefined);
   const firstRead = useCallback(async (): Promise<boolean> => {
@@ -329,46 +370,61 @@ export function WorkbenchRecordHost(): React.JSX.Element {
   const controller = useMemo<WorkbenchLayoutController>(
     () => ({
       snapshot: () => snapshotRef.current,
-      subscribe: (listener) => {
-        listenersRef.current.add(listener);
-        return () => {
-          listenersRef.current.delete(listener);
-        };
-      },
-      restorePreviousArrangement: async () => {
+      subscribe: (listener) => changes.subscribe(listener),
+      restorePreviousArrangement: async (expected) => {
         const previous = editorRef.getSnapshot().context.previousLayout;
         const current = store.snapshot().layout;
-        if (!previous || !current) {
+        const eligible = (): boolean =>
+          JSON.stringify(editorRef.getSnapshot().context.previousLayout) === expected.target &&
+          store.snapshot().digest === expected.layoutDigest &&
+          !restoreAvailability().restoreUnavailable &&
+          expected.eligible();
+        if (restoringRef.current || !previous || !current || !eligible()) {
           return false;
         }
-        for (const viewId of viewIdsIn(previous.layout.viewer)) {
-          const seed = previous.views[viewId];
-          if (!seed) {
-            announce(`The prior view ${viewId} cannot be restored without its original file.`);
+        restoringRef.current = true;
+        refreshRestore();
+        let saved = false;
+        try {
+          // Read before seed recreation; never bind a stale result to the newest layout.
+          if (!(await store.read()) || !eligible()) {
             return false;
           }
-          if (
-            !(await editViewFile({
-              root,
-              viewId,
-              files: { ...parameterFiles, ...workbenchFiles },
-              change: (existing) => existing ?? seed,
-              onError: (error) => {
-                announce(error instanceof Error ? error.message : 'View could not be restored.');
-              },
-            }))
-          ) {
-            return false;
+          for (const viewId of viewIdsIn(previous.layout.viewer)) {
+            if (!eligible()) {
+              return false;
+            }
+            const seed = previous.views[viewId];
+            if (
+              !seed ||
+              !(await ensureViewFile({
+                root,
+                viewId,
+                files: { ...parameterFiles, ...workbenchFiles },
+                seed,
+                eligible,
+                onError: (error) => {
+                  announce(error instanceof Error ? error.message : 'View could not be restored.');
+                },
+              }))
+            ) {
+              return false;
+            }
           }
+          const restored = await store.restore(previous.layout, expected.layoutDigest, eligible);
+          saved = restored;
+          if (restored && JSON.stringify(editorRef.getSnapshot().context.previousLayout) === expected.target) {
+            editorRef.send({ type: 'setPreviousLayout', layout: rollback(current) });
+            announce('Restore written.');
+          }
+          return restored;
+        } finally {
+          if (!saved) {
+            await store.read(true);
+          }
+          restoringRef.current = false;
+          refreshRestore();
         }
-        const restored = await store.edit(previous.layout);
-        if (restored) {
-          editorRef.send({
-            type: 'setPreviousLayout',
-            layout: rollback(current),
-          });
-        }
-        return restored;
       },
       registerViewer: (apply) => {
         viewerRef.current = apply;
@@ -464,9 +520,13 @@ export function WorkbenchRecordHost(): React.JSX.Element {
     [
       acknowledge,
       announce,
+      changes,
       editorRef,
       firstRead,
       parameterFiles,
+      refreshRestore,
+      restoreAvailability,
+      rollback,
       root,
       setAppliedWorkbenchRevision,
       store,
@@ -488,10 +548,8 @@ export function WorkbenchRecordHost(): React.JSX.Element {
           )
           .map((tab) => ({ tab, reason: 'debug-only' }));
     snapshotRef.current = { ...current, refused };
-    for (const listener of listenersRef.current) {
-      listener();
-    }
-  }, [isTauDebugEnabled]);
+    changes.emit();
+  }, [changes, isTauDebugEnabled]);
 
   useLayoutEffect(() => registerLayoutController(controller), [controller, registerLayoutController]);
   return (

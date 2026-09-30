@@ -5,10 +5,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ToolInvocation } from '@taucad/chat';
 import type { toolName } from '@taucad/chat/constants';
 import { workbenchPaths } from '@taucad/workbench';
-import type { WorkbenchLayoutSnapshot } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
+import type {
+  WorkbenchLayoutController,
+  WorkbenchLayoutSnapshot,
+} from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import { ChatMessageToolArrangeWorkbench } from '#routes/w.$workspace.$project/chat-message-tool-arrange-workbench.js';
 
-const controller = vi.hoisted(() => ({ snapshot: vi.fn(), subscribe: vi.fn(), restorePreviousArrangement: vi.fn() }));
+const controller = vi.hoisted(() => ({
+  snapshot: vi.fn(),
+  subscribe: vi.fn(),
+  restorePreviousArrangement: vi.fn<WorkbenchLayoutController['restorePreviousArrangement']>(),
+}));
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useWorkbenchLayoutController: () => controller,
 }));
@@ -48,7 +55,19 @@ afterEach(() => {
 });
 
 describe('ChatMessageToolArrangeWorkbench', () => {
-  it('starts Written, reacts to adoption and refusal, and keeps Restore focusable at rest', async () => {
+  it('should hide routine details until the compact row is expanded', async () => {
+    controller.snapshot.mockReturnValue(undefined);
+    controller.subscribe.mockReturnValue(() => undefined);
+    render(<ChatMessageToolArrangeWorkbench part={output} />);
+    const header = screen.getByRole('button', { name: /Arranged 1 view, 1 file.*Written/u });
+    expect(header).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: 'Restore previous layout' })).not.toBeInTheDocument();
+    await userEvent.click(header);
+    expect(screen.getByText('Requested arrangement')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Restore previous layout' })).toBeDisabled();
+  });
+
+  it('should preserve disclosure and focus while adoption and refusal update', async () => {
     let current: WorkbenchLayoutSnapshot | undefined;
     let listener: (() => void) | undefined;
     controller.snapshot.mockImplementation(() => current);
@@ -58,25 +77,28 @@ describe('ChatMessageToolArrangeWorkbench', () => {
         listener = undefined;
       };
     });
-    controller.restorePreviousArrangement.mockResolvedValue(true);
-    const rendered = render(<ChatMessageToolArrangeWorkbench part={output} />);
-
-    expect(screen.getByText('Arranged:').parentElement).toHaveTextContent('Arranged: iso view, docs/review.md');
-    expect(screen.getByRole('status')).toHaveTextContent('Written · shown when the project opens');
-    const restore = screen.getByRole('button', { name: 'Restore' });
-    restore.focus();
-    expect(restore).toHaveFocus();
+    const rendered = render(
+      <ChatMessageToolArrangeWorkbench
+        part={{ toolCallId: output.toolCallId, state: 'input-available', input: output.input }}
+      />,
+    );
+    const header = screen.getByRole('button', { name: 'Arranging workbench' });
+    header.focus();
     await userEvent.keyboard('{Enter}');
-    expect(controller.restorePreviousArrangement).toHaveBeenCalledOnce();
-
+    expect(header).toHaveAttribute('aria-expanded', 'true');
+    rendered.rerender(<ChatMessageToolArrangeWorkbench part={output} />);
+    expect(header).toHaveAttribute('aria-expanded', 'true');
+    expect(header).toHaveFocus();
+    expect(screen.getByRole('status')).toHaveTextContent('Written');
     act(() => {
-      current = { layout, layoutDigest: digest, refused: [] };
+      current = { layout, layoutDigest: digest, refused: [], restoreTarget: 'prior' };
       listener?.();
     });
-    expect(screen.getByRole('status')).toHaveTextContent('Written · shown when the project opens');
+    expect(screen.getByRole('status')).toHaveTextContent('Written');
     appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, digest]]);
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={output} />);
     expect(screen.getByRole('status')).toHaveTextContent('Shown');
+    expect(screen.getByRole('button', { name: 'Restore previous layout' })).toBeEnabled();
     act(() => {
       current = {
         layout,
@@ -86,7 +108,85 @@ describe('ChatMessageToolArrangeWorkbench', () => {
       listener?.();
     });
     expect(screen.getByRole('status')).toHaveTextContent('Shown partly');
+    await userEvent.keyboard(' ');
+    expect(header).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('alert')).toHaveTextContent('Telemetry could not be shown');
   });
+
+  it('should keep a restore receipt visible when collapsed and disable an immediate toggle', async () => {
+    const current = { layout, layoutDigest: digest, refused: [], restoreTarget: 'prior' };
+    controller.snapshot.mockReturnValue(current);
+    controller.subscribe.mockReturnValue(() => undefined);
+    appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, digest]]);
+    const gate = Promise.withResolvers<boolean>();
+    controller.restorePreviousArrangement.mockReturnValue(gate.promise);
+    const rendered = render(<ChatMessageToolArrangeWorkbench part={output} />);
+    const header = screen.getByRole('button', { name: /Arranged/u });
+    await userEvent.click(header);
+    const restore = screen.getByRole('button', { name: 'Restore previous layout' });
+    await userEvent.dblClick(restore);
+    expect(controller.restorePreviousArrangement).toHaveBeenCalledOnce();
+    const [submitted] = controller.restorePreviousArrangement.mock.calls[0]!;
+    expect(submitted.layoutDigest).toBe(digest);
+    expect(submitted.target).toBe('prior');
+    expect(submitted.eligible()).toBe(true);
+    appliedWorkbenchRevisions = new Map();
+    rendered.rerender(<ChatMessageToolArrangeWorkbench part={output} />);
+    expect(submitted.eligible()).toBe(false);
+    appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, digest]]);
+    rendered.rerender(<ChatMessageToolArrangeWorkbench part={output} />);
+    expect(restore).toHaveAttribute('aria-busy', 'true');
+    await userEvent.click(header);
+    await act(async () => {
+      gate.resolve(true);
+    });
+    expect(screen.getByText('Restore written. Adoption is tracked separately.')).toBeVisible();
+    await userEvent.click(header);
+    expect(screen.getByRole('button', { name: 'Restore previous layout' })).toBeDisabled();
+  });
+
+  it('should render safe empty and unchanged summaries without inferring adoption', () => {
+    controller.snapshot.mockReturnValue(undefined);
+    controller.subscribe.mockReturnValue(() => undefined);
+    const part = {
+      ...output,
+      output: {
+        ...output.output,
+        visible: [],
+        revisions: [{ path: workbenchPaths.layout, digest, previousDigest: digest }],
+      },
+    };
+    const rendered = render(<ChatMessageToolArrangeWorkbench part={part} />);
+    expect(screen.getByRole('button')).toHaveTextContent('Unchanged workbench');
+    expect(screen.getByRole('status')).toHaveTextContent('Written');
+    rendered.rerender(
+      <ChatMessageToolArrangeWorkbench
+        part={{ ...part, output: { ...part.output, revisions: output.output.revisions } }}
+      />,
+    );
+    expect(screen.getByRole('button')).toHaveTextContent('Arranged workbench');
+  });
+
+  it.each(['approval-requested', 'approval-responded', 'output-denied'] as const)(
+    'should present %s without duplicate approval controls',
+    (state) => {
+      controller.snapshot.mockReturnValue(undefined);
+      controller.subscribe.mockReturnValue(() => undefined);
+      render(
+        <ChatMessageToolArrangeWorkbench
+          part={
+            state === 'approval-requested'
+              ? { toolCallId: 'approval', input: output.input, state, approval: { id: 'a' } }
+              : { toolCallId: 'approval', input: output.input, state, approval: { id: 'a', approved: false } }
+          }
+        />,
+      );
+      expect(screen.queryByRole('button', { name: /Approve/u })).not.toBeInTheDocument();
+      expect(screen.getByRole('button')).toHaveTextContent(
+        state === 'output-denied' ? 'Denied' : state === 'approval-requested' ? 'Awaiting approval' : 'Awaiting result',
+      );
+    },
+  );
 
   it('waits for both a view and an entry owner even when the layout digest is unchanged', () => {
     controller.snapshot.mockReturnValue({ layout, layoutDigest: digest, refused: [] });
@@ -182,39 +282,47 @@ describe('ChatMessageToolArrangeWorkbench', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Shown');
   });
 
-  it.each(['VALIDATION_ERROR', 'FILE_NOT_FOUND', 'RECORD_CONFLICT', 'INVALID_RECORD'] as const)(
-    'preserves the %s refusal and its message',
-    async (code) => {
-      controller.snapshot.mockReturnValue(undefined);
-      controller.subscribe.mockReturnValue(() => undefined);
-      render(
-        <ChatMessageToolArrangeWorkbench
-          part={{
-            toolCallId: output.toolCallId,
-            input: output.input,
-            state: 'output-error',
-            errorText: JSON.stringify({ errorCode: code, message: `${code} exact refusal` }),
-          }}
-        />,
-      );
-      const header = screen.getByRole('button');
-      await userEvent.click(header);
-      expect(screen.getByText(new RegExp(`${code} exact refusal`, 'u'))).toBeVisible();
-    },
-  );
-
-  it.each(['false', 'reject'] as const)('reports a %s Restore outcome and enables retry', async (outcome) => {
+  it.each([
+    'VALIDATION_ERROR',
+    'FILE_NOT_FOUND',
+    'RECORD_CONFLICT',
+    'INVALID_RECORD',
+    'USER_INTERRUPTED',
+    'CLIENT_DISCONNECTED',
+    'TOOL_EXECUTION_TIMEOUT',
+    'TOOL_OUTPUT_VALIDATION_FAILED',
+  ] as const)('preserves the %s refusal and its message', async (code) => {
     controller.snapshot.mockReturnValue(undefined);
     controller.subscribe.mockReturnValue(() => undefined);
+    render(
+      <ChatMessageToolArrangeWorkbench
+        part={{
+          toolCallId: output.toolCallId,
+          input: output.input,
+          state: 'output-error',
+          errorText: JSON.stringify({ errorCode: code, message: `${code} exact refusal`, validationErrors: [] }),
+        }}
+      />,
+    );
+    const header = screen.getByRole('button');
+    await userEvent.click(header);
+    expect(screen.getByText(new RegExp(`${code} exact refusal`, 'u'))).toBeVisible();
+  });
+
+  it.each(['false', 'reject'] as const)('reports a %s Restore outcome and enables retry', async (outcome) => {
+    controller.snapshot.mockReturnValue({ layout, layoutDigest: digest, refused: [], restoreTarget: 'prior' });
+    controller.subscribe.mockReturnValue(() => undefined);
+    appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, digest]]);
     if (outcome === 'false') {
       controller.restorePreviousArrangement.mockResolvedValue(false);
     } else {
       controller.restorePreviousArrangement.mockRejectedValue(new Error('storage offline'));
     }
     render(<ChatMessageToolArrangeWorkbench part={output} />);
-    const restore = screen.getByRole('button', { name: 'Restore' });
+    await userEvent.click(screen.getByRole('button', { name: /Arranged/u }));
+    const restore = screen.getByRole('button', { name: 'Restore previous layout' });
     await userEvent.click(restore);
-    expect(await screen.findByRole('alert')).toHaveTextContent('Previous arrangement could not be restored.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Previous layout could not be restored.');
     expect(restore).toBeEnabled();
   });
 });

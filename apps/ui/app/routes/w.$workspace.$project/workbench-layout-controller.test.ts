@@ -255,6 +255,37 @@ describe('workbench layout checked store', () => {
       vi.useRealTimers();
     }
   });
+  it('should refuse pending person edits and never rebase a restore over foreign bytes', async () => {
+    const memory = memoryFiles();
+    const store = createWorkbenchLayoutStore({
+      root: '/root',
+      files: memory.files,
+      editDebounce: 500,
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    await store.read();
+    const { digest } = store.snapshot();
+    const next = { ...layout(), lanes: { chat: false, workbench: true } };
+    const editing = store.edit(next);
+    expect(await store.restore(layout(), digest, () => true)).toBe(false);
+    await store.flush();
+    await editing;
+    const current = store.snapshot().digest;
+    const release = memory.delayNextWrite();
+    const restoring = store.restore(layout(), current, () => true);
+    await vi.waitFor(() => {
+      expect(memory.writes).toHaveBeenCalledTimes(2);
+    });
+    const foreign = { ...layout(), lanes: { chat: true, workbench: false } };
+    memory.set(foreign);
+    release();
+    expect(await restoring).toBe(false);
+    expect(workbenchRecords.layout.read(memory.get()!)).toMatchObject({ status: 'current', record: foreign });
+    expect(memory.writes).toHaveBeenCalledTimes(2);
+    store.dispose();
+  });
+
   it('does not report superseded or disposed reads and reannounces same bytes after an IO error', async () => {
     const memory = memoryFiles();
     let stale = Promise.withResolvers<void>();

@@ -73,6 +73,7 @@ function mount(
   let firstFileRead = true;
   let controller: WorkbenchLayoutController | undefined;
   let previousLayout = options.previous;
+  const editorListeners = new Set<() => void>();
   let desktopLayout = { chatOpen: true, workbenchOpen: true };
   let { pendingLayoutAck } = options;
   const writes = vi.fn(
@@ -115,6 +116,9 @@ function mount(
   const send = vi.fn((event: { type: string; layout?: PreviousWorkbenchLayout; panelState?: unknown }) => {
     if (event.type === 'setPreviousLayout') {
       previousLayout = event.layout;
+      for (const listener of editorListeners) {
+        listener();
+      }
     }
     if (
       event.type === 'setPanelState' &&
@@ -178,6 +182,11 @@ function mount(
   project = {
     projectId: 'p',
     editorRef: {
+      subscribe: (listener: (state: unknown) => void) => {
+        const notify = () => listener({ context: { previousLayout, panelState: { desktopLayout } } });
+        editorListeners.add(notify);
+        return { unsubscribe: () => editorListeners.delete(notify) };
+      },
       send,
       getSnapshot: () => ({
         context: { previousLayout, panelState: { desktopLayout } },
@@ -239,6 +248,12 @@ function mount(
     get previous() {
       return previousLayout;
     },
+    changePrevious: (next: PreviousWorkbenchLayout | undefined) => {
+      previousLayout = next;
+      for (const listener of editorListeners) {
+        listener();
+      }
+    },
     writes,
     send,
     applied,
@@ -247,6 +262,66 @@ function mount(
 }
 
 describe('live workbench record host', () => {
+  it('should refresh restore availability without changing the layout digest and reject a stale target', async () => {
+    const host = mount();
+    await waitFor(() => expect(host.controller.snapshot()).toBeDefined());
+    const before = host.controller.snapshot()!;
+    expect(before.restoreUnavailable).toBe('No previous layout is saved.');
+    const changed = vi.fn();
+    const unsubscribe = host.controller.subscribe(changed);
+    act(() => host.changePrevious({ layout: second(), views: { 'v-abcd1234': viewSeed() } }));
+    const ready = host.controller.snapshot()!;
+    expect(ready.layoutDigest).toBe(before.layoutDigest);
+    expect(ready.restoreUnavailable).toBeUndefined();
+    expect(changed).toHaveBeenCalled();
+    act(() => host.changePrevious({ layout: first(), views: {} }));
+    expect(host.controller.snapshot()?.restoreUnavailable).toContain('has no saved record');
+    expect(
+      await act(async () =>
+        host.controller.restorePreviousArrangement({
+          layoutDigest: ready.layoutDigest,
+          target: ready.restoreTarget!,
+          eligible: () => true,
+        }),
+      ),
+    ).toBe(false);
+    expect(host.writes).not.toHaveBeenCalled();
+    unsubscribe();
+    host.unmount();
+  });
+
+  it('should admit one restore across callers and retain existing view settings', async () => {
+    const gate = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const host = mount({
+      layout: second(),
+      previous: { layout: first(), views: { 'v-abcd1234': { ...viewSeed(), name: 'Old' } } },
+      pendingLayoutAck: gate.promise,
+      onLayoutWriteStarted: () => started.resolve(),
+    });
+    await waitFor(() => expect(host.controller.snapshot()).toBeDefined());
+    const expected = {
+      layoutDigest: host.controller.snapshot()!.layoutDigest,
+      target: host.controller.snapshot()!.restoreTarget!,
+      eligible: () => true,
+    };
+    let saving: Promise<boolean>;
+    await act(async () => {
+      saving = host.controller.restorePreviousArrangement(expected);
+      await started.promise;
+    });
+    expect(host.controller.snapshot()?.restoring).toBe(true);
+    expect(await host.controller.restorePreviousArrangement(expected)).toBe(false);
+    await act(async () => {
+      gate.resolve();
+      expect(await saving!).toBe(true);
+    });
+    expect(host.writes).toHaveBeenCalledOnce();
+    expect(workbenchRecords.view.read(host.viewBytes!)).toMatchObject({ status: 'current', record: viewSeed() });
+    expect(screen.getByRole('status')).toHaveTextContent('Restore written.');
+    host.unmount();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -692,7 +767,15 @@ describe('live workbench record host', () => {
       type: 'setPreviousLayout',
       layout: { layout: first(), views: { 'v-abcd1234': viewSeed() } },
     });
-    expect(await act(async () => host.controller.restorePreviousArrangement())).toBe(true);
+    expect(
+      await act(async () =>
+        host.controller.restorePreviousArrangement({
+          layoutDigest: host.controller.snapshot()!.layoutDigest,
+          target: host.controller.snapshot()!.restoreTarget!,
+          eligible: () => true,
+        }),
+      ),
+    ).toBe(true);
     expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({
       status: 'current',
       record: first(),
@@ -746,7 +829,15 @@ describe('live workbench record host', () => {
     expect(host.viewBytes).toBeUndefined();
     expect(host.writes).not.toHaveBeenCalled();
     expect(host.previous?.views['v-abcd1234']?.entryPath).toBe('models/other.ts');
-    expect(await act(async () => host.controller.restorePreviousArrangement())).toBe(true);
+    expect(
+      await act(async () =>
+        host.controller.restorePreviousArrangement({
+          layoutDigest: host.controller.snapshot()!.layoutDigest,
+          target: host.controller.snapshot()!.restoreTarget!,
+          eligible: () => true,
+        }),
+      ),
+    ).toBe(true);
     expect(workbenchRecords.view.read(host.viewBytes!)).toMatchObject({
       status: 'current',
       record: { entryPath: 'models/other.ts' },
@@ -768,7 +859,15 @@ describe('live workbench record host', () => {
     await waitFor(() => {
       expect(host.controller.snapshot()?.layout).toEqual(closed);
     });
-    expect(await act(async () => host.controller.restorePreviousArrangement())).toBe(true);
+    expect(
+      await act(async () =>
+        host.controller.restorePreviousArrangement({
+          layoutDigest: host.controller.snapshot()!.layoutDigest,
+          target: host.controller.snapshot()!.restoreTarget!,
+          eligible: () => true,
+        }),
+      ),
+    ).toBe(true);
     expect(workbenchRecords.view.read(host.viewBytes!)).toMatchObject({
       status: 'current',
       record: { entryPath: 'models/other.ts' },

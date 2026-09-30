@@ -1,7 +1,7 @@
 /* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 /* oxlint-disable eslint/no-await-in-loop -- Checked conflicts retry sequentially. */
 /* oxlint-disable promise/prefer-await-to-then -- Per-file pending writes must serialize callbacks. */
-/* oxlint-disable eslint/max-params -- The checked writer carries next value, patch, Reset mode, and reviewed bytes. */
+/* oxlint-disable eslint/max-params -- The checked writer carries edits, Reset bytes, and an optional restore guard. */
 /* oxlint-disable typescript/prefer-optional-chain -- Explicit null checks preserve absent-byte semantics. */
 import type { ViewerNode, WorkbenchLaneNode, WorkbenchLayout, WorkbenchTab } from '@taucad/workbench';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
@@ -13,13 +13,19 @@ export type WorkbenchLayoutSnapshot = Readonly<{
   layout: WorkbenchLayout;
   refused: ReadonlyArray<Readonly<{ tab: WorkbenchTab; reason: 'debug-only' }>>;
   layoutDigest: `sha256:${string}` | 'missing';
+  /** Fingerprint of the existing device rollback slot, not call-specific history. */
+  restoreTarget?: string;
+  restoreUnavailable?: string;
+  restoring?: boolean;
 }>;
 
 /** Project-scoped page commands. Restore writes the saved projection as an authoritative record edit. */
 export type WorkbenchLayoutController = Readonly<{
   snapshot: () => WorkbenchLayoutSnapshot | undefined;
   subscribe: (listener: () => void) => () => void;
-  restorePreviousArrangement: () => Promise<boolean>;
+  restorePreviousArrangement: (
+    expected: Readonly<{ layoutDigest: string; target: string; eligible: () => boolean }>,
+  ) => Promise<boolean>;
   registerViewer: (apply: (node: ViewerNode, applied: () => void) => void) => () => void;
   registerWorkbench: (apply: (node: WorkbenchLaneNode, applied: () => void) => void) => () => void;
   personViewerChanged: (node: ViewerNode) => void;
@@ -61,6 +67,7 @@ export function createWorkbenchLayoutStore(
 ): Readonly<{
   read: (notify?: boolean) => Promise<boolean>;
   edit: (next: WorkbenchLayout) => Promise<boolean>;
+  restore: (next: WorkbenchLayout, expectedDigest: string, eligible: () => boolean) => Promise<boolean>;
   reset: (next: WorkbenchLayout) => Promise<boolean>;
   flush: () => Promise<boolean>;
   dispose: () => void;
@@ -183,6 +190,7 @@ export function createWorkbenchLayoutStore(
     patch: LayoutPatch | undefined,
     reset: boolean,
     resetBytes?: Uint8Array<ArrayBuffer> | null,
+    eligible?: () => boolean,
   ): Promise<'saved' | 'retry' | 'blocked'> => {
     if (isDisposed()) {
       return 'blocked';
@@ -205,8 +213,8 @@ export function createWorkbenchLayoutStore(
     ) {
       return 'saved';
     }
-    for (let attempt = 0; attempt < (reset ? 1 : 3); attempt++) {
-      if (isDisposed()) {
+    for (let attempt = 0; attempt < (reset || eligible ? 1 : 3); attempt++) {
+      if (isDisposed() || (eligible && !eligible())) {
         return 'blocked';
       }
       if (state.refusal && (!reset || state.refusal.code === 'NEWER_RECORD')) {
@@ -272,7 +280,7 @@ export function createWorkbenchLayoutStore(
         if (!(await read())) {
           return 'retry';
         }
-        if (reset) {
+        if (reset || eligible) {
           return 'blocked';
         }
       } catch (error) {
@@ -377,6 +385,34 @@ export function createWorkbenchLayoutStore(
           void drainEdit();
         }, input.editDebounce);
       });
+    },
+    restore: async (next, expectedDigest, eligible) => {
+      const sequence = editSequence;
+      const canRestore = (): boolean =>
+        !disposed &&
+        !readError &&
+        !state.refusal &&
+        state.digest === expectedDigest &&
+        editSequence === sequence &&
+        editSequence === settledSequence &&
+        !queuedEdit &&
+        !deferred &&
+        eligible();
+      if (!canRestore()) {
+        return false;
+      }
+      const result = pending.then(async () => {
+        if (!(await read()) || !canRestore()) {
+          return false;
+        }
+        const status = await write(next, diff(next, state.layout), false, undefined, canRestore);
+        if (status === 'saved' && editSequence === sequence) {
+          intended = state.layout;
+        }
+        return status === 'saved';
+      });
+      pending = result;
+      return result;
     },
     reset: async (next) => {
       if (isDisposed() || state.refusal?.code !== 'INVALID_RECORD') {

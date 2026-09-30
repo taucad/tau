@@ -86,19 +86,25 @@ file and line KCL reports. A guide with KCL sketches passes `languages: tauCusto
 
 ```bash
 TAU_CANVAS_PATH=docs/research/artifacts/<subject>/api \
-  pnpm exec vite --config scripts/src/canvas-vite.config.ts --host 127.0.0.1 --port <free port>
+  pnpm exec portless run --name <subject>-api pnpm run canvas:dev
 
 TAU_CANVAS_PATH=docs/research/artifacts/<subject>/api \
   pnpm exec vite build --config scripts/src/canvas-vite.config.ts
 ```
 
-Occupied ports fail rather than open the wrong page. In Claude Desktop add a `.claude/launch.json`
-entry and use the preview tools instead of a shell server. Build products go to `out/research`,
-never Brain.
+Use the named localhost URL printed by Portless. It allocates the backend port and supplies Vite's
+host, port and allowed-host settings; `run` adds a worktree prefix when appropriate. Use a distinct
+stable name per guide, retain it across restarts, and verify the printed URL before delivering it.
+Do not hand-pick a port, disable host checks or take over another route with `--force`. A named
+address still needs a running server. If no proxy is running and sudo cannot prompt, start
+`pnpm exec portless proxy start --port 1355 --https`; the named URL then includes `:1355`.
+Reuse a running proxy's settings. In Claude Desktop add a `.claude/launch.json` entry for the
+same launch command and use the preview tools instead of a shell server. Build products go to
+`out/research`, never Brain.
 
 ## Index
 
-`index.md` records: the owning document and work package, the launch command and port, each
+`index.md` records: the owning document and work package, the launch command and named URL, each
 revision with its date and what changed, the checker command with its result and TypeScript version,
 the browser checks performed, the transcript or source evidence behind the rubric scores, the
 operator's rulings, and what remains unverified. A ruling changes `guide.ts` (`decisions` with

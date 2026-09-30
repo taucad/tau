@@ -50,7 +50,7 @@ calls; do not connect the canvas to a real project/account merely to render it.
 
 ```bash
 TAU_CANVAS_PATH=docs/research/artifacts/<subject>/canvas \
-  pnpm exec vite --config scripts/src/canvas-vite.config.ts --host 127.0.0.1
+  pnpm exec portless run --name <subject>-canvas pnpm run canvas:dev
 
 TAU_CANVAS_PATH=docs/research/artifacts/<subject>/canvas \
   pnpm exec vite build --config scripts/src/canvas-vite.config.ts
@@ -63,10 +63,18 @@ pnpm nx test scripts --watch=false --args=src/canvas-vite.config.test.ts
 The shared runner injects compiled Tailwind, current
 `@taucad/ui/styles/tokens.css`, and the shipped local Geist fonts. Do not add
 a copied stylesheet or per-scene Vite config. Build products belong in
-`out/research`; source and compact evidence belong in Brain. Preview the Vite
-URL, not an uncompiled HTML file served by a generic static server.
-Use an explicit free `--port` when running several canvases; occupied ports
-fail rather than silently opening the wrong scene. The regression check exercises
+`out/research`; source and compact evidence belong in Brain. Preview the named
+URL printed by Portless, not an uncompiled HTML file served by a generic static server.
+Use a distinct, stable name for each scene; `portless run` adds a worktree prefix
+when appropriate. Portless allocates the backend port and supplies Vite's host,
+port and allowed-host settings. Do not hand-pick a port, disable host checks or
+take over another route with `--force`. Record the printed URL in the artifact
+index and verify it in the browser before sharing it. Restart the same command
+if the server stops; a named address still needs a running server.
+If no proxy is running and the host cannot prompt for sudo, start the registered
+unprivileged HTTPS proxy with `pnpm exec portless proxy start --port 1355 --https`;
+the printed named URL then includes `:1355`. Reuse a running proxy's settings.
+The regression check exercises
 both production compilation and live-browser component geometry.
 `canvas:typecheck` runs tsgo over the canvas with the runner's module map and
 fails only on diagnostics inside the canvas; Vite's build does not typecheck.

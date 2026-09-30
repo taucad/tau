@@ -79,6 +79,7 @@ export function createWorkbenchViewStore(
 ): Readonly<{
   read: (notify?: boolean) => Promise<boolean>;
   edit: (next: WorkbenchView) => Promise<boolean>;
+  ensure: (seed: WorkbenchView, eligible: () => boolean) => Promise<boolean>;
   reset: (next: WorkbenchView) => Promise<boolean>;
   flush: () => Promise<boolean>;
   dispose: () => void;
@@ -215,6 +216,7 @@ export function createWorkbenchViewStore(
     next: WorkbenchView,
     patch: Patch | undefined,
     resetBytes?: Uint8Array<ArrayBuffer> | null,
+    ensure?: () => boolean,
   ): Promise<'saved' | 'retry' | 'blocked'> => {
     if (closed()) {
       return 'blocked';
@@ -229,31 +231,38 @@ export function createWorkbenchViewStore(
     if (reset && (state.refusal?.code !== 'INVALID_RECORD' || !sameBytes(state.bytes, resetBytes))) {
       return 'blocked';
     }
-    const editPatch = patch ?? diff(next, state.record);
-    if (!reset && Object.keys(editPatch).length === 0) {
+    if (ensure && !ensure()) {
+      return 'blocked';
+    }
+    if (ensure && state.bytes !== null) {
       return 'saved';
     }
-    for (let attempt = 0; attempt < (reset ? 1 : 3); attempt++) {
-      if (closed()) {
+    const editPatch = patch ?? diff(next, state.record);
+    if (!reset && !ensure && Object.keys(editPatch).length === 0) {
+      return 'saved';
+    }
+    for (let attempt = 0; attempt < (reset || ensure ? 1 : 3); attempt++) {
+      if (closed() || (ensure && !ensure())) {
         return 'blocked';
       }
       // The schema supplies required defaults when the file is first created.
-      const merged: WorkbenchView = reset
-        ? next
-        : {
-            ...next,
-            ...state.record,
-            ...editPatch,
-            display: {
-              ...next.display,
-              ...state.record?.display,
-              ...editPatch.display,
-            },
-            grid: { ...next.grid, ...state.record?.grid, ...editPatch.grid },
-            version: 1,
-            entryPath: editPatch.entryPath === undefined ? (state.record?.entryPath ?? null) : editPatch.entryPath,
-            camera: editPatch.camera ?? state.record?.camera ?? next.camera,
-          };
+      const merged: WorkbenchView =
+        reset || ensure
+          ? next
+          : {
+              ...next,
+              ...state.record,
+              ...editPatch,
+              display: {
+                ...next.display,
+                ...state.record?.display,
+                ...editPatch.display,
+              },
+              grid: { ...next.grid, ...state.record?.grid, ...editPatch.grid },
+              version: 1,
+              entryPath: editPatch.entryPath === undefined ? (state.record?.entryPath ?? null) : editPatch.entryPath,
+              camera: editPatch.camera ?? state.record?.camera ?? next.camera,
+            };
       const expected = reset ? (resetBytes ?? null) : state.bytes;
       const generationAtWrite = generation;
       try {
@@ -305,6 +314,9 @@ export function createWorkbenchViewStore(
         }
         if (!(await read())) {
           return 'retry';
+        }
+        if (ensure) {
+          return state.bytes !== null && !state.refusal ? 'saved' : 'blocked';
         }
         if (reset || state.refusal) {
           return 'blocked';
@@ -408,6 +420,13 @@ export function createWorkbenchViewStore(
           void drainEdit();
         }, input.editDebounce);
       });
+    },
+    ensure: async (seed, eligible) => {
+      const result = pending
+        .then(async () => write(seed, undefined, undefined, eligible))
+        .then((status) => status === 'saved');
+      pending = result;
+      return result;
     },
     reset: async (next) => {
       if (closed() || state.refusal?.code !== 'INVALID_RECORD') {

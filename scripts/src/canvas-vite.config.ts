@@ -280,6 +280,7 @@ export const createCanvasConfig = (
     ],
     server: {
       host: '127.0.0.1',
+      port: process.env['PORT'] === undefined ? undefined : Number(process.env['PORT']),
       strictPort: true,
       fs: { allow: [repoRoot, root] },
     },

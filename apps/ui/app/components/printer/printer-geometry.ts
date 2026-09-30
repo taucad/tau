@@ -29,6 +29,8 @@ export type PrinterPanel = Readonly<{
 
 /** Scene dimensions for one machine. */
 export type PrinterGeometry = Readonly<{
+  /** Model identity selects only matching pre-rendered hardware assets. */
+  model: string | undefined;
   buildVolume: readonly [number, number, number];
   /** Whether the plate descends with the print or the head rises above a fixed plate. */
   motion: 'plate-descends' | 'head-rises';
@@ -168,6 +170,7 @@ export const derivePrinterGeometry = (manifest: PrinterManifest): PrinterGeometr
         })()
       : undefined;
   return {
+    model: manifest.identity.model,
     buildVolume: build,
     motion,
     plate: { center: [centerX, centerY, -plateThickness / 2], size: [build[0], build[1], plateThickness] },
@@ -180,7 +183,7 @@ export const derivePrinterGeometry = (manifest: PrinterManifest): PrinterGeometr
       size: [outer[0], outer[1], chamberFloor - enclosureFloor],
     },
     enclosure: enclosureBox,
-    panels,
+    panels: manifest.geometry.enclosure.enclosed ? panels : [],
     gantry: {
       kind: kinematics,
       beamZ,

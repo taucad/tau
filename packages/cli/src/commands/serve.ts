@@ -46,8 +46,8 @@ const computeStoreWorkerModulePath = (): string =>
  * @returns The daemon's machines option.
  */
 const machineProviders = async (): Promise<NonNullable<HostDaemonAgentOptions['machines']>> => {
-  const { bambuMachine, bambuSimulatorMachine } = await import('@taucad/bambu');
-  return { providers: [bambuMachine(), bambuSimulatorMachine()] };
+  const { bambuA1MiniMachine, bambuMachine, bambuSimulatorMachine } = await import('@taucad/bambu');
+  return { providers: [bambuMachine(), bambuA1MiniMachine(), bambuSimulatorMachine()] };
 };
 
 const childArguments = (options: { readonly plugin: unknown; readonly config?: string }): string[] => {

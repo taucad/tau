@@ -1,10 +1,26 @@
 import { cadMaterialDefaults } from '@taucad/runtime/types';
-import { transformNormalArray, transformVectorArrayChecked, writeGlb } from '@taucad/geometry-core';
-import type { GeometryOutputTransformOptions, GlbNode } from '@taucad/geometry-core';
+import { transformNormalArray, transformVectorArrayChecked, writeGlb, writeGltfJson } from '@taucad/geometry-core';
+import type {
+  GeometryOutputTransformOptions,
+  GlbInput,
+  GlbMaterial,
+  GlbNode,
+  GlbResources,
+} from '@taucad/geometry-core';
+
+import { projectSurfaceCoordinates } from '#picovoxel.surface-coordinates.js';
 
 import type { PicovoxelLane } from '#picovoxel.schemas.js';
 
 const triangleMode = 4;
+
+const hasMaterialTexture = (value: unknown): boolean =>
+  value !== null &&
+  typeof value === 'object' &&
+  !Array.isArray(value) &&
+  Object.entries(value).some(
+    ([key, child]) => key !== 'extras' && child !== undefined && (key.endsWith('Texture') || hasMaterialTexture(child)),
+  );
 
 /** Structured-cloneable geometry retained after a PicoVoxel session is disposed. @public */
 export type PicovoxelShapeSnapshot = {
@@ -15,10 +31,12 @@ export type PicovoxelShapeSnapshot = {
   readonly triangles: Uint32Array<ArrayBuffer>;
   /** The lane whose session built this shape. */
   readonly lane: PicovoxelLane;
+  /** Deeply owned standard glTF material; absent retains the legacy CAD defaults. */
+  readonly material?: GlbMaterial;
 };
 
 /** Durable native handle for PicoVoxel render, cache, and export phases. @public */
-export type PicovoxelNativeHandle = { readonly shapes: readonly PicovoxelShapeSnapshot[] };
+export type PicovoxelNativeHandle = GlbResources & { readonly shapes: readonly PicovoxelShapeSnapshot[] };
 
 /**
  * Area-weighted smooth vertex normals on the source (Z-up) vertices.
@@ -122,34 +140,76 @@ export const dropZeroAreaTriangles = (
  * @param options - Output coordinate system and length unit.
  * @returns The GLB node.
  */
-const buildNode = (shape: PicovoxelShapeSnapshot, options: GeometryOutputTransformOptions): GlbNode => ({
-  name: shape.name,
-  primitives: [
-    {
-      mode: triangleMode,
-      positions: transformVectorArrayChecked({
-        vectors: shape.vertices,
-        kind: 'position',
-        options,
-        invalidMessage: `PicoVoxel ${shape.name} contains a non-finite vertex.`,
-      }),
-      normals: transformNormalArray(computeVertexNormals(shape.vertices, shape.triangles), options),
-      // The writer copies from this view into the GLB, so no copy is made here.
-      indices: shape.triangles,
-      material: {
-        // Double-sided, like jscad and replicad (D30 check): the section view rejects a cap whose cut
-        // leaves unresolved edges (one-voxel lattice walls are non-manifold), and hides caps while a
-        // drag recomputes them. Back faces then shade the cut instead of leaving a see-through hole.
-        // Back-face culling would pay off only at >=5M triangles, which needs a real-GPU benchmark first.
-        doubleSided: true,
-        pbrMetallicRoughness: {
-          baseColorFactor: [...cadMaterialDefaults.baseColorFactor],
-          metallicFactor: cadMaterialDefaults.metalnessFactor,
-          roughnessFactor: cadMaterialDefaults.roughnessFactor,
+const buildNode = (shape: PicovoxelShapeSnapshot, options: GeometryOutputTransformOptions): GlbNode => {
+  const normals = computeVertexNormals(shape.vertices, shape.triangles);
+  const mapped =
+    shape.material &&
+    (Boolean(shape.material.extensions?.KHR_materials_anisotropy) || hasMaterialTexture(shape.material))
+      ? projectSurfaceCoordinates({ positions: shape.vertices, indices: shape.triangles, normals })
+      : undefined;
+  const tangents = mapped?.tangents;
+  if (tangents && options.coordinateSystem !== 'z-up') {
+    for (let index = 0; index < tangents.length; index += 4) {
+      const y = tangents[index + 1]!;
+      tangents[index + 1] = tangents[index + 2]!;
+      tangents[index + 2] = -y;
+    }
+  }
+  let { material } = shape;
+  const volume = material?.extensions?.KHR_materials_volume;
+  if (material && volume && options.unit?.length === 'millimeter') {
+    material = {
+      ...material,
+      extensions: {
+        ...material.extensions,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Standard glTF extension key.
+        KHR_materials_volume: {
+          ...volume,
+          ...(volume.thicknessFactor === undefined ? {} : { thicknessFactor: volume.thicknessFactor * 1000 }),
+          ...(volume.attenuationDistance === undefined
+            ? {}
+            : { attenuationDistance: volume.attenuationDistance * 1000 }),
         },
       },
-    },
-  ],
+    };
+  }
+  return {
+    name: shape.name,
+    primitives: [
+      {
+        mode: triangleMode,
+        positions: transformVectorArrayChecked({
+          vectors: mapped?.positions ?? shape.vertices,
+          kind: 'position',
+          options,
+          invalidMessage: `PicoVoxel ${shape.name} contains a non-finite vertex.`,
+        }),
+        normals: transformNormalArray(mapped?.normals ?? normals, options),
+        // The writer copies from this view into the GLB, so no copy is made here.
+        indices: mapped?.indices ?? shape.triangles,
+        ...(mapped ? { texCoords: [mapped.texCoords], tangents } : {}),
+        material: material ?? {
+          // Double-sided, like jscad and replicad (D30 check): the section view rejects a cap whose cut
+          // leaves unresolved edges (one-voxel lattice walls are non-manifold), and hides caps while a
+          // drag recomputes them. Back faces then shade the cut instead of leaving a see-through hole.
+          // Back-face culling would pay off only at >=5M triangles, which needs a real-GPU benchmark first.
+          doubleSided: true,
+          pbrMetallicRoughness: {
+            baseColorFactor: [...cadMaterialDefaults.baseColorFactor],
+            metallicFactor: cadMaterialDefaults.metalnessFactor,
+            roughnessFactor: cadMaterialDefaults.roughnessFactor,
+          },
+        },
+      },
+    ],
+  };
+};
+
+const buildScene = (handle: PicovoxelNativeHandle, options: GeometryOutputTransformOptions): GlbInput => ({
+  nodes: handle.shapes.map((shape) => buildNode(shape, options)),
+  ...(handle.images ? { images: handle.images } : {}),
+  ...(handle.textures ? { textures: handle.textures } : {}),
+  ...(handle.samplers ? { samplers: handle.samplers } : {}),
 });
 
 /**
@@ -165,4 +225,16 @@ const buildNode = (shape: PicovoxelShapeSnapshot, options: GeometryOutputTransfo
 export const picovoxelToGlb = (
   handle: PicovoxelNativeHandle,
   options: GeometryOutputTransformOptions = {},
-): Uint8Array<ArrayBuffer> => writeGlb({ nodes: handle.shapes.map((shape) => buildNode(shape, options)) });
+): Uint8Array<ArrayBuffer> => writeGlb(buildScene(handle, options));
+
+/**
+ * Write one self-contained glTF JSON scene with embedded geometry and image bytes.
+ * @internal
+ * @param handle - Durable shapes and shared material resources.
+ * @param options - Output coordinate system and length unit.
+ * @returns UTF-8 glTF JSON bytes.
+ */
+export const picovoxelToGltf = (
+  handle: PicovoxelNativeHandle,
+  options: GeometryOutputTransformOptions = {},
+): Uint8Array<ArrayBuffer> => writeGltfJson(buildScene(handle, options));

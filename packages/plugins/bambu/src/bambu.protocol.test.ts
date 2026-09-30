@@ -78,6 +78,26 @@ describe('Bambu protocol admission', () => {
     ).toThrow('BAMBU_DISCOVERY_INVALID');
   });
 
+  it('should discover an A1 mini without admitting another model or a mismatched serial', () => {
+    const discover = (model: string, serial: string) =>
+      parseBambuDiscoveryDatagram({
+        datagram: {
+          bytes: bytes(
+            `NOTIFY * HTTP/1.1\r\nDevName.bambu.com: Mini\r\nDevModel.bambu.com: ${model}\r\nUSN: ${serial}\r\n`,
+          ),
+          peer: { address: '192.0.2.145', interface: 'test0', port: 2021 },
+        },
+        observedAt: '2026-09-30T00:00:00.000Z',
+        expiresAt: '2026-09-30T00:00:30.000Z',
+      });
+    expect(discover('N1', '0300EA652800550')).toMatchObject({
+      name: 'Mini',
+      claimedIdentity: { model: 'A1 mini', serial: '0300EA652800550' },
+    });
+    expect(() => discover('N1', '00M00A391800004')).toThrow('BAMBU_DISCOVERY_INVALID');
+    expect(() => discover('C12', '01P00A391800001')).toThrow('BAMBU_DISCOVERY_INVALID');
+  });
+
   it('should preserve native physical units and map unknown states without retaining raw payload', () => {
     const status = parseBambuStatusPayload(
       bytes(
@@ -279,6 +299,7 @@ describe('Bambu protocol admission', () => {
     expect(version).toEqual({
       serial: '00M00A391800004',
       firmware: '01.08.02.00',
+      model: 'X1C',
     });
     expect(() =>
       parseBambuVersionPayload(

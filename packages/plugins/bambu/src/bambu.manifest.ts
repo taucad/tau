@@ -234,3 +234,68 @@ export const bambuX1cManifest: MachineManifest = parseMachineManifest({
     ],
   },
 });
+
+/** Bambu Lab A1 mini's model-specific hardware facts. @public */
+export const bambuA1MiniManifest: MachineManifest = parseMachineManifest({
+  ...bambuX1cManifest,
+  identity: {
+    vendor: 'Bambu Lab',
+    model: 'a1-mini',
+    displayName: 'A1 mini',
+    family: 'A1',
+    qualifiedFirmware: ['01.03.30.01'],
+  },
+  geometry: {
+    unit: 'mm',
+    buildVolume: { x: 180, y: 180, z: 180 },
+    enclosure: { outer: { x: 347, y: 315, z: 365 }, enclosed: false, doors: [] },
+    kinematics: 'cartesian-bedslinger',
+    bedMotion: 'y',
+    origin: 'front-left',
+    toolheadHome: { x: 1, y: 1, z: 180 },
+    materialSystemMount: 'external',
+  },
+  toolhead: {
+    filamentDiameter: millimetres(1.75),
+    nozzles: [
+      { id: 'nozzle-0.4', diameter: millimetres(0.4), maximumTemperature: celsius(300), material: 'stainless' },
+    ],
+  },
+  bed: {
+    maximumTemperature: celsius(80),
+    plates: [
+      { id: 'high-temperature', label: 'Smooth PEI plate' },
+      { id: 'textured-pei', label: 'Textured PEI plate' },
+    ],
+  },
+  chamber: { enclosed: false, heated: false, light: false, fans: [{ id: 'part', label: 'Part cooling fan' }] },
+  materialSystem: { units: 1, slotsPerUnit: 4, externalSpool: true, externalSpoolSlot: 254, drying: false },
+  actions: bambuX1cManifest.actions
+    .filter(({ id }) => id !== 'light.set')
+    .map((action) => ({
+      ...action,
+      qualification: action.effect === 'print' ? 'designed' : action.qualification,
+      ...(action.id === 'fan.set'
+        ? {
+            parameters: {
+              type: 'object',
+              properties: {
+                fan: { type: 'string', enum: ['part'] },
+                percent: { type: 'integer', minimum: 0, maximum: 100 },
+              },
+              required: ['fan', 'percent'],
+            },
+          }
+        : {}),
+      ...(action.id === 'motion.home' ? { preconditions: ['No active run'] } : {}),
+    })),
+  observations: bambuX1cManifest.observations.filter(({ group }) => group !== 'light'),
+  slicing: {
+    ...bambuX1cManifest.slicing,
+    recommended: {
+      ...bambuX1cManifest.slicing.recommended,
+      nozzleTemperature: celsius(215),
+      bedTemperature: celsius(60),
+    },
+  },
+});

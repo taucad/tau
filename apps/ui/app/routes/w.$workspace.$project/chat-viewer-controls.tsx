@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { FlipHorizontal, Ruler } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Separator } from '@taucad/ui/components/separator';
+import { cn } from '@taucad/ui/utils/cn';
 import { CaptureViewControl } from '#components/geometry/cad/capture-view-control.js';
 import { FitViewControl } from '#components/geometry/cad/fit-view-control.js';
 import { FullscreenViewControl } from '#components/geometry/cad/fullscreen-view-control.js';
@@ -23,8 +24,14 @@ import { useViewerShortcuts } from '#hooks/use-viewer-shortcuts.js';
 type Tool = 'section' | 'measure';
 
 /** Never the first thing on its line: the grid readout before it renders nothing until the grid has a size. */
-const Hairline = (): React.JSX.Element => (
-  <Separator orientation='vertical' className='mx-1 first:hidden data-[orientation=vertical]:h-4' />
+const Hairline = ({ className = 'mx-0' }: { readonly className?: string }): React.JSX.Element => (
+  <Separator
+    orientation='vertical'
+    className={cn(
+      'first:hidden data-[orientation=vertical]:h-4 [:hover+&]:opacity-0 has-[+*:hover]:opacity-0',
+      className,
+    )}
+  />
 );
 
 /** When a row unmounts holding focus, the keyboard returns to the toggle that started its tool. */
@@ -62,7 +69,7 @@ function ToolRow({ tool, name, icon, above, children, onDone }: ToolRowProps): R
           {/* Below 520 px the name gives way to its glyph, as the toggles' labels do, so the row fits. */}
           <span className='hidden @min-[520px]/viewer:inline'>{name}</span>
         </span>
-        <Hairline />
+        <Hairline className='mx-1' />
         {children}
         <Button variant='secondary' size='xs' className='h-7' aria-label={`Done with ${tool}`} onClick={onDone}>
           Done

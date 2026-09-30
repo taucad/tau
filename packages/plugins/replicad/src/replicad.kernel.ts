@@ -76,7 +76,7 @@ import { resolveEntryInterfaces, rotateNativeEntryToYup } from '#interface-resol
 import type { NativeHandleEntry } from '#interface-resolution.js';
 import type { GlbResources } from '@taucad/geometry-core';
 
-import { convertReplicadGeometriesToGltf, toMechanismKernelIssue } from '#utils/replicad-to-gltf.js';
+import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
 import { createReplicadComputeReuse, replicadComputeNamespace } from '#replicad-compute-reuse.js';
 import type { ReplicadComputeReuseAdapter } from '#replicad-compute-reuse.js';
 
@@ -90,8 +90,8 @@ import {
   createEmptyGltfGeometry,
   resolveShapeName,
   validateGlbResources,
+  readMechanismExport,
 } from '@taucad/geometry-core';
-import type { Issue } from '@taucad/kinematics';
 
 /**
  * Live Replicad native handle: the shapes `main` returned, the model's GLB resources and the entry module's
@@ -387,73 +387,6 @@ function extractDefaultName(module: unknown): string | undefined {
   }
 
   return typeof module['defaultName'] === 'string' ? module['defaultName'] : undefined;
-}
-
-const isMechanismFunction = (value: unknown): value is (parameters: Record<string, unknown>) => unknown =>
-  typeof value === 'function';
-
-// The kinematics-style issue for a `mechanism` export the kernel could not read.
-const mechanismExportIssue = (message: string, recovery: string): Issue => ({
-  code: 'INVALID_VALUE',
-  path: '',
-  message,
-  recovery,
-});
-
-/**
- * Read the entry module's optional `mechanism` export: a value, or a function (sync or async) of the
- * same parameters object `main` received. The value is normalised to plain JSON here, once, so the
- * fresh build and a build-cache snapshot, whose msgpack codec turns `undefined` into `null`, carry the
- * same mechanism. A throw, or a value JSON cannot hold, is a warning: the model builds without one.
- *
- * @internal
- * @param module - Executed entry module.
- * @param parameters - Parameters passed to `main`.
- * @param formatError - Source-maps a thrown error the way `main` errors are.
- * @returns The normalised value, admitted later against the rendered component ids, and its warnings.
- */
-export async function readMechanismExport(
-  module: unknown,
-  parameters: Record<string, unknown>,
-  formatError: (error: unknown) => KernelIssue,
-): Promise<{ mechanism: unknown; issues: KernelIssue[] }> {
-  const exported = isRecordObject(module) ? module['mechanism'] : undefined;
-  let value: unknown;
-  try {
-    value = await (isMechanismFunction(exported) ? exported(parameters) : exported);
-  } catch (error) {
-    const thrown = formatError(error);
-    const { message, details } = toMechanismKernelIssue(
-      mechanismExportIssue(
-        `mechanism() threw "${thrown.message}".`,
-        'Fix the error in mechanism(); the model renders without a mechanism until then.',
-      ),
-    );
-    return { mechanism: undefined, issues: [{ ...thrown, severity: 'warning', message, details }] };
-  }
-
-  if (value === undefined) {
-    return { mechanism: undefined, issues: [] };
-  }
-
-  try {
-    // ponytail: `MechanismSource` is plain JSON by contract, so a JSON round trip is the whole normalisation.
-    // oxlint-disable-next-line unicorn/prefer-structured-clone -- structuredClone keeps `undefined`, which msgpack restores as null.
-    const mechanism: unknown = JSON.parse(JSON.stringify(value));
-    return { mechanism, issues: [] };
-  } catch {
-    return {
-      mechanism: undefined,
-      issues: [
-        toMechanismKernelIssue(
-          mechanismExportIssue(
-            'The mechanism cannot be written as JSON: it holds a BigInt or a reference cycle, or is a function or symbol.',
-            'Return plain data: objects, arrays, strings, numbers and booleans.',
-          ),
-        ),
-      ],
-    };
-  }
 }
 
 function getReplicadFirstArgument(): unknown {
@@ -813,9 +746,13 @@ export const replicadKernel = defineKernel({
           validateGlbResources(model);
         }
         const defaultName = extractDefaultName(executeResult.value);
-        const { mechanism, issues } = await readMechanismExport(executeResult.value, parameters, (error) =>
-          formatOcRuntimeError(error, context.openCascade, buildErrorContext(context, { bundleSourceMap, entryUrl })),
-        );
+        const { mechanism, issues } = await readMechanismExport({
+          module: executeResult.value,
+          parameters,
+          kernelId: 'replicad',
+          formatError: (error) =>
+            formatOcRuntimeError(error, context.openCascade, buildErrorContext(context, { bundleSourceMap, entryUrl })),
+        });
 
         // Build phase ends here: normalize main() output and resolve GeoSpec
         // interfaces (pure BRep queries) onto the nativeHandle. The handle carries

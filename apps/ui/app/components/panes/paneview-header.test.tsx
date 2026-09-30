@@ -443,6 +443,10 @@ describe('paneviewStyleOverrides', () => {
   it('should attach open headers to inset bordered panel bodies', () => {
     expect(paneviewAttachedSurfaceStyleOverrides).toContain(paneviewStyleOverrides);
     expect(paneviewAttachedSurfaceStyleOverrides).toContain('[&_.dv-pane-body]:px-2!');
+    expect(paneviewAttachedSurfaceStyleOverrides.split(' ')).toContain('pb-(--pane-unit-gap)');
+    expect(paneviewAttachedSurfaceStyleOverrides).not.toContain('[&_.dv-pane-body]:pb-2!');
+    expect(paneviewAttachedSurfaceStyleOverrides).toContain('[&_[data-slot=paneview-header]]:mt-(--pane-unit-gap)!');
+    expect(paneviewAttachedSurfaceStyleOverrides).toContain(':h-[calc(40px-var(--pane-unit-gap))]!');
     expect(paneviewAttachedSurfaceStyleOverrides).toContain('[data-state=open]]:rounded-b-none!');
     expect(paneviewAttachedSurfaceStyleOverrides).toContain('[data-state=open]]:border-b-0!');
   });

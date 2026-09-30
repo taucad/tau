@@ -776,10 +776,13 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     put(coordinatorFile, coordinatorBytes);
     const originalDelivery = /** @type {{archives: {path: string, sha256: string}[]}} */ (inventory.delivery);
     const oldArchives = originalDelivery.archives.map((archive) => fileRecordForTest(join(producer, archive.path)));
+    const originalCacheKey = deliveryCacheKey(producer);
     revision = 'b'.repeat(40);
     for (const path of sourceOnlyPaths) {
       put(join(producer, path), `current source-kit input ${path}`);
     }
+    const sourceKitCacheKey = deliveryCacheKey(producer);
+    assert.notEqual(sourceKitCacheKey, originalCacheKey, 'a source-kit-only edit must invalidate the Nx cache key');
     const legacy = { ...inventory, schema: 'geospec-ci-artifacts-v2' };
     delete legacy.producerSource;
     put(inventoryFile, JSON.stringify(legacy));
@@ -791,6 +794,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     process.env['GITHUB_RUN_ATTEMPT'] = '2';
     const renewed = withProducerMarker(producer, () => ensureDelivery(producer), { pgid: process.pid });
     assert.equal(renewed.schema, 'geospec-ci-artifacts-v3');
+    assert.equal(deliveryCacheKey(producer), sourceKitCacheKey, 'assembly must not change the current Nx cache key');
     assert.equal(renewed.source.revision, revision, 'source kit records the current checkout revision');
     assert.equal(
       renewed.producerSource.revision,

@@ -14,6 +14,25 @@ import * as url from 'node:url';
 import vm from 'node:vm';
 import * as ts from 'typescript';
 import { load } from 'js-yaml';
+import { publishableClosure, workspace } from '@taucad/nx';
+
+void test('should declare the complete normal consumer build closure except the assembled native package', async () => {
+  const project = JSON.parse(readFileSync(new URL('../project.json', import.meta.url), 'utf8')) as {
+    targets: { 'prepare-geospec-test-consumer': { dependsOn: Array<{ target: string; projects: string[] }> } };
+  };
+  const roots = new Set(
+    project.targets['prepare-geospec-test-consumer'].dependsOn
+      .filter(({ target }) => target === 'build')
+      .flatMap(({ projects }) => projects),
+  );
+  const closure = publishableClosure(await workspace({ fresh: true }), ['geospec', 'geospec-engine']);
+  assert.deepEqual(
+    closure.filter((name) => name !== 'geospec-engine-native' && !roots.has(name)),
+    [],
+    'Normal consumer target omits publishable build prerequisites',
+  );
+  assert.ok(!roots.has('geospec-engine-native'), 'Native production must remain separately assembled');
+});
 
 type Manifest = {
   name: string;

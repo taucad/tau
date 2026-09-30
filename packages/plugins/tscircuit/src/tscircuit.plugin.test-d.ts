@@ -1,4 +1,4 @@
-import { describe, expectTypeOf, it } from 'vitest';
+import { expectTypeOf } from 'vitest';
 import { esbuildBundler } from '@taucad/esbuild';
 import { createRuntimeClient, defineRuntime, fromMemoryFs } from '@taucad/runtime';
 import type { ExportResult } from '@taucad/runtime';
@@ -31,25 +31,23 @@ expectTypeOf<(typeof selected.capabilities.kernels)[0]['exports']['board']['exte
 const runtime = defineRuntime({ plugins: [tscircuit()], bundlers: [esbuildBundler()] });
 const client = createRuntimeClient({ transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }) });
 
-describe('real tscircuit document requests', () => {
-  it('keeps view and export options narrow through the toolkit, runtime, transport and client', () => {
-    const document = client.open({ source: { path: 'main.tsx' } });
-    document.view('board');
-    document.view('schematic', { instance: 'sheet:Power' });
-    document.view('pcb', { options: { pinNumbers: true } });
-    expectTypeOf(document.view('pcb', { options: { pinNumbers: true } }).view).toEqualTypeOf<'pcb' | undefined>();
-    document.export('board');
-    document.export('bom');
-    document.export('netlist');
-    document.export('circuit');
-    expectTypeOf(document.export('bom')).toEqualTypeOf<Promise<ExportResult<'bom'>>>();
-    // @ts-expect-error -- board does not declare PCB presentation options.
-    document.view('board', { options: { pinNumbers: true } });
-    // @ts-expect-error -- instances belong only to the schematic view.
-    document.view('pcb', { instance: 'sheet:Power' });
-    // @ts-expect-error -- the PCB option is boolean.
-    document.view('pcb', { options: { pinNumbers: 'yes' } });
-    // @ts-expect-error -- the toolkit does not declare a STEP export.
-    document.export('step');
-  });
-});
+const checkDocumentRequestTypes = (): void => {
+  const document = client.open({ source: { path: 'main.tsx' } });
+  document.view('board');
+  document.view('schematic', { instance: 'sheet:Power' });
+  document.view('pcb', { options: { pinNumbers: true } });
+  expectTypeOf(document.view('pcb', { options: { pinNumbers: true } }).view).toEqualTypeOf<'pcb' | undefined>();
+  expectTypeOf(document.export('board')).toEqualTypeOf<Promise<ExportResult<'board'>>>();
+  expectTypeOf(document.export('bom')).toEqualTypeOf<Promise<ExportResult<'bom'>>>();
+  expectTypeOf(document.export('netlist')).toEqualTypeOf<Promise<ExportResult<'netlist'>>>();
+  expectTypeOf(document.export('circuit')).toEqualTypeOf<Promise<ExportResult<'circuit'>>>();
+  // @ts-expect-error -- board does not declare PCB presentation options.
+  document.view('board', { options: { pinNumbers: true } });
+  // @ts-expect-error -- instances belong only to the schematic view.
+  document.view('pcb', { instance: 'sheet:Power' });
+  // @ts-expect-error -- the PCB option is boolean.
+  document.view('pcb', { options: { pinNumbers: 'yes' } });
+  // @ts-expect-error -- the toolkit does not declare a STEP export.
+  expectTypeOf(document.export('step'));
+};
+expectTypeOf(checkDocumentRequestTypes).toBeFunction();

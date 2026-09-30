@@ -117,7 +117,8 @@
             "runtime",
             "bundler-core",
             "esbuild",
-            "geospec"
+            "geospec",
+            "geospec-engine"
           ]
         }
       ],

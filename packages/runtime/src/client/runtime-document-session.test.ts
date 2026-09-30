@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createChannelClient, createChannelServer, wrapMessagePort } from '@taucad/rpc';
+import { SharedPool } from '@taucad/memory';
 import type { ChannelContext } from '@taucad/rpc';
 import { materialiseBinaryContent } from '#transport/_internal/export-materialiser.js';
 import { RuntimeDocumentSessionClient } from '#client/runtime-document-session.js';
@@ -208,6 +209,106 @@ describe('document channel session', () => {
       expect(onTimeout).not.toHaveBeenCalled();
     } finally {
       firstBinary.resolve(new TextEncoder().encode('a'));
+      document.close();
+      sessions.close();
+      channel.close();
+      server.dispose();
+    }
+  });
+
+  it('acknowledges a pooled view frame after its materialisation deadline', async () => {
+    const ports = new MessageChannel();
+    const opened = Promise.withResolvers<{ subscriptionId: string; requestId: string }>();
+    const resolving = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const pool = new SharedPool(new SharedArrayBuffer(4096), { maxEntries: 1 });
+    expect(pool.publish('timed-frame', new Uint8Array([7]))).toBe(true);
+    const server = createChannelServer<RuntimeDocumentProtocol>({
+      port: wrapMessagePort(ports.port1, { label: 'view-materialisation-server' }),
+      sessionKey: 'view-materialisation-test',
+      hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion },
+      protocolSchemas: runtimeDocumentProtocolSchemas,
+      impl: {
+        async call() {
+          throw new Error('No calls.');
+        },
+        notify(_context, name, args) {
+          if (
+            name === 'openView' &&
+            args &&
+            typeof args === 'object' &&
+            'subscriptionId' in args &&
+            'requestId' in args
+          ) {
+            opened.resolve({ subscriptionId: String(args.subscriptionId), requestId: String(args.requestId) });
+          }
+        },
+        listen() {
+          throw new Error('No streams.');
+        },
+      },
+    });
+    const channel = createChannelClient<RuntimeDocumentProtocol>({
+      port: wrapMessagePort(ports.port2, { label: 'view-materialisation-client' }),
+      sessionKey: 'view-materialisation-test',
+      protocolSchemas: runtimeDocumentProtocolSchemas,
+    });
+    await channel.ready;
+    const sessions = new RuntimeDocumentSessionClient(
+      channel,
+      async (content) => {
+        resolving.resolve();
+        await release.promise;
+        return materialiseBinaryContent(content, pool, (key) => {
+          pool.acknowledge(key);
+        });
+      },
+      { operationTimeout: () => 20 },
+    );
+    const document = sessions.open({
+      documentId: 'doc',
+      file: { path: '/', filename: 'main.ts' },
+      parameters: {},
+      watch: false,
+    });
+    try {
+      server.notify('evaluating', { documentId: 'doc', intent: 0, evaluationId: 'e1', transient: false });
+      server.notify('evaluated', {
+        documentId: 'doc',
+        intent: 0,
+        id: 'e1',
+        success: true,
+        transient: false,
+        views: [],
+        exports: [],
+        issues: [],
+      });
+      await document.evaluation();
+      const view = document.view('board');
+      const { subscriptionId, requestId } = await opened.promise;
+      const rendered = view.rendering();
+      server.notify('rendering', { subscriptionId, requestId, evaluationId: 'e1', intent: 0 });
+      server.notify('rendered', {
+        subscriptionId,
+        requestId,
+        intent: 0,
+        evaluationId: 'e1',
+        transient: false,
+        success: true,
+        view: 'board',
+        hash: 'late',
+        issues: [],
+        artifact: { mimeType: 'application/octet-stream', content: { delivery: 'pooled', key: 'timed-frame' } },
+      });
+      await resolving.promise;
+      await expect(rendered).rejects.toMatchObject({ name: 'OperationTimeoutError' });
+      release.resolve();
+      await vi.waitFor(() => {
+        expect(pool.has('timed-frame')).toBe(false);
+      });
+      await expect(view.rendering()).rejects.toMatchObject({ name: 'OperationTimeoutError' });
+    } finally {
+      release.resolve();
       document.close();
       sessions.close();
       channel.close();
@@ -509,10 +610,19 @@ describe('document channel session', () => {
       protocolSchemas: runtimeDocumentProtocolSchemas,
     });
     await channel.ready;
-    const staleBinary = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
-    const sessions = new RuntimeDocumentSessionClient(channel, async (content) =>
-      content.delivery === 'pooled' ? staleBinary.promise : materialiseBinaryContent(content, undefined),
-    );
+    const staleBinary = Promise.withResolvers<void>();
+    const timedOutBinary = Promise.withResolvers<void>();
+    const pool = new SharedPool(new SharedArrayBuffer(4096), { maxEntries: 2 });
+    expect(pool.publish('old-pool', new Uint8Array([1]))).toBe(true);
+    expect(pool.publish('timeout-pool', new Uint8Array([2]))).toBe(true);
+    const sessions = new RuntimeDocumentSessionClient(channel, async (content) => {
+      if (content.delivery === 'pooled') {
+        await (content.key === 'old-pool' ? staleBinary.promise : timedOutBinary.promise);
+      }
+      return materialiseBinaryContent(content, pool, (key) => {
+        pool.acknowledge(key);
+      });
+    });
     const document = sessions.open({
       documentId: 'document-1',
       file: { path: '/', filename: 'main.ts' },
@@ -597,8 +707,10 @@ describe('document channel session', () => {
     await nextTurn();
     const newerRequest = commands.findLast((command) => command.name === 'updateView')
       ?.args as RuntimeDocumentProtocol['notifies']['updateView']['args'];
-    staleBinary.reject(new Error('old bytes unavailable'));
-    await nextTurn();
+    staleBinary.resolve();
+    await vi.waitFor(() => {
+      expect(pool.has('old-pool')).toBe(false);
+    });
     server.notify('rendered', {
       subscriptionId: staleOpen.subscriptionId,
       intent: 1,
@@ -625,6 +737,19 @@ describe('document channel session', () => {
       evaluationId: 'e2',
       intent: 1,
     });
+    server.notify('rendered', {
+      subscriptionId: openedView.subscriptionId,
+      intent: 1,
+      requestId: openedView.requestId,
+      evaluationId: 'e2',
+      transient: true,
+      success: true,
+      view: 'board',
+      hash: 'timed-out-frame',
+      issues: [],
+      artifact: { mimeType: 'application/octet-stream', content: { delivery: 'pooled', key: 'timeout-pool' } },
+    });
+    await nextTurn();
     server.notify('errorEvent', {
       scope: 'operation',
       documentId: document.id,
@@ -638,6 +763,10 @@ describe('document channel session', () => {
       message: 'Timed out.',
     });
     await expect(rendered).rejects.toMatchObject({ name: 'OperationTimeoutError' });
+    timedOutBinary.resolve();
+    await vi.waitFor(() => {
+      expect(pool.has('timeout-pool')).toBe(false);
+    });
     await expect(view.rendering()).rejects.toMatchObject({ name: 'OperationTimeoutError' });
     expect(await document.evaluation()).toMatchObject({ superseded: false, evaluation: { id: 'e2' } });
     const waitingView = view.rendering();

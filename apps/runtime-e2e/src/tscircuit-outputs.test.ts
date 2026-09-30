@@ -7,6 +7,7 @@
  * A fetch guard fails the suite if any render reaches the network.
  */
 import { NodeIO } from '@gltf-transform/core';
+import { asKnownArtifact } from '@taucad/runtime';
 import { createTestRuntimeClient, validateGlbData } from '@taucad/runtime-testing';
 import { loadFixture } from '@taucad/tau-examples/fixtures';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -20,22 +21,26 @@ const fetchGuard = vi.fn((): never => {
 
 type Client = ReturnType<typeof createTestRuntimeClient<typeof runtime>>;
 let client: Client | undefined;
+let document: ReturnType<Client['open']> | undefined;
 
 const render = async (output: '3d' | 'schematic' | 'pcb') => {
   client ??= createTestRuntimeClient({ runtime, files: fixture.files });
-  const outcome = await client.render({ source: { path: fixture.mainFile }, renderOptions: { output } });
+  document ??= client.open({ source: { path: fixture.mainFile }, watch: false });
+  const view = document.view(output === '3d' ? 'board' : output);
+  const outcome = await view.rendering();
+  view.close();
   if (outcome.superseded) {
     throw new Error('render was superseded');
   }
-  const { geometry } = outcome;
+  const { rendering } = outcome;
   expect(
-    geometry.success,
-    geometry.success ? undefined : geometry.issues.map(({ message }) => message).join('\n'),
+    rendering.success,
+    rendering.success ? undefined : rendering.issues.map(({ message }) => message).join('\n'),
   ).toBe(true);
-  if (!geometry.success) {
+  if (!rendering.success) {
     throw new Error('unreachable');
   }
-  return geometry.data;
+  return asKnownArtifact(rendering.artifact);
 };
 
 beforeAll(() => {
@@ -43,6 +48,8 @@ beforeAll(() => {
 });
 
 afterEach(async () => {
+  document?.close();
+  document = undefined;
   await client?.shutdown();
   client = undefined;
   expect(fetchGuard).not.toHaveBeenCalled();
@@ -56,9 +63,9 @@ describe('tscircuit kernel — led-board example outputs', () => {
   it('should render the 3d output as a GLB with at least one mesh', async () => {
     const data = await render('3d');
 
-    expect(data.format).toBe('gltf');
-    if (data.format !== 'gltf') {
-      throw new Error('unreachable');
+    expect(data?.mimeType).toBe('model/gltf-binary');
+    if (data?.mimeType !== 'model/gltf-binary') {
+      throw new TypeError('Expected board GLB artifact.');
     }
     validateGlbData(data.content);
     const document = await new NodeIO().readBinary(data.content);
@@ -68,9 +75,9 @@ describe('tscircuit kernel — led-board example outputs', () => {
   it.each(['schematic', 'pcb'] as const)('should render the %s output as an SVG with a viewBox', async (output) => {
     const data = await render(output);
 
-    expect(data.format).toBe('svg');
-    if (data.format !== 'svg') {
-      throw new Error('unreachable');
+    expect(data?.mimeType).toBe('image/svg+xml');
+    if (data?.mimeType !== 'image/svg+xml') {
+      throw new TypeError(`Expected ${output} SVG artifact.`);
     }
     expect(data.content).toMatch(/^<svg [^>]*viewBox="0 0 \d+(?:\.\d+)? \d+(?:\.\d+)?"/);
   });

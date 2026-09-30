@@ -57,7 +57,7 @@ export type RuntimeAgentImageJob = (
         background: string;
         axes: boolean;
         scaleBar: boolean;
-        lengthSymbol: string;
+        lengthSymbol?: string;
       }>;
     }>
   | Readonly<{
@@ -511,7 +511,7 @@ export const createRuntimeAgentClients = (
                   background: '#242424',
                   axes: false,
                   scaleBar: artifact.units !== undefined,
-                  lengthSymbol: artifact.units?.length ?? '',
+                  ...(artifact.units === undefined ? {} : { lengthSymbol: artifact.units.length }),
                 },
               }),
               { count: 1, mimeType: 'image/png' },

@@ -422,12 +422,16 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
           const verdict = testModelOutputSchema.parse(payload);
           const full = JSON.stringify(verdict);
           if (Buffer.byteLength(full, 'utf8') > 128 * 1024) {
-            const saved = await saveChatAttachment({
-              workspaceRoot: options.workspaceRoot,
-              chatId: claims.chatId,
-              data: Buffer.from(full, 'utf8').toString('base64'),
-              mimeType: 'application/json',
-            });
+            const saved =
+              verdict.fullResult ??
+              (await saveChatAttachment({
+                workspaceRoot: options.workspaceRoot,
+                chatId: claims.chatId,
+                data: Buffer.from(full, 'utf8').toString('base64'),
+                mimeType: 'application/json',
+              }));
+            signal.throwIfAborted();
+            binding?.signal.throwIfAborted();
             const failures = verdict.failures.slice(0, 20).map((failure) => ({
               id: shortDiagnostic(failure.id),
               requirement: shortDiagnostic(failure.requirement),
@@ -439,11 +443,16 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
               success: true,
               passed: verdict.passed,
               total: verdict.total,
+              ...(verdict.runStatus === undefined ? {} : { runStatus: verdict.runStatus }),
+              ...(verdict.accounting === undefined ? {} : { accounting: verdict.accounting }),
+              ...(verdict.lineageStatus === undefined ? {} : { lineageStatus: verdict.lineageStatus }),
               failures,
               passes: [],
-              omittedFailures: verdict.failures.length - failures.length,
-              omittedPasses: verdict.passes.length,
-              omittedSourceRevisions: verdict.sourceRevisions?.length ?? 0,
+              omittedFailures: (verdict.omittedFailures ?? 0) + verdict.failures.length - failures.length,
+              omittedPasses: (verdict.omittedPasses ?? 0) + verdict.passes.length,
+              omittedSourceRevisions: (verdict.omittedSourceRevisions ?? 0) + (verdict.sourceRevisions?.length ?? 0),
+              omittedTests: (verdict.omittedTests ?? 0) + (verdict.tests?.length ?? 0),
+              omittedLineage: (verdict.omittedLineage ?? 0) + (verdict.lineage?.length ?? 0),
               fullResult: { ...saved, mimeType: 'application/json' },
             };
           }

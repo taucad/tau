@@ -438,94 +438,122 @@ describe('the mounted /mcp route', () => {
     expect(invocations).toHaveLength(1);
   }, 30_000);
 
-  it('keeps six screenshots and an oversized GeoSpec report readable outside MCP payloads', async () => {
-    const views = ['front', 'back', 'right', 'left', 'top', 'bottom'];
-    endpoint = createHostMcpEndpoint({
-      secret,
-      workspaceRoot,
-      registry: {
-        list: () => [],
-        invoke: async (invocation): ReturnType<ToolRegistry['invoke']> => {
-          if (invocation.toolName === 'screenshot') {
+  it.each([false, true])(
+    'keeps six screenshots and an oversized GeoSpec report readable outside MCP payloads (record artifact: %s)',
+    async (alreadyRetained) => {
+      const views = ['front', 'back', 'right', 'left', 'top', 'bottom'];
+      const recordArtifact = {
+        path: '.tau/artifacts/call__geospec-json/result.json',
+        mimeType: 'application/json',
+        byteLength: 200_000,
+        sha256: 'a'.repeat(64),
+      };
+      endpoint = createHostMcpEndpoint({
+        secret,
+        workspaceRoot,
+        registry: {
+          list: () => [],
+          invoke: async (invocation): ReturnType<ToolRegistry['invoke']> => {
+            if (invocation.toolName === 'screenshot') {
+              return {
+                isError: false,
+                content: {
+                  success: true,
+                  images: views.map((view) => ({ view, dataUrl: 'data:image/webp;base64,QUJD' })),
+                  sourceRevision: { entry: 'main.cs', files: { 'main.cs': `sha256:${'a'.repeat(64)}` } },
+                  message: 'Section cutaways narrower than 180° are not shown in captures.',
+                },
+              };
+            }
             return {
               isError: false,
               content: {
                 success: true,
-                images: views.map((view) => ({ view, dataUrl: 'data:image/webp;base64,QUJD' })),
-                sourceRevision: { entry: 'main.cs', files: { 'main.cs': `sha256:${'a'.repeat(64)}` } },
-                message: 'Section cutaways narrower than 180° are not shown in captures.',
+                passed: 0,
+                total: 1,
+                runStatus: 'failed',
+                lineageStatus: 'unavailable',
+                tests: [{ id: 'main.cs:0', requirement: 'Mesh is sound', targetFile: 'main.cs', status: 'failed' }],
+                ...(alreadyRetained ? { fullResult: recordArtifact } : {}),
+                passes: [],
+                failures: [
+                  {
+                    id: 'large-1',
+                    requirement: 'Mesh is sound',
+                    reason: 'Failed',
+                    suggestion: 'Inspect details',
+                    targetFile: 'main.cs',
+                    diagnostics: [
+                      {
+                        code: 'GEOMETRY',
+                        severity: 'error',
+                        message: 'Large mesh',
+                        details: { vertices: 'x'.repeat(150_000) },
+                      },
+                    ],
+                  },
+                ],
               },
             };
-          }
-          return {
-            isError: false,
-            content: {
-              success: true,
-              passed: 0,
-              total: 1,
-              passes: [],
-              failures: [
-                {
-                  id: 'large-1',
-                  requirement: 'Mesh is sound',
-                  reason: 'Failed',
-                  suggestion: 'Inspect details',
-                  targetFile: 'main.cs',
-                  diagnostics: [
-                    {
-                      code: 'GEOMETRY',
-                      severity: 'error',
-                      message: 'Large mesh',
-                      details: { vertices: 'x'.repeat(150_000) },
-                    },
-                  ],
-                },
-              ],
-            },
-          };
+          },
         },
-      },
-    });
-    server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, mcp: endpoint });
-    await server.ready;
-    const capability = endpoint.mint({ runId: 'run-capture', chatId: 'chat-capture' });
-    const release = endpoint.activate({
-      token: capability.token,
-      runId: 'run-capture',
-      chatId: 'chat-capture',
-      signal: new AbortController().signal,
-    });
-    const client = await connectMcpOverFetch({
-      url: new URL('mcp', server.url()).href,
-      headers: { authorization: `Bearer ${capability.token}` },
-    });
-    try {
-      const capture = await client.callTool('screenshot', { targetFile: 'main.cs', mode: 'multi_angle' });
-      const manifest = screenshotMcpOutputSchema.parse(capture.structuredContent);
-      const { images } = manifest;
-      expect(images.map((image) => image.view)).toEqual(views);
-      expect(manifest.sourceRevision?.entry).toBe('main.cs');
-      expect(manifest.message).toBe('Section cutaways narrower than 180° are not shown in captures.');
-      expect(JSON.stringify(capture)).not.toContain('QUJD');
-      expect(Buffer.byteLength(JSON.stringify(capture), 'utf8')).toBeLessThan(128 * 1024);
-      for (const image of images) {
-        // oxlint-disable-next-line no-await-in-loop -- each named view must remain retrievable.
-        await expect(readFile(image.absolutePath)).resolves.toEqual(Buffer.from('ABC'));
-      }
-      const tests = await client.callTool('test_model', {});
-      const summary = testModelOutputSchema.parse(tests.structuredContent);
-      expect(summary).toMatchObject({ passed: 0, total: 1, omittedPasses: 0, omittedFailures: 0 });
-      expect(summary.failures[0]?.id).toBe('large-1');
-      expect(JSON.stringify(tests).length).toBeLessThan(128 * 1024);
-      expect(summary.fullResult).toBeDefined();
-      const full = JSON.parse(await readFile(summary.fullResult!.absolutePath, 'utf8')) as unknown;
-      expect(testModelOutputSchema.parse(full).failures[0]?.diagnostics?.[0]?.details).toEqual({
-        vertices: 'x'.repeat(150_000),
       });
-    } finally {
-      await release();
-    }
-  }, 30_000);
+      server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, mcp: endpoint });
+      await server.ready;
+      const capability = endpoint.mint({ runId: 'run-capture', chatId: 'chat-capture' });
+      const release = endpoint.activate({
+        token: capability.token,
+        runId: 'run-capture',
+        chatId: 'chat-capture',
+        signal: new AbortController().signal,
+      });
+      const client = await connectMcpOverFetch({
+        url: new URL('mcp', server.url()).href,
+        headers: { authorization: `Bearer ${capability.token}` },
+      });
+      try {
+        const capture = await client.callTool('screenshot', { targetFile: 'main.cs', mode: 'multi_angle' });
+        const manifest = screenshotMcpOutputSchema.parse(capture.structuredContent);
+        const { images } = manifest;
+        expect(images.map((image) => image.view)).toEqual(views);
+        expect(manifest.sourceRevision?.entry).toBe('main.cs');
+        expect(manifest.message).toBe('Section cutaways narrower than 180° are not shown in captures.');
+        expect(JSON.stringify(capture)).not.toContain('QUJD');
+        expect(Buffer.byteLength(JSON.stringify(capture), 'utf8')).toBeLessThan(128 * 1024);
+        for (const image of images) {
+          // oxlint-disable-next-line no-await-in-loop -- each named view must remain retrievable.
+          await expect(readFile(image.absolutePath)).resolves.toEqual(Buffer.from('ABC'));
+        }
+        const tests = await client.callTool('test_model', {});
+        const summary = testModelOutputSchema.parse(tests.structuredContent);
+        expect(summary).toMatchObject({ passed: 0, total: 1, omittedPasses: 0, omittedFailures: 0 });
+        expect(summary).toMatchObject({
+          runStatus: 'failed',
+          lineageStatus: 'unavailable',
+          omittedTests: 1,
+          omittedLineage: 0,
+        });
+        expect(summary.failures[0]?.id).toBe('large-1');
+        expect(JSON.stringify(tests).length).toBeLessThan(128 * 1024);
+        expect(summary.fullResult).toBeDefined();
+        if (alreadyRetained) {
+          expect(summary.fullResult).toStrictEqual(recordArtifact);
+          return;
+        }
+        const fullPath = summary.fullResult?.absolutePath;
+        if (fullPath === undefined) {
+          throw new Error('Expected the host-created attachment path');
+        }
+        const full = JSON.parse(await readFile(fullPath, 'utf8')) as unknown;
+        expect(testModelOutputSchema.parse(full).failures[0]?.diagnostics?.[0]?.details).toEqual({
+          vertices: 'x'.repeat(150_000),
+        });
+      } finally {
+        await release();
+      }
+    },
+    30_000,
+  );
 
   it('codes a fault Tau hits after the tool answered, so the agent does not retry its own call', async () => {
     endpoint = createHostMcpEndpoint({

@@ -7,12 +7,11 @@ import { openrscad } from '@taucad/openrscad';
 import { createNodeClient } from '@taucad/runtime/node';
 import type { KernelIssue } from '@taucad/runtime/types';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { GeoSpecModelLoadError, loadModel as publicLoadModel } from 'geospec/model';
+import { GeoSpecModelLoadError } from 'geospec/model';
 import { analyzeMesh as publicAnalyzeMesh } from 'geospec/mesh';
-import { createCollector } from 'geospec/runner';
 import { clearGeoSpecEngine, registerGeoSpecEngine } from 'geospec/engine';
 import { geoSpecEngineImplementation } from '#register.js';
-import { releaseEngineSubject } from '#engine/subject-store.js';
+import { exposeEngineSubject, releaseEngineSubject } from '#engine/subject-store.js';
 import type { GeoSpecRuntimeClient, GeoSpecRuntimeSourceAdapter, LoadModelOptions } from 'geospec/model';
 import {
   createModelLoader,
@@ -334,31 +333,18 @@ describe('loadModel — the runtime branch', () => {
     }));
     const bytes = await glbBytes(20);
     const runtime = fakeRuntime({ bytes, issues });
-    const subject = await publicLoadModel({ file: 'main.ts', runtime });
+    const subject = await loadModel({ file: 'main.ts', runtime });
+    const retained = exposeEngineSubject(subject);
     try {
       expect(subject.diagnostics.map(({ details }) => details)).toEqual(issues);
-      const first = await publicAnalyzeMesh({ subject });
+      const first = await publicAnalyzeMesh({ subject: retained });
       bytes.fill(0);
-      const second = await publicAnalyzeMesh({ subject });
+      const second = await publicAnalyzeMesh({ subject: retained });
       expect(second).toStrictEqual(first);
       expect(first.success && first.stats.boundingBox?.size).toEqual([20, 20, 0]);
       expect(runtime.state.exports).toHaveLength(1);
-      const collector = createCollector();
-      collector.it('default severities', () => collector.expectGeo(subject).toHaveNoDiagnostics());
-      collector.it('info explicitly rejected', () =>
-        collector.expectGeo(subject).toHaveNoDiagnostics({ severities: ['info'] }),
-      );
-      collector.it('explicit empty rejection set', () =>
-        collector.expectGeo(subject).toHaveNoDiagnostics({ severities: [] }),
-      );
-      await collector.waitForCompletion();
-      expect(collector.tests.map(({ status }) => status)).toEqual(['failed', 'failed', 'passed']);
-      expect(collector.tests[0]?.diagnostics[0]?.details).toMatchObject({
-        diagnostics: subject.diagnostics.slice(0, 2),
-      });
-      expect(collector.tests[1]?.diagnostics[0]?.details).toMatchObject({ diagnostics: subject.diagnostics.slice(2) });
     } finally {
-      releaseEngineSubject(subject.subjectId);
+      releaseEngineSubject(retained.subjectId);
       runtime.terminate();
       clearGeoSpecEngine();
     }

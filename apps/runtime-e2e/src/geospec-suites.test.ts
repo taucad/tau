@@ -76,6 +76,16 @@ const runGeoSpecSuite = async (
 };
 
 describe('geospec example suites (regression backbone)', () => {
+  it.each(['bench-vise', 'spur-gearbox', 'standing-fan', 'wheelbarrow', 'kestrel-240-quadcopter'])(
+    'Community motion assembly %s geospec suite passes',
+    { timeout: 1_500_000 },
+    async (name) => {
+      const report = await runGeoSpecSuite(`libs/tau-examples/src/kernels/replicad/${name}`);
+      expect(report.failed, JSON.stringify(report.files, null, 2)).toBe(0);
+      expect(report.success).toBe(true);
+    },
+  );
+
   it('PicoVoxel hello-world geospec suite passes on the exact serial path', { timeout: 180_000 }, async () => {
     const report = await runGeoSpecSuite('libs/tau-examples/src/kernels/picovoxel/hello-world');
     expect(report.failed).toBe(0);

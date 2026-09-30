@@ -594,7 +594,8 @@ export const createGeoSpecNativeModelLoader = (
     const requestedFormat = options.format ?? defaults.format ?? 'glb';
     const invalidOption = [
       'stepStreaming',
-      'mesh',
+      // Native STEP admission is BRep-only; explicit later queries may demand tessellation.
+      ...(options.mesh === false && (requestedFormat === 'step' || requestedFormat === 'stp') ? [] : ['mesh']),
       ...('source' in options
         ? [
             'meshLinearTolerance',

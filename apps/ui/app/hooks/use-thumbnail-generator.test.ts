@@ -20,22 +20,32 @@ let snapshotEntryPath: string | undefined = sourceEntryPath;
 const getSnapshot = vi.fn(() => ({
   context: {
     entryPath: snapshotEntryPath,
-    geometry: {
-      format: geometryFormat,
-      content: geometryFormat === 'gltf' ? geometryContent : '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    rendering: {
+      success: true,
+      requestId: 'request-1',
+      evaluationId: 'evaluation-1',
+      transient: false,
+      view: 'model',
+      artifact:
+        geometryFormat === 'gltf'
+          ? { mimeType: 'model/gltf-binary', content: geometryContent }
+          : { mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg"/>' },
       hash: 'geometry-hash',
+      issues: [],
     },
-    lastRequestedRenderId: 0,
+    evaluation: undefined,
   },
 }));
-let geometryListener: ((event: { geometry: { hash: string } }) => void) | undefined;
+let renderingListener: ((event: { rendering: { success: true; transient: false; hash: string } }) => void) | undefined;
 const unsubscribe = vi.fn();
 const unsubscribeSnapshots = vi.fn();
 const subscribe = vi.fn(() => ({ unsubscribe: unsubscribeSnapshots }));
-const on = vi.fn((_event: string, listener: (event: { geometry: { hash: string } }) => void) => {
-  geometryListener = listener;
-  return { unsubscribe };
-});
+const on = vi.fn(
+  (_event: string, listener: (event: { rendering: { success: true; transient: false; hash: string } }) => void) => {
+    renderingListener = listener;
+    return { unsubscribe };
+  },
+);
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
@@ -46,8 +56,9 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 
 const writeFile = vi.fn(async () => undefined);
+const deleteFile = vi.fn(async () => undefined);
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({ writeFile }),
+  useFileManager: () => ({ writeFile, deleteFile }),
 }));
 
 const webpBytes = (marker = 0): Uint8Array<ArrayBuffer> => {
@@ -97,7 +108,7 @@ describe('useThumbnailGenerator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     thumbnailInput = undefined;
-    geometryListener = undefined;
+    renderingListener = undefined;
     snapshotEntryPath = sourceEntryPath;
     geometryFormat = 'gltf';
     getProjectFileSystemConfig.mockResolvedValue(locator('/projects/one'));
@@ -159,7 +170,7 @@ describe('useThumbnailGenerator', () => {
       expect.fail('render should reject without a settled entry path');
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toBe('source-unavailable: settled canonical geometry not ready');
+      expect((error as Error).message).toBe('source-unavailable: committed rendering not ready');
     }
     expect(exportImage).not.toHaveBeenCalled();
   });
@@ -231,7 +242,7 @@ describe('useThumbnailGenerator', () => {
   it('should include the render recipe in the settled thumbnail identity', () => {
     renderHook(() => useThumbnailGenerator());
 
-    geometryListener?.({ geometry: { hash: 'geometry-hash' } });
+    renderingListener?.({ rendering: { success: true, transient: false, hash: 'geometry-hash' } });
 
     const event = send.mock.calls.at(-1)?.[0];
     expect(event?.type).toBe('settled');

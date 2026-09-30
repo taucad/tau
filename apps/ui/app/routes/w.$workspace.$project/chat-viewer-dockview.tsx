@@ -10,9 +10,10 @@ import type {
   IWatermarkPanelProps,
 } from 'dockview-react';
 import { positionToDirection } from 'dockview-react';
-import type { ViewerNode } from '@taucad/workbench';
-import { Box } from 'lucide-react';
-import type { CapabilitiesManifest } from '@taucad/runtime';
+import { workbenchRecords } from '@taucad/workbench';
+import type { ViewerNode, WorkbenchView } from '@taucad/workbench';
+import { Box, SlidersHorizontal } from 'lucide-react';
+import type { CapabilitiesManifest, Evaluation } from '@taucad/runtime';
 import { sourcePathMatchesExtensions } from '@taucad/utils/file';
 import type { FileEntry } from '@taucad/types';
 import { idPrefix, tauFileDragMime, tauEditorPanelDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
@@ -35,6 +36,14 @@ import { getViewerTabIcon, ViewerDockviewTab } from '#components/panes/viewer-ta
 import { DockviewLeftActions, DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
 import { ProjectWorkspaceActions } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 import { ViewerChatLaneToggle } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
+import { selectCadEvaluation } from '#machines/cad.machine.js';
+import type { cadMachine } from '#machines/cad.machine.js';
+import type { ActorRefFrom } from 'xstate';
+import { setLocalInstanceChoice, useLocalInstanceChoice } from '#workbench-records/local-instance.js';
+import { Button } from '@taucad/ui/components/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
+import { Toggle } from '@taucad/ui/components/toggle';
+import { cn } from '@taucad/ui/utils/cn';
 
 /**
  * Params passed to each viewer panel via Dockview.
@@ -49,6 +58,21 @@ type ViewerProfile = 'editor' | 'shared';
 
 const isViewerPanelParameters = (parameters: unknown): parameters is ViewerPanelParameters =>
   typeof (parameters as Partial<ViewerPanelParameters> | undefined)?.viewId === 'string';
+
+/** Projection suffixes distinguish panels for one file only when a build offers a choice. */
+export function viewerPanelTitle(
+  record: WorkbenchView,
+  siblingCount: number,
+  evaluation: Evaluation | undefined,
+): string {
+  const title = viewTabTitle(record);
+  if (siblingCount < 2 || !evaluation?.success || evaluation.views.length < 2) {
+    return title;
+  }
+  const id = record.selectedKernelView ?? evaluation.views[0]?.id;
+  const offer = evaluation.views.find((view) => view.id === id);
+  return id ? `${title} · ${offer?.title ?? id}` : title;
+}
 
 /** Adopt the record and return only view IDs genuinely removed from the arrangement. */
 export function adoptViewerRecordNode(api: DockviewApi, node: ViewerNode): string[] {
@@ -342,7 +366,7 @@ function ViewerEmptyState({
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath,
-          renderTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
+          operationTimeout: entriesRecord?.entries[entryPath]?.operationTimeout,
         });
       };
 
@@ -435,6 +459,334 @@ function ViewerLeftActions(properties: IDockviewHeaderActionsProps): React.JSX.E
   );
 }
 
+export function ViewerProjectionPicker({
+  viewId,
+  entryPath,
+  cadActor,
+  onOpenBeside,
+}: {
+  readonly viewId: string;
+  readonly entryPath: string;
+  readonly cadActor: ActorRefFrom<typeof cadMachine>;
+  readonly onOpenBeside?: (viewId: string) => void;
+}): React.JSX.Element | undefined {
+  const evaluation = useSelector(cadActor, selectCadEvaluation);
+  const { viewRecords } = useProject();
+  const viewCommands = useWorkbenchViewCommands();
+  const record = viewRecords.get(viewId);
+  const selected = record?.selectedKernelView;
+  const [optionError, setOptionError] = useState<string | undefined>();
+  const localChoice = useLocalInstanceChoice(viewId);
+  if (!evaluation?.success) {
+    return undefined;
+  }
+  const offered = selected ? evaluation.views.find((view) => view.id === selected) : evaluation.views[0];
+  const state = record?.kernelViews?.find((view) => view.id === offered?.id);
+  const showSwitch =
+    evaluation.views.length > 1 || Boolean(selected && !evaluation.views.some((view) => view.id === selected));
+  const showToggleGroup = showSwitch && evaluation.views.length <= 4 && Boolean(offered);
+  const localForView = localChoice?.viewId === offered?.id ? localChoice : undefined;
+  const selectedInstance = localForView?.instanceId ?? state?.authoredInstance ?? '';
+  const choose = (id: string): void => {
+    const nextId = id === '' ? undefined : id;
+    const nextOffer = evaluation.views.find((view) => view.id === nextId);
+    setLocalInstanceChoice(viewId, undefined);
+    void viewCommands.edit(viewId, (current) => {
+      const record = current ?? newViewRecord(entryPath);
+      const states = record.kernelViews ?? [];
+      return workbenchRecords.view.schema.parse({
+        ...record,
+        selectedKernelView: nextId,
+        kernelViews:
+          nextId && nextOffer?.options && !states.some((state) => state.id === nextId)
+            ? [...states, { id: nextId, options: nextOffer.options.defaults }]
+            : states,
+      });
+    });
+  };
+  const editViewState = (change: {
+    readonly options?: Record<string, unknown>;
+    readonly authoredInstance?: string | undefined;
+  }): void => {
+    if (!offered) {
+      return;
+    }
+    void viewCommands.edit(viewId, (current) => {
+      const nextRecord = current ?? newViewRecord(entryPath);
+      const states = nextRecord.kernelViews ?? [];
+      const prior = states.find((view) => view.id === offered.id) ?? { id: offered.id };
+      return workbenchRecords.view.schema.parse({
+        ...nextRecord,
+        kernelViews: [...states.filter((view) => view.id !== offered.id), { ...prior, ...change }],
+      });
+    });
+  };
+  const chooseInstance = (id: string): void => {
+    if (!offered) {
+      return;
+    }
+    if (id.startsWith('local:')) {
+      setLocalInstanceChoice(viewId, { evaluationId: evaluation.id, viewId: offered.id, instanceId: id });
+    } else {
+      setLocalInstanceChoice(viewId, undefined);
+      editViewState({ authoredInstance: id === '' ? undefined : id });
+    }
+  };
+  const schemaProperties = offered?.options?.schema.properties ?? {};
+  const values = { ...offered?.options?.defaults, ...state?.options };
+  const editOption = (key: string, value: unknown): void => {
+    const next = Object.fromEntries(Object.entries(values).filter(([name]) => name !== key));
+    if (value !== undefined) {
+      next[key] = value;
+    }
+    editViewState({ options: next });
+  };
+  if (!showSwitch && !offered?.instances?.length && !offered?.options && selectedInstance === '') {
+    return undefined;
+  }
+  return (
+    <div role='group' aria-label='Projection controls' className='flex items-center gap-1'>
+      {showToggleGroup ? (
+        <div role='group' aria-label='Views' className='hidden items-center gap-0.5 @min-[520px]/viewer:flex'>
+          {evaluation.views.map((view) => (
+            <Toggle
+              key={view.id}
+              size='xs'
+              pressed={(selected ?? evaluation.views[0]?.id) === view.id}
+              onPressedChange={() => {
+                choose(view.id);
+              }}
+            >
+              {view.title}
+            </Toggle>
+          ))}
+        </div>
+      ) : null}
+      {showSwitch ? (
+        <select
+          aria-label='Projection view'
+          className={cn(
+            'h-7 max-w-36 rounded border border-border bg-background px-1 text-xs text-foreground focus-visible:focus-outline',
+            showToggleGroup && '@min-[520px]/viewer:hidden',
+          )}
+          value={selected ?? ''}
+          onChange={(event) => {
+            choose(event.target.value);
+          }}
+        >
+          <option value=''>Default</option>
+          {selected && !evaluation.views.some((view) => view.id === selected) ? (
+            <option value={selected}>{selected} (unavailable)</option>
+          ) : null}
+          {evaluation.views.map((view) => (
+            <option key={view.id} value={view.id}>
+              {view.title}
+            </option>
+          ))}
+        </select>
+      ) : null}
+      {showSwitch && onOpenBeside ? (
+        <select
+          aria-label='Open projection beside'
+          className='h-7 max-w-36 rounded border border-border bg-background px-1 text-xs text-foreground focus-visible:focus-outline'
+          value=''
+          onChange={(event) => {
+            if (event.target.value) {
+              onOpenBeside(event.target.value);
+            }
+          }}
+        >
+          <option value=''>Open beside…</option>
+          {evaluation.views.map((view) => (
+            <option key={view.id} value={view.id}>
+              Open {view.title} beside
+            </option>
+          ))}
+        </select>
+      ) : null}
+      {offered && (Boolean(offered.instances?.length) || selectedInstance !== '') ? (
+        <select
+          aria-label={`${offered.title} instance`}
+          className='h-7 max-w-36 rounded border border-border bg-background px-1 text-xs text-foreground focus-visible:focus-outline'
+          value={selectedInstance}
+          onChange={(event) => {
+            chooseInstance(event.target.value);
+          }}
+        >
+          <option value=''>Whole view</option>
+          {localForView && localForView.evaluationId !== evaluation.id ? (
+            <option value={localForView.instanceId}>{localForView.instanceId} (expired)</option>
+          ) : null}
+          {offered.instances?.map((instance) => (
+            <option key={instance.id} value={instance.id}>
+              {instance.title}
+            </option>
+          ))}
+        </select>
+      ) : null}
+      {offered?.options ? (
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button size='icon-xs' variant='ghost' aria-label={`${offered.title} options`}>
+              <SlidersHorizontal aria-hidden='true' className='size-4' />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align='end' className='w-64'>
+            <fieldset className='flex flex-col gap-2'>
+              <legend className='mb-2 text-sm font-medium'>{offered.title} options</legend>
+              {Object.entries(schemaProperties).map(([key, property]) => {
+                if (typeof property === 'boolean') {
+                  return null;
+                }
+                const label = property.title ?? key;
+                const value = values[key];
+                if (property.type === 'boolean') {
+                  return (
+                    <label key={key} className='flex items-center gap-2 text-xs'>
+                      <input
+                        type='checkbox'
+                        checked={value === true}
+                        onChange={(event) => {
+                          editOption(key, event.target.checked);
+                        }}
+                      />
+                      {label}
+                    </label>
+                  );
+                }
+                if (property.enum) {
+                  const choices = property.enum.filter(
+                    (choice): choice is string | number | boolean =>
+                      typeof choice === 'string' || typeof choice === 'number' || typeof choice === 'boolean',
+                  );
+                  return (
+                    <label key={key} className='flex flex-col gap-1 text-xs'>
+                      {label}
+                      <select
+                        className='h-7 rounded border border-input bg-background px-1'
+                        value={
+                          typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+                            ? String(value)
+                            : ''
+                        }
+                        onChange={(event) => {
+                          editOption(
+                            key,
+                            choices.find((choice) => String(choice) === event.target.value),
+                          );
+                        }}
+                      >
+                        <option value=''>Choose…</option>
+                        {choices.map((choice) => (
+                          <option key={String(choice)} value={String(choice)}>
+                            {String(choice)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  );
+                }
+                if (property.type === 'number' || property.type === 'integer' || property.type === 'string') {
+                  return (
+                    <label key={key} className='flex flex-col gap-1 text-xs'>
+                      {label}
+                      <input
+                        type={property.type === 'string' ? 'text' : 'number'}
+                        className='h-7 rounded border border-input bg-background px-2'
+                        value={typeof value === 'string' || typeof value === 'number' ? value : ''}
+                        onChange={(event) => {
+                          editOption(
+                            key,
+                            event.target.type === 'number'
+                              ? event.target.value === ''
+                                ? undefined
+                                : Number(event.target.value)
+                              : event.target.value,
+                          );
+                        }}
+                      />
+                    </label>
+                  );
+                }
+                return (
+                  <label key={key} className='flex flex-col gap-1 text-xs'>
+                    {label} (JSON)
+                    <textarea
+                      className='min-h-16 rounded border border-input bg-background px-2'
+                      defaultValue={value === undefined ? '' : JSON.stringify(value)}
+                      onBlur={(event) => {
+                        try {
+                          editOption(
+                            key,
+                            event.target.value === '' ? undefined : (JSON.parse(event.target.value) as unknown),
+                          );
+                          setOptionError(undefined);
+                        } catch {
+                          setOptionError(`${label} must be valid JSON.`);
+                        }
+                      }}
+                    />
+                  </label>
+                );
+              })}
+              {optionError ? (
+                <p role='alert' className='text-xs text-destructive'>
+                  {optionError}
+                </p>
+              ) : null}
+              <Button
+                size='sm'
+                variant='outline'
+                type='button'
+                onClick={() => {
+                  editViewState({ options: offered.options?.defaults ?? {} });
+                }}
+              >
+                Restore view defaults
+              </Button>
+            </fieldset>
+          </PopoverContent>
+        </Popover>
+      ) : null}
+    </div>
+  );
+}
+
+export function ViewerRightActions(properties: IDockviewHeaderActionsProps): React.JSX.Element {
+  const { geometryUnits } = useProject();
+  const viewCommands = useWorkbenchViewCommands();
+  const active = properties.group.activePanel;
+  const params = active && isViewerPanelParameters(active.params) ? active.params : undefined;
+  const entryPath = params?.entryPath;
+  const cadActor = entryPath ? geometryUnits.get(entryPath) : undefined;
+  return (
+    <div className='flex h-full items-center gap-1'>
+      {cadActor && params && entryPath ? (
+        <ViewerProjectionPicker
+          viewId={params.viewId}
+          entryPath={entryPath}
+          cadActor={cadActor}
+          onOpenBeside={(kernelViewId) => {
+            const viewId = mintViewRecordId();
+            properties.containerApi.addPanel({
+              id: viewId,
+              component: 'viewer',
+              title: entryPath.split('/').pop() ?? entryPath,
+              params: { viewId, entryPath },
+              position: { direction: 'right', referenceGroup: properties.group },
+            });
+            void viewCommands.edit(viewId, () => ({
+              ...newViewRecord(entryPath),
+              selectedKernelView: kernelViewId,
+            }));
+          }}
+        />
+      ) : null}
+      <ProjectWorkspaceActions {...properties} />
+    </div>
+  );
+}
+
 /**
  * ViewerDockview
  *
@@ -450,7 +802,7 @@ export const ViewerDockview = memo(function ({
 }: {
   readonly profile?: ViewerProfile;
 } = {}): React.JSX.Element {
-  const { projectRef, mainEntryPath, viewRecords, entriesRecord, setViewEntryPath } = useProject();
+  const { projectRef, mainEntryPath, viewRecords, entriesRecord, geometryUnits, setViewEntryPath } = useProject();
   const viewCommands = useWorkbenchViewCommands();
   // oxlint-disable-next-line typescript/no-unnecessary-condition -- The optional workspace is absent in shared-profile embeds.
   const layoutController = useProjectWorkspace({ enableNoContext: true })?.layoutController;
@@ -561,6 +913,7 @@ export const ViewerDockview = memo(function ({
     const removeDisposable = api.onDidRemovePanel((event) => {
       if (isViewerPanelParameters(event.params)) {
         const viewId = event.id;
+        setLocalInstanceChoice(viewId, undefined);
         setViewEntryPath(viewId, undefined);
         projectRef.send({ type: 'destroyViewGraphics', viewId });
         if (!isRestoringLayout.current && profile === 'editor') {
@@ -583,6 +936,16 @@ export const ViewerDockview = memo(function ({
     if (!api || profile === 'shared') {
       return;
     }
+    const counts = new Map<string, number>();
+    for (const panel of api.panels) {
+      const record = viewRecords.get(panel.id);
+      if (!record) {
+        continue;
+      }
+      if (record.entryPath !== null) {
+        counts.set(record.entryPath, (counts.get(record.entryPath) ?? 0) + 1);
+      }
+    }
     for (const panel of api.panels) {
       if (!isViewerPanelParameters(panel.params)) {
         continue;
@@ -596,12 +959,13 @@ export const ViewerDockview = memo(function ({
         panel.api.updateParameters({ entryPath: nextPath });
       }
       setViewEntryPath(panel.id, record.entryPath);
-      const title = viewTabTitle(record);
+      const evaluation = geometryUnits.get(record.entryPath ?? '')?.getSnapshot().context.evaluation;
+      const title = viewerPanelTitle(record, counts.get(record.entryPath ?? '') ?? 0, evaluation);
       if (panel.title !== title) {
         panel.api.setTitle(title);
       }
     }
-  }, [api, profile, setViewEntryPath, viewRecords]);
+  }, [api, geometryUnits, profile, setViewEntryPath, viewRecords]);
 
   // Tag outgoing tab drags with the viewer MIME so the editor can identify them
   useEffect(() => {
@@ -718,7 +1082,7 @@ export const ViewerDockview = memo(function ({
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath: panelEntryPath,
-          renderTimeout: entriesRecord?.entries[panelEntryPath]?.renderTimeout,
+          operationTimeout: entriesRecord?.entries[panelEntryPath]?.operationTimeout,
         });
       }
       if (panelEntryPath && visibleGeometryDemand.current.get(panelViewId) !== panelEntryPath) {
@@ -865,7 +1229,7 @@ export const ViewerDockview = memo(function ({
           projectRef.send({
             type: 'createGeometryUnit',
             entryPath,
-            renderTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
+            operationTimeout: entriesRecord?.entries[entryPath]?.operationTimeout,
           });
         },
       });
@@ -897,7 +1261,7 @@ export const ViewerDockview = memo(function ({
       projectRef.send({
         type: 'createGeometryUnit',
         entryPath: path,
-        renderTimeout: entriesRecord?.entries[path]?.renderTimeout,
+        operationTimeout: entriesRecord?.entries[path]?.operationTimeout,
       });
     },
     [entriesRecord, getInheritedSettings, profile, projectRef, viewCommands],
@@ -905,7 +1269,7 @@ export const ViewerDockview = memo(function ({
 
   return (
     <DockviewFileActionProvider value={handleOpenFile}>
-      <div className='relative size-full'>
+      <div className='@container/viewer relative size-full'>
         <Dockview
           components={components}
           noPanelsOverlay='emptyGroup'
@@ -915,7 +1279,7 @@ export const ViewerDockview = memo(function ({
           watermarkComponent={ViewerWatermark}
           leftHeaderActionsComponent={ViewerLeftActions}
           prefixHeaderActionsComponent={profile === 'editor' ? ViewerChatLaneToggle : undefined}
-          rightHeaderActionsComponent={profile === 'editor' ? ProjectWorkspaceActions : undefined}
+          rightHeaderActionsComponent={profile === 'editor' ? ViewerRightActions : undefined}
           onReady={onReady}
           onDidDrop={onDidDrop}
         />

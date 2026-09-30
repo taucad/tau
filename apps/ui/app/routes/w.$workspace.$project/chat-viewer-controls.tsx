@@ -88,7 +88,7 @@ type ChatViewerControlsProps = Readonly<{
 export function ChatViewerControls({ shouldEnableCapture = true }: ChatViewerControlsProps): React.JSX.Element {
   const graphicsRef = useGraphics();
   const barRef = useRef<HTMLDivElement>(null);
-  const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
+  const is2dGeometry = useGraphicsSelector((state) => state.context.artifact?.mimeType === 'image/svg+xml');
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
   // Counted, so a phrase said twice in a row is a new node and is announced again.

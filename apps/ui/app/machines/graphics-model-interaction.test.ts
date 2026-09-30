@@ -65,6 +65,113 @@ function createManifest(sourceFile = unitId): GeometryComponentManifest {
 }
 
 describe('graphicsMachine model interaction', () => {
+  it('clears manifests and transient selection for both the displayed and incoming unit on GLB to SVG', () => {
+    const providedMachine = graphicsMachine.provide({
+      actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) },
+    });
+    const actor = createActor(providedMachine, { input: {} }).start();
+    const firstUnitId = deriveModelInteractionUnitId({ sourceFile: unitId });
+    const nextFile = 'src/secondary.ts';
+    const nextUnitId = deriveModelInteractionUnitId({ sourceFile: nextFile });
+    actor.send({
+      type: 'updateArtifact',
+      artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array([1]) },
+      hash: 'first-model',
+      sourceFile: unitId,
+    });
+    actor.send({
+      type: 'gltfPresentationCommitted',
+      revision: 1,
+      key: 'first-model',
+      unitId: firstUnitId,
+      manifest: createManifest(),
+    });
+    expect(actor.getSnapshot().context.modelInteractionUnitId).toBe(firstUnitId);
+    for (const [activeUnitId, sourceFile] of [
+      [firstUnitId, unitId],
+      [nextUnitId, nextFile],
+    ] as const) {
+      actor.getSnapshot().context.modelInteractionRef.send({
+        type: 'loadManifest',
+        unitId: activeUnitId,
+        manifest: createManifest(sourceFile),
+        source: 'viewer',
+      });
+      actor.send({
+        type: 'selectModelComponent',
+        unitId: activeUnitId,
+        componentId: housingComponentId,
+        source: 'viewer',
+      });
+      actor.send({
+        type: 'hideModelComponent',
+        unitId: activeUnitId,
+        componentId: housingComponentId,
+        source: 'viewer',
+      });
+    }
+
+    actor.send({
+      type: 'updateArtifact',
+      artifact: { mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg" />' },
+      hash: 'drawing',
+      sourceFile: nextFile,
+    });
+
+    const { context } = actor.getSnapshot();
+    expect(context.modelInteractionUnitId).toBe(nextUnitId);
+    expect(context.gltfPresentation.phase).toBe('idle');
+    for (const activeUnitId of [firstUnitId, nextUnitId]) {
+      const unit = getModelInteractionUnitState(context.modelInteractionRef.getSnapshot().context, activeUnitId);
+      expect(unit.manifest).toBeUndefined();
+      expect(unit.selectedComponentIds).toEqual([]);
+      expect(unit.hiddenComponentIds).toEqual([housingComponentId]);
+    }
+    actor.stop();
+  });
+
+  it('clears stale artifact, presentation, and active selection after a successful empty model', () => {
+    const providedMachine = graphicsMachine.provide({
+      actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) },
+    });
+    const actor = createActor(providedMachine, { input: {} }).start();
+    const sourceUnitId = deriveModelInteractionUnitId({ sourceFile: unitId });
+    actor.send({
+      type: 'updateArtifact',
+      artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array([1]) },
+      hash: 'prior-model',
+      sourceFile: unitId,
+    });
+    actor.send({
+      type: 'loadModelComponentManifest',
+      unitId: sourceUnitId,
+      manifest: createManifest(),
+      source: 'viewer',
+    });
+    actor.send({
+      type: 'selectModelComponent',
+      unitId: sourceUnitId,
+      componentId: housingComponentId,
+      source: 'viewer',
+    });
+    expect(actor.getSnapshot().context.artifactKey).toBe('prior-model');
+
+    actor.send({ type: 'clearArtifact' });
+
+    const { context } = actor.getSnapshot();
+    expect(context.artifact).toBeUndefined();
+    expect(context.artifactKey).toBe('');
+    expect(context.gltfPresentation.phase).toBe('idle');
+    expect(context.gltfPresentation.requestedKey).toBeUndefined();
+    expect(context.gltfPresentation.presentedKey).toBeUndefined();
+    expect(context.modelInteractionUnitId).toBeUndefined();
+    expect(context.geometryRadius).toBe(0);
+    const interaction = getModelInteractionUnitState(context.modelInteractionRef.getSnapshot().context, sourceUnitId);
+    expect(interaction.manifest).toBeUndefined();
+    expect(interaction.selectedComponentIds).toEqual([]);
+    actor.stop();
+  });
+
   it('should forward model interaction events without storing Three objects in graphics context', () => {
     const providedMachine = graphicsMachine.provide({
       actors: {
@@ -195,12 +302,10 @@ describe('graphicsMachine model interaction', () => {
     actor.start();
 
     actor.send({
-      type: 'updateGeometry',
-      units: { length: 'mm' },
-      sourceFile: 'src/main.ts',
-      geometry: {
-        format: 'gltf',
-        hash: 'geometry-hash',
+      type: 'updateArtifact',
+      artifact: {
+        mimeType: 'model/gltf-binary',
+        units: { length: 'mm' },
         content: encodeJson({
           nodes: [{ name: 'Housing', mesh: 0, extras: { tauComponentId: housingComponentId } }],
           meshes: [{ primitives: [{ attributes: { [positionAttributeName]: 0 }, material: 0 }] }],
@@ -208,6 +313,8 @@ describe('graphicsMachine model interaction', () => {
           materials: [{ name: 'gray' }],
         }),
       },
+      sourceFile: 'src/main.ts',
+      hash: 'geometry-hash',
     });
 
     const sourceUnitId = deriveModelInteractionUnitId({ sourceFile: 'src/main.ts' });

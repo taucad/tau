@@ -38,6 +38,16 @@ const cameraViewEqual = (left: PersistedCameraView, right: PersistedCameraView):
 const sectionViewEqual = (left: PersistedSectionView, right: PersistedSectionView): boolean =>
   left.active === right.active && areSectionCutsEqual(left.cuts, right.cuts);
 const sameRecordField = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
+const activeCameraRecord = (record: WorkbenchView): WorkbenchView => {
+  const selected = record.selectedKernelView;
+  if (!selected) {
+    return record;
+  }
+  return {
+    ...record,
+    camera: record.kernelViews?.find((view) => view.id === selected)?.camera ?? { kind: 'preset', preset: 'isometric' },
+  };
+};
 
 /** A cut's values without its id, which is made anew at every load. */
 const toPersistedSectionCut = (cut: SectionCut): PersistedSectionCut =>
@@ -66,7 +76,6 @@ export function useViewSettingsSync({
   viewId,
   entryPath,
   graphicsRef,
-  cadRef,
   editorRef,
   record,
   recordReady,
@@ -115,7 +124,7 @@ export function useViewSettingsSync({
   const session = useViewCameraSession(graphicsRef);
   const cameraFovAngle = useSelector(session?.rig.actorRef, (s) => s?.context.view.requestedVerticalFieldOfView);
   /* A viewer that is not rendering glTF has no pose to persist, so it clears the stale one. */
-  const geometryFormat = useSelector(cadRef, (s) => s?.context.geometry?.format);
+  const artifactMimeType = useSelector(graphicsRef, (s) => s.context.artifact?.mimeType);
   const graphicsBackendPreference = useSelector(graphicsRef, (s) => s.context.graphicsBackendPreference);
 
   useEffect(() => {
@@ -140,9 +149,10 @@ export function useViewSettingsSync({
         onRecordApplied?.(record);
       }
     };
+    const cameraRecord = activeCameraRecord(record);
     const previous = appliedSessionRef.current === session ? appliedRecordRef.current : undefined;
     appliedSessionRef.current = session;
-    appliedRecordRef.current = record;
+    appliedRecordRef.current = cameraRecord;
     let sectionTimer: ReturnType<typeof setTimeout> | undefined;
     const { context } = graphicsRef.getSnapshot();
     const visibility = [
@@ -174,17 +184,18 @@ export function useViewSettingsSync({
     const needsCamera =
       Boolean(session) &&
       (!previous ||
-        !sameRecordField(previous.camera, record.camera) ||
+        !sameRecordField(previous.camera, cameraRecord.camera) ||
+        previous.selectedKernelView !== cameraRecord.selectedKernelView ||
         previous.fieldOfView !== record.fieldOfView ||
         Boolean(pendingCameraRecordRef.current));
     if (needsCamera) {
       if (session && !session.framing.initialized) {
         // oxlint-disable-next-line react/immutability -- The session framing record is mutable actor-owned state, not React state.
-        session.framing.pendingView = record.camera.kind === 'pose' ? record.camera : undefined;
+        session.framing.pendingView = cameraRecord.camera.kind === 'pose' ? cameraRecord.camera : undefined;
         // oxlint-disable-next-line react/immutability -- The first geometry frame consumes this actor-owned marker.
-        session.framing.preserveOrientationOnFirstFrame = record.camera.kind !== 'pose';
+        session.framing.preserveOrientationOnFirstFrame = cameraRecord.camera.kind !== 'pose';
       }
-      pendingCameraRecordRef.current = record;
+      pendingCameraRecordRef.current = cameraRecord;
       cameraAdoptionPendingRef.current = true;
     }
     if (!previous || !sameRecordField(previous.section, record.section) || pendingSectionRecordRef.current) {
@@ -294,7 +305,7 @@ export function useViewSettingsSync({
         if (!session) {
           return {};
         }
-        if (geometryFormat !== undefined && geometryFormat !== 'gltf') {
+        if (artifactMimeType !== undefined && artifactMimeType !== 'model/gltf-binary') {
           return { cameraFovAngle, cameraView: undefined };
         }
         if (!session.framing.initialized) {
@@ -361,6 +372,25 @@ export function useViewSettingsSync({
       }
 
       const base = record ?? workbenchRecords.view.schema.parse({ version: 1, entryPath });
+      const changedCamera: WorkbenchView['camera'] | undefined =
+        includePose &&
+        !cameraAdoptionPendingRef.current &&
+        camera.cameraView &&
+        !(adoptedPoseRef.current && cameraViewEqual(adoptedPoseRef.current, camera.cameraView)) &&
+        !(
+          firstFrameReceiptRef.current &&
+          !firstFrameReceiptRef.current.consumed &&
+          cameraViewEqual(firstFrameReceiptRef.current.view, camera.cameraView)
+        )
+          ? {
+              kind: 'pose',
+              ...camera.cameraView,
+              target: [...camera.cameraView.target] as [number, number, number],
+              direction: [...camera.cameraView.direction] as [number, number, number],
+              up: [...camera.cameraView.up] as [number, number, number],
+            }
+          : undefined;
+      const selected = base.selectedKernelView;
       const next: WorkbenchView = {
         ...base,
         entryPath,
@@ -389,24 +419,13 @@ export function useViewSettingsSync({
           distance,
           ...(name ? { name } : {}),
         })),
-        camera:
-          includePose &&
-          !cameraAdoptionPendingRef.current &&
-          camera.cameraView &&
-          !(adoptedPoseRef.current && cameraViewEqual(adoptedPoseRef.current, camera.cameraView)) &&
-          !(
-            firstFrameReceiptRef.current &&
-            !firstFrameReceiptRef.current.consumed &&
-            cameraViewEqual(firstFrameReceiptRef.current.view, camera.cameraView)
-          )
-            ? {
-                kind: 'pose',
-                ...camera.cameraView,
-                target: [...camera.cameraView.target],
-                direction: [...camera.cameraView.direction],
-                up: [...camera.cameraView.up],
-              }
-            : base.camera,
+        camera: !selected && changedCamera ? changedCamera : base.camera,
+        kernelViews:
+          selected && changedCamera
+            ? base.kernelViews?.some((view) => view.id === selected)
+              ? base.kernelViews.map((view) => (view.id === selected ? { ...view, camera: changedCamera } : view))
+              : [...(base.kernelViews ?? []), { id: selected, camera: changedCamera }]
+            : base.kernelViews,
       };
       void writeRecord(next);
     };
@@ -426,7 +445,7 @@ export function useViewSettingsSync({
     gridUnit,
     cameraFovAngle,
     session,
-    geometryFormat,
+    artifactMimeType,
     pinnedMeasurements,
     isSectionViewActive,
     record,

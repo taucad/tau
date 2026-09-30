@@ -20,8 +20,8 @@ export const panelMinSizeWorkbench = 360;
 /** Mobile drawer snap points for the projects interface */
 export const mobileDrawerSnapPoints: Array<number | string> = [0.7, 1];
 
-/** Default render timeout. Milliseconds. */
-export const defaultRenderTimeout = 180_000;
+/** Default runtime operation timeout. Milliseconds. */
+export const defaultOperationTimeout = 180_000;
 
 /** Existing mobile drawer surfaces; desktop utilities are Workbench tabs. */
 export const mobilePanelIds = [
@@ -123,8 +123,8 @@ export type PersistedSectionCut = SectionCutValues;
 
 /** Settings of one entry path; the workbench entries record is the durable owner. */
 export type PersistedUnitSettings = {
-  /** Render timeout. Milliseconds. */
-  renderTimeout: number;
+  /** Runtime operation timeout. Milliseconds. */
+  operationTimeout: number;
 };
 
 /**
@@ -150,7 +150,7 @@ export type GraphicsOwnedSettings = Pick<
 export type CameraOwnedSettings = Pick<GraphicsViewSettings, 'cameraFovAngle' | 'cameraView'>;
 
 /** Durable keys whose live owner is the entry path's `cadMachine`. */
-export type CadOwnedSettings = Pick<PersistedUnitSettings, 'renderTimeout'>;
+export type CadOwnedSettings = Pick<PersistedUnitSettings, 'operationTimeout'>;
 
 export function isComponentDisplayStateEmpty(
   componentDisplay: PersistedModelComponentDisplayState | undefined,

@@ -167,6 +167,7 @@ type ProjectEventInternal =
       settings?: GraphicsViewSettings;
     }
   | { type: 'destroyViewGraphics'; viewId: string }
+  | { type: 'reconcileViewManifest'; unitId: string }
   // Filesystem participant intents — fired by the
   // `file-operation-participants.ts` adapter on rename/delete events.
   // The participant is the single source of truth; UI components must
@@ -321,12 +322,36 @@ const createViewGraphics = ({ context, event }: ProjectArgs<'createViewGraphics'
   return { context: { viewGraphics } };
 };
 
+/** The project owns the shared manifest until its last presented GLB pane leaves. */
+const reconcileViewManifest = (
+  context: ProjectContext,
+  enq: ProjectEnqueue,
+  { unitId, excludedViewId }: Readonly<{ unitId: string; excludedViewId?: string }>,
+): void => {
+  for (const [viewId, graphics] of context.viewGraphics) {
+    if (viewId === excludedViewId) {
+      continue;
+    }
+    const view = graphics.getSnapshot().context;
+    if (view.artifact?.mimeType === 'model/gltf-binary' && view.modelInteractionUnitId === unitId) {
+      return;
+    }
+  }
+  enq.sendTo(context.modelInteractionRef, { type: 'clearManifest', unitId, source: 'viewer' });
+  enq.sendTo(context.modelInteractionRef, { type: 'clearSelection', unitId, source: 'viewer' });
+  enq.sendTo(context.modelInteractionRef, { type: 'clearFocus', unitId, source: 'viewer' });
+};
+
 const destroyViewGraphics = ({ context, event }: ProjectArgs<'destroyViewGraphics'>, enq: ProjectEnqueue) => {
   const gfx = context.viewGraphics.get(event.viewId);
   if (!gfx) {
     return {};
   }
   enq.stop(gfx);
+  const unitId = gfx.getSnapshot().context.modelInteractionUnitId;
+  if (unitId) {
+    reconcileViewManifest(context, enq, { unitId, excludedViewId: event.viewId });
+  }
   const viewGraphics = new Map(context.viewGraphics);
   viewGraphics.delete(event.viewId);
   return { context: { viewGraphics } };
@@ -511,6 +536,10 @@ export const projectMachine = setup({
         // are not silently dropped if a useEffect fires before loading starts.
         createViewGraphics,
         destroyViewGraphics,
+        reconcileViewManifest: ({ context, event }, enq) => {
+          reconcileViewManifest(context, enq, { unitId: event.unitId });
+          return {};
+        },
       },
     },
     loading: {
@@ -522,6 +551,10 @@ export const projectMachine = setup({
         // zero dependency on context.project or any loaded data.
         createViewGraphics,
         destroyViewGraphics,
+        reconcileViewManifest: ({ context, event }, enq) => {
+          reconcileViewManifest(context, enq, { unitId: event.unitId });
+          return {};
+        },
         projectRetrieved: {
           context: ({ event }) => ({ project: event.project, manifestIssue: event.issue, isLoading: false }),
         },
@@ -694,6 +727,10 @@ export const projectMachine = setup({
             },
             createViewGraphics,
             destroyViewGraphics,
+            reconcileViewManifest: ({ context, event }, enq) => {
+              reconcileViewManifest(context, enq, { unitId: event.unitId });
+              return {};
+            },
             // ─────────────────────────────────────────────────────────────
             // Filesystem-participant transitions
             //

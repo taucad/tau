@@ -1006,7 +1006,7 @@ export const graphicsMachine = setup({
           if (!context.artifact && !context.modelInteractionUnitId && context.artifactKey === '') {
             return {};
           }
-          if (context.modelInteractionUnitId) {
+          if (context.ownsModelInteractionRef && context.modelInteractionUnitId) {
             forwardToModelInteraction(context, enq, {
               type: 'clearManifest',
               unitId: context.modelInteractionUnitId,
@@ -1037,7 +1037,7 @@ export const graphicsMachine = setup({
           };
         },
         updateArtifact: ({ context, event }, enq) => {
-          if (event.artifact.mimeType !== 'model/gltf-binary') {
+          if (context.ownsModelInteractionRef && event.artifact.mimeType !== 'model/gltf-binary') {
             const incomingUnitId = event.sourceFile
               ? deriveModelInteractionUnitId({ sourceFile: event.sourceFile })
               : undefined;

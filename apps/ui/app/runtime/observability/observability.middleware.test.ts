@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockRuntime } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
+import type { EvaluateResult, RenderResult, WriteResult } from '@taucad/runtime/kernel';
+import type { KernelErrorResult } from '@taucad/runtime/types';
 import { IngestEntryName } from '@taucad/telemetry';
 import { observabilityMiddleware } from '#runtime/observability/observability.middleware.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
@@ -12,17 +14,17 @@ const reportUrl = 'https://api.test/ingest';
 const evaluateInput = { entryPath: 'main.ts', parameters: {}, options: {} };
 const renderInput = { view: 'model', mimeType: 'model/gltf-binary', options: {} };
 const writeInput = { exportId: 'step', mimeType: 'model/step', extension: 'step', options: {} };
-const evaluateResult = { success: true, data: { views: ['model'] }, issues: [] } as const;
-const renderResult = {
+const evaluateResult: EvaluateResult = { success: true, data: { views: ['model'] }, issues: [] };
+const renderResult: RenderResult = {
   success: true,
   data: { mimeType: 'model/gltf-binary', content: new Uint8Array([1, 2, 3]) },
   issues: [],
-} as const;
-const writeResult = {
+};
+const writeResult: WriteResult = {
   success: true,
   data: [{ name: 'output.step', bytes: new Uint8Array([1]), mimeType: 'model/step' }],
   issues: [],
-} as const;
+};
 const services = (url = reportUrl) => createMockRuntime({ options: { reportUrl: url } });
 
 const resolve = async () => resolveRuntimePluginDefinition('middleware', observabilityMiddleware());
@@ -107,14 +109,14 @@ describe('observabilityMiddleware', () => {
   it('records resolved failures without changing their issues or logging an exception', async () => {
     const middleware = await resolve();
     const runtime = services();
-    const failure = {
+    const failure: KernelErrorResult = {
       success: false,
-      issues: [{ code: 'TEST_FAILURE', message: 'invalid model', severity: 'error', type: 'kernel' }],
-    } as const;
+      issues: [{ code: 'GEOMETRY_INVALID', message: 'invalid model', severity: 'error', type: 'kernel' }],
+    };
     expect(await middleware.wrapEvaluate!(evaluateInput, async () => failure, runtime)).toBe(failure);
     expect(await middleware.wrapRender!(renderInput, async () => failure, runtime)).toBe(failure);
     expect(await middleware.wrapWrite!(writeInput, async () => failure, runtime)).toBe(failure);
-    expect(failure.issues[0].message).toBe('invalid model');
+    expect(failure.issues[0]?.message).toBe('invalid model');
     expect(measureSpy).toHaveBeenCalledWith(
       IngestEntryName.KERNEL_CREATE_GEOMETRY,
       expect.objectContaining({ detail: { status: 'error', phase: 'evaluate' } }),

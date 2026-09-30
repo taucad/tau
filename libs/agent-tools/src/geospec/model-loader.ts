@@ -69,21 +69,31 @@ export const createProjectModelLoader = (options: ProjectModelLoaderOptions): Pr
   let fatalModelLoadError: Error | undefined;
   const revisions = new Map<string, SourceRevision>();
 
-  /* R4/I5: every model this loader produces came out of one `runtime.export`, and that result
+  /* R4/I5: every model this loader produces came out of one document export, and that result
    * names the source it was computed from. Recording it here — rather than threading provenance
    * through GeoSpec's subject vocabulary — keeps the digests in the layer that owns the runtime.
-   * A proxy, not a rebuilt object: `export` is generic, and the rest of the client is the host's. */
+   * Proxies preserve the public generic document methods and the rest of the host client. */
   const runtime = new Proxy(options.runtime, {
     get(target, property, receiver: unknown): unknown {
-      if (property !== 'export') {
+      if (property !== 'open') {
         return Reflect.get(target, property, receiver) as unknown;
       }
-      return async (...args: Parameters<GeoSpecRuntimeClient['export']>) => {
-        const result = await target.export(...args);
-        if (result.sourceRevision) {
-          revisions.set(result.sourceRevision.entry, result.sourceRevision);
-        }
-        return result;
+      return (...args: Parameters<GeoSpecRuntimeClient['open']>) => {
+        const document = target.open(...args);
+        return new Proxy(document, {
+          get(owner, method, documentReceiver: unknown): unknown {
+            if (method !== 'export') {
+              return Reflect.get(owner, method, documentReceiver) as unknown;
+            }
+            return async (...exportArgs: Parameters<typeof owner.export>) => {
+              const result = await owner.export(...exportArgs);
+              if (result.sourceRevision) {
+                revisions.set(result.sourceRevision.entry, result.sourceRevision);
+              }
+              return result;
+            };
+          },
+        });
       };
     },
   });

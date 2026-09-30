@@ -209,6 +209,11 @@ export const shaderEvidence = {
       'fails deterministically when the exact Three revision',
       'apps/ui/app/components/geometry/graphics/three/materials/line2.material.test.ts::matches stable stripped WebGPU line2 node material JSON snapshot',
     ),
+    reference: [
+      'apps/ui/app/components/geometry/graphics/three/materials/line2.material.test.ts::should preserve native reversed depth without a fragment-depth rewrite',
+      'apps/ui/app/components/geometry/graphics/three/materials/line2.material.test.ts::emits geometric viewZToLogarithmicDepth',
+    ],
+    pixels: [`${graphicsBackendEndToEnd}::grid, axes and model shading display the same`],
     'gpu-whole-frame': [`${graphicsBackendEndToEnd}::records warmed whole-frame benchmark`],
   },
   'morphing-points': evidence(

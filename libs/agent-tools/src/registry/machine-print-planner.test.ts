@@ -125,11 +125,11 @@ const provider = {
 } as unknown as MachineProvider;
 
 const dependencies = () => ({
-  exportGeometry: vi.fn<MachinePrintPlannerDependencies['exportGeometry']>(async () => ({
+  exportModel: vi.fn<MachinePrintPlannerDependencies['exportModel']>(async () => ({
     isError: false,
     content: {
       success: true,
-      format: 'gcode.3mf',
+      to: 'gcode.3mf',
       files: [{ name: 'pyramid.gcode.3mf', artifactPath, mimeType: mediaType, byteLength: container.byteLength }],
     },
   })),
@@ -175,21 +175,21 @@ const current = (intent: Partial<PrintIntent>): PrintIntentFile => ({
   intent: { model: 'x1c', ...intent },
 });
 
-const sliced = (deps: Pick<ReturnType<typeof dependencies>, 'exportGeometry'>): JsonObject | undefined =>
-  deps.exportGeometry.mock.calls[0]![0].exportOptions;
+const sliced = (deps: Pick<ReturnType<typeof dependencies>, 'exportModel'>): JsonObject | undefined =>
+  deps.exportModel.mock.calls[0]![0].options;
 
 describe('machine print planner', () => {
   it('slices through the export route and qualifies the artifact, the expected setup and the summary', async () => {
     const deps = dependencies();
     const result = await plan(deps);
     const digest = `sha256:${await sha256Bytes(container)}`;
-    expect(deps.exportGeometry).toHaveBeenCalledTimes(1);
-    expect(deps.exportGeometry.mock.calls[0]![0]).toMatchObject({
+    expect(deps.exportModel).toHaveBeenCalledTimes(1);
+    expect(deps.exportModel.mock.calls[0]![0]).toMatchObject({
       toolCallId: 'call-1',
       targetFile: 'main.ts',
-      format: 'gcode.3mf',
+      to: 'gcode.3mf',
       /* The machine fixes plate, nozzle, filament and temperatures; the call adds none here. */
-      exportOptions: {
+      options: {
         plate: 'textured-pei',
         nozzleDiameter: 0.4,
         filamentDiameter: 1.75,
@@ -228,7 +228,7 @@ describe('machine print planner', () => {
     await expect(plan(refused, unreported, { plate: 'textured-plate' })).rejects.toThrow(
       'does not report its build plate',
     );
-    expect(refused.exportGeometry).not.toHaveBeenCalled();
+    expect(refused.exportModel).not.toHaveBeenCalled();
 
     const deps = dependencies();
     const result = await plan(deps, unreported, { plate: 'high-temperature' });
@@ -236,7 +236,7 @@ describe('machine print planner', () => {
       expectedBedType: 'high-temperature',
       operatorConfirmedBedType: 'high-temperature',
     });
-    expect(deps.exportGeometry.mock.calls[0]![0].exportOptions).toMatchObject({ plate: 'high-temperature' });
+    expect(deps.exportModel.mock.calls[0]![0].options).toMatchObject({ plate: 'high-temperature' });
   });
 
   it('drops a summary it cannot derive', async () => {
@@ -255,7 +255,7 @@ describe('machine print planner', () => {
     const orphaned = { ...dependencies(), machines: { listProviders: async () => [] } };
     await expect(plan(orphaned)).rejects.toThrow('No provider bambu backs Workshop X1C.');
     for (const deps of [empty, orphaned]) {
-      expect(deps.exportGeometry).not.toHaveBeenCalled();
+      expect(deps.exportModel).not.toHaveBeenCalled();
     }
   });
 
@@ -267,7 +267,7 @@ describe('machine print planner', () => {
       settings: { sparse_infill_density: '25%', wall_loops: 3 },
     });
     /* Bambu Studio's presets own temperatures, nozzle and filament: none of the reference options ride along. */
-    expect(deps.exportGeometry.mock.calls[0]![0].exportOptions).toEqual({
+    expect(deps.exportModel.mock.calls[0]![0].options).toEqual({
       engine: 'bambu-studio',
       bambuStudio: {
         process: '0.12mm Fine @BBL X1C',
@@ -289,7 +289,7 @@ describe('machine print planner', () => {
     const deps = withBambuStudio();
     const result = await plan(deps, unreported, { plate: 'high-temperature' });
     expect(result.configuration).toMatchObject({ operatorConfirmedBedType: 'high-temperature' });
-    expect(deps.exportGeometry.mock.calls[0]![0].exportOptions).toMatchObject({
+    expect(deps.exportModel.mock.calls[0]![0].options).toMatchObject({
       bambuStudio: { plate: 'high-temperature', hints: { plate: 'high-temperature' } },
     });
 
@@ -297,7 +297,7 @@ describe('machine print planner', () => {
     await expect(plan(refused, machine(loaded), { options: { walls: 3 } })).rejects.toThrow(
       'Bambu Studio slices for Workshop X1C, so options do not apply; set Bambu Studio settings instead, with keys from get_print_profiles.',
     );
-    expect(refused.exportGeometry).not.toHaveBeenCalled();
+    expect(refused.exportModel).not.toHaveBeenCalled();
   });
 
   it('refuses a reported plate Bambu Studio has no bed type for, before slicing', async () => {
@@ -305,7 +305,7 @@ describe('machine print planner', () => {
     await expect(plan(deps, machine({ ...loaded, bedType: 'smooth-pei' }), {})).rejects.toThrow(
       'Bambu Studio has no build plate "smooth-pei"; ask the person which plate is installed, then pass plate as one of cool, engineering, high-temperature, textured-pei.',
     );
-    expect(deps.exportGeometry).not.toHaveBeenCalled();
+    expect(deps.exportModel).not.toHaveBeenCalled();
   });
 
   it('falls back to the reference engine without Bambu Studio or for another vendor, refusing Bambu Studio fields', async () => {
@@ -314,7 +314,7 @@ describe('machine print planner', () => {
       machines: { listProviders: async () => [{ ...provider, vendor: 'Prusa Research' }] },
     };
     await plan(other);
-    expect(other.exportGeometry.mock.calls[0]![0].exportOptions).not.toHaveProperty('engine');
+    expect(other.exportModel.mock.calls[0]![0].options).not.toHaveProperty('engine');
 
     const refused = dependencies();
     await expect(plan(refused, machine(loaded), { settings: { wall_loops: 3 } })).rejects.toThrow(
@@ -323,7 +323,7 @@ describe('machine print planner', () => {
     await expect(
       plan(refused, machine(loaded), { profiles: { printer: 'Bambu Lab X1 Carbon 0.4 nozzle' } }),
     ).rejects.toThrow('profiles and settings do not apply');
-    expect(refused.exportGeometry).not.toHaveBeenCalled();
+    expect(refused.exportModel).not.toHaveBeenCalled();
   });
 
   it("names the container's producer and prefers the slicer's own time estimate", async () => {
@@ -479,7 +479,7 @@ describe('machine print planner', () => {
     it('should name the file when a slice it supplied values to fails', async () => {
       const deps = {
         ...withBambuStudio(),
-        exportGeometry: async () => ({
+        exportModel: async () => ({
           isError: true,
           content: { errorCode: 'EXPORT_FAILED', message: 'Bambu Studio has no process preset "0.12mm Old @BBL X1C".' },
         }),
@@ -516,8 +516,8 @@ describe('machine print planner', () => {
         .mockResolvedValueOnce(twoColour)
         .mockResolvedValue(resliced),
     });
-    const exported = (deps: Pick<ReturnType<typeof dependencies>, 'exportGeometry'>) =>
-      deps.exportGeometry.mock.calls.map(([call]) => call.exportOptions?.['bambuStudio']);
+    const exported = (deps: Pick<ReturnType<typeof dependencies>, 'exportModel'>) =>
+      deps.exportModel.mock.calls.map(([call]) => call.options?.['bambuStudio']);
 
     it("should map each colour to a tray of that colour, and re-slice with each tray's filament", async () => {
       const deps = slicing(withBambuStudio());
@@ -573,7 +573,7 @@ describe('machine print planner', () => {
         ],
         amsMapping: [0, 2],
       });
-      expect(deps.exportGeometry).toHaveBeenCalledTimes(1);
+      expect(deps.exportModel).toHaveBeenCalledTimes(1);
       expect(result.artifact.digest).toBe(`sha256:${await sha256Bytes(twoColour)}`);
     });
 
@@ -634,7 +634,7 @@ describe('machine print planner', () => {
         expectedMaterials: [{ slot: 2, materialId: 'PETG' }],
         amsMapping: [2],
       });
-      expect(deps.exportGeometry).toHaveBeenCalledTimes(1);
+      expect(deps.exportModel).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -666,11 +666,11 @@ describe('machine print planner', () => {
       details: { colors: ['#FF0000', '#0000FF'] },
     } as const;
     const deps = dependencies();
-    deps.exportGeometry.mockResolvedValueOnce({
+    deps.exportModel.mockResolvedValueOnce({
       isError: false,
       content: {
         success: true,
-        format: 'gcode.3mf',
+        to: 'gcode.3mf',
         files: [{ name: 'pyramid.gcode.3mf', artifactPath, mimeType: mediaType, byteLength: container.byteLength }],
         warnings: [warning],
       },
@@ -683,7 +683,7 @@ describe('machine print planner', () => {
   it('reports why the export refused instead of requesting nothing', async () => {
     const deps = {
       ...dependencies(),
-      exportGeometry: async () => ({
+      exportModel: async () => ({
         isError: true,
         content: { errorCode: 'KERNEL_ERROR', message: 'Kernel refused' },
       }),

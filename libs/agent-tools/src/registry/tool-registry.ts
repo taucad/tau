@@ -73,12 +73,12 @@ const rpcForTool: Readonly<
   [toolName.deleteFile]: { rpc: rpcName.deleteFile },
   [toolName.grep]: { rpc: rpcName.grep },
   [toolName.globSearch]: { rpc: rpcName.globSearch },
-  [toolName.getKernelResult]: {
-    rpc: rpcName.getKernelResult,
+  [toolName.evaluateModel]: {
+    rpc: rpcName.evaluateModel,
     needs: 'kernelClient',
   },
   /* Writes the export and its artifact record outside the workspace. */
-  [toolName.exportGeometry]: { rpc: rpcName.exportGeometry, needs: 'graphics', sequential: true },
+  [toolName.exportModel]: { rpc: rpcName.exportModel, needs: 'graphics', sequential: true },
   [toolName.screenshot]: { rpc: rpcName.captureImages, needs: 'images' },
   [toolName.testModel]: { rpc: rpcName.runGeoSpecTests, needs: 'geospec' },
   [toolName.useSkill]: { rpc: rpcName.resolveSkill, needs: 'skillResolver' },
@@ -106,7 +106,7 @@ const geospecAuthoringRecipes = {
  * `.tau/artifacts` and `.tau/chats` read-only, so these writes go through the
  * host's record filesystem; each handler fences its own target path.
  */
-const recordRpcNames = new Set<RpcName>([rpcName.exportGeometry, rpcName.writeTodos, rpcName.arrangeWorkbench]);
+const recordRpcNames = new Set<RpcName>([rpcName.exportModel, rpcName.writeTodos, rpcName.arrangeWorkbench]);
 
 /**
  * The verdict tools whose answers the gate checks.
@@ -116,7 +116,8 @@ const recordRpcNames = new Set<RpcName>([rpcName.exportGeometry, rpcName.writeTo
  * bytes the run has already replaced is not a geometry answer.
  */
 const verdictRpcNames = new Set<RpcName>([
-  rpcName.getKernelResult,
+  rpcName.evaluateModel,
+  rpcName.exportModel,
   rpcName.captureImages,
   rpcName.getParameters,
   rpcName.runGeoSpecTests,
@@ -212,12 +213,12 @@ const assertNotAborted = (signal?: AbortSignal): void => {
 };
 
 /**
- * `RpcDependencies.kernelClient` is not optional, but `get_kernel_result` is
+ * `RpcDependencies.kernelClient` is not optional, but `evaluate_model` is
  * unlisted without one and `invoke` refuses unlisted tools, so this is only
  * ever the dispatcher's placeholder.
  */
 const unattachedKernelClient: RpcRuntimeClient = {
-  async getKernelResult() {
+  async evaluateModel() {
     return {
       success: false,
       errorCode: rpcClientErrorCode.unknown,
@@ -235,16 +236,16 @@ export type ChatToolRegistryOptions = {
   readonly fileSystemFor: (signal: AbortSignal) => RpcFileSystem;
   /**
    * Host-owned record writer, used only for the records Tau writes on the
-   * agent's behalf: `export_geometry` artifacts under `.tau/artifacts` and the
+   * agent's behalf: `export_model` artifacts under `.tau/artifacts` and the
    * `update_todos` list at `.tau/chats/<chatId>/todo.yaml`, both read-only in
    * the agent's own view. Without it those writes go through `fileSystemFor`.
    */
   readonly recordFileSystemFor?: ((signal: AbortSignal) => RpcFileSystem) | undefined;
   /** Live project root for workbench records, including candidate runs. */
   readonly workbenchFileSystemFor?: ((signal: AbortSignal) => RpcFileSystem) | undefined;
-  /** Backs `get_kernel_result`. */
+  /** Backs `evaluate_model`. */
   readonly kernelClient?: RpcRuntimeClient | undefined;
-  /** Backs `export_geometry`. */
+  /** Backs `export_model`. */
   readonly graphics?: RpcGraphicsClient | undefined;
   /** Backs `screenshot`. */
   readonly images?: RpcImageClient | undefined;
@@ -261,7 +262,7 @@ export type ChatToolRegistryOptions = {
   /**
    * The host's part of printing: the `tau.json` id of the project the agent
    * works in, which names every print artifact, and a binary read of the
-   * recorded slice. The registry slices through its own `export_geometry`
+   * recorded slice. The registry slices through its own `export_model`
    * route, so `request_print` is offered only with these, a `graphics` client
    * and an available `machines` facet. A host that cannot name its project
    * omits this, and neither `request_print` nor `prepare_machine_print` is
@@ -334,12 +335,9 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
    *
    * @param invocation - The call, from the model or from this registry's own
    *   print planner.
-   * @param exportOptions - Transcoder options for `export_geometry`. Only the
-   *   print planner passes them, after `request_print` admitted them; model
-   *   input never carries them this far, since the tool schema strips them.
    * @returns The tool result.
    */
-  const invokeRpcTool = async (invocation: HostToolInvocation, exportOptions?: JsonObject): Promise<HostToolResult> => {
+  const invokeRpcTool = async (invocation: HostToolInvocation): Promise<HostToolResult> => {
     const entry = byName.get(invocation.toolName);
     const mapped = rpcForTool[invocation.toolName];
     if (!entry || !mapped) {
@@ -403,14 +401,12 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
           if (typeof parsed.data !== 'object' || parsed.data === null || Array.isArray(parsed.data)) {
             throw new TypeError('Tool input schema returned a non-object value');
           }
-          /* The trusted ID and options join after parsing; parsed model input
-           * cannot carry either, since the tool schema strips unknown keys. */
+          /* The trusted ID joins after parsing; model input cannot choose it. */
           const args =
-            mapped.rpc === rpcName.exportGeometry
+            mapped.rpc === rpcName.exportModel
               ? {
                   ...parsed.data,
                   toolCallId: invocation.toolCallId,
-                  ...(exportOptions === undefined ? {} : { exportOptions }),
                 }
               : parsed.data;
           // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- schema validation above pins the tool↔RPC input pair.
@@ -535,22 +531,23 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
         /* The agent's own view, the one its edits to the print intent go through. */
         fileSystemFor: options.fileSystemFor,
         planPrint:
-          print === undefined || !servable(rpcForTool[toolName.exportGeometry])
+          print === undefined || !servable(rpcForTool[toolName.exportModel])
             ? undefined
             : createMachinePrintPlanner({
                 ...print,
                 machines,
                 /* This registry's own route, so the slice is validated and recorded exactly as an export is. */
-                exportGeometry: async ({ exportOptions, ...input }) =>
-                  invokeRpcTool(
-                    {
-                      toolCallId: input.toolCallId,
-                      toolName: toolName.exportGeometry,
-                      input: { targetFile: input.targetFile, format: input.format },
-                      signal: input.signal,
+                exportModel: async (input) =>
+                  invokeRpcTool({
+                    toolCallId: input.toolCallId,
+                    toolName: toolName.exportModel,
+                    input: {
+                      targetFile: input.targetFile,
+                      to: input.to,
+                      ...(input.options === undefined ? {} : { options: input.options }),
                     },
-                    exportOptions,
-                  ),
+                    signal: input.signal,
+                  }),
               }),
       })
     : undefined;

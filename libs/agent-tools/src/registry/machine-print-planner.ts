@@ -1,5 +1,5 @@
 import type { HostToolResult, JsonObject } from '@taucad/agent-host';
-import { exportGeometryOutputSchema } from '@taucad/chat';
+import { exportModelOutputSchema } from '@taucad/chat';
 import type { KernelIssue } from '@taucad/runtime';
 import type {
   MachineArtifactReference,
@@ -127,17 +127,17 @@ export type MachinePrintPlannerDependencies = Readonly<{
    */
   bambuStudio?: Pick<BambuStudioEngine, 'findBambuStudio' | 'loadBambuStudioCatalog'> | undefined;
   /**
-   * The registry's own `export_geometry` route, which also carries the slicer
+   * The registry's own `export_model` route, which also carries the slicer
    * options the model-facing tool cannot. Going through it records the slice
    * under `.tau/artifacts` exactly as a person's export is recorded.
    */
-  exportGeometry(
+  exportModel(
     input: Readonly<{
       toolCallId: string;
       targetFile: string;
-      format: typeof printFormat;
+      to: typeof printFormat;
       /** The slicer options `request_print` admitted; the runtime validates them. */
-      exportOptions?: JsonObject | undefined;
+      options?: JsonObject | undefined;
       signal: AbortSignal;
     }>,
   ): Promise<HostToolResult>;
@@ -149,7 +149,7 @@ const exported = z.object({
   success: z.literal(true),
   files: z.array(z.object({ artifactPath: z.string().min(1), mimeType: z.string().min(1) })).min(1),
   /* What the slice could not honour although it was made, such as a model's colours printing as one. */
-  warnings: exportGeometryOutputSchema.shape.warnings,
+  warnings: exportModelOutputSchema.shape.warnings,
 });
 const failure = z.object({ message: z.string().min(1) });
 
@@ -353,11 +353,11 @@ const exportSlice = async (
   input: PlanInput,
   options: Readonly<{ exportOptions: JsonObject; printIntent: JsonObject | undefined }>,
 ): Promise<Slice> => {
-  const result = await deps.exportGeometry({
+  const result = await deps.exportModel({
     toolCallId: input.toolCallId,
     targetFile: input.targetFile,
-    format: printFormat,
-    exportOptions: options.exportOptions,
+    to: printFormat,
+    options: options.exportOptions,
     signal: input.signal,
   });
   const success = result.isError ? undefined : exported.safeParse(result.content).data;

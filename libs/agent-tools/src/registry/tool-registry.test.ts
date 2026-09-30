@@ -10,7 +10,6 @@ import type {
   RpcParameterClient,
   RpcRuntimeClient,
 } from '@taucad/chat/rpc';
-import { toRpcError } from '@taucad/chat/rpc';
 import type { JsonValue } from '@taucad/agent-host';
 import { toolDescriptions } from '@taucad/chat/constants';
 import { ResourceQueue } from '@taucad/filesystem';
@@ -21,8 +20,6 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createProviderRpcFileSystem } from '#registry/provider-file-system.js';
 import { createChatToolRegistry } from '#registry/tool-registry.js';
 import type { ChatToolRegistryOptions } from '#registry/tool-registry.js';
-import { createRuntimeAgentClients } from '#runtime/runtime-agent-clients.js';
-import type { RuntimeAgentClient } from '#runtime/runtime-agent-clients.js';
 
 const emptyFileSystem = (): RpcFileSystem => ({
   readFile: async () => 'export const main = 1;\n',
@@ -122,25 +119,25 @@ describe('createChatToolRegistry listing', () => {
       label: 'filesystem only',
       options: {},
       offered: [],
-      withheld: ['get_kernel_result', 'export_geometry', 'screenshot', 'test_model', 'use_skill'],
+      withheld: ['evaluate_model', 'export_model', 'screenshot', 'test_model', 'use_skill'],
     },
     {
       label: 'kernel client only',
-      options: { kernelClient: { getKernelResult: vi.fn() } },
-      offered: ['get_kernel_result'],
-      withheld: ['export_geometry', 'screenshot', 'test_model', 'use_skill'],
+      options: { kernelClient: { evaluateModel: vi.fn() } },
+      offered: ['evaluate_model'],
+      withheld: ['export_model', 'screenshot', 'test_model', 'use_skill'],
     },
     {
       label: 'graphics only',
-      options: { graphics: { exportGeometry: vi.fn() } },
-      offered: ['export_geometry'],
-      withheld: ['get_kernel_result', 'screenshot'],
+      options: { graphics: { exportModel: vi.fn() } },
+      offered: ['export_model'],
+      withheld: ['evaluate_model', 'screenshot'],
     },
     {
       label: 'images only',
       options: { images: { captureImages: vi.fn() } },
       offered: ['screenshot'],
-      withheld: ['export_geometry', 'get_kernel_result'],
+      withheld: ['export_model', 'evaluate_model'],
     },
     {
       label: 'geospec only',
@@ -176,8 +173,8 @@ describe('createChatToolRegistry listing', () => {
 
   it('lists the browser worker set when every client is attached', () => {
     const names = listOf({
-      kernelClient: { getKernelResult: vi.fn() },
-      graphics: { exportGeometry: vi.fn() },
+      kernelClient: { evaluateModel: vi.fn() },
+      graphics: { exportModel: vi.fn() },
       images: { captureImages: vi.fn() },
       geospec: { runTests: vi.fn() },
       skillResolver: { resolveSkill: vi.fn() },
@@ -188,8 +185,8 @@ describe('createChatToolRegistry listing', () => {
         'create_file',
         'delete_file',
         'edit_file',
-        'export_geometry',
-        'get_kernel_result',
+        'export_model',
+        'evaluate_model',
         'glob_search',
         'grep',
         'list_directory',
@@ -206,7 +203,7 @@ describe('createChatToolRegistry listing', () => {
    * workspace, runs its batch in call order; every other tool stays parallel. */
   it('should declare sequential execution only where one call spans more than one path', () => {
     const registry = build({
-      graphics: { exportGeometry: vi.fn() },
+      graphics: { exportModel: vi.fn() },
       parameters: { getParameters: vi.fn(), applyParameterOperation: vi.fn() },
     });
 
@@ -215,7 +212,7 @@ describe('createChatToolRegistry listing', () => {
       .filter((tool) => tool.executionMode === 'sequential')
       .map((tool) => tool.name);
 
-    expect(sequential.toSorted()).toStrictEqual(['apply_parameter_operation', 'export_geometry']);
+    expect(sequential.toSorted()).toStrictEqual(['apply_parameter_operation', 'export_model']);
   });
 
   /* Review a1 R15: the read-only history tool is listed exactly where a client
@@ -528,8 +525,10 @@ describe('createChatToolRegistry invocation', () => {
   });
 
   it('uses the trusted invocation ID for exported artifact paths', async () => {
-    const exportGeometry = vi.fn<RpcGraphicsClient['exportGeometry']>(async () => ({
+    const exportModel = vi.fn<RpcGraphicsClient['exportModel']>(async () => ({
       success: true,
+      exportId: 'mesh',
+      issues: [],
       files: [
         {
           name: 'model.stl',
@@ -538,13 +537,17 @@ describe('createChatToolRegistry invocation', () => {
         },
       ],
     }));
-    const result = await invoke(build({ graphics: { exportGeometry } }), 'export_geometry', {
+    const registry = build({ graphics: { exportModel } });
+    const spoofed = await invoke(registry, 'export_model', {
       input: {
         targetFile: 'main.ts',
-        format: 'stl',
+        to: 'stl',
         toolCallId: 'untrusted',
       },
     });
+    expect(spoofed).toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+    expect(exportModel).not.toHaveBeenCalled();
+    const result = await invoke(registry, 'export_model', { input: { targetFile: 'main.ts', to: 'stl' } });
 
     expect(result).toMatchObject({
       isError: false,
@@ -555,31 +558,18 @@ describe('createChatToolRegistry invocation', () => {
     });
   });
 
-  it('should drop the exportOptions a model adds to export_geometry before the runtime export', async () => {
-    const exportModel = vi.fn<RuntimeAgentClient['export']>(async () => ({
-      success: true,
-      data: [{ name: 'model.stl', mimeType: 'model/stl', bytes: new Uint8Array([1]) }],
-      issues: [],
-    }));
-    const { graphics } = createRuntimeAgentClients({
-      runtime: { evaluate: vi.fn<RuntimeAgentClient['evaluate']>(), export: exportModel },
-      exportImage: vi.fn(),
-      mapRuntimeError: (error) => toRpcError(error),
-    });
-
-    const result = await invoke(build({ graphics }), 'export_geometry', {
+  it('should reject obsolete private exportOptions before invoking the graphics client', async () => {
+    const exportModel = vi.fn<RpcGraphicsClient['exportModel']>();
+    const result = await invoke(build({ graphics: { exportModel } }), 'export_model', {
       input: {
         targetFile: 'main.ts',
-        format: 'stl',
+        to: 'stl',
         exportOptions: { engine: 'service', service: { url: 'https://slicer.example.com', token: 'stolen-token' } },
       },
     });
 
-    expect(result).toMatchObject({ isError: false, content: { success: true } });
-    expect(exportModel).toHaveBeenCalledExactlyOnceWith('stl', {
-      source: { path: 'main.ts' },
-      signal: expect.any(AbortSignal) as AbortSignal,
-    });
+    expect(result).toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+    expect(exportModel).not.toHaveBeenCalled();
   });
 
   it('persists export artifacts through the invocation record filesystem only', async () => {
@@ -587,18 +577,20 @@ describe('createChatToolRegistry invocation', () => {
       throw Object.assign(new Error('Agent records are read-only.'), { code: 'EROFS' });
     });
     const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
-    const exportGeometry = vi.fn<RpcGraphicsClient['exportGeometry']>(async () => ({
+    const exportModel = vi.fn<RpcGraphicsClient['exportModel']>(async () => ({
       success: true,
+      exportId: 'mesh',
+      issues: [],
       files: [{ name: 'model.stl', mimeType: 'model/stl', bytes: new Uint8Array([1]) }],
     }));
     const registry = build({
       fileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: agentWrite }),
       recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
-      graphics: { exportGeometry },
+      graphics: { exportModel },
     });
 
-    const result = await invoke(registry, 'export_geometry', {
-      input: { targetFile: 'main.ts', format: 'stl' },
+    const result = await invoke(registry, 'export_model', {
+      input: { targetFile: 'main.ts', to: 'stl' },
     });
 
     expect(result).toMatchObject({ isError: false, content: { success: true } });
@@ -804,7 +796,7 @@ describe('createChatToolRegistry invocation', () => {
    * still fails, which is the loop this programme exists to end. */
   it('names the kernel death instead of repeating the verdict it answered before it', async () => {
     let answered = false;
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () => {
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () => {
       if (answered) {
         throw Object.assign(new Error('RuntimeClient has been terminated.'), {
           code: 'RUNTIME_UNAVAILABLE',
@@ -824,13 +816,13 @@ describe('createChatToolRegistry invocation', () => {
         ],
       };
     });
-    const registry = build({ kernelClient: { getKernelResult } });
+    const registry = build({ kernelClient: { evaluateModel } });
 
-    await expect(invoke(registry, 'get_kernel_result', { input: { targetFile: 'main.ts' } })).resolves.toMatchObject({
+    await expect(invoke(registry, 'evaluate_model', { input: { targetFile: 'main.ts' } })).resolves.toMatchObject({
       isError: false,
       content: { status: 'error' },
     });
-    const afterDeath = await invoke(registry, 'get_kernel_result', { input: { targetFile: 'main.ts' } });
+    const afterDeath = await invoke(registry, 'evaluate_model', { input: { targetFile: 'main.ts' } });
 
     expect(afterDeath).toMatchObject({
       isError: true,
@@ -841,20 +833,23 @@ describe('createChatToolRegistry invocation', () => {
 
   it('forwards local cancellation context without serializing it into RPC input', async () => {
     const controller = new AbortController();
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () => ({
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () => ({
       success: true,
       status: 'ready',
       kernelIssues: [],
     }));
-    const result = await invoke(build({ kernelClient: { getKernelResult } }), 'get_kernel_result', {
+    const result = await invoke(build({ kernelClient: { evaluateModel } }), 'evaluate_model', {
       input: { targetFile: 'main.ts' },
       signal: controller.signal,
     });
 
     expect(result.isError).toBe(false);
-    expect(getKernelResult).toHaveBeenCalledExactlyOnceWith('main.ts', {
-      signal: controller.signal,
-    });
+    expect(evaluateModel).toHaveBeenCalledExactlyOnceWith(
+      { targetFile: 'main.ts' },
+      {
+        signal: controller.signal,
+      },
+    );
     expect(JSON.stringify(result.content)).not.toContain('signal');
   });
 
@@ -862,8 +857,8 @@ describe('createChatToolRegistry invocation', () => {
     const first = new AbortController();
     const second = new AbortController();
     const seenSignals: AbortSignal[] = [];
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(
-      async (targetFile: string, context?: RpcInvocationContext) => {
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(
+      async ({ targetFile }, context?: RpcInvocationContext) => {
         if (context?.signal) {
           seenSignals.push(context.signal);
         }
@@ -875,12 +870,12 @@ describe('createChatToolRegistry invocation', () => {
         return { success: true, status: 'ready', kernelIssues: [] };
       },
     );
-    const registry = build({ kernelClient: { getKernelResult } });
-    const interrupted = invoke(registry, 'get_kernel_result', {
+    const registry = build({ kernelClient: { evaluateModel } });
+    const interrupted = invoke(registry, 'evaluate_model', {
       input: { targetFile: 'a.ts' },
       signal: first.signal,
     });
-    const sibling = invoke(registry, 'get_kernel_result', {
+    const sibling = invoke(registry, 'evaluate_model', {
       input: { targetFile: 'b.ts' },
       signal: second.signal,
     });
@@ -935,57 +930,57 @@ describe('createChatToolRegistry freshness gate', () => {
       ],
       ...(sourceRevision === undefined ? {} : { sourceRevision }),
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a hand-built RPC result stands in for the runtime's.
-    }) as unknown as Awaited<ReturnType<RpcRuntimeClient['getKernelResult']>>;
+    }) as unknown as Awaited<ReturnType<RpcRuntimeClient['evaluateModel']>>;
 
   const writeThenAsk = async (
-    getKernelResult: RpcRuntimeClient['getKernelResult'],
+    evaluateModel: RpcRuntimeClient['evaluateModel'],
     content = 'repaired',
     outOfBand?: (store: Map<string, string>) => void,
   ): Promise<Awaited<ReturnType<ReturnType<typeof build>['invoke']>>> => {
     const store = new Map<string, string>();
-    const registry = build({ kernelClient: { getKernelResult }, fileSystemFor: () => storedFileSystem(store) });
+    const registry = build({ kernelClient: { evaluateModel }, fileSystemFor: () => storedFileSystem(store) });
     await invoke(registry, 'create_file', { input: { targetFile: 'main.ts', content } });
     outOfBand?.(store);
-    return invoke(registry, 'get_kernel_result', { input: { targetFile: 'main.ts' } });
+    return invoke(registry, 'evaluate_model', { input: { targetFile: 'main.ts' } });
   };
 
   /* F1: the write memory is per registry, so a person editing in the editor, a
    * peer run or a `git checkout` makes it name bytes nobody has. The verdict
    * that reads what is actually there is the fresh one. */
   it('accepts a verdict for bytes edited outside the tools, without asking twice', async () => {
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () =>
       kernelVerdict(closure(digestOf('edited in the editor'))),
     );
 
-    const verdict = await writeThenAsk(getKernelResult, 'repaired', (store) => {
+    const verdict = await writeThenAsk(evaluateModel, 'repaired', (store) => {
       store.set('main.ts', 'edited in the editor');
     });
 
-    expect(getKernelResult).toHaveBeenCalledOnce();
+    expect(evaluateModel).toHaveBeenCalledOnce();
     expect(verdict).toMatchObject({ isError: false, content: { status: 'error' } });
   });
 
   it('still refuses when the path the verdict answered for is gone', async () => {
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () =>
       kernelVerdict(closure(digestOf('broken'))),
     );
 
-    const verdict = await writeThenAsk(getKernelResult, 'repaired', (store) => {
+    const verdict = await writeThenAsk(evaluateModel, 'repaired', (store) => {
       store.delete('main.ts');
     });
 
-    expect(getKernelResult).toHaveBeenCalledTimes(2);
+    expect(evaluateModel).toHaveBeenCalledTimes(2);
     expect(verdict).toMatchObject({ isError: true, content: { errorCode: 'STALE_EVALUATION' } });
   });
 
   it('refuses a verdict that still answers for replaced bytes after one re-invocation', async () => {
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () =>
       kernelVerdict(closure(digestOf('broken'))),
     );
 
-    const verdict = await writeThenAsk(getKernelResult);
+    const verdict = await writeThenAsk(evaluateModel);
 
-    expect(getKernelResult).toHaveBeenCalledTimes(2);
+    expect(evaluateModel).toHaveBeenCalledTimes(2);
     expect(verdict).toMatchObject({
       isError: true,
       content: {
@@ -999,7 +994,7 @@ describe('createChatToolRegistry freshness gate', () => {
 
   it('returns the fresh verdict when the re-invocation answers for the written bytes', async () => {
     let asked = 0;
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () => {
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () => {
       asked += 1;
       return asked === 1
         ? kernelVerdict(closure(digestOf('broken')))
@@ -1009,43 +1004,43 @@ describe('createChatToolRegistry freshness gate', () => {
             status: 'ready',
             kernelIssues: [],
             sourceRevision: closure(digestOf('repaired')),
-          } as unknown as Awaited<ReturnType<RpcRuntimeClient['getKernelResult']>>);
+          } as unknown as Awaited<ReturnType<RpcRuntimeClient['evaluateModel']>>);
     });
 
-    const verdict = await writeThenAsk(getKernelResult);
+    const verdict = await writeThenAsk(evaluateModel);
 
-    expect(getKernelResult).toHaveBeenCalledTimes(2);
+    expect(evaluateModel).toHaveBeenCalledTimes(2);
     expect(verdict).toMatchObject({ isError: false, content: { status: 'ready' } });
   });
 
   it('passes an unproven verdict through untouched rather than calling it fresh', async () => {
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () => kernelVerdict());
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () => kernelVerdict());
 
-    const verdict = await writeThenAsk(getKernelResult);
+    const verdict = await writeThenAsk(evaluateModel);
 
-    expect(getKernelResult).toHaveBeenCalledOnce();
+    expect(evaluateModel).toHaveBeenCalledOnce();
     expect(verdict).toMatchObject({ isError: false, content: { status: 'error' } });
   });
 
   it('invokes once when the verdict names the digest the write left', async () => {
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () =>
       kernelVerdict(closure(digestOf('repaired'))),
     );
 
-    const verdict = await writeThenAsk(getKernelResult);
+    const verdict = await writeThenAsk(evaluateModel);
 
-    expect(getKernelResult).toHaveBeenCalledOnce();
+    expect(evaluateModel).toHaveBeenCalledOnce();
     expect(verdict).toMatchObject({ isError: false, content: { status: 'error' } });
   });
 
   it('ignores a closure that never read the written path', async () => {
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () =>
       kernelVerdict({ entry: 'other.ts', files: { 'other.ts': digestOf('unrelated') } }),
     );
 
-    const verdict = await writeThenAsk(getKernelResult);
+    const verdict = await writeThenAsk(evaluateModel);
 
-    expect(getKernelResult).toHaveBeenCalledOnce();
+    expect(evaluateModel).toHaveBeenCalledOnce();
     expect(verdict).toMatchObject({ isError: false });
   });
 

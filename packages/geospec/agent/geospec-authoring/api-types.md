@@ -1,6 +1,6 @@
 # geospec — Types
 
-275 top-level symbols. Signatures are verbatim typescript.
+273 top-level symbols. Signatures are verbatim typescript.
 
 // Stateful GeoSpec API created by {@link createGeoSpec}
 GeoSpec: {
@@ -8,12 +8,10 @@ GeoSpec: {
     analyzeMesh(options: AnalyzeMeshOptions): Promise<AnalyzeMeshResult>;
 }
 
-// Native subject identity accepted by the authored native assertion helper
-GeoSpecNativeAuthoringSubject: GeoSpecNativeSubject & ({
-    readonly contentHash: string;
-} | {
-    readonly subjectHash: string;
-})
+// A model admitted by one live GeoSpec host scope
+GeoSpecSubject: {
+    readonly [subjectBrand]: true;
+}
 
 // Geometry units accepted at GeoSpec evidence-loading boundaries
 GeoSpecUnit: 'mm' | 'cm' | 'm' | 'in' | 'ft' | (string & {})
@@ -31,7 +29,9 @@ GeoSpecAssertion: {
     /** Structured diagnostics from matcher evaluation. */
     diagnostics?: GeometryDiagnostic[];
     /** Exact native report, including core-owned bytes and polarity; present only on the opt-in path. */
-    nativeReport?: GeoSpecCanonicalClaimReport;
+    report?: GeoSpecCanonicalClaimReport;
+    /** The host load which admitted this assertion's subject; independent of equal geometry hashes. */
+    loadId?: string;
     /** Wall-clock cost of matcher evaluation in milliseconds (R1: budgeted matchers only). */
     durationMs?: number;
 }
@@ -167,6 +167,12 @@ GeoSpecGeometrySelector: GeoSpecComponentSelector | {
 
 // Assertion chain returned by `expectGeo(subject)`
 GeoSpecMatcher: {
+    /** Core-owned negation; missing or refused evidence still fails. */
+    readonly not: Omit<GeoSpecMatcher, 'not'>;
+    /** Assert the fixed rational plate contract. */
+    toSatisfyRationalPlate(): GeoSpecAssertion;
+    /** Assert the fixed parallel-plane distance contract. */
+    toSatisfyParallelPlaneDistance(): GeoSpecAssertion;
     /**
      * Assert axis-aligned bounds, size, or center for a loaded geometry subject.
      */
@@ -264,11 +270,6 @@ GeoSpecMatcher: {
      * from the declared spaces, and hold the minimum cross-section.
      */
     toHaveVoidContinuity(expected: GeoSpecVoidContinuityExpectation): GeoSpecAssertion;
-}
-
-// Native runner assertions are awaitable and also tracked when left unawaited
-GeoSpecNativeRunnerMatcher: GeoSpecNativeMatcherMethods<Promise<GeoSpecAssertion>> & {
-    readonly not: GeoSpecNativeMatcherMethods<Promise<GeoSpecAssertion>>;
 }
 
 // Mass expectation accepted by `expectGeo(...).toHaveMass(...)`
@@ -766,7 +767,7 @@ GeoSpecMatcherExpectedShape: 'first' | 'first-or-empty' | 'bounds' | 'true'
 GeoSpecMatcherMode: 'sync' | 'async'
 
 // Every matcher name exposed by `expectGeo(...)`
-GeoSpecMatcherName: keyof GeoSpecMatcher
+GeoSpecMatcherName: Exclude<keyof GeoSpecMatcher, 'not'>
 
 // Per-request or per-claim cancellation
 GeoSpecCancelRequest: {
@@ -944,7 +945,7 @@ GeoSpecEngineHostBindings: {
     loadMesh(options: LoadMeshOptions): Promise<LoadMeshResult>;
     analyzeMesh(options: LoadMeshOptions): Promise<AnalyzeMeshResult>;
     loadStep(options: LoadStepOptions): Promise<GeometrySubject>;
-    loadModel<Code extends Record<string, string> = Record<string, string>>(options: LoadModelOptions<Code>): Promise<GeometrySubject>;
+    loadModel<Code extends Record<string, string> = Record<string, string>>(options: LoadModelOptions<Code>): Promise<GeoSpecSubject>;
     createModelLoader(options: CreateModelLoaderOptions): ManagedGeoSpecModelLoader;
     createGeoSpecNodeRunner(options: GeoSpecNodeRunnerOptions): GeoSpecRunner;
     createGeoSpecNodePoolRunner(options: GeoSpecNodePoolRunnerOptions): GeoSpecRunner;
@@ -1306,6 +1307,10 @@ RuntimeExportIntentFailure: {
 
 // Defaults accepted by {@link import ('./load-model.js').createModelLoader}
 CreateModelLoaderOptions: {
+    /** Initialized compiled engine supplied by the host, never selected by an authored spec. */
+    engine?: GeoSpecNativeModelEngine;
+    /** Rooted host reader for direct filesystem or URL sources. */
+    readSource?: GeoSpecNativeSourceReader;
     /** Geometry format to export when an individual call does not specify one. */
     format?: GeoSpecModelFormat;
     /** Runtime client or lazy runtime factory. */
@@ -1328,7 +1333,7 @@ CreateModelLoaderOptions: {
 GeoSpecModelFormat: MeshFileFormat | 'step' | 'stp'
 
 // Function shape used by GeoSpec runners to provide model loading inside VM executed test files
-GeoSpecModelLoader: <Code extends Record<string, string> = Record<string, string>>(options: LoadModelOptions<Code>) => Promise<GeometrySubject>
+GeoSpecModelLoader: <Code extends Record<string, string> = Record<string, string>>(options: LoadModelOptions<Code>) => Promise<GeoSpecSubject>
 
 // A configured loader whose shared runtime can be released with its owner
 ManagedGeoSpecModelLoader: GeoSpecModelLoader & {
@@ -1423,6 +1428,11 @@ LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadMode
 LoadModelSourceOptions: {
     /** Geometry bytes, path, browser file/blob, or in-memory mesh buffer. */
     source: MeshSource | StepSource;
+    /** Named external resources consumed alongside the direct geometry bytes. */
+    resources?: ReadonlyArray<{
+        readonly name: string;
+        readonly source: MeshSource | StepSource;
+    }>;
     /** Source geometry format. Defaults to `glb`. */
     format?: GeoSpecModelFormat;
     /** Source path recorded in provenance. */
@@ -1501,7 +1511,7 @@ GeoSpecCollector: {
 
 // Native collector surface for hosts that explicitly supply a native engine
 GeoSpecNativeCollector: Omit<GeoSpecCollector, 'expectGeo'> & {
-    expectGeo(subject: GeoSpecNativeSubject): GeoSpecNativeRunnerMatcher;
+    expectGeo(subject: unknown): GeoSpecMatcher;
 }
 
 // Per-module collector configuration
@@ -1567,6 +1577,10 @@ GeoSpecRunFailure: {
     success: false;
     issues: VmIssue[];
     bundle?: BundleResult;
+    accounting?: GeoSpecTestAccounting;
+    lineage?: GeoSpecRunLineage;
+    /** Tests registered before a module execution failure, including their retained assertions. */
+    tests?: GeoSpecTestCase[];
 }
 
 // Result returned by {@link import ('./run-geospec-module.js').runGeoSpecModule}
@@ -1575,14 +1589,18 @@ GeoSpecRunResult: GeoSpecRunSuccess | GeoSpecRunFailure
 // Successful GeoSpec run result
 GeoSpecRunSuccess: {
     success: true;
-    /** True when every collected test passed or was skipped. */
+    /** True only when selected tests completed successfully with coherent available lineage. */
     passed: boolean;
     tests: GeoSpecTestCase[];
     bundle: BundleResult;
+    accounting?: GeoSpecTestAccounting;
+    lineage?: GeoSpecRunLineage;
 }
 
 // A collected GeoSpec test case
 GeoSpecTestCase: {
+    /** Registration ordinal before filtering, scoped to the source module's collection. */
+    ordinal?: number;
     /** Hierarchical suite path. */
     suite: string[];
     /** Test case name. */
@@ -1598,7 +1616,7 @@ GeoSpecTestCase: {
 }
 
 // Test case status after runner collection
-GeoSpecTestStatus: 'passed' | 'failed' | 'skipped'
+GeoSpecTestStatus: 'passed' | 'failed' | 'unsupported' | 'inconclusive' | 'not-run' | 'skipped'
 
 // Options for executing a GeoSpec ESM test module
 RunGeoSpecModuleOptions: {
@@ -1621,7 +1639,9 @@ RunGeoSpecModuleOptions: {
      */
     nativeAssertions?: GeoSpecAssertionClientOptions;
     /** Native identity loader exposed through `geospec/runner/native` for opt-in native runs. */
-    nativeModelLoader?: GeoSpecNativeModelLoader;
+    nativeModelLoader?: (options: Parameters<GeoSpecNativeModelLoader>[0]) => Promise<GeoSpecNativeSubject & {
+        readonly load?: GeoSpecModelLoadEvidence;
+    }>;
     /** Model loader exposed to VM tests through `geospec/model`. */
     modelLoader?: GeoSpecModelLoader;
     /** STEP loader exposed to VM tests through `geospec/step`. */
@@ -1695,6 +1715,8 @@ GeoSpecNativeModelLoader: <Code extends Record<string, string> = Record<string, 
 // Subject identity returned by native STEP/GLB admission
 GeoSpecNativeModelSubject: GeoSpecNativeSubject & {
     readonly subjectHash: string;
+    /** Exact successful-load evidence retained by the admitting host, when available. */
+    readonly load?: GeoSpecModelLoadEvidence;
 }
 
 // One named external resource referenced by a direct glTF-family source
@@ -1737,15 +1759,15 @@ GeoSpecNodeRunnerOptions: GeoSpecRunnerOptions & {
 GeoSpecNodePoolRunnerOptions: {
     /** Absolute project root path. */
     projectPath: string;
-    /** Worker count; omit for auto-sizing (`min(shards, cpus − 2, mem/3.5 GiB)`). */
+    /** Compiled worker count; defaults to one, within the caller-inclusive host cap. */
     workers?: number;
     /** Per-shard non-verdict watchdog override, milliseconds (R11). */
     shardTimeout?: number;
-    /** Enable the authenticated persistent evidence cache. Defaults to true. */
+    /** Persistent reference-engine evidence caching is unsupported; omit or use false. True is refused. */
     cache?: boolean;
-    /** Absolute out-of-tree evidence-cache directory used by every worker. */
+    /** Reference-engine cache directories are unsupported and refused when supplied. */
     cacheDirectory?: string;
-    /** Node module exporting the runtime factory every worker should use. */
+    /** Reference-engine runtime factories are unsupported and refused when supplied. */
     runtimeFactoryModule?: {
         /** Absolute URL or resolvable Node module specifier. */
         specifier: string;
@@ -1975,6 +1997,10 @@ GeoSpecRunnerResult: {
     issues?: VmIssue[];
     /** Wall-clock cost of the whole run, in milliseconds (R1). */
     durationMs?: number;
+    /** Complete requested-file accounting; discovery may remain unknown in unstarted or broken modules. */
+    accounting?: GeoSpecRunnerAccounting;
+    /** Coherence of the consumed source graphs, not a geometry verdict. */
+    lineageStatus?: 'complete' | 'unavailable' | 'mixed';
 }
 
 // Options accepted by a GeoSpec worker-style runner run
@@ -2537,13 +2563,14 @@ XdeSupplementalPlane: {
 
 // Runner-independent native assertion client
 GeoSpecAssertionClient: {
-    expectGeo(subject: GeoSpecNativeSubject): GeoSpecAssertionMatchers;
+    expectGeo(subject: GeoSpecNativeSubject | GeoSpecSubject): GeoSpecAssertionMatchers;
+    query(options: MinimumDistanceQuery): Promise<MinimumDistanceResult>;
     query(options: GeoSpecQueryOptions): Promise<GeoSpecCanonicalClaimReport>;
 }
 
 // Flat construction options for a runner-independent native assertion client
 GeoSpecAssertionClientOptions: {
-    readonly claimId?: (matcher: GeoSpecNativeMatcherName, sequence: number) => string;
+    readonly claimId?: (matcher: GeoSpecMatcherName, sequence: number) => string;
     readonly engine: GeoSpecNativeEngine;
     /** Success-evidence profile of every claim and query; omitted means `complete`. */
     readonly evidenceProfile?: GeoSpecNativeEvidenceProfile;
@@ -2552,8 +2579,8 @@ GeoSpecAssertionClientOptions: {
 }
 
 // Standalone native matcher chain, including core-owned negation
-GeoSpecAssertionMatchers: GeoSpecNativeMatcherMethods<Promise<GeoSpecCanonicalClaimReport>> & {
-    readonly not: GeoSpecNativeMatcherMethods<Promise<GeoSpecCanonicalClaimReport>>;
+GeoSpecAssertionMatchers: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport> & {
+    readonly not: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport>;
 }
 
 // One authored call shared by the collector and native assertion client
@@ -2566,25 +2593,10 @@ GeoSpecAuthoringInvocation: {
     readonly subject: unknown;
 }
 
-// Fixed-contract native authoring call with no user arguments
-GeoSpecFixedNativeAuthoringInvocation: {
-    readonly arguments: readonly never[];
-    readonly expected: true;
-    readonly matcher: GeoSpecFixedNativeMatcherName;
-    readonly polarity: GeoSpecClaimPolarity;
-    readonly subject: unknown;
-}
-
 // Matcher methods derived mechanically from the existing GeoSpec registry
 GeoSpecMatcherMethods: {
     [Name in GeoSpecMatcherName]: (...arguments_: Parameters<GeoSpecMatcher[Name]>) => Result;
 }
-
-// One authored call accepted by a native matcher client
-GeoSpecNativeAuthoringInvocation: GeoSpecAuthoringInvocation | GeoSpecFixedNativeAuthoringInvocation
-
-// Native matcher methods extend the legacy surface with fixed nullary calls
-GeoSpecNativeMatcherMethods: GeoSpecMatcherMethods<Result> & Record<GeoSpecFixedNativeMatcherName, () => Result>
 
 // One positive-only ancillary query
 GeoSpecQueryOptions: {
@@ -2594,14 +2606,54 @@ GeoSpecQueryOptions: {
     readonly subject: GeoSpecNativeSubject;
 }
 
+// Complete native minimum and ordered finite witnesses in canonical millimetres/Z-up
+MinimumDistanceFact: {
+    readonly source: 'ap242';
+    readonly assurance: 'exact-brep';
+    readonly unit: 'mm';
+    readonly coordinateSystem: 'z-up';
+    readonly subjectHash: string;
+    readonly algorithmProfile: 'geospec-minimum-distance-v1';
+    readonly occurrences: readonly [string, string];
+    readonly distance: number;
+    readonly points: readonly [readonly [number, number, number], readonly [number, number, number]];
+}
+
+// Complete AP242 minimum over two subject-bound occurrence paths
+MinimumDistanceQuery: {
+    readonly capability: 'minimumDistance';
+    readonly subject: GeoSpecNativeSubject;
+    readonly payload: {
+        readonly pair: readonly [{
+            readonly occurrencePath: string;
+        }, {
+            readonly occurrencePath: string;
+        }];
+    };
+}
+
+// Geometry refusal and infrastructure interruption never masquerade as facts
+MinimumDistanceResult: {
+    readonly status: 'complete';
+    readonly fact: MinimumDistanceFact;
+} | {
+    readonly status: 'refused';
+    readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit';
+    readonly message: string;
+} | {
+    readonly status: 'interrupted';
+    readonly code: 'cancelled' | 'executor-exited' | 'deadline' | 'engine-error';
+    readonly message: string;
+}
+
 // Flat native query transport options
 GeoSpecNativeQueryOptions: Omit<GeoSpecNativeClaimOptions, 'arguments' | 'capability' | 'kind' | 'polarity'> & {
-    readonly capability: GeoSpecQueryCapability;
+    readonly capability: GeoSpecQueryCapability | 'minimumDistance';
     readonly payload?: unknown;
 }
 
 // Existing positive-only ancillary operations owned by the native core
-GeoSpecQueryCapability: (typeof geoSpecQueryCapabilities)[number]
+GeoSpecQueryCapability: Exclude<(typeof geoSpecQueryCapabilities)[number], 'minimumDistance'>
 
 // Explicit support state for one source-attributed inventory field
 GeoSpecPmiField: {
@@ -2724,15 +2776,12 @@ GeoSpecNativeSubject: {
     readonly subjectHash?: string;
 }
 
-// A fixed-contract matcher available only through native clients
-GeoSpecFixedNativeMatcherDescriptor: {
+// A canonical fixed-contract matcher
+GeoSpecFixedMatcherDescriptor: {
     readonly contract: 'geospec.plate-two-windows/v1' | 'geospec.pmi.parallel-plane-distance/v1';
     readonly expected: 'true';
-    readonly mode: 'async';
+    readonly mode: 'sync';
 }
-
-// Every matcher name exposed by a native `expectGeo(...)` client
-GeoSpecNativeMatcherName: keyof typeof geoSpecNativeMatcherDescriptors
 
 // Installed Vitest matcher map and lifecycle settlement hook
 GeoSpecVitestAdapter: {

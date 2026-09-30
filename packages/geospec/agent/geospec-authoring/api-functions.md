@@ -1,6 +1,6 @@
 # geospec — Functions
 
-73 top-level symbols. Signatures are verbatim typescript.
+70 top-level symbols. Signatures are verbatim typescript.
 
 // Create a GeoSpec instance
 export declare function createGeoSpec(): GeoSpec;
@@ -9,12 +9,8 @@ export declare function createGeoSpec(): GeoSpec;
 (name: string, function_: GeoSpecTestCallback): void;
 
 // Start a geometry assertion chain
-export declare function expectGeo(subject: unknown): GeoSpecMatcher;
+export declare function expectGeo(subject: GeoSpecSubject): GeoSpecMatcher;
 //   subject: geometry subject under test
-
-// Start a native geometry assertion chain through an explicitly native collector
-export declare function expectNativeGeo(subject: GeoSpecNativeAuthoringSubject): GeoSpecNativeRunnerMatcher;
-//   subject: Content-addressed native subject under test
 
 // GeoSpec test helper used inside VM-executed test modules
 (name: string, function_: GeoSpecTestCallback): void;
@@ -93,7 +89,7 @@ export declare function expectNativeGeo(subject: GeoSpecNativeAuthoringSubject):
 //   defaults: Model loading defaults
 
 // Load a CAD model into GeoSpec evidence
-export declare function loadModel<Code extends Record<string, string> = Record<string, string>>(options: LoadModelOptions<Code>): Promise<GeometrySubject>;
+export declare function loadModel<Code extends Record<string, string> = Record<string, string>>(options: LoadModelOptions<Code>): Promise<GeoSpecSubject>;
 //   options: Source, code, or file model load options
 
 (options: {
@@ -166,10 +162,6 @@ export declare function runGeoSpecModule(options: RunGeoSpecModuleOptions): Prom
 // Create a native model loader that admits actual STEP/GLB bytes and retains generation-checked handles until the owning runner finishes
 (defaults: CreateGeoSpecNativeModelLoaderOptions) => ManagedGeoSpecNativeModelLoader
 //   defaults: Native engine, Runtime defaults, and optional source reader
-
-// Load a model through the active native runner VM binding
-export declare function loadNativeModel<Code extends Record<string, string> = Record<string, string>>(_options: GeoSpecNativeLoadModelOptions<Code>): Promise<GeoSpecNativeModelSubject>;
-//   _options: Native source or Runtime export request
 
 // Create a GeoSpec runner for Node.js and CLI environments
 (options: GeoSpecNodeRunnerOptions) => GeoSpecRunner
@@ -267,14 +259,6 @@ export declare function loadNativeModel<Code extends Record<string, string> = Re
     readonly subject: unknown;
 }) => GeoSpecMatcherMethods<Result>
 //   options: Subject, polarity and host invocation function
-
-// Create the native matcher surface from the legacy methods plus its fixed-contract extensions
-<Result>(options: {
-    readonly invoke: (invocation: GeoSpecNativeAuthoringInvocation) => Result;
-    readonly polarity: GeoSpecClaimPolarity;
-    readonly subject: unknown;
-}) => GeoSpecNativeMatcherMethods<Result>
-//   options: Subject, polarity and native invocation function
 
 // Submit an ancillary query with positive polarity through the native core
 (options: GeoSpecNativeQueryOptions) => GeoSpecCanonicalClaimReport

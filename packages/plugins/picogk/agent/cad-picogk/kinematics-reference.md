@@ -80,15 +80,15 @@ Use the as-built frame after any object/group transforms: origins are points, wh
 
 Coordinates are deltas from the rendered reference pose. Driver zero means Reset. If parameters already move geometry, recompute as-built origins/axes and shift limits accordingly. Finite, nonzero axes are normalized. Limits are inclusive and must contain the as-built coordinate (zero for drivers).
 
-| Joint `type` | Additional fields | Coordinate IDs |
-| --- | --- | --- |
-| `fixed` | None | None; rigid connection |
-| `revolute` | `axis`, optional `limits` | Joint key; angle |
-| `prismatic` | `axis`, optional `limits` | Joint key; distance |
-| `cylindrical` | `axis`, optional `limits: { angle?, distance? }` | `<joint>/angle`, `<joint>/distance` |
-| `screw` | `axis`, nonzero `lead`, `handedness: "right"` or `"left"`, optional `limits` | Joint key; angle; one turn advances by signed `lead` in length units |
-| `spherical` | Optional symmetric `limits` (`lower = -upper`) | `<joint>/x`, `<joint>/y`, `<joint>/z`; rotation-vector angles |
-| `planar` | `normal`, perpendicular `xAxis`, optional `limits: { x?, y?, angle? }` | `<joint>/x`, `<joint>/y`, `<joint>/angle` |
+| Joint `type`  | Additional fields                                                            | Coordinate IDs                                                       |
+| ------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `fixed`       | None                                                                         | None; rigid connection                                               |
+| `revolute`    | `axis`, optional `limits`                                                    | Joint key; angle                                                     |
+| `prismatic`   | `axis`, optional `limits`                                                    | Joint key; distance                                                  |
+| `cylindrical` | `axis`, optional `limits: { angle?, distance? }`                             | `<joint>/angle`, `<joint>/distance`                                  |
+| `screw`       | `axis`, nonzero `lead`, `handedness: "right"` or `"left"`, optional `limits` | Joint key; angle; one turn advances by signed `lead` in length units |
+| `spherical`   | Optional symmetric `limits` (`lower = -upper`)                               | `<joint>/x`, `<joint>/y`, `<joint>/z`; rotation-vector angles        |
+| `planar`      | `normal`, perpendicular `xAxis`, optional `limits: { x?, y?, angle? }`       | `<joint>/x`, `<joint>/y`, `<joint>/angle`                            |
 
 All joints have `parent`, `child`, `origin` and optional display `name`. A scalar limit is `{ lower, upper }`. Use one link for rigidly attached parts, or a fixed joint when a rigid hierarchy is useful. A fixed-only tree has no moving controls.
 

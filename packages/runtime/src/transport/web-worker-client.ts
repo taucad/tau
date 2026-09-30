@@ -14,7 +14,6 @@ import { createChannelClient } from '@taucad/rpc';
 import type { Channel, Port } from '@taucad/rpc';
 import { Topic } from '@taucad/events';
 import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
-import type { Geometry } from '@taucad/types';
 import type {
   RuntimeInitializeMemoryHandle,
   RuntimeInitializePayload,
@@ -26,17 +25,11 @@ import type { TransportDescriptor } from '#transport/runtime-transport-descripto
 import { runtimeChannelSessionKey } from '#transport/_internal/runtime-channel-bindings.js';
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
-import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
-import { materialiseBinaryContent, materialiseExportResult } from '#transport/_internal/export-materialiser.js';
+import { materialiseBinaryContent } from '#transport/_internal/export-materialiser.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
-import type {
-  BinaryContentDelivery,
-  GeometryTransport,
-  RuntimeExportResultTransport,
-  RuntimeInitializeResult,
-} from '#types/runtime-protocol.types.js';
+import type { BinaryContentDelivery, RuntimeInitializeResult } from '#types/runtime-protocol.types.js';
 import { allocatePools } from '#transport/_internal/sab-pools.js';
-import { reservePreview, signalDocumentAbort, triggerDocumentTimeout } from '#transport/_internal/abort-channel.js';
+import { signalDocumentAbort } from '#transport/_internal/abort-channel.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { webWorkerId } from '#transport/_internal/web-worker-id.js';
 import type { WebWorkerId } from '#transport/_internal/web-worker-id.js';
@@ -294,19 +287,11 @@ export const webWorkerClient = (
 
   return {
     id: webWorkerId,
-    reservePreview() {
-      return reservePreview(ensurePools().signalBuffer);
-    },
     signalDocumentAbort(evaluationId, generation, reason) {
       return signalDocumentAbort(ensurePools().signalBuffer, evaluationId, generation, reason);
     },
     renderTimeoutRecovery: {
       kind: 'terminable',
-      abortRender(target): void {
-        if (channel) {
-          triggerDocumentTimeout(channel, ensurePools().signalBuffer, target);
-        }
-      },
       async terminate(): Promise<void> {
         await finish({ cause: 'render-timeout' });
       },
@@ -354,18 +339,8 @@ export const webWorkerClient = (
         throw error;
       }
     },
-    async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {
-      return materialiseGeometry(transport, ensurePools().geometryPool, (key) => {
-        channel?.notify('binaryMaterialised', { key });
-      });
-    },
     async resolveBinary(transport: BinaryContentDelivery): Promise<Uint8Array<ArrayBuffer>> {
       return materialiseBinaryContent(transport, ensurePools().geometryPool, (key) => {
-        channel?.notify('binaryMaterialised', { key });
-      });
-    },
-    async resolveExport(transport: RuntimeExportResultTransport) {
-      return materialiseExportResult(transport, ensurePools().geometryPool, (key) => {
         channel?.notify('binaryMaterialised', { key });
       });
     },

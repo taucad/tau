@@ -78,8 +78,6 @@ export type {
   RuntimeFromTransport,
   RuntimeTransportClient,
   RuntimeTransportCloseResult,
-  RuntimeTransportPreviewReservation,
-  RuntimeTransportRenderTarget,
   RuntimeTransportTimeoutRecovery,
   RuntimeTransportHost,
   TransportClientReady,

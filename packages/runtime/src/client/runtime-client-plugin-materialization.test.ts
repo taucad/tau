@@ -11,7 +11,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { createRuntimeClient, RuntimeConnectionError } from '#client/runtime-client.js';
+import { createRuntimeClient } from '#client/runtime-client.js';
 import type { RuntimeClientOptionsWithTransport } from '#client/runtime-client.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
@@ -165,7 +165,7 @@ describe('RuntimeClient TransportPlugin materialization', () => {
     client.terminate();
   });
 
-  it('rejects invalid runtime config during connect with a runtime-config cause', async () => {
+  it('rejects invalid runtime config during connect with its runtime error code', async () => {
     const createRuntime = vi.fn(() => ({}));
     const runtime = defineRuntime({
       configSchema: z.object({ endpoint: z.url() }),
@@ -177,17 +177,16 @@ describe('RuntimeClient TransportPlugin materialization', () => {
     });
 
     const error = await client.connect().catch((error: unknown) => error);
-    expect(error).toBeInstanceOf(RuntimeConnectionError);
-    if (!(error instanceof RuntimeConnectionError)) {
-      throw new Error('Expected RuntimeConnectionError');
+    expect(error).toMatchObject({ code: 'RUNTIME_CONFIG_INVALID' });
+    if (!(error instanceof Error)) {
+      throw new Error('Expected a runtime configuration error');
     }
-    expect(error.causeKind).toBe('runtime-config');
     expect(error.message).toContain('endpoint');
     expect(createRuntime).not.toHaveBeenCalled();
     client.terminate();
   });
 
-  it('classifies rejected client config providers as runtime-config failures', async () => {
+  it('preserves rejected client config provider errors', async () => {
     const runtime = defineRuntime({
       configSchema: z.object({ endpoint: z.url() }),
       createRuntime: vi.fn(() => ({})),
@@ -200,11 +199,9 @@ describe('RuntimeClient TransportPlugin materialization', () => {
     });
 
     const error = await client.connect().catch((error: unknown) => error);
-    expect(error).toBeInstanceOf(RuntimeConnectionError);
-    if (!(error instanceof RuntimeConnectionError)) {
-      throw new Error('Expected RuntimeConnectionError');
+    if (!(error instanceof Error)) {
+      throw new Error('Expected the config provider rejection');
     }
-    expect(error.causeKind).toBe('runtime-config');
     expect(error.message).toBe('config loader unavailable');
     client.terminate();
   });

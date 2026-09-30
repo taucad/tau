@@ -33,6 +33,58 @@ const parameters = {
 } as const;
 
 describe('v2 kernel boundary with the current client', () => {
+  it('delivers a failed view when evaluation has no source revision', async () => {
+    const kernel = defineKernelV2({
+      id: 'unavailable-source',
+      extensions: ['circuit'] as const,
+      name: 'Unavailable source',
+      version: '1.0.0',
+      views: { model: { title: 'Model', mimeType: 'image/svg+xml' } },
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve() {
+        throw new Error('Bridge proxy closed');
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        return { handle: {}, views: ['model'] as const, exports: [] as const };
+      },
+      async render() {
+        return { content: '<svg xmlns="http://www.w3.org/2000/svg"/>' };
+      },
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+    worker.onRendered = (event) => {
+      rendered.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 0,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      worker.handleOpenView({ documentId: 'doc', subscriptionId: 'view', requestId: 'request', view: 'model' });
+      await vi.waitFor(() => {
+        expect(rendered).toHaveLength(1);
+      });
+      expect(rendered[0]?.success).toBe(false);
+      expect(Object.hasOwn(rendered[0] ?? {}, 'sourceRevision')).toBe(false);
+      const decoded = msgpackCodec.decode(msgpackCodec.encode(rendered[0]));
+      expect(runtimeDocumentProtocolSchemas.notifies.rendered.safeParse(decoded).success).toBe(true);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
   it('retains missing optional dependencies as wire revision tokens', () => {
     const path = '.tau/parameters/model.circuit.json';
     expect(sourceRevisionFileDigest('missing', path)).toBe('missing');
@@ -118,7 +170,7 @@ describe('v2 kernel boundary with the current client', () => {
           handle: {},
           views: ['__proto__', 'constructor'] as const,
           exports: [] as const,
-          instances: Object.fromEntries([['__proto__', [{ id: 'part', title: 'Part' }]]]),
+          instances: { ['__proto__']: [{ id: 'part', title: 'Part' }], constructor: undefined },
         };
       },
       async render() {
@@ -1056,11 +1108,16 @@ describe('v2 kernel boundary with the current client', () => {
   it('settles a pinned export from a failed evaluation without borrowing a newer success', async () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
-    const write = vi.fn(async ({ handle }: { handle: { version: number } }) => ({
-      files: [
-        { name: 'bom.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode(String(handle.version)) },
-      ] as const,
-    }));
+    const write = vi.fn(async ({ handle }: { handle: unknown }) => {
+      if (!handle || typeof handle !== 'object' || !('version' in handle) || typeof handle.version !== 'number') {
+        throw new Error('Expected the pinned evaluation handle.');
+      }
+      return {
+        files: [
+          { name: 'bom.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode(String(handle.version)) },
+        ] as const,
+      };
+    });
     const kernel = defineKernelV2({
       id: 'failed-export-pin',
       extensions: ['circuit'] as const,

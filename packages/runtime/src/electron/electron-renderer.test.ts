@@ -200,7 +200,7 @@ describe('Electron renderer runtime helpers', () => {
     const provider = createElectronClientOptions({
       bridge,
       context: { projectRoot: '/projects/a' },
-      renderTimeout: 1234,
+      operationTimeout: 1234,
       target,
     });
     const options = await provider();
@@ -214,7 +214,7 @@ describe('Electron renderer runtime helpers', () => {
     ]);
     expect(requestRuntimePort.mock.calls[0]?.[0]).not.toBe(requestRuntimePort.mock.calls[1]?.[0]);
     expect(options.transport).not.toBe(nextOptions.transport);
-    expect(options.renderTimeout).toBe(1234);
+    expect(options.operationTimeout).toBe(1234);
     expect(options.transport.id).toBe('electron-utility');
     expect(options.transport.describe()).toMatchObject({
       fileSystem: 'host-local',
@@ -350,25 +350,12 @@ describe('Electron renderer runtime helpers', () => {
     }
   });
 
-  it('materialises inline export bytes on the copy-only Electron transport', async () => {
+  it('materialises inline binary bytes on the copy-only Electron transport', async () => {
     const client = electronUtilityTransport({ port: new MessageChannel().port1 }).materialize();
 
-    await expect(
-      client.resolveExport?.({
-        data: [
-          {
-            bytes: { bytes: new Uint8Array([1, 2, 3]), delivery: 'inline' },
-            mimeType: 'application/step',
-            name: 'model.step',
-          },
-        ],
-        issues: [],
-        success: true,
-      }),
-    ).resolves.toMatchObject({
-      data: [{ bytes: new Uint8Array([1, 2, 3]), mimeType: 'application/step', name: 'model.step' }],
-      success: true,
-    });
+    await expect(client.resolveBinary({ bytes: new Uint8Array([1, 2, 3]), delivery: 'inline' })).resolves.toEqual(
+      new Uint8Array([1, 2, 3]),
+    );
 
     await client.close();
   });

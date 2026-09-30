@@ -19,18 +19,12 @@
 import { createChannelClient, wrapMessagePort, wrapWebSocket } from '@taucad/rpc';
 import type { Channel, Port, WebSocketLike } from '@taucad/rpc';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
-import type { Geometry } from '@taucad/types';
 import type { MachineChannelClient } from '#machines/machine-channel.js';
 import type { MachineClient } from '#machines/machine-client.js';
 
 import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
-import type {
-  BinaryContentDelivery,
-  GeometryTransport,
-  RuntimeExportResultTransport,
-  RuntimeInitializeResult,
-} from '#types/runtime-protocol.types.js';
+import type { BinaryContentDelivery, RuntimeInitializeResult } from '#types/runtime-protocol.types.js';
 import type {
   RuntimeInitializeMemoryHandle,
   RuntimeInitializePayload,
@@ -41,9 +35,7 @@ import type {
 } from '#transport/runtime-transport.types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
-import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
-import { materialiseBinaryContent, materialiseExportResult } from '#transport/_internal/export-materialiser.js';
-import { triggerDocumentTimeout } from '#transport/_internal/abort-channel.js';
+import { materialiseBinaryContent } from '#transport/_internal/export-materialiser.js';
 import { runtimeChannelSessionKey } from '#transport/_internal/runtime-channel-bindings.js';
 import {
   buildSocketUrl,
@@ -343,21 +335,11 @@ export const webSocketClient = (
   return {
     id: webSocketId,
     machines,
-    reservePreview() {
-      return {};
-    },
     signalDocumentAbort() {
       return false;
     },
     renderTimeoutRecovery: {
       kind: 'terminable',
-      abortRender(target): void {
-        if (!channel) {
-          return;
-        }
-        /* No SAB across a socket — wire notify only. */
-        triggerDocumentTimeout(channel, undefined, target);
-      },
       async terminate(): Promise<void> {
         await finish({ cause: 'render-timeout' });
       },
@@ -380,14 +362,8 @@ export const webSocketClient = (
       };
       return channel.call('initialize', { ...input, memoryHandle });
     },
-    async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {
-      return materialiseGeometry(transport, undefined);
-    },
     async resolveBinary(transport: BinaryContentDelivery): Promise<Uint8Array<ArrayBuffer>> {
       return materialiseBinaryContent(transport, undefined);
-    },
-    async resolveExport(transport: RuntimeExportResultTransport) {
-      return materialiseExportResult(transport, undefined);
     },
     async close(): Promise<void> {
       await finish({ cause: 'requested' });

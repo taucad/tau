@@ -5,15 +5,14 @@
  *
  * - {@link TransportPlugin} — consumer-facing registration returned by calling
  *   bundled transports (`webWorkerTransport(opts)`, `inProcessTransport(opts)`).
- * - {@link RuntimeTransportClient} — fat consumer-facing handle. Owns SAB
- *   cancellation reservations, geometry pool, FS bridge, and timeout recovery.
- *   Exposes `open` / `initialize` / `reservePreview` / `resolveGeometry` /
- *   `close` / `closed`.
+ * - {@link RuntimeTransportClient} — consumer-facing handle. Owns SAB
+ *   cancellation, binary pool, FS bridge, and timeout recovery.
+ *   Exposes `open` / `initialize` / `resolveBinary` / `close` / `closed`.
  * - {@link RuntimeTransportHost} — fat kernel-host-facing handle. Owns wire
  *   encoding tiers. Exposes `open` / `adoptInitialize` / `encodeGeometry`
  *   / `close` / `closed`.
  *
- * The runtime core (`createRuntimeClient` + `RuntimeWorkerClient` +
+ * The runtime core (`createRuntimeClient` + document session +
  * `createRuntimeHost` + dispatcher) calls these methods only. It never
  * sees `MessagePort`, `SharedArrayBuffer`, transferables, or
  * `port.capabilities`.
@@ -24,14 +23,11 @@
 import type { Channel, ChannelServerHandle, RpcProtocol } from '@taucad/rpc';
 import type { Geometry } from '@taucad/types';
 import type { MachineClient } from '#machines/machine-client.js';
-import type { ExportGeometryResult } from '#types/runtime.types.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type {
   GeometryGltfTransport,
-  GeometryTransport,
   BinaryContentDelivery,
-  RuntimeExportResultTransport,
   InitializeMemoryHandle,
   RuntimeInitializeArgs,
   RuntimeInitializeResult,
@@ -39,33 +35,9 @@ import type {
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 
 /**
- * Opaque transport reservation captured synchronously for one preview.
- * Transport authors return it from {@link RuntimeTransportClient.reservePreview};
- * runtime code combines it with the render identity owned by
- * `RuntimeWorkerClient` and forwards it unchanged with that admission.
- *
- * @public
- */
-export type RuntimeTransportPreviewReservation = {
-  /** Opaque cooperative-abort generation. Transport authors must forward it unchanged. */
-  readonly abortGeneration?: number;
-};
-
-/**
- * Exact render target supplied to timeout recovery. Both fields are opaque to
- * transport authors: forward them unchanged and never infer ordering from them.
- *
- * @public
- */
-export type RuntimeTransportRenderTarget = RuntimeTransportPreviewReservation & {
-  /** Opaque render identity. Transport authors must not derive semantics from this value. */
-  readonly renderId: string;
-};
-
-/**
  * Behavioral wall-clock timeout capability supplied by a transport.
  *
- * Isolated transports abort exactly the supplied target and can terminate the
+ * Isolated transports can terminate the
  * host if it does not acknowledge cancellation. Same-isolate transports report
  * `unsupported` because their deadline timer cannot run while synchronous work
  * blocks the same event loop.
@@ -75,14 +47,6 @@ export type RuntimeTransportRenderTarget = RuntimeTransportPreviewReservation & 
 export type RuntimeTransportTimeoutRecovery =
   | {
       readonly kind: 'terminable';
-      /**
-       * Signal timeout cancellation for exactly the supplied render. This is
-       * cooperative and must not affect a successor with another `renderId`.
-       *
-       * @param target - Opaque render target captured at preview admission.
-       * @returns Nothing.
-       */
-      abortRender(target: RuntimeTransportRenderTarget): void;
       /**
        * Terminate this client's isolated host and settle `closed` as
        * `{ cause: 'render-timeout' }`.
@@ -342,15 +306,6 @@ export type RuntimeTransportClient<
    */
   readonly [__transportBindingsExtra]?: BindingsExtra;
 
-  /**
-   * Reserve any transport-owned cooperative-abort state for one preview before
-   * asynchronous staging or wire work begins. Each call returns a distinct
-   * reservation; transports without a numeric generation return `{}`.
-   *
-   * @returns Opaque reservation to forward with exactly one preview admission.
-   */
-  reservePreview(): RuntimeTransportPreviewReservation;
-
   /** Atomically signal a still-current native document operation. @internal */
   signalDocumentAbort(evaluationId: string, expectedGeneration: number | undefined, reason: 1 | 2): boolean;
 
@@ -376,18 +331,8 @@ export type RuntimeTransportClient<
    */
   initialize(input: RuntimeInitializePayload): Promise<RuntimeInitializeResult>;
 
-  /**
-   * Materialise an {@link GeometryTransport} payload received
-   * off the wire back into a usable `Geometry`. The transport owns
-   * the pool wiring; the consumer never sees `SharedArrayBuffer`.
-   */
-  resolveGeometry(transport: GeometryTransport): Promise<Geometry>;
-
   /** Copy one inline or pooled binary payload, acknowledging pooled ownership. */
   resolveBinary(transport: BinaryContentDelivery): Promise<Uint8Array<ArrayBuffer>>;
-
-  /** Materialise pooled/inline export files into owned consumer bytes. */
-  resolveExport?(transport: RuntimeExportResultTransport): Promise<ExportGeometryResult>;
 
   /**
    * Close the wire, terminate the host. After `close()` resolves the

@@ -34,6 +34,7 @@ import { RuntimeDocumentSessionClient } from '#client/runtime-document-session.j
 import { RuntimeTerminatedError } from '#client/runtime-terminated-error.js';
 import { openDeferredDocument } from '#client/runtime-document-deferred.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
+import { validateProtocolHeader } from '#types/protocol-header.types.js';
 import type {
   CapabilitiesManifest,
   ExportRoute,
@@ -51,20 +52,20 @@ import { renderTimeoutRecoveryGrace } from '#framework/runtime-framework.constan
 type AnyTransportPlugin = TransportPlugin<RuntimeDocumentProtocol, any, any, any>;
 type TransportId<T> = T extends TransportPlugin<any, any, infer Id, any> ? Id : string;
 type ClientKernels<R> = [AnyRuntimeDefinition] extends [R]
-  ? KernelPlugin[]
+  ? readonly KernelPlugin[]
   : RuntimeKernels<R> extends readonly KernelPlugin[]
     ? RuntimeKernels<R>
-    : KernelPlugin[];
+    : readonly KernelPlugin[];
 type ClientMiddleware<R> = [AnyRuntimeDefinition] extends [R]
-  ? MiddlewarePlugin[]
+  ? readonly MiddlewarePlugin[]
   : RuntimeMiddleware<R> extends readonly MiddlewarePlugin[]
     ? RuntimeMiddleware<R>
-    : MiddlewarePlugin[];
+    : readonly MiddlewarePlugin[];
 type ClientTranscoders<R> = [AnyRuntimeDefinition] extends [R]
-  ? TranscoderPlugin[]
+  ? readonly TranscoderPlugin[]
   : RuntimeTranscoders<R> extends readonly TranscoderPlugin[]
     ? RuntimeTranscoders<R>
-    : TranscoderPlugin[];
+    : readonly TranscoderPlugin[];
 type RuntimeTranscodeInput<Transcoders extends readonly TranscoderPlugin[]> =
   CollectTranscodeRoutes<Transcoders> extends infer Route
     ? Route extends { readonly from: infer From; readonly to: infer To; readonly options: infer Options }
@@ -228,6 +229,9 @@ export function createRuntimeClient(options: {
   readonly operationTimeout?: number;
   readonly config?: unknown;
 }): RuntimeClient {
+  if (!Object.hasOwn(options, 'transport')) {
+    throw new TypeError('createRuntimeClient: `transport` is required.');
+  }
   const transport: RuntimeTransportClient = options.transport.materialize();
   const machines: RuntimeTransportFacet<MachineClient> = transport.machines ?? {
     available: false,
@@ -310,11 +314,16 @@ export function createRuntimeClient(options: {
       if (currentLifecycle() === 'terminated') {
         throw new RuntimeTerminatedError();
       }
+      const { channel } = await transport.open();
+      await channel.ready;
+      validateProtocolHeader({ v: channel.hello.payload.protocolVersion });
+      if (currentLifecycle() === 'terminated') {
+        throw new RuntimeTerminatedError();
+      }
       const initialized = await transport.initialize(config === undefined ? {} : { config });
       if (currentLifecycle() === 'terminated') {
         throw new RuntimeTerminatedError();
       }
-      const { channel } = await transport.open();
       capabilities = initialized.capabilities;
       topics.capabilities.emit(capabilities);
       channel.onNotify('stateChanged', ({ state }) => {

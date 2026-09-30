@@ -40,8 +40,8 @@ const file = z.object({ path: z.string(), filename: id });
 const stage = z.record(rootedFile, z.instanceof(Uint8Array));
 const provenance = { sourceRevision: runtimeSourceRevisionSchema.optional() };
 const binary = z.discriminatedUnion('delivery', [
-  z.object({ delivery: z.literal('inline'), bytes: z.instanceof(Uint8Array) }).strict(),
-  z.object({ delivery: z.literal('pooled'), key: id }).strict(),
+  z.object({ delivery: z.literal('inline'), bytes: z.instanceof(Uint8Array) }).strip(),
+  z.object({ delivery: z.literal('pooled'), key: id }).strip(),
 ]);
 const mediaType = z.string().trim().min(1);
 const options = z
@@ -49,8 +49,8 @@ const options = z
     schema: z.custom<JSONSchema7>(isJsonSchema),
     defaults: z.record(z.string(), z.custom<unknown>(isWireJson)),
   })
-  .strict();
-const instance = z.object({ id, title: z.string() }).strict();
+  .strip();
+const instance = z.object({ id, title: z.string() }).strip();
 const viewOffer = z
   .object({
     id,
@@ -59,10 +59,10 @@ const viewOffer = z
     instances: z.array(instance).readonly().optional(),
     options: options.optional(),
   })
-  .strict();
+  .strip();
 const exportOffer = z
   .object({ id, title: z.string(), mimeType: mediaType, extension: id, options: options.optional() })
-  .strict();
+  .strip();
 const evaluation = z.discriminatedUnion('success', [
   z
     .object({
@@ -74,8 +74,8 @@ const evaluation = z.discriminatedUnion('success', [
       issues,
       ...provenance,
     })
-    .strict(),
-  z.object({ success: z.literal(false), id, transient: z.boolean(), issues, ...provenance }).strict(),
+    .strip(),
+  z.object({ success: z.literal(false), id, transient: z.boolean(), issues, ...provenance }).strip(),
 ]);
 const description = z.discriminatedUnion('success', [
   z
@@ -88,7 +88,7 @@ const description = z.discriminatedUnion('success', [
       parameters: z.custom<ParameterManifest>(isParameterManifestShape),
       issues,
     })
-    .strict(),
+    .strip(),
   z
     .object({
       success: z.literal(false),
@@ -98,7 +98,7 @@ const description = z.discriminatedUnion('success', [
         .transform((value) => value ?? undefined),
       issues,
     })
-    .strict(),
+    .strip(),
 ]);
 const artifact = z
   .object({
@@ -106,10 +106,10 @@ const artifact = z
     content: z.union([binary, z.string()]),
     units: z
       .object({ length: z.enum(cadLengthUnits) })
-      .strict()
+      .strip()
       .optional(),
   })
-  .strict();
+  .strip();
 const rendering = z.discriminatedUnion('success', [
   z
     .object({
@@ -124,7 +124,7 @@ const rendering = z.discriminatedUnion('success', [
       issues,
       ...provenance,
     })
-    .strict(),
+    .strip(),
   z
     .object({
       success: z.literal(false),
@@ -136,9 +136,9 @@ const rendering = z.discriminatedUnion('success', [
       issues,
       ...provenance,
     })
-    .strict(),
+    .strip(),
 ]);
-const exportFile = z.object({ name: id, mimeType: mediaType, bytes: binary }).strict();
+const exportFile = z.object({ name: id, mimeType: mediaType, bytes: binary }).strip();
 const exportResult = z.discriminatedUnion('success', [
   z
     .object({
@@ -149,13 +149,13 @@ const exportResult = z.discriminatedUnion('success', [
       issues,
       ...provenance,
     })
-    .strict(),
-  z.object({ success: z.literal(false), issues, ...provenance }).strict(),
+    .strip(),
+  z.object({ success: z.literal(false), issues, ...provenance }).strip(),
 ]);
 const describeArgs = z
   .object({
     stage: stage.optional(),
-    file: file.strict(),
+    file: file.strip(),
     resolution: z
       .object({
         mode: z.enum(['default', 'declared-only']).optional(),
@@ -164,20 +164,20 @@ const describeArgs = z
         projectBindingDigest: runtimeContentDigestSchema.optional(),
         sourceUnitDigest: runtimeContentDigestSchema.optional(),
       })
-      .strict()
+      .strip()
       .optional(),
   })
-  .strict();
+  .strip();
 const snapshotArgs = z
   .object({
     stage: stage.optional(),
     file,
     additionalPaths: z
-      .array(z.object({ path: rootedFile, required: z.boolean() }).strict())
+      .array(z.object({ path: rootedFile, required: z.boolean() }).strip())
       .readonly()
       .optional(),
   })
-  .strict();
+  .strip();
 const snapshotResult = z.discriminatedUnion('success', [
   z
     .object({
@@ -194,20 +194,20 @@ const snapshotResult = z.discriminatedUnion('success', [
                   sha256: z.string(),
                   role: z.enum(['entry', 'kernel-dependency', 'middleware-dependency', 'additional']),
                 })
-                .strict(),
+                .strip(),
             )
             .readonly(),
           unresolvedPaths: z.array(rootedFile).readonly(),
           kernelId: z.string(),
         })
-        .strict(),
+        .strip(),
       issues: z.array(issue),
       ...provenance,
     })
-    .strict(),
-  z.object({ success: z.literal(false), issues: z.array(issue), ...provenance }).strict(),
+    .strip(),
+  z.object({ success: z.literal(false), issues: z.array(issue), ...provenance }).strip(),
 ]);
-const transcodeFile = z.object({ name: id, mimeType: mediaType, bytes: z.instanceof(Uint8Array) }).strict();
+const transcodeFile = z.object({ name: id, mimeType: mediaType, bytes: z.instanceof(Uint8Array) }).strip();
 const transcodeArgs = z
   .object({
     from: id,
@@ -229,7 +229,7 @@ const transcodeArgs = z
       }),
     options: values,
   })
-  .strict();
+  .strip();
 const transcodeResult = z.discriminatedUnion('success', [
   z
     .object({
@@ -239,8 +239,8 @@ const transcodeResult = z.discriminatedUnion('success', [
       serializedNativeHandle: z.unknown().optional(),
       ...provenance,
     })
-    .strict(),
-  z.object({ success: z.literal(false), issues: z.array(issue), ...provenance }).strict(),
+    .strip(),
+  z.object({ success: z.literal(false), issues: z.array(issue), ...provenance }).strip(),
 ]);
 const document = { documentId: id };
 const withIntent = { ...document, intent };
@@ -266,7 +266,7 @@ export const runtimeDocumentProtocolSchemas = {
           options: values.optional(),
           content: runtimeContentSchema.optional(),
         })
-        .strict(),
+        .strip(),
       result: exportResult,
     },
     snapshotSource: { args: snapshotArgs, result: snapshotResult },
@@ -283,7 +283,7 @@ export const runtimeDocumentProtocolSchemas = {
         stage: stage.optional(),
         watch: z.boolean(),
       })
-      .strict(),
+      .strip(),
     update: z
       .object({
         ...withIntent,
@@ -292,11 +292,11 @@ export const runtimeDocumentProtocolSchemas = {
         transient: z.boolean().optional(),
         stage: stage.optional(),
       })
-      .strict()
+      .strip()
       .refine((update) => update.transient !== true || update.stage === undefined, {
         message: 'Transient updates cannot stage files.',
       }),
-    close: z.object(document).strict(),
+    close: z.object(document).strip(),
     openView: z
       .object({
         ...document,
@@ -307,7 +307,7 @@ export const runtimeDocumentProtocolSchemas = {
         options: values.optional(),
         content: runtimeContentSchema.optional(),
       })
-      .strict(),
+      .strip(),
     updateView: z
       .object({
         ...subscription,
@@ -316,20 +316,20 @@ export const runtimeDocumentProtocolSchemas = {
         options: values.optional(),
         content: runtimeContentSchema.optional(),
       })
-      .strict(),
-    closeView: z.object(subscription).strict(),
-    abort: z.object({ operationId: id, reason: z.number().int() }).strict(),
-    binaryMaterialised: z.object({ key: id }).strict(),
+      .strip(),
+    closeView: z.object(subscription).strip(),
+    abort: z.object({ operationId: id, reason: z.number().int() }).strip(),
+    binaryMaterialised: z.object({ key: id }).strip(),
     described: z.discriminatedUnion('success', [
       description.options[0].extend({ ...withIntent, ...evaluationId }),
       description.options[1].extend({ ...withIntent, ...evaluationId }),
     ]),
-    evaluating: z.object({ ...withIntent, ...evaluationId, transient: z.boolean() }).strict(),
+    evaluating: z.object({ ...withIntent, ...evaluationId, transient: z.boolean() }).strip(),
     evaluated: z.discriminatedUnion('success', [
       evaluation.options[0].extend(withIntent),
       evaluation.options[1].extend(withIntent),
     ]),
-    rendering: z.object({ ...subscription, ...request, ...evaluationId, intent }).strict(),
+    rendering: z.object({ ...subscription, ...request, ...evaluationId, intent }).strip(),
     rendered: z.discriminatedUnion('success', [
       rendering.options[0].extend({ ...subscription, intent }),
       rendering.options[1].extend({ ...subscription, intent }),
@@ -343,9 +343,9 @@ export const runtimeDocumentProtocolSchemas = {
         phase: id,
         detail: values.optional(),
       })
-      .strict(),
+      .strip(),
     errorEvent: z.discriminatedUnion('scope', [
-      z.object({ scope: z.literal('connection'), error: z.object({ issues }).strict() }).strict(),
+      z.object({ scope: z.literal('connection'), error: z.object({ issues }).strip() }).strip(),
       z
         .object({
           scope: z.literal('operation'),
@@ -358,9 +358,9 @@ export const runtimeDocumentProtocolSchemas = {
           phase: id,
           message: z.string(),
         })
-        .strict(),
+        .strip(),
     ]),
-    stateChanged: z.object({ state: z.enum(['idle', 'busy', 'error']), detail: z.string().optional() }).strict(),
+    stateChanged: z.object({ state: z.enum(['idle', 'busy', 'error']), detail: z.string().optional() }).strip(),
     log: runtimeLogArgsSchema,
     logBatch: runtimeLogBatchArgsSchema,
     telemetry: runtimeTelemetryArgsSchema,

@@ -101,4 +101,79 @@ describe('document worker dispatcher', () => {
     client.close();
     server.dispose();
   });
+
+  it('rejects duplicate initialization and acknowledges pooled bytes through the host owner', async () => {
+    const ports = new MessageChannel();
+    const initialize = vi.fn(async () => undefined);
+    const acknowledgeBinary = vi.fn();
+    const worker = {
+      setTelemetrySend: vi.fn(),
+      setDevtoolsTelemetryEnabled: vi.fn(),
+      setCompiledWasmModules: vi.fn(),
+      initialize,
+      capabilitiesManifest: { registrations: [], routes: [], renderCapabilities: {} },
+      permitComputePublication: vi.fn(),
+    } as unknown as KernelWorker;
+    const server = createDocumentWorkerDispatcher(worker, wrapMessagePort(ports.port1), { acknowledgeBinary });
+    const client = createChannelClient<RuntimeDocumentProtocol>({
+      port: wrapMessagePort(ports.port2),
+      sessionKey: 'tau.runtime/v1',
+      protocolSchemas: runtimeDocumentProtocolSchemas,
+    });
+    try {
+      await client.ready;
+      await client.call('initialize', {});
+      await expect(client.call('initialize', {})).rejects.toMatchObject({ code: 'RUNTIME_ALREADY_INITIALIZED' });
+      expect(initialize).toHaveBeenCalledOnce();
+      client.notify('binaryMaterialised', { key: 'pool-entry-1' });
+      await vi.waitFor(() => {
+        expect(acknowledgeBinary).toHaveBeenCalledExactlyOnceWith('pool-entry-1');
+      });
+    } finally {
+      client.close();
+      server.dispose();
+    }
+  });
+
+  it('copies direct transcoder output into wire-owned binary and forwards the request signal', async () => {
+    const ports = new MessageChannel();
+    const source = new Uint8Array([7, 8]);
+    const transcode = vi.fn(async () => ({
+      success: true as const,
+      data: [{ name: 'part.step', mimeType: 'application/step', bytes: source }],
+      issues: [],
+    }));
+    const worker = {
+      setTelemetrySend: vi.fn(),
+      transcode,
+      permitComputePublication: vi.fn(),
+    } as unknown as KernelWorker;
+    const server = createDocumentWorkerDispatcher(worker, wrapMessagePort(ports.port1));
+    const client = createChannelClient<RuntimeDocumentProtocol>({
+      port: wrapMessagePort(ports.port2),
+      sessionKey: 'tau.runtime/v1',
+      protocolSchemas: runtimeDocumentProtocolSchemas,
+    });
+    try {
+      await client.ready;
+      const result = await client.call('transcode', {
+        from: 'stl',
+        to: 'step',
+        files: [{ name: 'part.stl', mimeType: 'model/stl', bytes: new Uint8Array([1]) }],
+        options: {},
+      });
+      expect(result).toMatchObject({
+        success: true,
+        data: [{ name: 'part.step', bytes: { delivery: 'inline', bytes: new Uint8Array([7, 8]) } }],
+      });
+      expect(transcode).toHaveBeenCalledWith(
+        expect.objectContaining({ from: 'stl', to: 'step' }),
+        expect.any(AbortSignal),
+      );
+      expect(source).toEqual(new Uint8Array([7, 8]));
+    } finally {
+      client.close();
+      server.dispose();
+    }
+  });
 });

@@ -6,8 +6,11 @@ import type { ExportFile } from '@taucad/types';
 import { createChannelClient, wrapMessagePort } from '@taucad/rpc';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
-import { createWorkerDispatcher, runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
-import type { RuntimeProtocol, RuntimeTranscodeArgs, TelemetryEntry } from '#types/runtime-protocol.types.js';
+import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-document-dispatcher.js';
+import { runtimeChannelSessionKey } from '#transport/_internal/runtime-channel-bindings.js';
+import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
+import type { RuntimeTranscodeArgs, TelemetryEntry } from '#types/runtime-protocol.types.js';
 import type { CreateGeometryInput, KernelRuntime } from '#types/runtime-kernel.types.js';
 import type { TranscodeInput, TranscodeResult, TranscoderDefinition } from '#types/runtime-transcoder.types.js';
 import type { CapabilitiesManifest, KernelIssue } from '#types/runtime.types.js';
@@ -527,7 +530,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
       [],
       [attachRuntimePluginDefinition({ id: 'boundary-transcoder' }, () => definition)],
     );
-    const request: RuntimeProtocol['calls']['transcode']['args'] = {
+    const request: RuntimeTranscodeArgs = {
       from: 'glb',
       to: 'webp',
       files: [exportFile('settled.glb', new Uint8Array([1]), 'model/gltf-binary')],
@@ -2881,8 +2884,8 @@ describe('installWorkerCrashTrap', () => {
   });
 
   async function buildBootstrapFixture(): Promise<{
-    server: ReturnType<typeof createWorkerDispatcher>;
-    client: ReturnType<typeof createChannelClient<RuntimeProtocol>>;
+    server: ReturnType<typeof createDocumentWorkerDispatcher>;
+    client: ReturnType<typeof createChannelClient<RuntimeDocumentProtocol>>;
     channel: MessageChannel;
     closeReasons: Array<string | undefined>;
   }> {
@@ -2893,10 +2896,11 @@ describe('installWorkerCrashTrap', () => {
     clientPort.start?.();
 
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({}) });
-    const server = createWorkerDispatcher(worker, serverPort);
-    const client = createChannelClient<RuntimeProtocol>({
+    const server = createDocumentWorkerDispatcher(worker, serverPort);
+    const client = createChannelClient<RuntimeDocumentProtocol>({
       port: clientPort,
       sessionKey: runtimeChannelSessionKey,
+      protocolSchemas: runtimeDocumentProtocolSchemas,
     });
     await client.ready;
 
@@ -2917,7 +2921,7 @@ describe('installWorkerCrashTrap', () => {
    * listener and exercise it without touching vitest's surface.
    */
   function captureAndInstall(
-    server: ReturnType<typeof createWorkerDispatcher>,
+    server: ReturnType<typeof createDocumentWorkerDispatcher>,
     options?: { readonly exit?: (code: number) => void },
   ): {
     readonly dispose: () => void;
@@ -2991,7 +2995,7 @@ describe('installWorkerCrashTrap', () => {
       expect.stringContaining('[tau-runtime] unhandled rejection: async worker boom'),
     );
     /* The session survives: the next call still round-trips. */
-    await expect(fixture.client.call('cleanup', undefined)).resolves.toBeNull();
+    await expect(fixture.client.call('dispose', null)).resolves.toBeNull();
     expect(fixture.closeReasons).toEqual([]);
   });
 

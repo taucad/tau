@@ -18,6 +18,7 @@ use crate::{
         array, field, logical_id, number_field, object, optional_field, require_fields,
         string_field, validate_content_hash, validate_versions,
     },
+    result::{Diagnostic, Severity},
     subject::{subject_cache_key, Subject, SubjectFormat},
     Engine, ErrorKind, ProtocolError,
 };
@@ -196,7 +197,42 @@ impl Engine {
             "primaryByteLength",
             "resources",
         ];
-        require_fields(fields, &names, &names, "ingestSubject request")?;
+        let allowed = [names.as_slice(), &["diagnostics"]].concat();
+        require_fields(fields, &allowed, &names, "ingestSubject request")?;
+        let diagnostics = match optional_field(fields, "diagnostics") {
+            None => Vec::new(),
+            Some(value) => array(value, "admission diagnostics")?
+                .iter()
+                .map(|value| {
+                    let fields = object(value, "admission diagnostic")?;
+                    require_fields(
+                        fields,
+                        &["code", "severity", "message", "suggestion"],
+                        &["code", "severity", "message"],
+                        "admission diagnostic",
+                    )?;
+                    let severity =
+                        match string_field(fields, "severity")? {
+                            "error" => Severity::Error,
+                            "warning" => Severity::Warning,
+                            "info" => Severity::Info,
+                            _ => return Err(invalid(
+                                "Admission diagnostic severity must be error, warning, or info.",
+                            )),
+                        };
+                    Ok(Diagnostic {
+                        code: string_field(fields, "code")?.into(),
+                        severity,
+                        message: string_field(fields, "message")?.into(),
+                        suggestion: optional_field(fields, "suggestion")
+                            .map(|_| string_field(fields, "suggestion").map(str::to_owned))
+                            .transpose()?,
+                        details: None,
+                        spatial: None,
+                    })
+                })
+                .collect::<Result<Vec<_>, ProtocolError>>()?,
+        };
         validate_versions(fields)?;
         if string_field(fields, "method")? != "ingestSubject" {
             return Err(invalid(
@@ -318,7 +354,7 @@ impl Engine {
             bundle.entries.insert(name.into(), bytes);
         }
         let mut pending_mesh_index = None;
-        let retained = match format {
+        let mut retained = match format {
             "rational-plate" => {
                 if !bundle.entries.is_empty()
                     || string_field(frame, "coordinateSystem")? != "z-up"
@@ -332,7 +368,9 @@ impl Engine {
                     crate::certificates::plate_syntax::PlateSource::decode(primary.to_vec())
                         .map_err(|error| invalid(error.to_string()))?;
                 self.observations.add(WorkCounter::IdentityBuilds, 1);
-                let identity = SubjectIdentity::rational_plate(&source).map_err(backend)?;
+                let identity = SubjectIdentity::rational_plate(&source)
+                    .and_then(|identity| identity.with_diagnostics(&diagnostics))
+                    .map_err(backend)?;
                 let mut retained = Subject::new(
                     identity.primary_hash().to_owned(),
                     SubjectFormat::RationalPlate,
@@ -353,13 +391,18 @@ impl Engine {
                 )
                 .map_err(backend)?;
                 let primary_hash = crate::identity::sha256_hex(primary);
-                let (closure_key, resource_hashes) = mesh_closure_key(
+                let (mut closure_key, resource_hashes) = mesh_closure_key(
                     format,
                     string_field(frame, "sourceUnit")?,
                     &primary_hash,
                     primary.len(),
                     &bundle,
                 );
+                if !diagnostics.is_empty() {
+                    closure_key.push_str(&crate::identity::sha256_hex(encode(&Json::Array(
+                        diagnostics.iter().map(Diagnostic::to_json).collect(),
+                    ))?));
+                }
                 if let Some(subject) = self
                     .mesh_sources
                     .get(&closure_key)
@@ -409,6 +452,7 @@ impl Engine {
                     },
                     applied,
                 )
+                .and_then(|identity| identity.with_diagnostics(&diagnostics))
                 .map_err(backend)?;
                 let retained = Subject::new(
                     identity.primary_hash().to_owned(),
@@ -466,7 +510,8 @@ impl Engine {
                     let descriptor = object(identity.descriptor(), "retained descriptor")?;
                     let retained_primary =
                         object(field(descriptor, "primary")?, "retained primary")?;
-                    if number_field(retained_primary, "byteLength")? == primary.len() as f64
+                    if subject.diagnostics == diagnostics
+                        && number_field(retained_primary, "byteLength")? == primary.len() as f64
                         && string_field(
                             object(field(descriptor, "frame")?, "retained frame")?,
                             "coordinateSystem",
@@ -503,6 +548,7 @@ impl Engine {
                     step_name,
                     source_frame,
                 )
+                .and_then(|identity| identity.with_diagnostics(&diagnostics))
                 .map_err(backend)?;
                 let mut retained = Subject::new(
                     identity.primary_hash().to_owned(),
@@ -536,6 +582,7 @@ impl Engine {
                 )))
             }
         };
+        retained.diagnostics = diagnostics;
         let identity = retained
             .semantic_identity
             .get()

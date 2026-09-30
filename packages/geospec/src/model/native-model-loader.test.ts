@@ -30,6 +30,42 @@ const testEngine = () => {
 };
 
 describe('native model loader ownership', () => {
+  it('should retain only actual source locators in load lineage', async () => {
+    const { engine } = testEngine();
+    const loader = createGeoSpecNativeModelLoader({ engine, readSource: async () => Uint8Array.of(1) });
+    try {
+      const bytes = await loader({ source: Uint8Array.of(1), path: 'display.step', format: 'step' });
+      const locator = await loader({ source: 'actual.step', path: 'display.step', format: 'step' });
+      expect(bytes.load).not.toHaveProperty('sourcePath');
+      expect(locator.load).toHaveProperty('sourcePath', 'actual.step');
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+
+  it('should admit successful Runtime issues into the compiled subject', async () => {
+    const { engine, ingestSubject } = testEngine();
+    const runtime: GeoSpecRuntimeClient = {
+      connect: async () => undefined,
+      terminate: () => undefined,
+      export: vi.fn().mockResolvedValue({
+        success: true,
+        issues: [{ code: 'MODEL_WARNING', severity: 'warning', message: 'Model warning' }],
+        data: [{ name: 'part.glb', bytes: Uint8Array.of(1) }],
+      }),
+    };
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime });
+    try {
+      await loader({ file: 'main.ts' });
+      const request: unknown = JSON.parse(new TextDecoder().decode(ingestSubject.mock.calls[0]![0]));
+      expect(request).toMatchObject({
+        diagnostics: [{ code: 'MODEL_WARNING', severity: 'warning', message: 'Model warning' }],
+      });
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+
   it('should retain each Runtime load graph and actual export bytes despite equal admitted geometry', async () => {
     const { engine } = testEngine();
     const parameters = { width: 2 };
@@ -85,6 +121,7 @@ describe('native model loader ownership', () => {
       connect: vi.fn(async () => undefined),
       export: vi.fn().mockResolvedValue({
         success: true,
+        issues: [],
         data: [
           { name: 'model.glb', bytes: exported },
           { name: 'model.bin', bytes: resource },
@@ -116,6 +153,7 @@ describe('native model loader ownership', () => {
       .mockImplementationOnce(async () => firstExport.promise)
       .mockResolvedValue({
         success: true,
+        issues: [],
         data: [{ name: 'model.glb', bytes: Uint8Array.of(8) }],
       });
     const terminate = vi.fn();

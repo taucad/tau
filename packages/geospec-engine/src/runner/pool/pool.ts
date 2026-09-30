@@ -84,6 +84,57 @@ const shardErrorResult = (message: string): GeoSpecRunResult => ({
   ],
 });
 
+const emptyAccounting = (files: readonly string[]): NonNullable<GeoSpecRunnerResult['accounting']> => ({
+  requestedFiles: [...files],
+  completedFiles: [],
+  notRunFiles: [...files],
+  discoveryComplete: false,
+  discovered: 0,
+  selected: 0,
+  completed: 0,
+  passed: 0,
+  failed: 0,
+  unsupported: 0,
+  inconclusive: 0,
+  skipped: 0,
+  notRun: 0,
+  cancelled: false,
+  bailed: false,
+});
+
+// Compare consumed file graphs, never run-token-bearing bundles or parameter-dependent exports.
+const lineageStatusOf = (results: readonly GeoSpecRunResult[]): 'complete' | 'unavailable' | 'mixed' => {
+  let status: 'complete' | 'unavailable' | 'mixed' = 'complete';
+  const files = new Map<string, string>();
+  for (const result of results) {
+    if (result.lineage?.status === 'mixed') {
+      status = 'mixed';
+    } else if (result.lineage?.status !== 'complete' && status !== 'mixed') {
+      status = 'unavailable';
+    }
+    const directGraphs =
+      result.lineage?.loads.flatMap(({ evidence }) => {
+        const primary = evidence?.artifacts[0];
+        return evidence?.sourcePath === undefined || evidence.exportOptions !== undefined || primary === undefined
+          ? []
+          : [{ [evidence.sourcePath]: `sha256:${primary.sha256}` }];
+      }) ?? [];
+    for (const graph of [
+      ...(result.lineage?.modules.map((module_) => module_.files) ?? []),
+      ...directGraphs,
+      ...(result.lineage?.loads.map((load) => load.evidence?.sourceRevision?.files ?? {}) ?? []),
+    ]) {
+      for (const [path, digest] of Object.entries(graph)) {
+        if (files.has(path) && files.get(path) !== digest) {
+          status = 'mixed';
+        }
+        files.set(path, digest);
+      }
+    }
+  }
+  return status;
+};
+
 type PoolWorker = {
   handle: GeoSpecPoolWorkerHandle;
   /** The last deterministic model-load key this worker resolved (R9). */
@@ -375,6 +426,26 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
 
   return {
     async run(runOptions: GeoSpecRunnerRunOptions): Promise<GeoSpecRunnerResult> {
+      const initialAccounting = emptyAccounting(runOptions.files);
+      if (new Set(runOptions.files).size !== runOptions.files.length) {
+        return {
+          success: false,
+          passed: 0,
+          failed: 1,
+          selectedTests: 0,
+          files: [],
+          accounting: initialAccounting,
+          lineageStatus: 'unavailable',
+          issues: [
+            {
+              code: 'GEOSPEC_DUPLICATE_FILES',
+              message: 'GeoSpec requested files must be unique.',
+              severity: 'error',
+              type: 'runtime',
+            },
+          ],
+        };
+      }
       if (state.closed) {
         return {
           success: false,
@@ -382,6 +453,8 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
           failed: 1,
           selectedTests: 0,
           files: [],
+          accounting: initialAccounting,
+          lineageStatus: 'unavailable',
           issues: [
             {
               code: 'GEOSPEC_RUNNER_CLOSED',
@@ -399,6 +472,8 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
           failed: 1,
           selectedTests: 0,
           files: [],
+          accounting: initialAccounting,
+          lineageStatus: 'unavailable',
           issues: [
             {
               code: 'GEOSPEC_RUNNER_BUSY',
@@ -487,7 +562,11 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
             },
             shard,
           );
-          if (settled.type === 'listed' && settled.names.length > 1) {
+          if (
+            settled.type === 'listed' &&
+            settled.names.length > 1 &&
+            new Set(settled.names).size === settled.names.length
+          ) {
             splitTests.set(file, settled.names);
           }
           // A failed collection pass is not a failure: the file simply runs whole.
@@ -499,6 +578,11 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
           ...(options.timings ? { timings: options.timings } : {}),
         });
         const perFile = new Map<string, { result: GeoSpecRunResult; durationMs: number }>();
+        const plannedCounts = new Map(
+          files.map((file) => [file, pending.filter((shard) => shard.file === file).length]),
+        );
+        const completedCounts = new Map<string, number>();
+        let bailed = false;
         let heavyRunning = 0;
 
         const drain = async (worker: PoolWorker): Promise<void> => {
@@ -578,6 +662,7 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
               result: previous === undefined ? result : mergeShardResults(previous.result, result),
               durationMs: (previous?.durationMs ?? 0) + durationMs,
             });
+            completedCounts.set(shard.file, (completedCounts.get(shard.file) ?? 0) + 1);
             events.emit({
               type: 'file-complete',
               file: shard.file,
@@ -594,8 +679,9 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
             // Bail means "stop at the first RED", and a file that executed
             // cleanly with a failing test inside it is red — the same reading
             // the serial shell uses.
-            const shardFailed = result.success ? result.tests.some((test) => test.status === 'failed') : true;
+            const shardFailed = !result.success || !result.passed;
             if (runOptions.bail === true && shardFailed) {
+              bailed = true;
               pending.length = 0;
               return;
             }
@@ -637,12 +723,42 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
           totals.failed += 1;
         }
 
+        const accounting = emptyAccounting(runOptions.files);
+        accounting.completedFiles = files.filter((file) => completedCounts.get(file) === plannedCounts.get(file));
+        accounting.notRunFiles = files.filter((file) => !accounting.completedFiles.includes(file));
+        accounting.cancelled = abortReason !== undefined;
+        accounting.bailed = bailed;
+        accounting.discoveryComplete =
+          accounting.notRunFiles.length === 0 &&
+          fileResults.every(({ result }) => result.success && result.accounting !== undefined);
+        for (const { result } of fileResults) {
+          if (result.accounting !== undefined) {
+            for (const key of [
+              'discovered',
+              'selected',
+              'completed',
+              'passed',
+              'failed',
+              'unsupported',
+              'inconclusive',
+              'skipped',
+              'notRun',
+            ] as const) {
+              accounting[key] += result.accounting[key];
+            }
+          }
+        }
+        const lineageStatus = lineageStatusOf(fileResults.map(({ result }) => result));
+        const complete =
+          accounting.discoveryComplete && fileResults.every(({ result }) => result.success && result.passed);
         const aggregate: GeoSpecRunnerResult = {
-          success: totals.failed === 0 && issues.length === 0,
+          success: complete && lineageStatus === 'complete' && totals.failed === 0 && issues.length === 0,
           passed: totals.passed,
           failed: totals.failed,
           selectedTests: totals.selectedTests,
           files: fileResults,
+          accounting,
+          lineageStatus,
           ...(issues.length > 0 ? { issues } : {}),
           durationMs: performance.now() - runStartedAt,
         };
@@ -676,16 +792,51 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
  * @public
  */
 export const mergeShardResults = (left: GeoSpecRunResult, right: GeoSpecRunResult): GeoSpecRunResult => {
-  if (!left.success) {
-    return left;
+  const tests = [...(left.tests ?? []), ...(right.tests ?? [])].sort(
+    (a, b) => (a.ordinal ?? Infinity) - (b.ordinal ?? Infinity),
+  );
+  const lineage = {
+    status: lineageStatusOf([left, right]),
+    modules: [...(left.lineage?.modules ?? []), ...(right.lineage?.modules ?? [])],
+    loads: [...(left.lineage?.loads ?? []), ...(right.lineage?.loads ?? [])],
+  };
+  let accounting: GeoSpecRunResult['accounting'];
+  const ordinals = tests.map((test) => test.ordinal);
+  const discovered = left.accounting?.discovered;
+  if (
+    discovered !== undefined &&
+    discovered === right.accounting?.discovered &&
+    ordinals.every(
+      (ordinal) => ordinal !== undefined && Number.isSafeInteger(ordinal) && ordinal >= 0 && ordinal < discovered,
+    ) &&
+    new Set(ordinals).size === tests.length
+  ) {
+    const count = (status: string): number => tests.filter((test) => test.status === status).length;
+    accounting = {
+      discovered,
+      selected: tests.length,
+      completed: tests.filter((test) => test.status !== 'not-run' && test.status !== 'skipped').length,
+      passed: count('passed'),
+      failed: count('failed'),
+      unsupported: count('unsupported'),
+      inconclusive: count('inconclusive'),
+      skipped: count('skipped'),
+      notRun: Math.max(0, discovered - tests.length) + count('not-run'),
+    };
   }
-  if (!right.success) {
-    return right;
+  const metadata = { tests, lineage, ...(accounting === undefined ? {} : { accounting }) };
+  if (!left.success || !right.success) {
+    return {
+      success: false,
+      issues: [...(left.success ? [] : left.issues), ...(right.success ? [] : right.issues)],
+      ...(left.bundle === undefined && right.bundle === undefined ? {} : { bundle: left.bundle ?? right.bundle }),
+      ...metadata,
+    };
   }
   return {
     success: true,
-    passed: left.passed && right.passed,
-    tests: [...left.tests, ...right.tests],
+    passed: left.passed && right.passed && accounting !== undefined && lineage.status === 'complete',
+    ...metadata,
     bundle: left.bundle,
   };
 };

@@ -18,17 +18,53 @@ const bundle = {
   unresolvedPaths: [],
 };
 
-const passing = (name: string): GeoSpecRunResult => ({
+// Synthetic scheduler controls carry explicit metadata; they do not qualify a native producer.
+const passing = (name: string, ordinal = 0, discovered = 1): Extract<GeoSpecRunResult, { success: true }> => ({
   success: true,
   passed: true,
-  tests: [{ suite: ['s'], name, assertions: [], status: 'passed', diagnostics: [] }],
+  tests: [{ suite: ['s'], name, ordinal, assertions: [], status: 'passed', diagnostics: [] }],
+  accounting: {
+    discovered,
+    selected: 1,
+    completed: 1,
+    passed: 1,
+    failed: 0,
+    unsupported: 0,
+    inconclusive: 0,
+    skipped: 0,
+    notRun: discovered - 1,
+  },
+  lineage: {
+    status: 'complete',
+    modules: [
+      {
+        entryPath: 'control.geospec.ts',
+        bundleSha256: 'control',
+        files: { 'control.geospec.ts': 'sha256:control' },
+        consistent: true,
+      },
+    ],
+    loads: [],
+  },
   bundle,
 });
 
-const failing = (name: string): GeoSpecRunResult => ({
+const failing = (name: string, ordinal = 0): Extract<GeoSpecRunResult, { success: true }> => ({
+  ...passing(name, ordinal),
   success: true,
   passed: false,
-  tests: [{ suite: ['s'], name, assertions: [], status: 'failed', diagnostics: [] }],
+  tests: [{ suite: ['s'], name, ordinal, assertions: [], status: 'failed', diagnostics: [] }],
+  accounting: {
+    discovered: 1,
+    selected: 1,
+    completed: 1,
+    passed: 0,
+    failed: 1,
+    unsupported: 0,
+    inconclusive: 0,
+    skipped: 0,
+    notRun: 0,
+  },
   bundle,
 });
 
@@ -135,6 +171,50 @@ const complete = (
 };
 
 describe('createGeoSpecPoolRunner', () => {
+  it('should reject duplicate requested files before starting or spawning', async () => {
+    const createWorker = vi.fn(
+      () => scriptedWorker({ onShard: (file) => complete({ id: 0, file }, passing('one')) }).handle,
+    );
+    const runner = createGeoSpecPoolRunner({ createWorker, workers: 1 });
+    const result = await runner.run({ files: ['a.geospec.ts', 'a.geospec.ts'] });
+    expect(createWorker).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: false,
+      issues: [{ code: 'GEOSPEC_DUPLICATE_FILES' }],
+      accounting: {
+        requestedFiles: ['a.geospec.ts', 'a.geospec.ts'],
+        notRunFiles: ['a.geospec.ts', 'a.geospec.ts'],
+        discoveryComplete: false,
+      },
+    });
+    await runner.close();
+  });
+
+  it('should not turn an incomplete module into a passing pool run', async () => {
+    const worker = scriptedWorker({
+      onShard: (file) => complete({ id: 0, file }, { ...passing('unsupported'), passed: false }),
+    });
+    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
+    const result = await runner.run({ files: ['a.geospec.ts'] });
+    expect(result.success).toBe(false);
+    await runner.close();
+  });
+
+  it('should keep duplicate full test names on the whole-file path', async () => {
+    const patterns: Array<string | undefined> = [];
+    const createWorker = () =>
+      scriptedWorker({
+        onList: () => ['s > same', 's > same'],
+        onShard: (file, pattern) => {
+          patterns.push(pattern);
+          return complete({ id: 0, file }, passing('same'));
+        },
+      }).handle;
+    const runner = createGeoSpecPoolRunner({ createWorker, workers: 2 });
+    await runner.run({ files: ['a.geospec.ts'] });
+    expect(patterns).toEqual([undefined]);
+    await runner.close();
+  });
   it('should refuse a second run while its worker holds a delayed shard reply', async () => {
     let listener: ((message: GeoSpecPoolWorkerMessage) => void) | undefined;
     const sent: GeoSpecPoolHostMessage[] = [];
@@ -652,7 +732,7 @@ describe('createGeoSpecPoolRunner', () => {
       onList: () => ['s > one', 's > two'],
       onShard: (file, pattern) => {
         patterns.push(pattern);
-        return complete({ id: 0, file }, passing(pattern ?? 'whole'));
+        return complete({ id: 0, file }, passing(pattern ?? 'whole', pattern === '^s > two$' ? 1 : 0, 2));
       },
     });
     const runner = createGeoSpecPoolRunner({
@@ -676,7 +756,7 @@ describe('createGeoSpecPoolRunner', () => {
         onList: () => ['s > one', 's > two'],
         onShard: (file, pattern) => {
           patterns.push(pattern!);
-          return complete({ id: 0, file }, passing(pattern!));
+          return complete({ id: 0, file }, passing(pattern!, pattern === '^s > two$' ? 1 : 0, 2));
         },
       }),
     );
@@ -824,10 +904,17 @@ describe('createGeoSpecPoolRunner', () => {
       workers: 1,
     });
 
-    await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'], bail: true });
+    const result = await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'], bail: true });
     await runner.close();
 
     expect(seen).toStrictEqual(['a.geospec.ts']);
+    expect(result.accounting).toMatchObject({
+      requestedFiles: ['a.geospec.ts', 'b.geospec.ts'],
+      completedFiles: ['a.geospec.ts'],
+      notRunFiles: ['b.geospec.ts'],
+      discoveryComplete: false,
+      bailed: true,
+    });
   });
 
   it('should report an abort requested mid-run', async () => {
@@ -907,8 +994,47 @@ describe('createGeoSpecPoolRunner', () => {
 });
 
 describe('mergeShardResults', () => {
+  it('should retain both module identities, order claims by definition and not sum repeated discovery', () => {
+    const left = passing('two', 1, 2);
+    const right = passing('one', 0, 2);
+    const merged = mergeShardResults(left, right);
+    expect(merged.tests?.map((test) => test.name)).toEqual(['one', 'two']);
+    expect(merged.lineage?.modules).toHaveLength(2);
+    expect(merged.accounting).toMatchObject({ discovered: 2, selected: 2, completed: 2, passed: 2, notRun: 0 });
+  });
+
+  it('should reject mixed consumed file graphs even when every shard passes', () => {
+    const left = passing('one', 0, 2);
+    const right: GeoSpecRunResult = {
+      ...passing('two', 1, 2),
+      lineage: {
+        status: 'complete',
+        modules: [
+          {
+            entryPath: 'control.geospec.ts',
+            bundleSha256: 'other-run-token',
+            files: { 'control.geospec.ts': 'sha256:changed' },
+            consistent: true,
+          },
+        ],
+        loads: [],
+      },
+    };
+    expect(mergeShardResults(left, right)).toMatchObject({
+      success: true,
+      passed: false,
+      lineage: { status: 'mixed' },
+    });
+  });
+
+  it('should preserve ambiguous overlapping claims without inventing complete discovery', () => {
+    const merged = mergeShardResults(passing('one'), passing('also ordinal zero'));
+    expect(merged.tests).toHaveLength(2);
+    expect(merged.accounting).toBeUndefined();
+    expect(merged.success && merged.passed).toBe(false);
+  });
   it('should concatenate tests and AND the pass flag', () => {
-    const merged = mergeShardResults(passing('one'), failing('two'));
+    const merged = mergeShardResults(passing('one'), failing('two', 1));
 
     expect(merged.success && merged.passed).toBe(false);
     expect(merged.success && merged.tests.map((test) => test.name)).toStrictEqual(['one', 'two']);
@@ -919,6 +1045,7 @@ describe('mergeShardResults', () => {
 
     expect(mergeShardResults(broken, passing('one')).success).toBe(false);
     expect(mergeShardResults(passing('one'), broken).success).toBe(false);
+    expect(mergeShardResults(passing('one'), broken).tests?.map((test) => test.name)).toEqual(['one']);
   });
 });
 
@@ -929,6 +1056,35 @@ describe('sanitizePoolResult', () => {
     assertions: [{ kind: 'volume', subject, expected: { value: 1 } }],
     status: 'passed',
     diagnostics: [],
+  });
+
+  it('should sanitize retained claims when a later module failure prevents success', () => {
+    const live = {
+      kind: 'geometry-subject',
+      provenance: { contentHash: 'sha256:abc' },
+      nativeXde: { delete: () => undefined },
+    };
+    const test = subjectTest(live);
+    const canonical = new Uint8Array([1, 2, 3]);
+    test.assertions[0]!.report = {
+      canonicalClaim: canonical,
+      canonicalPlan: canonical,
+      canonicalResult: canonical,
+      claim: {},
+      claimId: 'control',
+      diagnostics: [],
+      polarity: 'negative',
+      result: {},
+      status: 'passed',
+    };
+    const sanitized = sanitizePoolResult({ success: false, issues: [], tests: [test] });
+    expect(sanitized.tests?.[0]?.assertions[0]?.subject).toEqual({
+      kind: 'geometry-subject-ref',
+      contentHash: 'sha256:abc',
+    });
+    expect(() => structuredClone(sanitized)).not.toThrow();
+    expect(sanitized.tests?.[0]?.assertions[0]?.report?.canonicalResult).toBe(canonical);
+    expect(sanitized.tests?.[0]?.assertions[0]?.report?.polarity).toBe('negative');
   });
 
   it('should replace a live subject with its content-addressed identity', () => {
@@ -1123,6 +1279,12 @@ describe('the remaining refusal legs', () => {
     await runner.close();
 
     expect(result.issues?.[0]?.message).toBe('GeoSpec run aborted.');
+    expect(result.accounting).toMatchObject({
+      completedFiles: ['a.geospec.ts'],
+      notRunFiles: ['b.geospec.ts'],
+      discoveryComplete: false,
+      cancelled: true,
+    });
   });
 });
 

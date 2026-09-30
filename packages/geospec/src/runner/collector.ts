@@ -418,6 +418,7 @@ export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecColle
   const definitionPending: Array<Promise<unknown>> = [];
   const scheduled: Array<{ test: GeoSpecTestCase; function_: GeoSpecTestFunction }> = [];
   const pendingAssertions = new WeakMap<GeoSpecTestCase, Array<Promise<unknown>>>();
+  const nativeClaimFailures = new WeakSet<GeoSpecAssertionError>();
   let activeTest: GeoSpecTestCase | undefined;
   let executed = false;
 
@@ -443,6 +444,7 @@ export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecColle
 
   const recordSkipped = (name: string): void => {
     tests.push({
+      ordinal: tests.length,
       suite: [...suite],
       name,
       assertions: [],
@@ -534,6 +536,7 @@ export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecColle
           trackDefinitionPending(result, {
             onError(error) {
               tests.push({
+                ordinal: tests.length,
                 suite: capturedSuite,
                 name,
                 assertions: [],
@@ -549,6 +552,7 @@ export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecColle
         }
       } catch (error) {
         tests.push({
+          ordinal: tests.length,
           suite: [...suite],
           name,
           assertions: [],
@@ -565,10 +569,11 @@ export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecColle
 
     it(name, function_) {
       const test: GeoSpecTestCase = {
+        ordinal: tests.length,
         suite: [...suite],
         name,
         assertions: [],
-        status: 'passed',
+        status: 'not-run',
         diagnostics: [],
       };
       tests.push(test);
@@ -618,6 +623,7 @@ export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecColle
 
         const previousTest = activeTest;
         activeTest = scheduledTest.test;
+        scheduledTest.test.status = 'passed';
         const startedAt = performance.now();
         const failures: unknown[] = [];
         const recordFailure = (error: unknown): void => {
@@ -662,6 +668,28 @@ export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecColle
             for (const failure of failures) {
               scheduledTest.test.diagnostics.push(...createErrorDiagnostics(failure));
             }
+            const { assertions } = scheduledTest.test;
+            const infrastructureFailure =
+              failures.some(
+                (failure) => !(failure instanceof GeoSpecAssertionError) || !nativeClaimFailures.has(failure),
+              ) ||
+              assertions.some(
+                (assertion) =>
+                  assertion.passed === false &&
+                  (assertion.report === undefined ||
+                    assertion.report.status === 'invalid' ||
+                    assertion.report.status === 'engine-error'),
+              );
+            if (nativeClient !== undefined && !infrastructureFailure) {
+              const statuses = assertions.map((assertion) => assertion.report?.status);
+              scheduledTest.test.status = statuses.includes('failed')
+                ? 'failed'
+                : statuses.some((status) => status !== undefined && status !== 'passed' && status !== 'unsupported')
+                  ? 'inconclusive'
+                  : statuses.includes('unsupported')
+                    ? 'unsupported'
+                    : 'failed';
+            }
           }
         } finally {
           activeTest = previousTest;
@@ -689,6 +717,9 @@ export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecColle
     try {
       const admission = resolveGeoSpecSubject(invocation.subject, options?.nativeAssertions?.engine);
       assertion.subject = admission.identity;
+      if (admission.load !== undefined) {
+        assertion.loadId = admission.load.loadId;
+      }
       const methods = nativeClient.expectGeo(admission.identity);
       const chain = invocation.polarity === 'negative' ? methods.not : methods;
       // The shared authoring registry already supplies each method's argument tuple.
@@ -723,6 +754,9 @@ export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecColle
             ],
       );
     } catch (error) {
+      if (error instanceof GeoSpecAssertionError && assertion.report !== undefined) {
+        nativeClaimFailures.add(error);
+      }
       assertion.passed = false;
       assertion.diagnostics ??= createErrorDiagnostics(error);
       throw error;

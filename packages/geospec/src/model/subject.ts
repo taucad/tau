@@ -2,6 +2,7 @@
 
 import type { GeoSpecAssertionClient, GeoSpecAssertionClientOptions } from '#assertion-client/client.js';
 import type { GeoSpecNativeSubject } from '#engine/client.js';
+import type { GeoSpecModelLoadEvidence } from '#model/native-model-loader.js';
 
 declare const subjectBrand: unique symbol;
 
@@ -13,6 +14,7 @@ type Admission = {
   readonly engine: GeoSpecAssertionClientOptions['engine'];
   readonly identity: GeoSpecNativeSubject;
   readonly isLive: () => boolean;
+  readonly load?: GeoSpecModelLoadEvidence;
 };
 
 // oxlint-disable-next-line typescript/no-restricted-types -- WeakMap keys must accept arbitrary opaque objects without structural authority.
@@ -29,6 +31,7 @@ export const bindGeoSpecSubject = (options: {
   readonly engine: GeoSpecAssertionClientOptions['engine'];
   readonly identity: GeoSpecNativeSubject;
   readonly isLive: () => boolean;
+  readonly load?: GeoSpecModelLoadEvidence;
 }): GeoSpecSubject => {
   const subject = Object.freeze({});
   admissions.set(subject, {
@@ -36,6 +39,7 @@ export const bindGeoSpecSubject = (options: {
     engine: options.engine,
     identity: options.identity,
     isLive: options.isLive,
+    ...(options.load === undefined ? {} : { load: options.load }),
   });
   // The brand has no runtime representation: only this private map establishes admission.
   return subject as GeoSpecSubject;

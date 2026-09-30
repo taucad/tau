@@ -30,6 +30,41 @@ const testEngine = () => {
 };
 
 describe('native model loader ownership', () => {
+  it('should retain each Runtime load graph and actual export bytes despite equal admitted geometry', async () => {
+    const { engine } = testEngine();
+    const parameters = { width: 2 };
+    const files = { 'main.ts': `sha256:${'a'.repeat(64)}`, 'cache.json': `sha256:${'b'.repeat(64)}` };
+    const runtime: GeoSpecRuntimeClient = {
+      connect: async () => undefined,
+      terminate: () => undefined,
+      export: vi.fn().mockImplementation(async () => ({
+        success: true,
+        issues: [],
+        sourceRevision: { entry: 'main.ts', files: { ...files } },
+        data: [{ name: 'part.glb', bytes: Uint8Array.of(parameters.width) }],
+      })),
+    };
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime });
+    const first = await loader({ file: 'main.ts', parameters });
+    parameters.width = 3;
+    files['cache.json'] = `sha256:${'c'.repeat(64)}`;
+    const second = await loader({ file: 'main.ts', parameters });
+    expect(first).toMatchObject({
+      load: {
+        status: 'complete',
+        parameters: { width: 2 },
+        sourceRevision: { files: { 'cache.json': `sha256:${'b'.repeat(64)}` } },
+        artifacts: [{ name: 'part.glb', byteLength: 1 }],
+      },
+    });
+    expect(first.load?.artifacts[0]?.sha256).toMatch(/^[a-f0-9]{64}$/u);
+    expect(second).toMatchObject({
+      load: { parameters: { width: 3 }, sourceRevision: { files: { 'cache.json': `sha256:${'c'.repeat(64)}` } } },
+    });
+    expect(first.subjectHash).toBe(second.subjectHash);
+    expect(first.load?.artifacts[0]?.sha256).not.toBe(second.load?.artifacts[0]?.sha256);
+    await loader.releaseAll();
+  });
   it('should reject ignored STEP source-unit overrides before reading or admission', async () => {
     const { engine, ingestSubject } = testEngine();
     const readSource = vi.fn(async () => Uint8Array.of(1));
@@ -189,7 +224,7 @@ describe('native model loader ownership', () => {
     const cleanup = loader.releaseAll();
     source.resolve(Uint8Array.of(1, 2, 3));
 
-    await expect(loading).resolves.toStrictEqual({ subjectHash: hash });
+    await expect(loading).resolves.toMatchObject({ subjectHash: hash, load: { status: 'complete' } });
     await cleanup;
     expect(operations).toStrictEqual(['ingest', 'handle', 'release']);
   });
@@ -252,7 +287,7 @@ describe('native model loader ownership', () => {
       expect(operations).toStrictEqual(['ingest:1', 'handle:1', 'ingest:2', 'handle:2']);
       third.resolve(Uint8Array.of(3));
 
-      await expect(loading).resolves.toStrictEqual({ subjectHash: '3'.repeat(64) });
+      await expect(loading).resolves.toMatchObject({ subjectHash: '3'.repeat(64), load: { status: 'complete' } });
       await cleanup;
       expect(readSource.mock.calls).toStrictEqual([['first.step'], ['second.step'], ['third.step']]);
       expect(operations).toStrictEqual([
@@ -335,7 +370,7 @@ describe('native model loader freshness', () => {
 
     expect(readSource).toHaveBeenCalledTimes(3);
     expect(ingestSubject).toHaveBeenCalledTimes(3);
-    expect([first, repeat, edited]).toStrictEqual([
+    expect([first, repeat, edited].map(({ subjectHash }) => ({ subjectHash }))).toStrictEqual([
       { subjectHash: '1'.repeat(64) },
       { subjectHash: '1'.repeat(64) },
       { subjectHash: '9'.repeat(64) },
@@ -375,7 +410,10 @@ describe('native model loader carried scopes', () => {
     const second = createGeoSpecNativeModelLoader({ engine, readSource, carried });
     await second({ source: 'b.step', format: 'step' });
     refuseNext();
-    await expect(second({ source: 'c.step', format: 'step' })).resolves.toStrictEqual({ subjectHash: '3'.repeat(64) });
+    await expect(second({ source: 'c.step', format: 'step' })).resolves.toMatchObject({
+      subjectHash: '3'.repeat(64),
+      load: { status: 'complete' },
+    });
     expect(released).toStrictEqual(['1']);
     expect([...carried.keys()]).toStrictEqual(['2'.repeat(64)]);
 

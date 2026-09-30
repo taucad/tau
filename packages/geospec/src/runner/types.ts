@@ -3,7 +3,8 @@ import type { BuiltinModule, BundleResult, VmFileSystem, VmIssue } from '@taucad
 import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
 import type { GeometrySelector } from '#selector/types.js';
 import type { GeoSpecModelLoader } from '#model/index.js';
-import type { GeoSpecNativeModelLoader } from '#model/native-model-loader.js';
+import type { GeoSpecNativeModelLoader, GeoSpecModelLoadEvidence } from '#model/native-model-loader.js';
+import type { GeoSpecNativeSubject } from '#engine/client.js';
 import type { GeoSpecRunProfile } from '#runner/profile.js';
 import type { GeoSpecStepLoader } from '#step/index.js';
 
@@ -638,6 +639,8 @@ export type GeoSpecAssertion = {
   diagnostics?: GeometryDiagnostic[];
   /** Exact native report, including core-owned bytes and polarity; present only on the opt-in path. */
   report?: GeoSpecCanonicalClaimReport;
+  /** The host load which admitted this assertion's subject; independent of equal geometry hashes. */
+  loadId?: string;
   /** Wall-clock cost of matcher evaluation in milliseconds (R1: budgeted matchers only). */
   durationMs?: number;
 };
@@ -647,7 +650,39 @@ export type GeoSpecAssertion = {
  *
  * @public
  */
-export type GeoSpecTestStatus = 'passed' | 'failed' | 'skipped';
+export type GeoSpecTestStatus = 'passed' | 'failed' | 'unsupported' | 'inconclusive' | 'not-run' | 'skipped';
+
+/** Test accounting for the actual module collection and execution. @public */
+export type GeoSpecTestAccounting = {
+  discovered: number;
+  selected: number;
+  completed: number;
+  passed: number;
+  failed: number;
+  unsupported: number;
+  inconclusive: number;
+  skipped: number;
+  notRun: number;
+};
+
+/** Consumed source and artifact identities retained without replacing earlier loads. @public */
+export type GeoSpecRunLineage = {
+  status: 'complete' | 'unavailable' | 'mixed';
+  modules: ReadonlyArray<{
+    entryPath: string;
+    bundleSha256: string;
+    files: Readonly<Record<string, string>>;
+    consistent: boolean;
+  }>;
+  loads: ReadonlyArray<{
+    loadId: string;
+    status: 'complete' | 'unavailable' | 'failed';
+    subject?: GeoSpecNativeSubject;
+    evidence?: GeoSpecModelLoadEvidence;
+    error?: string;
+    diagnostics?: readonly GeometryDiagnostic[];
+  }>;
+};
 
 /**
  * Worker-local cache for successful GeoSpec bundles.
@@ -685,6 +720,8 @@ export type GeoSpecModuleBundleCache = Map<
  * @public
  */
 export type GeoSpecTestCase = {
+  /** Registration ordinal before filtering, scoped to the source module's collection. */
+  ordinal?: number;
   /** Hierarchical suite path. */
   suite: string[];
   /** Test case name. */
@@ -724,7 +761,9 @@ export type RunGeoSpecModuleOptions = {
    */
   nativeAssertions?: GeoSpecAssertionClientOptions;
   /** Native identity loader exposed through `geospec/runner/native` for opt-in native runs. */
-  nativeModelLoader?: GeoSpecNativeModelLoader;
+  nativeModelLoader?: (
+    options: Parameters<GeoSpecNativeModelLoader>[0],
+  ) => Promise<GeoSpecNativeSubject & { readonly load?: GeoSpecModelLoadEvidence }>;
   /** Model loader exposed to VM tests through `geospec/model`. */
   modelLoader?: GeoSpecModelLoader;
   /** STEP loader exposed to VM tests through `geospec/step`. */
@@ -751,10 +790,12 @@ export type RunGeoSpecModuleOptions = {
  */
 export type GeoSpecRunSuccess = {
   success: true;
-  /** True when every collected test passed or was skipped. */
+  /** True only when selected tests completed successfully with coherent available lineage. */
   passed: boolean;
   tests: GeoSpecTestCase[];
   bundle: BundleResult;
+  accounting?: GeoSpecTestAccounting;
+  lineage?: GeoSpecRunLineage;
 };
 
 /**
@@ -766,6 +807,10 @@ export type GeoSpecRunFailure = {
   success: false;
   issues: VmIssue[];
   bundle?: BundleResult;
+  accounting?: GeoSpecTestAccounting;
+  lineage?: GeoSpecRunLineage;
+  /** Tests registered before a module execution failure, including their retained assertions. */
+  tests?: GeoSpecTestCase[];
 };
 
 /**

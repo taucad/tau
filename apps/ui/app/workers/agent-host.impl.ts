@@ -19,6 +19,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { createRuntimeClient } from '@taucad/runtime/client';
+import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import { createParameterSetActor } from '@taucad/parameters/set-machine';
 import type { ParameterSetActor } from '@taucad/parameters/set-machine';
 import { Actor, waitFor } from 'xstate';
@@ -41,7 +42,7 @@ import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.j
 import { createSkillResolver } from '#lib/skill-resolver.js';
 import type { SkillResolver } from '#lib/skill-resolver.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
-import type { HeadlessImageService } from '#services/headless-image.service.js';
+import type { HeadlessImageJob, HeadlessImageService } from '#services/headless-image.service.js';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { agentHostWorkerBuild } from '#workers/agent-host.contract.js';
 import type { AgentHostProjectProvide, AgentHostProjectRebridge } from '#workers/agent-host.contract.js';
@@ -358,7 +359,42 @@ const createRuntimeRpcClients = (options: {
   const runtime: RuntimeAgentClient = runtimeClient;
   return createRuntimeAgentClients({
     runtime,
-    exportImage: async (job) => options.imageService.export(job),
+    exportImage: async (job) => {
+      if (job.sourceFormat === 'svg') {
+        return options.imageService.export(job);
+      }
+      if (job.exportOptions.mode === 'single') {
+        const { camera } = job.exportOptions;
+        const exportOptions: Extract<HeadlessImageJob, { sourceFormat: 'glb'; format: 'webp' }>['exportOptions'] = {
+          ...job.exportOptions,
+          mode: 'single',
+          camera: {
+            framing: 'bounds',
+            direction: [camera.direction[0], camera.direction[1], camera.direction[2]],
+            up: [camera.up[0], camera.up[1], camera.up[2]],
+            margin: camera.margin,
+            projection: { kind: 'perspective', verticalFieldOfView: camera.projection.verticalFieldOfView },
+          },
+        };
+        return options.imageService.export({ ...job, exportOptions });
+      }
+      const exportOptions: Extract<HeadlessImageJob, { sourceFormat: 'glb'; format: 'webp' }>['exportOptions'] = {
+        ...job.exportOptions,
+        mode: 'batch',
+        views: job.exportOptions.views.map((view) => ({
+          id: view.id,
+          label: view.label,
+          camera: {
+            framing: 'bounds',
+            direction: [view.camera.direction[0], view.camera.direction[1], view.camera.direction[2]],
+            up: [view.camera.up[0], view.camera.up[1], view.camera.up[2]],
+            margin: view.camera.margin,
+            projection: { kind: 'orthographic' },
+          },
+        })),
+      };
+      return options.imageService.export({ ...job, exportOptions });
+    },
     mapRuntimeError: (error) => toRpcError(error),
   });
 };
@@ -509,7 +545,8 @@ const composeProjectHost = async (
     { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
   );
   /* One runtime client per project host, shared by every turn and chat of the project (RH-A6). */
-  const runtimeClient: AppRuntimeClient = createRuntimeClient(
+  // Agent tools select offered IDs at runtime; this host deliberately constructs the public dynamic client.
+  const runtimeClient: AppRuntimeClient = createRuntimeClient<AnyRuntimeDefinition>(
     createDefaultKernelOptions({
       fileSystem: fromFsLike(createRuntimeFsLike(agentView)),
       runtimeConfig,
@@ -550,7 +587,7 @@ const composeProjectHost = async (
       },
       files: projectRoot,
       resolve: async ({ entry }, signal, resolution) => {
-        const result = await runtimeClient.resolveParameters({
+        const result = await runtimeClient.describe({
           source: { path: entry },
           ...(resolution === undefined ? {} : { resolution }),
           signal,
@@ -561,7 +598,7 @@ const composeProjectHost = async (
             { code: result.issues[0]?.code ?? 'PARAMETER_RESOLUTION_FAILED' },
           );
         }
-        return result.data;
+        return result.parameters;
       },
     });
     parameterActors.set(targetFile, actor);

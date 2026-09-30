@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { DirectIdbProvider, OPFSProvider } from '@taucad/filesystem/backend';
 import type { AgentLogEvent, HostRunSnapshot } from '@taucad/agent-host';
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
@@ -512,7 +513,7 @@ it('records the run a dead leader left as abandoned, observed on the stream', as
  * multi-tool turn has to script the wire per call — done here by swapping
  * `fetch` around this module's real project host (`openBrowserProjectHost`).
  *
- * `export_geometry` stays out: it connects the runtime worker, whose
+ * `export_model` stays out: it connects the runtime worker, whose
  * shared-memory transport needs a cross-origin-isolated page, and those headers
  * live in the browser vitest config (a W10 test hold).
  */
@@ -952,6 +953,12 @@ const gateModel = () => {
   };
 };
 
+const gatewayToolNames = (body: string): string[] =>
+  z
+    .object({ tools: z.array(z.object({ function: z.object({ name: z.string() }) })) })
+    .parse(JSON.parse(body))
+    .tools.map((tool) => tool.function.name);
+
 const startPayload = (chatId: string, runId: string) => ({
   chatId,
   runId,
@@ -1092,9 +1099,9 @@ const scriptModel = (frames: (call: number) => readonly string[]) => {
   };
 };
 
-/** One `get_kernel_result` call on `targetFile`, as the gateway streams it. */
+/** One `evaluate_model` call on `targetFile`, as the gateway streams it. */
 const kernelToolCall = (callId: string, targetFile: string): readonly string[] => [
-  `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"${callId}","function":{"name":"get_kernel_result","arguments":"{\\"targetFile\\":\\"${targetFile}\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n`,
+  `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"${callId}","function":{"name":"evaluate_model","arguments":"{\\"targetFile\\":\\"${targetFile}\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n`,
   'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4}}\n\n',
   'data: [DONE]\n\n',
 ];
@@ -1129,7 +1136,7 @@ it('should construct one runtime worker across three turns on one checkout', asy
       // oxlint-disable-next-line no-await-in-loop -- see above.
       const snapshot = await settled(sessionId, 'chat-kernel', 'completed');
       expect(snapshot.messages).toContainEqual(
-        expect.objectContaining({ role: 'tool-output', toolName: 'get_kernel_result' }),
+        expect.objectContaining({ role: 'tool-output', toolName: 'evaluate_model' }),
       );
     }
 
@@ -1481,7 +1488,7 @@ it('should offer the revisions tool on the browser host', async () => {
       expect(model.bodies).toHaveLength(1);
     });
 
-    expect(model.bodies[0]).toContain('"revisions"');
+    expect(gatewayToolNames(model.bodies[0] ?? '')).toContain('revisions');
   } finally {
     model.restore();
     await closeSession(sessionId);
@@ -1554,7 +1561,7 @@ it("should broker the revisions port only after the project's revision client op
     await vi.waitFor(() => {
       expect(model.bodies).toHaveLength(1);
     });
-    expect(model.bodies[0]).not.toContain('"revisions"');
+    expect(gatewayToolNames(model.bodies[0] ?? '')).not.toContain('revisions');
   } finally {
     model.restore();
     await closeSession(sessionId);

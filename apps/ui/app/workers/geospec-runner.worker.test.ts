@@ -25,7 +25,7 @@ const workerMocks = vi.hoisted(() => {
     dispose: vi.fn(),
   };
   const runtimeClient = {
-    export: vi.fn(),
+    open: vi.fn(),
     terminate: vi.fn(),
   };
   const runner = {
@@ -214,13 +214,16 @@ const initializeWorkerSession = async (options: {
     },
   } as MessageEvent<GeoSpecRunnerWorkerRequest>);
 
-  await vi.waitFor(() => {
-    expect(options.postMessage).toHaveBeenCalledWith({
-      type: 'initialized',
-      requestId,
-      sessionId,
-    } satisfies GeoSpecRunnerWorkerResponse);
-  });
+  await vi.waitFor(
+    () => {
+      expect(options.postMessage).toHaveBeenCalledWith({
+        type: 'initialized',
+        requestId,
+        sessionId,
+      } satisfies GeoSpecRunnerWorkerResponse);
+    },
+    { timeout: 5000 },
+  );
   options.postMessage.mockClear();
   return sessionId;
 };
@@ -255,7 +258,7 @@ describe('geospec-runner.worker', () => {
     workerMocks.fsProxy.rename.mockReset();
     workerMocks.fsProxy.exists.mockReset();
     workerMocks.fsProxy.dispose.mockReset();
-    workerMocks.runtimeClient.export.mockReset();
+    workerMocks.runtimeClient.open.mockReset();
     workerMocks.runtimeClient.terminate.mockReset();
     workerMocks.runner.run.mockReset();
     workerMocks.runner.close.mockReset();

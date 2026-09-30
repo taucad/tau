@@ -25,6 +25,17 @@ type RequiredEvaluationKernel = KernelPlugin<
 >;
 declare const requiredEvaluationKernel: RequiredEvaluationKernel;
 const requiredEvaluationRuntime = defineRuntime({ kernels: [requiredEvaluationKernel] });
+type OptionalEvaluationKernel = KernelPlugin<
+  Record<never, never>,
+  Record<string, unknown>,
+  'optional-evaluation',
+  never,
+  Record<never, never>,
+  readonly ['cad'],
+  z.ZodObject<{ quality: z.ZodOptional<z.ZodNumber> }>
+>;
+declare const optionalEvaluationKernel: OptionalEvaluationKernel;
+const optionalEvaluationRuntime = defineRuntime({ kernels: [optionalEvaluationKernel] });
 
 describe('geospec/model public types', () => {
   it('should accept direct parameters for source, code, and file loads', () => {
@@ -82,6 +93,7 @@ describe('geospec/model public types', () => {
 
   it('should accept Tau runtime clients through the GeoSpec runtime surface', () => {
     expectTypeOf<RuntimeClient>().toExtend<GeoSpecRuntimeClient>();
+    expectTypeOf<RuntimeClient<typeof optionalEvaluationRuntime>>().toExtend<GeoSpecRuntimeClient>();
     // GeoSpec loadModel has no evaluateOptions input; a kernel requiring one cannot be admitted through it.
     expectTypeOf<RuntimeClient<typeof requiredEvaluationRuntime>>().not.toExtend<GeoSpecRuntimeClient>();
     expectTypeOf<LoadModelFileOptions['runtime']>().toEqualTypeOf<

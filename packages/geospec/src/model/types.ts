@@ -22,7 +22,9 @@ export type GeoSpecModelFormat = MeshFileFormat | 'step' | 'stp';
  * @public
  */
 export type GeoSpecRuntimeClient = Pick<RuntimeClient, 'connect' | 'terminate'> & {
-  open: (...input: Parameters<RuntimeClient['open']>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
+  open: (
+    input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>,
+  ) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
   on?(
     event: 'telemetry',
     handler: (batch: {

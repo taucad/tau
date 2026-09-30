@@ -927,6 +927,7 @@ Library.Go(1f, () =>
         0.04f,
         Animation.EType.Once,
         Easing.EEasing.LINEAR));
+    viewer.bPoll(); // Start the animation clock before measuring its existing completion interval.
     System.Threading.Thread.Sleep(90);
 });
 """);

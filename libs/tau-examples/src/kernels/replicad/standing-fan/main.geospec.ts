@@ -247,7 +247,7 @@ describe('Standing fan — individual components', () => {
     ['base', { x: 390, y: 390, z: 30 }, { x: 0, y: 0, z: 21 }],
     ['socket', { x: 70, y: 70, z: 64 }, { x: 0, y: 70, z: 68 }],
     ['outer-tube', { x: 32, y: 32, z: 645 }, { x: 0, y: 70, z: 387.5 }],
-    ['inner-tube', { x: 24, y: 24, z: 390 }, { x: 0, y: 70, z: 815 }],
+    ['inner-tube', { x: 24, y: 24, z: 590 }, { x: 0, y: 70, z: 715 }],
     ['height-collar', { x: 44, y: 44, z: 38 }, { x: 0, y: 70, z: 719 }],
     ['motor-shell', { x: 116, y: 100, z: 116 }, { x: 0, y: 35, z: 1120 }],
     ['motor-core', { x: 62, y: 48, z: 62 }, { x: 0, y: 28, z: 1120 }],
@@ -300,7 +300,7 @@ describe('Standing fan — individual components', () => {
 
   it('uses a genuinely hollow upper tube with a 2 mm wall', async () => {
     expectGeo(await component('inner-tube')).toHaveVolume({
-      value: Math.PI * (12 ** 2 - 10 ** 2) * 390,
+      value: Math.PI * (12 ** 2 - 10 ** 2) * 590,
       tolerance: 200,
     });
   });
@@ -416,7 +416,7 @@ describe('Standing fan — adjustments and variants', () => {
       expectGeo(
         await component('inner-tube', { headHeight }),
       ).toHaveBoundingBox({
-        min: { z: 620 },
+        min: { z: headHeight - 700 },
         max: { z: headHeight - 110 },
         tolerance: 0.1,
       });

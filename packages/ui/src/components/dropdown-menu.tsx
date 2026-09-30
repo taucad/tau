@@ -16,6 +16,7 @@ import {
   menuItemLayoutClass,
   menuItemIconClass,
 } from '#components/menu.variants.js';
+import { useFullscreenElement } from '#hooks/use-fullscreen-element.js';
 
 /**
  * Owns the open state and focus lifecycle for a dropdown menu.
@@ -96,10 +97,11 @@ function DropdownMenuContent({
   onClick,
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>): React.JSX.Element {
+  const fullscreenElement = useFullscreenElement();
   const resolvedAlignOffset = alignOffset ?? (side === 'left' || side === 'right' ? menuSideAlignOffset : undefined);
 
   return (
-    <DropdownMenuPrimitive.Portal>
+    <DropdownMenuPrimitive.Portal container={fullscreenElement}>
       <DropdownMenuPrimitive.Content
         data-slot='dropdown-menu-content'
         sideOffset={sideOffset}

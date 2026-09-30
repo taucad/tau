@@ -28,8 +28,8 @@ describe('GeoSpec public type extraction', () => {
       expect(files[types.slice(2)]).toBeTruthy();
     }
     expect(bundle.files['runner/native/index.d.ts']).toContain('createNativeGeoSpecRunner');
-    expect(bundle.files['runner/native/index.d.ts']).toContain('loadNativeModel');
-    expect(bundle.files['create-geospec.d.ts']).toContain('expectNativeGeo');
+    expect(bundle.files['model/index.d.ts']).toContain('loadModel');
+    expect(bundle.files['create-geospec.d.ts']).toContain('expectGeo');
     const source = generated['geospec']!.files['mesh/load-mesh.d.ts']!;
     const ast = ts.createSourceFile('mesh/load-mesh.d.ts', source, ts.ScriptTarget.Latest, true);
     const options = ast.statements.find(

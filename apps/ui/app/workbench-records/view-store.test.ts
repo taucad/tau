@@ -82,6 +82,131 @@ const makeStore = (data: ReturnType<typeof memory>) =>
   });
 
 describe('workbench view checked store', () => {
+  it('should keep invalid bytes preservable when an unchanged edit owes no fields', async () => {
+    const data = memory();
+    const view = makeStore(data);
+    try {
+      await view.read();
+      const invalid = encoder.encode('{broken');
+      data.setBytes(invalid);
+      await view.read();
+      expect(await view.edit(seed())).toBe(false);
+      expect(await view.flush()).toBe(true);
+      expect(data.get()).toEqual(invalid);
+      expect(data.writes).not.toHaveBeenCalled();
+    } finally {
+      view.dispose();
+    }
+  });
+
+  it('should hold an accepted edit and flush until its first record read settles', async () => {
+    const data = memory();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const view = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'first-read',
+      files: {
+        ...data.files,
+        readFile: async () => {
+          entered.resolve();
+          await release.promise;
+          return data.files.readFile();
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      const hydration = view.read();
+      await entered.promise;
+      const edited = view.edit({ ...seed(), name: 'Accepted before hydration' });
+      let settled = false;
+      const drained = (async () => {
+        const saved = await view.flush();
+        settled = true;
+        return saved;
+      })();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(data.writes).not.toHaveBeenCalled();
+      release.resolve();
+      await hydration;
+      expect(await edited).toBe(true);
+      expect(await drained).toBe(true);
+      expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
+        status: 'current',
+        record: { name: 'Accepted before hydration', entryPath: 'a.ts' },
+      });
+    } finally {
+      release.resolve();
+      view.dispose();
+    }
+  });
+
+  it.each(['{broken', '{"version":2}'])(
+    'should retain blocked view intent through flush and repair (%s)',
+    async (invalid) => {
+      const data = memory();
+      const view = makeStore(data);
+      try {
+        await view.read();
+        const release = data.delay();
+        const edited = view.edit({ ...seed(), name: 'Unsaved' });
+        await vi.waitFor(() => {
+          expect(data.writes).toHaveBeenCalledOnce();
+        });
+        const foreign = encoder.encode(invalid);
+        data.setBytes(foreign);
+        release();
+        expect(await edited).toBe(false);
+        expect(await view.flush()).toBe(false);
+        expect(data.get()).toEqual(foreign);
+        data.set(seed());
+        await view.read();
+        expect(await view.flush()).toBe(true);
+        expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
+          status: 'current',
+          record: { name: 'Unsaved' },
+        });
+      } finally {
+        view.dispose();
+      }
+    },
+  );
+
+  it('should preserve invalid view bytes on a clean flush', async () => {
+    const data = memory();
+    const foreign = encoder.encode('{broken');
+    data.setBytes(foreign);
+    const view = makeStore(data);
+    try {
+      await view.read();
+      expect(await view.flush()).toBe(true);
+      expect(data.get()).toEqual(foreign);
+      expect(data.writes).not.toHaveBeenCalled();
+    } finally {
+      view.dispose();
+    }
+  });
+
+  it('should resolve blocked view intent only after an explicit checked Reset', async () => {
+    const data = memory();
+    const view = makeStore(data);
+    try {
+      await view.read();
+      data.setBytes(encoder.encode('{broken'));
+      await view.read();
+      expect(await view.edit({ ...seed(), name: 'Unsaved' })).toBe(false);
+      expect(await view.flush()).toBe(false);
+      expect(await view.reset(seed())).toBe(true);
+      expect(await view.flush()).toBe(true);
+      expect(workbenchRecords.view.read(data.get()!)).toEqual({ status: 'current', record: seed() });
+    } finally {
+      view.dispose();
+    }
+  });
   it('should classify a watch of in-flight local write bytes as a local acknowledgement', async () => {
     const data = memory();
     const acknowledgement = Promise.withResolvers<void>();

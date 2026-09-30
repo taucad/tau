@@ -349,9 +349,12 @@ export function createWorkbenchViewStore(
         if (saved) {
           deferred = undefined;
           retryDelay = 250;
-        } else if (status === 'retry') {
-          deferred = combine(deferred, patch);
-          retry();
+        } else {
+          const remaining = combine(deferred, patch);
+          deferred = status === 'retry' || Object.keys(remaining).length > 0 ? remaining : undefined;
+          if (status === 'retry') {
+            retry();
+          }
         }
         if (sequence === editSequence) {
           intended = saved ? state.record : next;
@@ -407,11 +410,25 @@ export function createWorkbenchViewStore(
       });
     },
     reset: async (next) => {
-      if (state.refusal?.code !== 'INVALID_RECORD') {
+      if (closed() || state.refusal?.code !== 'INVALID_RECORD') {
         return false;
       }
       const reviewed = state.bytes;
-      const result = pending.then(async () => write(next, undefined, reviewed)).then((status) => status === 'saved');
+      await drainEdit();
+      const sequence = ++editSequence;
+      const result = pending
+        .then(async () => write(next, undefined, reviewed))
+        .then((status) => {
+          if (status !== 'saved') {
+            return false;
+          }
+          deferred = undefined;
+          settledSequence = sequence;
+          if (sequence === editSequence) {
+            intended = state.record;
+          }
+          return true;
+        });
       pending = result;
       return result;
     },

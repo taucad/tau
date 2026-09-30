@@ -399,7 +399,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   installElectronRuntimeHeaders();
 
-  /* Deny by default; see `grantedPermissions` for the single exception and why. */
+  /* Deny by default; see `grantedPermissions` for the explicit grants and why. */
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
     const granted = isPermissionGranted(permission);
     log.log(granted ? 'info' : 'warn', granted ? 'permission.granted' : 'permission.denied', { permission });

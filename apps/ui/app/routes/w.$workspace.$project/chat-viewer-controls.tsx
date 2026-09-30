@@ -4,6 +4,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Separator } from '@taucad/ui/components/separator';
 import { CaptureViewControl } from '#components/geometry/cad/capture-view-control.js';
 import { FitViewControl } from '#components/geometry/cad/fit-view-control.js';
+import { FullscreenViewControl } from '#components/geometry/cad/fullscreen-view-control.js';
 import { GridSizeIndicator } from '#components/geometry/cad/grid-control.js';
 import { MeasureControl } from '#components/geometry/cad/measure-control.js';
 import { MeasureOptions } from '#components/geometry/cad/measure-tool-row.js';
@@ -79,7 +80,7 @@ type ChatViewerControlsProps = Readonly<{
 /**
  * The viewer's one bar. A running tool adds its row above the controls row, Section's above Measure's, and the open
  * cut's editor and the section's status unfold above the Section row. The controls row holds the grid readout, the
- * Section and Measure toggles, Fit view and Capture, and Viewer settings. Below 520 px of viewer width
+ * Section and Measure toggles, Fit view and Fullscreen, Capture in its own section, and Viewer settings. Below 520 px of viewer width
  * (`@container/viewer`) the toggles and the grid readout drop to their glyphs. The bar never shrinks below its rows,
  * so a host strip narrower than the bar must start it at its left edge (`items-center-safe`), keeping the grid readout
  * and Section in view. The bar also owns the viewer's keyboard shortcuts, and speaks each one's result in a polite
@@ -158,7 +159,13 @@ export function ChatViewerControls({ shouldEnableCapture = true }: ChatViewerCon
           </>
         )}
         <FitViewControl shortcut={keys.fitView} />
-        {shouldEnableCapture ? <CaptureViewControl /> : null}
+        <FullscreenViewControl />
+        {shouldEnableCapture ? (
+          <>
+            <Hairline />
+            <CaptureViewControl />
+          </>
+        ) : null}
         <Hairline />
         <ViewerSettings
           side='top'

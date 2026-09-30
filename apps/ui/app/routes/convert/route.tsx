@@ -104,7 +104,7 @@ export const ConverterViewer = memo(function ({
   const geometry = useMemo<Geometry>(() => ({ format: 'gltf', content: glbData, hash: 'converter' }), [glbData]);
 
   return (
-    <div data-viewer-frame className='absolute inset-0'>
+    <div data-viewer-frame className='fullscreen:bg-background absolute inset-0'>
       <div role='img' aria-label={`Preview of ${fileName}`} className='absolute inset-0'>
         <CadViewer
           enableZoom
@@ -121,7 +121,7 @@ export const ConverterViewer = memo(function ({
       </div>
 
       {/* Keep the viewer bar clear of the export panel, with safe centring on narrow screens. */}
-      <div className='@container/viewer pointer-events-none absolute right-2 bottom-2 left-2 z-10 flex flex-col items-center-safe md:right-84'>
+      <div className='in-fullscreen:right-2 @container/viewer pointer-events-none absolute right-2 bottom-2 left-2 z-10 flex flex-col items-center-safe md:right-84'>
         <ChatViewerControls shouldEnableCapture={false} />
       </div>
     </div>

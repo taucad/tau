@@ -209,17 +209,13 @@ const nodeFileSystem = async (sandbox: string, workspaceRoot: string): Promise<P
 const unresolvedRuntime = (): ProjectHostRuntimeClient => ({
   capabilities: undefined,
   connect: async () => undefined,
-  evaluate: async () => {
-    throw new Error('Not rendered in this test.');
-  },
-  export: async () => {
-    throw new Error('Not rendered in this test.');
-  },
+  open: vi.fn(),
   transcode: async () => {
     throw new Error('Not rendered in this test.');
   },
-  resolveParameters: async () => ({
+  describe: async () => ({
     success: false,
+    kernelId: undefined,
     issues: [{ code: 'SEMANTICS_UNRESOLVED', message: 'No declared parameter semantics.', severity: 'error' }],
   }),
 });

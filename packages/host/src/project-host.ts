@@ -19,7 +19,7 @@ import type { NodeFsProviderClient } from '@taucad/filesystem/backend';
 import type { ParameterManifest } from '@taucad/parameters';
 import { createParameterSetActor } from '@taucad/parameters/set-machine';
 import type { ParameterSetActor } from '@taucad/parameters/set-machine';
-import type { RuntimeClient } from '@taucad/runtime/client';
+import type { Description } from '@taucad/runtime/client';
 import { Actor, createActor, waitFor } from 'xstate';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 
@@ -54,7 +54,7 @@ export type ProjectFileSystem = Readonly<{
 }>;
 
 /** The runtime client a project host's tools and parameter actors run on, for one root. @public */
-export type ProjectHostRuntimeClient = HostRuntimeClient & Pick<RuntimeClient, 'resolveParameters'>;
+export type ProjectHostRuntimeClient = HostRuntimeClient;
 
 /** Options for {@link createProjectHost}. @public */
 export type ProjectHostOptions = Pick<
@@ -133,14 +133,14 @@ const settled =
 const parameterKey = (root: string, entry: string): string => JSON.stringify([root, entry]);
 const parameterRoot = (key: string): string => (JSON.parse(key) as [string, string])[0];
 
-const manifestOf = (result: Awaited<ReturnType<ProjectHostRuntimeClient['resolveParameters']>>): ParameterManifest => {
+const manifestOf = (result: Description): ParameterManifest => {
   if (!result.success) {
     throw Object.assign(
       new Error(result.issues.map(({ message }) => message).join('; ') || 'Parameter resolution failed.'),
       { code: result.issues[0]?.code ?? 'PARAMETER_RESOLUTION_FAILED' },
     );
   }
-  return result.data;
+  return result.parameters;
 };
 
 /** How long a parameter actor may take to finish its last write when its host closes (D16). Milliseconds. */
@@ -254,7 +254,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
       },
       resolve: async ({ entry: source }, signal, resolution) =>
         manifestOf(
-          await runtime.resolveParameters({
+          await runtime.describe({
             source: { path: source },
             ...(resolution === undefined ? {} : { resolution }),
             signal,

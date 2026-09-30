@@ -776,6 +776,8 @@ export class RuntimeDocumentSessionClient {
             value.code === 'OPERATION_TIMEOUT'
               ? new OperationTimeoutError(value.phase, value.message)
               : new OperationAbortedError(value.phase, value.message);
+          timedOutViewRequestId = value.requestId;
+          timedOutViewToken = `${value.evaluationId}:${value.requestId}`;
           clearViewDeadline?.();
           if (hasViewUpdateWaiter) {
             viewPending.reject(viewOperationError);

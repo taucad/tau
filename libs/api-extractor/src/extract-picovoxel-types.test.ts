@@ -93,7 +93,9 @@ describe('collectDeclarationGraph', () => {
   });
 
   it('should refuse an import that climbs out of the declaration directory', () => {
-    const directory = createFiles({ 'index.d.ts': 'import { X } from "../outside.js";' });
+    const directory = createFiles({
+      'index.d.ts': 'import { X } from "../outside.js";',
+    });
 
     expect(() => collectDeclarationGraph(directory, ['index.d.ts'])).toThrow(
       'index.d.ts imports ../outside.js from outside the declaration directory.',
@@ -158,11 +160,11 @@ describe('buildPicovoxelTypes', () => {
 
 /** Type-check one authored module against the bundle, exactly as the editor mounts it. */
 const checkAuthoredModule = (source: string): readonly string[] => {
-  const bundle = buildPicovoxelTypes();
+  const bundle = picovoxelBundle;
   const files = new Map<string, string>([['/project/main.ts', source]]);
   for (const [packageName, entry] of Object.entries(bundle)) {
     files.set(`/node_modules/${packageName}/index.d.ts`, entry.content);
-    for (const [path, content] of Object.entries(entry.files ?? {})) {
+    for (const [path, content] of Object.entries(entry.files)) {
       files.set(`/node_modules/${packageName}/${path}`, content);
     }
     files.set(`/node_modules/${packageName}/package.json`, JSON.stringify({ name: packageName, types: 'index.d.ts' }));
@@ -193,6 +195,46 @@ const checkAuthoredModule = (source: string): readonly string[] => {
 };
 
 describe('PicoVoxel authored result types', () => {
+  it('should compile shared mapped materials and model resources without host declarations', () => {
+    expect(
+      checkAuthoredModule(`
+      import type { Pico } from 'picovoxel';
+      import type { Material, Image, Resources, PicovoxelPart, PicovoxelModel, PicovoxelResult } from '@taucad/picovoxel';
+      const image: Image = { mimeType: 'image/png', data: new Uint8Array([1]) };
+      const resources: Resources = { images: [image], textures: [{ source: 0 }], samplers: [{ wrapS: 10497 }] };
+      const material: Material = {
+        pbrMetallicRoughness: { baseColorFactor: [0.5, 0.3, 0.1, 1], baseColorTexture: { index: 0 } },
+        normalTexture: { index: 0, scale: 0.6 }, extras: { finish: { inspected: true } },
+        extensions: { KHR_materials_anisotropy: { anisotropyStrength: 0.7, anisotropyTexture: { index: 0 } },
+          KHR_materials_volume: { thicknessFactor: 0.003, attenuationColor: [1, 0.9, 0.8] } }
+      };
+      export default function main(pico: Pico): PicovoxelResult {
+        const part: PicovoxelPart = { shape: pico.createVoxels({ shape: 'sphere', radius: 2 }), material };
+        const model: PicovoxelModel = { shapes: [part], ...resources };
+        return model;
+      }
+    `),
+    ).toEqual([]);
+    const bundle = picovoxelBundle;
+    expect(Object.keys(bundle)).toEqual(['@taucad/picovoxel', 'picovoxel']);
+    const declarations = Object.values(bundle['@taucad/picovoxel'].files).join('\n');
+    expect(declarations).not.toMatch(/@taucad\/runtime|@taucad\/geometry-core|@gltf-transform\/core/u);
+    expect(declarations).not.toMatch(/defineRuntime|createNodeClient|KernelContext/u);
+  }, 20_000);
+
+  it('should reject invalid material and resource shapes through the editor mount', () => {
+    const errors = checkAuthoredModule(`
+      import type { Material, Image, PicovoxelModel } from '@taucad/picovoxel';
+      const material: Material = { pbrMetallicRoughness: { metallicFactor: 'metal' } };
+      const image: Image = { mimeType: 'image/svg+xml', data: new Uint8Array([1]) };
+      const model: PicovoxelModel = { shapes: [], textures: [{ source: 'image.png' }] };
+      void [material, image, model];
+    `);
+    expect(errors).toHaveLength(3);
+    expect(errors.join('\n')).toContain("Type 'string' is not assignable to type 'number'");
+    expect(errors.join('\n')).toContain('image/svg+xml');
+  }, 20_000);
+
   it('should compile raw, named, readonly and repeated parts through the editor mount', () => {
     expect(
       checkAuthoredModule(`

@@ -242,8 +242,8 @@ static class Second
         var arguments = new[] { "--workspace", root, "--artifacts", Path.Combine(root, "artifacts"), "--parent-pid", Environment.ProcessId.ToString() };
 
         var output = Run(arguments, """
-{"protocolVersion":6,"requestId":"1","method":"resolve","params":{"entryPath":"./regions/other.cs"}}
-{"protocolVersion":6,"requestId":"2","method":"resolve","params":{"entryPath":"Shared.cs"}}
+{"protocolVersion":7,"requestId":"1","method":"resolve","params":{"entryPath":"./regions/other.cs"}}
+{"protocolVersion":7,"requestId":"2","method":"resolve","params":{"entryPath":"Shared.cs"}}
 """);
 
         Assert.Contains("\"sources\":[\"Shared.cs\",\"regions/other.cs\"]", output);
@@ -1101,9 +1101,9 @@ Library.Go(2f, () =>
         Assert.Throws<KeyNotFoundException>(() => Program.ParseArguments(["--workspace", root]));
 
         var output = Run(arguments, """
-{"protocolVersion":6,"requestId":"1","method":"analyze","params":{"entryPath":"main.cs"}}
-{"protocolVersion":6,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{}}}
-{"protocolVersion":6,"requestId":"3","method":"shutdown","params":{}}
+{"protocolVersion":7,"requestId":"1","method":"analyze","params":{"entryPath":"main.cs"}}
+{"protocolVersion":7,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{}}}
+{"protocolVersion":7,"requestId":"3","method":"shutdown","params":{}}
 """);
         Assert.Contains("\"type\":\"ready\"", output);
         Assert.Contains("\"defaultParameters\":{}", output);
@@ -1131,9 +1131,9 @@ Library.Go(2f, () =>
         Assert.Equal(2, Program.Run(arguments, new StringReader("{\"protocolVersion\":3,\"requestId\":\"1\",\"method\":\"x\",\"params\":{}}"), new StringWriter(), new StringWriter()));
         Assert.Equal(2, Program.Run(arguments, new StringReader(new string('x', 1_048_577)), new StringWriter(), new StringWriter()));
 
-        var output = Run(arguments, "{\"protocolVersion\":6,\"requestId\":\"2\",\"method\":\"unknown\",\"params\":{}}");
+        var output = Run(arguments, "{\"protocolVersion\":7,\"requestId\":\"2\",\"method\":\"unknown\",\"params\":{}}");
         Assert.Contains("CS_TAU_PROTOCOL", output);
-        output = Run(arguments, "{\"protocolVersion\":6,\"requestId\":\"3\",\"method\":\"analyze\",\"params\":{}}");
+        output = Run(arguments, "{\"protocolVersion\":7,\"requestId\":\"3\",\"method\":\"analyze\",\"params\":{}}");
         Assert.Contains("CS_TAU_RUNTIME", output);
         Assert.DoesNotContain("\"location\":null", output);
 
@@ -1144,11 +1144,11 @@ Library.Go(2f, () =>
         {
             Assert.ThrowsAny<Exception>(() => Program.ValidateEntryPath(Json(json), root));
         }
-        output = Run(arguments, "{\"protocolVersion\":6,\"requestId\":\"3a\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
+        output = Run(arguments, "{\"protocolVersion\":7,\"requestId\":\"3a\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
         Assert.Contains("CS_TAU_NO_SCENE", output);
 
         Write("main.cs", "using System; using System.Numerics; using PicoGK; Library.Go(1f, () => { Library.oViewer().Add(Utils.mshCreateCube(Vector3.One)); throw new InvalidOperationException(\"failed after start\"); });");
-        output = Run(arguments, "{\"protocolVersion\":6,\"requestId\":\"4\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
+        output = Run(arguments, "{\"protocolVersion\":7,\"requestId\":\"4\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
         Assert.Contains("failed after start", output);
     }
 
@@ -1186,11 +1186,11 @@ public static class Params
         var frames = new[]
         {
             // A cancel with nothing in flight has nothing to stop.
-            """{"protocolVersion":6,"requestId":"0","method":"cancel"}""",
-            """{"protocolVersion":6,"requestId":"1","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":100,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
-            """{"protocolVersion":6,"requestId":"1","method":"cancel"}""",
-            """{"protocolVersion":6,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":0,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
-            """{"protocolVersion":6,"requestId":"3","method":"shutdown","params":{}}""",
+            """{"protocolVersion":7,"requestId":"0","method":"cancel"}""",
+            """{"protocolVersion":7,"requestId":"1","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":100,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
+            """{"protocolVersion":7,"requestId":"1","method":"cancel"}""",
+            """{"protocolVersion":7,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":0,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
+            """{"protocolVersion":7,"requestId":"3","method":"shutdown","params":{}}""",
         };
 
         // The cancel is held back until the model is demonstrably running, so it stops a build in flight.
@@ -1267,7 +1267,7 @@ public static class Params
         var originalError = Console.Error;
         try
         {
-            Console.SetIn(new StringReader("{\"protocolVersion\":6,\"requestId\":\"main\",\"method\":\"shutdown\",\"params\":{}}"));
+            Console.SetIn(new StringReader("{\"protocolVersion\":7,\"requestId\":\"main\",\"method\":\"shutdown\",\"params\":{}}"));
             var output = new StringWriter();
             Console.SetOut(output);
             Console.SetError(new StringWriter());

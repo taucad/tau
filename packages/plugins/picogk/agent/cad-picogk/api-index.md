@@ -1,6 +1,6 @@
 # PicoGK API index
 
-PicoGK 2.3.0.0 · 2085 symbols · extracted by Roslyn 5.9.0.
+PicoGK 2.3.0.0 · 2187 symbols · extracted by Roslyn 5.9.0.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature.
 
@@ -345,6 +345,108 @@ LogProgress (class) [3 members] — A progress reporting class that outputs to a
   LogProgress.LogProgress (constructor) — Initialize a new progress reporting object
   LogProgress.Progress (method) — Report progress from 0..1
   LogProgress.Dispose (method) — Cleanup (just reports that the task is finished)
+Material (class) [26 members] — Typed Material appearance
+  Material.Name (property)
+  Material.Color (property)
+  Material.Metallic (property)
+  Material.Roughness (property)
+  Material.ColorTexture (property)
+  Material.MetallicRoughnessTexture (property)
+  Material.NormalTexture (property)
+  Material.NormalScale (property)
+  Material.OcclusionTexture (property)
+  Material.OcclusionStrength (property)
+  Material.Emissive (property)
+  Material.EmissiveStrength (property)
+  Material.EmissiveTexture (property)
+  Material.AlphaMode (property)
+  Material.AlphaCutoff (property)
+  Material.DoubleSided (property)
+  Material.Unlit (property)
+  Material.Ior (property)
+  Material.Dispersion (property)
+  Material.Anisotropy (property)
+  Material.Clearcoat (property)
+  Material.Iridescence (property)
+  Material.Sheen (property)
+  Material.Specular (property)
+  Material.Transmission (property)
+  Material.Volume (property)
+MaterialAlphaMode (enum) [3 members] — Typed MaterialAlphaMode appearance
+  MaterialAlphaMode.Opaque (enumMember)
+  MaterialAlphaMode.Mask (enumMember)
+  MaterialAlphaMode.Blend (enumMember)
+MaterialAnisotropy (class) [3 members] — Typed MaterialAnisotropy appearance
+  MaterialAnisotropy.Strength (property)
+  MaterialAnisotropy.Rotation (property)
+  MaterialAnisotropy.Texture (property)
+MaterialClearcoat (class) [6 members] — Typed MaterialClearcoat appearance
+  MaterialClearcoat.Factor (property)
+  MaterialClearcoat.Roughness (property)
+  MaterialClearcoat.Texture (property)
+  MaterialClearcoat.RoughnessTexture (property)
+  MaterialClearcoat.NormalTexture (property)
+  MaterialClearcoat.NormalScale (property)
+MaterialImage (class) [3 members] — Typed MaterialImage appearance
+  MaterialImage.Data (property)
+  MaterialImage.Format (property)
+  MaterialImage.Name (property)
+MaterialImageFormat (enum) [3 members] — Typed MaterialImageFormat appearance
+  MaterialImageFormat.Png (enumMember)
+  MaterialImageFormat.Jpeg (enumMember)
+  MaterialImageFormat.WebP (enumMember)
+MaterialIridescence (class) [6 members] — Typed MaterialIridescence appearance
+  MaterialIridescence.Factor (property)
+  MaterialIridescence.Ior (property)
+  MaterialIridescence.ThicknessMinimum (property)
+  MaterialIridescence.ThicknessMaximum (property)
+  MaterialIridescence.Texture (property)
+  MaterialIridescence.ThicknessTexture (property)
+MaterialMagFilter (enum) [2 members] — Typed MaterialMagFilter appearance
+  MaterialMagFilter.Nearest (enumMember)
+  MaterialMagFilter.Linear (enumMember)
+MaterialMinFilter (enum) [6 members] — Typed MaterialMinFilter appearance
+  MaterialMinFilter.Nearest (enumMember)
+  MaterialMinFilter.Linear (enumMember)
+  MaterialMinFilter.NearestMipmapNearest (enumMember)
+  MaterialMinFilter.LinearMipmapNearest (enumMember)
+  MaterialMinFilter.NearestMipmapLinear (enumMember)
+  MaterialMinFilter.LinearMipmapLinear (enumMember)
+MaterialSampler (class) [4 members] — Typed MaterialSampler appearance
+  MaterialSampler.WrapS (property)
+  MaterialSampler.WrapT (property)
+  MaterialSampler.MagFilter (property)
+  MaterialSampler.MinFilter (property)
+MaterialSheen (class) [4 members] — Typed MaterialSheen appearance
+  MaterialSheen.Color (property)
+  MaterialSheen.Roughness (property)
+  MaterialSheen.ColorTexture (property)
+  MaterialSheen.RoughnessTexture (property)
+MaterialSpecular (class) [4 members] — Typed MaterialSpecular appearance
+  MaterialSpecular.Factor (property)
+  MaterialSpecular.Color (property)
+  MaterialSpecular.Texture (property)
+  MaterialSpecular.ColorTexture (property)
+MaterialTexture (class) [3 members] — Typed MaterialTexture appearance
+  MaterialTexture.Image (property)
+  MaterialTexture.Sampler (property)
+  MaterialTexture.Transform (property)
+MaterialTextureTransform (class) [3 members] — Typed MaterialTextureTransform appearance
+  MaterialTextureTransform.Offset (property)
+  MaterialTextureTransform.Scale (property)
+  MaterialTextureTransform.Rotation (property)
+MaterialTransmission (class) [2 members] — Typed MaterialTransmission appearance
+  MaterialTransmission.Factor (property)
+  MaterialTransmission.Texture (property)
+MaterialVolume (class) [4 members] — Typed MaterialVolume appearance
+  MaterialVolume.Thickness (property)
+  MaterialVolume.AttenuationDistance (property)
+  MaterialVolume.AttenuationColor (property)
+  MaterialVolume.ThicknessTexture (property)
+MaterialWrap (enum) [3 members] — Typed MaterialWrap appearance
+  MaterialWrap.ClampToEdge (enumMember)
+  MaterialWrap.MirroredRepeat (enumMember)
+  MaterialWrap.Repeat (enumMember)
 Mesh (class) [23 members] — A triangle mesh
   Mesh.EStlUnit (enum)
   Mesh.m_strLoadHeaderData (field)
@@ -477,6 +579,9 @@ ScalarField (class) [17 members] — A field of scalar floating point values
 ScalarFieldHandle (struct) [2 members]
   ScalarFieldHandle.Value (property)
   ScalarFieldHandle.ScalarFieldHandle (constructor)
+
+## PicoGK (3) — `api-picogk-3.md`
+
 SdfVisualizer (class) [3 members]
   SdfVisualizer.imgEncodeFromSdf (method) — Create a color image which encodes the signed distance values…
   SdfVisualizer.bDoesSliceContainDefect (method) — Checks if the scalar field slice contains a defective voxel
@@ -507,9 +612,6 @@ Triangle (struct) [4 members]
   Triangle.B (field)
   Triangle.C (field)
   Triangle.Triangle (constructor)
-
-## PicoGK (3) — `api-picogk-3.md`
-
 Utils (class) [12 members]
   Utils.TempFolder (class) — Creates a temporary folder with an arbitrary filename in the…
   Utils.mshCreateCube (method) — Helper function to create simple box mesh from a bounding…
@@ -596,7 +698,7 @@ Viewer (class) [62 members] — PicoGK viewer
   Viewer.RequestScreenShot (method) — Request screenshot (TGA), which will be saved to the the…
   Viewer.EnableExperimental (method) — Enable/disable experimental rendering features
   Viewer.SetGroupVisible (method) — Enable or disable the display of a viewer group
-  Viewer.SetGroupMaterial (method) — Set the material for this viewer group
+  Viewer.SetGroupMaterial (method) — Assign a typed physical material to every object in the…
   Viewer.SetGroupMatrix (method) — Set the group's transformation matrix
   Viewer.EnableOverhangWarning (method) — Enables overhang severity visualization for the specified viewer group
   Viewer.DisableOverhangWarning (method) — Disables the overhang angle warning of the specified group

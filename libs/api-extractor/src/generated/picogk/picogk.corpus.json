@@ -4,19 +4,19 @@
     "packageName": "PicoGK",
     "packageVersion": "2.3.0.0",
     "extractor": "Roslyn 5.9.0",
-    "extractionDate": "2026-09-29T12:00:49.003Z",
-    "totalEntries": 2085,
+    "extractionDate": "2026-09-30T10:07:40.839Z",
+    "totalEntries": 2187,
     "breakdown": {
-      "class": 85,
+      "class": 97,
       "method": 1379,
       "constructor": 96,
       "interface": 18,
-      "enum": 12,
-      "enumMember": 107,
+      "enum": 17,
+      "enumMember": 124,
       "struct": 46,
       "field": 126,
       "constant": 13,
-      "property": 196,
+      "property": 264,
       "type": 7
     }
   },
@@ -7450,6 +7450,28 @@
                 "text": "void"
               },
               "text": "void SetGroupMaterial(int nGroupID, ColorFloat clr, float fMetallic, float fRoughness)"
+            },
+            {
+              "parameters": [
+                {
+                  "name": "groupId",
+                  "type": {
+                    "text": "int"
+                  },
+                  "optional": false
+                },
+                {
+                  "name": "material",
+                  "type": {
+                    "text": "Material"
+                  },
+                  "optional": false
+                }
+              ],
+              "returnType": {
+                "text": "void"
+              },
+              "text": "void SetGroupMaterial(int groupId, Material material)"
             }
           ],
           "visibility": "public",
@@ -7494,7 +7516,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 41
+            "line": 42
           },
           "languageSpecific": {
             "language": "csharp",
@@ -7540,7 +7562,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 42
+            "line": 43
           },
           "languageSpecific": {
             "language": "csharp",
@@ -7572,7 +7594,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 43
+            "line": 44
           },
           "languageSpecific": {
             "language": "csharp",
@@ -7596,7 +7618,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/ViewerBackend.cs",
-            "line": 44
+            "line": 45
           },
           "languageSpecific": {
             "language": "csharp",
@@ -12702,6 +12724,1893 @@
             "documentationId": "M:PicoGK.LogProgress.Dispose"
           },
           "id": "csharp:PicoGK.LogProgress.Dispose"
+        }
+      ]
+    },
+    {
+      "name": "Material",
+      "kind": "class",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed Material appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 39
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.Material"
+      },
+      "id": "csharp:PicoGK.Material",
+      "members": [
+        {
+          "name": "Name",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "string?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 40
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Name"
+          },
+          "id": "csharp:PicoGK.Material.Name"
+        },
+        {
+          "name": "Color",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "ColorFloat"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 41
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Color"
+          },
+          "id": "csharp:PicoGK.Material.Color"
+        },
+        {
+          "name": "Metallic",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 42
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Metallic"
+          },
+          "id": "csharp:PicoGK.Material.Metallic"
+        },
+        {
+          "name": "Roughness",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 43
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Roughness"
+          },
+          "id": "csharp:PicoGK.Material.Roughness"
+        },
+        {
+          "name": "ColorTexture",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 44
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.ColorTexture"
+          },
+          "id": "csharp:PicoGK.Material.ColorTexture"
+        },
+        {
+          "name": "MetallicRoughnessTexture",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 45
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.MetallicRoughnessTexture"
+          },
+          "id": "csharp:PicoGK.Material.MetallicRoughnessTexture"
+        },
+        {
+          "name": "NormalTexture",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 46
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.NormalTexture"
+          },
+          "id": "csharp:PicoGK.Material.NormalTexture"
+        },
+        {
+          "name": "NormalScale",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 47
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.NormalScale"
+          },
+          "id": "csharp:PicoGK.Material.NormalScale"
+        },
+        {
+          "name": "OcclusionTexture",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 48
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.OcclusionTexture"
+          },
+          "id": "csharp:PicoGK.Material.OcclusionTexture"
+        },
+        {
+          "name": "OcclusionStrength",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 49
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.OcclusionStrength"
+          },
+          "id": "csharp:PicoGK.Material.OcclusionStrength"
+        },
+        {
+          "name": "Emissive",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "ColorFloat"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 50
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Emissive"
+          },
+          "id": "csharp:PicoGK.Material.Emissive"
+        },
+        {
+          "name": "EmissiveStrength",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 51
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.EmissiveStrength"
+          },
+          "id": "csharp:PicoGK.Material.EmissiveStrength"
+        },
+        {
+          "name": "EmissiveTexture",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 52
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.EmissiveTexture"
+          },
+          "id": "csharp:PicoGK.Material.EmissiveTexture"
+        },
+        {
+          "name": "AlphaMode",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "MaterialAlphaMode?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 53
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.AlphaMode"
+          },
+          "id": "csharp:PicoGK.Material.AlphaMode"
+        },
+        {
+          "name": "AlphaCutoff",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 54
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.AlphaCutoff"
+          },
+          "id": "csharp:PicoGK.Material.AlphaCutoff"
+        },
+        {
+          "name": "DoubleSided",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "bool"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 55
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.DoubleSided"
+          },
+          "id": "csharp:PicoGK.Material.DoubleSided"
+        },
+        {
+          "name": "Unlit",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "bool"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 56
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Unlit"
+          },
+          "id": "csharp:PicoGK.Material.Unlit"
+        },
+        {
+          "name": "Ior",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "float?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 57
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Ior"
+          },
+          "id": "csharp:PicoGK.Material.Ior"
+        },
+        {
+          "name": "Dispersion",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "float?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 58
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Dispersion"
+          },
+          "id": "csharp:PicoGK.Material.Dispersion"
+        },
+        {
+          "name": "Anisotropy",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "MaterialAnisotropy?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 59
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Anisotropy"
+          },
+          "id": "csharp:PicoGK.Material.Anisotropy"
+        },
+        {
+          "name": "Clearcoat",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "MaterialClearcoat?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 60
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Clearcoat"
+          },
+          "id": "csharp:PicoGK.Material.Clearcoat"
+        },
+        {
+          "name": "Iridescence",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "MaterialIridescence?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 61
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Iridescence"
+          },
+          "id": "csharp:PicoGK.Material.Iridescence"
+        },
+        {
+          "name": "Sheen",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "MaterialSheen?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 62
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Sheen"
+          },
+          "id": "csharp:PicoGK.Material.Sheen"
+        },
+        {
+          "name": "Specular",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "MaterialSpecular?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 63
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Specular"
+          },
+          "id": "csharp:PicoGK.Material.Specular"
+        },
+        {
+          "name": "Transmission",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "MaterialTransmission?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 64
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Transmission"
+          },
+          "id": "csharp:PicoGK.Material.Transmission"
+        },
+        {
+          "name": "Volume",
+          "kind": "property",
+          "path": "PicoGK.Material",
+          "type": {
+            "text": "MaterialVolume?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 65
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.Material.Volume"
+          },
+          "id": "csharp:PicoGK.Material.Volume"
+        }
+      ]
+    },
+    {
+      "name": "MaterialAlphaMode",
+      "kind": "enum",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialAlphaMode appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 7
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialAlphaMode"
+      },
+      "id": "csharp:PicoGK.MaterialAlphaMode",
+      "members": [
+        {
+          "name": "Opaque",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialAlphaMode",
+          "type": {
+            "text": "Opaque"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 7
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialAlphaMode.Opaque"
+          },
+          "id": "csharp:PicoGK.MaterialAlphaMode.Opaque"
+        },
+        {
+          "name": "Mask",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialAlphaMode",
+          "type": {
+            "text": "Mask"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 7
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialAlphaMode.Mask"
+          },
+          "id": "csharp:PicoGK.MaterialAlphaMode.Mask"
+        },
+        {
+          "name": "Blend",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialAlphaMode",
+          "type": {
+            "text": "Blend"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 7
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialAlphaMode.Blend"
+          },
+          "id": "csharp:PicoGK.MaterialAlphaMode.Blend"
+        }
+      ]
+    },
+    {
+      "name": "MaterialAnisotropy",
+      "kind": "class",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialAnisotropy appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 25
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialAnisotropy"
+      },
+      "id": "csharp:PicoGK.MaterialAnisotropy",
+      "members": [
+        {
+          "name": "Strength",
+          "kind": "property",
+          "path": "PicoGK.MaterialAnisotropy",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 25
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialAnisotropy.Strength"
+          },
+          "id": "csharp:PicoGK.MaterialAnisotropy.Strength"
+        },
+        {
+          "name": "Rotation",
+          "kind": "property",
+          "path": "PicoGK.MaterialAnisotropy",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 25
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialAnisotropy.Rotation"
+          },
+          "id": "csharp:PicoGK.MaterialAnisotropy.Rotation"
+        },
+        {
+          "name": "Texture",
+          "kind": "property",
+          "path": "PicoGK.MaterialAnisotropy",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 25
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialAnisotropy.Texture"
+          },
+          "id": "csharp:PicoGK.MaterialAnisotropy.Texture"
+        }
+      ]
+    },
+    {
+      "name": "MaterialClearcoat",
+      "kind": "class",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialClearcoat appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 27
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialClearcoat"
+      },
+      "id": "csharp:PicoGK.MaterialClearcoat",
+      "members": [
+        {
+          "name": "Factor",
+          "kind": "property",
+          "path": "PicoGK.MaterialClearcoat",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 27
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialClearcoat.Factor"
+          },
+          "id": "csharp:PicoGK.MaterialClearcoat.Factor"
+        },
+        {
+          "name": "Roughness",
+          "kind": "property",
+          "path": "PicoGK.MaterialClearcoat",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 27
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialClearcoat.Roughness"
+          },
+          "id": "csharp:PicoGK.MaterialClearcoat.Roughness"
+        },
+        {
+          "name": "Texture",
+          "kind": "property",
+          "path": "PicoGK.MaterialClearcoat",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 27
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialClearcoat.Texture"
+          },
+          "id": "csharp:PicoGK.MaterialClearcoat.Texture"
+        },
+        {
+          "name": "RoughnessTexture",
+          "kind": "property",
+          "path": "PicoGK.MaterialClearcoat",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 27
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialClearcoat.RoughnessTexture"
+          },
+          "id": "csharp:PicoGK.MaterialClearcoat.RoughnessTexture"
+        },
+        {
+          "name": "NormalTexture",
+          "kind": "property",
+          "path": "PicoGK.MaterialClearcoat",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 27
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialClearcoat.NormalTexture"
+          },
+          "id": "csharp:PicoGK.MaterialClearcoat.NormalTexture"
+        },
+        {
+          "name": "NormalScale",
+          "kind": "property",
+          "path": "PicoGK.MaterialClearcoat",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 27
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialClearcoat.NormalScale"
+          },
+          "id": "csharp:PicoGK.MaterialClearcoat.NormalScale"
+        }
+      ]
+    },
+    {
+      "name": "MaterialImage",
+      "kind": "class",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialImage appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 17
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialImage"
+      },
+      "id": "csharp:PicoGK.MaterialImage",
+      "members": [
+        {
+          "name": "Data",
+          "kind": "property",
+          "path": "PicoGK.MaterialImage",
+          "type": {
+            "text": "byte[]"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 17
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialImage.Data"
+          },
+          "id": "csharp:PicoGK.MaterialImage.Data"
+        },
+        {
+          "name": "Format",
+          "kind": "property",
+          "path": "PicoGK.MaterialImage",
+          "type": {
+            "text": "MaterialImageFormat"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 17
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialImage.Format"
+          },
+          "id": "csharp:PicoGK.MaterialImage.Format"
+        },
+        {
+          "name": "Name",
+          "kind": "property",
+          "path": "PicoGK.MaterialImage",
+          "type": {
+            "text": "string?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 17
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialImage.Name"
+          },
+          "id": "csharp:PicoGK.MaterialImage.Name"
+        }
+      ]
+    },
+    {
+      "name": "MaterialImageFormat",
+      "kind": "enum",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialImageFormat appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 9
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialImageFormat"
+      },
+      "id": "csharp:PicoGK.MaterialImageFormat",
+      "members": [
+        {
+          "name": "Png",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialImageFormat",
+          "type": {
+            "text": "Png"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 9
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialImageFormat.Png"
+          },
+          "id": "csharp:PicoGK.MaterialImageFormat.Png"
+        },
+        {
+          "name": "Jpeg",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialImageFormat",
+          "type": {
+            "text": "Jpeg"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 9
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialImageFormat.Jpeg"
+          },
+          "id": "csharp:PicoGK.MaterialImageFormat.Jpeg"
+        },
+        {
+          "name": "WebP",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialImageFormat",
+          "type": {
+            "text": "WebP"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 9
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialImageFormat.WebP"
+          },
+          "id": "csharp:PicoGK.MaterialImageFormat.WebP"
+        }
+      ]
+    },
+    {
+      "name": "MaterialIridescence",
+      "kind": "class",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialIridescence appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 29
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialIridescence"
+      },
+      "id": "csharp:PicoGK.MaterialIridescence",
+      "members": [
+        {
+          "name": "Factor",
+          "kind": "property",
+          "path": "PicoGK.MaterialIridescence",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 29
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialIridescence.Factor"
+          },
+          "id": "csharp:PicoGK.MaterialIridescence.Factor"
+        },
+        {
+          "name": "Ior",
+          "kind": "property",
+          "path": "PicoGK.MaterialIridescence",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 29
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialIridescence.Ior"
+          },
+          "id": "csharp:PicoGK.MaterialIridescence.Ior"
+        },
+        {
+          "name": "ThicknessMinimum",
+          "kind": "property",
+          "path": "PicoGK.MaterialIridescence",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 29
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialIridescence.ThicknessMinimum"
+          },
+          "id": "csharp:PicoGK.MaterialIridescence.ThicknessMinimum"
+        },
+        {
+          "name": "ThicknessMaximum",
+          "kind": "property",
+          "path": "PicoGK.MaterialIridescence",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 29
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialIridescence.ThicknessMaximum"
+          },
+          "id": "csharp:PicoGK.MaterialIridescence.ThicknessMaximum"
+        },
+        {
+          "name": "Texture",
+          "kind": "property",
+          "path": "PicoGK.MaterialIridescence",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 29
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialIridescence.Texture"
+          },
+          "id": "csharp:PicoGK.MaterialIridescence.Texture"
+        },
+        {
+          "name": "ThicknessTexture",
+          "kind": "property",
+          "path": "PicoGK.MaterialIridescence",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 29
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialIridescence.ThicknessTexture"
+          },
+          "id": "csharp:PicoGK.MaterialIridescence.ThicknessTexture"
+        }
+      ]
+    },
+    {
+      "name": "MaterialMagFilter",
+      "kind": "enum",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialMagFilter appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 13
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialMagFilter"
+      },
+      "id": "csharp:PicoGK.MaterialMagFilter",
+      "members": [
+        {
+          "name": "Nearest",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialMagFilter",
+          "type": {
+            "text": "Nearest"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 13
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialMagFilter.Nearest"
+          },
+          "id": "csharp:PicoGK.MaterialMagFilter.Nearest"
+        },
+        {
+          "name": "Linear",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialMagFilter",
+          "type": {
+            "text": "Linear"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 13
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialMagFilter.Linear"
+          },
+          "id": "csharp:PicoGK.MaterialMagFilter.Linear"
+        }
+      ]
+    },
+    {
+      "name": "MaterialMinFilter",
+      "kind": "enum",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialMinFilter appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 15
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialMinFilter"
+      },
+      "id": "csharp:PicoGK.MaterialMinFilter",
+      "members": [
+        {
+          "name": "Nearest",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialMinFilter",
+          "type": {
+            "text": "Nearest"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 15
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialMinFilter.Nearest"
+          },
+          "id": "csharp:PicoGK.MaterialMinFilter.Nearest"
+        },
+        {
+          "name": "Linear",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialMinFilter",
+          "type": {
+            "text": "Linear"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 15
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialMinFilter.Linear"
+          },
+          "id": "csharp:PicoGK.MaterialMinFilter.Linear"
+        },
+        {
+          "name": "NearestMipmapNearest",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialMinFilter",
+          "type": {
+            "text": "NearestMipmapNearest"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 15
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialMinFilter.NearestMipmapNearest"
+          },
+          "id": "csharp:PicoGK.MaterialMinFilter.NearestMipmapNearest"
+        },
+        {
+          "name": "LinearMipmapNearest",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialMinFilter",
+          "type": {
+            "text": "LinearMipmapNearest"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 15
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialMinFilter.LinearMipmapNearest"
+          },
+          "id": "csharp:PicoGK.MaterialMinFilter.LinearMipmapNearest"
+        },
+        {
+          "name": "NearestMipmapLinear",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialMinFilter",
+          "type": {
+            "text": "NearestMipmapLinear"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 15
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialMinFilter.NearestMipmapLinear"
+          },
+          "id": "csharp:PicoGK.MaterialMinFilter.NearestMipmapLinear"
+        },
+        {
+          "name": "LinearMipmapLinear",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialMinFilter",
+          "type": {
+            "text": "LinearMipmapLinear"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 15
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialMinFilter.LinearMipmapLinear"
+          },
+          "id": "csharp:PicoGK.MaterialMinFilter.LinearMipmapLinear"
+        }
+      ]
+    },
+    {
+      "name": "MaterialSampler",
+      "kind": "class",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialSampler appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 19
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialSampler"
+      },
+      "id": "csharp:PicoGK.MaterialSampler",
+      "members": [
+        {
+          "name": "WrapS",
+          "kind": "property",
+          "path": "PicoGK.MaterialSampler",
+          "type": {
+            "text": "MaterialWrap"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 19
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialSampler.WrapS"
+          },
+          "id": "csharp:PicoGK.MaterialSampler.WrapS"
+        },
+        {
+          "name": "WrapT",
+          "kind": "property",
+          "path": "PicoGK.MaterialSampler",
+          "type": {
+            "text": "MaterialWrap"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 19
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialSampler.WrapT"
+          },
+          "id": "csharp:PicoGK.MaterialSampler.WrapT"
+        },
+        {
+          "name": "MagFilter",
+          "kind": "property",
+          "path": "PicoGK.MaterialSampler",
+          "type": {
+            "text": "MaterialMagFilter?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 19
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialSampler.MagFilter"
+          },
+          "id": "csharp:PicoGK.MaterialSampler.MagFilter"
+        },
+        {
+          "name": "MinFilter",
+          "kind": "property",
+          "path": "PicoGK.MaterialSampler",
+          "type": {
+            "text": "MaterialMinFilter?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 19
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialSampler.MinFilter"
+          },
+          "id": "csharp:PicoGK.MaterialSampler.MinFilter"
+        }
+      ]
+    },
+    {
+      "name": "MaterialSheen",
+      "kind": "class",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialSheen appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 31
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialSheen"
+      },
+      "id": "csharp:PicoGK.MaterialSheen",
+      "members": [
+        {
+          "name": "Color",
+          "kind": "property",
+          "path": "PicoGK.MaterialSheen",
+          "type": {
+            "text": "ColorFloat"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 31
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialSheen.Color"
+          },
+          "id": "csharp:PicoGK.MaterialSheen.Color"
+        },
+        {
+          "name": "Roughness",
+          "kind": "property",
+          "path": "PicoGK.MaterialSheen",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 31
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialSheen.Roughness"
+          },
+          "id": "csharp:PicoGK.MaterialSheen.Roughness"
+        },
+        {
+          "name": "ColorTexture",
+          "kind": "property",
+          "path": "PicoGK.MaterialSheen",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 31
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialSheen.ColorTexture"
+          },
+          "id": "csharp:PicoGK.MaterialSheen.ColorTexture"
+        },
+        {
+          "name": "RoughnessTexture",
+          "kind": "property",
+          "path": "PicoGK.MaterialSheen",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 31
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialSheen.RoughnessTexture"
+          },
+          "id": "csharp:PicoGK.MaterialSheen.RoughnessTexture"
+        }
+      ]
+    },
+    {
+      "name": "MaterialSpecular",
+      "kind": "class",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialSpecular appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 33
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialSpecular"
+      },
+      "id": "csharp:PicoGK.MaterialSpecular",
+      "members": [
+        {
+          "name": "Factor",
+          "kind": "property",
+          "path": "PicoGK.MaterialSpecular",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 33
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialSpecular.Factor"
+          },
+          "id": "csharp:PicoGK.MaterialSpecular.Factor"
+        },
+        {
+          "name": "Color",
+          "kind": "property",
+          "path": "PicoGK.MaterialSpecular",
+          "type": {
+            "text": "ColorFloat"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 33
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialSpecular.Color"
+          },
+          "id": "csharp:PicoGK.MaterialSpecular.Color"
+        },
+        {
+          "name": "Texture",
+          "kind": "property",
+          "path": "PicoGK.MaterialSpecular",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 33
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialSpecular.Texture"
+          },
+          "id": "csharp:PicoGK.MaterialSpecular.Texture"
+        },
+        {
+          "name": "ColorTexture",
+          "kind": "property",
+          "path": "PicoGK.MaterialSpecular",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 33
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialSpecular.ColorTexture"
+          },
+          "id": "csharp:PicoGK.MaterialSpecular.ColorTexture"
+        }
+      ]
+    },
+    {
+      "name": "MaterialTexture",
+      "kind": "class",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialTexture appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 23
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialTexture"
+      },
+      "id": "csharp:PicoGK.MaterialTexture",
+      "members": [
+        {
+          "name": "Image",
+          "kind": "property",
+          "path": "PicoGK.MaterialTexture",
+          "type": {
+            "text": "MaterialImage"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 23
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialTexture.Image"
+          },
+          "id": "csharp:PicoGK.MaterialTexture.Image"
+        },
+        {
+          "name": "Sampler",
+          "kind": "property",
+          "path": "PicoGK.MaterialTexture",
+          "type": {
+            "text": "MaterialSampler?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 23
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialTexture.Sampler"
+          },
+          "id": "csharp:PicoGK.MaterialTexture.Sampler"
+        },
+        {
+          "name": "Transform",
+          "kind": "property",
+          "path": "PicoGK.MaterialTexture",
+          "type": {
+            "text": "MaterialTextureTransform?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 23
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialTexture.Transform"
+          },
+          "id": "csharp:PicoGK.MaterialTexture.Transform"
+        }
+      ]
+    },
+    {
+      "name": "MaterialTextureTransform",
+      "kind": "class",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialTextureTransform appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 21
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialTextureTransform"
+      },
+      "id": "csharp:PicoGK.MaterialTextureTransform",
+      "members": [
+        {
+          "name": "Offset",
+          "kind": "property",
+          "path": "PicoGK.MaterialTextureTransform",
+          "type": {
+            "text": "Vector2"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 21
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialTextureTransform.Offset"
+          },
+          "id": "csharp:PicoGK.MaterialTextureTransform.Offset"
+        },
+        {
+          "name": "Scale",
+          "kind": "property",
+          "path": "PicoGK.MaterialTextureTransform",
+          "type": {
+            "text": "Vector2"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 21
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialTextureTransform.Scale"
+          },
+          "id": "csharp:PicoGK.MaterialTextureTransform.Scale"
+        },
+        {
+          "name": "Rotation",
+          "kind": "property",
+          "path": "PicoGK.MaterialTextureTransform",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 21
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialTextureTransform.Rotation"
+          },
+          "id": "csharp:PicoGK.MaterialTextureTransform.Rotation"
+        }
+      ]
+    },
+    {
+      "name": "MaterialTransmission",
+      "kind": "class",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialTransmission appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 35
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialTransmission"
+      },
+      "id": "csharp:PicoGK.MaterialTransmission",
+      "members": [
+        {
+          "name": "Factor",
+          "kind": "property",
+          "path": "PicoGK.MaterialTransmission",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 35
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialTransmission.Factor"
+          },
+          "id": "csharp:PicoGK.MaterialTransmission.Factor"
+        },
+        {
+          "name": "Texture",
+          "kind": "property",
+          "path": "PicoGK.MaterialTransmission",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 35
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialTransmission.Texture"
+          },
+          "id": "csharp:PicoGK.MaterialTransmission.Texture"
+        }
+      ]
+    },
+    {
+      "name": "MaterialVolume",
+      "kind": "class",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialVolume appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 37
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialVolume"
+      },
+      "id": "csharp:PicoGK.MaterialVolume",
+      "members": [
+        {
+          "name": "Thickness",
+          "kind": "property",
+          "path": "PicoGK.MaterialVolume",
+          "type": {
+            "text": "float"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 37
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialVolume.Thickness"
+          },
+          "id": "csharp:PicoGK.MaterialVolume.Thickness"
+        },
+        {
+          "name": "AttenuationDistance",
+          "kind": "property",
+          "path": "PicoGK.MaterialVolume",
+          "type": {
+            "text": "float?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 37
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialVolume.AttenuationDistance"
+          },
+          "id": "csharp:PicoGK.MaterialVolume.AttenuationDistance"
+        },
+        {
+          "name": "AttenuationColor",
+          "kind": "property",
+          "path": "PicoGK.MaterialVolume",
+          "type": {
+            "text": "ColorFloat"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 37
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialVolume.AttenuationColor"
+          },
+          "id": "csharp:PicoGK.MaterialVolume.AttenuationColor"
+        },
+        {
+          "name": "ThicknessTexture",
+          "kind": "property",
+          "path": "PicoGK.MaterialVolume",
+          "type": {
+            "text": "MaterialTexture?"
+          },
+          "visibility": "public",
+          "source": {
+            "file": "Material.cs",
+            "line": 37
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "P:PicoGK.MaterialVolume.ThicknessTexture"
+          },
+          "id": "csharp:PicoGK.MaterialVolume.ThicknessTexture"
+        }
+      ]
+    },
+    {
+      "name": "MaterialWrap",
+      "kind": "enum",
+      "path": "PicoGK",
+      "docs": {
+        "summary": "Typed MaterialWrap appearance; colors are sRGB, rotations radians and volume distances metres."
+      },
+      "visibility": "public",
+      "source": {
+        "file": "Material.cs",
+        "line": 11
+      },
+      "languageSpecific": {
+        "language": "csharp",
+        "documentationId": "T:PicoGK.MaterialWrap"
+      },
+      "id": "csharp:PicoGK.MaterialWrap",
+      "members": [
+        {
+          "name": "ClampToEdge",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialWrap",
+          "type": {
+            "text": "ClampToEdge"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 11
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialWrap.ClampToEdge"
+          },
+          "id": "csharp:PicoGK.MaterialWrap.ClampToEdge"
+        },
+        {
+          "name": "MirroredRepeat",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialWrap",
+          "type": {
+            "text": "MirroredRepeat"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 11
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialWrap.MirroredRepeat"
+          },
+          "id": "csharp:PicoGK.MaterialWrap.MirroredRepeat"
+        },
+        {
+          "name": "Repeat",
+          "kind": "enumMember",
+          "path": "PicoGK.MaterialWrap",
+          "type": {
+            "text": "Repeat"
+          },
+          "visibility": "public",
+          "static": true,
+          "source": {
+            "file": "Material.cs",
+            "line": 11
+          },
+          "languageSpecific": {
+            "language": "csharp",
+            "documentationId": "F:PicoGK.MaterialWrap.Repeat"
+          },
+          "id": "csharp:PicoGK.MaterialWrap.Repeat"
         }
       ]
     },
@@ -29108,7 +31017,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 791
+            "line": 802
           },
           "languageSpecific": {
             "language": "csharp",
@@ -29126,7 +31035,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 806
+            "line": 817
           },
           "languageSpecific": {
             "language": "csharp",
@@ -29144,7 +31053,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 807
+            "line": 818
           },
           "languageSpecific": {
             "language": "csharp",
@@ -29162,7 +31071,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 808
+            "line": 819
           },
           "languageSpecific": {
             "language": "csharp",
@@ -29180,7 +31089,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 809
+            "line": 820
           },
           "languageSpecific": {
             "language": "csharp",
@@ -29198,7 +31107,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 810
+            "line": 821
           },
           "languageSpecific": {
             "language": "csharp",
@@ -29216,7 +31125,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 811
+            "line": 822
           },
           "languageSpecific": {
             "language": "csharp",
@@ -29234,7 +31143,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 812
+            "line": 823
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32609,6 +34518,31 @@
             {
               "parameters": [
                 {
+                  "name": "groupId",
+                  "type": {
+                    "text": "int"
+                  },
+                  "optional": false,
+                  "description": "Existing viewer group assignment."
+                },
+                {
+                  "name": "material",
+                  "type": {
+                    "text": "Material"
+                  },
+                  "optional": false,
+                  "description": "Appearance and encoded textures, snapshotted synchronously."
+                }
+              ],
+              "returnType": {
+                "text": "void"
+              },
+              "text": "public void SetGroupMaterial(int groupId, Material material)",
+              "description": "Assign a typed physical material to every object in the hosted group."
+            },
+            {
+              "parameters": [
+                {
                   "name": "nGroupID",
                   "type": {
                     "text": "int"
@@ -32649,16 +34583,16 @@
             }
           ],
           "docs": {
-            "summary": "Set the material for this viewer group"
+            "summary": "Assign a typed physical material to every object in the hosted group."
           },
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 641
+            "line": 637
           },
           "languageSpecific": {
             "language": "csharp",
-            "documentationId": "M:PicoGK.Viewer.SetGroupMaterial(System.Int32,PicoGK.ColorFloat,System.Single,System.Single)"
+            "documentationId": "M:PicoGK.Viewer.SetGroupMaterial(System.Int32,PicoGK.Material)"
           },
           "id": "csharp:PicoGK.Viewer.SetGroupMaterial"
         },
@@ -32697,7 +34631,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 663
+            "line": 674
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32783,7 +34717,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 684
+            "line": 695
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32819,7 +34753,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 721
+            "line": 732
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32847,7 +34781,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 737
+            "line": 748
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32883,7 +34817,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 749
+            "line": 760
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32911,7 +34845,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 763
+            "line": 774
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32947,7 +34881,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 777
+            "line": 788
           },
           "languageSpecific": {
             "language": "csharp",
@@ -32975,7 +34909,7 @@
           "visibility": "public",
           "source": {
             "file": "Viewer/Viewer.cs",
-            "line": 820
+            "line": 831
           },
           "languageSpecific": {
             "language": "csharp",

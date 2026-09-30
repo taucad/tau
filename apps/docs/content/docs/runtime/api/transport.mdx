@@ -130,7 +130,7 @@ await host.ready;
 
 ## Timeout Recovery
 
-`renderTimeoutRecovery` is the current transport capability name. Its `kind: 'terminable'` branch terminates exactly this client's isolated host and settles closure with the timeout cause. Same-isolate transports report `{ kind: 'unsupported' }` because synchronous work can block their deadline timer.
+`operationTimeoutRecovery` is the current transport capability name. Its `kind: 'terminable'` branch terminates exactly this client's isolated host and settles closure with the timeout cause. Same-isolate transports report `{ kind: 'unsupported' }` because synchronous work can block their deadline timer.
 
 <auto-type-table path='./props/transport.ts' name='RuntimeTransportTimeoutRecovery' />
 
@@ -142,18 +142,18 @@ The runtime owns document operation correlation and cancellation. Do not infer t
 
 <auto-type-table path='./props/transport.ts' name='RuntimeTransportCloseResult' />
 
-| Cause            | Meaning                                                           |
-| ---------------- | ----------------------------------------------------------------- |
-| `requested`      | Consumer closed or terminated the client.                         |
-| `render-timeout` | Deadline recovery terminated this isolated host.                  |
-| `host-exit`      | Host exited independently; phase distinguishes boot from session. |
-| `wire-failure`   | Channel failed; the result retains the original error.            |
+| Cause               | Meaning                                                           |
+| ------------------- | ----------------------------------------------------------------- |
+| `requested`         | Consumer closed or terminated the client.                         |
+| `operation-timeout` | Deadline recovery terminated this isolated host.                  |
+| `host-exit`         | Host exited independently; phase distinguishes boot from session. |
+| `wire-failure`      | Channel failed; the result retains the original error.            |
 
 A later requested close cannot overwrite a previously observed exit, wire failure, or timeout.
 
 ## Related
 
-- [Configure Render Timeouts](../guides/render-timeouts)
+- [Configure Operation Timeouts](../guides/render-timeouts)
 - [Framework Integrations API](./frameworks)
 - [Embedding in a Host](../guides/embedding-in-a-host)
 - [Worker Model](../concepts/worker-model)

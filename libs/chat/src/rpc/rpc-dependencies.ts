@@ -88,6 +88,8 @@ export type RpcFileSystem = {
    * pattern — never call `readFile` on agent-supplied paths without bounds.
    */
   readFile(path: string): Promise<string>;
+  /** Exact owned bytes from a canonical rooted path; refuses files above 256 MiB. */
+  readBinaryFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   writeFile(path: string, content: string): Promise<void>;
   writeFileChecked(input: CheckedFileWrite): Promise<CheckedFileWriteResult>;
   deleteFileChecked(input: {

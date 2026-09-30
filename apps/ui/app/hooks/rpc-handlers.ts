@@ -210,6 +210,23 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
   };
 
   return {
+    async readBinaryFile(path: string): Promise<Uint8Array<ArrayBuffer>> {
+      const rootedPath = assertRootedPath(path);
+      const maximumReadBytes = 256 * 1024 * 1024;
+      const metadata = await fileManager.stat(rootedPath);
+      if (metadata.type === 'dir' || metadata.size > maximumReadBytes) {
+        throw Object.assign(new Error(`File '${path}' exceeds the binary read limit or is a directory.`), {
+          code: rpcClientErrorCode.resultTooLarge,
+        });
+      }
+      const data = await readFileBytes(rootedPath);
+      if (data.byteLength > maximumReadBytes) {
+        throw Object.assign(new Error(`File '${path}' exceeds the binary read limit.`), {
+          code: rpcClientErrorCode.resultTooLarge,
+        });
+      }
+      return data;
+    },
     async readFile(path: string): Promise<string> {
       const data = await fileManager.readFile(path);
       try {

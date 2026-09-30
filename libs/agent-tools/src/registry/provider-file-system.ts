@@ -43,6 +43,7 @@ const textDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const manifestPath = 'tau.json';
 const maximumCheckedPreconditions = 32;
 const maximumCheckedBytes = 8 * 1024 * 1024;
+const maximumReadBytes = 256 * 1024 * 1024;
 
 const manifestRefusal = (message: string): Error =>
   Object.assign(new Error(message), { code: rpcClientErrorCode.validationError });
@@ -272,6 +273,24 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
   };
 
   return {
+    async readBinaryFile(path) {
+      assertNotAborted(signal);
+      const target = assertRootedPath(path);
+      const metadata = await provider.stat(target);
+      if (metadata.type === 'dir' || metadata.size > maximumReadBytes) {
+        throw Object.assign(new Error(`Cannot read '${path}' as a file within the 256 MiB byte limit.`), {
+          code: rpcClientErrorCode.resultTooLarge,
+        });
+      }
+      const content = await bytes(target);
+      assertNotAborted(signal);
+      if (content.byteLength > maximumReadBytes) {
+        throw Object.assign(new Error(`File '${path}' grew above the 256 MiB byte limit.`), {
+          code: rpcClientErrorCode.resultTooLarge,
+        });
+      }
+      return content;
+    },
     async readFile(path) {
       const content = await bytes(path);
       try {

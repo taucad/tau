@@ -352,7 +352,7 @@ describe('compaction safety regressions', () => {
           {
             type: 'tool-input',
             toolCallId: 'kernel-call',
-            toolName: 'get_kernel_result',
+            toolName: 'evaluate_model',
             input: {},
           },
           { type: 'usage', usage: usage(1000) },
@@ -365,7 +365,7 @@ describe('compaction safety regressions', () => {
           {
             type: 'tool-input',
             toolCallId: 'kernel-call-2',
-            toolName: 'get_kernel_result',
+            toolName: 'evaluate_model',
             input: {},
           },
           { type: 'usage', usage: usage(1500) },
@@ -383,7 +383,7 @@ describe('compaction safety regressions', () => {
     const session = await createSession({
       file,
       transport,
-      tools: toolRegistry('get_kernel_result', () => ({
+      tools: toolRegistry('evaluate_model', () => ({
         status: 'ok',
         payload: `${marker}-${'x'.repeat(3000)}`,
       })),

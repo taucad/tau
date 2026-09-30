@@ -97,7 +97,7 @@ describe('ToolResultTrimmer', () => {
       {
         role: 'toolResult',
         toolCallId: 'call-1',
-        toolName: 'get_kernel_result',
+        toolName: 'evaluate_model',
         content: [{ type: 'text', text: JSON.stringify(content) }],
         details: { content, isError: false, substituted: false },
         isError: false,

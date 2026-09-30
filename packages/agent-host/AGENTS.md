@@ -8,7 +8,7 @@
 - The chat protocol is orchestrator-agnostic and carries complete messages; reject delta-only request payloads.
 - `test_model` delegates to the browser GeoSpec runner and its worker-owned runtime. Missing source files remain test failures.
 - Preserve exact previously invoked skill content during replay; metadata-only skill history requires a fresh `use_skill` call before applying the skill.
-- The CAD agent invokes `export_geometry` only for an explicit export request. Agent-authored visible labels use Title Case words with spaces; source identifiers preserve their native casing.
+- The CAD agent invokes `export_model` only for an explicit export request. Agent-authored visible labels use Title Case words with spaces; source identifiers preserve their native casing.
 
 ## Scripted model tests
 

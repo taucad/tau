@@ -133,12 +133,7 @@ globalThis.addEventListener('message', async () => {
         principal: async () => undefined,
         resolveInvocation: async () => {
           recoveryLookups++;
-          return {
-            status: 'terminal',
-            operationId: 'browser-recovery-operation',
-            outcome: 'settled',
-            chargedCreditAtoms: '1',
-          };
+          return { status: 'pending' };
         },
       },
       async *stream() {

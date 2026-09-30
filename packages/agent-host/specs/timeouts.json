@@ -133,6 +133,15 @@
       "fixedBy": "W6"
     },
     {
+      "id": "B14G",
+      "bound": "Geometry-runner port request to main (10 s)",
+      "site": "apps/desktop/src/tau/services-host.ts",
+      "token": "geometryPortTimeout",
+      "class": "Peer",
+      "owner": "desktop geometry broker",
+      "fixedBy": "outside this charter: desktop geometry broker owner"
+    },
+    {
       "id": "B15",
       "bound": "Agent-host configuration from main",
       "site": "apps/desktop/src/tau/services-host.impl.ts",

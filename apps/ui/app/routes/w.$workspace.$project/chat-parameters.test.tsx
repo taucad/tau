@@ -75,17 +75,27 @@ const mockCadRef2 = {
 /** A unit whose kernel declares no cancellation, moved through render states by the test. */
 function createUncancellableCadRef() {
   const listeners = new Set<(snapshot: unknown) => void>();
-  const snapshotOf = (state: 'idle' | 'rendering', requestId: number) => ({
+  const viewListeners = new Set<(status: 'rendering' | 'ready') => void>();
+  let openAttempt = 0;
+  const defaultView = {
+    on: (_event: 'status', listener: (status: 'rendering' | 'ready') => void) => {
+      viewListeners.add(listener);
+      listener('ready');
+      return () => viewListeners.delete(listener);
+    },
+  };
+  const snapshotOf = (state: 'idle' | 'rendering') => ({
     context: {
       ...mockCadRef.getSnapshot().context,
       activeKernelId: 'openscad',
       capabilities: { renderCapabilities: { openscad: {} } },
-      lastRequestedRenderId: requestId,
+      defaultView,
+      openAttempt,
     },
     hasTag: () => false,
     matches: (value: string) => value === state,
   });
-  let snapshot = snapshotOf('idle', 0);
+  let snapshot = snapshotOf('idle');
   const ref = {
     getSnapshot: () => snapshot,
     subscribe: (listener: (next: unknown) => void) => {
@@ -94,13 +104,25 @@ function createUncancellableCadRef() {
     },
     send: vi.fn(),
   } as unknown as ActorRefFrom<typeof cadMachine>;
-  const enter = (state: 'idle' | 'rendering', requestId: number): void => {
-    snapshot = snapshotOf(state, requestId);
+  const enter = (state: 'idle' | 'rendering'): void => {
+    snapshot = snapshotOf(state);
     for (const listener of listeners) {
       listener(snapshot);
     }
+    for (const listener of viewListeners) {
+      listener(state === 'idle' ? 'ready' : 'rendering');
+    }
   };
-  return { ref, enter };
+  const repeatRendering = (): void => {
+    for (const listener of viewListeners) {
+      listener('rendering');
+    }
+  };
+  const supersede = (): void => {
+    openAttempt += 1;
+    enter('rendering');
+  };
+  return { ref, enter, repeatRendering, supersede };
 }
 
 let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
@@ -689,18 +711,81 @@ describe('ChatParameters', () => {
 
       act(() => {
         now = 1000;
-        unit.enter('rendering', 1);
+        unit.enter('rendering');
         now = 1400;
-        unit.enter('idle', 1);
+        unit.enter('idle');
       });
       fireEvent.click(screen.getByTestId('scrub-param'));
       expect(isScrubSent()).toBe(false);
 
       act(() => {
         now = 2000;
-        unit.enter('rendering', 2);
+        unit.enter('rendering');
         now = 2040;
-        unit.enter('idle', 2);
+        unit.enter('idle');
+      });
+      fireEvent.click(screen.getByTestId('scrub-param'));
+      expect(unit.ref.send).toHaveBeenCalledWith({ type: 'scrubParameters', parameters: { width: '21 in' } });
+    } finally {
+      clock.mockRestore();
+      requestFrame.mockRestore();
+    }
+  });
+
+  it('should time from the first rendering status when the same request is re-emitted', () => {
+    const requestFrame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const unit = createUncancellableCadRef();
+      mockGeometryUnits.set('main.ts', unit.ref);
+      const isScrubSent = () => vi.mocked(unit.ref.send).mock.calls.some(([event]) => event.type === 'scrubParameters');
+      render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
+      act(() => {
+        now = 1000;
+        unit.enter('rendering');
+        now = 1260;
+        unit.repeatRendering();
+        now = 1300;
+        unit.enter('idle');
+      });
+      fireEvent.click(screen.getByTestId('scrub-param'));
+      expect(isScrubSent()).toBe(false);
+      act(() => {
+        now = 2000;
+        unit.enter('rendering');
+        now = 2040;
+        unit.enter('idle');
+      });
+      fireEvent.click(screen.getByTestId('scrub-param'));
+      expect(isScrubSent()).toBe(true);
+    } finally {
+      clock.mockRestore();
+      requestFrame.mockRestore();
+    }
+  });
+
+  it('should time the replacement when a render request is superseded', () => {
+    const requestFrame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const unit = createUncancellableCadRef();
+      mockGeometryUnits.set('main.ts', unit.ref);
+      render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
+      act(() => {
+        now = 1000;
+        unit.enter('rendering');
+        now = 1400;
+        unit.supersede();
+        now = 1440;
+        unit.enter('idle');
       });
       fireEvent.click(screen.getByTestId('scrub-param'));
       expect(unit.ref.send).toHaveBeenCalledWith({ type: 'scrubParameters', parameters: { width: '21 in' } });

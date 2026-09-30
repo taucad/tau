@@ -391,7 +391,7 @@ it('accepts the project Runtime mesh', async () => {
     }
     const outputs = results.flatMap(({ content }) => {
       const text = typeof content === 'string' ? content : content.map((part) => part.text).join('');
-      const parsed = testModelOutputSchema.safeParse(JSON.parse(text));
+      const parsed = testModelOutputSchema.omit({ passes: true }).safeParse(JSON.parse(text));
       return parsed.success ? [parsed.data] : [];
     });
     expect(outputs).toHaveLength(1);
@@ -410,7 +410,27 @@ it('accepts the project Runtime mesh', async () => {
     const retained = testModelOutputSchema.parse(JSON.parse(retainedText!));
     expect(retained).toMatchObject({ passed: 2, total: 3 });
     expect(output).toMatchObject({ passed: 2, total: 3 });
-    expect(output.passes.map((row) => row.requirement)).toEqual([
+    expect(output.accounting).toEqual(retained.accounting);
+    expect(retained.accounting).toEqual({
+      discovered: 3,
+      selected: 3,
+      completed: 3,
+      passed: 2,
+      failed: 1,
+      unsupported: 0,
+      inconclusive: 0,
+      skipped: 0,
+      notRun: 0,
+      requestedFiles: ['native.geospec.ts'],
+      completedFiles: ['native.geospec.ts'],
+      notRunFiles: [],
+      discoveryComplete: true,
+      cancelled: false,
+      bailed: false,
+    });
+    expect(retained).toMatchObject({ runStatus: 'failed', lineageStatus: 'complete' });
+    expect(output).toMatchObject({ runStatus: 'failed', lineageStatus: 'complete' });
+    expect(retained.passes.map((row) => row.requirement)).toEqual([
       'accepts the fixed box volume',
       'accepts the project Runtime mesh',
     ]);
@@ -462,9 +482,8 @@ it('accepts the project Runtime mesh', async () => {
       }
     }
     const rows = [retained.passes[0]!, retained.failures[0]!, retained.passes[1]!];
-    const compactRows = [output.passes[0]!, output.failures[0]!, output.passes[1]!];
-    expect(compactRows.map((row) => row.reports![0])).toEqual(
-      rows.map((row) => {
+    expect(output.failures.map((row) => row.reports![0])).toEqual(
+      retained.failures.map((row) => {
         const { canonical: _canonical, ...report } = row.reports![0]!;
         return report;
       }),
@@ -476,11 +495,18 @@ it('accepts the project Runtime mesh', async () => {
     for (const [index, id] of reportLoadIds.entries()) {
       const matching = loads.filter((load) => load.loadId === id);
       expect(matching).toHaveLength(1);
-      expect(matching[0]!.subject?.contentHash).toMatch(/^[\da-f]{64}$/u);
+      expect(matching[0]!.subject?.subjectHash).toMatch(/^[\da-f]{64}$/u);
+      const { artifacts } = matching[0]!.evidence!;
+      expect(artifacts).toHaveLength(1);
+      expect(artifacts[0]!.sha256).toMatch(/^[\da-f]{64}$/u);
+      expect(artifacts[0]!.byteLength).toBeGreaterThan(0);
       if (index < 2) {
-        expect(matching[0]!.subject?.contentHash).toBe(nativeFixtureHash);
+        expect(matching[0]!.subject?.subjectHash).toBe(apiSubjectHash);
+        expect(artifacts[0]!.sha256).toBe(nativeFixtureHash);
+        expect(artifacts[0]!.byteLength).toBe(fixtureBytes.byteLength);
       } else {
-        expect(matching[0]!.subject?.contentHash).not.toBe(nativeFixtureHash);
+        expect(matching[0]!.subject?.subjectHash).not.toBe(apiSubjectHash);
+        expect(artifacts[0]!.sha256).not.toBe(nativeFixtureHash);
       }
     }
     for (const [index, row] of rows.entries()) {
@@ -506,7 +532,7 @@ it('accepts the project Runtime mesh', async () => {
     );
     expect(measuredSubjects.slice(0, 2)).toEqual([nativeFixtureHash, nativeFixtureHash]);
     expect(measuredSubjects[2]).not.toBe(nativeFixtureHash);
-    expect(reportLoadIds.map((id) => loads.find((load) => load.loadId === id)!.subject!.contentHash)).toEqual(
+    expect(reportLoadIds.map((id) => loads.find((load) => load.loadId === id)!.evidence!.artifacts[0]!.sha256)).toEqual(
       measuredSubjects,
     );
     await target.click(selectors.getByRole('button', { name: /^(?:Edited files, )?ran tests$/iu }));

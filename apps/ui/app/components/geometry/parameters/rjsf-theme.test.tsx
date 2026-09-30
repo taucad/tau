@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Form from '@rjsf/core';
+import { VirtuosoMockContext } from 'react-virtuoso';
 import type { IChangeEvent } from '@rjsf/core';
 import { customizeValidator } from '@rjsf/validator-ajv8';
 import type { WidgetProps, RJSFSchema, Registry } from '@rjsf/utils';
@@ -79,6 +80,8 @@ const stringEnumOptions = [
 const createOnChange = () =>
   vi.fn<(data: IChangeEvent<Record<string, unknown>, RJSFSchema, RJSFContext>, id?: string) => void>();
 
+const collectionViewport = { viewportHeight: 240, itemHeight: 80 };
+
 const renderSchemaForm = ({
   schema,
   formData,
@@ -106,26 +109,72 @@ const renderSchemaForm = ({
   };
 
   render(
-    <TooltipProvider>
-      <Form
-        schema={schema}
-        validator={validator}
-        widgets={widgets}
-        templates={templates}
-        fields={rjsfFields}
-        uiSchema={uiSchema}
-        idPrefix={rjsfIdPrefix}
-        idSeparator={rjsfIdSeparator}
-        formContext={formContext}
-        formData={formData}
-        experimental_defaultFormStateBehavior={rjsfDefaultFormStateBehavior}
-        onChange={onChange}
-      />
-    </TooltipProvider>,
+    <VirtuosoMockContext.Provider value={collectionViewport}>
+      <TooltipProvider>
+        <Form
+          schema={schema}
+          validator={validator}
+          widgets={widgets}
+          templates={templates}
+          fields={rjsfFields}
+          uiSchema={uiSchema}
+          idPrefix={rjsfIdPrefix}
+          idSeparator={rjsfIdSeparator}
+          formContext={formContext}
+          formData={formData}
+          experimental_defaultFormStateBehavior={rjsfDefaultFormStateBehavior}
+          onChange={onChange}
+        />
+      </TooltipProvider>
+    </VirtuosoMockContext.Provider>,
   );
 
   return onChange;
 };
+
+describe('workbench group spacing', () => {
+  it.each([2, 24])('should retain shared field-group spacing with %i properties', (count) => {
+    renderSchemaForm({
+      schema: {
+        type: 'object',
+        properties: Object.fromEntries(
+          Array.from({ length: count }, (_, index) => [
+            `group${index}`,
+            { type: 'object', title: `Group ${index}`, properties: { value: { type: 'number', default: 0 } } },
+          ]),
+        ),
+      },
+    });
+    const groups = screen.getAllByRole('button', { name: /^Group: Group/ });
+    expect(groups.length).toBeGreaterThan(1);
+    expect(groups.length).toBeLessThanOrEqual(count);
+    for (const group of groups) {
+      const field = group.closest('[data-slot=field-group]');
+      expect(field).toHaveClass('[&:not(:first-child)]:pt-(--pane-group-gap)');
+      expect(field).toHaveClass('[[data-pane-list-key]:not([aria-posinset="1"])>&]:pt-(--pane-group-gap)');
+      expect(field).not.toHaveClass('[&+.field-group]:mt-2');
+    }
+  });
+
+  it.each([2, 24])('should give object-array items shared measured gaps with %i items', (count) => {
+    renderSchemaForm({
+      schema: {
+        type: 'object',
+        properties: {
+          entries: {
+            type: 'array',
+            items: { type: 'object', properties: { value: { type: 'number' } } },
+          },
+        },
+      },
+      formData: { entries: Array.from({ length: count }, () => ({ value: 0 })) },
+    });
+    const list = screen.getByRole('list', { name: 'Items: Entries' });
+    const rows = list.querySelectorAll('[data-pane-list-key]');
+    expect(rows[0]).not.toHaveClass('pt-(--pane-group-gap)');
+    expect(rows[1]).toHaveClass('pt-(--pane-group-gap)');
+  });
+});
 
 describe('SelectWidget', () => {
   describe('numeric enums', () => {

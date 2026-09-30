@@ -283,14 +283,14 @@ const runStatus = (
   if (tests.some((test) => test.status === 'unsupported')) {
     return 'unsupported';
   }
-  if (result.selectedTests === 0) {
+  if (result.selectedTests === 0 || (tests.length > 0 && tests.every((test) => test.status === 'skipped'))) {
     return 'not-run';
   }
   const { accounting } = result;
   return result.success &&
     result.lineageStatus === 'complete' &&
     accounting?.discoveryComplete &&
-    accounting.notRun === 0 &&
+    accounting.completed + tests.filter((test) => test.status === 'skipped').length === accounting.selected &&
     accounting.notRunFiles.length === 0 &&
     !accounting.bailed
     ? 'passed'

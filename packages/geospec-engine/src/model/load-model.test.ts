@@ -416,6 +416,23 @@ describe('loadModel — the runtime branch', () => {
     expect(subject.provenance.unit).toBe('mm');
   });
 
+  it(
+    'should preserve the real OpenSCAD replay through the unchanged default runtime',
+    { timeout: 120_000 },
+    async () => {
+      const packageText = await readFile(join(import.meta.dirname, '../../package.json'), 'utf8');
+      expect(JSON.parse(packageText)).toMatchObject({ dependencies: { '@taucad/openrscad': 'workspace:*' } });
+      const subject = await loadModel({
+        code: Object.fromEntries([['main.scad', openScadReplayCode]]),
+        file: 'main.scad',
+      });
+      expect(subject.mesh.stats.boundingBox?.size).toEqual([20, 20, 20]);
+      expect(subject.mesh.stats.boundingBox?.center).toEqual([0, 0, 0]);
+      expect(subject.mesh.stats.watertight).toBe(true);
+      expect(subject.provenance.unit).toBe('mm');
+    },
+  );
+
   it('should connect, export, record the honored route and terminate a runtime it created', async () => {
     const runtime = fakeRuntime({ bytes: await glbBytes() });
     const subject = await loadModel({ file: 'main.ts', runtime: async () => runtime });

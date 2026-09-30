@@ -16,6 +16,8 @@ import type {
 import { printIntentPath, printIntentSchema } from '@taucad/slicer/print-intent';
 import type { PrintIntent } from '@taucad/slicer/print-intent';
 import type { FileExtension } from '@taucad/types';
+import { asKnownArtifact } from '@taucad/runtime';
+import type { Rendering } from '@taucad/runtime';
 import { Button } from '@taucad/ui/components/button';
 import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import { sha256Bytes } from '@taucad/utils/hash';
@@ -65,7 +67,7 @@ import {
   summarizeGcodeContainer,
 } from '#routes/w.$workspace.$project/chat-print-summary.js';
 import type { PlateFit, SliceSummary } from '#routes/w.$workspace.$project/chat-print-summary.js';
-import { bestRouteForActiveKernel, exportWithRuntimeValidatedInput } from '#utils/export-formats.utils.js';
+import { bestRouteForActiveKernel, exportDocumentWithValidatedInput } from '#utils/export-formats.utils.js';
 
 /** The export target every print goes through (blueprint D3). */
 const gcodeContainerFormat: FileExtension = 'gcode.3mf';
@@ -130,8 +132,8 @@ export type SlicedArtifact = Readonly<{
   mimeType: string;
   /** The slicer options this artifact was produced from; a different key means the slice is stale. */
   optionsKey: string;
-  /** The rendered geometry it was sliced from, compared by identity: a new render makes the slice stale. */
-  geometry: unknown;
+  /** The committed rendering it was sliced from; a new rendering makes the slice stale. */
+  rendering: Rendering | undefined;
   /** The material identity and slots approved by this slice, held across later telemetry frames. */
   materialConfiguration: Readonly<Record<string, unknown>>;
   summary: SliceSummary;
@@ -422,23 +424,24 @@ export const usePrintPrepare = ({
   );
   const entryPath =
     chosenEntryPath !== undefined && entryPaths.includes(chosenEntryPath) ? chosenEntryPath : mainEntryPath;
-  const renderTimeout = entriesRecord?.entries[entryPath]?.renderTimeout;
+  const operationTimeout = entriesRecord?.entries[entryPath]?.operationTimeout;
   useEffect(() => {
     if (!isShown || !entryPath) {
       return;
     }
     const claimId = randomUuid();
-    projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath, renderTimeout });
+    projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath, operationTimeout });
     return () => {
       projectRef.send({ type: 'releaseGeometryUnit', claimId });
     };
-  }, [entryPath, isShown, projectRef, renderTimeout]);
+  }, [entryPath, isShown, projectRef, operationTimeout]);
   const actor = useSelector(projectRef, (state) => state.context.geometryUnits.get(entryPath));
   const kernelClient = useSelector(actor, (state) => state?.context.kernelClient);
   const activeKernelId = useSelector(actor, (state) => state?.context.activeKernelId);
   const capabilities = useSelector(actor, (state) => state?.context.capabilities);
-  const geometry: unknown = useSelector(actor, (state) => state?.context.geometry);
-  const hasGeometry = geometry !== undefined;
+  const rendering = useSelector(actor, (state) => state?.context.rendering);
+  const artifact = useMemo(() => (rendering?.success ? asKnownArtifact(rendering.artifact) : undefined), [rendering]);
+  const hasGeometry = artifact !== undefined;
 
   const route = useMemo(
     () =>
@@ -466,8 +469,8 @@ export const usePrintPrepare = ({
   const [slice, setSlice] = useState<SlicedArtifact>();
   const [isSlicing, setIsSlicing] = useState(false);
   /* Kept with the geometry it described, so a new render retires it (a failure on an empty model must not outlive it). */
-  const [failedSlice, setFailedSlice] = useState<Readonly<{ message: string; geometry: unknown }>>();
-  const sliceError = failedSlice !== undefined && failedSlice.geometry === geometry ? failedSlice.message : undefined;
+  const [failedSlice, setFailedSlice] = useState<Readonly<{ message: string; rendering: Rendering | undefined }>>();
+  const sliceError = failedSlice !== undefined && failedSlice.rendering === rendering ? failedSlice.message : undefined;
   const [isSending, setIsSending] = useState(false);
   const [isConfirmingSend, setIsConfirmingSend] = useState(false);
   const [sendError, setSendError] = useState<string>();
@@ -477,27 +480,19 @@ export const usePrintPrepare = ({
   );
 
   const modelColors = useMemo(() => {
-    if (
-      typeof geometry !== 'object' ||
-      geometry === null ||
-      !('format' in geometry) ||
-      geometry.format !== 'gltf' ||
-      !('content' in geometry) ||
-      !(geometry.content instanceof Uint8Array) ||
-      !(geometry.content.buffer instanceof ArrayBuffer)
-    ) {
+    if (artifact?.mimeType !== 'model/gltf-binary') {
       return noColors;
     }
     try {
-      const components = buildGltfComponentManifest(geometry.content as Uint8Array<ArrayBuffer>);
+      const components = buildGltfComponentManifest(artifact.content);
       const materials = components.nodesById[components.rootId]?.appearance?.materials ?? [];
       return [...new Set(materials.flatMap(({ color }) => (color?.startsWith('#') ? [color.toUpperCase()] : [])))];
     } catch {
       return noColors;
     }
-  }, [geometry]);
+  }, [artifact]);
   const filamentColors =
-    slice !== undefined && slice.geometry === geometry ? slice.summary.filamentColors : modelColors;
+    slice !== undefined && slice.rendering === rendering ? slice.summary.filamentColors : modelColors;
   const effectiveSubmission = useMemo(() => {
     if (!provider || !entry) {
       return submission;
@@ -506,7 +501,7 @@ export const usePrintPrepare = ({
      * gives way to the defaults for this slice's filaments. */
     const { amsMapping: ownMapping, expectedMaterials: _ownMaterials, ...own } = submission;
     const colorsConfirmed =
-      slice?.geometry !== geometry ||
+      slice?.rendering !== rendering ||
       modelColors.length === 0 ||
       (modelColors.length === filamentColors.length &&
         modelColors.every((color, index) => color === filamentColors[index]));
@@ -523,7 +518,7 @@ export const usePrintPrepare = ({
       effective['operatorConfirmedBedType'] = effective['expectedBedType'];
     }
     return effective;
-  }, [entry, filamentColors, intent, manifest, modelColors, provider, slice?.geometry, submission]);
+  }, [entry, filamentColors, intent, manifest, modelColors, provider, slice?.rendering, submission]);
   const plate =
     typeof effectiveSubmission['expectedBedType'] === 'string' ? effectiveSubmission['expectedBedType'] : undefined;
   const slotsKey = mappingOf(effectiveSubmission).join(',');
@@ -603,7 +598,7 @@ export const usePrintPrepare = ({
     if (slice === undefined) {
       return undefined;
     }
-    if (slice.geometry !== geometry) {
+    if (slice.rendering !== rendering) {
       return 'model';
     }
     return slice.optionsKey === optionsKey ? undefined : 'options';
@@ -621,38 +616,36 @@ export const usePrintPrepare = ({
       return;
     }
     const claimId = randomUuid();
-    projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath, renderTimeout });
+    projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath, operationTimeout });
     setIsSlicing(true);
     setFailedSlice(undefined);
-    let sliceGeometry = geometry;
+    let sliceRendering = rendering;
     try {
       const settled = await awaitFreshRender(actor);
       const failedIssues = selectCadFailureIssues(settled);
       if (failedIssues) {
         throw new Error(failedIssues.map((issue) => issue.message).join('; ') || 'The selected CAD render failed');
       }
-      if (settled.context.latestGeometryOutcome !== 'success') {
+      if (settled.context.latestRenderingOutcome !== 'success') {
         throw new Error(`No current successful geometry is available for ${entryPath}`);
       }
-      sliceGeometry = settled.context.geometry;
+      sliceRendering = settled.context.rendering;
       const freshKernelClient = settled.context.kernelClient;
+      const freshDocument = settled.context.document;
       const freshKernelId = settled.context.activeKernelId;
       const freshRoute = freshKernelClient
         ? bestRouteForActiveKernel(freshKernelClient, gcodeContainerFormat, freshKernelId)
         : undefined;
-      if (!freshKernelClient || !freshRoute) {
+      if (!freshKernelClient || !freshRoute || !freshDocument) {
         throw new Error('The selected CAD runtime is unavailable');
       }
-      const result = await exportWithRuntimeValidatedInput(freshKernelClient, freshRoute, {
-        exportOptions: sliceOptions,
+      const result = await exportDocumentWithValidatedInput(freshDocument, freshRoute, {
+        options: sliceOptions,
       });
       if (!result.success) {
         throw new Error(result.issues.map((issue) => issue.message).join('; ') || 'Slicing failed.');
       }
-      const file = result.data[0];
-      if (!file) {
-        throw new Error('The slicer produced no file.');
-      }
+      const file = result.files[0];
       const fileName = `${modelName(entryPath)}.gcode.3mf`;
       const hex = await sha256Bytes(file.bytes);
       // SAFETY: sha256Bytes returns the lowercase hex the digest brand describes.
@@ -689,7 +682,7 @@ export const usePrintPrepare = ({
         digest,
         length: file.bytes.byteLength,
         mimeType: file.mimeType,
-        geometry: sliceGeometry,
+        rendering: sliceRendering,
         materialConfiguration:
           entry === undefined
             ? {}
@@ -709,7 +702,7 @@ export const usePrintPrepare = ({
         warnings,
       });
     } catch (error) {
-      setFailedSlice({ message: error instanceof Error ? error.message : String(error), geometry: sliceGeometry });
+      setFailedSlice({ message: error instanceof Error ? error.message : String(error), rendering: sliceRendering });
     } finally {
       setIsSlicing(false);
       projectRef.send({ type: 'releaseGeometryUnit', claimId });
@@ -719,14 +712,14 @@ export const usePrintPrepare = ({
     entry,
     entryPath,
     fileManager,
-    geometry,
+    rendering,
     kernelClient,
     manifest,
     modelColors,
     optionsKey,
     provider,
     projectRef,
-    renderTimeout,
+    operationTimeout,
     route,
     sliceOptions,
     submission,

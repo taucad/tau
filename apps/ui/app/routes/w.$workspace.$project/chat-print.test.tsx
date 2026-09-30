@@ -234,7 +234,7 @@ describe('Print pane orientation', () => {
     );
     await waitFor(() => {
       expect(mockProjectSend).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'claimGeometryUnit', entryPath: 'main.ts', renderTimeout: undefined }),
+        expect.objectContaining({ type: 'claimGeometryUnit', entryPath: 'main.ts', operationTimeout: undefined }),
       );
     });
     const claim = mockProjectSend.mock.calls.find(([event]) => event.type === 'claimGeometryUnit')?.[0] as unknown as {
@@ -447,7 +447,7 @@ describe('Print pane prepare and send', () => {
     await user.keyboard('{Enter}');
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
-        exportOptions: { ...machineSliceOptions, preset: 'fine' },
+        options: { ...machineSliceOptions, preset: 'fine' },
       });
     });
     expect(mockWriteFiles).toHaveBeenCalledExactlyOnceWith({
@@ -575,7 +575,7 @@ describe('Print pane prepare and send', () => {
 
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
-        exportOptions: { ...machineSliceOptions, plate: 'cool' },
+        options: { ...machineSliceOptions, plate: 'cool' },
       });
     });
   });
@@ -611,7 +611,7 @@ describe('Print pane prepare and send', () => {
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice again' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenLastCalledWith('gcode.3mf', {
-        exportOptions: { ...machineSliceOptions, layerHeight: 0.16 },
+        options: { ...machineSliceOptions, layerHeight: 0.16 },
       });
     });
     expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
@@ -624,9 +624,8 @@ describe('Print pane prepare and send', () => {
     await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
     mockExport.mockResolvedValueOnce({
       success: false,
-      data: [],
-      issues: [{ message: 'The GLB carries no triangle primitives.' }],
-    } as unknown as Awaited<ReturnType<typeof mockExport>>);
+      issues: [{ code: 'GEOMETRY_INVALID', severity: 'error', message: 'The GLB carries no triangle primitives.' }],
+    });
 
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     expect(await within(prepareRegion()).findByText('The GLB carries no triangle primitives.')).toBeInTheDocument();
@@ -1341,7 +1340,7 @@ describe('Print pane Bambu Studio mode', () => {
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
-        exportOptions: {
+        options: {
           engine: 'bambu-studio',
           bambuStudio: { printer: x1c, process: standard, filaments: [plaMatte], plate: 'textured-pei' },
         },
@@ -1440,7 +1439,7 @@ describe('Print pane Bambu Studio mode', () => {
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
-        exportOptions: {
+        options: {
           engine: 'bambu-studio',
           bambuStudio: {
             printer: x1c,
@@ -1603,7 +1602,7 @@ describe('Print pane Bambu Studio mode', () => {
       await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice again' }));
       await waitFor(() => {
         expect(mockExport).toHaveBeenLastCalledWith('gcode.3mf', {
-          exportOptions: {
+          options: {
             engine: 'bambu-studio',
             // In filament order: filament 1 from A3, filament 2 from A1.
             bambuStudio: { printer: x1c, process: standard, filaments: [petg, plaMatte], plate: 'textured-pei' },
@@ -1660,7 +1659,9 @@ describe('Print pane Bambu Studio mode', () => {
     const merged = `The printer loads at most 4 filaments, so the model's 5 colours print as one, in ${red}.`;
     mockExport.mockResolvedValueOnce({
       success: true,
-      data: [{ name: 'main.gcode.3mf', bytes: new Uint8Array([1]), mimeType: 'application/vnd.bambulab.gcode-3mf' }],
+      exportId: 'gcode.3mf',
+      evaluationId: 'mock-evaluation',
+      files: [{ name: 'main.gcode.3mf', bytes: new Uint8Array([1]), mimeType: 'application/vnd.bambulab.gcode-3mf' }],
       issues: [{ message: merged, code: 'REPRESENTATION_UNSUPPORTED', severity: 'warning' }],
     });
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
@@ -1786,7 +1787,7 @@ describe('Print pane Bambu Studio mode', () => {
     // The reference engine still slices and previews; only Send waits.
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
-      expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', { exportOptions: machineSliceOptions });
+      expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', { options: machineSliceOptions });
     });
     const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
     expect(send).toBeDisabled();
@@ -1929,7 +1930,7 @@ describe('Print pane print settings file', () => {
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
-        exportOptions: {
+        options: {
           engine: 'bambu-studio',
           bambuStudio: {
             printer: x1c,
@@ -2032,7 +2033,7 @@ describe('Print pane print settings file', () => {
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
-        exportOptions: { ...machineSliceOptions, nozzleDiameter: 0.6, layerHeight: 0.16 },
+        options: { ...machineSliceOptions, nozzleDiameter: 0.6, layerHeight: 0.16 },
       });
     });
 
@@ -2054,7 +2055,7 @@ describe('Print pane print settings file', () => {
     );
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
-      expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', { exportOptions: machineSliceOptions });
+      expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', { options: machineSliceOptions });
     });
 
     // A change is not saved over bytes Tau cannot read; changes run in order, so the reset lands after it.

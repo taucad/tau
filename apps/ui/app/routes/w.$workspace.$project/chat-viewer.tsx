@@ -314,6 +314,17 @@ export const ChatViewer = memo(function ({
   const fileContent = useFileContent(entryPath);
   const isMissing = fileContent.kind === 'orphaned' && !isDirectory;
 
+  useEffect(() => {
+    if (!graphicsActor || (entryPath && !isDirectory && !isMissing)) {
+      return;
+    }
+    const unitId = graphicsActor.getSnapshot().context.modelInteractionUnitId;
+    graphicsActor.send({ type: 'clearArtifact' });
+    if (unitId) {
+      projectRef.send({ type: 'reconcileViewManifest', unitId });
+    }
+  }, [entryPath, graphicsActor, isDirectory, isMissing, projectRef]);
+
   // The project view record is the camera seed for this pane.
   const viewRecord = viewRecords.get(viewId);
   const savedCamera = viewRecord?.selectedKernelView
@@ -457,12 +468,12 @@ export const ChatViewer = memo(function ({
 });
 
 /** Stands in for geometry that has not arrived; subscribes to loading so the viewer does not. */
-function GeometryPlaceholder({ empty = false }: { readonly empty?: boolean }): React.JSX.Element {
+function GeometryPlaceholder({ isEmpty = false }: { readonly isEmpty?: boolean }): React.JSX.Element {
   const isCadLoading = useCadSelector(selectIsCadLoading, false);
   return (
     <div
       role='status'
-      aria-label={empty ? 'Empty model' : isCadLoading ? 'Loading geometry' : 'Waiting for geometry'}
+      aria-label={isEmpty ? 'Empty model' : isCadLoading ? 'Loading geometry' : 'Waiting for geometry'}
       aria-busy={isCadLoading || undefined}
       className='size-full bg-background'
     />
@@ -546,6 +557,20 @@ const ViewerContent = memo(function ({
   // Bridge this pane's projection to its graphics owner. Other panes may show
   // different views of the same evaluated document without changing this one.
   const graphicsActor = useGraphics();
+  const presentedUnitId = useGraphicsSelector((state) => state.context.modelInteractionUnitId);
+  const presentedMediaType = useGraphicsSelector((state) => state.context.artifact?.mimeType);
+  const previousPresentation = useRef({ unitId: presentedUnitId, mimeType: presentedMediaType });
+  useEffect(() => {
+    const previous = previousPresentation.current;
+    previousPresentation.current = { unitId: presentedUnitId, mimeType: presentedMediaType };
+    if (
+      previous.unitId &&
+      (previous.unitId !== presentedUnitId ||
+        (previous.mimeType === 'model/gltf-binary' && presentedMediaType !== 'model/gltf-binary'))
+    ) {
+      projectRef.send({ type: 'reconcileViewManifest', unitId: previous.unitId });
+    }
+  }, [presentedUnitId, presentedMediaType, projectRef]);
   useEffect(() => {
     if (emptyModel) {
       graphicsActor.send({ type: 'clearArtifact' });
@@ -850,7 +875,7 @@ const ViewerContent = memo(function ({
             className='size-full flex-col justify-center gap-3 bg-background text-center [&>svg]:size-10'
           />
         ) : (
-          <GeometryPlaceholder empty={emptyModel} />
+          <GeometryPlaceholder isEmpty={emptyModel} />
         )}
         {artifact && overlayFailureMessage ? (
           <RuntimeErrorOverlay

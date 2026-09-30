@@ -138,6 +138,28 @@ Fast previews retain materials. Exact GLB and **single-file JSON glTF** preserve
 materials and embedded image bytes. STL preserves geometry only. Upstream `Mesh.toGlb()`
 bypasses Tau's material/resources path.
 
+### Mechanisms
+
+Alongside `main`, optionally export a plain `mechanism` value or a synchronous or asynchronous
+`mechanism(params)` function. It receives the same resolved parameters as `main`. Import
+`MechanismSource` and `LinkSource` from `@taucad/kinematics` with `import type`; their optional
+string-name generic constrains link bindings to a shared `as const` palette also used for geometry
+labels, for example `MechanismSource<'Base' | 'Carriage'>`.
+
+Bind links to unique, explicitly authored part names. Blank, omitted, generated-only or ambiguous
+names cannot bind a mechanism. Invalid metadata produces warnings while valid geometry remains
+available; inspect the issues and fix the mechanism before relying on motion. Unnamed and
+material-only outputs keep their existing behavior.
+
+Preview includes mechanism topology and uses the shared viewer joint, clip, reset and playback
+controls. Fast preview and exact replay capture an owned JSON snapshot before disposing the
+PicoVoxel session; cache restore preserves that snapshot. Default GLB/glTF exports are static.
+Opt in with `content: { includeTopology: true }` to carry Tau mechanism metadata; STL has no
+motion metadata. This is Tau topology, not standard glTF animation channels.
+
+See the [mechanism authoring reference](agent/kinematics-reference.md) for a complete model,
+all seven joint families, couplings, clips, units and frame conventions.
+
 ### Lanes
 
 Every build runs in one of two lanes. The viewer renders in the **fast** lane (render option

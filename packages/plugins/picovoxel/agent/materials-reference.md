@@ -63,6 +63,11 @@ Omit attenuation distance for infinite reach; finite supplied distances must be
 positive. Invalid factors, resource indexes, sampler values and UV sets fail
 with an authoring diagnostic; only UV0 is provided.
 
+Image bytes stay encoded without color conversion. Base-color, emissive,
+sheen-color and specular-color maps use sRGB interpretation; normal and numeric
+maps contain linear data. Alpha is linear coverage. Color factors remain linear,
+so do not apply the PicoGK `ColorFloat` sRGB convention to these factors.
+
 All 17 texture slots are supported:
 
 | Material scope               | Texture fields                                                                                                                                   |
@@ -75,6 +80,22 @@ All 17 texture slots are supported:
 | `KHR_materials_sheen`        | `sheenColorTexture`, `sheenRoughnessTexture`                                                                                                     |
 | `KHR_materials_iridescence`  | `iridescenceTexture`, `iridescenceThicknessTexture`                                                                                              |
 | `KHR_materials_anisotropy`   | `anisotropyTexture`                                                                                                                              |
+
+Texture channels follow glTF packing; unused channels do not drive the material:
+
+| Texture slot | Channels |
+| --- | --- |
+| `baseColorTexture` | RGB base color, A coverage; multiplies `baseColorFactor`. |
+| `metallicRoughnessTexture` | G roughness, B metallic; multiplies the corresponding factors. |
+| `normalTexture`, `clearcoatNormalTexture` | RGB tangent-space normal; `scale` changes XY detail. |
+| `occlusionTexture` | R ambient occlusion. |
+| `emissiveTexture` | RGB emission. |
+| `anisotropyTexture` | RG direction mapped to `[-1, 1]`, B strength. |
+| `clearcoatTexture`, `clearcoatRoughnessTexture` | R coating factor, G coating roughness respectively. |
+| `iridescenceTexture`, `iridescenceThicknessTexture` | R factor, G film thickness within the authored bounds respectively. |
+| `sheenColorTexture`, `sheenRoughnessTexture` | RGB color, A roughness respectively. |
+| `specularTexture`, `specularColorTexture` | A factor, RGB color respectively. |
+| `transmissionTexture`, `thicknessTexture` | R transmission, G thickness respectively. |
 
 Each texture info supports `index`, optional `texCoord: 0`, and
 `KHR_texture_transform` (`offset`, `scale`, `rotation`, optional `texCoord: 0`).

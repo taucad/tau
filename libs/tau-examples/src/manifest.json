@@ -720,6 +720,19 @@
     "kind": "model",
     "geometry": "3d",
     "kernel": "picovoxel",
+    "name": "lead-screw-stage",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
     "name": "material-sensor",
     "mainFile": "main.ts",
     "files": [

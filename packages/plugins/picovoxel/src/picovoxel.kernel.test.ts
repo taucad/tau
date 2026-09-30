@@ -7,6 +7,8 @@ import type { IsolationStatus } from '@taucad/runtime/cross-origin-isolation';
 import type * as KernelModule from '@taucad/runtime/kernel';
 import type { KernelIssue } from '@taucad/runtime/types';
 import { RenderAbortedError } from '@taucad/runtime';
+import { createNodeIo } from '@taucad/geometry-core';
+import type { TauCadTopologyRoot } from '@taucad/geometry-core';
 import { createMockKernelRuntime, glbToDocument } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { CreatePicoOptions, CreatePicoRuntimeOptions, Mesh, Pico, PicoRuntime, Voxels } from 'picovoxel';
@@ -225,7 +227,7 @@ describe('picovoxel kernel', () => {
   describe('identity', () => {
     it('should key the kernel version on the PicoVoxel version, both artifact digests and its scripts', () => {
       expect(definition.version).toMatch(
-        /^1\.3\.0\+picovoxel\.[\w.-]+\.serial-[\da-f]{12}\.multi-[\da-f]{12}\.scripts-[\da-f]{12}$/,
+        /^1\.4\.0\+picovoxel\.[\w.-]+\.serial-[\da-f]{12}\.multi-[\da-f]{12}\.scripts-[\da-f]{12}$/,
       );
     });
 
@@ -1658,4 +1660,189 @@ describe('picovoxel kernel', () => {
       ).toThrow(message);
     });
   });
+});
+
+describe('PicoVoxel mechanism snapshots and binding', () => {
+  const hinge = (base = 'Base', lid = 'Lid') => ({
+    schemaVersion: 1,
+    units: { length: 'mm', angle: 'deg' },
+    root: 'base',
+    links: { base: { shapes: [base] }, lid: { shapes: [lid] } },
+    joints: { hinge: { type: 'revolute', parent: 'base', child: 'lid', origin: [2, 3, 4], axis: [1, 0, 0] } },
+  });
+  const readTopology = async (bytes: Uint8Array<ArrayBuffer>) => {
+    const io = await createNodeIo();
+    const document = await io.readBinary(bytes);
+    return document.getRoot().getExtension<TauCadTopologyRoot>('TAU_cad_topology')?.getPayload();
+  };
+  it.each([
+    { label: 'generated', name: undefined, reference: 'Shape 1', valid: false },
+    { label: 'blank', name: ' ', reference: 'Shape 1', valid: false },
+    { label: 'authored fallback-looking', name: 'Shape 1', reference: 'Shape 1', valid: true },
+    { label: 'trimmed Unicode', name: '  蓋 / Lid  ', reference: '蓋 / Lid', valid: true },
+  ] as const)('should bind $label labels only with explicit name evidence', async ({ name, reference, valid }) => {
+    const { runtime, context, result } = await createGeometry({
+      module: {
+        default: (pico: Pico) => [
+          { shape: helloCube(pico), ...(name === undefined ? {} : { name }) },
+          { shape: helloCube(pico), name: 'Lid' },
+        ],
+        mechanism: hinge(reference),
+      },
+    });
+    try {
+      const snapshot = structuredClone(
+        definition.serializeNativeHandle!({ nativeHandle: result.nativeHandle }, runtime, context),
+      );
+      const restored = definition.deserializeNativeHandle!({ serializedNativeHandle: snapshot }, runtime, context);
+      expect(restored).toEqual(result.nativeHandle);
+      expect(restored.mechanism).not.toBe(result.nativeHandle.mechanism);
+      const meshed = await definition.meshGeometry!(
+        { nativeHandle: restored, options: { lane: 'fast' }, content: { includeTopology: true } },
+        runtime,
+        context,
+      );
+      const payload = await readTopology(
+        meshed.geometry.format === 'gltf' ? meshed.geometry.content : new Uint8Array(),
+      );
+      expect(payload?.['components']).toHaveLength(2);
+      if (valid) {
+        expect(payload?.['mechanism']).toMatchObject({ links: { base: { components: ['component:node-0'] } } });
+        expect(meshed.issues).toEqual([]);
+      } else {
+        expect(payload?.['mechanism']).toBeUndefined();
+        expect(meshed.issues).toMatchObject([{ code: 'INVALID_REFERENCE', severity: 'warning' }]);
+      }
+    } finally {
+      await definition.cleanup!(context);
+    }
+  });
+
+  it.each([true, false])(
+    'should preserve duplicate parts and reject only an ambiguous referenced name (%s)',
+    async (referenced) => {
+      const { runtime, context, result } = await createGeometry({
+        module: {
+          default: (pico: Pico) =>
+            ['Base', 'Lid', 'Duplicate', 'Duplicate'].map((name) => ({ shape: helloCube(pico), name })),
+          mechanism: hinge('Base', referenced ? 'Duplicate' : 'Lid'),
+        },
+      });
+      try {
+        const meshed = await definition.meshGeometry!(
+          { nativeHandle: result.nativeHandle, options: { lane: 'fast' }, content: { includeTopology: true } },
+          runtime,
+          context,
+        );
+        const payload = await readTopology(
+          meshed.geometry.format === 'gltf' ? meshed.geometry.content : new Uint8Array(),
+        );
+        expect(payload?.['components']).toHaveLength(4);
+        expect(result.nativeHandle.shapes.map(({ name }) => name)).toEqual(['Base', 'Lid', 'Duplicate', 'Duplicate']);
+        if (referenced) {
+          expect(payload?.['mechanism']).toBeUndefined();
+          expect(meshed.issues).toMatchObject([
+            {
+              message: expect.stringContaining('More than one returned shape'),
+              details: { mechanism: { recovery: 'Give each referenced part a distinct authored name.' } },
+            },
+          ]);
+        } else {
+          expect(payload?.['mechanism']).toBeDefined();
+          expect(meshed.issues).toEqual([]);
+        }
+      } finally {
+        await definition.cleanup!(context);
+      }
+    },
+  );
+
+  it.each([42, '', 'Wrong'])('should refuse forged authored name evidence %j', async (authoredName) => {
+    const { runtime, context, result } = await createGeometry({ module: { default: helloCube } });
+    try {
+      const snapshot = definition.serializeNativeHandle!({ nativeHandle: result.nativeHandle }, runtime, context);
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- Deliberately corrupted cache payload exercises the restoration trust boundary.
+      const corrupted = { ...snapshot, shapes: [{ ...snapshot.shapes[0]!, authoredName }] } as typeof snapshot;
+      expect(() =>
+        definition.deserializeNativeHandle!({ serializedNativeHandle: corrupted }, runtime, context),
+      ).toThrow('authoredName must match');
+    } finally {
+      await definition.cleanup!(context);
+    }
+  });
+
+  it('should own reader warnings across snapshots and emit them once per preview and export', async () => {
+    const { runtime, context, result } = await createGeometry({
+      module: { default: helloCube, mechanism: { invalid: 1n } },
+      lane: 'exact',
+    });
+    try {
+      expect(result.issues).toHaveLength(1);
+      const snapshot = definition.serializeNativeHandle!({ nativeHandle: result.nativeHandle }, runtime, context);
+      const restored = definition.deserializeNativeHandle!({ serializedNativeHandle: snapshot }, runtime, context);
+      expect(restored.mechanismIssues).toEqual(result.issues);
+      expect(restored.mechanismIssues).not.toBe(result.issues);
+      const mesh = await definition.meshGeometry!(
+        { nativeHandle: restored, options: { lane: 'exact' }, content: { includeTopology: true } },
+        runtime,
+        context,
+      );
+      expect(mesh.issues).toEqual([]);
+      const inputs: ExportInput[] = [
+        { format: 'glb', nativeHandle: restored, options: definition.exportFormats.glb.optionsSchema.parse({}) },
+        { format: 'gltf', nativeHandle: restored, options: definition.exportFormats.gltf.optionsSchema.parse({}) },
+        { format: 'stl', nativeHandle: restored, options: definition.exportFormats.stl.optionsSchema.parse({}) },
+      ];
+      for (const input of inputs) {
+        // oxlint-disable-next-line no-await-in-loop -- Exports share one kernel context.
+        const exported = await definition.exportGeometry(input, runtime, context);
+        expect(exported.issues).toEqual(result.issues);
+      }
+      for (const mechanismIssues of [
+        {},
+        [{ code: 'RUNTIME', message: 'bad', severity: 'error' }],
+        [{ code: 'invented', message: 'bad', severity: 'warning' }],
+      ]) {
+        // oxlint-disable-next-line typescript/consistent-type-assertions -- Deliberately corrupted cache payload exercises warning-envelope validation.
+        const corrupted = { ...snapshot, mechanismIssues } as typeof snapshot;
+        expect(() =>
+          definition.deserializeNativeHandle!({ serializedNativeHandle: corrupted }, runtime, context),
+        ).toThrow();
+      }
+    } finally {
+      await definition.cleanup!(context);
+    }
+  });
+});
+
+it('should recycle a mechanism trap and propagate mechanism cancellation after freeing the session', async () => {
+  const runtime = createRuntime({
+    default: helloCube,
+    mechanism: () => {
+      throw new WebAssembly.RuntimeError('mechanism trap');
+    },
+  });
+  const context = await initialize({ wasm: 'serial' }, runtime);
+  try {
+    const result = await definition.createGeometry(
+      { entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } },
+      runtime,
+      context,
+    );
+    expect(result.issues).toMatchObject([{ severity: 'warning', message: expect.stringContaining('mechanism trap') }]);
+    expect(context.runtimes.size).toBe(0);
+    expect(() => sessions.created[0]!.pico.memory).toThrow(/already been disposed/);
+    const aborted = createRuntime({
+      default: helloCube,
+      mechanism: () => {
+        throw new RenderAbortedError();
+      },
+    });
+    await expect(
+      definition.createGeometry({ entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } }, aborted, context),
+    ).rejects.toBeInstanceOf(RenderAbortedError);
+    expect(() => sessions.created[1]!.pico.memory).toThrow(/already been disposed/);
+  } finally {
+    await definition.cleanup!(context);
+  }
 });

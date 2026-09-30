@@ -1,12 +1,23 @@
-import { cadMaterialDefaults } from '@taucad/runtime/types';
-import { transformNormalArray, transformVectorArrayChecked, writeGlb, writeGltfJson } from '@taucad/geometry-core';
+import { cadMaterialDefaults, tauCadTopologyExtension } from '@taucad/runtime/types';
+import type { KernelIssue } from '@taucad/runtime/types';
+import {
+  formatComponentId,
+  formatPrimitiveSelector,
+  toMechanismKernelIssue,
+  transformNormalArray,
+  transformVectorArrayChecked,
+  writeGlb,
+  writeGltfJson,
+} from '@taucad/geometry-core';
 import type {
   GeometryOutputTransformOptions,
   GlbInput,
   GlbMaterial,
   GlbNode,
   GlbResources,
+  TauCadTopologyPayload,
 } from '@taucad/geometry-core';
+import { resolveMechanismComponents, transformMechanism } from '@taucad/kinematics';
 
 import { projectSurfaceCoordinates } from '#picovoxel.surface-coordinates.js';
 
@@ -25,6 +36,8 @@ const hasMaterialTexture = (value: unknown): boolean =>
 /** Structured-cloneable geometry retained after a PicoVoxel session is disposed. @public */
 export type PicovoxelShapeSnapshot = {
   readonly name: string;
+  /** Explicit, nonblank authored name; generated display labels never bind mechanisms. */
+  readonly authoredName?: string;
   /** Welded vertex positions, `[x, y, z, …]` in millimetres, Z up. */
   readonly vertices: Float32Array<ArrayBuffer>;
   /** Triangle vertex indices into `vertices`, three per triangle. */
@@ -36,7 +49,20 @@ export type PicovoxelShapeSnapshot = {
 };
 
 /** Durable native handle for PicoVoxel render, cache, and export phases. @public */
-export type PicovoxelNativeHandle = GlbResources & { readonly shapes: readonly PicovoxelShapeSnapshot[] };
+export type PicovoxelNativeHandle = GlbResources & {
+  readonly shapes: readonly PicovoxelShapeSnapshot[];
+  /** JSON-normalized module export, resolved against delivered components when topology is requested. */
+  readonly mechanism?: unknown;
+  /** Reader warnings retained for exports whose runtime result omits create-phase issues. */
+  readonly mechanismIssues?: readonly KernelIssue[];
+};
+
+type PicovoxelGltfOptions = GeometryOutputTransformOptions & {
+  includeTopology?: boolean;
+  onMechanismIssues?: (issues: KernelIssue[]) => void;
+};
+
+const sourceToGltf = [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1] as const;
 
 /**
  * Area-weighted smooth vertex normals on the source (Z-up) vertices.
@@ -205,12 +231,100 @@ const buildNode = (shape: PicovoxelShapeSnapshot, options: GeometryOutputTransfo
   };
 };
 
-const buildScene = (handle: PicovoxelNativeHandle, options: GeometryOutputTransformOptions): GlbInput => ({
-  nodes: handle.shapes.map((shape) => buildNode(shape, options)),
-  ...(handle.images ? { images: handle.images } : {}),
-  ...(handle.textures ? { textures: handle.textures } : {}),
-  ...(handle.samplers ? { samplers: handle.samplers } : {}),
-});
+const buildScene = (handle: PicovoxelNativeHandle, options: PicovoxelGltfOptions): GlbInput => {
+  const nodes = handle.shapes.map((shape, index) => ({
+    ...buildNode(shape, options),
+    ...(options.includeTopology ? { extras: { tauComponentId: formatComponentId(index) } } : {}),
+  }));
+  const scene: GlbInput = {
+    nodes,
+    ...(handle.images ? { images: handle.images } : {}),
+    ...(handle.textures ? { textures: handle.textures } : {}),
+    ...(handle.samplers ? { samplers: handle.samplers } : {}),
+  };
+  if (!options.includeTopology) {
+    return scene;
+  }
+  const components: TauCadTopologyPayload['components'] = handle.shapes.map(({ name }, nodeIndex) => ({
+    id: formatComponentId(nodeIndex),
+    name,
+    kind: 'mesh',
+    selector: formatPrimitiveSelector(nodeIndex, 'surface'),
+    nodeIndex,
+    meshIndex: nodeIndex,
+    primitiveIndices: [0],
+    primitiveRefs: [{ nodeIndex, meshIndex: nodeIndex, primitiveIndex: 0 }],
+    capabilities: {
+      hasPreciseTopology: false,
+      exports: [{ fidelity: 'mesh', formats: ['glb', 'gltf', 'stl'], available: true }],
+    },
+  }));
+  let mechanism: TauCadTopologyPayload['mechanism'];
+  if (handle.mechanism !== undefined) {
+    const ids = new Map<string, string>();
+    const duplicates = new Set<string>();
+    for (const [index, shape] of handle.shapes.entries()) {
+      if (shape.authoredName !== undefined) {
+        if (ids.has(shape.authoredName)) {
+          duplicates.add(shape.authoredName);
+        }
+        ids.set(shape.authoredName, formatComponentId(index));
+      }
+    }
+    // An ambiguous name has no binding, just like an absent name. Unreferenced duplicates stay valid.
+    for (const name of duplicates) {
+      ids.delete(name);
+    }
+    const resolved = resolveMechanismComponents({ source: handle.mechanism, componentIds: Object.fromEntries(ids) });
+    const outcome =
+      resolved.status === 'resolved'
+        ? transformMechanism({
+            mechanism: resolved.mechanism,
+            units: {
+              length: options.unit?.length === 'millimeter' ? 'mm' : 'm',
+              angle: resolved.mechanism.units.angle,
+            },
+            ...(options.coordinateSystem === 'z-up' ? {} : { matrix: sourceToGltf }),
+          })
+        : resolved;
+    if (outcome.status === 'invalid') {
+      options.onMechanismIssues?.(
+        outcome.issues.map((issue) => {
+          const duplicate = [...duplicates].find((name) => issue.message === `No returned shape is named "${name}".`);
+          return toMechanismKernelIssue({
+            issue:
+              duplicate === undefined
+                ? issue
+                : {
+                    ...issue,
+                    message: `More than one returned shape is named "${duplicate}".`,
+                    recovery: 'Give each referenced part a distinct authored name.',
+                  },
+            kernelId: 'picovoxel',
+          });
+        }),
+      );
+    } else {
+      mechanism = outcome.mechanism;
+    }
+  }
+  if (handle.shapes.length === 0) {
+    return scene;
+  }
+  const payload: TauCadTopologyPayload = { schemaVersion: 1, components, ...(mechanism ? { mechanism } : {}) };
+  return {
+    ...scene,
+    extensionsUsed: [tauCadTopologyExtension],
+    extraBufferViews: [{ key: 'topology', data: new TextEncoder().encode(JSON.stringify(payload)) }],
+    extensions: (bufferViews) => ({
+      [tauCadTopologyExtension]: {
+        schemaVersion: 1,
+        encoding: 'application/json',
+        topologyBufferView: bufferViews['topology']!,
+      },
+    }),
+  };
+};
 
 /**
  * Convert durable PicoVoxel mesh snapshots to canonical Tau GLB bytes.
@@ -224,7 +338,7 @@ const buildScene = (handle: PicovoxelNativeHandle, options: GeometryOutputTransf
  */
 export const picovoxelToGlb = (
   handle: PicovoxelNativeHandle,
-  options: GeometryOutputTransformOptions = {},
+  options: PicovoxelGltfOptions = {},
 ): Uint8Array<ArrayBuffer> => writeGlb(buildScene(handle, options));
 
 /**
@@ -236,5 +350,5 @@ export const picovoxelToGlb = (
  */
 export const picovoxelToGltf = (
   handle: PicovoxelNativeHandle,
-  options: GeometryOutputTransformOptions = {},
+  options: PicovoxelGltfOptions = {},
 ): Uint8Array<ArrayBuffer> => writeGltfJson(buildScene(handle, options));

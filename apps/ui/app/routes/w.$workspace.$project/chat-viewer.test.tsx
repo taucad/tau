@@ -562,6 +562,8 @@ describe('ChatViewer reopen-renderer overlay', () => {
     input.focus();
     fireEvent.keyDown(input, { key: '1' });
     expect(mockViewActions.edit).not.toHaveBeenCalled();
+    fireEvent.keyDown(canvas, { key: '2', isComposing: true });
+    expect(mockViewActions.edit).not.toHaveBeenCalled();
   });
 
   it('keeps the prior picture through a pending and failed named-view switch', () => {
@@ -569,7 +571,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     vi.mocked(runtime.view.rendering).mockImplementation(
       async () =>
         new Promise(() => {
-          /* pending replacement */
+          /* Pending replacement. */
         }),
     );
     const evaluation: Evaluation = {

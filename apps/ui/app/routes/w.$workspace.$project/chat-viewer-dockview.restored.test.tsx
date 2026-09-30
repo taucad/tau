@@ -41,6 +41,8 @@ vi.mock('#hooks/use-project.js', () => {
     },
     mainEntryPath: 'main.ts',
     geometryUnits: new Map(),
+    viewRecords: new Map(),
+    setViewEntryPath: vi.fn(),
   };
   fixture.switchProject = () => {
     project.projectRef = nextProjectRef;
@@ -53,6 +55,9 @@ vi.mock('#hooks/use-project.js', () => {
 
 vi.mock('#routes/w.$workspace.$project/chat-viewer.js', () => ({
   ChatViewer: ({ entryPath }: { entryPath: string }) => <div data-testid={`content:${entryPath}`} />,
+}));
+vi.mock('#workbench-records/view-actions.js', () => ({
+  useWorkbenchViewCommands: () => ({ edit: vi.fn(), remove: vi.fn() }),
 }));
 
 vi.mock('#components/panes/dockview.js', () => ({
@@ -101,8 +106,17 @@ vi.mock('#components/panes/dockview.js', () => ({
       return {
         panels,
         groups: [{}],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Dockview's public API spells this method fromJSON.
         fromJSON: () => {
           panels.push(main, secondary);
+          refresh((value) => value + 1);
+        },
+        addPanel: ({ id, params }: { id: string; params: { viewId: string; entryPath: string } }) => {
+          panels.push({ id, params, api: main.api });
+          refresh((value) => value + 1);
+        },
+        clear: () => {
+          panels.length = 0;
           refresh((value) => value + 1);
         },
         onDidLayoutChange: subscribe,
@@ -115,6 +129,9 @@ vi.mock('#components/panes/dockview.js', () => ({
     });
     useEffect(() => {
       onReady({ api } as DockviewReadyEvent);
+      if (api.panels.length === 0) {
+        api.fromJSON({} as Parameters<DockviewApi['fromJSON']>[0]);
+      }
     }, [api, onReady]);
     return createElement(
       'div',
@@ -148,7 +165,7 @@ describe('restored viewer layout admission', () => {
     expect(fixture.projectSend).toHaveBeenCalledWith({
       type: 'createGeometryUnit',
       entryPath: 'main.ts',
-      renderTimeout: undefined,
+      operationTimeout: undefined,
     });
     expect(fixture.projectSend).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'createGeometryUnit', entryPath: 'other.ts' }),
@@ -161,7 +178,7 @@ describe('restored viewer layout admission', () => {
     expect(fixture.projectSend).toHaveBeenCalledWith({
       type: 'createGeometryUnit',
       entryPath: 'other.ts',
-      renderTimeout: undefined,
+      operationTimeout: undefined,
     });
 
     act(() => {
@@ -187,7 +204,7 @@ describe('restored viewer layout admission', () => {
     expect(fixture.nextProjectSend).toHaveBeenCalledWith({
       type: 'createGeometryUnit',
       entryPath: 'main.ts',
-      renderTimeout: undefined,
+      operationTimeout: undefined,
     });
     expect(fixture.nextProjectSend).not.toHaveBeenCalledWith(expect.objectContaining({ entryPath: 'other.ts' }));
   });

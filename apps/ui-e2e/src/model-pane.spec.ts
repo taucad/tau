@@ -885,7 +885,7 @@ test('admits previews for newly mounted virtual Model rows after scrolling', asy
   expect(
     await target.evaluateLocator(list, (element) => Boolean(element.querySelector('[data-virtuoso-scroller]'))),
   ).toBe(true);
-  const filter = selectors.getByRole('textbox', { name: 'Filter parts' });
+  const filter = selectors.getByRole('searchbox', { name: 'Filter parts' });
   await target.fill(filter, 'Preview part 1');
   const first = list.getByRole('button', { name: 'Preview part 1', exact: true });
   await target.expectVisible(first);

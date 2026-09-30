@@ -5,19 +5,19 @@ docType: how-to
 icon: lucide:flask-conical
 ---
 
-Use `@taucad/runtime-testing` for runtime harnesses, mocks, and geometry assertions. Install it and Vitest as development dependencies, and compose the same kernel and bundler plugins your host uses — the testing package is not part of the production runtime payload.
+Install `@taucad/runtime-testing` and Vitest as development dependencies. Compose the same kernel and bundler plugins your host uses.
 
 ## Steps
 
 ### 1. Render through a real client
 
-`createTestRuntimeClient` accepts a normal [`defineRuntime`](../api/client) result and drives the production `createRuntimeClient` and `inProcessTransport` path with an isolated `fromMemoryFs` filesystem. Use the public `render`, `export`, and event APIs; the caller owns shutdown:
+`createTestRuntimeClient` accepts a normal [`defineRuntime`](../api/client) result and drives the production `createRuntimeClient` and `inProcessTransport` path with an isolated `fromMemoryFs` filesystem. Use public documents and views; the caller owns shutdown:
 
 ```typescript
 import { afterEach, describe, expect, it } from 'vitest';
 import { esbuild } from '@taucad/esbuild';
 import { replicad } from '@taucad/replicad';
-import { assertSuccess, createTestRuntimeClient } from '@taucad/runtime-testing';
+import { assertRenderingSuccess, createTestRuntimeClient } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 const runtime = defineRuntime({
@@ -25,7 +25,8 @@ const runtime = defineRuntime({
 });
 
 describe('Replicad kernel', () => {
-  const clients = new Set<ReturnType<typeof createTestRuntimeClient>>();
+  const createClient = (files: Record<string, string>) => createTestRuntimeClient({ runtime, files });
+  const clients = new Set<ReturnType<typeof createClient>>();
 
   afterEach(async () => {
     await Promise.all([...clients].map((client) => client.shutdown()));
@@ -44,19 +45,21 @@ describe('Replicad kernel', () => {
     });
     clients.add(client);
 
-    const outcome = await client.render({ source: { path: 'main.ts' } });
+    const document = client.open({ source: { path: 'main.ts' } });
+    const outcome = await document.view('model').rendering();
     expect(outcome.superseded).toBe(false);
     if (outcome.superseded) return;
-    assertSuccess(outcome.geometry);
+    assertRenderingSuccess(outcome.rendering);
 
-    const exported = await client.export('step');
-    assertSuccess(exported);
-    expect(exported.data[0]?.bytes.byteLength).toBeGreaterThan(0);
+    const exported = await document.export('step');
+    expect(exported.success).toBe(true);
+    if (!exported.success) throw new Error(exported.issues.map((issue) => issue.message).join('\n'));
+    expect(new TextDecoder().decode(exported.files[0].bytes)).toContain('ISO-10303-21');
   });
 });
 ```
 
-Passing `source` to `client.export(format, { source })` performs a request-scoped render and export; `client.export(format)` reuses the last settled render and rejects with `NoRenderOutcomeError` when none exists. To observe public events — `telemetry`, `renderStatus`, `log`, `error` — subscribe with `client.on(...)` before rendering.
+An export can evaluate its document before any view renders. Assert the output's structure, topology, or intended behavior; nonempty bytes alone do not prove a correct model. Observe document status and issues separately from client logging and telemetry.
 
 ### 2. Use convenience helpers for one-shot tests
 
@@ -66,7 +69,7 @@ Passing `source` to `client.export(format, { source })` performs a request-scope
 import { expect, it } from 'vitest';
 import { esbuild } from '@taucad/esbuild';
 import { replicad } from '@taucad/replicad';
-import { assertSuccess, createTestGeometry, getTestParameters } from '@taucad/runtime-testing';
+import { assertRenderingSuccess, createTestGeometry, getTestParameters } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 const runtime = defineRuntime({
@@ -85,14 +88,19 @@ it('exposes parameters and geometry', async () => {
   const parameters = await getTestParameters({ runtime, files, mainFile: 'main.ts' });
   expect(parameters.defaults).toEqual({ width: 10 });
 
-  const result = await createTestGeometry({ runtime, files, mainFile: 'main.ts', parameters: { width: 25 } });
-  assertSuccess(result);
+  const result = await createTestGeometry({
+    runtime,
+    files,
+    open: { source: { path: 'main.ts' }, parameters: { width: 25 } },
+    view: (document) => document.view('model'),
+  });
+  assertRenderingSuccess(result);
 });
 ```
 
 ### 3. Unit-test plugin definitions
 
-`resolveRuntimePluginDefinition` from `@taucad/runtime/plugin` exposes the definition behind a public factory for focused hook tests. Assert v2 inputs and outputs directly: `evaluate` must offer only declared view/export IDs; `render` must return content without changing the handle; `write` must return at least one file; and `onDispose` releases context resources. Use `createMockKernelRuntime` from `@taucad/runtime-testing` for kernel services, and pass a fresh operation signal to each call. Keep caching, watch, disposal ordering, and transport invariants in runtime-owned integration tests.
+`resolveRuntimePluginDefinition` from `@taucad/runtime/plugin` exposes the definition behind a public factory for focused hook tests. Assert operation inputs and outputs directly: `evaluate` must offer only declared view/export IDs; `render` must return content without changing the handle; `write` must return at least one file; and `onDispose` releases context resources. Use `createMockKernelRuntime` from `@taucad/runtime-testing` for kernel services, and pass a fresh operation signal to each call. Keep caching, watch, disposal ordering, and transport invariants in runtime-owned integration tests.
 
 ```typescript
 import { expect, it } from 'vitest';
@@ -114,7 +122,7 @@ Geometry helpers accept the public render result shape and import no runtime int
 import { it } from 'vitest';
 import { esbuild } from '@taucad/esbuild';
 import { replicad } from '@taucad/replicad';
-import { assertSuccess, createGeometryTestHelpers, createTestGeometry } from '@taucad/runtime-testing';
+import { assertRenderingSuccess, createGeometryTestHelpers, createTestGeometry } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 const runtime = defineRuntime({
@@ -130,9 +138,10 @@ it('checks the rendered mesh', async () => {
         export default () => makeBaseBox(30, 50, 10);
       `,
     },
-    mainFile: 'main.ts',
+    open: { source: { path: 'main.ts' } },
+    view: (document) => document.view('model'),
   });
-  assertSuccess(result);
+  assertRenderingSuccess(result);
 
   const helpers = createGeometryTestHelpers();
   await helpers.expectValidGltf(result);

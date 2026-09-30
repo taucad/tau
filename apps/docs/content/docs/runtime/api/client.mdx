@@ -1,266 +1,170 @@
 ---
 title: Client API
-description: createRuntimeClient, RuntimeClient, worker-owned runtime definitions, boot config, events, and error codes.
+description: Create typed runtime clients, open documents, subscribe to views, and export committed evaluations.
 docType: reference
 icon: lucide:monitor
 ---
 
-`createRuntimeClient` builds the application-facing `RuntimeClient` from one wired transport plugin. Executable capabilities live in the worker-owned runtime definition; the client projects only their types.
+# Client API
+
+`createRuntimeClient` connects a transport to a worker-owned runtime definition. Each `RuntimeDocument` owns its evaluation, view subscriptions, and committed export source.
 
 ## createRuntimeClient
 
 <auto-type-table path='./props/client.ts' name='RuntimeClientOptions' />
 
+<auto-type-table path='./props/client.ts' name='RuntimeClientOptionsWithTransport' />
+
 <auto-type-table path='./props/client.ts' name='RuntimeClient' />
 
-`RuntimeClientOptionsWithTransport`, the accepted shape, is that bag with `transport` required:
+| Option             | Default          | Contract                                                                                     |
+| ------------------ | ---------------- | -------------------------------------------------------------------------------------------- |
+| `transport`        | required         | A wired transport plugin; materialized once per client.                                      |
+| `operationTimeout` | `0`              | Milliseconds; zero disables. Positive values require a transport that can enforce deadlines. |
+| `config`           | schema-dependent | Boot configuration, or a sync/async provider; inferred from the runtime definition.          |
 
-| Option             | Default          | Notes                                                                                  |
-| ------------------ | ---------------- | -------------------------------------------------------------------------------------- |
-| `transport`        | required         | Wired transport plugin; `materialize()` runs exactly once during client construction.  |
-| `renderTimeout`    | `0` (off)        | Per-preview wall-clock deadline in ms. Requires a terminable transport.                |
-| `transcodeTimeout` | `60_000`         | Per-transcode wall-clock deadline in ms. Zero disables it.                             |
-| `config`           | schema-dependent | `RuntimeConfigProvider` — a boot-config value, or a sync/async function returning one. |
-
-## Worker-Owned Runtime
-
-`defineRuntime` declares executable capabilities in the worker or host process. Browser and framework clients connect over a transport, importing only `typeof runtime` for compile-time narrowing:
+### Usage
 
 ```typescript
-// runtime.worker.ts
+import { createRuntimeClient } from '@taucad/runtime/client';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad } from '@taucad/replicad';
 import { esbuild } from '@taucad/esbuild';
-import { defineRuntime } from '@taucad/runtime/worker';
-import { serveWebWorkerRuntime } from '@taucad/runtime/worker/web';
 
-export const runtime = defineRuntime({
-  plugins: [replicad(), esbuild()],
+const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
-
-await serveWebWorkerRuntime({ runtime });
-```
-
-```typescript
-// app.ts
-import type { runtime } from './examples/runtime.worker';
-import { createRuntimeClient } from '@taucad/runtime/client';
-import { createWebWorkerClientOptions } from '@taucad/runtime/transport/web';
-
-const clientOptions = createWebWorkerClientOptions<typeof runtime>({
-  createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
-});
-
-const client = createRuntimeClient(clientOptions);
-```
-
-The `@taucad/runtime/worker` subpath also exports `createRuntimeWorker` with `CreateRuntimeWorkerOptions` (host authoring), `resolveRuntimeDefinition` (config resolution), the `RuntimeDefinition` / `RuntimeDefinitionOptions` / `AnyRuntimeDefinition` carriers, and the projection helpers `RuntimeKernels`, `RuntimeMiddleware`, `RuntimeBundlers`, `RuntimeTranscoders`.
-
-Node tests and CLIs skip the worker: `inProcessTransport({ runtime }){:ts}` takes the definition directly, `fileSystem` optional (see [Usage](#usage)).
-
-`createNodeClient(options: NodeRuntimeClientOptions)` from `@taucad/runtime/node` wraps that wiring: `fromNodeFs(projectPath)` when `projectPath` is given, `fromMemoryFs()` otherwise.
-
-## Boot Config
-
-A runtime definition declares a Zod `configSchema` when worker-owned plugin construction needs deployment-specific values. The worker keeps executable composition; the client supplies only a structured-cloneable payload before initialization:
-
-```typescript
-// runtime.worker.ts
-import { z } from 'zod';
-import { zoo } from '@taucad/zoo';
-import { esbuild } from '@taucad/esbuild';
-import { defineRuntime } from '@taucad/runtime/worker';
-import { serveWebWorkerRuntime } from '@taucad/runtime/worker/web';
-
-export const runtime = defineRuntime({
-  configSchema: z.object({
-    tauWebSocketUrl: z.string().url(),
-  }),
-  createRuntime(config) {
-    return {
-      plugins: [zoo({ kernels: { default: { baseUrl: `${config.tauWebSocketUrl}/v1/kernels/zoo` } } }), esbuild()],
-    };
+const document = client.open({
+  source: {
+    files: { 'main.ts': 'import { makeBox } from "replicad"; export default () => makeBox([0,0,0],[1,1,1]);' },
   },
 });
 
-await serveWebWorkerRuntime({ runtime });
+try {
+  const outcome = await document.evaluation();
+  if (!outcome.superseded && outcome.evaluation.success) {
+    const view = document.view('model');
+    try {
+      const rendered = await view.rendering();
+      if (!rendered.superseded && rendered.rendering.success) {
+        console.log(rendered.rendering.artifact.mimeType, rendered.rendering.hash);
+      }
+      const exported = await document.export('glb');
+      if (exported.success) {
+        console.log(exported.files[0].name, exported.files[0].bytes.byteLength);
+      }
+    } finally {
+      view.close();
+    }
+  }
+} finally {
+  document.close();
+  await client.shutdown();
+}
 ```
 
-Client wiring is the one above plus a `config` key: `createWebWorkerClientOptions<typeof runtime>({ config: { tauWebSocketUrl: 'wss://api.example.com' }, createWorker }){:ts}`.
+Worker-backed clients import `typeof runtime` as a type witness and use `createWebWorkerClientOptions<typeof runtime>` or the corresponding Node/Electron transport factory. Executable plugins remain in `defineRuntime` at the host boundary. See [Transport API](./transport).
 
-The runtime factory receives `RuntimeConfigOutput` (`z.output` of the schema); the client accepts `RuntimeConfigInput` (`z.input`). A required schema makes `config` required on the client; one that defaults or accepts `undefined` makes it optional. Static runtimes reject `config` outright.
-
-Invalid config fails during `connect()` with `RuntimeConnectionError.causeKind === 'runtime-config'` wrapping a [`RuntimeConfigError`](#error-types). Filesystem stays a transport-owned workspace resource, outside boot config.
-
-## Properties and Methods
-
-The `RuntimeClient` table above carries every signature. The contracts behind them:
-
-- **State** — `transport` (id plus diagnostic descriptor) is available from construction. `lifecycleState` (`RuntimeLifecycleState`) advances `unconnected` → `connecting` → `connected` → `terminated`; only a failed connect steps back, demoting `connecting` to `unconnected`. `renderStatus` rolls that up for UI as `'idle' | 'connecting' | 'rendering' | 'ready' | 'error'`. `activeKernelId` follows the `activeKernelChanged` event. `capabilities` is the kernel-derived manifest (`RuntimeCapabilities`) layered with transport flags, resolved once `connect()` completes.
-- **Rendering** — `connect()` runs the handshake and is idempotent. `render(input)` accepts `parameters`, legacy `renderOptions`, and framework `content`. The worker evaluates the source, then renders the **first offered** v2 view. `updateParameters(parameters)` supersedes any in-flight render of the active file. `setOptions(renderOptions)` replaces the current view option bag rather than patching it: absent keys are dropped. Explicit view and instance selection is part of W3, not this client contract.
-- **Deadlines** — `setRenderTimeout(ms)` and `setTranscodeTimeout(ms)` take milliseconds, zero disables, and neither disturbs work already in flight.
-- **Output** — `export(format, input?)` self-renders when given `source` and otherwise reuses the latest compatible native result. `transcode({ from, to, files, options })` runs a registered transcoder over caller-owned artifacts with no kernel source loaded. `snapshotSource(input)` collects the source closure and approved additional files without computing geometry. `routesFor(format)` lists routes in manifest order; `bestRouteFor(format, { kernelId?, content? }?)` applies the tiebreak rules.
-- **Teardown** — `on(event, handler, { signal }?)` returns an unsubscribe function, and an `AbortSignal` unsubscribes too. `terminate()` tears down worker, transport, and subscriptions. `shutdown({ drain: true })` lets in-flight work settle first, and `terminate()` during a drain cancels it. Both are idempotent.
-
-## Render Input Types
+## Sources and Opening
 
 <auto-type-table path='./props/client.ts' name='RuntimeSource' />
 
-<auto-type-table path='./props/client.ts' name='RuntimeRenderInput' />
+<auto-type-table path='./props/client.ts' name='FilesystemRuntimeSource' />
 
-<auto-type-table path='./props/client.ts' name='RuntimeExportOptions' />
+<auto-type-table path='./props/client.ts' name='InlineRuntimeSource' />
+
+<auto-type-table path='./props/client.ts' name='OpenInput' />
+
+`RuntimeSourceFiles` maps canonical root-relative paths to `RuntimeSourceContent` (text or owned bytes). A single inline file may omit `entry`; multiple literal files require an `entry` matching a key. `source.path` names a file inside the transport's filesystem. See [Path Namespaces](../concepts/path-namespaces).
+
+`open(input)` returns synchronously and starts evaluation, connecting lazily. `watch` defaults to `true`; staged bytes are applied before evaluation. `parameters` are model inputs; `evaluateOptions` belong to the selected kernel. Required kernel option schemas remain required through concrete runtime inference. An opening `signal` closes the document when aborted.
+
+`describe({ source, resolution?, signal? })` finds the kernel and parameter manifest without evaluating a model. Its `resolution` is the parameter owner's `ParameterResolutionOptions`.
+
+## RuntimeDocument
+
+<auto-type-table path='./props/client.ts' name='RuntimeDocument' />
+
+<auto-type-table path='./props/client.ts' name='DocumentUpdate' />
+
+<auto-type-table path='./props/client.ts' name='UpdateOutcome' />
+
+`evaluation()` reads the current evaluation. `update()` replaces supplied parameter/evaluation option state and optionally stages files. A transient update cannot stage files and never replaces the committed export source. A newer admitted update resolves displaced work as `{ superseded: true }`.
+
+Document events are `described` (`Description`), `evaluated` (`Evaluation`), `progress` (`{ phase, detail? }`), and `status` (`DocumentStatus`: `evaluating`, `ready`, `error`, `closed`). `on` returns an unsubscribe function and accepts an optional subscription signal. `close()` is idempotent and closes owned views.
+
+## ViewSubscription
+
+<auto-type-table path='./props/client.ts' name='ViewSubscription' />
+
+<auto-type-table path='./props/client.ts' name='DocumentViewRequest' />
+
+<auto-type-table path='./props/client.ts' name='ViewUpdateOutcome' />
+
+`document.view()` follows the first offered view with default options. `document.view(id, request)` selects a declared view and its schema-inferred `options`, supported framework `content`, and optional `instance`. An instance is a named projection such as a schematic sheet; it is separate from a camera angle. `instance: null` resets an instance-capable view to the first offered instance.
+
+`rendering()` reads a projection; `update(request)` patches that subscription's request. Each subscription independently follows document evaluations. `rendered` carries `Rendering`; `status` carries `ViewStatus` (`rendering`, `ready`, `error`, `closed`). Closing a subscription releases it without closing its document.
+
+Successful evaluations may offer no views. Inspect `evaluation.views` before requesting a default projection. An unknown view produces `VIEW_UNKNOWN`; a declared but unavailable view produces `VIEW_UNAVAILABLE`. A valid evaluation can still contain error-severity issues; inspect every issue before treating the model as clean.
+
+## Exporting
+
+<auto-type-table path='./props/client.ts' name='DocumentExportRequest' />
 
 <auto-type-table path='./props/client.ts' name='ExportResult' />
 
-Filesystem sources take a canonical root-relative `source.path` such as `models/main.ts`; leading slashes and noncanonical spellings are rejected. Inline `source.entry` is a key in `source.files` (a `RuntimeSourceFiles` record) and may include directory segments.
+`document.export(target, request?)` exports the pinned committed evaluation, independently of active view options and transient edits. `target` is an export ID, an unambiguous extension, or an available transcoder target. Concrete runtimes infer required `options` and supported `content` for that target; dynamic runtimes validate them at the worker. Success provides a nonempty ordered `files` tuple, `exportId`, `evaluationId`, and optional `sourceRevision`.
+
+`WideViewRequest` and `WideExportRequest` describe dynamic requests whose option/content validation occurs at the worker.
+
+`routesFor(format)` returns routes in manifest order after connection. `bestRouteFor(format, { kernelId?, content? })` filters by kernel/content, then prefers BRep fidelity and direct routes. Check `Evaluation.exports` for the current model's offered direct exports; static declarations do not guarantee a result offers every export.
+
+`client.transcode({ from, to, files, options, signal? })` converts caller-owned files without opening a document. Its `TranscodeResult` uses `data`; document `ExportResult` uses `files`.
+
+## Boot Configuration
+
+A configured `defineRuntime` receives `RuntimeConfigOutput` from its Zod schema. The client accepts `RuntimeConfigInput` via `RuntimeConfigProvider`: a value or sync/async provider. Required schemas make `config` required; schemas accepting `undefined` make it optional. Static definitions reject `config`. Invalid configuration rejects with `RuntimeConfigError` (`RUNTIME_CONFIG_INVALID`); use `isRuntimeConfigError` to narrow it.
+
+The worker subpath exports `createRuntimeWorker`, `CreateRuntimeWorkerOptions`, `resolveRuntimeDefinition`, `RuntimeDefinition`, `RuntimeDefinitionOptions`, `AnyRuntimeDefinition`, and the projections `RuntimeKernels`, `RuntimeMiddleware`, `RuntimeBundlers`, `RuntimeTranscoders`. Node's `createNodeClient` accepts `NodeRuntimeClientOptions` and selects `fromNodeFs(projectPath)` or `fromMemoryFs()`.
 
 ## Source Snapshots
 
-`RuntimeSourceSnapshotInput` is `source`, optional `additionalPaths` (`RuntimeSourceSnapshotAdditionalPath`: `{ path, required }`), and an optional `signal`. `RuntimeSourceSnapshotResult` is a `KernelResult` of `RuntimeSourceSnapshotData`: resolved `entryPath`, selected `kernelId`, `unresolvedPaths`, and a `RuntimeSourceSnapshotFile` array of owned bytes, `sha256`, and a `RuntimeSourceSnapshotFileRole` (`'entry' | 'kernel-dependency' | 'middleware-dependency' | 'additional'`).
+`snapshotSource` accepts `RuntimeSourceSnapshotInput`: source, optional `additionalPaths` (`RuntimeSourceSnapshotAdditionalPath`: path plus required flag), and signal. `RuntimeSourceSnapshotResult` contains `RuntimeSourceSnapshotData`: `entryPath`, `kernelId`, unresolved paths, and `RuntimeSourceSnapshotFile` records of owned bytes, hashes, and `RuntimeSourceSnapshotFileRole` (`entry`, `kernel-dependency`, `middleware-dependency`, `additional`). It collects source closure without geometry computation.
 
-## Content Requirements and Route Capabilities
+## Deadlines and Errors
 
-`content` is the framework-owned description of what the artifact must contain, separate from kernel-owned `renderOptions` and format-owned `exportOptions`:
+`setOperationTimeout(milliseconds)` synchronously changes the deadline for subsequent operations. Zero disables it; negative or nonfinite values are rejected. It covers description, evaluation, view rendering, and document exports. `setTranscodeTimeout(milliseconds)` separately sets direct conversion deadlines; the default is `60_000`. Existing operations retain their admitted deadline.
 
-```typescript @ts-nocheck
-// @ts-nocheck: the docs site does not install `@taucad/image`.
-import { createRuntimeClient } from '@taucad/runtime';
-import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad } from '@taucad/replicad';
-import { image } from '@taucad/image';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+| Error                    | Stable code                 | Meaning                                                                     |
+| ------------------------ | --------------------------- | --------------------------------------------------------------------------- |
+| `OperationAbortedError`  | `RUNTIME_OPERATION_ABORTED` | Explicit cancellation or reading a closed handle.                           |
+| `OperationTimeoutError`  | `RUNTIME_OPERATION_TIMEOUT` | The admitted wall-clock deadline expired; `phase` identifies the operation. |
+| `RuntimeTerminatedError` | `RUNTIME_TERMINATED`        | Explicit client termination or transport loss; pending operations reject.   |
 
-const runtime = defineRuntime({ plugins: [replicad(), image()] });
-const client = createRuntimeClient({
-  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
-});
+`SharedPoolEntryNotFoundError` identifies unavailable pooled bytes; narrow it with `isSharedPoolEntryNotFoundError`.
 
-const renderedImage = await client.export('webp', {
-  source: { path: 'main.ts' },
-  content: { includeEdges: true },
-  exportOptions: {
-    width: 1920,
-    height: 1080,
-    lineWidth: 3,
-    quality: 0.9,
-  },
-});
+Use `isOperationAbortedError`, `isOperationTimeoutError`, or `isRuntimeTerminatedError` across realms. Model failures resolve as `success: false` with `KernelIssue` records. Supersession resolves normally; it is separate from operational rejection. A noncooperative isolated host may be terminated after bounded deadline recovery; create a new client after termination.
 
-// Dynamic kernel: check the route first.
-const route = client.bestRouteFor('webp', {
-  kernelId: client.activeKernelId,
-  content: { includeEdges: true },
-});
-if (!route) {
-  // This kernel has no route for the requested content.
-}
-```
+## Client Lifecycle and Events
 
-WebP quality defaults to `1` (lossless); lower values request lossy encoding. For fitted cameras, viewer placement, annotations, and ordered view batches, see [Capture Camera Views](../guides/headless-camera-capture).
+`RuntimeLifecycleState` advances through `unconnected`, `connecting`, `connected`, and `terminated`. `connect()` is idempotent and takes no arguments; explicit connection allows capability discovery before opening a document. `terminate()` initiates teardown; `shutdown()` awaits transport closure. Both settle owned pending work and remove subscriptions.
 
-The content properties are `includeEdges` and `includeTopology`. Support belongs to a route, not to a format or kernel: an image route may accept edges, a Replicad GLB route both, STEP/STL routes neither. `bestRouteFor` filters by kernel and explicit content keys before fidelity/direct-route ranking. Routes keep plugin-owned schema and defaults under `exportOptions`, framework-owned ones under `content`; `capabilities.renderCapabilities[kernelId]` uses the same split.
+| Client event   | Payload                                          |
+| -------------- | ------------------------------------------------ |
+| `capabilities` | `CapabilitiesManifest`                           |
+| `state`        | `idle`, `busy`, or `error`, with optional detail |
+| `log`          | `LogEntry`                                       |
+| `telemetry`    | `TelemetryBatch`                                 |
+| `error`        | Connection-scoped `KernelIssue` records          |
 
-`content` is optional, and defaults apply only for properties the selected route owns: edges default to `false`; topology to `true` for capable render routes and `false` for exports. Unsupported properties are never silently ignored — static calls fail type checking, dynamic calls return a `RUNTIME_CONTENT_UNSUPPORTED` issue before expensive geometry work. Changing content mid-render takes a new `render` request; `updateParameters` and `setOptions` keep the established render-content snapshot.
-
-## Filesystem
-
-<auto-type-table path='./props/client.ts' name='RuntimeFileSystem' />
-
-`fromMemoryFs`, `fromNodeFs`, `fromFsLike`, `fromBrowserFs`, and `fromFileSystemBridge` return an opaque `RuntimeFileSystem`. Pass it to the wired transport callable — `webWorkerTransport({ fileSystem })`, `inProcessTransport({ runtime, fileSystem })` — which builds the kernel-side bridge primitives internally. Consumers cannot branch on the handle's kind.
-
-A runtime path names a file inside that filesystem: render `main.ts`, never an authority-global path such as `/projects/widget/main.ts`. See [Path Namespaces](../concepts/path-namespaces) and the [Filesystem API](./filesystem).
-
-### Transport plugins vs materialized handles
-
-Bundled transports are `TransportPlugin` callables. `createRuntimeClient` receives the wired plugin (`webWorkerTransport({ ... })` — `{ id, describe, materialize }`) and calls `materialize()` once during construction to obtain the `RuntimeTransportClient` handle. Worker entries call `serveWebWorkerRuntime({ runtime })` or its Node counterpart; transport authors compose `webWorkerHost` / `nodeWorkerHost` directly, never through a `.host` accessor on the plugin callable. See [Transport API](./transport).
-
-## Error Types
-
-Every runtime error class exposes a stable `code` getter and a realm-safe guard named `is<ClassName>` — `isRuntimeConnectionError`, `isRuntimeConfigError`, `isTranscodeTimeoutError`, and so on. Branch on the code, not on `Error.message` or `instanceof`: the message is human prose, the code is the contract.
-
-| Error class                    | `code`                              | Thrown when                                                           |
-| ------------------------------ | ----------------------------------- | --------------------------------------------------------------------- |
-| `RuntimeNotConnectedError`     | `'RUNTIME_NOT_CONNECTED'`           | A command was issued before `connect()` resolved.                     |
-| `RuntimeConnectionError`       | `'RUNTIME_CONNECTION_FAILED'`       | The transport handshake failed. Pair with `causeKind`.                |
-| `RuntimeConfigError`           | `'RUNTIME_CONFIG_INVALID'`          | Boot config was missing or invalid. Wrapped by the connection error.  |
-| `RuntimeTerminatedError`       | `'RUNTIME_TERMINATED'`              | A command was issued after termination. Pair with `causeKind`.        |
-| `RenderTimeoutError`           | `'RUNTIME_RENDER_TIMEOUT'`          | A render exceeded `renderTimeout`; rejects locally at the deadline.   |
-| `RenderAbortedError`           | `'RUNTIME_RENDER_ABORTED'`          | A render was aborted, typically superseded before settlement.         |
-| `TranscodeTimeoutError`        | `'RUNTIME_TRANSCODE_TIMEOUT'`       | A direct transcode exceeded `transcodeTimeout`.                       |
-| `NoRenderOutcomeError`         | `'RUNTIME_NO_RENDER_OUTCOME'`       | Single-arg `client.export(format)` ran with no prior render result.   |
-| `SharedPoolEntryNotFoundError` | `'RUNTIME_SHARED_POOL_KEY_MISSING'` | The worker emitted a `pooled` geometry key the client cannot resolve. |
-
-`RuntimeConnectionCause` is `'transport-open' | 'capabilities-resolution' | 'runtime-config' | 'kernel-binding'`; `RuntimeTerminatedCause` is `'explicit' | 'transport-closed' | 'render-timeout'`.
-
-`KernelIssue` payloads, delivered via the `error` event and on `Geometry` results, carry a parallel `code: KernelIssueCode` — use it instead of `RegExp`-matching `issue.message`.
-
-> Supersession is **not** an error. `render`/`updateParameters`/`setOptions`
-> resolve a `RenderOutcome` union whose `superseded: true` branch is the normal
-> outcome when a newer command or autonomous watched-filesystem preview takes
-> ownership; selected geometry arrives over the `geometry` event. See
-> [Handle Errors](../guides/error-handling).
-
-`causeKind === 'render-timeout'` means an isolated host did not acknowledge cooperative cancellation during bounded recovery and was terminated. Construct a new client before issuing more work. See [Configure Render Timeouts](../guides/render-timeouts).
-
-## Event Subscription
-
-| Event                 | Handler Signature                                                | When                              |
-| --------------------- | ---------------------------------------------------------------- | --------------------------------- |
-| `geometry`            | `(result: HashedGeometryResult) => void`                         | Render completes (autonomous)     |
-| `renderStatus`        | `(status: RenderStatus) => void`                                 | Derived render lifecycle changes  |
-| `state`               | `(state: WorkerState, detail?: string) => void`                  | Worker state changes              |
-| `log`                 | `(entry: LogEntry) => void`                                      | Kernel/middleware log messages    |
-| `progress`            | `(phase: RenderPhase, detail?: Record<string, unknown>) => void` | Render phase transitions          |
-| `telemetry`           | `(entries: TelemetryEntry[]) => void`                            | Performance entries               |
-| `parametersResolved`  | `(result: GetParametersResult) => void`                          | Parameters extracted              |
-| `capabilities`        | `(manifest: CapabilitiesManifest) => void`                       | Capabilities resolved             |
-| `activeKernelChanged` | `(kernelId: KernelId \| undefined) => void`                      | A new kernel took over the worker |
-| `error`               | `(issues: KernelIssue[]) => void`                                | Worker emitted a top-level error  |
-
-`LogEntry` carries `id`, `timestamp`, a `LogLevel` (see the `logLevels` constant), `message`, an optional `LogOrigin` (`component`/`operation`/`file`), and optional `data`.
-
-## When Do I Need `connect()`?
-
-`client.connect()` runs the transport handshake and takes **no arguments** — filesystem and signalling concerns are closed over by the transport supplied at construction. Call it explicitly to surface connection failures before the first command; `render` and `export` open the transport as needed. Teardown is `client.terminate(){:ts}`.
-
-The transport carries the scenario. Inline `source.files`, one-shot or live, use `inProcessTransport({ runtime, fileSystem: fromMemoryFs() }){:ts}` ([Quick Start](../getting-started/quick-start)); an on-disk Node project swaps in `fromNodeFs(path){:ts}` ([Set Up the Filesystem](../guides/filesystem-setup)); a browser editor passes `fromFileSystemBridge(() => openFileSystemBridge(fsWorker, { root: '/projects/widget', consumer: 'agent' })){:ts}` to `createWebWorkerClientOptions` ([Embedding in a Host](../guides/embedding-in-a-host)).
-
-## Usage
-
-`client.export(format, input)` runs a single render-and-export cycle and returns a Promise. Auto-connect is the npm-consumer default:
-
-```typescript
-import { createRuntimeClient } from '@taucad/runtime';
-import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad } from '@taucad/replicad';
-import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-
-const runtime = defineRuntime({ plugins: [replicad()] });
-const client = createRuntimeClient({
-  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
-});
-
-const result = await client.export('glb', {
-  source: { files: { 'main.ts': 'export default () => {}' } },
-});
-
-if (result.success) {
-  for (const file of result.data) {
-    console.log(`Exported ${file.name}: ${file.bytes.byteLength} bytes`);
-  }
-}
-
-client.terminate();
-```
-
-UI viewers that react to parameter changes or file edits use the autonomous render loop instead — `render`, `updateParameters`, `setOptions`, and the `geometry` event. See [Live Rendering](../guides/live-rendering).
+Model/projection events belong to documents/views. `LogEntry` includes level (`LogLevel`; `logLevels`), timestamp, message, optional `LogOrigin` and data. `RuntimeCapabilities` combines the manifest with transport information. `machines` and `jobs` expose availability facets; inspect the facet before accessing its client.
 
 ## Related
 
 - [Live Rendering](../guides/live-rendering)
-- [Configure Render Timeouts](../guides/render-timeouts)
-- [Embedding in a Host](../guides/embedding-in-a-host)
-- [Set Up the Filesystem](../guides/filesystem-setup)
 - [Handle Errors](../guides/error-handling)
-- [Render Lifecycle](../concepts/render-lifecycle)
+- [Transport API](./transport)
+- [Core Types](./types)

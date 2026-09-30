@@ -1,13 +1,17 @@
 ---
 title: Middleware API
-description: defineMiddleware and built-in middleware factories for caching, transforms, and edge detection.
+description: Declare operation wrappers, file dependencies, content providers, and typed middleware state.
 docType: reference
 icon: lucide:layers
 ---
 
-Middleware wraps kernel operations in an onion-model pipeline for caching, coordinate transforms, and geometry post-processing.
+# Middleware API
+
+`defineMiddleware` wraps description, evaluation, view rendering, and exports. Hooks compose through an onion pipeline without owning the kernel's native handle.
 
 ## Types
+
+<auto-type-table path='./props/middleware.ts' name='KernelMiddleware' />
 
 <auto-type-table path='./props/middleware.ts' name='MiddlewareState' />
 
@@ -19,28 +23,31 @@ Middleware wraps kernel operations in an onion-model pipeline for caching, coord
 
 <auto-type-table path='./props/middleware.ts' name='MiddlewareDependency' />
 
+<auto-type-table path='./props/middleware.ts' name='EvaluateRequest' />
+
 <auto-type-table path='./props/middleware.ts' name='RenderRequest' />
 
 <auto-type-table path='./props/middleware.ts' name='WriteRequest' />
 
 ## defineMiddleware
 
-`defineMiddleware` returns a `MiddlewarePluginFactory`; calling it yields serializable registration metadata with a private executable definition. Optional hooks are `wrapDescribe`, `wrapEvaluate`, `wrapRender`, and `wrapWrite`. Each receives `(input, next, services)`; `next(input)` continues the chain. Evaluation is independent of any view. Render and write requests name the selected view or export and its declared MIME type; write also carries the extension.
+Calling its `MiddlewarePluginFactory` yields serializable registration metadata and a private executable definition. `WrapDescribeHook`, `WrapEvaluateHook`, `WrapRenderHook`, and `WrapWriteHook` receive `(input, next, services)`. Await `next(input)` to continue; return the corresponding hook result.
 
-Middleware is assumed to mutate results and therefore participates in cache identity. A pure telemetry/logging tap may declare `mutates: false`; it must return successful results unchanged and declare no dependencies.
+Evaluation is independent of views. Render requests identify a view, MIME type, and optional instance. Write requests identify an export, extension, and MIME type. State and options schemas infer parsed output on services; do not forward unparsed caller options.
 
-A middleware that fulfills framework content declares it by view MIME type or export extension. The bundled edge-detection middleware is one such provider:
+Middleware participates in cache identity. A pure telemetry tap may declare `mutates: false`, return successful results unchanged, and declare no dependencies. Other middleware is assumed to mutate results.
 
-```typescript @ts-nocheck
-// @ts-nocheck: the docs site does not install `@taucad/middleware`.
-import { gltfEdgeDetection } from '@taucad/middleware';
+## Content
 
-export const gltfEdges = gltfEdgeDetection();
-```
+`MiddlewareContent` declares view MIME types and export extensions. `ViewContentKeys`/`ExportContentKeys` extract supported keys; `ViewContentMap`/`ExportContentMap` preserve per-route inference. Hooks receive only selected-route content. A provider cannot add content support to unrelated media/routes.
 
-The declaration makes a property available only on composed routes where the middleware can run. The runtime projects only the selected MIME or extension's content keys into that hook.
+## Dependencies and Cancellation
 
-Middleware file inputs are declarative: `entryPath` and dependency `path` values are normalized [runtime paths](../concepts/path-namespaces). The `resolve` hook returns `MiddlewareDependency` values with explicit `affects` operation names. The declaration participates in hashing and, for the current preview, rerender ownership:
+`MiddlewareResolveHook` returns `MiddlewareDependency` records with canonical root-relative paths and explicit `affects` operations. Missing files remain unresolved dependencies so their creation can heal the model. Other filesystem failures propagate. Middleware never registers watchers imperatively.
+
+Each hook receives a fresh operation-scoped `signal`; pass it to cancellable APIs and release operation state on settlement.
+
+### Usage
 
 ```typescript
 import { defineMiddleware } from '@taucad/runtime/middleware';
@@ -54,41 +61,11 @@ export const settingsFiles = defineMiddleware({
 });
 ```
 
-Middleware does not register watchers imperatively. A missing declaration is retained as an unresolved dependency so creating the file can heal the preview; non-not-found filesystem failures propagate.
-
-Every wrap hook receives a fresh operation-scoped `signal` on `KernelMiddlewareServices`; dependency hooks receive the same primitive on `MiddlewareDependencyServices`. Pass it to cancellable APIs and do not retain it after the hook settles. See [Cooperate with Cancellation](../guides/cooperate-with-cancellation).
-
 ## Factories
 
-`@taucad/middleware` exports the `middleware()` toolkit (presets `default`, `cache` and `units`) plus these role factories:
+`@taucad/middleware` provides `middleware()` presets (`default`, `cache`, `units`) and role factories: `parameterFileResolver()`, `parameterUnits()`, `geometryCache()`, `gltfEdgeDetection()`. Compose them in the worker-owned runtime definition.
 
-| Factory                   | Purpose                                               |
-| ------------------------- | ----------------------------------------------------- |
-| `parameterFileResolver()` | Resolve per-file parameter documents beside the entry |
-| `parameterUnits()`        | Infer units for parameters without a declared unit    |
-| `geometryCache()`         | Cache geometry output by dependency hash              |
-| `gltfEdgeDetection()`     | Add requested edge geometry to glTF meshes            |
-
-## Usage
-
-```typescript @ts-nocheck
-// @ts-nocheck: the docs site does not install `@taucad/middleware`.
-import { createRuntimeClient } from '@taucad/runtime';
-import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad } from '@taucad/replicad';
-import { esbuild } from '@taucad/esbuild';
-import { middleware } from '@taucad/middleware';
-
-const runtime = defineRuntime({
-  plugins: [replicad(), esbuild(), middleware()],
-});
-
-const client = createRuntimeClient({
-  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
-});
-```
+`describeResultSchema` validates a middleware description result at an untyped boundary.
 
 ## Related
 
@@ -96,4 +73,3 @@ const client = createRuntimeClient({
 - [Create Custom Middleware](../guides/custom-middleware)
 - [Cooperate with Cancellation](../guides/cooperate-with-cancellation)
 - [Middleware Model](../concepts/middleware-model)
-- [Path Namespaces](../concepts/path-namespaces)

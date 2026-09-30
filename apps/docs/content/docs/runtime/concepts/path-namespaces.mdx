@@ -23,7 +23,10 @@ const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 
-await client.render({ source: { path: 'models/main.ts' } });
+const document = client.open({ source: { path: 'models/main.ts' } });
+await document.evaluation();
+document.close();
+await client.shutdown();
 ```
 
 For inline source, `source.entry` is a key in `source.files` and may include directory segments:
@@ -42,7 +45,7 @@ const client = createRuntimeClient({
 const mainSource = 'export default () => null;';
 const partSource = 'export const part = null;';
 
-await client.render({
+const document = client.open({
   source: {
     files: {
       'models/main.ts': mainSource,
@@ -51,6 +54,9 @@ await client.render({
     entry: 'models/main.ts',
   },
 });
+await document.evaluation();
+document.close();
+await client.shutdown();
 ```
 
 ## Plugin Entry and Dependency Paths
@@ -58,15 +64,15 @@ await client.render({
 Kernel and bundler methods receive the canonical `entryPath` that names the model's evaluation root within the supplied runtime filesystem:
 
 ```typescript
-import type { KernelDefinition } from '@taucad/runtime/kernel';
+import type { ResolveInput, ResolveOutput, KernelServices } from '@taucad/runtime/types';
 
-const kernelMethods: Pick<KernelDefinition, 'resolve'> = {
-  async resolve({ entryPath }, { filesystem }) {
-    // entryPath === 'models/main.ts'
-    const source = await filesystem.readFile(entryPath, 'utf8');
-    return { resolved: [entryPath, 'lib/part.ts'], unresolved: source ? [] : [entryPath] };
-  },
-};
+export async function resolve(
+  { entryPath }: ResolveInput,
+  { filesystem }: Pick<KernelServices, 'filesystem'>,
+): Promise<ResolveOutput> {
+  const source = await filesystem.readFile(entryPath, 'utf8');
+  return { resolved: [entryPath, 'lib/part.ts'], unresolved: source ? [] : [entryPath] };
+}
 ```
 
 Middleware receives the same normalized `entryPath`. Dependency `path` values and all `KernelFileSystem` arguments use this namespace too: `entryPath` is the evaluation root, `path` is any dependency.

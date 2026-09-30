@@ -33,50 +33,31 @@ const loggingMiddleware = defineMiddleware({
 });
 ```
 
-### 2. Short-circuit, with state and options
+### 2. Add inferred options
 
-`optionsSchema` (Zod) declares configuration with `.default()` values, resolved from schema defaults and caller overrides at registration. `stateSchema` declares type-safe operation state; `state.update()` merges partial data validated against the schema. A cache middleware combines both — a hit returns without calling `handler`, and the short-circuited result still flows through upstream layers:
+An `optionsSchema` validates registration input and provides defaults. Hooks receive its parsed output. This factory lives in `examples/my-logging.middleware.ts`:
 
 ```typescript
 import { defineMiddleware } from '@taucad/runtime/middleware';
-import type { EvaluateResult } from '@taucad/runtime/types';
 import { z } from 'zod';
 
-const cache = new Map<string, { value: EvaluateResult; expiresAt: number }>();
-
-const configurableCacheMiddleware = defineMiddleware({
-  id: 'configurable-cache',
-  name: 'ConfigurableCache',
-  optionsSchema: z.object({
-    maxAge: z.number().default(60_000),
-    enabled: z.boolean().default(true),
-  }),
-  stateSchema: z.object({
-    cacheKey: z.string().optional(),
-  }),
-  async wrapEvaluate(input, handler, { options, state, dependencyHash }) {
-    if (!options.enabled) {
-      return handler(input);
-    }
-
-    const entry = cache.get(dependencyHash);
-    if (entry && entry.expiresAt > Date.now()) {
-      state.update({ cacheKey: dependencyHash });
-      return entry.value;
-    }
-
-    const result = await handler(input);
-    cache.set(dependencyHash, { value: result, expiresAt: Date.now() + options.maxAge });
+export const myLogging = defineMiddleware({
+  id: 'my-logging',
+  name: 'MyLogging',
+  optionsSchema: z.object({ enabled: z.boolean().default(true) }),
+  async wrapEvaluate(input, next, { logger, options }) {
+    const result = await next(input);
+    if (options.enabled) logger.debug('Evaluation completed');
     return result;
   },
 });
 ```
 
-`dependencyHash` is the framework's pre-computed SHA-256 hash over the operation's dependency set. Cache the complete `EvaluateResult`, including offered view/export IDs and the exact native replay carrier when present; a result without those fields cannot safely stand in for evaluation.
+Forward the complete result. Evaluation handles have lifetimes owned by the runtime; retaining whole results in a global map can return a released handle or cross document ownership. Use the bundled cache middleware for runtime-managed reuse instead of implementing an unbounded result cache.
 
-### 3. Export and register the factory
+### 3. Register the factory
 
-`defineMiddleware` returns a callable [`MiddlewarePlugin`](../api/middleware) factory directly — no wrapper file or extra factory step. Middleware executes in the worker-owned runtime, so keep the factory in the module that calls `defineRuntime`; browser clients may type-import the runtime definition but should not value-import executable middleware. Here `my-cache.middleware.ts` exports a `myCache` factory shaped like step 2:
+Keep executable middleware with the runtime definition in its worker or host process. A browser client can type-import that definition without loading its implementation:
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
@@ -85,16 +66,17 @@ import { replicad } from '@taucad/replicad';
 import { esbuild } from '@taucad/esbuild';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { myCache } from './examples/my-cache.middleware';
+import { myLogging } from './examples/my-logging.middleware';
 
 const runtime = defineRuntime({
   plugins: [replicad(), esbuild()],
-  middleware: [myCache()],
+  middleware: [myLogging({ enabled: true })],
 });
-
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
+await client.connect();
+await client.shutdown();
 ```
 
 ### 4. Declare operation-scoped dependencies
@@ -102,6 +84,8 @@ const client = createRuntimeClient({
 Use `resolve` when a file affects an operation. `affects` is required; list only the operations whose result changes when the file changes:
 
 ```typescript
+import { defineMiddleware } from '@taucad/runtime/middleware';
+
 const metadataMiddleware = defineMiddleware({
   id: 'metadata',
   name: 'Metadata',

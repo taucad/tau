@@ -132,9 +132,8 @@ export const ChatTextarea = memo(function ({
   const geometryUnits = projectContext?.geometryUnits;
   const mainEntryPath = projectContext?.mainEntryPath;
   const viewRecords = projectContext?.viewRecords;
-  const mainGeometryFormat = useSelector(
-    mainEntryPath ? geometryUnits?.get(mainEntryPath) : undefined,
-    (state) => state?.context.geometry?.format,
+  const mainGeometryFormat = useSelector(mainEntryPath ? geometryUnits?.get(mainEntryPath) : undefined, (state) =>
+    state?.context.rendering?.success ? state.context.rendering.artifact.mimeType : undefined,
   );
   const screenshotActionItems = useMemo((): ContextSuggestionItem[] => {
     if (!geometryUnits || !viewRecords || !logic.imageInputSupported) {
@@ -151,7 +150,7 @@ export const ChatTextarea = memo(function ({
         screenshotAction: { type: 'single' },
       },
     ];
-    if (mainGeometryFormat === 'gltf') {
+    if (mainGeometryFormat === 'model/gltf-binary') {
       items.push({
         id: 'screenshot-orthographic',
         label: 'Orthographic views x 6',

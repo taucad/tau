@@ -144,6 +144,8 @@ The worker subpath exports `createRuntimeWorker`, `CreateRuntimeWorkerOptions`, 
 | `OperationTimeoutError`  | `RUNTIME_OPERATION_TIMEOUT` | The admitted wall-clock deadline expired; `phase` identifies the operation. |
 | `RuntimeTerminatedError` | `RUNTIME_TERMINATED`        | Explicit client termination or transport loss; pending operations reject.   |
 
+`RuntimeTerminatedError.causeKind` is a `RuntimeTerminatedCause`: `explicit`, `transport-closed`, or `operation-timeout`. Its optional `detail` is `RuntimeTerminatedDetail`, preserving host exit phase, exit code, reason, resource release and stderr tail when available. Pending and subsequent operations retain the first terminal failure.
+
 `SharedPoolEntryNotFoundError` identifies unavailable pooled bytes; narrow it with `isSharedPoolEntryNotFoundError`.
 
 Use `isOperationAbortedError`, `isOperationTimeoutError`, or `isRuntimeTerminatedError` across realms. Model failures resolve as `success: false` with `KernelIssue` records. Supersession resolves normally; it is separate from operational rejection. A noncooperative isolated host may be terminated after bounded deadline recovery; create a new client after termination.

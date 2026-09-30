@@ -1,6 +1,7 @@
 /* oxlint-disable no-bitwise, typescript/consistent-type-assertions -- Binary header fixtures and partial XState snapshots intentionally use low-level encoding and test-only casts. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ExportFile, Geometry } from '@taucad/types';
+import type { ExportFile } from '@taucad/types';
+import type { Artifact, Rendering } from '@taucad/runtime';
 import type { CameraState } from '@taucad/camera';
 import {
   canonicalCaptureViews,
@@ -47,26 +48,35 @@ const webp = (width: number, height: number, index = 0): ExportFile => {
   return { name: `render-${index}.webp`, mimeType: 'image/webp', bytes };
 };
 
-const snapshot = (geometry: Geometry, entryPath = '/parts/bracket.ts') =>
+const snapshot = (artifact: Artifact & { hash: string }, entryPath = '/parts/bracket.ts') =>
   ({
     context: {
-      geometry,
+      rendering: {
+        success: true,
+        artifact,
+        hash: artifact.hash,
+        view: 'model',
+        requestId: 'view-request',
+        evaluationId: 'evaluation',
+        transient: false,
+        issues: [],
+      } satisfies Rendering,
       entryPath,
       parameters: { width: 42 },
       units: { length: 'mm' },
-      latestGeometryOutcome: 'success',
+      latestRenderingOutcome: 'success',
       kernelIssues: new Map(),
     },
     hasTag: () => false,
   }) as unknown as Parameters<typeof captureSettledCadImages>[0]['cadSnapshot'];
 
 const gltf = {
-  format: 'gltf',
+  mimeType: 'model/gltf-binary',
   content: new Uint8Array([0x67, 0x6c, 0x54, 0x46]),
   hash: 'gltf-hash',
-} as Extract<Geometry, { format: 'gltf' }>;
+} satisfies Artifact & { hash: string };
 const presentationGltf = {
-  format: 'gltf',
+  mimeType: 'model/gltf-binary',
   content: new TextEncoder().encode(
     JSON.stringify({
       scene: 0,
@@ -79,12 +89,12 @@ const presentationGltf = {
     }),
   ),
   hash: 'presentation-gltf-hash',
-} as Extract<Geometry, { format: 'gltf' }>;
+} satisfies Artifact & { hash: string };
 const svg = {
-  format: 'svg',
+  mimeType: 'image/svg+xml',
   content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"></svg>',
   hash: 'svg-hash',
-} as Extract<Geometry, { format: 'svg' }>;
+} satisfies Artifact & { hash: string };
 const cameraState = {
   frameId: 'tau:root',
   position: [8, -6, 4],
@@ -368,7 +378,7 @@ describe('headless capture adapter', () => {
     });
   });
 
-  it('routes settled SVG to one annotated PNG and rejects meaningless multi-angle capture', async () => {
+  it('routes either SVG capture mode to one canonical annotated PNG', async () => {
     const exportImage = vi.fn<ExportImage>(async (_job) => [png(2400, 1350)]);
     const common = {
       cadSnapshot: snapshot(svg, '/drawings/profile.ts'),
@@ -396,12 +406,15 @@ describe('headless capture adapter', () => {
       lengthSymbol: 'mm',
     });
     expect(job.exportOptions).not.toHaveProperty('lineWidth');
-    await expect(
-      captureSettledCadImages({
-        ...common,
-        recipe: { purpose: 'agent', mode: 'orthographic', includeEdges: true },
-      }),
-    ).rejects.toThrow('one canonical view');
+    const orthographic = await captureSettledCadImages({
+      ...common,
+      recipe: { purpose: 'agent', mode: 'orthographic', includeEdges: true },
+    });
+    expect(orthographic).toHaveLength(1);
+    expect(exportImage).toHaveBeenCalledTimes(2);
+    const orthographicJob = exportImage.mock.calls[1]![0];
+    expect(orthographicJob).toMatchObject({ sourceFormat: 'svg', content: svg.content, format: 'png' });
+    expect(orthographicJob.exportOptions).toMatchObject({ width: 1600, height: 1600, axes: true, scaleBar: true });
   });
 
   it('rejects malformed output before dispatch and encodes MIME-aware data URLs', async () => {
@@ -417,9 +430,9 @@ describe('headless capture adapter', () => {
     expect(captureFilesToDataUrls([png(1, 1)])[0]).toMatch(/^data:image\/png;base64,/u);
   });
 
-  it('rejects live WebRTC geometry without invoking a canvas fallback', async () => {
+  it('rejects unknown media without invoking a canvas fallback', async () => {
     const exportImage = vi.fn();
-    const webrtc = { format: 'webrtc', hash: 'live-hash' } as unknown as Geometry;
+    const webrtc = { mimeType: 'application/x-webrtc-stream', content: 'stream', hash: 'live-hash' };
 
     await expect(
       captureSettledCadImages({
@@ -428,17 +441,17 @@ describe('headless capture adapter', () => {
         imageService: { export: exportImage },
         recipe: { purpose: 'chat', mode: 'current' },
       }),
-    ).rejects.toThrow('Live WebRTC geometry cannot be captured headlessly');
+    ).rejects.toThrow('Unsupported CAD artifact: application/x-webrtc-stream');
     expect(exportImage).not.toHaveBeenCalled();
   });
 
   it('uses the shared reserved-key precedence for failed renders', async () => {
     const failedSnapshot = {
       context: {
-        geometry: gltf,
+        rendering: snapshot(gltf).context.rendering,
         entryPath: '/parts/bracket.ts',
         units: { length: 'mm' },
-        latestGeometryOutcome: 'failure',
+        latestRenderingOutcome: 'failure',
         kernelIssues: new Map([
           [
             '__render__',
@@ -464,10 +477,10 @@ describe('headless capture adapter', () => {
   it('uses the deterministic machine fallback for a failed render without issues', async () => {
     const failedSnapshot = {
       context: {
-        geometry: gltf,
+        rendering: snapshot(gltf).context.rendering,
         entryPath: '/parts/bracket.ts',
         units: { length: 'mm' },
-        latestGeometryOutcome: 'failure',
+        latestRenderingOutcome: 'failure',
         kernelIssues: new Map(),
       },
       hasTag: () => false,

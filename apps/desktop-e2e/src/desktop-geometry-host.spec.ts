@@ -35,18 +35,18 @@ export default function main() {
   return drawCircle(10).sketchOnPlane().extrude(10);
 }
 `;
-const quickSpec = `import { it, expectNativeGeo } from 'geospec';
-import { loadNativeModel } from 'geospec/runner/native';
+const quickSpec = `import { it, expectGeo } from 'geospec';
+import { loadModel } from 'geospec/model';
 it('checks the product Runtime mesh', async () => {
-  const model = await loadNativeModel({ file: 'main.ts', format: 'glb' });
-  await expectNativeGeo(model).toBeWatertight();
+  const model = await loadModel({ file: 'main.ts', format: 'glb' });
+  expectGeo(model).toBeWatertight();
 });
 `;
-const slowSpec = `import { it, expectNativeGeo } from 'geospec';
-import { loadNativeModel } from 'geospec/runner/native';
+const slowSpec = `import { it, expectGeo } from 'geospec';
+import { loadModel } from 'geospec/model';
 it('enters the synchronous AP242 claim', async () => {
-  const model = await loadNativeModel({ source: 'gearbox.step', format: 'step' });
-  await expectNativeGeo(model).toHaveConnectedComponents({ count: 5, toleranceMm: 0.001 });
+  const model = await loadModel({ source: 'gearbox.step', format: 'step' });
+  expectGeo(model).toHaveConnectedComponents({ count: 5, toleranceMm: 0.001 });
 });
 `;
 const stepFixture = new URL(
@@ -93,7 +93,7 @@ const expectNativeQuick = async (desktop: DesktopSession, runIndex: number): Pro
         const run = events[runIndex];
         return events
           .slice(runIndex + 1)
-          .some((event) => event.pid === run?.pid && event.kind === 'event' && event.eventType === 'file-complete');
+          .some((event) => event.pid === run?.pid && event.kind === 'event' && event.eventType === 'file-progress');
       },
       { timeout: 90_000 },
     )
@@ -211,7 +211,8 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
   });
   await observeGeometryHost(session);
   await session.page.addInitScript(() => {
-    localStorage.setItem('tau:flags', JSON.stringify({ nativeGeoSpec: true }));
+    // A retired stored flag cannot opt the qualified desktop out of its automatic binding.
+    localStorage.setItem('tau:flags', JSON.stringify({ nativeGeoSpec: false }));
   });
   await session.page.reload({ waitUntil: 'domcontentloaded' });
   await fixture.routeThrough(session.page);
@@ -340,7 +341,7 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
   expect(
     lifecycle
       .slice(replacementSpawn + 1)
-      .some((event) => event.pid === replacementPid && event.kind === 'event' && event.eventType === 'file-complete'),
+      .some((event) => event.pid === replacementPid && event.kind === 'event' && event.eventType === 'file-progress'),
   ).toBe(true);
   expect(
     lifecycle.slice(replacementSpawn + 1).some((event) => event.pid === replacementPid && event.kind === 'result'),

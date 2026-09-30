@@ -268,7 +268,7 @@ export const cubeCylinderCutoutScript: readonly GatewayScriptTurn[] = [
     usage: { inputTokens: 3500, outputTokens: 400 },
   },
   {
-    toolCalls: [{ name: 'get_kernel_result', args: { targetFile: 'main.scad' } }],
+    toolCalls: [{ name: 'evaluate_model', args: { targetFile: 'main.scad' } }],
     usage: { inputTokens: 3000, outputTokens: 20 },
   },
   {

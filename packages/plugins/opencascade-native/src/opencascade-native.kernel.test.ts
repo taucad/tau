@@ -8,6 +8,7 @@ import {
   getTestParameters,
 } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
+import { asKnownArtifact } from '@taucad/runtime/types';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -25,16 +26,17 @@ const model = (body: string) => ({ 'model.ts': `import oc from '@taucad/opencasc
 const runtime = defineRuntime({ kernels: [opencascadeNativeKernel()], bundlers: [esbuildBundler()] });
 
 const render = async (files: Record<string, string>, parameters: Record<string, unknown> = {}) =>
-  createTestGeometry({ runtime, files, mainFile: 'model.ts', parameters });
+  createTestGeometry({ runtime, files, open: { source: { path: 'model.ts' }, parameters } });
 
 const glbOf = (result: Awaited<ReturnType<typeof createTestGeometry>>): Uint8Array<ArrayBuffer> => {
   if (!result.success) {
     throw new Error(`render failed: ${result.issues.map((issue) => issue.message).join('; ')}`);
   }
-  if (result.data.format !== 'gltf') {
-    throw new Error(`expected gltf, received ${result.data.format}`);
+  const artifact = asKnownArtifact(result.artifact);
+  if (artifact?.mimeType !== 'model/gltf-binary') {
+    throw new Error(`expected gltf, received ${result.artifact.mimeType}`);
   }
-  return result.data.content;
+  return artifact.content;
 };
 
 describe('native OpenCascade backend', () => {
@@ -248,18 +250,24 @@ describe('OpenCascadeNativeKernel', () => {
       runtime,
       files: model('export default (oc) => oc.createSolid.cylinder(5, [0,0,15]);'),
     });
+    const document = client.open({ source: { path: 'model.ts' }, watch: false });
     try {
-      const created = await client.render({ source: { path: 'model.ts' } });
+      const created = await document.evaluation();
       expect(created.superseded).toBe(false);
+      if (created.superseded) {
+        return;
+      }
+      expect(created.evaluation.success).toBe(true);
 
-      const glb = await client.export('glb');
+      const glb = await document.export('glb');
       expect(glb.success).toBe(true);
-      expect(glb.success && Buffer.from(glb.data[0]!.bytes).subarray(0, 4).toString()).toBe('glTF');
+      expect(glb.success && Buffer.from(glb.files[0].bytes).subarray(0, 4).toString()).toBe('glTF');
 
-      const step = await client.export('step');
+      const step = await document.export('step');
       expect(step.success).toBe(true);
-      expect(step.success && Buffer.from(step.data[0]!.bytes).subarray(0, 13).toString()).toBe('ISO-10303-21;');
+      expect(step.success && Buffer.from(step.files[0].bytes).subarray(0, 13).toString()).toBe('ISO-10303-21;');
     } finally {
+      document.close();
       await client.shutdown();
     }
   });

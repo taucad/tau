@@ -69,7 +69,7 @@ import type { NativeHandleEntry } from '#interface-resolution.js';
 import type { GlbResources } from '@taucad/geometry-core';
 
 import { convertReplicadGeometriesToGltf, toMechanismKernelIssue } from '#utils/replicad-to-gltf.js';
-import { createReplicadComputeReuse, replicadComputeNamespace } from '#replicad-compute-reuse.js';
+import { createReplicadComputeReuse, replicadComputeNamespace, replicadModuleFacade } from '#replicad-compute-reuse.js';
 import type { ReplicadComputeReuseAdapter } from '#replicad-compute-reuse.js';
 
 import type { GeometryReplicad } from '#replicad.types.js';
@@ -570,8 +570,9 @@ export const replicadKernel = defineKernel({
     },
   },
   async initialize(options, runtime): Promise<ReplicadContext> {
-    const replicadLibrary = await import('replicad');
-    const { mangledToOriginal: exportNameMap, exportNames: libraryExportNames } = preserveExportNames(replicadLibrary);
+    const replicadModule = await import('replicad');
+    const replicadLibrary = replicadModuleFacade(replicadModule);
+    const { mangledToOriginal: exportNameMap, exportNames: libraryExportNames } = preserveExportNames(replicadModule);
 
     const { logger, tracer } = runtime;
     const {

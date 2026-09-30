@@ -234,6 +234,7 @@ export class HeadlessImageService {
         ? await this.backend.isAutomaticGpuAvailable()
         : true;
     job.signal?.throwIfAborted();
+    // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- dispose() can run while adapter admission awaits.
     if (this.disposed) {
       throw new Error('HeadlessImageService is disposed');
     }

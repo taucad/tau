@@ -36,7 +36,10 @@ export const projectMachineDirectoryFrame = (
   return {
     ...current,
     cursor: frame.cursor,
-    entries: [entry, ...current.entries.filter(({ machineId }) => machineId !== entry.machineId)],
+    // Telemetry replaces facts in place; receipt order must never choose the printer.
+    entries: current.entries.some(({ machineId }) => machineId === entry.machineId)
+      ? current.entries.map((candidate) => (candidate.machineId === entry.machineId ? entry : candidate))
+      : [...current.entries, entry],
   };
 };
 

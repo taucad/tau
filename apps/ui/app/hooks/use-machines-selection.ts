@@ -1,5 +1,10 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { Topic } from '@taucad/events';
 import type { MachineDirectoryEntry } from '@taucad/runtime/machine';
+
+const selectionChanges = new Topic<Readonly<{ projectId: string; machineId: string }>>({
+  name: 'print-machine-selection',
+});
 
 const storageKey = (projectId: string): string => `tau:print:selected-machine:${projectId}`;
 
@@ -46,10 +51,21 @@ export const useMachinesSelection = (
   if (state.projectId !== projectId) {
     setState({ projectId, machineId: readSelection(projectId) });
   }
+  useEffect(
+    () =>
+      selectionChanges.subscribe({
+        interestedIn: (change) => change.projectId === projectId,
+        handler: (change) => {
+          setState(change);
+        },
+      }),
+    [projectId],
+  );
   const select = useCallback(
     (machineId: string) => {
       writeSelection(projectId, machineId);
       setState({ projectId, machineId });
+      selectionChanges.emit({ projectId, machineId });
     },
     [projectId],
   );

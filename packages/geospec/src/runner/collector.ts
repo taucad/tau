@@ -14,15 +14,12 @@
 
 import {
   createGeoSpecMatcherMethods,
-  createGeoSpecNativeMatcherMethods,
   createGeoSpecAssertionClient,
   GeoSpecAssertionError as NativeAssertionError,
 } from '#assertion-client/index.js';
 import type {
   GeoSpecAuthoringInvocation,
   GeoSpecAssertionClientOptions,
-  GeoSpecNativeSubject,
-  GeoSpecNativeAuthoringInvocation,
   GeoSpecCanonicalClaimReport,
 } from '#assertion-client/index.js';
 import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
@@ -47,7 +44,8 @@ import {
   resolveMatcherWorkUnitBudget,
   withMatcherBudget,
 } from '#runner/matcher-budget.js';
-import type { GeoSpecAssertion, GeoSpecMatcher, GeoSpecTestCase, GeoSpecNativeRunnerMatcher } from '#runner/types.js';
+import type { GeoSpecAssertion, GeoSpecMatcher, GeoSpecTestCase } from '#runner/types.js';
+import { resolveGeoSpecSubject } from '#model/subject.js';
 
 type GeoSpecTestFunction = () => unknown | PromiseLike<unknown>;
 
@@ -69,7 +67,7 @@ export type GeoSpecCollector = {
 
 /** Native collector surface for hosts that explicitly supply a native engine. @public */
 export type GeoSpecNativeCollector = Omit<GeoSpecCollector, 'expectGeo'> & {
-  expectGeo(subject: GeoSpecNativeSubject): GeoSpecNativeRunnerMatcher;
+  expectGeo(subject: unknown): GeoSpecMatcher;
 };
 
 /** Per-module collector configuration; native subject/engine lifetime stays with the host. @public */
@@ -81,10 +79,6 @@ export type GeoSpecCollectorOptions = {
 
 export const collectorGlobalKey = '__GEOSPEC_COLLECTOR__';
 const geospecGlobal = globalThis as typeof globalThis & Record<string, unknown>;
-const nativeCollectorMarker: unique symbol = Symbol('GeoSpecNativeCollector');
-type RuntimeGeoSpecNativeCollector = GeoSpecNativeCollector & { readonly [nativeCollectorMarker]: true };
-const isRuntimeGeoSpecNativeCollector = (value: unknown): value is RuntimeGeoSpecNativeCollector =>
-  typeof value === 'object' && value !== null && Reflect.get(value, nativeCollectorMarker) === true;
 
 const isPromiseLike = (value: unknown): value is PromiseLike<unknown> =>
   typeof value === 'object' &&
@@ -384,34 +378,6 @@ export const getCollector = (): GeoSpecCollector => {
   return collector;
 };
 
-/**
- * Read the active collector only when it uses the legacy assertion path.
- *
- * @returns The active legacy collector.
- * @throws When the active collector uses native assertions.
- */
-export const getLegacyCollector = (): GeoSpecCollector => {
-  const collector = getCollector();
-  if (isRuntimeGeoSpecNativeCollector(collector)) {
-    throw new Error('Legacy expectGeo is unavailable in native mode. Import expectNativeGeo from geospec.');
-  }
-  return collector;
-};
-
-/**
- * Read the active collector only when it was created in native assertion mode.
- *
- * @returns The active native collector.
- * @throws When the active collector uses the legacy assertion path.
- */
-export const getNativeCollector = (): GeoSpecNativeCollector => {
-  const collector = geospecGlobal[collectorGlobalKey];
-  if (!isRuntimeGeoSpecNativeCollector(collector)) {
-    throw new Error('Native expectGeo requires a collector configured with nativeAssertions.');
-  }
-  return collector;
-};
-
 const isGeoSpecCollector = (value: unknown): value is GeoSpecCollector =>
   typeof value === 'object' &&
   value !== null &&
@@ -530,7 +496,7 @@ export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecColle
     activeTest.assertions.push(assertion);
     const descriptor = geoSpecMatcherDescriptors[invocation.matcher];
 
-    if (descriptor.mode === 'async') {
+    if (invocation.matcher === 'toHaveNoComponentInterference' || invocation.matcher === 'toHaveSpatialRelationships') {
       void recordAsyncAssertion(activeTest, assertion, async () => [
         ...(await invokeMatcherWithBudget(invocation, execution)),
       ]);
@@ -614,7 +580,21 @@ export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecColle
     },
 
     expectGeo(subject) {
-      return createGeoSpecMatcherMethods({ invoke: recordInvocation, polarity: 'positive', subject });
+      const methods = (polarity: 'positive' | 'negative') =>
+        createGeoSpecMatcherMethods({
+          invoke: (invocation) => {
+            if (
+              invocation.matcher === 'toSatisfyRationalPlate' ||
+              invocation.matcher === 'toSatisfyParallelPlaneDistance'
+            ) {
+              throw new TypeError('This reference engine cannot evaluate the fixed compiled contract.');
+            }
+            return recordInvocation(invocation);
+          },
+          polarity,
+          subject,
+        });
+      return Object.assign(methods('positive'), { not: methods('negative') });
     },
 
     async waitForCompletion(testTimeout, testNamePattern) {
@@ -677,7 +657,7 @@ export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecColle
               recordRejectedSettlements(settled, recordFailure);
             }
           }
-          if (failures.length > 0) {
+          if (failures.length > 0 || scheduledTest.test.assertions.some((assertion) => assertion.passed === false)) {
             scheduledTest.test.status = 'failed';
             for (const failure of failures) {
               scheduledTest.test.diagnostics.push(...createErrorDiagnostics(failure));
@@ -695,71 +675,70 @@ export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecColle
   if (nativeClient === undefined) {
     return collector;
   }
-  // oxlint-disable-next-line typescript/promise-function-async -- Preserve the already-observed promise returned by recordAsyncAssertion.
-  const recordNativeInvocation = (invocation: GeoSpecNativeAuthoringInvocation): Promise<GeoSpecAssertion> => {
+  const recordNativeInvocation = (invocation: GeoSpecAuthoringInvocation): GeoSpecAssertion => {
     if (!isGeoSpecTestCase(activeTest)) {
       throw new Error('expectGeo() must be called inside it().');
     }
     const assertion: GeoSpecAssertion = {
-      kind: 'kind' in invocation ? invocation.kind : invocation.matcher,
-      subject: invocation.subject,
+      kind: invocation.kind,
+      subject: null,
       expected: invocation.expected,
     };
     activeTest.assertions.push(assertion);
-    return recordAsyncAssertion(activeTest, assertion, async () => {
-      const { subject } = invocation;
-      if (
-        typeof subject !== 'object' ||
-        subject === null ||
-        (!('contentHash' in subject && typeof subject.contentHash === 'string') &&
-          !('subjectHash' in subject && typeof subject.subjectHash === 'string'))
-      ) {
-        throw new TypeError('Native expectGeo requires an admitted contentHash or subjectHash identity.');
-      }
-      const methods = nativeClient.expectGeo(subject as GeoSpecNativeSubject);
+    const startedAt = performance.now();
+    try {
+      const admission = resolveGeoSpecSubject(invocation.subject, options?.nativeAssertions?.engine);
+      assertion.subject = admission.identity;
+      const methods = nativeClient.expectGeo(admission.identity);
       const chain = invocation.polarity === 'negative' ? methods.not : methods;
       // The shared authoring registry already supplies each method's argument tuple.
-      const method = chain[invocation.matcher] as (
-        ...arguments_: readonly unknown[]
-      ) => Promise<GeoSpecCanonicalClaimReport>;
+      const method = chain[invocation.matcher] as (...arguments_: readonly unknown[]) => GeoSpecCanonicalClaimReport;
       let report: GeoSpecCanonicalClaimReport;
       try {
-        report = await method(...invocation.arguments);
+        report = method(...invocation.arguments);
       } catch (error) {
         if (!(error instanceof NativeAssertionError)) {
           throw error;
         }
         report = error.report;
       }
-      assertion.nativeReport = report;
+      assertion.report = report;
       if (report.status === 'passed') {
-        return [];
+        return recordAssertion(assertion, []);
       }
       const diagnostics = report.diagnostics.map((diagnostic) =>
         diagnosticForTransport(diagnosticFromWire(diagnostic)),
       );
-      return diagnostics.length > 0
-        ? diagnostics
-        : [
-            {
-              code: 'GEOSPEC_NATIVE_ASSERTION_FAILED',
-              severity: 'error',
-              message: `Native claim '${report.claimId}' ended with status '${report.status}'.`,
-              details: { claimId: report.claimId, status: report.status },
-            },
-          ];
-    });
+      return recordAssertion(
+        assertion,
+        diagnostics.length > 0
+          ? diagnostics
+          : [
+              {
+                code: 'GEOSPEC_NATIVE_ASSERTION_FAILED',
+                severity: 'error',
+                message: `Native claim '${report.claimId}' ended with status '${report.status}'.`,
+                details: { claimId: report.claimId, status: report.status },
+              },
+            ],
+      );
+    } catch (error) {
+      assertion.passed = false;
+      assertion.diagnostics ??= createErrorDiagnostics(error);
+      throw error;
+    } finally {
+      assertion.durationMs = performance.now() - startedAt;
+    }
   };
   const nativeCollector: GeoSpecNativeCollector = {
     ...collector,
-    expectGeo(subject: GeoSpecNativeSubject) {
+    expectGeo(subject: unknown) {
       return Object.assign(
-        createGeoSpecNativeMatcherMethods({ invoke: recordNativeInvocation, polarity: 'positive', subject }),
-        { not: createGeoSpecNativeMatcherMethods({ invoke: recordNativeInvocation, polarity: 'negative', subject }) },
+        createGeoSpecMatcherMethods({ invoke: recordNativeInvocation, polarity: 'positive', subject }),
+        { not: createGeoSpecMatcherMethods({ invoke: recordNativeInvocation, polarity: 'negative', subject }) },
       );
     },
   };
-  Object.defineProperty(nativeCollector, nativeCollectorMarker, { value: true });
   return nativeCollector;
 }
 

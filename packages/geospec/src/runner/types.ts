@@ -1,8 +1,4 @@
-import type {
-  GeoSpecAssertionClientOptions,
-  GeoSpecCanonicalClaimReport,
-  GeoSpecNativeMatcherMethods,
-} from '#assertion-client/index.js';
+import type { GeoSpecAssertionClientOptions, GeoSpecCanonicalClaimReport } from '#assertion-client/index.js';
 import type { BuiltinModule, BundleResult, VmFileSystem, VmIssue } from '@taucad/esbuild/vm';
 import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
 import type { GeometrySelector } from '#selector/types.js';
@@ -493,6 +489,12 @@ export type GeoSpecValidBrepExpectation = {
  * @public
  */
 export type GeoSpecMatcher = {
+  /** Core-owned negation; missing or refused evidence still fails. */
+  readonly not: Omit<GeoSpecMatcher, 'not'>;
+  /** Assert the fixed rational plate contract. */
+  toSatisfyRationalPlate(): GeoSpecAssertion;
+  /** Assert the fixed parallel-plane distance contract. */
+  toSatisfyParallelPlaneDistance(): GeoSpecAssertion;
   /**
    * Assert axis-aligned bounds, size, or center for a loaded geometry subject.
    */
@@ -635,14 +637,9 @@ export type GeoSpecAssertion = {
   /** Structured diagnostics from matcher evaluation. */
   diagnostics?: GeometryDiagnostic[];
   /** Exact native report, including core-owned bytes and polarity; present only on the opt-in path. */
-  nativeReport?: GeoSpecCanonicalClaimReport;
+  report?: GeoSpecCanonicalClaimReport;
   /** Wall-clock cost of matcher evaluation in milliseconds (R1: budgeted matchers only). */
   durationMs?: number;
-};
-
-/** Native runner assertions are awaitable and also tracked when left unawaited. @public */
-export type GeoSpecNativeRunnerMatcher = GeoSpecNativeMatcherMethods<Promise<GeoSpecAssertion>> & {
-  readonly not: GeoSpecNativeMatcherMethods<Promise<GeoSpecAssertion>>;
 };
 
 /**

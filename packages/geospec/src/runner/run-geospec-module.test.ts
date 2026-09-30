@@ -251,20 +251,17 @@ describe('runGeoSpecModule', () => {
     }
   });
 
-  it('should expose the injected model and step loaders to authored modules', async () => {
+  it('should retain the legitimate low-level STEP loader seam', async () => {
     const result = await runModule(
       [
         [
           'spec.geospec.ts',
           `
           import { it } from 'geospec';
-          import { loadModel, createModelLoader } from 'geospec/model';
           import { loadStep, createStepLoader } from 'geospec/step';
           import { analyzeBrep } from 'geospec/brep';
           it('loads', async () => {
-            const model = await loadModel({ source: 'a' });
-            await createModelLoader({})({ source: 'b' });
-            await loadStep({ source: 'c' });
+            const model = await loadStep({ source: 'c' });
             await createStepLoader({})({ source: 'd' });
             if (analyzeBrep({ subject: model }).success !== true) { throw new Error('expected brep evidence'); }
             if (analyzeBrep({ subject: {} }).success !== false) { throw new Error('expected subject rejection'); }
@@ -276,8 +273,7 @@ describe('runGeoSpecModule', () => {
         ],
       ],
       {
-        modelLoader: async () => ({ ...subject, brep: {}, diagnostics: [] }),
-        stepLoader: async () => subject,
+        stepLoader: async () => ({ ...subject, brep: {}, diagnostics: [] }),
       },
     );
 
@@ -303,7 +299,7 @@ describe('runGeoSpecModule', () => {
     expect(result.success && result.tests[1]?.diagnostics[0]?.message).toContain('No GeoSpec STEP loader is active');
   });
 
-  it('should keep legacy and native authored APIs on separate bindings', async () => {
+  it('should bind canonical loading to the compiled host without using the reference loader', async () => {
     const modelLoader = vi.fn(async () => subject);
     const nativeModelLoader = vi.fn(async () => ({ subjectHash: 'native-subject' }));
     const result = await runModule(
@@ -313,20 +309,10 @@ describe('runGeoSpecModule', () => {
           `
           import { expectGeo, it } from 'geospec';
           import { loadModel } from 'geospec/model';
-          import { loadNativeModel } from 'geospec/runner/native';
-          it('keeps declared APIs distinct', async () => {
-            const legacy = await loadModel({ source: 'legacy' });
-            const native = await loadNativeModel({ source: 'native', format: 'step' });
-            if (legacy.kind !== 'geometry-subject' || native.subjectHash !== 'native-subject') {
-              throw new Error('loader binding crossed API boundaries');
-            }
-            try {
-              expectGeo(legacy);
-              throw new Error('legacy expectGeo was silently rebound in native mode');
-            } catch (error) {
-              if (!String(error).includes('Legacy expectGeo is unavailable in native mode')) {
-                throw error;
-              }
+          it('admits an opaque canonical subject', async () => {
+            const model = await loadModel({ source: 'native', format: 'step' });
+            if (Object.keys(model).length !== 0 || typeof expectGeo(model).toHaveVolume !== 'function') {
+              throw new Error('canonical admission leaked its host identity');
             }
           });
         `,
@@ -336,11 +322,11 @@ describe('runGeoSpecModule', () => {
     );
 
     expect(result.success && result.tests[0]?.status).toBe('passed');
-    expect(modelLoader).toHaveBeenCalledOnce();
+    expect(modelLoader).not.toHaveBeenCalled();
     expect(nativeModelLoader).toHaveBeenCalledOnce();
   });
 
-  it('should diagnose legacy model loading without silently using the native loader', async () => {
+  it('should admit canonical loads when only the compiled loader is bound', async () => {
     const nativeModelLoader = vi.fn(async () => ({ subjectHash: 'native-subject' }));
     const result = await runModule(
       [
@@ -349,19 +335,43 @@ describe('runGeoSpecModule', () => {
           `
           import { it } from 'geospec';
           import { loadModel } from 'geospec/model';
-          it('rejects the legacy loader', async () => { await loadModel({ source: 'legacy' }); });
+          it('loads through the canonical binding', async () => { await loadModel({ source: 'native' }); });
         `,
         ],
       ],
       { nativeAssertions, nativeModelLoader },
     );
 
+    expect(result.success && result.tests[0]?.status).toBe('passed');
+    expect(nativeModelLoader).toHaveBeenCalledOnce();
+  });
+
+  it('should expire a managed VM scope before any later assertion can evaluate geometry', async () => {
+    const evaluateClaim = vi.fn(nativeAssertions.engine.evaluateClaim);
+    const nativeModelLoader = vi.fn(async () => ({ subjectHash: 'a'.repeat(64) }));
+    const result = await runModule(
+      [
+        [
+          'spec.geospec.ts',
+          `
+        import { it, expectGeo } from 'geospec';
+        import { createModelLoader } from 'geospec/model';
+        it('retains caught expired-scope failure', async () => {
+          const load = createModelLoader({ format: 'step' });
+          const model = await load({ source: 'part.step' });
+          const chain = expectGeo(model);
+          await load.dispose();
+          try { chain.toBeWatertight(); } catch {}
+        });
+      `,
+        ],
+      ],
+      { nativeAssertions: { engine: { ...nativeAssertions.engine, evaluateClaim } }, nativeModelLoader },
+    );
     expect(result.success && result.tests[0]?.status).toBe('failed');
-    expect(result.success && result.tests[0]?.diagnostics[0]).toMatchObject({
-      code: 'GEOSPEC_LEGACY_MODEL_LOADER_UNAVAILABLE_IN_NATIVE_MODE',
-      message: 'No legacy GeoSpec model loader is active in this native runner.',
-    });
-    expect(nativeModelLoader).not.toHaveBeenCalled();
+    expect(result.success && result.tests[0]?.assertions[0]?.passed).toBe(false);
+    expect(evaluateClaim).not.toHaveBeenCalled();
+    expect(nativeModelLoader).toHaveBeenCalledWith({ format: 'step', source: 'part.step' });
   });
 
   it('should settle an ordinary unawaited native admission before the module completes', async () => {
@@ -373,8 +383,8 @@ describe('runGeoSpecModule', () => {
           'spec.geospec.ts',
           `
           import { it } from 'geospec';
-          import { loadNativeModel } from 'geospec/runner/native';
-          it('admits', () => { void loadNativeModel({ source: 'native', format: 'step' }); });
+          import { loadModel } from 'geospec/model';
+          it('admits', () => { void loadModel({ source: 'native', format: 'step' }); });
         `,
         ],
       ],
@@ -410,10 +420,10 @@ describe('runGeoSpecModule', () => {
           'spec.geospec.ts',
           `
           import { it } from 'geospec';
-          import { loadNativeModel } from 'geospec/runner/native';
+          import { loadModel } from 'geospec/model';
           it('admits a finite chain', () => {
-            void loadNativeModel({ source: 'first.step', format: 'step' })
-              .then(() => loadNativeModel({ source: 'second.step', format: 'step' }));
+            void loadModel({ source: 'first.step', format: 'step' })
+              .then(() => loadModel({ source: 'second.step', format: 'step' }));
           });
         `,
         ],
@@ -469,11 +479,11 @@ describe('runGeoSpecModule', () => {
           'spec.geospec.ts',
           `
           import { it } from 'geospec';
-          import { loadNativeModel } from 'geospec/runner/native';
+          import { loadModel } from 'geospec/model';
           it('returns a finite chain', () => {
-            return loadNativeModel({ source: 'first.step', format: 'step' })
-              .then(() => loadNativeModel({ source: 'second.step', format: 'step' }))
-              .then(() => loadNativeModel({ source: 'third.step', format: 'step' }));
+            return loadModel({ source: 'first.step', format: 'step' })
+              .then(() => loadModel({ source: 'second.step', format: 'step' }))
+              .then(() => loadModel({ source: 'third.step', format: 'step' }));
           });
         `,
         ],

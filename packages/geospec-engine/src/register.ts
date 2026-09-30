@@ -26,7 +26,6 @@ import type { GeoSpecEngineHostBindings, GeoSpecEngineImplementation } from 'geo
 import packageMetadata from '../package.json' with { type: 'json' };
 import { flushEvidenceStore } from '#cache/evidence-cache.js';
 import { loadMesh } from '#mesh/load-mesh.js';
-import { createModelLoader, loadModel } from '#model/load-model.js';
 import { loadStep } from '#step/load-step.js';
 import { createGeoSpecWebPoolRunner, createGeoSpecWebRunner } from '#runner/web/web-runner.js';
 import { startGeoSpecPoolWorkerHost } from '#runner/pool/worker-host.js';
@@ -51,14 +50,6 @@ const registeredLoadStep: GeoSpecEngineHostBindings['loadStep'] = async (options
   return exposeEngineSubject(subject);
 };
 
-const registeredLoadModel: GeoSpecEngineHostBindings['loadModel'] = async (options) => {
-  const subject = await loadModel(options);
-  return exposeEngineSubject(subject);
-};
-
-const registeredCreateModelLoader: GeoSpecEngineHostBindings['createModelLoader'] = (options) =>
-  createModelLoader(options);
-
 /**
  * What this engine build can execute.
  *
@@ -73,8 +64,6 @@ export const geoSpecEngineImplementation: GeoSpecEngineImplementation = {
     loadMesh: registeredLoadMesh,
     analyzeMesh: registeredAnalyzeMesh,
     loadStep: registeredLoadStep,
-    loadModel: registeredLoadModel,
-    createModelLoader: registeredCreateModelLoader,
     createGeoSpecWebRunner,
     createGeoSpecWebPoolRunner,
     startGeoSpecPoolWorkerHost,

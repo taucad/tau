@@ -211,29 +211,6 @@ const resolveFormat = (
 };
 
 /**
- * Load a model through the active native runner VM binding.
- *
- * The runner replaces this public subpath with its per-run builtin. Calling
- * the package implementation directly has no subject-lifetime owner.
- *
- * @param _options - Native source or Runtime export request.
- * @returns A validated subjectHash identity when called inside a native run.
- * @throws When called outside a native runner VM.
- * @public
- */
-export async function loadNativeModel<Code extends Record<string, string> = Record<string, string>>(
-  _options: GeoSpecNativeLoadModelOptions<Code>,
-): Promise<GeoSpecNativeModelSubject> {
-  throw failure([
-    diagnostic({
-      code: 'GEOSPEC_NATIVE_MODEL_RUNNER_UNAVAILABLE',
-      message: 'No native GeoSpec model runner is active.',
-      suggestion: 'Call loadNativeModel from a module executed by createNativeGeoSpecRunner().',
-    }),
-  ]);
-}
-
-/**
  * Create a native model loader that admits actual STEP/GLB bytes and retains
  * generation-checked handles until the owning runner finishes.
  *
@@ -521,6 +498,30 @@ export const createGeoSpecNativeModelLoader = (
 
   // oxlint-disable-next-line typescript/promise-function-async -- Return the tracked admission promise unchanged to its author.
   const loader: GeoSpecNativeModelLoader = (options) => {
+    const requestedFormat = options.format ?? defaults.format ?? 'glb';
+    const invalidOption = [
+      'stepStreaming',
+      'mesh',
+      ...('source' in options
+        ? [
+            'meshLinearTolerance',
+            'meshAngularToleranceDegrees',
+            ...(requestedFormat === 'step' || requestedFormat === 'stp' ? ['sourceUnit'] : []),
+          ]
+        : []),
+    ].find((key) => key in options);
+    if (invalidOption !== undefined) {
+      return Promise.reject(
+        failure([
+          diagnostic({
+            code: 'GEOSPEC_MODEL_OPTION_UNSUPPORTED',
+            message: `This GeoSpec host cannot honor model option '${invalidOption}'.`,
+            suggestion: 'Remove this option or configure a host that supports its declared behavior.',
+            details: { option: invalidOption },
+          }),
+        ]),
+      );
+    }
     const pending =
       'source' in options
         ? loadDirect(options)

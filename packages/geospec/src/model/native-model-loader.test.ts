@@ -30,6 +30,17 @@ const testEngine = () => {
 };
 
 describe('native model loader ownership', () => {
+  it('should reject ignored STEP source-unit overrides before reading or admission', async () => {
+    const { engine, ingestSubject } = testEngine();
+    const readSource = vi.fn(async () => Uint8Array.of(1));
+    const loader = createGeoSpecNativeModelLoader({ engine, readSource });
+    await expect(loader({ source: 'model.step', format: 'step', sourceUnit: 'm' })).rejects.toMatchObject({
+      diagnostics: [expect.objectContaining({ code: 'GEOSPEC_MODEL_OPTION_UNSUPPORTED' })],
+    });
+    expect(readSource).not.toHaveBeenCalled();
+    expect(ingestSubject).not.toHaveBeenCalled();
+    await loader.releaseAll();
+  });
   it('should admit reader and Runtime export bytes as they are but snapshot caller-owned bytes', async () => {
     const { engine, ingestSubject } = testEngine();
     const read = Uint8Array.of(1);

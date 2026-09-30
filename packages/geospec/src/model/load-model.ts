@@ -7,7 +7,10 @@
  */
 
 import { getRegisteredGeoSpecHostBinding, geoSpecEngineUnavailableDiagnostic } from '#engine/registry.js';
-import type { GeometrySubject } from '#mesh/types.js';
+import { createGeoSpecAssertionClient } from '#assertion-client/client.js';
+import { bindGeoSpecSubject, resolveGeoSpecSubject } from '#model/subject.js';
+import type { GeoSpecSubject } from '#model/subject.js';
+import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
 import type { CreateModelLoaderOptions, ManagedGeoSpecModelLoader, LoadModelOptions } from '#model/types.js';
 
@@ -25,12 +28,14 @@ import type { CreateModelLoaderOptions, ManagedGeoSpecModelLoader, LoadModelOpti
  */
 export async function loadModel<Code extends Record<string, string> = Record<string, string>>(
   options: LoadModelOptions<Code>,
-): Promise<GeometrySubject> {
+): Promise<GeoSpecSubject> {
   const engine = getRegisteredGeoSpecHostBinding<typeof loadModel>('loadModel');
   if (!engine) {
     throw new GeoSpecModelLoadError([geoSpecEngineUnavailableDiagnostic('loadModel')]);
   }
-  return engine(options);
+  const subject = await engine(options);
+  resolveGeoSpecSubject(subject);
+  return subject;
 }
 
 /**
@@ -41,12 +46,45 @@ export async function loadModel<Code extends Record<string, string> = Record<str
  * @public
  */
 export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): ManagedGeoSpecModelLoader => {
+  if (defaults.engine !== undefined) {
+    const { engine, readSource, format, ...hostDefaults } = defaults;
+    const modelDefaults = { ...hostDefaults, ...(format === undefined ? {} : { format }) };
+    const raw = createGeoSpecNativeModelLoader({
+      ...hostDefaults,
+      engine,
+      ...(readSource === undefined ? {} : { readSource }),
+    });
+    const client = createGeoSpecAssertionClient({ engine });
+    let generation = 0;
+    const loader = async (options: LoadModelOptions): Promise<GeoSpecSubject> => {
+      const current = generation;
+      const identity = await raw({ ...modelDefaults, ...options });
+      return bindGeoSpecSubject({ client, engine, identity, isLive: () => generation === current });
+    };
+    return Object.assign(loader, {
+      async dispose() {
+        try {
+          await raw.releaseAll();
+        } finally {
+          generation += 1;
+        }
+      },
+    });
+  }
   const engine =
     getRegisteredGeoSpecHostBinding<(options: CreateModelLoaderOptions) => ManagedGeoSpecModelLoader>(
       'createModelLoader',
     );
   if (engine) {
-    return engine(defaults);
+    const configured = engine(defaults);
+    return Object.assign(
+      async (options: LoadModelOptions) => {
+        const subject = await configured(options);
+        resolveGeoSpecSubject(subject);
+        return subject;
+      },
+      { dispose: async () => configured.dispose() },
+    );
   }
   return Object.assign(async (options: LoadModelOptions) => loadModel({ ...defaults, ...options }), {
     dispose: async () => undefined,

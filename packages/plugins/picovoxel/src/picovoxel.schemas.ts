@@ -128,7 +128,7 @@ const exportLaneSchema = z.object({
   lane: laneSchema
     .default('exact')
     .describe(
-      "'exact' (default) replays the model in a deterministic session. 'fast' exports fast-lane geometry: STL is stamped LANE=fast, GLB is refused.",
+      "'exact' (default) replays the model in a deterministic session. 'fast' exports fast-lane geometry: STL is stamped LANE=fast, GLB and glTF are refused.",
     ),
 });
 
@@ -140,6 +140,7 @@ const vector3Schema = z.tuple([z.number(), z.number(), z.number()]);
  */
 export const picovoxelExportSchemas = {
   glb: exportLaneSchema.extend(gltfExportConventionSchema.shape),
+  gltf: exportLaneSchema.extend(gltfExportConventionSchema.shape),
   stl: exportLaneSchema.extend({
     unit: z.enum(['mm', 'cm', 'm', 'ft', 'in']).default('mm'),
     scale: z.number().positive().default(1),

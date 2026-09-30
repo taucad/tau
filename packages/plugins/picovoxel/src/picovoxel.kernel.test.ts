@@ -12,7 +12,6 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { CreatePicoOptions, CreatePicoRuntimeOptions, Mesh, Pico, PicoRuntime, Voxels } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
 
-import type { PicovoxelNativeHandle } from '#picovoxel.geometry.js';
 import { picovoxelBuiltinModuleNames, picovoxelDetectPattern, picovoxelKernel } from '#picovoxel.kernel.js';
 import type { PicovoxelOptionsInput } from '#picovoxel.schemas.js';
 
@@ -226,7 +225,7 @@ describe('picovoxel kernel', () => {
   describe('identity', () => {
     it('should key the kernel version on the PicoVoxel version, both artifact digests and its scripts', () => {
       expect(definition.version).toMatch(
-        /^1\.2\.0\+picovoxel\.[\w.-]+\.serial-[\da-f]{12}\.multi-[\da-f]{12}\.scripts-[\da-f]{12}$/,
+        /^1\.3\.0\+picovoxel\.[\w.-]+\.serial-[\da-f]{12}\.multi-[\da-f]{12}\.scripts-[\da-f]{12}$/,
       );
     });
 
@@ -371,6 +370,68 @@ describe('picovoxel kernel', () => {
   });
 
   describe('results', () => {
+    it('should reject a malformed model envelope before capturing its parts', async () => {
+      const issues = await buildIssues(createGeometry({ module: { default: () => ({ shapes: {} }) } }));
+
+      expect(issues[0]!.message).toContain('model.shapes must be a flat array');
+    });
+
+    it.each([null, [], 42])('should reject non-object material %j with its part context', async (material) => {
+      const issues = await buildIssues(
+        createGeometry({ module: { default: (pico: Pico) => ({ shape: helloCube(pico), name: 'Pin', material }) } }),
+      );
+
+      expect(issues[0]!.message).toContain('Pin (output 1): material must be an object.');
+    });
+
+    it.each([Number.NaN, Number.POSITIVE_INFINITY, 1n, Symbol('metadata'), () => 1])(
+      'should reject unsupported material metadata %# before taking a cache snapshot',
+      async (value) => {
+        const issues = await buildIssues(
+          createGeometry({
+            module: { default: (pico: Pico) => ({ shape: helloCube(pico), material: { extras: { value } } }) },
+          }),
+        );
+
+        expect(issues[0]!.message).toContain('Shape 1 (output 1):');
+        expect(issues[0]!.message).toContain('must contain finite JSON values.');
+      },
+    );
+
+    it('should retain context when user-authored metadata getters throw non-errors', async () => {
+      const materialIssues = await buildIssues(
+        createGeometry({
+          module: {
+            default: (pico: Pico) => ({
+              shape: helloCube(pico),
+              material: {
+                get extras() {
+                  // oxlint-disable-next-line typescript/only-throw-error -- User-authored getters can throw non-errors; preserve their diagnostic context.
+                  throw 'material getter failed';
+                },
+              },
+            }),
+          },
+        }),
+      );
+      expect(materialIssues[0]!.message).toContain('Shape 1 (output 1): material getter failed');
+
+      const resourceIssues = await buildIssues(
+        createGeometry({
+          module: {
+            default: () => ({
+              shapes: [],
+              get images() {
+                // oxlint-disable-next-line typescript/only-throw-error -- User-authored getters can throw non-errors; preserve their diagnostic context.
+                throw 'resource getter failed';
+              },
+            }),
+          },
+        }),
+      );
+      expect(resourceIssues[0]!.message).toContain('model resources: resource getter failed');
+    });
+
     it('should preserve authored labels for mixed descriptors and raw parts after session disposal', async () => {
       const { result } = await createGeometry({
         module: {
@@ -508,7 +569,7 @@ describe('picovoxel kernel', () => {
     it.each([
       [
         { default: () => 42 },
-        'PicoVoxel main() result 1 must be Mesh, Voxels or { shape: Mesh | Voxels, name?: string }; received number.',
+        'PicoVoxel main() result 1 must be Mesh, Voxels or { shape: Mesh | Voxels, name?: string, material?: Material }; received number.',
       ],
       [{ default: () => null }, 'received null.'],
       [{ default: () => [[]] }, 'received an array.'],
@@ -1539,11 +1600,12 @@ describe('picovoxel kernel', () => {
 
     it('should preserve authored and legacy snapshot labels and repair blank restored names', async () => {
       const { runtime, context, result } = await createGeometry({ module: { default: helloCube } });
+      const snapshot = definition.serializeNativeHandle!({ nativeHandle: result.nativeHandle }, runtime, context);
       const nativeHandle = definition.deserializeNativeHandle!(
         {
           serializedNativeHandle: {
             shapes: ['  蓋 / Lid  ', 'Mesh', 'Shape 1', ''].map((name) => ({
-              ...result.nativeHandle.shapes[0]!,
+              ...snapshot.shapes[0]!,
               name,
             })),
           },
@@ -1584,7 +1646,12 @@ describe('picovoxel kernel', () => {
 
       expect(() =>
         definition.deserializeNativeHandle!(
-          { serializedNativeHandle: snapshot as unknown as PicovoxelNativeHandle },
+          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Deliberately malformed cache bytes exercise restoration's trust boundary.
+          {
+            serializedNativeHandle: snapshot as Parameters<
+              NonNullable<typeof definition.deserializeNativeHandle>
+            >[0]['serializedNativeHandle'],
+          },
           runtime,
           context,
         ),

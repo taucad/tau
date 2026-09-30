@@ -798,7 +798,7 @@ function UnifiedProjectList({ rows, viewMode, actions, onOpenCloudProject }: Uni
                 <p className='text-sm'>Start by describing what you want to build, or create from code</p>
               </div>
             </div>
-            <NewProjectChatComposer enableAutoFocus={false} className='pt-1 shadow-none' />
+            <NewProjectChatComposer enableAutoFocus={false} className='shadow-none' />
             <div className='flex items-center justify-center gap-4 text-sm text-muted-foreground'>
               <div className='h-px flex-1 bg-border' />
               <span>or</span>

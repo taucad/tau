@@ -20,7 +20,7 @@ type NewProjectChatComposerProperties = {
 /** Shared direct-create composer rendered inside an existing chat provider. */
 export function NewProjectChatComposer({
   enableAutoFocus = true,
-  className = 'pt-1',
+  className,
 }: NewProjectChatComposerProperties): React.JSX.Element {
   const navigate = useNavigate();
   const { kernel, setKernel } = useKernel();

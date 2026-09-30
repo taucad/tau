@@ -66,19 +66,18 @@ describe('runtime capability tuple composition', () => {
     const client = createRuntimeClient({
       transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
     });
-    await client.export('stl', {
-      source: { path: 'model.typed' },
-      exportOptions: { binary: true },
+    const document = client.open({ source: { path: 'model.typed' } });
+    await document.export('stl', {
+      options: { binary: true },
       content: { includeEdges: true },
     });
     // @ts-expect-error -- export content stays narrowed through the toolkit and runtime.
-    await client.export('stl', { source: { path: 'model.typed' }, content: { includeTopology: true } });
-    // @ts-expect-error -- declaration IDs are metadata until the W3 client/wire migration.
-    await client.export('mesh');
+    await document.export('stl', { options: { binary: true }, content: { includeTopology: true } });
+    await document.export('mesh', { options: { binary: true }, content: { includeEdges: true } });
     // @ts-expect-error -- the route's options must survive toolkit composition.
-    await client.export('stl', { source: { path: 'model.typed' }, exportOptions: { binary: 'yes' } });
+    await document.export('stl', { options: { binary: 'yes' } });
     // @ts-expect-error -- no STEP route is declared.
-    await client.export('step');
+    await document.export('step');
   });
 
   it('should preserve direct and configured tuples without an empty variadic tail', () => {

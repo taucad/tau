@@ -41,7 +41,7 @@ export const runtimeSourceRevisionSchema = z
     entry: rootedFile,
     files: z.record(rootedFile, z.union([runtimeContentDigestSchema, z.literal('missing')])),
   })
-  .strict();
+  .loose();
 
 const logEntrySchema = z
   .object({
@@ -84,7 +84,7 @@ export const runtimeInitializeMemoryHandleSchema = z
     computeBindingMode: z.enum(['off', 'memory', 'durable']).optional(),
     devtoolsTelemetry: z.boolean().optional(),
     compiledWasmModules: z
-      .array(z.object({ url: z.string(), module: compiledWasmModuleSchema }).strict())
+      .array(z.object({ url: z.string(), module: compiledWasmModuleSchema }).loose())
       .readonly()
       .optional(),
   })

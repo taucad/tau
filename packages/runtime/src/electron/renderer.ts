@@ -84,10 +84,10 @@ export type RequestElectronRuntimePortOptions = {
 export type ElectronClientOptionsInput<Runtime extends AnyRuntimeDefinition | undefined = undefined> =
   RequestElectronRuntimePortOptions & {
     /**
-     * Wall-clock deadline applied independently to each preview. Milliseconds.
+     * Wall-clock deadline applied independently to each operation. Milliseconds.
      * Zero disables timeout enforcement.
      */
-    readonly renderTimeout?: number;
+    readonly operationTimeout?: number;
     /**
      * Authenticated machines service brokered beside the runtime port, in the
      * WebSocket transport's `machines` shape. Absent, the client negotiates
@@ -333,20 +333,20 @@ export const requestElectronRuntimePort = async (
  * import { createRuntimeClient } from '@taucad/runtime/client';
  * import { createElectronClientOptions } from '@taucad/runtime/electron/renderer';
  *
- * const provideClientOptions = createElectronClientOptions({ renderTimeout: 60_000 });
+ * const provideClientOptions = createElectronClientOptions({ operationTimeout: 60_000 });
  * const client = createRuntimeClient(await provideClientOptions());
  * ```
  */
 export const createElectronClientOptions = <Runtime extends AnyRuntimeDefinition | undefined = undefined>(
   options: ElectronClientOptionsInput<Runtime> = {} as ElectronClientOptionsInput<Runtime>,
 ): (() => Promise<RuntimeClientOptionsWithTransport<Runtime, ReturnType<typeof electronUtilityTransport>>>) => {
-  const { config, machines, renderTimeout, ...portOptions } = options;
+  const { config, machines, operationTimeout, ...portOptions } = options;
   return async () => {
     const port = await requestElectronRuntimePort(portOptions);
     const clientOptions = {
       transport: electronUtilityTransport({ port, ...(machines === undefined ? {} : { machines }) }),
       ...(config === undefined ? {} : { config }),
-      ...(renderTimeout === undefined ? {} : { renderTimeout }),
+      ...(operationTimeout === undefined ? {} : { operationTimeout }),
     };
     return clientOptions as RuntimeClientOptionsWithTransport<Runtime, ReturnType<typeof electronUtilityTransport>>;
   };

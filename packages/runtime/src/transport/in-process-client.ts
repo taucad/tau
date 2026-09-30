@@ -13,14 +13,8 @@ import { createChannelClient, wrapMessagePort } from '@taucad/rpc';
 import type { Channel, ChannelServerHandle } from '@taucad/rpc';
 import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
-import type { Geometry } from '@taucad/types';
 import type { inProcessClientOptionsSchema } from '#transport/in-process-transport.schemas.js';
-import type {
-  BinaryContentDelivery,
-  GeometryTransport,
-  RuntimeExportResultTransport,
-  RuntimeInitializeResult,
-} from '#types/runtime-protocol.types.js';
+import type { BinaryContentDelivery, RuntimeInitializeResult } from '#types/runtime-protocol.types.js';
 import type {
   EncodedBinary,
   RuntimeInitializeMemoryHandle,
@@ -34,11 +28,10 @@ import { runtimeChannelSessionKey } from '#transport/_internal/runtime-channel-b
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { resolveRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
-import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
-import { materialiseBinaryContent, materialiseExportResult } from '#transport/_internal/export-materialiser.js';
+import { materialiseBinaryContent } from '#transport/_internal/export-materialiser.js';
 import { allocatePools } from '#transport/_internal/sab-pools.js';
 import type { AllocatedPools } from '#transport/_internal/sab-pools.js';
-import { reservePreview, signalDocumentAbort } from '#transport/_internal/abort-channel.js';
+import { signalDocumentAbort } from '#transport/_internal/abort-channel.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 import type { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { buildComputeStoreBridge } from '#transport/_internal/compute-store-bridge.js';
@@ -189,9 +182,6 @@ export const inProcessClient = (
 
   return {
     id: inProcessId,
-    reservePreview() {
-      return reservePreview(ensurePoolsAndPorts().pooled.signalBuffer);
-    },
     signalDocumentAbort(evaluationId, generation, reason) {
       return signalDocumentAbort(ensurePoolsAndPorts().pooled.signalBuffer, evaluationId, generation, reason);
     },
@@ -236,18 +226,8 @@ export const inProcessClient = (
         throw error;
       }
     },
-    async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {
-      return materialiseGeometry(transport, pooled?.geometryPool, (key) => {
-        channel?.notify('binaryMaterialised', { key });
-      });
-    },
     async resolveBinary(transport: BinaryContentDelivery): Promise<Uint8Array<ArrayBuffer>> {
       return materialiseBinaryContent(transport, pooled?.geometryPool, (key) => {
-        channel?.notify('binaryMaterialised', { key });
-      });
-    },
-    async resolveExport(transport: RuntimeExportResultTransport) {
-      return materialiseExportResult(transport, pooled?.geometryPool, (key) => {
         channel?.notify('binaryMaterialised', { key });
       });
     },

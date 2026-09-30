@@ -1295,12 +1295,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           };
         }
         if (!evaluation.result.success || !evaluation.artifact) {
-          return { success: false, issues: evaluation.result.issues, sourceRevision: evaluation.result.sourceRevision };
+          return {
+            success: false,
+            issues: evaluation.result.issues,
+            ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
+          };
         }
         const artifact = evaluation.artifact;
         const target = this.resolveDocumentExportTarget(artifact.owner, artifact.evaluationSlot?.offers, input.target);
         if (!target.success) {
-          return { success: false, issues: target.issues, sourceRevision: evaluation.result.sourceRevision };
+          return {
+            success: false,
+            issues: target.issues,
+            ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
+          };
         }
         const plan = this.createExportRequestPlan(artifact.owner, {
           format: target.format,
@@ -1309,7 +1317,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           exportId: target.exportId,
         });
         if (!plan.success) {
-          return { success: false, issues: plan.result.issues, sourceRevision: evaluation.result.sourceRevision };
+          return {
+            success: false,
+            issues: plan.result.issues,
+            ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
+          };
         }
         this.onDocumentProgressUpdate?.({
           documentId: document.id,
@@ -1350,7 +1362,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
         controller.signal.throwIfAborted();
         if (!result.success)
-          return { success: false, issues: result.issues, sourceRevision: evaluation.result.sourceRevision };
+          return {
+            success: false,
+            issues: result.issues,
+            ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
+          };
         const files = nonemptyExportFiles(result.data);
         return {
           success: true,
@@ -1358,7 +1374,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           evaluationId: evaluation.id,
           files,
           issues: result.issues,
-          sourceRevision: evaluation.result.sourceRevision,
+          ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
         };
       }, controller.signal);
     } catch (error) {
@@ -1701,7 +1717,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           evaluationId: evaluation.id,
           transient: evaluation.transient,
           issues: [...evaluation.result.issues],
-          sourceRevision: evaluation.result.sourceRevision,
+          ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
         };
       } else {
         const selected = this.selectDocumentView(
@@ -1718,7 +1734,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             evaluationId: evaluation.id,
             transient: evaluation.transient,
             issues: selected.issues,
-            sourceRevision: evaluation.result.sourceRevision,
+            ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
           };
         } else {
           const selection = selected.selection;
@@ -1796,7 +1812,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 ...(selection.instance === undefined ? {} : { instance: selection.instance }),
                 transient: evaluation.transient,
                 issues: projected.issues,
-                sourceRevision: evaluation.result.sourceRevision,
+                ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
               }
             : {
                 success: false,
@@ -1806,7 +1822,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 ...(selection.instance === undefined ? {} : { instance: selection.instance }),
                 transient: evaluation.transient,
                 issues: projected.issues,
-                sourceRevision: evaluation.result.sourceRevision,
+                ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
               };
         }
       }
@@ -1843,7 +1859,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             evaluationId: evaluation.id,
             transient: evaluation.transient,
             issues: this.errorToRuntimeIssues(error),
-            sourceRevision: evaluation.result.sourceRevision,
+            ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
           };
           this.onRendered?.({ subscriptionId: view.id, intent: evaluation.intent, ...result });
         }

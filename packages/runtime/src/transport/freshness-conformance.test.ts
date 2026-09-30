@@ -15,7 +15,7 @@ import { afterEach, describe, it, expect } from 'vitest';
 import { mkdtemp, mkdir, rm, writeFile, unlink, readFile, readdir, rename, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { z } from 'zod';
+import { createKernelSuccess } from '#kernels/kernel-helpers.js';
 
 import { createFileSystemBridgePort } from '@taucad/fs-bridge';
 import type { NativeStats } from '@taucad/types';
@@ -28,59 +28,53 @@ import { inProcessTransport } from '#transport/in-process-transport.js';
 import { _fromMemoryFsHandle } from '#transport/_internal/from-memory-fs-handle.js';
 import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
-import { defineKernel } from '#types/runtime-kernel.types.js';
+import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
-// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
-import { createParameterDeclaration } from '../../test/support/kernel-worker.fixture.js';
 
 const entryPath = 'main.scope';
 const dependencyPath = 'dep.scope';
-const decoder = new TextDecoder();
+const parameters = {
+  schema: {
+    $schema: 'https://json-structure.org/meta/extended/v0/#',
+    $id: 'urn:taucad:test:freshness',
+    $uses: ['JSONSchemaUnits'],
+    name: 'FreshnessParameters',
+    type: 'object',
+  },
+  defaults: {},
+} as const;
 
 /** One kernel for every adapter: geometry is the entry plus whichever dependency currently exists. */
-const freshnessKernel = defineKernel({
+const freshnessKernel = defineKernelV2({
   id: 'freshness-conformance',
   name: 'Freshness conformance fixture',
   version: '1.0.0',
-  extensions: ['scope'],
-  exportFormats: { glb: { optionsSchema: z.object({}) } },
+  extensions: ['scope'] as const,
+  views: { model: { title: 'Model', mimeType: 'application/x-scope' } },
+  exports: {},
   async initialize() {
     return {};
   },
-  async getDependencies(input, runtime) {
+  async resolve(input, runtime) {
     const resolved = [input.entryPath];
     if (await runtime.filesystem.exists(dependencyPath)) {
       resolved.push(dependencyPath);
     }
     return { resolved, unresolved: resolved.includes(dependencyPath) ? [] : [dependencyPath] };
   },
-  async getParameters() {
-    return createParameterDeclaration();
+  async describe() {
+    return createKernelSuccess({ parameters });
   },
-  async createGeometry(input, runtime) {
+  async evaluate(input, runtime) {
     const parts: string[] = [await runtime.filesystem.readFile(input.entryPath, 'utf8')];
     if (await runtime.filesystem.exists(dependencyPath)) {
       parts.push(await runtime.filesystem.readFile(dependencyPath, 'utf8'));
     }
     const label = parts.join('+');
-    return {
-      geometry: { format: 'gltf', content: new TextEncoder().encode(label) },
-      nativeHandle: { label },
-      issues: [],
-    };
+    return { handle: { label }, views: ['model'] as const, exports: [] as const };
   },
-  async exportGeometry(input) {
-    return {
-      success: true,
-      data: [
-        {
-          name: 'model.glb',
-          bytes: new TextEncoder().encode(`export:${String(input.nativeHandle.label)}`),
-          mimeType: 'model/gltf-binary',
-        },
-      ],
-      issues: [],
-    };
+  async render({ handle }) {
+    return { content: handle.label };
   },
 })();
 
@@ -94,20 +88,33 @@ type Verdict = {
   readonly issues: readonly string[];
 };
 
-const openClient = (fileSystem: RuntimeFileSystem): ReturnType<typeof createRuntimeClient> =>
+const openClient = (fileSystem: RuntimeFileSystem) =>
   createRuntimeClient({ transport: inProcessTransport({ runtime, fileSystem }) });
+type FreshnessClient = ReturnType<typeof openClient>;
 
-const evaluateVerdict = async (client: ReturnType<typeof createRuntimeClient>): Promise<Verdict> => {
-  const result = await client.evaluate({ source: { path: entryPath } });
-  if (!result.success) {
-    return { success: false, issues: result.issues.map(({ message }) => message) };
+const evaluateVerdict = async (client: FreshnessClient): Promise<Verdict> => {
+  const document = client.open({ source: { path: entryPath } });
+  try {
+    const view = document.view('model');
+    let outcome = await view.rendering();
+    while (outcome.superseded) {
+      // A watched edit may supersede the in-flight projection; compare the settled successor.
+      // oxlint-disable-next-line no-await-in-loop -- each read waits for the next current projection.
+      outcome = await view.rendering();
+    }
+    const result = outcome.rendering;
+    if (!result.success) {
+      return { success: false, issues: result.issues.map(({ message }) => message) };
+    }
+    return {
+      success: true,
+      hash: result.hash,
+      label: typeof result.artifact.content === 'string' ? result.artifact.content : undefined,
+      issues: result.issues.map(({ message }) => message),
+    };
+  } finally {
+    document.close();
   }
-  return {
-    success: true,
-    hash: result.data.hash,
-    label: result.data.format === 'gltf' ? decoder.decode(result.data.content) : undefined,
-    issues: result.issues.map(({ message }) => message),
-  };
 };
 
 type Bed = {
@@ -188,7 +195,7 @@ const beds = [
   ['fromNodeFs (real fs.watch)', async () => nodeFsBed(true)],
 ] as const;
 
-const openClients = new Set<ReturnType<typeof createRuntimeClient>>();
+const openClients = new Set<FreshnessClient>();
 const openBeds = new Set<Bed>();
 
 afterEach(async () => {

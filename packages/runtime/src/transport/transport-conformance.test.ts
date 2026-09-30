@@ -16,7 +16,7 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 
 import { createChannelServer, wrapMessagePort, wrapWebSocket } from '@taucad/rpc';
-import type { Channel, ChannelServerHandle, MessagePortMainLike, Port, WebSocketLike } from '@taucad/rpc';
+import type { ChannelServerHandle, MessagePortMainLike, Port, WebSocketLike } from '@taucad/rpc';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
 import { createFileSystemBridgePort, fileSystemBridgeProtocolVersion } from '@taucad/fs-bridge';
 import { contentDigest, digestAction } from '@taucad/cache-core';
@@ -36,9 +36,8 @@ import { webWorkerHost } from '#transport/web-worker-host.js';
 import { webSocketClient } from '#transport/web-socket-client.js';
 import { webSocketTransport } from '#transport/web-socket-transport.js';
 import { webSocketClientOptionsSchema } from '#transport/web-socket-transport.schemas.js';
-import { triggerDocumentTimeout } from '#transport/_internal/abort-channel.js';
 import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
-import { runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
+import { runtimeChannelSessionKey } from '#transport/_internal/runtime-channel-bindings.js';
 import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-document-dispatcher.js';
 import type { RuntimeTransportClient } from '#transport/runtime-transport.types.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
@@ -103,7 +102,7 @@ describe('transport conformance — in-process (C2)', () => {
     expect(typeof plugin.materialize).toBe('function');
   });
 
-  it('materialise() returns the v6 fat client handle surface', () => {
+  it('materialise() returns the document transport handle surface', () => {
     const mainEntry = 'main.ts';
     const plugin = inProcessTransport({
       runtime,
@@ -114,9 +113,8 @@ describe('transport conformance — in-process (C2)', () => {
     expect(typeof client.describe).toBe('function');
     expect(typeof client.open).toBe('function');
     expect(typeof client.initialize).toBe('function');
-    expect(typeof client.reservePreview).toBe('function');
     expect(client.renderTimeoutRecovery.kind).toBe('unsupported');
-    expect(typeof client.resolveGeometry).toBe('function');
+    expect(typeof client.resolveBinary).toBe('function');
     expect(typeof client.close).toBe('function');
     expect(client.closed).toBeInstanceOf(Promise);
     void plugin;
@@ -480,10 +478,10 @@ describe('transport conformance — web-worker (C2)', () => {
         url: 'about:blank',
         workerCtor,
         files: { 'main.ts': 'export default () => true;' },
-        renderTimeout: 4567,
+        operationTimeout: 4567,
       });
 
-      expect(options.renderTimeout).toBe(4567);
+      expect(options.operationTimeout).toBe(4567);
       expect(options.transport.id).toBe('web-worker');
       const description = options.transport.describe();
       expect(description.fileSystem).toBe('inline');
@@ -518,9 +516,8 @@ describe('transport conformance — web-worker (C2)', () => {
       expect(typeof client.describe).toBe('function');
       expect(typeof client.open).toBe('function');
       expect(typeof client.initialize).toBe('function');
-      expect(typeof client.reservePreview).toBe('function');
       expect(client.renderTimeoutRecovery.kind).toBe('terminable');
-      expect(typeof client.resolveGeometry).toBe('function');
+      expect(typeof client.resolveBinary).toBe('function');
       expect(typeof client.close).toBe('function');
       expect(client.closed).toBeInstanceOf(Promise);
     } finally {
@@ -740,9 +737,8 @@ describe('transport conformance — node-worker (C2)', () => {
       expect(typeof client.describe).toBe('function');
       expect(typeof client.open).toBe('function');
       expect(typeof client.initialize).toBe('function');
-      expect(typeof client.reservePreview).toBe('function');
       expect(client.renderTimeoutRecovery.kind).toBe('terminable');
-      expect(typeof client.resolveGeometry).toBe('function');
+      expect(typeof client.resolveBinary).toBe('function');
       expect(typeof client.close).toBe('function');
       expect(client.closed).toBeInstanceOf(Promise);
     } finally {
@@ -911,9 +907,8 @@ describe('transport conformance — web-socket (C2)', () => {
     expect(typeof client.describe).toBe('function');
     expect(typeof client.open).toBe('function');
     expect(typeof client.initialize).toBe('function');
-    expect(typeof client.reservePreview).toBe('function');
     expect(client.renderTimeoutRecovery.kind).toBe('terminable');
-    expect(typeof client.resolveGeometry).toBe('function');
+    expect(typeof client.resolveBinary).toBe('function');
     expect(typeof client.close).toBe('function');
     expect(client.closed).toBeInstanceOf(Promise);
   });
@@ -1138,15 +1133,6 @@ describe('transport conformance — web-socket (C2)', () => {
  * ============================================================ */
 
 describe('transport conformance — shared transport internals (T37)', () => {
-  const renderId = '550e8400-e29b-41d4-a716-446655440000';
-
-  /** The abort frame the shared helper would emit for `target` — the byte-for-byte reference. */
-  const sharedAbortFrame = (target: { renderId: string; abortGeneration?: number }): [string, unknown] => {
-    const notify = vi.fn();
-    triggerDocumentTimeout({ notify } as unknown as Channel<RuntimeDocumentProtocol>, undefined, target);
-    return notify.mock.calls[0] as [string, unknown];
-  };
-
   /**
    * Far end of a real `MessageChannel` running an rpc server, so the client
    * completes its handshake and actually flushes queued notify frames.
@@ -1154,11 +1140,9 @@ describe('transport conformance — shared transport internals (T37)', () => {
   const wireBackedPeer = (): {
     port: MessagePort;
     peerPort: MessagePort;
-    firstNotify: Promise<[string, unknown]>;
     dispose: () => void;
   } => {
     const pair = new MessageChannel();
-    const received = Promise.withResolvers<[string, unknown]>();
     const server = createChannelServer<RuntimeDocumentProtocol>({
       port: wrapMessagePort<unknown>(pair.port2, { label: 't37:peer' }),
       sessionKey: runtimeChannelSessionKey,
@@ -1167,9 +1151,7 @@ describe('transport conformance — shared transport internals (T37)', () => {
         async call() {
           throw new Error('T37 conformance issues no calls');
         },
-        notify(_context, name, args) {
-          received.resolve([name, args]);
-        },
+        notify() {},
         listen: () => {
           throw new Error('T37 conformance subscribes to nothing');
         },
@@ -1178,7 +1160,6 @@ describe('transport conformance — shared transport internals (T37)', () => {
     return {
       port: pair.port1,
       peerPort: pair.port2,
-      firstNotify: received.promise,
       dispose: () => {
         server.dispose();
         pair.port1.close();
@@ -1276,30 +1257,6 @@ describe('transport conformance — shared transport internals (T37)', () => {
       },
     ],
   ] as const;
-
-  it.each(terminableTransports)(
-    '%s builds its abort frame with the shared helper',
-    async (_transportId, materialize) => {
-      const peer = wireBackedPeer();
-      const client = await materialize(peer.port);
-      try {
-        const ready = await client.open();
-        await ready.channel.ready;
-
-        const recovery = client.renderTimeoutRecovery;
-        if (recovery.kind !== 'terminable') {
-          throw new TypeError(`Expected terminable ${_transportId} recovery`);
-        }
-        const target = { renderId, ...client.reservePreview() };
-        recovery.abortRender(target);
-
-        await expect(peer.firstNotify).resolves.toEqual(sharedAbortFrame(target));
-      } finally {
-        await client.close();
-        peer.dispose();
-      }
-    },
-  );
 
   it('electron-utility settles closed as host-exit when the utility end of the port closes', async () => {
     const materializeElectronUtility = terminableTransports.find(([id]) => id === 'electron-utility')![1];

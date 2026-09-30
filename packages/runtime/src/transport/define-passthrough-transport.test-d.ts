@@ -33,16 +33,10 @@ const stubClient = <Id extends string>(
     async initialize() {
       throw new Error('stub');
     },
-    reservePreview() {
-      return {};
-    },
     signalDocumentAbort() {
       return false;
     },
     renderTimeoutRecovery: { kind: 'unsupported' },
-    async resolveGeometry() {
-      throw new Error('stub');
-    },
     async resolveBinary() {
       throw new Error('stub');
     },

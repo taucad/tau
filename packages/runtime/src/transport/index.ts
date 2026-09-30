@@ -59,8 +59,6 @@ export type {
   TransportPlugin,
   RuntimeTransportClient,
   RuntimeTransportCloseResult,
-  RuntimeTransportPreviewReservation,
-  RuntimeTransportRenderTarget,
   RuntimeTransportTimeoutRecovery,
   RuntimeTransportFacet,
   RuntimeTransportHost,

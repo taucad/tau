@@ -6,19 +6,10 @@
 
 import { wrapMessagePort, wrapMessagePortMain, createChannelClient } from '@taucad/rpc';
 import type { Channel, MessagePortMainLike, Port } from '@taucad/rpc';
-import type { Geometry } from '@taucad/types';
-import type {
-  ExportGeometryResult,
-  BinaryContentDelivery,
-  GeometryTransport,
-  RuntimeExportResultTransport,
-  RuntimeInitializeResult,
-} from '#index.js';
+import type { BinaryContentDelivery, RuntimeInitializeResult } from '#index.js';
 import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
-import { materialiseBinaryContent, materialiseExportResult } from '#transport/_internal/export-materialiser.js';
-import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
-import { triggerDocumentTimeout } from '#transport/_internal/abort-channel.js';
+import { materialiseBinaryContent } from '#transport/_internal/export-materialiser.js';
 import type {
   RuntimeInitializeMemoryHandle,
   RuntimeInitializePayload,
@@ -223,21 +214,11 @@ const createElectronUtilityClient = (
   return {
     id: electronUtilityId,
     machines: machines.facet,
-    reservePreview() {
-      return {};
-    },
     signalDocumentAbort() {
       return false;
     },
     renderTimeoutRecovery: {
       kind: 'terminable',
-      abortRender(target): void {
-        if (!channel) {
-          return;
-        }
-        debugLog(origin, 'render-timeout', target);
-        triggerDocumentTimeout(channel, undefined, target);
-      },
       async terminate(): Promise<void> {
         await finish({ cause: 'render-timeout' });
       },
@@ -256,14 +237,8 @@ const createElectronUtilityClient = (
       const memoryHandle: RuntimeInitializeMemoryHandle = {};
       return channel.call('initialize', { ...input, memoryHandle });
     },
-    async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {
-      return materialiseGeometry(transport, undefined);
-    },
     async resolveBinary(transport: BinaryContentDelivery): Promise<Uint8Array<ArrayBuffer>> {
       return materialiseBinaryContent(transport, undefined);
-    },
-    async resolveExport(transport: RuntimeExportResultTransport): Promise<ExportGeometryResult> {
-      return materialiseExportResult(transport, undefined);
     },
     async close(): Promise<void> {
       await finish({ cause: 'requested' });

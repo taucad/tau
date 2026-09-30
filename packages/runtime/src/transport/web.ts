@@ -62,7 +62,7 @@ export type WebWorkerClientOptionsInput<Runtime extends AnyRuntimeDefinition | u
    * Wall-clock deadline applied independently to each preview. Milliseconds.
    * Zero disables timeout enforcement.
    */
-  readonly renderTimeout?: number;
+  readonly operationTimeout?: number;
 } & ([RuntimeConfigInput<Runtime>] extends [never]
     ? { readonly config?: never }
     : undefined extends RuntimeConfigInput<Runtime>
@@ -89,7 +89,7 @@ export type WebWorkerClientOptionsInput<Runtime extends AnyRuntimeDefinition | u
  *
  * const clientOptions = createWebWorkerClientOptions({
  *   createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
- *   renderTimeout: 60_000,
+ *   operationTimeout: 60_000,
  * });
  * const client = createRuntimeClient(clientOptions);
  * ```
@@ -101,14 +101,14 @@ export const createWebWorkerClientOptions = <Runtime extends AnyRuntimeDefinitio
     throw new TypeError('createWebWorkerClientOptions: pass either `files` or `fileSystem`, not both');
   }
 
-  const { config, files, fileSystem, renderTimeout, ...transportOptions } = options;
+  const { config, files, fileSystem, operationTimeout, ...transportOptions } = options;
   const clientOptions = {
     transport: webWorkerTransport({
       ...transportOptions,
       fileSystem: fileSystem ?? fromMemoryFs(files),
     }),
     ...(config === undefined ? {} : { config }),
-    ...(renderTimeout === undefined ? {} : { renderTimeout }),
+    ...(operationTimeout === undefined ? {} : { operationTimeout }),
   };
   return clientOptions as RuntimeClientOptionsWithTransport<Runtime, ReturnType<typeof webWorkerTransport>>;
 };

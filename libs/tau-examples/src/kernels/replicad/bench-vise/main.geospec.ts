@@ -216,6 +216,12 @@ describe('BV-125 SysML geometry verification', () => {
       faces: { greaterThan: 12 },
     });
   });
+
+  it('R06 spindle remains a valid solid at an 80mm jaw opening', async () => {
+    expectGeo(await model({ component: 'Spindle', opening: 80 })).toBeValidBrep(
+      { maxTolerance: 0.01 },
+    );
+  });
   it('R06 threaded bronze nut has flange attachment holes', async () => {
     const nut = await model({ component: 'Drive nut' });
     expectGeo(nut).toHaveCircularHole({

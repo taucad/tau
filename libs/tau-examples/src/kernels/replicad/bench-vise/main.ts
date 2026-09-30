@@ -219,7 +219,7 @@ export default function main(input = defaultParams): ShapeConfig[] {
   add('Spindle', steel, () => {
     const threaded = thread(171)
       .rotate(90, [0, 0, 0], [0, 1, 0])
-      .rotate(g * 90, [0, 0, 0], [1, 0, 0])
+      .rotate((g * 90) % 360, [0, 0, 0], [1, 0, 0])
       .translate([g - 171, 0, 50]);
     return threaded
       .fuseAll([xCylinder(10, g, 62), xCylinder(17, g, 3)])

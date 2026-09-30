@@ -8,6 +8,7 @@
  * - Workers or other JS runtimes
  */
 import type { RevisionChangeOutput, RevisionRowOutput } from '#schemas/tools/revisions.tool.schema.js';
+import type { DeterministicEditFileInput } from '#schemas/tools/edit-file.tool.schema.js';
 import type {
   CaptureImagesRpcResult,
   CaptureImagesRpcInput,
@@ -101,12 +102,7 @@ export type RpcFileSystem = {
   readdir(path: string): Promise<RpcDirectoryEntry[]>;
   exists(path: string): Promise<boolean>;
   appendFile(path: string, content: string): Promise<void>;
-  editFile(
-    path: string,
-    oldString: string,
-    newString: string,
-    replaceAll?: boolean,
-  ): Promise<{
+  editFile(input: DeterministicEditFileInput): Promise<{
     occurrences: number;
     staleRecovered?: true;
     diffStats: DiffStatsWithContent;

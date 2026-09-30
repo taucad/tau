@@ -323,12 +323,32 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
         });
       });
     },
-    // oxlint-disable-next-line max-params -- list of args is consistent with other file operations
-    async editFile(path: string, oldString: string, newString: string, replaceAll?: boolean) {
+    async editFile({ targetFile: path, oldString, newString, replaceAll, expectedDigest }) {
       const result = await applyClientTextMutation({
         targetFile: path,
-        fileSystem: { stat, readFileBytes, writeFileIfUnchanged },
-        plan: createExactReplacementPlan({ oldString, newString, replaceAll }),
+        expectedDigest,
+        fileSystem: {
+          stat,
+          readFileBytes,
+          writeFileIfUnchanged:
+            expectedDigest === undefined
+              ? writeFileIfUnchanged
+              : async (target, expected, replacement) => {
+                  const committed = await fileManager.workbenchFiles.writeFileChecked({
+                    path: absolute(target),
+                    data: replacement,
+                    preconditions: [{ path: absolute(target), expected }],
+                  });
+                  if (committed.status === 'conflict') {
+                    throw Object.assign(
+                      new Error('Reviewed bytes changed before commit. Read and review the file again.'),
+                      { code: rpcClientErrorCode.editConflict },
+                    );
+                  }
+                  return { status: 'committed', committedBytes: new Uint8Array(committed.content) };
+                },
+        },
+        plan: createExactReplacementPlan({ oldString, newString, replaceAll, expectedDigest }),
       });
       if (!result.ok) {
         throw Object.assign(new Error(result.message), { code: result.errorCode });

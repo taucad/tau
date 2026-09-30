@@ -20,6 +20,13 @@ export const editFileInputSchema = z.object({
   oldString: boundedEditTextSchema.min(1, 'oldString must not be empty.').describe('The exact text to replace.'),
   newString: boundedEditTextSchema.describe('The replacement text. May be empty to delete oldString.'),
   replaceAll: z.boolean().optional().describe('Replace every match. Omit to require one unique match.'),
+  expectedDigest: z
+    .string()
+    .regex(/^sha256:[0-9a-f]{64}$/u, 'Expected a lowercase sha256 content digest.')
+    .optional()
+    .describe(
+      'Reviewed raw-byte digest. Requires one atomic literal edit; on conflict reread and review, never blindly retry.',
+    ),
 });
 
 /** @public */

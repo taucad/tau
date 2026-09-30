@@ -128,7 +128,9 @@ describe('the tool filesystem over a composed view', () => {
     await expect(tools.writeFile(path, 'x')).rejects.toMatchObject({ code: 'EROFS' });
     await expect(tools.writeBinaryFile(path, encoder.encode('x'))).rejects.toMatchObject({ code: 'EROFS' });
     await expect(tools.appendFile(path, 'x')).rejects.toMatchObject({ code: 'EROFS' });
-    await expect(tools.editFile(path, 'needle', 'x')).rejects.toMatchObject({ code: 'EROFS' });
+    await expect(tools.editFile({ targetFile: path, oldString: 'needle', newString: 'x' })).rejects.toMatchObject({
+      code: 'EROFS',
+    });
     await expect(tools.deleteFile(path)).rejects.toMatchObject({ code: 'EROFS' });
     expect(await tools.readFile(path)).toBe(contents['api-index.md']);
   });

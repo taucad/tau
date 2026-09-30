@@ -74,6 +74,12 @@ const createReplayFileSystem = (
     async readFile(path) {
       return readText(path);
     },
+    async readBinaryFile(path) {
+      if ((files.get(path)?.byteLength ?? 0) > 256 * 1024 * 1024) {
+        return throwClientError('RESULT_TOO_LARGE', 'Replay byte read exceeds the existing 256 MiB limit.');
+      }
+      return readBytes(path);
+    },
     async writeFile(path, content) {
       files.set(path, new TextEncoder().encode(content));
     },
@@ -131,10 +137,10 @@ const createReplayFileSystem = (
     async appendFile(path, content) {
       files.set(path, new TextEncoder().encode(`${files.has(path) ? readText(path) : ''}${content}`));
     },
-    // oxlint-disable-next-line max-params -- the RpcFileSystem.editFile signature
-    async editFile(path, oldString, newString, replaceAll) {
+    async editFile({ targetFile: path, oldString, newString, replaceAll, expectedDigest }) {
       const result = await applyClientTextMutation({
         targetFile: path,
+        expectedDigest,
         fileSystem: {
           stat,
           readFileBytes: async (target) => readBytes(target),
@@ -153,7 +159,7 @@ const createReplayFileSystem = (
             return { status: 'committed', committedBytes: readBytes(target) };
           },
         },
-        plan: createExactReplacementPlan({ oldString, newString, replaceAll }),
+        plan: createExactReplacementPlan({ oldString, newString, replaceAll, expectedDigest }),
       });
       if (!result.ok) {
         return throwClientError(result.errorCode, result.message);
@@ -162,6 +168,7 @@ const createReplayFileSystem = (
         occurrences: result.occurrences,
         ...(result.staleRecovered ? { staleRecovered: true } : {}),
         diffStats: result.diffStats,
+        digest: result.digest,
       };
     },
     stat,

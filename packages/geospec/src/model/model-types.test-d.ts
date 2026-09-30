@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, it } from 'vitest';
-import type { GeometrySubject } from '#mesh/types.js';
+import type { GeoSpecSubject } from '#model/subject.js';
 import type {
   GeoSpecRuntimeClient,
   GeoSpecRuntimeClientFactory,
@@ -15,17 +15,17 @@ describe('geospec/model public types', () => {
   it('should accept direct parameters for source, code, and file loads', () => {
     const code = Object.fromEntries([['main.ts', '']]);
     expectTypeOf(loadModel({ source: new Uint8Array(), parameters: { width: 10 } })).toEqualTypeOf<
-      Promise<GeometrySubject>
+      Promise<GeoSpecSubject>
     >();
     expectTypeOf(loadModel({ code, file: 'main.ts', parameters: { width: 20 } })).toEqualTypeOf<
-      Promise<GeometrySubject>
+      Promise<GeoSpecSubject>
     >();
-    expectTypeOf(loadModel({ file: 'main.ts', parameters: { width: 30 } })).toEqualTypeOf<Promise<GeometrySubject>>();
+    expectTypeOf(loadModel({ file: 'main.ts', parameters: { width: 30 } })).toEqualTypeOf<Promise<GeoSpecSubject>>();
   });
 
   it('should keep source-unit declarations on direct raw geometry only', () => {
     expectTypeOf(loadModel({ source: new Uint8Array(), format: 'glb', sourceUnit: 'mm' })).toEqualTypeOf<
-      Promise<GeometrySubject>
+      Promise<GeoSpecSubject>
     >();
 
     // @ts-expect-error -- loadModel has no output-unit knob; every subject is canonical millimetres.

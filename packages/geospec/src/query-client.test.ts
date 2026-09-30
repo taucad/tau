@@ -146,7 +146,7 @@ describe('positive ancillary query authoring', () => {
         workUnitLimit: 1,
       }).status,
     ).toBe(status);
-    await expect(client.expectGeo(subject).toBeValidBrep()).rejects.toBeInstanceOf(GeoSpecAssertionError);
+    expect(() => client.expectGeo(subject).toBeValidBrep()).toThrow(GeoSpecAssertionError);
   });
 
   it('shares the automatic sequence without consuming an explicit query ID', async () => {
@@ -155,7 +155,7 @@ describe('positive ancillary query authoring', () => {
     const reports = [
       await client.query({ subject, capability: 'analyzeMesh' }),
       await client.query({ subject, capability: 'analyzeMesh', claimId: 'chosen' }),
-      await client.expectGeo(subject).toBeWatertight(),
+      client.expectGeo(subject).toBeWatertight(),
       await client.query({ subject, capability: 'analyzeBrep' }),
     ];
     expect(reports.map((report) => report.claimId)).toStrictEqual([
@@ -172,7 +172,7 @@ describe('positive ancillary query authoring', () => {
     const client = createGeoSpecAssertionClient({ engine, claimId });
     await client.query({ subject, capability: 'analyzeMesh' });
     await client.query({ subject, capability: 'analyzeMesh', claimId: 'chosen' });
-    const report = await client.expectGeo(subject).toBeWatertight();
+    const report = client.expectGeo(subject).toBeWatertight();
     const second = createGeoSpecAssertionClient({ engine });
     const query = await second.query({ subject, capability: 'analyzeBrep' });
     expect(claimId.mock.calls).toStrictEqual([['toBeWatertight', 2]]);

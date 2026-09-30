@@ -180,6 +180,7 @@
     "src/cli/cli.ts",
     "src/cli/node-host.ts",
     "src/cli/node-host.test.ts",
+    "src/cli/node-host-selection.test.ts",
     "src/cli/cli.test.ts",
     "src/cli/main.ts"
   ]

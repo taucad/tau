@@ -4,6 +4,7 @@ import { memoryUsage } from 'node:process';
 import { parentPort, workerData } from 'node:worker_threads';
 import { Engine } from '@taucad/geospec-engine-native/node';
 import { createGeoSpecNativeModelLoader } from 'geospec/runner/native';
+import type { RuntimeDefinition } from '@taucad/runtime';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
 // oxlint-disable-next-line import/no-unassigned-import -- Worker-host registration is isolate-local.
 import '#register-node.js';
@@ -29,6 +30,14 @@ export const startNativePoolWorker = (port: NativePoolPort, options: NativePoolW
     const nativeModelLoader = createGeoSpecNativeModelLoader({
       engine,
       projectPath: options.projectPath,
+      runtime: async () => {
+        const [{ createNodeClient }, { defaultRuntime }] = await Promise.all([
+          import('@taucad/runtime/node'),
+          import('#model/default-runtime.js'),
+        ]);
+        const runtime: RuntimeDefinition = defaultRuntime;
+        return createNodeClient({ runtime, projectPath: options.projectPath });
+      },
       readSource: async (source) => {
         if (typeof source !== 'string') {
           throw new TypeError('Native Node pool direct sources must be project-rooted paths or bytes.');

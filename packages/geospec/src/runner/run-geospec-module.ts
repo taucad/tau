@@ -1,10 +1,13 @@
 import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
 import type { VmFileSystem } from '@taucad/esbuild/vm';
 import { createCollector } from '#runner/collector.js';
+import { createGeoSpecAssertionClient } from '#assertion-client/client.js';
 import { compileGeoSpecTestNamePattern, filterGeoSpecTests } from '#runner/filter.js';
 import { getGeoSpecEngineProtocol, getRegisteredGeoSpecHostBinding } from '#engine/registry.js';
 import { analyzeMesh } from '#mesh/load-mesh.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
+import { bindGeoSpecSubject, resolveGeoSpecSubject } from '#model/subject.js';
+import type { CreateModelLoaderOptions, GeoSpecModelLoader, ManagedGeoSpecModelLoader } from '#model/types.js';
 import type {
   GeoSpecModuleBundleCache,
   GeoSpecRunResult,
@@ -20,7 +23,8 @@ type GeoSpecRunBinding = {
   analyzeMesh: typeof analyzeMesh;
   geoSpecModelLoadError: typeof GeoSpecModelLoadError;
   modelLoader?: RunGeoSpecModuleOptions['modelLoader'];
-  nativeModelLoader?: RunGeoSpecModuleOptions['nativeModelLoader'];
+  nativeModelLoader?: GeoSpecModelLoader;
+  createModelLoader?: (defaults: CreateModelLoaderOptions) => ManagedGeoSpecModelLoader;
   stepLoader?: RunGeoSpecModuleOptions['stepLoader'];
 };
 
@@ -149,24 +153,6 @@ const getRunBinding = () => {
 
 const createGeospecBuiltinCode = (runToken: string): string => `
 ${createBindingAccessorCode(runToken)}
-const getLegacyCollector = () => {
-  const binding = getRunBinding();
-  if (binding.nativeAssertions) {
-    throw new Error('Legacy expectGeo is unavailable in native mode. Import expectNativeGeo from geospec.');
-  }
-  const collector = binding.collector;
-  if (!collector) {
-    throw new Error('GeoSpec collector is not active. Run the module through runGeoSpecModule().');
-  }
-  return collector;
-};
-const getNativeCollector = () => {
-  const binding = getRunBinding();
-  if (!binding.nativeAssertions) {
-    throw new Error('Native expectGeo requires a collector configured with nativeAssertions.');
-  }
-  return binding.collector;
-};
 
 export const describe = (name, fn) => getRunBinding().collector.describe(name, fn);
 describe.skip = (name, fn) => getRunBinding().collector.describeSkip(name, fn);
@@ -175,8 +161,7 @@ export const it = (name, fn) => getRunBinding().collector.it(name, fn);
 it.skip = (name, fn) => getRunBinding().collector.itSkip(name, fn);
 
 export const test = it;
-export const expectGeo = (subject) => getLegacyCollector().expectGeo(subject);
-export const expectNativeGeo = (subject) => getNativeCollector().expectGeo(subject);
+export const expectGeo = (subject) => getRunBinding().collector.expectGeo(subject);
 `;
 
 const createGeospecModelBuiltinCode = (runToken: string): string => `
@@ -185,47 +170,26 @@ export const GeoSpecModelLoadError = getRunBinding().geoSpecModelLoadError;
 
 export const loadModel = async (options) => {
   const binding = getRunBinding();
-  const loader = binding.modelLoader;
+  const loader = binding.nativeAssertions ? binding.nativeModelLoader : binding.modelLoader;
   if (typeof loader !== 'function') {
     throw new GeoSpecModelLoadError([
       {
-        code: binding.nativeAssertions
-          ? 'GEOSPEC_LEGACY_MODEL_LOADER_UNAVAILABLE_IN_NATIVE_MODE'
-          : 'GEOSPEC_MODEL_LOADER_UNAVAILABLE',
+        code: 'GEOSPEC_MODEL_LOADER_UNAVAILABLE',
         severity: 'error',
-        message: binding.nativeAssertions
-          ? 'No legacy GeoSpec model loader is active in this native runner.'
-          : 'No GeoSpec model loader is active for this runner.',
-        suggestion: binding.nativeAssertions
-          ? 'Import loadNativeModel from geospec/runner/native, or explicitly supply a legacy modelLoader.'
-          : 'Run this test through the GeoSpec CLI or Tau browser test runner.',
+        message: 'No GeoSpec model loader is active for this runner.',
+        suggestion: 'Run this test through the GeoSpec CLI or Tau browser test runner.',
       },
     ]);
   }
   return loader(options);
 };
 
-export const createModelLoader = (defaults = {}) => async (options) => loadModel({ ...defaults, ...options });
-`;
-
-const createGeospecNativeRunnerBuiltinCode = (runToken: string): string => `
-${createBindingAccessorCode(runToken)}
-export const loadNativeModel = async (options) => {
-  const binding = getRunBinding();
-  if (!binding.nativeAssertions) {
-    throw new Error('Native loadModel requires a collector configured with nativeAssertions.');
+export const createModelLoader = (defaults = {}) => {
+  const factory = getRunBinding().createModelLoader;
+  if (typeof factory !== 'function') {
+    throw new GeoSpecModelLoadError([{ code: 'GEOSPEC_MODEL_LOADER_UNAVAILABLE', severity: 'error', message: 'No managed GeoSpec model loader is active for this runner.' }]);
   }
-  if (typeof binding.nativeModelLoader !== 'function') {
-    throw new binding.geoSpecModelLoadError([
-      {
-        code: 'GEOSPEC_NATIVE_MODEL_LOADER_UNAVAILABLE',
-        severity: 'error',
-        message: 'No native GeoSpec model loader is active for this runner.',
-        suggestion: 'Run this test through createNativeGeoSpecRunner() with a managed native model loader.',
-      },
-    ]);
-  }
-  return binding.nativeModelLoader(options);
+  return factory(defaults);
 };
 `;
 
@@ -303,12 +267,23 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
   const meshProtocol = options.nativeAssertions === undefined ? getGeoSpecEngineProtocol() : undefined;
   const nativeAdmissions = new Set<Promise<unknown>>();
   const configuredNativeModelLoader = options.nativeModelLoader;
+  const admissionClient =
+    options.nativeAssertions === undefined ? undefined : createGeoSpecAssertionClient(options.nativeAssertions);
+  let nativeScopeLive = true;
   /* oxlint-disable typescript/promise-function-async -- Return the exact admission promise to the authored module. */
-  const trackedNativeModelLoader: RunGeoSpecModuleOptions['nativeModelLoader'] =
+  const trackedNativeModelLoader: GeoSpecModelLoader | undefined =
     configuredNativeModelLoader === undefined
       ? undefined
       : (loadOptions) => {
-          const pending = configuredNativeModelLoader(loadOptions);
+          const pending = (async () => {
+            const identity = await configuredNativeModelLoader(loadOptions);
+            return bindGeoSpecSubject({
+              ...options.nativeAssertions!,
+              client: admissionClient!,
+              identity,
+              isLive: () => nativeScopeLive,
+            });
+          })();
           nativeAdmissions.add(pending);
           return pending;
         };
@@ -336,6 +311,47 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     },
     ...(options.modelLoader ? { modelLoader: options.modelLoader } : {}),
     ...(trackedNativeModelLoader ? { nativeModelLoader: trackedNativeModelLoader } : {}),
+    ...(trackedNativeModelLoader
+      ? {
+          createModelLoader: (defaults: CreateModelLoaderOptions): ManagedGeoSpecModelLoader => {
+            // VM subjects are released by the run's existing raw-loader owner. A
+            // managed child scope drains its loads and invalidates only its facades.
+            if (defaults.engine !== undefined || defaults.readSource !== undefined) {
+              throw new TypeError('Authored VM model defaults cannot replace the admitting host.');
+            }
+            let generation = 0;
+            const loads = new Set<Promise<unknown>>();
+            const loader: GeoSpecModelLoader = async (input) => {
+              const current = generation;
+              const subject = await trackedNativeModelLoader({ ...defaults, ...input });
+              const admission = resolveGeoSpecSubject(subject);
+              return bindGeoSpecSubject({
+                ...admission,
+                isLive: () => admission.isLive() && generation === current,
+              });
+            };
+            // oxlint-disable-next-line typescript/promise-function-async -- Preserve the exact child admission promise for lifecycle drainage.
+            const tracked: GeoSpecModelLoader = (input) => {
+              const pending = loader(input);
+              loads.add(pending);
+              return pending;
+            };
+            return Object.assign(tracked, {
+              async dispose() {
+                do {
+                  const pending = [...loads];
+                  // oxlint-disable-next-line no-await-in-loop -- Child-scope load callbacks may enqueue more admissions while draining.
+                  await Promise.allSettled(pending);
+                  for (const load of pending) {
+                    loads.delete(load);
+                  }
+                } while (loads.size > 0);
+                generation += 1;
+              },
+            });
+          },
+        }
+      : {}),
     ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
   });
 
@@ -346,10 +362,6 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
   vm.registerModule('geospec/model', {
     version: '0.0.0-poc',
     code: createGeospecModelBuiltinCode(runToken),
-  });
-  vm.registerModule('geospec/runner/native', {
-    version: '0.0.0-poc',
-    code: createGeospecNativeRunnerBuiltinCode(runToken),
   });
   vm.registerModule('geospec/step', {
     version: '0.0.0-poc',
@@ -425,6 +437,7 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
         nativeAdmissions.delete(pending);
       }
     } while (nativeAdmissions.size > 0);
+    nativeScopeLive = false;
     bindings.delete(runToken);
     if (bindings.size === 0) {
       Reflect.deleteProperty(runBindingsGlobal, geospecRunBindingsGlobalKey);

@@ -27,7 +27,7 @@ afterEach(() => {
 describe('matcher registry', () => {
   it('describes every matcher expectGeo exposes, in registry order', () => {
     expect(Object.keys(geoSpecMatcherDescriptors)).toStrictEqual([...geoSpecMatcherNames]);
-    expect(geoSpecMatcherNames).toHaveLength(24);
+    expect(geoSpecMatcherNames).toHaveLength(26);
   });
 
   it('gives every matcher a distinct assertion kind', () => {

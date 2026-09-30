@@ -1,5 +1,7 @@
 import type { GeoSpecUnit } from '#geometry-unit.js';
-import type { GeometrySubject, MeshFileFormat } from '#mesh/types.js';
+import type { MeshFileFormat } from '#mesh/types.js';
+import type { GeoSpecSubject } from '#model/subject.js';
+import type { GeoSpecNativeModelEngine, GeoSpecNativeSourceReader } from '#model/native-model-loader.js';
 import type { MeshSource } from '#mesh/load-mesh.js';
 import type { StepSource, StepStreamingMode } from '#step/types.js';
 import type {
@@ -81,6 +83,8 @@ export type GeoSpecRuntimeSourceAdapter = {
 export type LoadModelSourceOptions = {
   /** Geometry bytes, path, browser file/blob, or in-memory mesh buffer. */
   source: MeshSource | StepSource;
+  /** Named external resources consumed alongside the direct geometry bytes. */
+  resources?: ReadonlyArray<{ readonly name: string; readonly source: MeshSource | StepSource }>;
   /** Source geometry format. Defaults to `glb`. */
   format?: GeoSpecModelFormat;
   /** Source path recorded in provenance. */
@@ -177,7 +181,7 @@ export type LoadModelOptions<Code extends Record<string, string> = Record<string
  */
 export type GeoSpecModelLoader = <Code extends Record<string, string> = Record<string, string>>(
   options: LoadModelOptions<Code>,
-) => Promise<GeometrySubject>;
+) => Promise<GeoSpecSubject>;
 
 /** A configured loader whose shared runtime can be released with its owner. @public */
 export type ManagedGeoSpecModelLoader = GeoSpecModelLoader & {
@@ -190,6 +194,10 @@ export type ManagedGeoSpecModelLoader = GeoSpecModelLoader & {
  * @public
  */
 export type CreateModelLoaderOptions = {
+  /** Initialized compiled engine supplied by the host, never selected by an authored spec. */
+  engine?: GeoSpecNativeModelEngine;
+  /** Rooted host reader for direct filesystem or URL sources. */
+  readSource?: GeoSpecNativeSourceReader;
   /** Geometry format to export when an individual call does not specify one. */
   format?: GeoSpecModelFormat;
   /** Runtime client or lazy runtime factory. */

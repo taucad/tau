@@ -1,13 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  createGeoSpec,
-  describe as geoDescribe,
-  expectGeo,
-  expectNativeGeo,
-  geoSpecMatcherNames,
-  it as geoIt,
-  test,
-} from '#index.js';
+import { createGeoSpec, describe as geoDescribe, expectGeo, geoSpecMatcherNames, it as geoIt, test } from '#index.js';
 import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
 import { decodeGeoSpecCanonicalJson, geoSpecEngineProtocolVersion, toGeoSpecProtocolJson } from '#engine/protocol.js';
 import { clearGeoSpecEngine, registerGeoSpecEngine } from '#engine/seam.js';
@@ -259,7 +251,7 @@ describe('expectGeo proxy', () => {
   it('should expose every registry matcher name in registry order', () => {
     const matcher = createCollector().expectGeo(undefined);
 
-    expect(Object.keys(matcher)).toStrictEqual(Object.keys(geoSpecMatcherDescriptors));
+    expect(Object.keys(matcher)).toStrictEqual([...Object.keys(geoSpecMatcherDescriptors), 'not']);
     expect(geoSpecMatcherNames).toStrictEqual(Object.keys(geoSpecMatcherDescriptors));
   });
 
@@ -423,15 +415,14 @@ describe('expectGeo proxy', () => {
 });
 
 describe('authoring helpers', () => {
-  it('should reject the native helper when the active collector is legacy', () => {
+  it('should reject forged root subjects independently of an installed reference collector', () => {
     installCollector(createCollector());
 
-    expect(() => expectNativeGeo({ contentHash: 'sha256:test' })).toThrow(
-      'Native expectGeo requires a collector configured with nativeAssertions.',
-    );
+    // @ts-expect-error -- The public trust boundary refuses hash bags.
+    expect(() => expectGeo({ contentHash: 'sha256:test' })).toThrow('not admitted');
   });
 
-  it('should reject the legacy helper while retaining native suite registration', async () => {
+  it('should retain suite registration while rejecting unadmitted root subjects', async () => {
     const passthrough = (input: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => input;
     const collector = createCollector({
       nativeAssertions: {
@@ -446,10 +437,9 @@ describe('authoring helpers', () => {
     geoDescribe('native helpers', () => {
       geoIt('registers', () => undefined);
     });
-    expect(() => expectGeo('legacy subject')).toThrow(
-      'Legacy expectGeo is unavailable in native mode. Import expectNativeGeo from geospec.',
-    );
-    expect(expectNativeGeo({ subjectHash: 'a'.repeat(64) })).toHaveProperty('toBeWatertight');
+    // @ts-expect-error -- A string is not an admitted subject.
+    expect(() => expectGeo('legacy subject')).toThrow('not admitted');
+    expect(collector.expectGeo({ subjectHash: 'a'.repeat(64) })).toHaveProperty('toBeWatertight');
 
     await collector.waitForCompletion();
     expect(collector.tests.map(({ name, status }) => ({ name, status }))).toStrictEqual([
@@ -463,7 +453,7 @@ describe('authoring helpers', () => {
 
     geoDescribe('helpers', () => {
       geoIt('runs', () => {
-        expect(expectGeo('subject')).toHaveProperty('toBeWatertight');
+        expect(collector.expectGeo('subject')).toHaveProperty('toBeWatertight');
       });
       test('aliased', () => undefined);
       geoIt.skip('skipped test');

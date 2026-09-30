@@ -1,4 +1,3 @@
-import { useRef, useState } from 'react';
 import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import {
   Select,
@@ -25,7 +24,7 @@ export type ParameterSelectGroup = Readonly<{
 }>;
 
 export const parameterSelectTriggerClass =
-  'h-(--param-field-h) min-w-0 flex-1 rounded-(--param-field-radius) border-border/50 bg-muted text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)';
+  'min-w-0 flex-1 border-border/50 bg-muted text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)';
 
 /** The Parameters select presentation, shared by schema fields and print setup. */
 export function ParameterSelect({
@@ -51,16 +50,8 @@ export function ParameterSelect({
   readonly onFocus?: () => void;
   readonly onBlur?: () => void;
 }): React.JSX.Element {
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const [triggerWidth, setTriggerWidth] = useState<number>();
-  // Radix aligns item text, so match the trigger's border, left inset and corners.
   const item = (option: ParameterSelectOption): React.JSX.Element => (
-    <SelectItem
-      key={option.value}
-      value={option.value}
-      disabled={option.disabled}
-      className='h-7 rounded-md border border-transparent pl-2.5'
-    >
+    <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
       <span className='flex min-w-0 items-center gap-1.5'>
         {option.swatch === undefined ? null : (
           <MaterialSwatch materials={[{ color: option.swatch, roughness: 0.35, metalness: 0 }]} />
@@ -73,21 +64,10 @@ export function ParameterSelect({
     </SelectItem>
   );
   return (
-    <Select
-      value={value}
-      disabled={isDisabled}
-      onValueChange={onChange}
-      onOpenChange={(isOpen) => {
-        if (isOpen) {
-          setTriggerWidth(triggerRef.current?.getBoundingClientRect().width);
-        }
-      }}
-    >
+    <Select size='sm' value={value} disabled={isDisabled} onValueChange={onChange}>
       <SelectTrigger
-        ref={triggerRef}
         id={id}
         autoFocus={shouldAutoFocus}
-        size='sm'
         aria-label={label}
         className={parameterSelectTriggerClass}
         onFocus={onFocus}
@@ -95,18 +75,12 @@ export function ParameterSelect({
       >
         <SelectValue placeholder={placeholder ?? 'Choose an option'} />
       </SelectTrigger>
-      <SelectContent
-        className='min-w-0'
-        // The viewport has one spacing unit on each side of the trigger-sized row.
-        style={{
-          width: triggerWidth === undefined ? undefined : `calc(${String(triggerWidth)}px + var(--spacing) * 2)`,
-        }}
-      >
+      <SelectContent>
         {groups.map((group, index) =>
           group.label === undefined ? (
             group.options.map(item)
           ) : (
-            <SelectGroup key={`${group.label}-${String(index)}`} className='gap-0 p-0'>
+            <SelectGroup key={`${group.label}-${String(index)}`} className='gap-0'>
               <SelectLabel>{group.label}</SelectLabel>
               {group.options.map(item)}
             </SelectGroup>

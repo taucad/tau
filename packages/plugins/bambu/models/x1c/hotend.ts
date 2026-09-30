@@ -10,7 +10,7 @@
  * omitted; the viewer only needs the part that meets the print.
  */
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- The Replicad kernel provides `replicad` to model sources at export time.
-import { draw } from 'replicad';
+import { draw, drawCircle } from 'replicad';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Types of the kernel-provided module.
 import type { Shape3D } from 'replicad';
 
@@ -92,6 +92,16 @@ export default function main(): Array<
 
   return [
     { shape: front.intersect(side), name: 'sock', color: sockColor, roughness: 0.8, metalness: 0 },
-    { shape: nozzle, name: 'nozzle', color: nozzleColor, roughness: 0.3, metalness: 1 },
+    {
+      shape: nozzle.cut(
+        drawCircle(0.2)
+          .sketchOnPlane('XY', -0.1)
+          .extrude(sockBottom + 0.2),
+      ),
+      name: 'nozzle',
+      color: nozzleColor,
+      roughness: 0.3,
+      metalness: 1,
+    },
   ];
 }

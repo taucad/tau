@@ -115,9 +115,10 @@ export default function main(params = defaultParams): Array<
   const textured = params.plate === 'textured-pei';
   const coat = textured ? 0.075 : 0.175;
   const color = textured ? '#C4A168' : '#282A2E';
+  const inkColor = textured ? '#CECECE' : '#56585D';
   const thickness = 0.4 + coat * 2;
   const sheet = sheetOutline();
-  const material = { roughness: textured ? 0.9 : 0.65, metalness: 0 };
+  const material = { roughness: textured ? 0.9 : 0.7, metalness: 0 };
   const edgeName = label(textured ? 'Bambu Textured PEI Plate' : 'Bambu Smooth PEI Plate', 104, 4.2)
     .rotate(-90, [0, 0])
     .translate(3.5, 171);
@@ -193,12 +194,14 @@ export default function main(params = defaultParams): Array<
     },
     { shape: sheet.sketchOnPlane('XY', -coat).extrude(coat), name: 'surface', color, ...material },
     { shape: sheet.sketchOnPlane('XY', -thickness).extrude(coat), name: 'underside', color, ...material },
-    { shape: film(band), name: 'marking-band', color: '#CECECE', ...material },
+    { shape: film(band), name: 'marking-band', color: inkColor, ...material },
     { shape: film(text, 0.04), name: 'marking-text', color, ...material },
     {
-      shape: makeCompound([edgeName, warning, ...waves, ...placement, plateIcon, ...brand].map((ink) => film(ink))),
+      shape: makeCompound(
+        [edgeName, warning, ...waves, ...placement, plateIcon, ...(textured ? brand : [])].map((ink) => film(ink)),
+      ),
       name: 'marking-ink',
-      color: '#CECECE',
+      color: inkColor,
       ...material,
     },
   ];

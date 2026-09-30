@@ -7,36 +7,36 @@ import { describe, it, assertType } from 'vitest';
 import type { ProtocolHeader, WireMessage } from '#types/protocol-header.types.js';
 
 describe('ProtocolHeader (type-d)', () => {
-  it('should require v, seq and accept optional cid + rgen', () => {
-    const minimal: ProtocolHeader = { v: 3, seq: 0 };
+  it('should require v, seq and accept optional cid', () => {
+    const minimal: ProtocolHeader = { v: 4, seq: 0 };
     assertType<ProtocolHeader>(minimal);
 
-    const correlated: ProtocolHeader = { v: 3, seq: 1, cid: 'cmd_xyz', rgen: 3 };
+    const correlated: ProtocolHeader = { v: 4, seq: 1, cid: 'cmd_xyz' };
     assertType<ProtocolHeader>(correlated);
   });
 
-  it('should narrow v to the current protocol version literal `3`', () => {
-    const header: ProtocolHeader = { v: 3, seq: 0 };
-    // Compile-time: assignment to `3` only succeeds because `v` is a literal type.
-    const literal: 3 = header.v;
-    assertType<3>(literal);
+  it('should narrow v to the current protocol version literal `4`', () => {
+    const header: ProtocolHeader = { v: 4, seq: 0 };
+    // Compile-time: assignment to `4` only succeeds because `v` is a literal type.
+    const literal: 4 = header.v;
+    assertType<4>(literal);
   });
 });
 
 describe('WireMessage<T> (type-d)', () => {
   it('should produce the structural intersection of a payload and a ProtocolHeader', () => {
     type Ping = { type: 'ping' };
-    const wire: WireMessage<Ping> = { type: 'ping', v: 3, seq: 0 };
+    const wire: WireMessage<Ping> = { type: 'ping', v: 4, seq: 0 };
     assertType<WireMessage<Ping>>(wire);
     assertType<'ping'>(wire.type);
-    assertType<3>(wire.v);
+    assertType<4>(wire.v);
     assertType<number>(wire.seq);
   });
 
   it('should preserve discriminated unions across the intersection', () => {
     type Sample = { type: 'a'; payload: string } | { type: 'b'; payload: number };
     const widen = <T>(value: T): T => value;
-    const wireA = widen<WireMessage<Sample>>({ type: 'a', payload: 'hello', v: 3, seq: 0 });
+    const wireA = widen<WireMessage<Sample>>({ type: 'a', payload: 'hello', v: 4, seq: 0 });
     if (wireA.type === 'a') {
       assertType<string>(wireA.payload);
     }

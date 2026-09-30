@@ -22,7 +22,7 @@
       "inputs": [
         "{projectRoot}/scripts/audit-public-surface.mts",
         "{projectRoot}/src/index.ts",
-        "{projectRoot}/src/client/runtime-client-core.ts",
+        "{projectRoot}/src/client/runtime-document-client-core.ts",
         "{projectRoot}/tsconfig.lib.json",
         "{projectRoot}/src/vite/index.ts"
       ]

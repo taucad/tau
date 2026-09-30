@@ -1,5 +1,5 @@
 import { randomUuid } from '@taucad/utils/id';
-import { OperationAbortedError } from '#framework/runtime-worker-client.js';
+import { OperationAbortedError } from '#framework/runtime-operation-errors.js';
 import type { RuntimeDocumentSessionClient } from '#client/runtime-document-session.js';
 import type {
   Description,

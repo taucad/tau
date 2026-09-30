@@ -16,18 +16,25 @@
  */
 
 import { z } from 'zod';
-import { runtimeCapabilityKinds } from '#plugins/plugin-types.js';
+import {
+  runtimeIssueSchema,
+  runtimeContentDigestSchema,
+  runtimeSourceRevisionSchema,
+  runtimeInitializeArgsSchema,
+  runtimeInitializeResultSchema,
+  runtimeLogArgsSchema,
+  runtimeLogBatchArgsSchema,
+  runtimeTelemetryArgsSchema,
+  runtimeCapabilitiesUpdatedArgsSchema,
+  transportHelloPayloadSchema,
+} from '#types/runtime-wire-common.schemas.js';
 import { runtimeContentSchema } from '#types/runtime-content.types.js';
-import { cadLengthUnits, exportFidelityValues } from '@taucad/types/constants';
-import type { MimeType } from '@taucad/types';
-import type { MessagePortLike, WireProtocolSchemas } from '@taucad/rpc';
-import { isMessagePortLike } from '#transport/_internal/wire-transferables.js';
-import { compiledWasmModuleSchema } from '#transport/_internal/compiled-wasm-module.schema.js';
+import { cadLengthUnits } from '@taucad/types/constants';
+import type { MediaType } from '@taucad/types';
+import type { WireProtocolSchemas } from '@taucad/rpc';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
-import { kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 import { assertRootedPath } from '@taucad/utils/path';
 import { validateArtifactPaths } from '#types/export-artifact-validation.js';
-import type { ContentDigest } from '@taucad/cache-core';
 import { isParameterManifestShape } from '@taucad/parameters';
 import type { ParameterManifest } from '@taucad/parameters';
 
@@ -60,23 +67,14 @@ const geometryFileSchema = z
   })
   .catchall(z.unknown());
 
-const kernelIssueCodeSchema = z.enum(kernelIssueCodeValues);
-
-const kernelIssueSchema = z
-  .object({
-    message: z.string(),
-    code: kernelIssueCodeSchema,
-    severity: z.enum(['error', 'warning', 'info']),
-    details: z.unknown().optional(),
-  })
-  .catchall(z.unknown());
+const kernelIssueSchema = runtimeIssueSchema;
 
 const binaryContentDeliverySchema = z.discriminatedUnion('delivery', [
   z.object({ delivery: z.literal('inline'), bytes: z.instanceof(Uint8Array) }).strict(),
   z.object({ delivery: z.literal('pooled'), key: z.string() }).strict(),
 ]);
 
-const mimeTypeSchema = z.custom<MimeType>(
+const mimeTypeSchema = z.custom<MediaType>(
   (value) => typeof value === 'string' && value.trim().length > 0,
   'Expected a non-empty MIME type',
 );
@@ -113,20 +111,8 @@ const directExportFilesSchema = z
     }
   });
 
-const isSha256Digest = (value: unknown): value is `sha256:${string}` =>
-  typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value);
-const contentDigestSchema = z.custom<ContentDigest>(isSha256Digest, 'Expected a lowercase SHA-256 digest');
-
-/** The source closure a request-scoped operation read, carried on the result it produced (R4). */
-const sourceRevisionSchema = z
-  .object({
-    entry: rootedFilePathSchema,
-    files: z.record(rootedFilePathSchema, z.union([contentDigestSchema, z.literal('missing')])),
-  })
-  .strict();
-
-/** Provenance is optional on every result branch: only request-scoped operations resolve a closure. */
-const sourceRevisionShape = { sourceRevision: sourceRevisionSchema.optional() };
+const contentDigestSchema = runtimeContentDigestSchema;
+const sourceRevisionShape = { sourceRevision: runtimeSourceRevisionSchema.optional() };
 
 const exportGeometryResultSchema = z.discriminatedUnion('success', [
   z
@@ -155,28 +141,6 @@ export const getParametersResultSchema = z.union([
       data: z.custom<ParameterManifest>(isParameterManifestShape, 'Expected a parameter manifest wire shape'),
       issues: z.array(kernelIssueSchema),
       serializedNativeHandle: z.unknown().optional(),
-      ...sourceRevisionShape,
-    })
-    .catchall(z.unknown()),
-  z
-    .object({
-      success: z.literal(false),
-      issues: z.array(kernelIssueSchema),
-      ...sourceRevisionShape,
-    })
-    .catchall(z.unknown()),
-]);
-
-/** Parameter description result used by the view/export runtime contract. @public */
-export const describeResultSchema = z.union([
-  z
-    .object({
-      success: z.literal(true),
-      data: z.object({
-        parameters: z.custom<ParameterManifest>(isParameterManifestShape, 'Expected a parameter manifest wire shape'),
-      }),
-      issues: z.array(kernelIssueSchema),
-      serializedHandle: z.unknown().optional(),
       ...sourceRevisionShape,
     })
     .catchall(z.unknown()),
@@ -235,157 +199,6 @@ const previewCommandIdentityShape = {
   abortGeneration: abortGenerationSchema.optional(),
 } as const;
 const wireAbortReasonCodeSchema = z.literal(2);
-
-const runtimePluginPermissionsSchema = z
-  .object({
-    network: z.array(z.string()).optional(),
-    filesystemWrite: z.boolean().optional(),
-  })
-  .catchall(z.unknown());
-
-const runtimeRegistrationCommonShape = {
-  id: z.string(),
-  permissions: runtimePluginPermissionsSchema.optional(),
-} as const;
-
-const knownRuntimeCapabilityRegistrationSchema = z.discriminatedUnion('kind', [
-  z
-    .object({
-      ...runtimeRegistrationCommonShape,
-      kind: z.literal('kernel'),
-      extensions: z.array(z.string()),
-    })
-    .catchall(z.unknown()),
-  z
-    .object({
-      ...runtimeRegistrationCommonShape,
-      kind: z.literal('middleware'),
-    })
-    .catchall(z.unknown()),
-  z
-    .object({
-      ...runtimeRegistrationCommonShape,
-      kind: z.literal('bundler'),
-    })
-    .catchall(z.unknown()),
-  z
-    .object({
-      ...runtimeRegistrationCommonShape,
-      kind: z.literal('transcoder'),
-    })
-    .catchall(z.unknown()),
-]);
-
-const unknownRuntimeCapabilityRegistrationSchema = z
-  .object({
-    kind: z.string(),
-    id: z.string(),
-  })
-  .catchall(z.unknown())
-  .refine(({ kind }) => !runtimeCapabilityKinds.includes(kind as (typeof runtimeCapabilityKinds)[number]));
-
-const runtimeCapabilityRegistrationSchema = z.union([
-  knownRuntimeCapabilityRegistrationSchema,
-  unknownRuntimeCapabilityRegistrationSchema,
-]);
-
-const contentCapabilitySchema = z
-  .object({
-    schema: z.unknown(),
-    defaults: runtimeContentSchema,
-  })
-  .catchall(z.unknown());
-
-const exportRouteSchema = z
-  .object({
-    targetFormat: z.string().min(1),
-    kernelId: z.string(),
-    sourceFormat: z.string().min(1),
-    transcoderId: z.string().optional(),
-    fidelity: z.enum(exportFidelityValues),
-    exportOptions: z
-      .object({
-        schema: z.unknown(),
-        defaults: z.unknown(),
-      })
-      .catchall(z.unknown()),
-    content: contentCapabilitySchema.optional(),
-  })
-  .catchall(z.unknown());
-
-const renderCapabilitySchema = z
-  .object({
-    renderOptions: z
-      .object({
-        schema: z.unknown(),
-        defaults: z.unknown(),
-      })
-      .catchall(z.unknown()),
-    content: contentCapabilitySchema.optional(),
-    cancellation: z.literal('cooperative').optional(),
-  })
-  .catchall(z.unknown());
-
-export const capabilitiesManifestSchema = z
-  .object({
-    registrations: z.array(runtimeCapabilityRegistrationSchema),
-    routes: z.array(exportRouteSchema),
-    renderCapabilities: z.record(z.string(), renderCapabilitySchema),
-  })
-  .catchall(z.unknown());
-
-const logEntrySchema = z.unknown();
-const telemetryEntrySchema = z
-  .object({
-    name: z.string(),
-    startTime: z.number(),
-    duration: z.number(),
-    detail: z.record(z.string(), z.unknown()).optional(),
-    workerTimeOrigin: z.number(),
-  })
-  .catchall(z.unknown());
-
-// ---------- Memory handle (transport-supplied attachments) ----------
-
-const sharedArrayBufferSchema = z.custom<SharedArrayBuffer>(
-  (value) => typeof SharedArrayBuffer !== 'undefined' && value instanceof SharedArrayBuffer,
-);
-
-/* Structural, not `instanceof`: the handle legitimately carries a DOM
- * `MessagePort`, a `node:worker_threads` port, or an in-process structural
- * port (X7). Reuses the transport's single port sniff. */
-const messagePortSchema = z.custom<MessagePortLike>(isMessagePortLike);
-export const runtimeInitializeMemoryHandleSchema = z
-  .object({
-    signalBuffer: sharedArrayBufferSchema.optional(),
-    geometryPoolBuffer: sharedArrayBufferSchema.optional(),
-    fileSystemPort: messagePortSchema.optional(),
-    computeStorePort: messagePortSchema.optional(),
-    computeBindingMode: z.enum(['off', 'memory', 'durable']).optional(),
-    devtoolsTelemetry: z.boolean().optional(),
-    compiledWasmModules: z
-      .array(z.object({ url: z.string(), module: compiledWasmModuleSchema }).strict())
-      .readonly()
-      .optional(),
-  })
-  .catchall(z.unknown());
-
-// ---------- Initialize call ----------
-
-export const runtimeInitializeArgsSchema = z
-  .object({
-    config: z.unknown().optional(),
-    memoryHandle: runtimeInitializeMemoryHandleSchema.optional(),
-    sessionId: z.string().optional(),
-    resumeToken: z.string().optional(),
-  })
-  .catchall(z.unknown());
-
-export const runtimeInitializeResultSchema = z
-  .object({
-    capabilities: capabilitiesManifestSchema,
-  })
-  .catchall(z.unknown());
 
 // ---------- Export call ----------
 
@@ -614,51 +427,6 @@ export const runtimeActiveKernelChangedArgsSchema = z
   .object({
     kernelId: z.string().optional(),
     renderId: renderIdSchema.optional(),
-  })
-  .catchall(z.unknown());
-
-export const runtimeLogArgsSchema = z
-  .object({
-    entry: logEntrySchema,
-  })
-  .catchall(z.unknown());
-
-export const runtimeLogBatchArgsSchema = z
-  .object({
-    entries: z.array(logEntrySchema),
-  })
-  .catchall(z.unknown());
-
-const telemetryOriginSchema = z
-  .object({
-    label: z.string(),
-    instance: z.string(),
-  })
-  .catchall(z.unknown());
-
-export const runtimeTelemetryArgsSchema = z
-  .object({
-    entries: z.array(telemetryEntrySchema),
-    origin: telemetryOriginSchema,
-    epoch: z.number(),
-  })
-  .catchall(z.unknown());
-
-export const runtimeCapabilitiesUpdatedArgsSchema = z
-  .object({
-    capabilities: capabilitiesManifestSchema,
-  })
-  .catchall(z.unknown());
-
-// ---------- Hello payload ----------
-
-export const transportHelloPayloadSchema = z
-  .object({
-    server: z.literal('kernel-runtime-worker'),
-    runtimeVersion: z.string(),
-    protocolVersion: z.number().int().min(0),
-    sessionId: z.string().optional(),
-    resumeToken: z.string().optional(),
   })
   .catchall(z.unknown());
 

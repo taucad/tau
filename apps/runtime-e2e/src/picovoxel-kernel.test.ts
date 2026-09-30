@@ -10,7 +10,8 @@ import { esbuild } from '@taucad/esbuild';
 import { picovoxel } from '@taucad/picovoxel';
 import type { PicovoxelOptionsInput } from '@taucad/picovoxel';
 import { Worker as NodeWorker } from 'node:worker_threads';
-import { createRuntimeClient } from '@taucad/runtime';
+import { asKnownArtifact, createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { createNodeClient } from '@taucad/runtime/node';
 import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
@@ -120,17 +121,25 @@ describe('PicoVoxel packaged runtime', () => {
     `);
     const client = await createNodeClient({ runtime: createRuntime('serial'), projectPath });
     try {
+      const document = client.open({ source: { path: 'main.ts' }, evaluateOptions: { lane: 'fast' } });
       const renderGlb = async (lane: 'fast' | 'exact'): Promise<Uint8Array<ArrayBuffer>> => {
-        const outcome = await client.render({ source: { path: 'main.ts' }, renderOptions: { lane } });
-        if (outcome.superseded || !outcome.geometry.success || outcome.geometry.data.format !== 'gltf') {
+        if (lane === 'exact') {
+          await document.update({ evaluateOptions: { lane } });
+        }
+        const outcome = await document.view('model').rendering();
+        if (outcome.superseded || !outcome.rendering.success) {
           throw new Error(`PicoVoxel ${lane} render failed`);
         }
-        return outcome.geometry.data.content;
+        const artifact = asKnownArtifact(outcome.rendering.artifact);
+        if (artifact?.mimeType !== 'model/gltf-binary') {
+          throw new Error(`PicoVoxel ${lane} did not render GLB`);
+        }
+        return artifact.content;
       };
       const fast = await measureGlb(await renderGlb('fast'));
       // The export replays the model exactly; canonical Z-up millimetres, so it measures in voxel units.
       const exported = extractGltfFromExportResult(
-        await client.export('glb', { exportOptions: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } } }),
+        await document.export('glb', { options: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } } }),
       );
       const exact = await measureGlb(exported!);
       const exactView = await measureGlb(await renderGlb('exact'));
@@ -144,7 +153,7 @@ describe('PicoVoxel packaged runtime', () => {
         expect(Math.abs(fast.maximum[axis]! - exactView.maximum[axis]!)).toBeLessThanOrEqual(voxelSize * scale);
       }
     } finally {
-      await client.shutdown({ drain: true });
+      await client.shutdown();
       client.terminate();
     }
   }, 300_000);
@@ -170,36 +179,39 @@ describe('PicoVoxel packaged runtime', () => {
       }),
     });
     try {
-      const render = async (steps: number) =>
-        client.render({ source: { path: 'main.ts' }, parameters: { steps }, renderOptions: { lane: 'exact' } });
+      const document = client.open({
+        source: { path: 'main.ts' },
+        parameters: { steps: 1 },
+        evaluateOptions: { lane: 'exact' },
+      });
       const logs: string[] = [];
       const stopLogs = client.on('log', ({ message }) => logs.push(message));
 
       // Warm the worker (bundle, module, runtime) so the heavy build reaches its loop quickly.
-      const warm = await render(1);
-      expect(!warm.superseded && warm.geometry.success).toBe(true);
+      const warm = await document.evaluation();
+      expect(!warm.superseded && warm.evaluation.success).toBe(true);
 
-      // Supersede only once the heavy build is computing: ordered by the worker's own progress
-      // event, never by a wall clock (invariant I5). Nothing later is orderable: logs reach the client
-      // in the render's telemetry flush, after the build, so a log-ordered supersede lands too late.
+      // Supersede only once the heavy native evaluation begins, ordered by the worker's own
+      // progress event rather than a wall clock (invariant I5). Logs can arrive after the build,
+      // so a log-ordered supersede lands too late.
       // Large enough that no machine finishes it before the superseding render arrives; supersession
       // makes the size free.
       const heavySteps = 400;
       const computing = new Promise<void>((resolve) => {
-        const stop = client.on('progress', (phase) => {
-          if (phase === 'computingGeometry') {
+        const stop = document.on('progress', ({ phase }) => {
+          if (phase === 'evaluate') {
             stop();
             resolve();
           }
         });
       });
-      const heavy = render(heavySteps);
+      const heavy = document.update({ parameters: { steps: heavySteps } });
       await computing;
-      const light = await render(1);
+      const light = await document.update({ parameters: { steps: 1 } });
 
       const superseded = await heavy;
       expect(superseded.superseded).toBe(true);
-      expect(!light.superseded && light.geometry.success).toBe(true);
+      expect(!light.superseded && light.evaluation.success).toBe(true);
       // Cooperative, in work units: the kernel's own check caught the heavy build before its loop
       // finished (1 sphere + 400 offsets), rather than the runtime discarding a completed build. The
       // count can be 0 when the supersede lands while the build is still bundling or opening its
@@ -212,12 +224,83 @@ describe('PicoVoxel packaged runtime', () => {
       stopLogs();
 
       // Worker recovery: the next export replays cleanly on the same worker.
-      const stl = await client.export('stl');
-      expect(stl.success && stlHeader(stl.data[0]!.bytes)).toBe('PicoGK UNITS=mm');
+      const stl = await document.export('stl');
+      expect(stl.success && stlHeader(stl.files[0].bytes)).toBe('PicoGK UNITS=mm');
     } finally {
       client.terminate();
     }
   }, 300_000);
+
+  it('should stop synchronous native render and write hooks through the packaged Node worker', async () => {
+    const client = createRuntimeClient({
+      transport: nodeWorkerTransport({
+        url: new URL('fixtures/picovoxel-node-runtime.ts', import.meta.url),
+        fileSystem: fromMemoryFs({ 'native.hook': 'fixture' }),
+        workerCtor: TsxWorker,
+      }),
+    });
+    const logs: string[] = [];
+    const stopLogs = client.on('log', ({ message }) => {
+      logs.push(message);
+    });
+    try {
+      const document = client.open({ source: { path: 'native.hook' }, parameters: { spin: true } });
+      const first = await document.evaluation();
+      expect(first.superseded).toBe(false);
+      if (first.superseded) {
+        throw new Error('Native render fixture evaluation was superseded.');
+      }
+      expect(first.evaluation.success).toBe(true);
+
+      const renderStarted = Promise.withResolvers<void>();
+      const stopRenderProgress = document.on('progress', ({ phase }) => {
+        if (phase === 'render') {
+          stopRenderProgress();
+          renderStarted.resolve();
+        }
+      });
+      const slowView = document.view('model');
+      const slowRender = slowView.rendering();
+      await renderStarted.promise;
+      const lightEvaluation = await document.update({ parameters: { spin: false } });
+      expect(lightEvaluation.superseded).toBe(false);
+      const stoppedRender = await slowRender;
+      expect(stoppedRender.superseded).toBe(true);
+      const recoveredRender = await document.view('model').rendering();
+      expect(recoveredRender.superseded).toBe(false);
+      if (recoveredRender.superseded) {
+        throw new Error('Recovery render was superseded.');
+      }
+      expect(recoveredRender.rendering.success).toBe(true);
+
+      const heavyEvaluation = await document.update({ parameters: { spin: true } });
+      expect(heavyEvaluation.superseded).toBe(false);
+      const writeStarted = Promise.withResolvers<void>();
+      const stopWriteProgress = document.on('progress', ({ phase }) => {
+        if (phase === 'write') {
+          stopWriteProgress();
+          writeStarted.resolve();
+        }
+      });
+      const controller = new AbortController();
+      const slowExport = document.export('text', { signal: controller.signal });
+      await writeStarted.promise;
+      controller.abort();
+      await expect(slowExport).rejects.toMatchObject({ name: 'OperationAbortedError' });
+      const finalEvaluation = await document.update({ parameters: { spin: false } });
+      expect(finalEvaluation.superseded).toBe(false);
+      const recoveredExport = await document.export('text');
+      expect(recoveredExport.success).toBe(true);
+      if (recoveredExport.success) {
+        expect(new TextDecoder().decode(recoveredExport.files[0].bytes)).toBe('recovered');
+      }
+      expect(logs.some((message) => message.startsWith('Native render stopped after '))).toBe(true);
+      expect(logs.some((message) => message.startsWith('Native write stopped after '))).toBe(true);
+    } finally {
+      stopLogs();
+      client.terminate();
+    }
+  }, 60_000);
 
   it('should export the pinned exact STL and GLB of sphere-minus-beams on both wasm builds (DP18)', async () => {
     // The same pins the browser leg asserts (apps/ui-e2e picovoxel-multi.spec.ts).
@@ -238,13 +321,14 @@ describe('PicoVoxel packaged runtime', () => {
       });
       try {
         const exported: Record<'stl' | 'glb', Pin | undefined> = { stl: undefined, glb: undefined };
+        const document = client.open({ source: { path: 'main.ts' } });
         for (const format of ['stl', 'glb'] as const) {
           // oxlint-disable-next-line no-await-in-loop -- one client, one export at a time
-          const result = await client.export(format, { source: { path: 'main.ts' } });
+          const result = await document.export(format);
           if (!result.success) {
             throw new Error(result.issues.map(({ message }) => message).join('; '));
           }
-          exported[format] = digest(result.data[0]!.bytes);
+          exported[format] = digest(result.files[0].bytes);
         }
         return exported;
       } finally {
@@ -259,27 +343,28 @@ describe('PicoVoxel packaged runtime', () => {
   it('should render a multi-file ShapeKernel model and export exact GLB and STL through the Node client', async () => {
     const client = await createNodeClient({ runtime: createRuntime(), projectPath: await writeProject() });
     try {
-      const rendered = await client.render({ source: { path: 'main.ts' }, content: { includeEdges: true } });
-      if (rendered.superseded || !rendered.geometry.success) {
+      const document = client.open({ source: { path: 'main.ts' } });
+      const rendered = await document.view('model', { content: { includeEdges: true } }).rendering();
+      if (rendered.superseded || !rendered.rendering.success) {
         throw new Error(`PicoVoxel render failed: ${JSON.stringify(rendered)}`);
       }
 
-      const glb = extractGltfFromExportResult(await client.export('glb'));
+      const glb = extractGltfFromExportResult(await document.export('glb'));
       expect(glb).toBeDefined();
       validateGlbData(glb!);
 
-      const stl = await client.export('stl');
+      const stl = await document.export('stl');
       if (!stl.success) {
         throw new Error(stl.issues.map(({ message }) => message).join('; '));
       }
-      expect(stl.data.map(({ name }) => name)).toEqual(['Shape 1.stl']);
+      expect(stl.files.map(({ name }) => name)).toEqual(['Shape 1.stl']);
       // The default export lane is exact: no LANE=fast stamp.
-      expect(stlHeader(stl.data[0]!.bytes)).toBe('PicoGK UNITS=mm');
+      expect(stlHeader(stl.files[0].bytes)).toBe('PicoGK UNITS=mm');
 
-      const fast = await client.export('stl', { exportOptions: { lane: 'fast' } });
-      expect(fast.success && stlHeader(fast.data[0]!.bytes)).toBe('PicoGK UNITS=mm LANE=fast');
+      const fast = await document.export('stl', { options: { lane: 'fast' } });
+      expect(fast.success && stlHeader(fast.files[0].bytes)).toBe('PicoGK UNITS=mm LANE=fast');
     } finally {
-      await client.shutdown({ drain: true });
+      await client.shutdown();
       client.terminate();
     }
   }, 180_000);
@@ -291,10 +376,11 @@ describe('PicoVoxel packaged runtime', () => {
     await writeFile(join(directory, starter.mainFile), starter.emptyCode);
     const client = await createNodeClient({ runtime: createRuntime(), projectPath: directory });
     try {
-      const rendered = await client.render({ source: { path: starter.mainFile } });
-      expect(rendered.superseded || rendered.geometry.success).toBe(true);
+      const document = client.open({ source: { path: starter.mainFile } });
+      const rendered = await document.view('model').rendering();
+      expect(rendered.superseded || rendered.rendering.success).toBe(true);
 
-      const stl = await client.export('stl');
+      const stl = await document.export('stl');
       expect(stl.success).toBe(false);
       expect(stl.success ? [] : stl.issues.map(({ message }) => message)).toEqual([
         expect.stringContaining('no shapes to export'),
@@ -310,11 +396,11 @@ describe('PicoVoxel packaged runtime', () => {
       const client = await createNodeClient({ runtime: createRuntime(wasm), projectPath });
       try {
         // Request-scoped, as GeoSpec exports: one private exact build.
-        const result = await client.export('glb', { source: { path: 'main.ts' } });
+        const result = await client.open({ source: { path: 'main.ts' } }).export('glb');
         if (!result.success) {
           throw new Error(result.issues.map(({ message }) => message).join('; '));
         }
-        return result.data[0]!.bytes;
+        return result.files[0].bytes;
       } finally {
         client.terminate();
       }

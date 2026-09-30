@@ -22,6 +22,13 @@ import type { GeometrySvg } from '@taucad/types';
 import type {
   runtimeInitializeArgsSchema,
   runtimeInitializeResultSchema,
+  runtimeLogArgsSchema,
+  runtimeLogBatchArgsSchema,
+  runtimeTelemetryArgsSchema,
+  runtimeCapabilitiesUpdatedArgsSchema,
+  transportHelloPayloadSchema,
+} from '#types/runtime-wire-common.schemas.js';
+import type {
   runtimeExportArgsSchema,
   runtimeExportModelArgsSchema,
   runtimeEvaluateModelArgsSchema,
@@ -38,13 +45,8 @@ import type {
   runtimeBinaryMaterialisedArgsSchema,
   runtimeUpdateParametersArgsSchema,
   runtimeSetOptionsArgsSchema,
-  runtimeLogArgsSchema,
-  runtimeLogBatchArgsSchema,
-  runtimeTelemetryArgsSchema,
-  runtimeCapabilitiesUpdatedArgsSchema,
   runtimeKernelCommandArgsSchema,
   runtimeKernelEventArgsSchema,
-  transportHelloPayloadSchema,
   runtimeProtocolSchemas,
 } from '#types/runtime-protocol.schemas.js';
 import type {

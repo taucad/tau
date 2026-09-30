@@ -28,15 +28,15 @@ const withGlobalOverride = async <T>(
 describe('runtime protocol schemas in constrained browser environments', () => {
   it('should import when SharedArrayBuffer is unavailable', async () => {
     await withGlobalOverride('SharedArrayBuffer', undefined, async () => {
-      const { runtimeProtocolSchemas } = await import('#types/runtime-protocol.schemas.js');
+      const { runtimeDocumentProtocolSchemas } = await import('#types/runtime-document-protocol.schemas.js');
 
-      expect(runtimeProtocolSchemas.calls.initialize.args).toBeDefined();
+      expect(runtimeDocumentProtocolSchemas.calls.initialize.args).toBeDefined();
     });
   });
 
   it('should reject shared memory handles when SharedArrayBuffer is unavailable', async () => {
     await withGlobalOverride('SharedArrayBuffer', undefined, async () => {
-      const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+      const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-wire-common.schemas.js');
 
       expect(
         runtimeInitializeMemoryHandleSchema.safeParse({
@@ -48,15 +48,15 @@ describe('runtime protocol schemas in constrained browser environments', () => {
 
   it('should import when MessagePort is unavailable', async () => {
     await withGlobalOverride('MessagePort', undefined, async () => {
-      const { runtimeProtocolSchemas } = await import('#types/runtime-protocol.schemas.js');
+      const { runtimeDocumentProtocolSchemas } = await import('#types/runtime-document-protocol.schemas.js');
 
-      expect(runtimeProtocolSchemas.calls.initialize.args).toBeDefined();
+      expect(runtimeDocumentProtocolSchemas.calls.initialize.args).toBeDefined();
     });
   });
 
   it('should reject file-system ports when MessagePort is unavailable', async () => {
     await withGlobalOverride('MessagePort', undefined, async () => {
-      const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+      const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-wire-common.schemas.js');
 
       expect(
         runtimeInitializeMemoryHandleSchema.safeParse({
@@ -69,7 +69,7 @@ describe('runtime protocol schemas in constrained browser environments', () => {
 
 describe('runtime initialize memory handle port validation (X7)', () => {
   it('should accept a Node MessageChannel port', async () => {
-    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-wire-common.schemas.js');
     const channel = new MessageChannel();
 
     try {
@@ -87,7 +87,7 @@ describe('runtime initialize memory handle port validation (X7)', () => {
   });
 
   it('should accept a structural port that is not a MessagePort instance', async () => {
-    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-wire-common.schemas.js');
     const structuralPort = {
       postMessage(): void {
         /* No-op. */
@@ -108,14 +108,14 @@ describe('runtime initialize memory handle port validation (X7)', () => {
   });
 
   it('should reject a plain object that exposes no port methods', async () => {
-    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-wire-common.schemas.js');
 
     expect(runtimeInitializeMemoryHandleSchema.safeParse({ fileSystemPort: { postMessage: 1 } }).success).toBe(false);
     expect(runtimeInitializeMemoryHandleSchema.safeParse({ fileSystemPort: {} }).success).toBe(false);
   });
 
   it('should reject port shapes that wrapMessagePort cannot drive', async () => {
-    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-wire-common.schemas.js');
     const noop = (): void => {
       /* No-op. */
     };

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { setAbortContext, clearAbortContext, checkAbort } from '#framework/cooperative-abort.js';
-import { RenderAbortedError } from '#framework/runtime-worker-client.js';
+import { RenderAbortedError } from '#framework/runtime-operation-errors.js';
 import { signalSlot } from '#types/runtime-protocol.types.js';
 import { signalBufferByteLength } from '#framework/runtime-framework.constants.js';
 

@@ -1,28 +1,31 @@
 import { z } from 'zod';
 import type { WireProtocolSchemas } from '@taucad/rpc';
-import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
-import type { ContentDigest } from '@taucad/cache-core';
 import type { JSONSchema7 } from '@taucad/json-schema';
+import { isJsonSchema, isWireJson } from '#types/runtime-metadata-validation.js';
 import type { ParameterManifest } from '@taucad/parameters';
 import { isParameterManifestShape } from '@taucad/parameters';
 import { cadLengthUnits } from '@taucad/types/constants';
 import { runtimeContentSchema } from '#types/runtime-content.types.js';
-import { kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 import { assertRootedPath } from '@taucad/utils/path';
-import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
+import { validateArtifactPaths } from '#types/export-artifact-validation.js';
+import {
+  runtimeInitializeArgsSchema,
+  runtimeInitializeResultSchema,
+  runtimeLogArgsSchema,
+  runtimeLogBatchArgsSchema,
+  runtimeTelemetryArgsSchema,
+  runtimeCapabilitiesUpdatedArgsSchema,
+  runtimeContentDigestSchema,
+  runtimeIssueSchema,
+  runtimeSourceRevisionSchema,
+  transportHelloPayloadSchema,
+} from '#types/runtime-wire-common.schemas.js';
 
 const id = z.string().min(1);
 const intent = z.number().int().min(0);
 const values = z.record(z.string(), z.unknown());
-const issue = z
-  .object({
-    code: z.enum(kernelIssueCodeValues),
-    message: z.string(),
-    severity: z.enum(['error', 'warning', 'info']),
-    details: z.unknown().optional(),
-  })
-  .catchall(z.unknown());
-const issues = z.array(issue);
+const issue = runtimeIssueSchema;
+const issues = z.array(issue).readonly();
 const rootedFile = z
   .string()
   .min(1)
@@ -35,96 +38,12 @@ const rootedFile = z
   });
 const file = z.object({ path: z.string(), filename: id });
 const stage = z.record(rootedFile, z.instanceof(Uint8Array));
-const sourceRevision = z
-  .object({
-    entry: rootedFile,
-    files: z.record(
-      rootedFile,
-      z.union([
-        z.custom<ContentDigest>((value) => typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value)),
-        z.literal('missing'),
-      ]),
-    ),
-  })
-  .strict();
-const provenance = { sourceRevision: sourceRevision.optional() };
+const provenance = { sourceRevision: runtimeSourceRevisionSchema.optional() };
 const binary = z.discriminatedUnion('delivery', [
   z.object({ delivery: z.literal('inline'), bytes: z.instanceof(Uint8Array) }).strict(),
   z.object({ delivery: z.literal('pooled'), key: id }).strict(),
 ]);
 const mediaType = z.string().trim().min(1);
-const jsonSchemaTypes = new Set(['array', 'boolean', 'integer', 'null', 'number', 'object', 'string']);
-const isWireJson = (value: unknown, ancestors = new Set<unknown>(), depth = 0): boolean => {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
-    return true;
-  }
-  if (typeof value === 'number') {
-    return Number.isFinite(value);
-  }
-  if (typeof value !== 'object' || depth > 64 || ancestors.has(value)) {
-    return false;
-  }
-  if (
-    !Array.isArray(value) &&
-    Object.getPrototypeOf(value) !== Object.prototype &&
-    Object.getPrototypeOf(value) !== null
-  ) {
-    return false;
-  }
-  const ownKeys = Reflect.ownKeys(value);
-  if (ownKeys.some((key) => typeof key === 'symbol')) {
-    return false;
-  }
-  if (ownKeys.length - (Array.isArray(value) ? 1 : 0) !== Object.keys(value).length) {
-    return false;
-  }
-  if (Array.isArray(value) && Object.keys(value).length !== value.length) {
-    return false;
-  }
-  ancestors.add(value);
-  try {
-    return Object.values(Object.getOwnPropertyDescriptors(value)).every(
-      (descriptor) => 'value' in descriptor && isWireJson(descriptor.value, ancestors, depth + 1),
-    );
-  } catch {
-    return false;
-  } finally {
-    ancestors.delete(value);
-  }
-};
-const isJsonSchema = (value: unknown): value is JSONSchema7 => {
-  if (!isWireJson(value) || typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const schema = value as Record<string, unknown>;
-  if (schema['type'] !== undefined) {
-    const types = Array.isArray(schema['type']) ? schema['type'] : [schema['type']];
-    if (!types.every((type) => typeof type === 'string' && jsonSchemaTypes.has(type))) {
-      return false;
-    }
-  }
-  if (schema['properties'] !== undefined) {
-    if (
-      typeof schema['properties'] !== 'object' ||
-      schema['properties'] === null ||
-      Array.isArray(schema['properties'])
-    ) {
-      return false;
-    }
-    if (
-      !Object.values(schema['properties']).every((property) => typeof property === 'boolean' || isJsonSchema(property))
-    ) {
-      return false;
-    }
-  }
-  if (
-    schema['required'] !== undefined &&
-    (!Array.isArray(schema['required']) || !schema['required'].every((key) => typeof key === 'string'))
-  ) {
-    return false;
-  }
-  return true;
-};
 const options = z
   .object({
     schema: z.custom<JSONSchema7>(isJsonSchema),
@@ -137,7 +56,7 @@ const viewOffer = z
     id,
     title: z.string(),
     mimeType: mediaType,
-    instances: z.array(instance).optional(),
+    instances: z.array(instance).readonly().optional(),
     options: options.optional(),
   })
   .strict();
@@ -150,8 +69,8 @@ const evaluation = z.discriminatedUnion('success', [
       success: z.literal(true),
       id,
       transient: z.boolean(),
-      views: z.array(viewOffer),
-      exports: z.array(exportOffer),
+      views: z.array(viewOffer).readonly(),
+      exports: z.array(exportOffer).readonly(),
       issues,
       ...provenance,
     })
@@ -162,12 +81,24 @@ const description = z.discriminatedUnion('success', [
   z
     .object({
       success: z.literal(true),
-      kernelId: z.union([z.string(), z.undefined()]),
+      kernelId: z
+        .string()
+        .nullish()
+        .transform((value) => value ?? undefined),
       parameters: z.custom<ParameterManifest>(isParameterManifestShape),
       issues,
     })
     .strict(),
-  z.object({ success: z.literal(false), kernelId: z.union([z.string(), z.undefined()]), issues }).strict(),
+  z
+    .object({
+      success: z.literal(false),
+      kernelId: z
+        .string()
+        .nullish()
+        .transform((value) => value ?? undefined),
+      issues,
+    })
+    .strict(),
 ]);
 const artifact = z
   .object({
@@ -214,12 +145,102 @@ const exportResult = z.discriminatedUnion('success', [
       success: z.literal(true),
       exportId: id,
       evaluationId: id,
-      files: z.tuple([exportFile], exportFile),
+      files: z.tuple([exportFile], exportFile).readonly(),
       issues,
       ...provenance,
     })
     .strict(),
   z.object({ success: z.literal(false), issues, ...provenance }).strict(),
+]);
+const describeArgs = z
+  .object({
+    stage: stage.optional(),
+    file: file.strict(),
+    resolution: z
+      .object({
+        mode: z.enum(['default', 'declared-only']).optional(),
+        profile: z.literal('tau-json-structure-units-03-v1').optional(),
+        inferenceLanguage: z.string().optional(),
+        projectBindingDigest: runtimeContentDigestSchema.optional(),
+        sourceUnitDigest: runtimeContentDigestSchema.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+const snapshotArgs = z
+  .object({
+    stage: stage.optional(),
+    file,
+    additionalPaths: z
+      .array(z.object({ path: rootedFile, required: z.boolean() }).strict())
+      .readonly()
+      .optional(),
+  })
+  .strict();
+const snapshotResult = z.discriminatedUnion('success', [
+  z
+    .object({
+      success: z.literal(true),
+      data: z
+        .object({
+          entryPath: rootedFile,
+          files: z
+            .array(
+              z
+                .object({
+                  path: rootedFile,
+                  content: z.instanceof(Uint8Array),
+                  sha256: z.string(),
+                  role: z.enum(['entry', 'kernel-dependency', 'middleware-dependency', 'additional']),
+                })
+                .strict(),
+            )
+            .readonly(),
+          unresolvedPaths: z.array(rootedFile).readonly(),
+          kernelId: z.string(),
+        })
+        .strict(),
+      issues: z.array(issue),
+      ...provenance,
+    })
+    .strict(),
+  z.object({ success: z.literal(false), issues: z.array(issue), ...provenance }).strict(),
+]);
+const transcodeFile = z.object({ name: id, mimeType: mediaType, bytes: z.instanceof(Uint8Array) }).strict();
+const transcodeArgs = z
+  .object({
+    from: id,
+    to: id,
+    files: z
+      .array(transcodeFile)
+      .min(1)
+      .superRefine((files, context) => {
+        for (const issue of validateArtifactPaths(files)) {
+          context.addIssue({
+            code: 'custom',
+            path: [issue.index, 'name'],
+            message:
+              issue.reason === 'duplicate-path'
+                ? 'Artifact path duplicates an earlier input.'
+                : 'Expected a safe relative artifact path.',
+          });
+        }
+      }),
+    options: values,
+  })
+  .strict();
+const transcodeResult = z.discriminatedUnion('success', [
+  z
+    .object({
+      success: z.literal(true),
+      data: z.array(exportFile).min(1),
+      issues: z.array(issue),
+      serializedNativeHandle: z.unknown().optional(),
+      ...provenance,
+    })
+    .strict(),
+  z.object({ success: z.literal(false), issues: z.array(issue), ...provenance }).strict(),
 ]);
 const document = { documentId: id };
 const withIntent = { ...document, intent };
@@ -229,11 +250,11 @@ const evaluationId = { evaluationId: id };
 
 /** Runtime document wire validators. Every admitted command and result is checked here. @public */
 export const runtimeDocumentProtocolSchemas = {
-  hello: runtimeProtocolSchemas.hello,
+  hello: transportHelloPayloadSchema,
   calls: {
-    initialize: runtimeProtocolSchemas.calls.initialize,
+    initialize: { args: runtimeInitializeArgsSchema, result: runtimeInitializeResultSchema },
     describe: {
-      args: runtimeProtocolSchemas.calls.resolveParameters.args,
+      args: describeArgs,
       result: description,
     },
     export: {
@@ -248,9 +269,9 @@ export const runtimeDocumentProtocolSchemas = {
         .strict(),
       result: exportResult,
     },
-    snapshotSource: runtimeProtocolSchemas.calls.snapshotSource,
-    transcode: runtimeProtocolSchemas.calls.transcode,
-    dispose: runtimeProtocolSchemas.calls.cleanup,
+    snapshotSource: { args: snapshotArgs, result: snapshotResult },
+    transcode: { args: transcodeArgs, result: transcodeResult },
+    dispose: { args: z.null(), result: z.null() },
   },
   notifies: {
     open: z
@@ -298,7 +319,7 @@ export const runtimeDocumentProtocolSchemas = {
       .strict(),
     closeView: z.object(subscription).strict(),
     abort: z.object({ operationId: id, reason: z.number().int() }).strict(),
-    binaryMaterialised: runtimeProtocolSchemas.notifies.binaryMaterialised,
+    binaryMaterialised: z.object({ key: id }).strict(),
     described: z.discriminatedUnion('success', [
       description.options[0].extend({ ...withIntent, ...evaluationId }),
       description.options[1].extend({ ...withIntent, ...evaluationId }),
@@ -324,7 +345,7 @@ export const runtimeDocumentProtocolSchemas = {
       })
       .strict(),
     errorEvent: z.discriminatedUnion('scope', [
-      z.object({ scope: z.literal('connection'), error: runtimeProtocolSchemas.notifies.errorEvent }).strict(),
+      z.object({ scope: z.literal('connection'), error: z.object({ issues }).strict() }).strict(),
       z
         .object({
           scope: z.literal('operation'),
@@ -340,10 +361,10 @@ export const runtimeDocumentProtocolSchemas = {
         .strict(),
     ]),
     stateChanged: z.object({ state: z.enum(['idle', 'busy', 'error']), detail: z.string().optional() }).strict(),
-    log: runtimeProtocolSchemas.notifies.log,
-    logBatch: runtimeProtocolSchemas.notifies.logBatch,
-    telemetry: runtimeProtocolSchemas.notifies.telemetry,
-    capabilitiesUpdated: runtimeProtocolSchemas.notifies.capabilitiesUpdated,
+    log: runtimeLogArgsSchema,
+    logBatch: runtimeLogBatchArgsSchema,
+    telemetry: runtimeTelemetryArgsSchema,
+    capabilitiesUpdated: runtimeCapabilitiesUpdatedArgsSchema,
   },
   listens: {},
-} as const satisfies WireProtocolSchemas<RuntimeDocumentProtocol>;
+} as const satisfies WireProtocolSchemas;

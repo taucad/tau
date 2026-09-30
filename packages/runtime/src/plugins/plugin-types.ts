@@ -86,7 +86,9 @@ export type KernelPlugin<
   /** File extensions this kernel handles (e.g., ['scad'], ['ts', 'js']). '*' is a catch-all. */
   extensions: Extensions;
   /** Serialisable V2 export declarations keyed by export ID. */
-  exports?: Readonly<Record<string, Readonly<{ extension: string }>>>;
+  exports?: unknown extends Exports
+    ? Readonly<Record<string, Readonly<{ extension: string }>>>
+    : Readonly<{ [Key in keyof Exports]: Readonly<{ extension: string }> }>;
   /** Regex to match against file content for kernel selection */
   detectImport?: RegExp | Readonly<{ source: string; flags: string }>;
   /** Bare-specifier module names this kernel provides for bundler-assisted detection */

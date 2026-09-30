@@ -44,7 +44,7 @@ import type {
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type { RuntimeTranscodeArgs, TelemetryBatch } from '#types/runtime-protocol.types.js';
-import { OperationAbortedError, OperationTimeoutError } from '#framework/runtime-worker-client.js';
+import { OperationAbortedError, OperationTimeoutError } from '#framework/runtime-operation-errors.js';
 import { renderTimeoutRecoveryGrace } from '#framework/runtime-framework.constants.js';
 
 // oxlint-disable @typescript-eslint/no-explicit-any -- Transport and plugin existential carriers retain concrete tuples at the public overload.
@@ -310,7 +310,7 @@ export function createRuntimeClient(options: {
       if (currentLifecycle() === 'terminated') {
         throw new RuntimeTerminatedError();
       }
-      const initialized = await transport.initialize({ config });
+      const initialized = await transport.initialize(config === undefined ? {} : { config });
       if (currentLifecycle() === 'terminated') {
         throw new RuntimeTerminatedError();
       }
@@ -349,6 +349,8 @@ export function createRuntimeClient(options: {
         operationTimeout: () => activeTimeout,
         onTimeout,
         onTerminal: clearRecovery,
+        signalAbort: (evaluationId, generation, reason) =>
+          transport.signalDocumentAbort(evaluationId, generation, reason),
       });
       lifecycleState = 'connected';
     })();
@@ -532,6 +534,7 @@ export function createRuntimeClient(options: {
       const controller = new AbortController();
       const timed = Promise.withResolvers<never>();
       const operationId = `transcode:${randomUuid()}`;
+      let workerReplied = false;
       const onAbort = (): void => {
         controller.abort();
       };
@@ -540,7 +543,9 @@ export function createRuntimeClient(options: {
         transcodeTimeout > 0
           ? setTimeout(() => {
               timed.reject(new OperationTimeoutError('transcode', 'Transcode timed out.'));
-              onTimeout(operationId);
+              if (!workerReplied) {
+                onTimeout(operationId);
+              }
             }, transcodeTimeout)
           : undefined;
       try {
@@ -548,6 +553,7 @@ export function createRuntimeClient(options: {
         const call = channel.call('transcode', request as RuntimeTranscodeArgs, controller.signal);
         void clearRecoveryWhenSettled(call, operationId);
         const wire = await waitWithAbort(Promise.race([call, timed.promise, terminated.promise]), signal);
+        workerReplied = true;
         if (!wire.success) {
           return wire;
         }

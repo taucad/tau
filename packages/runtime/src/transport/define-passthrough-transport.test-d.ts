@@ -10,7 +10,7 @@ import { definePassthroughTransport } from '#transport/define-runtime-transport.
 import type { RuntimeTransportClient, TransportClientReady } from '#transport/runtime-transport.types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type { TransportPluginId } from '#transport/transport-projections.js';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 
 const stubDescriptor = <Id extends string>(id: Id): TransportDescriptor<Id> => ({
   id,
@@ -21,7 +21,7 @@ const stubDescriptor = <Id extends string>(id: Id): TransportDescriptor<Id> => (
 
 const stubClient = <Id extends string>(
   id: Id,
-): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<string, unknown>>, Id> =>
+): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<string, unknown>>, Id> =>
   ({
     id,
     describe(): TransportDescriptor<Id> {
@@ -36,16 +36,22 @@ const stubClient = <Id extends string>(
     reservePreview() {
       return {};
     },
+    signalDocumentAbort() {
+      return false;
+    },
     renderTimeoutRecovery: { kind: 'unsupported' },
     async resolveGeometry() {
       throw new Error('stub');
     },
+    async resolveBinary() {
+      throw new Error('stub');
+    },
     async close() {},
     closed: Promise.resolve({ cause: 'requested' }),
-  }) as RuntimeTransportClient<RuntimeProtocol, Readonly<Record<string, unknown>>, Id>;
+  }) as RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<string, unknown>>, Id>;
 
 describe('definePassthroughTransport — TypeScript surface', () => {
-  const clientFoo = (): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<string, unknown>>, 'foo'> =>
+  const clientFoo = (): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<string, unknown>>, 'foo'> =>
     stubClient<'foo'>('foo');
   clientFoo.describe = (): TransportDescriptor<'foo'> => stubDescriptor('foo');
 
@@ -61,7 +67,7 @@ describe('definePassthroughTransport — TypeScript surface', () => {
   });
 
   it('works without clientOptionsSchema', () => {
-    const clientBar = (): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<string, unknown>>, 'bar'> =>
+    const clientBar = (): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<string, unknown>>, 'bar'> =>
       stubClient<'bar'>('bar');
     clientBar.describe = (): TransportDescriptor<'bar'> => stubDescriptor('bar');
 

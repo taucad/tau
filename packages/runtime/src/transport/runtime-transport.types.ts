@@ -351,6 +351,9 @@ export type RuntimeTransportClient<
    */
   reservePreview(): RuntimeTransportPreviewReservation;
 
+  /** Atomically signal a still-current native document operation. @internal */
+  signalDocumentAbort(evaluationId: string, expectedGeneration: number | undefined, reason: 1 | 2): boolean;
+
   /** Human/diagnostic descriptor; never used to branch runtime behaviour. */
   describe(): TransportDescriptor<Id>;
 

@@ -5,7 +5,7 @@
  * package's public surface.
  *
  *  1. **`RuntimeClient` member allowlist** — introspect the canonical
- *     `RuntimeClient` type literal in `packages/runtime/src/client/runtime-client-core.ts`.
+ *     `RuntimeClient` type literal in `packages/runtime/src/client/runtime-document-client-core.ts`.
  *     CI fails on drift: an unknown member appearing (regression — a removed
  *     legacy verb came back) or a required member disappearing (accidental
  *     deletion).
@@ -29,7 +29,8 @@ import { dirname, resolve } from 'node:path';
 import * as ts from 'typescript';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const runtimeClientPath = resolve(here, '..', 'src', 'client', 'runtime-client-core.ts');
+const runtimeClientPath = resolve(here, '..', 'src', 'client', 'runtime-document-client-core.ts');
+const clientBarrelPath = resolve(here, '..', 'src', 'client', 'runtime-client.ts');
 const packageBarrelPath = resolve(here, '..', 'src', 'index.ts');
 const viteBarrelPath = resolve(here, '..', 'src', 'vite', 'index.ts');
 
@@ -42,18 +43,12 @@ const allowedMembers: ReadonlySet<string> = new Set([
   'machines',
   'jobs',
   'lifecycleState',
-  'renderStatus',
-  'activeKernelId',
   'capabilities',
   'connect',
-  'render',
-  'evaluate',
-  'resolveParameters',
-  'updateParameters',
-  'setOptions',
-  'setRenderTimeout',
+  'open',
+  'describe',
+  'setOperationTimeout',
   'setTranscodeTimeout',
-  'export',
   'transcode',
   'snapshotSource',
   'on',
@@ -79,6 +74,15 @@ const forbiddenMembers: ReadonlySet<string> = new Set([
   'geometryPool',
   'lastRequestedGeneration',
   'incrementAbortGeneration',
+  'renderStatus',
+  'activeKernelId',
+  'render',
+  'evaluate',
+  'resolveParameters',
+  'updateParameters',
+  'setOptions',
+  'setRenderTimeout',
+  'export',
 ]);
 
 const failures: string[] = [];
@@ -104,7 +108,7 @@ const loadRuntimeClientBranches = (sourceOverride?: string): ReadonlyArray<Reado
   const program = ts.createProgram(parsed.fileNames, parsed.options, host);
   const sourceFile = program.getSourceFile(runtimeClientPath);
   if (!sourceFile) {
-    throw new Error('could not load runtime-client-core.ts in the runtime TypeScript program');
+    throw new Error('could not load runtime-document-client-core.ts in the runtime TypeScript program');
   }
   const runtimeClientType = sourceFile.statements.find(
     (node): node is ts.TypeAliasDeclaration =>
@@ -113,7 +117,7 @@ const loadRuntimeClientBranches = (sourceOverride?: string): ReadonlyArray<Reado
       node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) === true,
   );
   if (!runtimeClientType) {
-    throw new Error('could not locate exported `RuntimeClient` type alias in runtime-client-core.ts');
+    throw new Error('could not locate exported `RuntimeClient` type alias in runtime-document-client-core.ts');
   }
 
   const checker = program.getTypeChecker();
@@ -202,41 +206,43 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'createRuntimeClient',
   'RuntimeClient',
   'RuntimeClientOptions',
+  'RuntimeClientOptionsWithTransport',
   'FilesystemRuntimeSource',
   'InlineRuntimeSource',
-  'RuntimeExportOptions',
-  'RuntimeRenderInput',
-  'RuntimeEvaluateInput',
+  'RuntimeDocument',
+  'OpenInput',
+  'DocumentViewRequest',
+  'DocumentExportRequest',
+  'DocumentUpdate',
+  'Evaluation',
+  'Rendering',
+  'Description',
+  'UpdateOutcome',
+  'ViewUpdateOutcome',
+  'ViewSubscription',
+  'ViewOffer',
+  'ExportOffer',
+  'DocumentStatus',
+  'ViewStatus',
+  'WideViewRequest',
+  'WideExportRequest',
   'RuntimeSource',
   'RuntimeSourceContent',
   'RuntimeSourceFiles',
-  'RuntimeSourceSnapshotAdditionalPath',
-  'RuntimeSourceSnapshotInput',
   'sourcePathMatchesExtensions',
   'ExportResult',
-  'RenderOutcome',
-  'RenderStatus',
   'RuntimeLifecycleState',
-  'RuntimeConnectionCause',
-  'RuntimeTerminatedCause',
-  'RuntimeTerminatedDetail',
   'RuntimeFromTransport',
 
   // Lifecycle errors + guards
-  'NoRenderOutcomeError',
-  'isNoRenderOutcomeError',
-  'RuntimeNotConnectedError',
-  'isRuntimeNotConnectedError',
-  'RuntimeConnectionError',
-  'isRuntimeConnectionError',
   'RuntimeTerminatedError',
   'isRuntimeTerminatedError',
+  'OperationAbortedError',
+  'isOperationAbortedError',
+  'OperationTimeoutError',
+  'isOperationTimeoutError',
 
-  // Render-path errors + guards (re-exported from runtime-worker-client.js)
-  'RenderTimeoutError',
-  'isRenderTimeoutError',
-  'RenderAbortedError',
-  'isRenderAbortedError',
+  // Operation errors + guards
 
   // Shared-pool errors + guards
   'SharedPoolEntryNotFoundError',
@@ -358,6 +364,16 @@ for (const required of allowedViteBarrelExports) {
 }
 
 const observedBarrelExports = new Set<string>();
+
+// The package root intentionally uses `export *` for the browser-safe client
+// entry. Audit its explicit declarations as part of the root's client surface.
+const clientBarrelSource = readFileSync(clientBarrelPath, 'utf8');
+const clientBarrelSourceFile = ts.createSourceFile(clientBarrelPath, clientBarrelSource, ts.ScriptTarget.Latest, true);
+clientBarrelSourceFile.forEachChild((node) => {
+  if (ts.isExportDeclaration(node) && node.exportClause && ts.isNamedExports(node.exportClause)) {
+    for (const specifier of node.exportClause.elements) observedBarrelExports.add(specifier.name.text);
+  }
+});
 
 barrelSourceFile.forEachChild((node) => {
   // `export { A, B as C } from '...';` and `export { A, B };`

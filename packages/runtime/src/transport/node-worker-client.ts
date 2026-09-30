@@ -25,7 +25,7 @@ import type {
   TransportClientReady,
 } from '#transport/runtime-transport.types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
-import { runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
+import { runtimeChannelSessionKey } from '#transport/_internal/runtime-channel-bindings.js';
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
@@ -38,7 +38,7 @@ import type {
   RuntimeInitializeResult,
 } from '#types/runtime-protocol.types.js';
 import { allocatePools } from '#transport/_internal/sab-pools.js';
-import { reservePreview, triggerDocumentTimeout } from '#transport/_internal/abort-channel.js';
+import { reservePreview, signalDocumentAbort, triggerDocumentTimeout } from '#transport/_internal/abort-channel.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { nodeWorkerId } from '#transport/_internal/node-worker-id.js';
 import type { NodeWorkerId } from '#transport/_internal/node-worker-id.js';
@@ -172,7 +172,7 @@ export const nodeWorkerClient = (
 
   let bridge: ReturnType<typeof buildFileSystemBridge>;
   let computeBridge: ReturnType<typeof buildComputeStoreBridge> | undefined;
-  let openPromise: Promise<TransportClientReady<RuntimeDocumentProtocol>> | undefined;
+  let openPromise: Promise<TransportClientReady> | undefined;
   let worker: NodeWorkerLike | undefined;
   let port: Port<unknown> | undefined;
   let channel: Channel<RuntimeDocumentProtocol> | undefined;
@@ -222,7 +222,7 @@ export const nodeWorkerClient = (
     resolveClosed?.(result);
   };
 
-  const open = async (): Promise<TransportClientReady<RuntimeDocumentProtocol>> => {
+  const open = async (): Promise<TransportClientReady> => {
     if (openPromise) {
       return openPromise;
     }
@@ -276,6 +276,9 @@ export const nodeWorkerClient = (
     id: nodeWorkerId,
     reservePreview() {
       return reservePreview(ensurePools().signalBuffer);
+    },
+    signalDocumentAbort(evaluationId, generation, reason) {
+      return signalDocumentAbort(ensurePools().signalBuffer, evaluationId, generation, reason);
     },
     renderTimeoutRecovery: {
       kind: 'terminable',

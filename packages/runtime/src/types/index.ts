@@ -93,7 +93,25 @@ export type {
   BundlerDefinition,
   BundlerPluginFactory,
 } from '#types/runtime-bundler.types.js';
-export type * from '#types/runtime-middleware-v2.types.js';
+export type {
+  MiddlewareState,
+  MiddlewareContent,
+  MiddlewareDependency,
+  MiddlewareDependencyServices,
+  MiddlewareResolveHook,
+  KernelMiddlewareServices,
+  EvaluateRequest,
+  RenderRequest,
+  WriteRequest,
+  WrapDescribeHook,
+  WrapEvaluateHook,
+  WrapRenderHook,
+  WrapWriteHook,
+  ViewContentKeys,
+  ExportContentKeys,
+  ExportContentMap,
+  ViewContentMap,
+} from '#types/runtime-middleware-v2.types.js';
 export type * from '#types/runtime-content.types.js';
 export type * from '#types/runtime-source-snapshot.types.js';
 export {

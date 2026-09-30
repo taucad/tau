@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createChannelClient, createChannelServer, wrapMessagePort } from '@taucad/rpc';
+import type { ChannelContext } from '@taucad/rpc';
 import { materialiseBinaryContent } from '#transport/_internal/export-materialiser.js';
 import { RuntimeDocumentSessionClient } from '#client/runtime-document-session.js';
 import { openDeferredDocument } from '#client/runtime-document-deferred.js';
@@ -14,6 +15,293 @@ const nextTurn = async (): Promise<void> => {
 };
 
 describe('document channel session', () => {
+  it('signals exact native render and write tokens on view supersession and document close', async () => {
+    const ports = new MessageChannel();
+    const exportCalled = Promise.withResolvers<string>();
+    const viewOpened = Promise.withResolvers<{ subscriptionId: string; requestId: string }>();
+    const server = createChannelServer<RuntimeDocumentProtocol>({
+      port: wrapMessagePort(ports.port1, { label: 'native-abort-server' }),
+      sessionKey: 'native-abort-test',
+      hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion },
+      protocolSchemas: runtimeDocumentProtocolSchemas,
+      impl: {
+        async call(_context, name, args) {
+          if (name === 'export' && args && typeof args === 'object' && 'operationId' in args) {
+            exportCalled.resolve(String(args.operationId));
+          }
+          return new Promise<never>(() => {
+            /* Work remains active until local close. */
+          });
+        },
+        notify(_context, name, args) {
+          if (
+            name === 'openView' &&
+            args &&
+            typeof args === 'object' &&
+            'subscriptionId' in args &&
+            'requestId' in args
+          ) {
+            viewOpened.resolve({ subscriptionId: String(args.subscriptionId), requestId: String(args.requestId) });
+          }
+        },
+        listen() {
+          throw new Error('No streams.');
+        },
+      },
+    });
+    const channel = createChannelClient<RuntimeDocumentProtocol>({
+      port: wrapMessagePort(ports.port2, { label: 'native-abort-client' }),
+      sessionKey: 'native-abort-test',
+      protocolSchemas: runtimeDocumentProtocolSchemas,
+    });
+    await channel.ready;
+    const signalAbort = vi.fn(() => true);
+    const sessions = new RuntimeDocumentSessionClient(
+      channel,
+      async (content) => materialiseBinaryContent(content, undefined),
+      { signalAbort },
+    );
+    const document = sessions.open({
+      documentId: 'doc',
+      file: { path: '/', filename: 'main.ts' },
+      parameters: {},
+      watch: false,
+    });
+    try {
+      server.notify('evaluating', { documentId: 'doc', intent: 0, evaluationId: '1', transient: false });
+      server.notify('evaluated', {
+        documentId: 'doc',
+        intent: 0,
+        id: '1',
+        success: true,
+        transient: false,
+        views: [],
+        exports: [],
+        issues: [],
+      });
+      await document.evaluation();
+      const view = document.view();
+      const { subscriptionId, requestId: firstRequestId } = await viewOpened.promise;
+      server.notify('rendering', { subscriptionId, requestId: firstRequestId, evaluationId: '1', intent: 0 });
+      server.notify('progress', {
+        documentId: 'doc',
+        intent: 0,
+        evaluationId: '1',
+        operationId: `render:${subscriptionId}:1:${firstRequestId}`,
+        requestId: firstRequestId,
+        phase: 'render',
+        detail: { abortSequence: 5, abortGeneration: 7 },
+      });
+      await nextTurn();
+      const updated = view.update({});
+      expect(signalAbort).toHaveBeenCalledWith('5', 7, 1);
+      const exported = document.export('bom');
+      const exportOperationId = await exportCalled.promise;
+      server.notify('progress', {
+        documentId: 'doc',
+        intent: 0,
+        evaluationId: '1',
+        operationId: exportOperationId,
+        phase: 'write',
+        detail: { abortSequence: 6, abortGeneration: 8 },
+      });
+      await nextTurn();
+      document.close();
+      expect(signalAbort).toHaveBeenCalledWith('6', 8, 1);
+      await expect(updated).resolves.toEqual({ superseded: true });
+      await expect(exported).rejects.toMatchObject({ name: 'OperationAbortedError' });
+    } finally {
+      document.close();
+      sessions.close();
+      channel.close();
+      server.dispose();
+    }
+  });
+
+  it('times out during pooled export materialisation and acknowledges every delivered file', async () => {
+    const ports = new MessageChannel();
+    const firstBinary = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+    const resolving = Promise.withResolvers<void>();
+    const resolvedKeys: string[] = [];
+    function call<Name extends keyof RuntimeDocumentProtocol['calls'] & string>(
+      _context: ChannelContext,
+      name: Name,
+    ): Promise<RuntimeDocumentProtocol['calls'][Name]['result']>;
+    async function call(_context: ChannelContext, name: string): Promise<unknown> {
+      if (name === 'export') {
+        return {
+          success: true,
+          exportId: 'bom',
+          evaluationId: 'e1',
+          files: [
+            { name: 'a.txt', mimeType: 'text/plain', bytes: { delivery: 'pooled', key: 'a' } },
+            { name: 'b.txt', mimeType: 'text/plain', bytes: { delivery: 'pooled', key: 'b' } },
+          ],
+          issues: [],
+        };
+      }
+      throw new Error(`Unexpected call: ${name}`);
+    }
+    const server = createChannelServer<RuntimeDocumentProtocol>({
+      port: wrapMessagePort(ports.port1, { label: 'export-timeout-server' }),
+      sessionKey: 'export-timeout-test',
+      hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion },
+      protocolSchemas: runtimeDocumentProtocolSchemas,
+      impl: {
+        call,
+        notify() {
+          /* Export timeout only needs the RPC result. */
+        },
+        listen() {
+          throw new Error('No streams.');
+        },
+      },
+    });
+    const channel = createChannelClient<RuntimeDocumentProtocol>({
+      port: wrapMessagePort(ports.port2, { label: 'export-timeout-client' }),
+      sessionKey: 'export-timeout-test',
+      protocolSchemas: runtimeDocumentProtocolSchemas,
+    });
+    await channel.ready;
+    const onTimeout = vi.fn();
+    const sessions = new RuntimeDocumentSessionClient(
+      channel,
+      async (content) => {
+        if (content.delivery !== 'pooled') {
+          return materialiseBinaryContent(content, undefined);
+        }
+        resolvedKeys.push(content.key);
+        if (content.key === 'a') {
+          resolving.resolve();
+          return firstBinary.promise;
+        }
+        return new TextEncoder().encode('b');
+      },
+      { operationTimeout: () => 20, onTimeout },
+    );
+    const document = sessions.open({
+      documentId: 'doc',
+      file: { path: '/', filename: 'main.ts' },
+      parameters: {},
+      watch: false,
+    });
+    try {
+      server.notify('evaluating', { documentId: 'doc', intent: 0, evaluationId: 'e1', transient: false });
+      server.notify('evaluated', {
+        documentId: 'doc',
+        intent: 0,
+        id: 'e1',
+        success: true,
+        transient: false,
+        views: [],
+        exports: [],
+        issues: [],
+      });
+      await document.evaluation();
+      const exported = document.export('bom');
+      await resolving.promise;
+      await expect(exported).rejects.toMatchObject({ name: 'OperationTimeoutError' });
+      firstBinary.resolve(new TextEncoder().encode('a'));
+      await vi.waitFor(() => {
+        expect(resolvedKeys).toEqual(['a', 'b']);
+      });
+      expect(onTimeout).not.toHaveBeenCalled();
+    } finally {
+      firstBinary.resolve(new TextEncoder().encode('a'));
+      document.close();
+      sessions.close();
+      channel.close();
+      server.dispose();
+    }
+  });
+
+  it('signals only the current unpinned evaluation generation on update', async () => {
+    const ports = new MessageChannel();
+    const server = createChannelServer<RuntimeDocumentProtocol>({
+      port: wrapMessagePort(ports.port1, { label: 'generation-server' }),
+      sessionKey: 'generation-test',
+      hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion },
+      protocolSchemas: runtimeDocumentProtocolSchemas,
+      impl: {
+        async call() {
+          return new Promise<never>(() => {
+            /* Export remains admitted. */
+          });
+        },
+        notify() {
+          /* Admission is observed through the client-side signal callback. */
+        },
+        listen() {
+          throw new Error('No streams.');
+        },
+      },
+    });
+    const channel = createChannelClient<RuntimeDocumentProtocol>({
+      port: wrapMessagePort(ports.port2, { label: 'generation-client' }),
+      sessionKey: 'generation-test',
+      protocolSchemas: runtimeDocumentProtocolSchemas,
+    });
+    await channel.ready;
+    const signalAbort = vi.fn(() => true);
+    const sessions = new RuntimeDocumentSessionClient(
+      channel,
+      async (content) => materialiseBinaryContent(content, undefined),
+      { signalAbort },
+    );
+    const open = (documentId: string) =>
+      sessions.open({
+        documentId,
+        file: { path: '/', filename: 'main.ts' },
+        parameters: {},
+        watch: false,
+      });
+    const first = open('first');
+    const second = open('second');
+    const emitStart = (documentId: string, evaluationId: string, generation: number) => {
+      server.notify('evaluating', { documentId, intent: 0, evaluationId, transient: false });
+      server.notify('progress', {
+        documentId,
+        intent: 0,
+        evaluationId,
+        operationId: `evaluate:${documentId}:${evaluationId}`,
+        phase: 'evaluate',
+        detail: { abortGeneration: generation },
+      });
+    };
+    emitStart('first', 'one', 7);
+    await nextTurn();
+    const pinnedExport = first.export('bom');
+    const pinnedUpdate = first.update({ parameters: { value: 1 } });
+    expect(signalAbort).not.toHaveBeenCalled();
+    emitStart('second', 'two', 8);
+    await nextTurn();
+    const ordinaryUpdate = second.update({ parameters: { value: 2 } });
+    expect(signalAbort).toHaveBeenCalledExactlyOnceWith('two', 8, 1);
+    const beforeProgress = second.update({ parameters: { value: 3 } });
+    expect(signalAbort).toHaveBeenCalledTimes(1);
+    const early = open('early');
+    server.notify('evaluating', { documentId: 'early', intent: 0, evaluationId: 'four', transient: false });
+    await nextTurn();
+    const earlyUpdate = early.update({ parameters: { value: 4 } });
+    expect(signalAbort).toHaveBeenLastCalledWith('four', undefined, 1);
+    const closing = open('closing');
+    emitStart('closing', 'five', 9);
+    await nextTurn();
+    closing.close();
+    expect(signalAbort).toHaveBeenLastCalledWith('five', 9, 1);
+    first.close();
+    second.close();
+    early.close();
+    await expect(pinnedExport).rejects.toMatchObject({ name: 'OperationAbortedError' });
+    await expect(pinnedUpdate).resolves.toEqual({ superseded: true });
+    await expect(ordinaryUpdate).resolves.toEqual({ superseded: true });
+    await expect(beforeProgress).resolves.toEqual({ superseded: true });
+    await expect(earlyUpdate).resolves.toEqual({ superseded: true });
+    sessions.close();
+    channel.close();
+    server.dispose();
+  });
+
   it('keeps the dispatched deadline when admission arrives after the timeout setting changes', async () => {
     const ports = new MessageChannel();
     const server = createChannelServer<RuntimeDocumentProtocol>({
@@ -231,7 +519,9 @@ describe('document channel session', () => {
       parameters: {},
       watch: false,
     });
-    await nextTurn();
+    await vi.waitFor(() => {
+      expect(commands.some((command) => command.name === 'open')).toBe(true);
+    });
     const opened = commands.find((command) => command.name === 'open')
       ?.args as RuntimeDocumentProtocol['notifies']['open']['args'];
     expect(opened.documentId).toBe(document.id);

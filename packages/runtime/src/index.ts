@@ -1,8 +1,7 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- public API re-export */
 // Document client
 export * from '#client/runtime-client.js';
-export { asKnownArtifact } from '#types/runtime-artifact.js';
-export type { KnownArtifact } from '#types/runtime-artifact.js';
+export { SharedPoolEntryNotFoundError, isSharedPoolEntryNotFoundError } from '#transport/shared-pool-errors.js';
 
 // Plugin types
 export type {

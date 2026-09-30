@@ -226,8 +226,8 @@ describe('typed runtime document', () => {
     opened.update({ parameters: { count: 2 } });
     // @ts-expect-error -- real schema requires evaluate options when opening.
     realClient.open({ source: { files: { 'main.tsx': '' } } });
-    // @ts-expect-error -- source entry stays tied to actual file keys.
     realClient.open({
+      // @ts-expect-error -- source entry stays tied to actual file keys.
       source: { files: { 'main.tsx': '', 'asset.bin': new Uint8Array([1]) }, entry: 'other.ts' },
       evaluateOptions: { precision: 1 },
     });

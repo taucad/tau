@@ -38,7 +38,7 @@ const exportFixture = async (
     };
   } finally {
     document.close();
-    client.terminate();
+    await client.shutdown();
   }
 };
 

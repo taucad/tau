@@ -14,7 +14,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNodeClient } from '@taucad/runtime/node';
-import type { WorkerState } from '@taucad/runtime/types';
+import { asKnownArtifact } from '@taucad/runtime';
+import type { Rendering } from '@taucad/runtime';
 import { runtime } from '#runtime.definition.js';
 
 const mainSource = (height: number): string =>
@@ -45,43 +46,59 @@ describe('autonomous re-render on the Node filesystem adapter', () => {
     await writeFile(entryPath, mainSource(20), 'utf8');
 
     const client = await createNodeClient({ runtime, projectPath: root });
-    const states: WorkerState[] = [];
-    const stopStates = client.on('state', (state) => states.push(state));
-    const settle = async (): Promise<void> => {
-      await vi.waitFor(
-        () => {
-          expect(states.at(-1)).toBe('idle');
-        },
-        { timeout: 120_000, interval: 50 },
-      );
+    const rendered: Rendering[] = [];
+    const content = (rendering: Rendering): Uint8Array<ArrayBuffer> => {
+      if (!rendering.success) {
+        throw new Error('Expected a successful model rendering');
+      }
+      const artifact = asKnownArtifact(rendering.artifact);
+      if (artifact?.mimeType !== 'model/gltf-binary') {
+        throw new Error('Expected GLB model rendering');
+      }
+      return artifact.content;
     };
+    let stopRendered: (() => void) | undefined;
 
+    const document = client.open({ source: { path: 'main.ts' }, watch: true });
+    const view = document.view('model');
     try {
-      const initial = await client.render({ source: { path: 'main.ts' } });
+      stopRendered = view.on('rendered', (rendering) => rendered.push(rendering));
+      const initial = await view.rendering();
       expect(initial.superseded).toBe(false);
-      if (initial.superseded || !initial.geometry.success) {
+      if (initial.superseded || !initial.rendering.success) {
         throw new Error('Expected the initial Replicad preview to render successfully');
       }
-      await settle();
+      expect(content(initial.rendering).byteLength).toBeGreaterThan(0);
 
       // 1. A plain external write through raw node:fs.
-      let mark = states.length;
+      let mark = rendered.length;
       await writeFile(entryPath, mainSource(25), 'utf8');
       await delay(debounceSettlingWindow);
-      expect(states.slice(mark).filter((state) => state === 'rendering')).toEqual(['rendering']);
-      await settle();
+      await vi.waitFor(
+        () => {
+          expect(rendered.length).toBe(mark + 1);
+        },
+        { timeout: 120_000 },
+      );
+      expect(content(rendered[mark]!)).not.toEqual(content(initial.rendering));
 
       // 2. An editor-style atomic save: write a sibling temp file, rename it over the target.
-      mark = states.length;
+      const firstEdit = rendered.at(-1)!;
+      mark = rendered.length;
       const temporaryPath = join(root, '.main.ts.editor.tmp');
       await writeFile(temporaryPath, mainSource(30), 'utf8');
       await rename(temporaryPath, entryPath);
       await delay(debounceSettlingWindow);
-      expect(states.slice(mark).filter((state) => state === 'rendering')).toEqual(['rendering']);
-      await settle();
+      await vi.waitFor(
+        () => {
+          expect(rendered.length).toBe(mark + 1);
+        },
+        { timeout: 120_000 },
+      );
+      expect(content(rendered[mark]!)).not.toEqual(content(firstEdit));
 
       // 3. Tau's own cache writes are excluded and must never feed back into a render.
-      mark = states.length;
+      mark = rendered.length;
       const cacheDirectory = join(root, '.tau/cache/geometry');
       await mkdir(cacheDirectory, { recursive: true });
       for (let index = 0; index < 20; index++) {
@@ -89,11 +106,12 @@ describe('autonomous re-render on the Node filesystem adapter', () => {
         await writeFile(join(cacheDirectory, `burst-${index}.bin`), new Uint8Array([index]));
       }
       await delay(debounceSettlingWindow);
-      expect(states.slice(mark).filter((state) => state === 'rendering')).toEqual([]);
+      expect(rendered.slice(mark)).toEqual([]);
     } finally {
-      stopStates();
-      await client.shutdown({ drain: true });
-      client.terminate();
+      stopRendered?.();
+      view.close();
+      document.close();
+      await client.shutdown();
     }
   });
 });

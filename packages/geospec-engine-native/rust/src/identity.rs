@@ -137,24 +137,50 @@ impl SubjectIdentity {
 
     /// Retained identity payload, counting actual Vec/String capacities.
     pub(crate) fn owned_bytes(&self) -> usize {
-        fn heap(value: &Json) -> usize {
-            match value {
-                Json::String(value) => value.capacity(),
-                Json::Array(values) => {
-                    values.capacity() * std::mem::size_of::<Json>()
-                        + values.iter().map(heap).sum::<usize>()
-                }
-                Json::Object(fields) => {
-                    fields.capacity() * std::mem::size_of::<(String, Json)>()
-                        + fields
-                            .iter()
-                            .map(|(key, value)| key.capacity() + heap(value))
-                            .sum::<usize>()
-                }
-                _ => 0,
-            }
+        std::mem::size_of::<Self>()
+            .saturating_add(self.hash.capacity())
+            .saturating_add(Self::heap(&self.descriptor))
+    }
+
+    /// Diagnostic payload and its containing field allocation; clean identity stays uncharged.
+    pub(crate) fn diagnostics_owned_bytes(&self) -> usize {
+        let Json::Object(fields) = &self.descriptor else {
+            unreachable!()
+        };
+        fields
+            .iter()
+            .find(|(name, _)| name == "diagnostics")
+            .map_or(0, |(name, value)| {
+                name.capacity()
+                    .saturating_add(
+                        fields
+                            .capacity()
+                            .saturating_mul(std::mem::size_of::<(String, Json)>()),
+                    )
+                    .saturating_add(Self::heap(value))
+            })
+    }
+
+    fn heap(value: &Json) -> usize {
+        match value {
+            Json::String(value) => value.capacity(),
+            Json::Array(values) => values.iter().fold(
+                values
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<Json>()),
+                |sum, value| sum.saturating_add(Self::heap(value)),
+            ),
+            Json::Object(fields) => fields.iter().fold(
+                fields
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<(String, Json)>()),
+                |sum, (key, value)| {
+                    sum.saturating_add(key.capacity())
+                        .saturating_add(Self::heap(value))
+                },
+            ),
+            _ => 0,
         }
-        std::mem::size_of::<Self>() + self.hash.capacity() + heap(&self.descriptor)
     }
 
     /// Binds the original syntax owner without hashing its primary bytes again.

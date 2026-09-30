@@ -284,6 +284,41 @@ function ConnectedPrintPanel({
   const { snapshot, providers, error, refresh } = useMachineDirectory(client);
   const entries = useMemo(() => snapshot?.entries.toSorted((a, b) => a.name.localeCompare(b.name)) ?? [], [snapshot]);
   const { selected, select } = useMachinesSelection(projectId, entries);
+  return (
+    <MachinePrintPanel
+      key={`${projectId}:${selected?.machineId ?? ''}`}
+      client={client}
+      bridge={bridge}
+      isShown={isShown}
+      projectId={projectId}
+      directory={{ snapshot, providers, error, refresh }}
+      entries={entries}
+      selected={selected}
+      select={select}
+    />
+  );
+}
+
+function MachinePrintPanel({
+  client,
+  bridge,
+  isShown,
+  projectId,
+  directory,
+  entries,
+  selected,
+  select,
+}: {
+  readonly client: MachineClient;
+  readonly bridge: PrintApprovalBridge;
+  readonly isShown: boolean;
+  readonly projectId: string;
+  readonly directory: ReturnType<typeof useMachineDirectory>;
+  readonly entries: readonly MachineDirectoryEntry[];
+  readonly selected: MachineDirectoryEntry | undefined;
+  readonly select: ReturnType<typeof useMachinesSelection>['select'];
+}): React.JSX.Element {
+  const { snapshot, providers, error, refresh } = directory;
   const provider = providers.find(({ id }) => id === selected?.providerId);
   const manifest = provider?.manifest;
   /* This project's requests only (blueprint D5): the host filters by the id its artifacts carry. */
@@ -304,7 +339,13 @@ function ConnectedPrintPanel({
     },
     [record],
   );
-  const prepare = usePrintPrepare({ client, entry: selected, provider, manifest, isShown });
+  const prepare = usePrintPrepare({
+    client,
+    entry: selected,
+    provider,
+    manifest,
+    isShown: isShown && selected !== undefined,
+  });
   const latestReceipt = ledger.find((entry) => entry.kind === 'receipt');
   const headerPresentation = selected ? presentMachine(selected) : undefined;
   const HeaderIcon = headerPresentation?.icon ?? Printer;

@@ -52,7 +52,8 @@ export const isBambuProvider = (provider: MachineProvider | undefined): boolean 
  * @returns True for the real printer, false for the simulator and every other provider.
  * @public
  */
-export const isRealBambuPrinter = (provider: MachineProvider | undefined): boolean => provider?.id === 'bambu';
+export const isRealBambuPrinter = (provider: MachineProvider | undefined): boolean =>
+  provider?.id === 'bambu' || provider?.id === 'bambu-a1-mini';
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);

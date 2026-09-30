@@ -142,6 +142,20 @@ describe('completeMachineBinding', () => {
       expect(bind.events).toEqual([{ type: 'credential-saved', providerId: 'bambu' }]);
     });
 
+    it('pins the Mini camera on 6000 while preserving MQTT credential custody', async () => {
+      const bind = ceremony({
+        candidate: {
+          ...candidateAt('192.0.2.145', '0300EA652800550'),
+          claimedIdentity: { serial: '0300EA652800550', model: 'A1 mini' },
+        },
+      });
+      await bind.complete({ accessCode: printerCode });
+      expect(bind.probe.mock.calls.map(([probed]) => probed.port)).toEqual([8883, 6000]);
+      expect(bind.completeBinding).toHaveBeenCalledWith(
+        expect.objectContaining({ serviceTrust: { mqtt: pin('a'), camera: pin('c') } }),
+      );
+    });
+
     it('should leave the vault untouched and drop the staged code when the printer refuses it', async () => {
       const bind = ceremony();
 

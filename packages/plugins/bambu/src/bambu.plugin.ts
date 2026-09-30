@@ -1,6 +1,6 @@
 import { definePlugin } from '@taucad/runtime/plugin';
 
-import { bambuMachine } from '#bambu.machine.js';
+import { bambuA1MiniMachine, bambuMachine } from '#bambu.machine.js';
 
 /** Canonical `@taucad/bambu` plugin factory. @public */
 export const bambu = definePlugin({
@@ -10,9 +10,11 @@ export const bambu = definePlugin({
 
   machines: {
     default: bambuMachine,
+    a1Mini: bambuA1MiniMachine,
   },
 
   presets: {
     default: ['machines.default'],
+    a1Mini: ['machines.a1Mini'],
   },
 });

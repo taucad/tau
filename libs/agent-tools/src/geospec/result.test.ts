@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ZodError } from 'zod';
 import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 import type { GeoSpecCanonicalClaimReport } from 'geospec/assertion-client';
 import type { GeometryDiagnostic } from 'geospec/mesh';
@@ -52,6 +53,60 @@ const claimReport = (options: {
 };
 
 describe('model-facing diagnostics', () => {
+  it('should preserve literal subjectId parameter keys through lineage transport', () => {
+    const parameters: Record<string, unknown> = {
+      subjectId: 'authored-name',
+      size: 2,
+      nested: { subjectId: 'nested-name', keep: true },
+    };
+    const lineage = {
+      status: 'complete',
+      modules: [],
+      loads: [
+        {
+          loadId: 'load-1',
+          status: 'complete',
+          subject: { subjectHash: 'a'.repeat(64) },
+          evidence: {
+            loadId: 'load-1',
+            status: 'complete',
+            format: 'gltf',
+            parameters,
+            ingestOptions: {},
+            artifacts: [{ name: 'mesh.bin', sourcePath: 'assets/mesh.bin', sha256: 'b'.repeat(64), byteLength: 2 }],
+          },
+        },
+      ],
+    } as const;
+    const result: GeoSpecRunnerResult = {
+      success: true,
+      passed: 1,
+      failed: 0,
+      selectedTests: 1,
+      files: [
+        {
+          file: 'gear.geospec.ts',
+          result: {
+            success: true,
+            passed: true,
+            lineage,
+            bundle: { success: true, code: '', issues: [], dependencies: [], unresolvedPaths: [] },
+            tests: [{ suite: [], name: 'control', status: 'passed', assertions: [], diagnostics: [] }],
+          },
+        },
+      ],
+    };
+    const output = runnerResultToTestModelOutput(result, ['gear.geospec.ts']);
+    expect(output.lineage).toStrictEqual([{ file: 'gear.geospec.ts', lineage }]);
+    expect(testModelOutputSchema.parse(output)).toStrictEqual(output);
+    for (const invalid of [() => undefined, new Map(), /literal/u, new Uint8Array([1]), Number.NaN]) {
+      parameters['invalid'] = invalid;
+      expect(() => runnerResultToTestModelOutput(result, ['gear.geospec.ts'])).toThrow(ZodError);
+    }
+    delete parameters['invalid'];
+    Reflect.set(lineage.loads[0].subject, 'engine', { nativeHandle: 1 });
+    expect(() => runnerResultToTestModelOutput(result, ['gear.geospec.ts'])).toThrow(ZodError);
+  });
   it('renders nested rejected warnings in plain-text reasons without dropping their structured originals', () => {
     const nested = [
       { code: 'NON_MANIFOLD', severity: 'warning', message: 'Open gear tooth at x=2', details: { source: 'gear.ts' } },

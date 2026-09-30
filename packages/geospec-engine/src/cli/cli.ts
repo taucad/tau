@@ -25,9 +25,9 @@
  */
 
 import { discoverGeoSpecFiles } from 'geospec/runner';
-import { toGeoSpecProtocolJson } from 'geospec/engine';
 import type { GeoSpecForensicEvent, GeoSpecRunner, GeoSpecRunnerResult } from 'geospec/runner/worker';
 import type { GeoSpecRunResult, GeoSpecTestCase } from '#runner/types.js';
+import { protocolWireValue } from '#engine/protocol.js';
 
 /** Parsed CLI invocation, or the reason it could not be parsed. */
 export type GeoSpecCliCommand =
@@ -335,7 +335,7 @@ export const runReportJson = (result: GeoSpecRunnerResult): Record<string, unkno
     file: file.file,
     success: file.result.success && file.result.passed,
     ...(file.result.accounting === undefined ? {} : { accounting: file.result.accounting }),
-    ...(file.result.lineage === undefined ? {} : { lineage: toGeoSpecProtocolJson(file.result.lineage) }),
+    ...(file.result.lineage === undefined ? {} : { lineage: protocolWireValue(file.result.lineage) }),
     ...(file.durationMs === undefined ? {} : { durationMs: file.durationMs }),
     ...(file.result.tests === undefined
       ? {}

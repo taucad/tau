@@ -15,7 +15,6 @@ import { isRecord } from '@taucad/utils/schema';
 import type { GeometryDiagnostic } from 'geospec/mesh';
 import type { GeoSpecTestCase } from 'geospec/runner';
 import type { GeoSpecRunnerResult } from 'geospec/runner/worker';
-import { toGeoSpecProtocolJson } from 'geospec/engine';
 
 type RunGeoSpecTestsSuccess = Extract<RunGeoSpecTestsRpcResult, { success: true }>;
 type RunGeoSpecTestFailure = RunGeoSpecTestsSuccess['failures'][number];
@@ -143,7 +142,7 @@ export const runnerResultToTestModelOutput = (
       : [
           {
             file,
-            lineage: geoSpecRunLineageSchema.parse(toGeoSpecProtocolJson(moduleResult.lineage)),
+            lineage: geoSpecRunLineageSchema.parse(moduleResult.lineage),
           },
         ],
   );

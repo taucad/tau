@@ -74,11 +74,25 @@ type PdfTranscoder = TranscoderPlugin<
   { readonly pdf: 'includeTopology' },
   { readonly pdf: 'delimiter' }
 >;
+type BranchTranscoder = TranscoderPlugin<
+  {
+    readonly png: TranscoderEdgeType<
+      'csv',
+      | { readonly mode: 'single'; readonly camera: 'front' | 'top' }
+      | { readonly mode: 'batch'; readonly views: readonly ['front', ...string[]] }
+    >;
+  },
+  'csv',
+  'branch-converter',
+  Record<never, never>,
+  { readonly png: 'delimiter' }
+>;
 declare const routed: RuntimeDocument<
   readonly [BoardKernel, SolidKernel],
   readonly [DiagramMiddleware],
   readonly [PdfTranscoder]
 >;
+declare const branchRouted: RuntimeDocument<readonly [BoardKernel], readonly never[], readonly [BranchTranscoder]>;
 type PrecisionKernel = KernelPlugin<
   Record<never, never>,
   Record<string, unknown>,
@@ -233,6 +247,17 @@ describe('typed runtime document', () => {
     await routed.export('pdf');
     // @ts-expect-error -- the converter only retains topology content.
     await routed.export('pdf', { options: { layout: 'portrait' }, content: { includeEdges: true } });
+  });
+
+  it('preserves discriminated route option branches after source option ownership', async () => {
+    await branchRouted.export('png', { options: { mode: 'single', camera: 'front' } });
+    await branchRouted.export('png', { options: { mode: 'batch', views: ['front', 'top'] } });
+    // @ts-expect-error Batch views do not belong to the single-camera branch.
+    await branchRouted.export('png', { options: { mode: 'single', views: ['front'] } });
+    // @ts-expect-error A batch requires its own nonempty views.
+    await branchRouted.export('png', { options: { mode: 'batch', camera: 'front' } });
+    // @ts-expect-error Pinned source options are supplied by the route, not callers.
+    await branchRouted.export('png', { options: { mode: 'single', camera: 'front', delimiter: ',' } });
   });
 
   it('retains real factory, runtime, transport, and open inference', async () => {

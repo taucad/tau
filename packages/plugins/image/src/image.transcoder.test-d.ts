@@ -100,10 +100,10 @@ describe('image export option types', () => {
   });
 
   it('should infer exact public client options and plural results', async () => {
-    const result = await client.export('webp', {
-      source,
-      content: { includeEdges: true },
-      exportOptions: {
+    const document = client.open({ source });
+    void document.export('glb', { content: { includeEdges: true } });
+    const result = await document.export('webp', {
+      options: {
         mode: 'batch',
         quality: 1,
         axes: true,
@@ -126,21 +126,19 @@ describe('image export option types', () => {
       },
     });
     if (result.success) {
-      expectTypeOf(result.data).toEqualTypeOf<ExportFile[]>();
+      expectTypeOf(result.files).toExtend<readonly [ExportFile, ...ExportFile[]]>();
     }
 
-    void client.export('webp', {
-      source,
-      exportOptions: {
+    void document.export('webp', {
+      options: {
         mode: 'batch',
         views: [{ id: 'front', camera: frontCamera }],
         // @ts-expect-error a shared camera would make per-view precedence ambiguous.
         camera: frontCamera,
       },
     });
-    void client.export('png', {
-      source,
-      exportOptions: {
+    void document.export('png', {
+      options: {
         mode: 'single',
         // @ts-expect-error views belong to the batch branch.
         views: [{ id: 'front', camera: frontCamera }],
@@ -148,10 +146,9 @@ describe('image export option types', () => {
     });
     // A label's presence is its own switch — optional at both altitudes, with no
     // separate enable flag to keep in sync.
-    void client.export('webp', { source, exportOptions: { mode: 'single', label: 'Front' } });
-    void client.export('webp', {
-      source,
-      exportOptions: {
+    void document.export('webp', { options: { mode: 'single', label: 'Front' } });
+    void document.export('webp', {
+      options: {
         mode: 'batch',
         views: [
           { id: 'front', label: 'Front', camera: frontCamera },
@@ -159,17 +156,15 @@ describe('image export option types', () => {
         ],
       },
     });
-    void client.export('webp', {
-      source,
-      exportOptions: {
+    void document.export('webp', {
+      options: {
         mode: 'single',
         // @ts-expect-error the deleted enable flag is no longer part of the surface.
         includeLabel: true,
       },
     });
-    void client.export('webp', {
-      source,
-      exportOptions: {
+    void document.export('webp', {
+      options: {
         mode: 'batch',
         views: [
           {
@@ -181,16 +176,14 @@ describe('image export option types', () => {
         ],
       },
     });
-    void client.export('png', {
-      source,
-      exportOptions: {
+    void document.export('png', {
+      options: {
         // @ts-expect-error quality is not a PNG option.
         quality: 0.8,
       },
     });
-    void client.export('png', {
-      source,
-      exportOptions: {
+    void document.export('png', {
+      options: {
         mode: 'batch',
         views: [
           {
@@ -202,9 +195,8 @@ describe('image export option types', () => {
         ],
       },
     });
-    void client.export('webp', {
-      source,
-      exportOptions: {
+    void document.export('webp', {
+      options: {
         mode: 'batch',
         views: [
           {
@@ -216,17 +208,15 @@ describe('image export option types', () => {
         ],
       },
     });
-    void client.export('webp', {
-      source,
-      exportOptions: {
+    void document.export('webp', {
+      options: {
         mode: 'single',
         // @ts-expect-error misspelled image settings are rejected.
         widht: 800,
       },
     });
-    void client.export('webp', {
-      source,
-      exportOptions: {
+    void document.export('webp', {
+      options: {
         mode: 'batch',
         views: [{ id: 'front', camera: frontCamera }],
         // @ts-expect-error unrelated export settings are rejected.

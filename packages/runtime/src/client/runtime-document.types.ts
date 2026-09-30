@@ -307,6 +307,11 @@ type ReachableTarget<Kernels extends readonly KernelPlugin[], Transcoders extend
 type OptionFieldFromInput<Input> =
   Readonly<Record<never, never>> extends Input ? { readonly options?: Input } : { readonly options: Input };
 type SourceOptions<D> = [SchemaInput<D>] extends [never] ? Readonly<Record<never, never>> : SchemaInput<D>;
+type RoutedOptions<Source, Edge, Pinned extends PropertyKey> = Source extends unknown
+  ? Edge extends unknown
+    ? Omit<Source, Pinned> & Omit<Edge, keyof Source>
+    : never
+  : never;
 type RoutedRequest<K, Middleware extends readonly MiddlewarePlugin[], Route> = Route extends {
   readonly from: infer From extends string;
   readonly options: infer EdgeOptions;
@@ -316,9 +321,7 @@ type RoutedRequest<K, Middleware extends readonly MiddlewarePlugin[], Route> = R
   ? ExportDeclarationByExtension<K, From> extends infer D
     ? D extends unknown
       ? Readonly<
-          OptionFieldFromInput<
-            Omit<SourceOptions<D>, Extract<Pinned, PropertyKey>> & Omit<EdgeOptions, keyof SourceOptions<D>>
-          > &
+          OptionFieldFromInput<RoutedOptions<SourceOptions<D>, EdgeOptions, Extract<Pinned, PropertyKey>>> &
             ContentRequestFor<
               Extract<ContentKeys<D> | MiddlewareExportKeys<Middleware, From>, Extract<RouteContent, RuntimeContentKey>>
             > & { signal?: AbortSignal }

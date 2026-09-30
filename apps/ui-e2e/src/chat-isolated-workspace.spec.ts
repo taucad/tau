@@ -14,6 +14,7 @@ import {
 } from '#support/agent-host-gateway-script.js';
 import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
 import { placeChatOnNewBranch } from '#support/chat-branch.js';
+import { readProjectStorageState, readProjectTree } from '#support/project-storage-state.js';
 
 const prompt = 'Create a cube with a centered cylindrical cutout and verify it.';
 const composer = '[aria-label="Ask Tau to build anything..."]';
@@ -212,6 +213,11 @@ const canonicalChatReport = (report: GeoSpecCanonicalClaimReport): NativeGeoSpec
   claim: { ...report.claim },
   result: { ...report.result },
   diagnostics: [...report.diagnostics],
+  canonical: {
+    claim: [...report.canonicalClaim],
+    plan: [...report.canonicalPlan],
+    result: [...report.canonicalResult],
+  },
   ...(report.evidence === undefined ? {} : { evidence: report.evidence }),
 });
 
@@ -226,20 +232,20 @@ test('[native-geospec] compares fixed-fixture reports through browser chat and t
   const fixtureBytes = base64ToUint8Array(fixtureBase64);
   const fixtureDigest = new Uint8Array(await crypto.subtle.digest('SHA-256', fixtureBytes));
   expect([...fixtureDigest].map((byte) => byte.toString(16).padStart(2, '0')).join('')).toBe(nativeFixtureHash);
-  const nativeSource = `import { it, expectNativeGeo } from 'geospec';
-import { loadNativeModel } from 'geospec/runner/native';
+  const nativeSource = `import { it, expectGeo } from 'geospec';
+import { loadModel } from 'geospec/model';
 const bytes = new Uint8Array(${JSON.stringify([...fixtureBytes])});
 it('accepts the fixed box volume', async () => {
-  const model = await loadNativeModel({ source: bytes, format: 'glb', sourceUnit: 'mm' });
-  await expectNativeGeo(model).toHaveVolume({ value: 6000, tolerance: 0.000001 });
+  const model = await loadModel({ source: bytes, format: 'glb', sourceUnit: 'mm' });
+  await expectGeo(model).toHaveVolume({ value: 6000, tolerance: 0.000001 });
 });
 it('rejects the impossible fixed box volume', async () => {
-  const model = await loadNativeModel({ source: bytes, format: 'glb', sourceUnit: 'mm' });
-  await expectNativeGeo(model).toHaveVolume({ value: 1, tolerance: 0 });
+  const model = await loadModel({ source: bytes, format: 'glb', sourceUnit: 'mm' });
+  await expectGeo(model).toHaveVolume({ value: 1, tolerance: 0 });
 });
 it('accepts the project Runtime mesh', async () => {
-  const model = await loadNativeModel({ file: 'main.scad', format: 'glb' });
-  await expectNativeGeo(model).toBeWatertight();
+  const model = await loadModel({ file: 'main.scad', format: 'glb' });
+  await expectGeo(model).toBeWatertight();
 });
 `;
   const finalText = 'Native GeoSpec chat checks completed.';
@@ -259,7 +265,7 @@ it('accepts the project Runtime mesh', async () => {
   ];
   await prepare(script);
   await target.addInitScript(() => {
-    localStorage.setItem('tau:flags', JSON.stringify({ nativeGeoSpec: true }));
+    localStorage.setItem('tau:flags', JSON.stringify({ nativeGeoSpec: false }));
   });
   let requests: unknown[] = [];
   const apiReports: NativeGeoSpecReport[] = [];
@@ -269,7 +275,7 @@ it('accepts the project Runtime mesh', async () => {
   try {
     await createProject('Tau Native GeoSpec Chat');
     expect(await target.evaluate(() => localStorage.getItem('tau:flags'))).toBe(
-      JSON.stringify({ nativeGeoSpec: true }),
+      JSON.stringify({ nativeGeoSpec: false }),
     );
     await submitPrompt();
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 180_000);
@@ -302,12 +308,35 @@ it('accepts the project Runtime mesh', async () => {
     });
     expect(outputs).toHaveLength(1);
     const output = outputs[0]!;
+    expect(output.fullResult).toBeDefined();
+    const artifact = output.fullResult!;
+    const storage = await readProjectStorageState();
+    expect(storage.configs).toHaveLength(1);
+    const tree = await readProjectTree(storage.configs[0]!);
+    const retainedText = tree[`/${artifact.path}`];
+    expect(retainedText).toBeDefined();
+    const retainedBytes = new TextEncoder().encode(retainedText);
+    expect(retainedBytes.byteLength).toBe(artifact.byteLength);
+    const retainedDigest = new Uint8Array(await crypto.subtle.digest('SHA-256', retainedBytes));
+    expect([...retainedDigest].map((byte) => byte.toString(16).padStart(2, '0')).join('')).toBe(artifact.sha256);
+    const retained = testModelOutputSchema.parse(JSON.parse(retainedText!));
+    expect(retained).toMatchObject({ passed: 2, total: 3 });
     expect(output).toMatchObject({ passed: 2, total: 3 });
     expect(output.passes.map((row) => row.requirement)).toEqual([
       'accepts the fixed box volume',
       'accepts the project Runtime mesh',
     ]);
     expect(output.failures.map((row) => row.requirement)).toEqual(['rejects the impossible fixed box volume']);
+    const { geospecWasm } = await target.events();
+    expect(geospecWasm).toBeDefined();
+    expect(geospecWasm!.status).toBe(200);
+    expect(geospecWasm!.expectedSha256).toMatch(/^[\da-f]{64}$/u);
+    expect(geospecWasm!.expectedByteLength).toBeGreaterThan(0);
+    expect(geospecWasm!.sha256).toBe(geospecWasm!.expectedSha256);
+    expect(geospecWasm!.byteLength).toBe(geospecWasm!.expectedByteLength);
+    expect(geospecWasm!.sourceSha256).toBe(geospecWasm!.expectedSha256);
+    expect(geospecWasm!.sourceByteLength).toBe(geospecWasm!.expectedByteLength);
+    expect(await target.workers('geospec-runner')).toHaveLength(1);
     const [native, assertionApi, { createGeoSpecNativeModelLoader }] = await Promise.all([
       import('@taucad/geospec-engine-native'),
       import('geospec/assertion-client'),
@@ -322,10 +351,10 @@ it('accepts the project Runtime mesh', async () => {
       // The chat's runner selects bounded success evidence, so the API reports compare in that profile.
       const client = assertionApi.createGeoSpecAssertionClient({ engine, evidenceProfile: 'bounded' });
       apiReports.push(
-        canonicalChatReport(await client.expectGeo(subject).toHaveVolume({ value: 6000, tolerance: 0.000001 })),
+        canonicalChatReport(client.expectGeo(subject).toHaveVolume({ value: 6000, tolerance: 0.000001 })),
       );
       try {
-        await client.expectGeo(subject).toHaveVolume({ value: 1, tolerance: 0 });
+        client.expectGeo(subject).toHaveVolume({ value: 1, tolerance: 0 });
         expect.fail('The independent 6000 mm^3 box must fail a 1 mm^3 volume assertion.');
       } catch (error) {
         if (!(error instanceof assertionApi.GeoSpecAssertionError)) {
@@ -344,7 +373,28 @@ it('accepts the project Runtime mesh', async () => {
         apiClosed = true;
       }
     }
-    const rows = [output.passes[0]!, output.failures[0]!, output.passes[1]!];
+    const rows = [retained.passes[0]!, retained.failures[0]!, retained.passes[1]!];
+    const compactRows = [output.passes[0]!, output.failures[0]!, output.passes[1]!];
+    expect(compactRows.map((row) => row.reports![0])).toEqual(
+      rows.map((row) => {
+        const { canonical: _canonical, ...report } = row.reports![0]!;
+        return report;
+      }),
+    );
+    const { loads } = retained.lineage!.find((file) => file.file === 'native.geospec.ts')!.lineage;
+    const reportLoadIds = rows.map((row) => row.reports![0]!.loadId);
+    expect(reportLoadIds.every((id) => typeof id === 'string' && id.length > 0)).toBe(true);
+    expect(new Set(reportLoadIds).size).toBe(3);
+    for (const [index, id] of reportLoadIds.entries()) {
+      const matching = loads.filter((load) => load.loadId === id);
+      expect(matching).toHaveLength(1);
+      expect(matching[0]!.subject?.contentHash).toMatch(/^[\da-f]{64}$/u);
+      if (index < 2) {
+        expect(matching[0]!.subject?.contentHash).toBe(nativeFixtureHash);
+      } else {
+        expect(matching[0]!.subject?.contentHash).not.toBe(nativeFixtureHash);
+      }
+    }
     for (const [index, row] of rows.entries()) {
       expect(row.targetFile).toBe('native.geospec.ts');
       expect(row.reports).toHaveLength(1);
@@ -354,7 +404,12 @@ it('accepts the project Runtime mesh', async () => {
       expect(report.polarity).toBe('positive');
       expect(report.result).toMatchObject({ claimId: report.claimId, status: report.status });
     }
-    expect(rows.slice(0, 2).map((row) => row.reports![0])).toEqual(apiReports);
+    expect(
+      rows.slice(0, 2).map((row) => {
+        const { loadId: _loadId, ...report } = row.reports![0]!;
+        return report;
+      }),
+    ).toEqual(apiReports);
     // Equal verdicts on another subject must not pass: each report names the source bytes it measured.
     const measuredSubjects = rows.map(
       (row) =>
@@ -363,6 +418,9 @@ it('accepts the project Runtime mesh', async () => {
     );
     expect(measuredSubjects.slice(0, 2)).toEqual([nativeFixtureHash, nativeFixtureHash]);
     expect(measuredSubjects[2]).not.toBe(nativeFixtureHash);
+    expect(reportLoadIds.map((id) => loads.find((load) => load.loadId === id)!.subject!.contentHash)).toEqual(
+      measuredSubjects,
+    );
     await target.click(selectors.getByRole('button', { name: /^(?:Edited files, )?ran tests$/iu }));
     await target.expectVisible(selectors.getByText('Tested 3 requirements', { exact: true }));
     await target.expectVisible(selectors.getByText('1. rejects the impossible fixed box volume', { exact: true }));

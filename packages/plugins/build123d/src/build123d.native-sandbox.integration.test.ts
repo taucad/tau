@@ -122,17 +122,18 @@ describe('Build123d native sandbox', () => {
     writeFileSync(paths.homeCanary, 'secret');
     writeFileSync(paths.tempCanary, 'secret');
     const client = createTestRuntimeClient({ runtime, files: { 'main.py': hostileSource(paths) } });
+    const document = client.open({ source: { path: 'main.py' }, watch: false });
     try {
-      const rendered = await client.render({ source: { path: 'main.py' } });
+      const rendered = await document.evaluation();
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('Hostile Build123d render was unexpectedly superseded.');
       }
-      expect(rendered.geometry.success).toBe(false);
-      if (rendered.geometry.success) {
+      expect(rendered.evaluation.success).toBe(false);
+      if (rendered.evaluation.success) {
         throw new Error('Hostile Build123d project produced geometry.');
       }
-      const report = rendered.geometry.issues.map(({ message }) => message).join('\n');
+      const report = rendered.evaluation.issues.map(({ message }) => message).join('\n');
       const probe = /TAU_SANDBOX_PROBE (?<json>\{.*\})/u.exec(report)?.groups?.['json'];
       expect(probe, report).toBeDefined();
       const outcomes = JSON.parse(probe!) as { readonly import: Outcomes; readonly main: Outcomes };
@@ -150,6 +151,7 @@ describe('Build123d native sandbox', () => {
       expect(existsSync(paths.outsideEscape)).toBe(false);
       expect(existsSync(paths.homeEscape)).toBe(false);
     } finally {
+      document.close();
       await client.shutdown();
       for (const path of Object.values(paths)) {
         rmSync(path, { force: true });

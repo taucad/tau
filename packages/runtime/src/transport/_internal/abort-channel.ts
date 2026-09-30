@@ -8,7 +8,7 @@
 
 /* oxlint-disable unicorn/prefer-math-trunc, no-bitwise -- cancellation generations require ECMAScript ToUint32 wrap semantics. */
 
-import { abortReason } from '#types/runtime-protocol.types.js';
+import type { abortReason } from '#types/runtime-wire.types.js';
 import {
   documentAbortGeneration,
   documentAbortReason,

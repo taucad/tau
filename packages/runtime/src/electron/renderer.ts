@@ -52,7 +52,7 @@ export type ElectronRuntimeRendererBridge = {
    * Release exactly one opaque utility host lease. Called by the transport;
    * application code should normally use `RuntimeClient.terminate()`.
    */
-  releaseRuntimeHost(hostId: string, reason: 'requested' | 'render-timeout'): void;
+  releaseRuntimeHost(hostId: string, reason: 'requested' | 'operation-timeout'): void;
 };
 
 /**
@@ -294,7 +294,7 @@ export const requestElectronRuntimePort = async (
   /* `release()` asks main to kill the utility, so the exit relay it provokes
    * arrives *after* it. Dropping the listener here is what made every
    * release-first teardown report an unexplained exit. */
-  const release = (reason: 'requested' | 'render-timeout'): void => {
+  const release = (reason: 'requested' | 'operation-timeout'): void => {
     if (released) {
       return;
     }

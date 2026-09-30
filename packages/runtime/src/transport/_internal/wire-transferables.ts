@@ -43,7 +43,7 @@ import type { MessagePortLike } from '@taucad/rpc';
  * (`@taucad/rpc`'s `wrapMessagePortMain` is the adapter for that family, and
  * it never crosses the initialize path).
  *
- * Shared with `runtime-protocol.schemas.ts`, which validates
+ * Shared with `runtime-wire-common.schemas.ts`, which validates
  * `InitializeMemoryHandle.fileSystemPort` with it.
  *
  * @internal

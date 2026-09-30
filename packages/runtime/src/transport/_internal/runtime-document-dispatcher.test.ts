@@ -139,7 +139,7 @@ describe('document worker dispatcher', () => {
     const ports = new MessageChannel();
     const source = new Uint8Array([7, 8]);
     const transcode = vi.fn(async () => ({
-      success: true as const,
+      success: true,
       data: [{ name: 'part.step', mimeType: 'application/step', bytes: source }],
       issues: [],
     }));

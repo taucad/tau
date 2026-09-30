@@ -18,9 +18,7 @@ export type {
   FileSystemItem,
   FileStatus,
   FileTreeEntry,
-  Geometry,
   GeometryGltf,
-  GeometryResponse,
   GeometrySvg,
   GeometryWebRtc,
   JSONArray,
@@ -62,7 +60,36 @@ export {
 } from '@taucad/types/constants';
 export { isKernelIssueCode, kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 export type { KernelIssueCode } from '#types/kernel-issue-codes.js';
-export type * from '#types/runtime.types.js';
+export type {
+  BackendProvider,
+  BundlerRegistration,
+  BundlerRegistrations,
+  CapabilitiesManifest,
+  ContentCapability,
+  ErrorLocation,
+  ExportRoute,
+  ExtractNameResult,
+  FrameContext,
+  IssueSeverity,
+  KernelErrorResult,
+  KernelIssue,
+  KernelIssueType,
+  KernelModules,
+  KernelProvider,
+  KernelProviderId,
+  KernelRegistration,
+  KernelResult,
+  KernelStackFrame,
+  KernelSuccessResult,
+  KnownKernelProvider,
+  MiddlewareRegistration,
+  MiddlewareRegistrations,
+  RenderCapability,
+  RuntimeCapabilities,
+  RuntimeCapabilityRegistration,
+  SourceRevision,
+  TransportCapabilities,
+} from '#types/runtime.types.js';
 export { asKnownArtifact } from '#types/runtime-artifact.js';
 export type { KnownArtifact } from '#types/runtime-artifact.js';
 export type * from '#types/runtime-tracer.types.js';
@@ -129,14 +156,8 @@ export type {
   RuntimeWatchRequest,
   RuntimeWatchEvent,
   KernelFileSystem,
-  KernelRuntime,
-  GetParametersInput,
-  CreateGeometryInput,
   GetDependenciesInput,
   InitializeInput,
-  ExportGeometryInput,
-  ExportGeometryRequest,
-  CreateGeometryOutput,
   MeshGeometryInput,
   MeshGeometryOutput,
 } from '#types/runtime-kernel.types.js';
@@ -171,7 +192,22 @@ export type {
   TranscoderPluginFactory,
 } from '#types/runtime-transcoder.types.js';
 export type { TranscoderEdgeType } from '#plugins/plugin-types.js';
-export * from '#types/runtime-protocol.types.js';
+export type {
+  BinaryContentDelivery,
+  CompiledWasmModuleHandle,
+  GeometryPoolHandle,
+  InitializeMemoryHandle,
+  RuntimeHelloPayload,
+  RuntimeInitializeArgs,
+  RuntimeInitializeResult,
+  RuntimeSourceSnapshotArgs,
+  RuntimeTranscodeArgs,
+  SignalBufferHandle,
+  TelemetryBatch,
+  TelemetryEntry,
+  TelemetryOrigin,
+  TelemetrySpanRecord,
+} from '#types/runtime-wire.types.js';
 export type {
   RuntimeDocumentProtocol,
   WireArtifact,

@@ -25,7 +25,6 @@ import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-doc
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 import { createWorkerHostBindings } from '#transport/_internal/worker-host-bindings.js';
-import { encodeGeometryAsOwnedTransfer } from '#transport/_internal/owned-transfer-bytes.js';
 import { acquireWebWorkerSelfPort } from '#transport/_internal/web-worker-self-port.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
@@ -68,7 +67,7 @@ export const webWorkerHost = (
 
   return {
     id: webWorkerId,
-    async open(): Promise<TransportHostReady<RuntimeDocumentProtocol>> {
+    async open(): Promise<TransportHostReady> {
       if (serverHandle) {
         return { channel: serverHandle, peerHello: buildHelloPayload(webWorkerId) };
       }
@@ -84,9 +83,6 @@ export const webWorkerHost = (
     },
     adoptInitialize(handle: RuntimeInitializeMemoryHandle): HostInitializeBindings {
       return createWorkerHostBindings(handle);
-    },
-    encodeGeometry(geometry) {
-      return encodeGeometryAsOwnedTransfer(geometry);
     },
     async close(reason?: string): Promise<void> {
       if (isClosed) {

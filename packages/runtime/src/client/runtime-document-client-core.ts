@@ -35,18 +35,13 @@ import { RuntimeTerminatedError } from '#client/runtime-terminated-error.js';
 import { openDeferredDocument } from '#client/runtime-document-deferred.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import { validateProtocolHeader } from '#types/protocol-header.types.js';
-import type {
-  CapabilitiesManifest,
-  ExportRoute,
-  KernelIssue,
-  RuntimeCapabilities,
-  ExportGeometryResult,
-} from '#types/runtime.types.js';
+import type { CapabilitiesManifest, ExportRoute, KernelIssue, RuntimeCapabilities } from '#types/runtime.types.js';
+import type { TranscodeResult } from '#types/runtime-transcoder.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
-import type { RuntimeTranscodeArgs, TelemetryBatch } from '#types/runtime-protocol.types.js';
+import type { RuntimeTranscodeArgs, TelemetryBatch } from '#types/runtime-wire.types.js';
 import { OperationAbortedError, OperationTimeoutError } from '#framework/runtime-operation-errors.js';
-import { renderTimeoutRecoveryGrace } from '#framework/runtime-framework.constants.js';
+import { operationTimeoutRecoveryGrace } from '#framework/runtime-framework.constants.js';
 
 // oxlint-disable @typescript-eslint/no-explicit-any -- Transport and plugin existential carriers retain concrete tuples at the public overload.
 type AnyTransportPlugin = TransportPlugin<RuntimeDocumentProtocol, any, any, any>;
@@ -90,12 +85,14 @@ const consumeRejection = async (promise: Promise<unknown>): Promise<void> => {
     /* The public waiter owns this rejection. */
   }
 };
-// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- existential configured-runtime test retains generic wrapper assignability.
-type RuntimeConfigOption<R> = [R] extends [ConfiguredRuntimeDefinition<any, any>]
-  ? undefined extends RuntimeConfigInput<R>
-    ? { readonly config?: RuntimeConfigProvider<R> }
-    : { readonly config: RuntimeConfigProvider<R> }
-  : { readonly config?: never };
+type RuntimeConfigOption<R> = [AnyRuntimeDefinition] extends [R]
+  ? { readonly config?: RuntimeConfigProvider<R> }
+  : // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- Existential configured-runtime test retains generic wrapper assignability.
+    [R] extends [ConfiguredRuntimeDefinition<any, any>]
+    ? undefined extends RuntimeConfigInput<R>
+      ? { readonly config?: RuntimeConfigProvider<R> }
+      : { readonly config: RuntimeConfigProvider<R> }
+    : { readonly config?: never };
 type ClientEventHandlers<
   Kernels extends readonly KernelPlugin[],
   Middleware extends readonly MiddlewarePlugin[],
@@ -191,7 +188,7 @@ export type RuntimeClient<
     additionalPaths?: ReadonlyArray<{ path: string; required: boolean }>;
     signal?: AbortSignal;
   }): Promise<RuntimeSourceSnapshotResult>;
-  transcode(input: RuntimeTranscodeInput<ClientTranscoders<Runtime>>): Promise<ExportGeometryResult>;
+  transcode(input: RuntimeTranscodeInput<ClientTranscoders<Runtime>>): Promise<TranscodeResult>;
   on<
     const Event extends keyof ClientEventHandlers<
       ClientKernels<Runtime>,
@@ -278,14 +275,14 @@ export function createRuntimeClient(options: {
     }
   };
   const onTimeout = (operationId: string): void => {
-    const recovery = transport.renderTimeoutRecovery;
+    const recovery = transport.operationTimeoutRecovery;
     if (recovery.kind !== 'terminable' || recoveryTimers.has(operationId)) {
       return;
     }
     const timer = setTimeout(() => {
       recoveryTimers.delete(operationId);
       void recovery.terminate();
-    }, renderTimeoutRecoveryGrace);
+    }, operationTimeoutRecoveryGrace);
     recoveryTimers.set(operationId, timer);
   };
   const currentLifecycle = (): RuntimeLifecycleState => lifecycleState;
@@ -293,7 +290,7 @@ export function createRuntimeClient(options: {
     if (!Number.isFinite(milliseconds) || milliseconds < 0) {
       throw new TypeError('Operation timeout must be a finite nonnegative number.');
     }
-    if (milliseconds > 0 && transport.renderTimeoutRecovery.kind === 'unsupported') {
+    if (milliseconds > 0 && transport.operationTimeoutRecovery.kind === 'unsupported') {
       throw new TypeError('This transport cannot enforce a wall-clock operation deadline.');
     }
   };
@@ -491,7 +488,7 @@ export function createRuntimeClient(options: {
       if (!Number.isFinite(milliseconds) || milliseconds < 0) {
         throw new TypeError('Transcode timeout must be a finite nonnegative number.');
       }
-      if (milliseconds > 0 && transport.renderTimeoutRecovery.kind === 'unsupported') {
+      if (milliseconds > 0 && transport.operationTimeoutRecovery.kind === 'unsupported') {
         throw new TypeError('This transport cannot enforce a wall-clock transcode deadline.');
       }
       transcodeTimeout = milliseconds;

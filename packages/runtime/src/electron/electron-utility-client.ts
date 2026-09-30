@@ -81,13 +81,13 @@ export type ElectronUtilityMainClientOptions = {
   /** `MessagePortMain` transferred from Electron main into another utility process. */
   readonly port: MessagePortMainLike;
   /** Release the corresponding main-owned utility lease. */
-  readonly release?: (reason: 'requested' | 'render-timeout') => void;
+  readonly release?: (reason: 'requested' | 'operation-timeout') => void;
 };
 
 type ElectronUtilityClientHooks = {
   readonly origin: string;
   readonly machines?: ElectronUtilityTransportOptions['machines'];
-  readonly release?: (reason: 'requested' | 'render-timeout') => void;
+  readonly release?: (reason: 'requested' | 'operation-timeout') => void;
   readonly subscribeHostExit?: (listener: (detail: ElectronRuntimeHostExitDetail) => void) => void;
   readonly wrappedPort: Port<unknown>;
 };
@@ -135,7 +135,7 @@ const createElectronUtilityClient = (
       /* Best-effort */
     }
     try {
-      release?.(result.cause === 'render-timeout' ? 'render-timeout' : 'requested');
+      release?.(result.cause === 'operation-timeout' ? 'operation-timeout' : 'requested');
     } catch {
       /* Best-effort */
     }
@@ -217,10 +217,10 @@ const createElectronUtilityClient = (
     signalDocumentAbort() {
       return false;
     },
-    renderTimeoutRecovery: {
+    operationTimeoutRecovery: {
       kind: 'terminable',
       async terminate(): Promise<void> {
-        await finish({ cause: 'render-timeout' });
+        await finish({ cause: 'operation-timeout' });
       },
     },
     describe(): TransportDescriptor<typeof electronUtilityId> {

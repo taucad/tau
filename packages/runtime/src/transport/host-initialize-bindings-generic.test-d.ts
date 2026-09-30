@@ -8,15 +8,15 @@ import { describe, it, expectTypeOf } from 'vitest';
 import type {
   HostInitializeBindings,
   HostInitializeBindingsCore,
-  HostGeometryDeliveryBinding,
-  EncodedGeometry,
+  HostBinaryDeliveryBinding,
+  EncodedBinary,
 } from '#transport/runtime-transport.types.js';
 
 describe('HostInitializeBindings is generic (C13)', () => {
   it('exposes the core shape on every transport', () => {
     expectTypeOf<HostInitializeBindings>().toMatchTypeOf<HostInitializeBindingsCore>();
     expectTypeOf<HostInitializeBindingsCore>().not.toHaveProperty('fileSystem');
-    expectTypeOf<HostInitializeBindingsCore>().toHaveProperty('geometryDelivery');
+    expectTypeOf<HostInitializeBindingsCore>().toHaveProperty('binaryDelivery');
   });
 
   it('HostInitializeBindings<{}> is structurally HostInitializeBindingsCore', () => {
@@ -36,8 +36,8 @@ describe('HostInitializeBindings is generic (C13)', () => {
     expectTypeOf<WebWorkerBindings>().toHaveProperty('signalSlot');
   });
 
-  it('HostGeometryDeliveryBinding.publish returns EncodedGeometry', () => {
-    expectTypeOf<HostGeometryDeliveryBinding['publish']>().returns.toMatchTypeOf<EncodedGeometry>();
-    expectTypeOf<HostGeometryDeliveryBinding['tier']>().toEqualTypeOf<'pool' | 'transfer' | 'copy'>();
+  it('HostBinaryDeliveryBinding.publishBytes returns EncodedBinary', () => {
+    expectTypeOf<HostBinaryDeliveryBinding['publishBytes']>().returns.toMatchTypeOf<EncodedBinary>();
+    expectTypeOf<HostBinaryDeliveryBinding['tier']>().toEqualTypeOf<'pool' | 'transfer' | 'copy'>();
   });
 });

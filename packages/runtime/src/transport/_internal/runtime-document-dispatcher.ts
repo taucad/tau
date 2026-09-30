@@ -154,8 +154,8 @@ export function createDocumentWorkerDispatcher(
       }
       if (options?.bindingsFactory && memoryHandle) {
         const bindings = options.bindingsFactory(memoryHandle);
-        binaryEncoder = bindings.geometryDelivery.publishBytes;
-        acknowledgeBinary = bindings.geometryDelivery.acknowledge;
+        binaryEncoder = bindings.binaryDelivery.publishBytes;
+        acknowledgeBinary = bindings.binaryDelivery.acknowledge;
       }
       await Promise.race([
         worker.initialize({

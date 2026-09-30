@@ -3,24 +3,24 @@ import { z } from 'zod';
 import type { KernelPlugin, MiddlewarePlugin, TranscoderEdgeType, TranscoderPlugin } from '#plugins/plugin-types.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimeDocument, ExportResult, OpenInput } from '#client/runtime-document.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import { createRuntimeClient } from '#client/runtime-client.js';
 import type { TransportPlugin } from '#transport/runtime-transport.types.js';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { defineKernelV2, nonemptyExportFiles } from '#types/runtime-kernel-v2.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
-import type { RuntimeMiddleware, RuntimeTranscoders } from '#worker/runtime-definition.js';
+import type { AnyRuntimeDefinition, RuntimeMiddleware, RuntimeTranscoders } from '#worker/runtime-definition.js';
 import { definePlugin } from '#plugins/plugin.js';
 import { defineMiddleware } from '#plugins/middleware-entry.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 
 type BoardKernel = KernelPlugin<
-  {},
+  Record<never, never>,
   Record<string, unknown>,
   'board-kernel',
   never,
-  {},
+  Record<never, never>,
   readonly ['tsx'],
   undefined,
   {
@@ -41,11 +41,11 @@ type BoardKernel = KernelPlugin<
   }
 >;
 type SolidKernel = KernelPlugin<
-  {},
+  Record<never, never>,
   Record<string, unknown>,
   'solid-kernel',
   never,
-  {},
+  Record<never, never>,
   readonly ['scad'],
   undefined,
   { readonly solid: { readonly title: 'Solid'; readonly mimeType: 'model/gltf-binary' } },
@@ -80,11 +80,11 @@ declare const routed: RuntimeDocument<
   readonly [PdfTranscoder]
 >;
 type PrecisionKernel = KernelPlugin<
-  {},
+  Record<never, never>,
   Record<string, unknown>,
   'precision',
   never,
-  {},
+  Record<never, never>,
   readonly ['ts'],
   z.ZodObject<{ precision: z.ZodNumber }>
 >;
@@ -126,8 +126,31 @@ const realRuntime = defineRuntime({ kernels: [realKernel()] });
 const realClient = createRuntimeClient({
   transport: inProcessTransport({ runtime: realRuntime, fileSystem: fromMemoryFs() }),
 });
-declare const wrongProtocolTransport: TransportPlugin<RuntimeProtocol>;
-// @ts-expect-error A v3 transport cannot serve the document-only v4 client.
+const configuredRuntime = defineRuntime({
+  configSchema: z.object({ endpoint: z.url() }),
+  createRuntime: () => ({ kernels: [realKernel()] }),
+});
+const configuredTransport = inProcessTransport({ runtime: configuredRuntime, fileSystem: fromMemoryFs() });
+createRuntimeClient<AnyRuntimeDefinition>({
+  transport: configuredTransport,
+  config: { endpoint: 'https://example.test' },
+});
+// @ts-expect-error A known configured runtime requires its config.
+createRuntimeClient({ transport: configuredTransport });
+createRuntimeClient({
+  transport: inProcessTransport({ runtime: realRuntime, fileSystem: fromMemoryFs() }),
+  // @ts-expect-error A known unconfigured runtime rejects supplied config.
+  config: { endpoint: 'https://example.test' },
+});
+const emptyWireValue = null;
+type WrongProtocol = {
+  readonly hello: RuntimeDocumentProtocol['hello'];
+  readonly calls: { readonly ping: { readonly args: typeof emptyWireValue; readonly result: typeof emptyWireValue } };
+  readonly notifies: Record<never, never>;
+  readonly listens: Record<never, never>;
+};
+declare const wrongProtocolTransport: TransportPlugin<WrongProtocol>;
+// @ts-expect-error A non-document protocol transport cannot serve the document client.
 createRuntimeClient({ transport: wrongProtocolTransport });
 const realToolkit = definePlugin({
   meta: { name: '@taucad/document-proof' },
@@ -173,21 +196,21 @@ const routedClient = createRuntimeClient({
 });
 
 describe('typed runtime document', () => {
-  it('narrows a direct export ID and its view options', () => {
+  it('narrows a direct export ID and its view options', async () => {
     expectTypeOf(document.export('bom', { options: { delimiter: ',' } })).toEqualTypeOf<Promise<ExportResult<'bom'>>>();
     document.view('board', { options: { scale: 2 } });
     document.view('solid');
-    document.export('mesh');
-    document.export('stl');
-    document.export('csv', { options: { delimiter: ',' } });
-    document.export('csv', { options: { quality: 2 } });
+    await document.export('mesh');
+    await document.export('stl');
+    await document.export('csv', { options: { delimiter: ',' } });
+    await document.export('csv', { options: { quality: 2 } });
     expectTypeOf(document.export('csv', { options: { delimiter: ',' } })).toEqualTypeOf<
       Promise<ExportResult<'bom' | 'csv'>>
     >();
     // @ts-expect-error -- direct and extension targets retain the required schema.
-    document.export('bom');
+    await document.export('bom');
     // @ts-expect-error -- the extension route has the same required options.
-    document.export('csv');
+    await document.export('csv');
     // @ts-expect-error -- the declared view requires options.
     document.view('board');
     // @ts-expect-error -- the concrete view schema requires a numeric scale.
@@ -195,24 +218,24 @@ describe('typed runtime document', () => {
     // @ts-expect-error -- a concrete kernel does not declare this view.
     document.view('schematic');
     routed.view('board', { options: { scale: 2 }, content: { includeEdges: true } });
-    routed.export('pdf', { options: { layout: 'portrait' }, content: { includeTopology: true } });
-    routedClient.transcode({ from: 'csv', to: 'pdf', files: [], options: { layout: 'portrait' } });
+    await routed.export('pdf', { options: { layout: 'portrait' }, content: { includeTopology: true } });
+    await routedClient.transcode({ from: 'csv', to: 'pdf', files: [], options: { layout: 'portrait' } });
     // @ts-expect-error -- the real converter route requires its declared layout.
-    routedClient.transcode({ from: 'csv', to: 'pdf', files: [], options: {} });
+    await routedClient.transcode({ from: 'csv', to: 'pdf', files: [], options: {} });
     // @ts-expect-error -- the real converter does not declare this route.
-    routedClient.transcode({ from: 'stl', to: 'pdf', files: [], options: { layout: 'portrait' } });
+    await routedClient.transcode({ from: 'stl', to: 'pdf', files: [], options: { layout: 'portrait' } });
     openPrecision({ source: { files: { '/main.ts': '' } }, evaluateOptions: { precision: 0.1 } });
     // @ts-expect-error -- a single concrete kernel requires its evaluate options.
     openPrecision({ source: { files: { '/main.ts': '' } } });
     // @ts-expect-error -- source entry must refer to a declared inline file.
     openPrecision({ source: { files: { '/main.ts': '' }, entry: '/missing.ts' }, evaluateOptions: { precision: 0.1 } });
     // @ts-expect-error -- route options remain required after the source delimiter is pinned.
-    routed.export('pdf');
+    await routed.export('pdf');
     // @ts-expect-error -- the converter only retains topology content.
-    routed.export('pdf', { options: { layout: 'portrait' }, content: { includeEdges: true } });
+    await routed.export('pdf', { options: { layout: 'portrait' }, content: { includeEdges: true } });
   });
 
-  it('retains real factory, runtime, transport, and open inference', () => {
+  it('retains real factory, runtime, transport, and open inference', async () => {
     const opened = realClient.open({
       source: { files: { 'main.tsx': '', 'asset.bin': new Uint8Array([1]) }, entry: 'main.tsx' },
       evaluateOptions: { precision: 0.1 },
@@ -222,8 +245,8 @@ describe('typed runtime document', () => {
     // @ts-expect-error -- secondary diagram view still requires its own options.
     opened.view('diagram');
     expectTypeOf(opened.export('bom', { options: { delimiter: ',' } })).toEqualTypeOf<Promise<ExportResult<'bom'>>>();
-    opened.update({ evaluateOptions: { precision: 0.2 } });
-    opened.update({ parameters: { count: 2 } });
+    await opened.update({ evaluateOptions: { precision: 0.2 } });
+    await opened.update({ parameters: { count: 2 } });
     // @ts-expect-error -- real schema requires evaluate options when opening.
     realClient.open({ source: { files: { 'main.tsx': '' } } });
     realClient.open({
@@ -234,9 +257,9 @@ describe('typed runtime document', () => {
     // @ts-expect-error -- real view schema remains narrow through the chain.
     opened.view('diagram', { options: { scale: 'large' } });
     // @ts-expect-error -- real export schema remains narrow through the chain.
-    opened.export('bom', { options: { delimiter: 4 } });
+    await opened.export('bom', { options: { delimiter: 4 } });
     // @ts-expect-error -- update retains the real evaluation schema.
-    opened.update({ evaluateOptions: { precision: 'fine' } });
+    await opened.update({ evaluateOptions: { precision: 'fine' } });
     const fromToolkit = toolkitClient.open({ source: { path: 'main.tsx' }, evaluateOptions: { precision: 1 } });
     fromToolkit.view('diagram', { options: { scale: 2 } });
     expectTypeOf(fromToolkit.export('bom', { options: { delimiter: ',' } })).toEqualTypeOf<
@@ -250,8 +273,11 @@ describe('typed runtime document', () => {
     expectTypeOf<RuntimeMiddleware<typeof routedRuntime>['length']>().toEqualTypeOf<1>();
     expectTypeOf<RuntimeTranscoders<typeof routedRuntime>['length']>().toEqualTypeOf<1>();
     composed.view('diagram', { options: { scale: 1 }, content: { includeEdges: true } });
-    composed.export('pdf', { options: { delimiter: ';', layout: 'portrait' }, content: { includeTopology: true } });
+    await composed.export('pdf', {
+      options: { delimiter: ';', layout: 'portrait' },
+      content: { includeTopology: true },
+    });
     // @ts-expect-error -- source owns the overlapping delimiter key, so edge number cannot replace it.
-    composed.export('pdf', { options: { delimiter: 2, layout: 'portrait' } });
+    await composed.export('pdf', { options: { delimiter: 2, layout: 'portrait' } });
   });
 });

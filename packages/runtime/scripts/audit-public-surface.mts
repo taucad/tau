@@ -316,8 +316,6 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'TransportPlugin',
   'RuntimeTransportClient',
   'RuntimeTransportCloseResult',
-  'RuntimeTransportPreviewReservation',
-  'RuntimeTransportRenderTarget',
   'RuntimeTransportTimeoutRecovery',
   'RuntimeTransportHost',
   'TransportClientReady',
@@ -371,7 +369,9 @@ const clientBarrelSource = readFileSync(clientBarrelPath, 'utf8');
 const clientBarrelSourceFile = ts.createSourceFile(clientBarrelPath, clientBarrelSource, ts.ScriptTarget.Latest, true);
 clientBarrelSourceFile.forEachChild((node) => {
   if (ts.isExportDeclaration(node) && node.exportClause && ts.isNamedExports(node.exportClause)) {
-    for (const specifier of node.exportClause.elements) observedBarrelExports.add(specifier.name.text);
+    for (const specifier of node.exportClause.elements) {
+      observedBarrelExports.add(specifier.name.text);
+    }
   }
 });
 

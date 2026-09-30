@@ -118,7 +118,27 @@
             "bundler-core",
             "esbuild",
             "geospec",
-            "geospec-engine"
+            "geospec-engine",
+            "camera",
+            "spatial",
+            "geometry-core",
+            "occt-core",
+            "openrscad",
+            "assimp",
+            "brep",
+            "gltf",
+            "image",
+            "jscad",
+            "manifold",
+            "middleware",
+            "opencascade",
+            "picovoxel",
+            "replicad",
+            "rhino",
+            "rpc",
+            "kinematics",
+            "filesystem",
+            "revisions"
           ]
         }
       ],

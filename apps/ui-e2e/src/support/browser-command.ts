@@ -77,6 +77,7 @@ export type AgentHostGatewayState = {
 };
 
 type Session = {
+  geospecFault?: TargetDiagnostics['geospecFault'];
   geospecWasm?: Promise<TargetDiagnostics['geospecWasm']>;
   geospecResponseCleanup?: () => void;
   readonly agentHostApiRequests: string[];
@@ -214,6 +215,7 @@ const observePage = (session: Session, page: TargetPage): void => {
     const listener = (response: Awaited<ReturnType<TargetPage['waitForResponse']>>) => {
       if (
         session.geospecWasm !== undefined ||
+        response.headers()['x-tau-geospec-fault'] === 'corrupt' ||
         !/\/geospec_engine_native(?:-[\w-]+)?\.wasm$/u.test(new URL(response.url()).pathname)
       ) {
         return;
@@ -676,6 +678,30 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
   [script?: readonly GatewayScriptTurn[], options?: AgentHostGatewayFixtureOptions]
 > = async (commandContext, script = browserHostScript, options = {}) => {
   const session = sessionFor(commandContext);
+  let geospecFaultActive = options.geospecFault !== undefined;
+  if (options.geospecFault !== undefined) {
+    const kind = options.geospecFault;
+    await session.context.route(/\/geospec_engine_native(?:-[\w-]+)?\.wasm(?:\?.*)?$/u, async (route) => {
+      if (!geospecFaultActive) {
+        await route.continue();
+        return;
+      }
+      session.geospecFault = {
+        kind,
+        url: session.geospecFault?.url ?? route.request().url(),
+        requests: (session.geospecFault?.requests ?? 0) + 1,
+      };
+      if (kind === 'missing') {
+        await route.abort('failed');
+      } else {
+        await route.fulfill({
+          status: 200,
+          headers: { 'content-type': 'application/wasm', 'x-tau-geospec-fault': 'corrupt' },
+          body: Buffer.from([0, 1, 2, 3]),
+        });
+      }
+    });
+  }
   session.agentHostGatewayRequests.length = 0;
   session.agentHostApiRequests.length = 0;
   for (const gate of session.agentHostGatewayGates.splice(0)) {
@@ -770,13 +796,19 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
           'x-tau-operation-id': `browser-host-e2e-operation-${String(currentRequest)}`,
         });
         response.flushHeaders();
+        const turn =
+          step === undefined
+            ? { text: options.summary, usage: { inputTokens: 40, outputTokens: 10 } }
+            : walk.serve(step);
+        // Streaming compilation may refetch after a fault. Keep that entire
+        // first initialization failed, then retire the fault at the first terminal turn.
+        if (turn.toolCalls === undefined && turn.text !== undefined) {
+          geospecFaultActive = false;
+        }
         await writeScriptedTurn({
           currentRequest,
           session,
-          turn:
-            step === undefined
-              ? { text: options.summary, usage: { inputTokens: 40, outputTokens: 10 } }
-              : walk.serve(step),
+          turn,
           turnKey: step?.turn ?? '',
           writeEvent,
         });
@@ -1916,6 +1948,7 @@ export const uiReadTargetEvents: BrowserCommand<
     }>;
     readonly pageErrors: readonly string[];
     readonly geospecWasm?: TargetDiagnostics['geospecWasm'];
+    readonly geospecFault?: TargetDiagnostics['geospecFault'];
   }
 > = async (commandContext) => {
   const session = sessionFor(commandContext);
@@ -1923,6 +1956,7 @@ export const uiReadTargetEvents: BrowserCommand<
     consoleMessages: session.consoleMessages,
     pageErrors: session.pageErrors,
     geospecWasm: await session.geospecWasm,
+    geospecFault: session.geospecFault,
   };
 };
 

@@ -61,8 +61,11 @@ const openAndReadSource = async (): Promise<string> => {
  * replay model here refused the turn outright — `Tau cannot run the tau
  * provider wire in your browser` (`use-cad-agent-config.ts`).
  */
-const prepare = async (script: readonly GatewayScriptTurn[]): Promise<void> => {
-  await target.installAgentHostGatewayFixture(script);
+const prepare = async (
+  script: readonly GatewayScriptTurn[],
+  options?: target.AgentHostGatewayFixtureOptions,
+): Promise<void> => {
+  await target.installAgentHostGatewayFixture(script, options);
   await target.setViewport({ width: 1440, height: 900 });
   await target.addCookies([
     { domain: 'localhost', name: 'tau-cad-kernel', path: '/', value: cookieValue('openscad') },
@@ -224,7 +227,7 @@ const canonicalChatReport = (report: GeoSpecCanonicalClaimReport): NativeGeoSpec
 // The accepted C2 box is 10 × 20 × 30 mm. Reuse its exact GLB, not a new tessellation.
 const nativeFixtureHash = '1321806f5b10c87126bece80cee96cf867c6c131db655a9f28558a39a086616d';
 
-test('[native-geospec] compares fixed-fixture reports through browser chat and the mixed API', async () => {
+const runCanonicalGeoSpecChat = async (fault?: 'missing' | 'corrupt'): Promise<void> => {
   const fixtureBase64 = await target.commands.readFile(
     `../../packages/geospec/host-tests/fixtures/data/${nativeFixtureHash}`,
     'base64',
@@ -249,6 +252,8 @@ it('accepts the project Runtime mesh', async () => {
 });
 `;
   const finalText = 'Native GeoSpec chat checks completed.';
+  const failedText = 'GeoSpec initialization failed; project files remain available.';
+  const marker = 'Persisted after failed GeoSpec initialization.\n';
   const script: readonly GatewayScriptTurn[] = [
     {
       toolCalls: [
@@ -261,9 +266,22 @@ it('accepts the project Runtime mesh', async () => {
       toolCalls: [{ name: 'test_model', args: { files: ['native.geospec.ts'] } }],
       usage: { inputTokens: 20, outputTokens: 8 },
     },
+    ...(fault === undefined
+      ? []
+      : [
+          {
+            toolCalls: [{ name: 'create_file', args: { targetFile: 'recovery-marker.txt', content: marker } }],
+            usage: { inputTokens: 20, outputTokens: 8 },
+          },
+          { text: failedText, usage: { inputTokens: 20, outputTokens: 8 } },
+          {
+            toolCalls: [{ name: 'test_model', args: { files: ['native.geospec.ts'] } }],
+            usage: { inputTokens: 20, outputTokens: 8 },
+          },
+        ]),
     { text: finalText, usage: { inputTokens: 20, outputTokens: 8 } },
   ];
-  await prepare(script);
+  await prepare(script, fault === undefined ? undefined : { geospecFault: fault });
   await target.addInitScript(() => {
     localStorage.setItem('tau:flags', JSON.stringify({ nativeGeoSpec: false }));
   });
@@ -272,12 +290,71 @@ it('accepts the project Runtime mesh', async () => {
   let apiSubjectHash: string | undefined;
   let apiReleased = false;
   let apiClosed = false;
+  let layoutBeforeClose: string | undefined;
+  let acknowledgedLayout: string | undefined;
+  let layoutBeforeReload: string | undefined;
   try {
     await createProject('Tau Native GeoSpec Chat');
     expect(await target.evaluate(() => localStorage.getItem('tau:flags'))).toBe(
       JSON.stringify({ nativeGeoSpec: false }),
     );
     await submitPrompt();
+    if (fault !== undefined) {
+      await target.expectVisible(selectors.getByText(failedText, { exact: true }), 180_000);
+      const firstRequests = await target.readAgentHostGatewayRequests();
+      expect(firstRequests).toHaveLength(4);
+      const { geospecFault, geospecWasm } = await target.events();
+      expect(geospecFault).toMatchObject({ kind: fault });
+      expect(geospecFault!.requests).toBeGreaterThan(0);
+      expect(Number.isInteger(geospecFault!.requests)).toBe(true);
+      expect(geospecWasm).toBeUndefined();
+      expect(await target.workers('geospec-runner')).toHaveLength(0);
+      const firstStorage = await readProjectStorageState();
+      expect(firstStorage.configs).toHaveLength(1);
+      const project = firstStorage.configs[0]!;
+      await expect
+        .poll(
+          async () => {
+            const persisted = await readProjectTree(project);
+            return persisted['/recovery-marker.txt'];
+          },
+          { timeout: 60_000 },
+        )
+        .toBe(marker);
+      await ensureFilesPane();
+      await target.click(fileTreeItem('native.geospec.ts'));
+      await target.expectVisible(selectors.getByCss('.dv-tab.dv-active-tab[aria-label="native.geospec.ts"]'), 30_000);
+      await expect
+        .poll(
+          async () => {
+            const persisted = await readProjectTree(project);
+            return persisted['/.tau/workbench/layout.json'];
+          },
+          { timeout: 60_000 },
+        )
+        .toContain('native.geospec.ts');
+      const beforeClose = await readProjectTree(project);
+      layoutBeforeClose = beforeClose['/.tau/workbench/layout.json'];
+      const nativeTab = selectors.getByCss('.dv-tab[aria-label="native.geospec.ts"]');
+      await target.hover(nativeTab);
+      await target.click(nativeTab.getByCss('.dv-default-tab-action'), { force: true });
+      await target.expectCount(nativeTab, 0, 30_000);
+      await expect
+        .poll(
+          async () => {
+            const persisted = await readProjectTree(project);
+            const layout = persisted['/.tau/workbench/layout.json'];
+            if (layout === undefined || layout === layoutBeforeClose || layout.includes('native.geospec.ts')) {
+              return false;
+            }
+            acknowledgedLayout = layout;
+            return true;
+          },
+          { timeout: 60_000 },
+        )
+        .toBe(true);
+      await submitPrompt();
+    }
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 180_000);
     requests = await target.readAgentHostGatewayRequests();
     expect(requests).toHaveLength(script.length);
@@ -299,8 +376,19 @@ it('accepts the project Runtime mesh', async () => {
           .safeParse(block);
         return parsed.success ? [parsed.data] : [];
       });
-    expect(results).toHaveLength(3);
-    expect(results.some((result) => result.is_error === true)).toBe(false);
+    expect(results).toHaveLength(fault === undefined ? 3 : 5);
+    expect(results.filter((result) => result.is_error === true)).toHaveLength(fault === undefined ? 0 : 1);
+    if (fault !== undefined) {
+      const failed = results[2]!;
+      expect(failed.is_error).toBe(true);
+      const failedContent =
+        typeof failed.content === 'string' ? failed.content : failed.content.map((part) => part.text).join('');
+      const failure = z
+        .object({ success: z.literal(false), errorCode: z.string(), message: z.string().min(1) })
+        .strict();
+      expect(failure.parse(JSON.parse(failedContent)).message).toMatch(/wasm|webassembly|fetch|compile|abort/iu);
+      expect(testModelOutputSchema.safeParse(JSON.parse(failedContent)).success).toBe(false);
+    }
     const outputs = results.flatMap(({ content }) => {
       const text = typeof content === 'string' ? content : content.map((part) => part.text).join('');
       const parsed = testModelOutputSchema.safeParse(JSON.parse(text));
@@ -424,10 +512,24 @@ it('accepts the project Runtime mesh', async () => {
     await target.click(selectors.getByRole('button', { name: /^(?:Edited files, )?ran tests$/iu }));
     await target.expectVisible(selectors.getByText('Tested 3 requirements', { exact: true }));
     await target.expectVisible(selectors.getByText('1. rejects the impossible fixed box volume', { exact: true }));
+    if (fault !== undefined) {
+      const postRetry = await readProjectTree(storage.configs[0]!);
+      layoutBeforeReload = postRetry['/.tau/workbench/layout.json'];
+      expect(layoutBeforeReload).toBeDefined();
+      expect(layoutBeforeReload).not.toContain('native.geospec.ts');
+      expect(acknowledgedLayout).not.toBe(layoutBeforeClose);
+    }
     await target.reload();
     await waitForComposer();
     await target.expectVisible(selectors.getByText(finalText, { exact: true }));
     expect(await target.readAgentHostGatewayRequests()).toHaveLength(script.length);
+    if (fault !== undefined) {
+      const reloadedStorage = await readProjectStorageState();
+      const reloadedTree = await readProjectTree(reloadedStorage.configs[0]!);
+      expect(reloadedTree['/recovery-marker.txt']).toBe(marker);
+      expect(reloadedTree['/.tau/workbench/layout.json']).toBe(layoutBeforeReload);
+      expect(reloadedTree[`/${artifact.path}`]).toBe(retainedText);
+    }
   } finally {
     requests = await target.readAgentHostGatewayRequests();
     await target.writeArtifact(
@@ -435,6 +537,11 @@ it('accepts the project Runtime mesh', async () => {
       JSON.stringify(
         {
           profile: 'mixed',
+          fault,
+          events: await target.events(),
+          layoutBeforeClose,
+          acknowledgedLayout,
+          layoutBeforeReload,
           fixtureSha256: nativeFixtureHash,
           fixtureBase64,
           nativeSource,
@@ -453,4 +560,16 @@ it('accepts the project Runtime mesh', async () => {
       ),
     );
   }
+};
+
+test('[native-geospec] compares fixed-fixture reports through browser chat and the mixed API', async () => {
+  await runCanonicalGeoSpecChat();
 }, 600_000);
+
+test.each(['missing', 'corrupt'] as const)(
+  '[native-geospec] recovers from a %s first WASM asset without resetting the project',
+  async (fault) => {
+    await runCanonicalGeoSpecChat(fault);
+  },
+  600_000,
+);

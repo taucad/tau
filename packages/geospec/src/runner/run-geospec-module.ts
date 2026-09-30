@@ -7,7 +7,7 @@ import { compileGeoSpecTestNamePattern, filterGeoSpecTests } from '#runner/filte
 import { getGeoSpecEngineProtocol, getRegisteredGeoSpecHostBinding } from '#engine/registry.js';
 import { analyzeMesh } from '#mesh/load-mesh.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
-import { bindGeoSpecSubject, resolveGeoSpecSubject } from '#model/subject.js';
+import { bindGeoSpecSubject, rawSubjectResidency, resolveGeoSpecSubject } from '#model/subject.js';
 import type { CreateModelLoaderOptions, GeoSpecModelLoader, ManagedGeoSpecModelLoader } from '#model/types.js';
 import type {
   GeoSpecModuleBundleCache,
@@ -303,10 +303,12 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
                 configuredNativeModelLoader === undefined
                   ? resolveGeoSpecSubject(await configuredModelLoader!(loadOptions), options.nativeAssertions?.engine)
                   : undefined;
-              const { load, ...identity } =
+              const rawSubject =
                 admission === undefined
                   ? await configuredNativeModelLoader!(loadOptions)
                   : { ...admission.identity, load: admission.load };
+              const { load, ...identity } = rawSubject;
+              const ensureResident = admission?.ensureResident ?? rawSubjectResidency(rawSubject);
               const evidence = load === undefined ? undefined : { ...structuredClone(load), loadId };
               loads[index] = {
                 loadId,
@@ -320,6 +322,7 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
                 identity,
                 ...(evidence === undefined ? {} : { load: evidence }),
                 isLive: () => nativeScopeLive && (admission?.isLive() ?? true),
+                ...(ensureResident === undefined ? {} : { ensureResident }),
               });
             } catch (error) {
               loads[index] = {

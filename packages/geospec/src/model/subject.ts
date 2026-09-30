@@ -15,16 +15,38 @@ type Admission = {
   readonly identity: GeoSpecNativeSubject;
   readonly isLive: () => boolean;
   readonly load?: GeoSpecModelLoadEvidence;
+  readonly ensureResident?: () => void;
 };
+
+const rawResidency = new WeakMap<GeoSpecNativeSubject, () => void>();
+
+/**
+ * Associate the final raw load wrapper with its private residency owner.
+ * @internal
+ * @param subject - The final wrapper returned by the native model loader.
+ * @param ensureResident - Synchronous restoration under the loader's live scope.
+ */
+export const bindRawSubjectResidency = (subject: GeoSpecNativeSubject, ensureResident: () => void): void => {
+  rawResidency.set(subject, ensureResident);
+};
+
+/**
+ * Preserve private residency when a host binds the final raw load wrapper.
+ * @internal
+ * @param subject - The exact final load wrapper, not a copied hash descriptor.
+ * @returns Its private restoration callback, when owned by a native loader.
+ */
+export const rawSubjectResidency = (subject: GeoSpecNativeSubject): (() => void) | undefined =>
+  rawResidency.get(subject);
 
 // oxlint-disable-next-line typescript/no-restricted-types -- WeakMap keys must accept arbitrary opaque objects without structural authority.
 const admissions = new WeakMap<object, Admission>();
 
 /**
  * Bind one successful host admission to its live owning scope.
+ * @internal
  * @param options - The initialized client, identity and lifetime owned by the host.
  * @returns An opaque authoring subject.
- * @internal
  */
 export const bindGeoSpecSubject = (options: {
   readonly client: GeoSpecAssertionClient;
@@ -32,6 +54,7 @@ export const bindGeoSpecSubject = (options: {
   readonly identity: GeoSpecNativeSubject;
   readonly isLive: () => boolean;
   readonly load?: GeoSpecModelLoadEvidence;
+  readonly ensureResident?: () => void;
 }): GeoSpecSubject => {
   const subject = Object.freeze({});
   admissions.set(subject, {
@@ -40,6 +63,7 @@ export const bindGeoSpecSubject = (options: {
     identity: options.identity,
     isLive: options.isLive,
     ...(options.load === undefined ? {} : { load: options.load }),
+    ...(options.ensureResident === undefined ? {} : { ensureResident: options.ensureResident }),
   });
   // The brand has no runtime representation: only this private map establishes admission.
   return subject as GeoSpecSubject;
@@ -47,10 +71,10 @@ export const bindGeoSpecSubject = (options: {
 
 /**
  * Resolve a live subject without treating its digest as authority.
+ * @internal
  * @param subject - The opaque subject returned by admission.
  * @param engine - Optional expected engine owner.
  * @returns The live private admission.
- * @internal
  */
 export const resolveGeoSpecSubject = (subject: unknown, engine?: Admission['engine']): Admission => {
   const admission = typeof subject === 'object' && subject !== null ? admissions.get(subject) : undefined;
@@ -62,5 +86,6 @@ export const resolveGeoSpecSubject = (subject: unknown, engine?: Admission['engi
       },
     );
   }
+  admission.ensureResident?.();
   return admission;
 };

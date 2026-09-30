@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import type { GeoSpecNativeModelEngine } from '#model/native-model-loader.js';
 import type { GeoSpecRuntimeClient } from '#model/types.js';
+import { rawSubjectResidency } from '#model/subject.js';
 
 const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
 
@@ -21,7 +22,16 @@ const testEngine = () => {
   const releaseSubject = vi.fn(() => encode({ result: {} }));
   const engine: GeoSpecNativeModelEngine = {
     evaluateClaim: (input) => ({ canonicalClaim: input, canonicalPlan: input, canonicalResult: input }),
-    processRequest: (input) => input,
+    processRequest: () =>
+      encode({
+        requestId: 'configuration',
+        result: {
+          canonicalProfile: 'geospec-jcs-v1',
+          protocolVersion: 3,
+          registryVersion: 5,
+          configuration: { binaryAdmissionLimits: { maxSubjectBytes: 1024, maxTotalBinaryBytes: 1024 } },
+        },
+      }),
     ingestSubject,
     subjectHandle,
     releaseSubject,
@@ -300,7 +310,16 @@ describe('native model loader ownership', () => {
     const operations: string[] = [];
     const engine: GeoSpecNativeModelEngine = {
       evaluateClaim: (input) => ({ canonicalClaim: input, canonicalPlan: input, canonicalResult: input }),
-      processRequest: (input) => input,
+      processRequest: () =>
+        encode({
+          requestId: 'configuration',
+          result: {
+            canonicalProfile: 'geospec-jcs-v1',
+            protocolVersion: 3,
+            registryVersion: 5,
+            configuration: { binaryAdmissionLimits: { maxSubjectBytes: 1024, maxTotalBinaryBytes: 1024 } },
+          },
+        }),
       ingestSubject: () => {
         operations.push('ingest');
         return encode({ result: { subject: { subjectHash: hash } } });
@@ -341,7 +360,16 @@ describe('native model loader ownership', () => {
     let admission = 0;
     const engine: GeoSpecNativeModelEngine = {
       evaluateClaim: (input) => ({ canonicalClaim: input, canonicalPlan: input, canonicalResult: input }),
-      processRequest: (input) => input,
+      processRequest: () =>
+        encode({
+          requestId: 'configuration',
+          result: {
+            canonicalProfile: 'geospec-jcs-v1',
+            protocolVersion: 3,
+            registryVersion: 5,
+            configuration: { binaryAdmissionLimits: { maxSubjectBytes: 1024, maxTotalBinaryBytes: 1024 } },
+          },
+        }),
       ingestSubject: () => {
         admission += 1;
         operations.push(`ingest:${admission}`);
@@ -433,7 +461,16 @@ const contentEngine = () => {
   );
   const engine: GeoSpecNativeModelEngine = {
     evaluateClaim: (input) => ({ canonicalClaim: input, canonicalPlan: input, canonicalResult: input }),
-    processRequest: (input) => input,
+    processRequest: () =>
+      encode({
+        requestId: 'configuration',
+        result: {
+          canonicalProfile: 'geospec-jcs-v1',
+          protocolVersion: 3,
+          registryVersion: 5,
+          configuration: { binaryAdmissionLimits: { maxSubjectBytes: 1024, maxTotalBinaryBytes: 1024 } },
+        },
+      }),
     ingestSubject,
     subjectHandle: (request) =>
       encode({ result: { subjectHandle: { subjectHash: decodeRequest(request)['subjectHash'], generation: 1 } } }),
@@ -478,6 +515,155 @@ describe('native model loader freshness', () => {
 });
 
 describe('native model loader carried scopes', () => {
+  it.each(['releaseAll', 'count refusal'] as const)(
+    'should retain failed carried cleanup for retry after %s',
+    async (operation) => {
+      const { engine, readSource, released, refuseNext } = contentEngine();
+      const releaseSubject = engine.releaseSubject.bind(engine);
+      const failure = new Error('Selective release temporarily unavailable.');
+      let fail = false;
+      engine.releaseSubject = (request) => {
+        if (fail) {
+          throw failure;
+        }
+        return releaseSubject(request);
+      };
+      const carried = new Map<string, unknown>();
+      const first = createGeoSpecNativeModelLoader({ engine, readSource, carried });
+      await first({ source: 'a.step', format: 'step' });
+      await first.releaseAll();
+      const second = createGeoSpecNativeModelLoader({ engine, readSource, carried });
+      fail = true;
+      if (operation === 'releaseAll') {
+        await expect(second.releaseAll()).rejects.toBeInstanceOf(AggregateError);
+      } else {
+        refuseNext();
+        await expect(second({ source: 'b.step', format: 'step' })).rejects.toBe(failure);
+      }
+      expect([...carried.keys()]).toStrictEqual(['1'.repeat(64)]);
+      expect(released).toStrictEqual([]);
+      fail = false;
+      await second.releaseAll();
+      expect(carried.size).toBe(0);
+      expect(released).toStrictEqual(['1']);
+      await second.releaseAll();
+      expect(released).toStrictEqual(['1']);
+    },
+  );
+  it('should refuse a restored identity mismatch without marking the earlier subject resident', async () => {
+    const { engine, ingestSubject, refuseNext } = contentEngine();
+    const loader = createGeoSpecNativeModelLoader({ engine });
+    try {
+      const first = await loader({ source: Uint8Array.of(1), format: 'step' });
+      refuseNext();
+      await loader({ source: Uint8Array.of(2), format: 'step' });
+      const restore = rawSubjectResidency(first)!;
+      ingestSubject.mockImplementationOnce(() => encode({ result: { subject: { subjectHash: '9'.repeat(64) } } }));
+      expect(restore).toThrow(new TypeError('Native GeoSpec restored admission changed its subject identity.'));
+      const before = ingestSubject.mock.calls.length;
+      restore();
+      expect(ingestSubject).toHaveBeenCalledTimes(before + 1);
+      expect([...ingestSubject.mock.calls.at(-1)![1]]).toEqual([1]);
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+  it('should restore exact resource and descriptor bytes without rereading source', async () => {
+    const { engine, ingestSubject, refuseNext } = contentEngine();
+    const primary = Uint8Array.of(1);
+    const resource = Uint8Array.of(7);
+    const readSource = vi.fn(async () => primary);
+    const loader = createGeoSpecNativeModelLoader({ engine, readSource });
+    const ingestOptions = { name: 'original' };
+    try {
+      const first = await loader({
+        source: 'first.step',
+        format: 'step',
+        resources: [{ name: 'resource.bin', source: resource }],
+        ingestOptions,
+      });
+      primary[0] = 9;
+      resource[0] = 9;
+      ingestOptions.name = 'changed';
+      await loader({ source: Uint8Array.of(2), format: 'step' });
+      refuseNext();
+      await loader({ source: Uint8Array.of(3), format: 'step' });
+      const restore = rawSubjectResidency(first);
+      expect(restore).toBeTypeOf('function');
+      restore!();
+      const restored = ingestSubject.mock.calls.at(-1)!;
+      expect([...restored[1]]).toEqual([1]);
+      expect(restored[2].map((bytes) => [...bytes])).toEqual([[7]]);
+      expect(JSON.parse(new TextDecoder().decode(restored[0]))).toMatchObject({
+        ingestOptions: { name: 'original' },
+        resources: [{ name: 'resource.bin', byteLength: 1 }],
+      });
+      expect(readSource).toHaveBeenCalledOnce();
+      await loader.releaseAll();
+      expect(() => {
+        restore!();
+      }).toThrow('not admitted');
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+  it('should reject a descriptor exceeding the existing wire byte ceiling before native admission', async () => {
+    const { engine, ingestSubject } = contentEngine();
+    const loader = createGeoSpecNativeModelLoader({ engine });
+    try {
+      await expect(
+        loader({ source: Uint8Array.of(1), format: 'step', ingestOptions: { name: 'x'.repeat(16 * 1024 * 1024) } }),
+      ).rejects.toMatchObject({
+        name: 'RangeError',
+        code: 'limit-exceeded',
+        message: 'GeoSpec retained admission input exceeds its byte limit.',
+      });
+      expect(ingestSubject).not.toHaveBeenCalled();
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+  it('should retain one accepted boundary-sized input and reject aggregate growth before native admission', async () => {
+    const { engine, ingestSubject } = contentEngine();
+    const loader = createGeoSpecNativeModelLoader({ engine });
+    const bytes = new Uint8Array(1024);
+    bytes[0] = 1;
+    try {
+      await loader({ source: bytes, format: 'step' });
+      await loader({ source: Uint8Array.from(bytes), format: 'step' });
+      const before = ingestSubject.mock.calls.length;
+      await expect(loader({ source: Uint8Array.of(2), format: 'step' })).rejects.toMatchObject({
+        name: 'RangeError',
+        code: 'limit-exceeded',
+        message: 'GeoSpec live admission snapshots exceed their retained input byte limit.',
+      });
+      expect(ingestSubject).toHaveBeenCalledTimes(before);
+      await loader.releaseAll();
+      await expect(loader({ source: Uint8Array.of(2), format: 'step' })).resolves.toMatchObject({
+        subjectHash: '2'.repeat(64),
+      });
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+
+  it('should propagate a geometry-byte limit unchanged without evicting a live subject', async () => {
+    const { engine, ingestSubject, released } = contentEngine();
+    const loader = createGeoSpecNativeModelLoader({ engine });
+    try {
+      await loader({ source: Uint8Array.of(1), format: 'step' });
+      const failure = Object.assign(new Error('Primary geometry exceeds the configured binary subject limit.'), {
+        code: 'limit-exceeded',
+      });
+      ingestSubject.mockImplementationOnce(() => {
+        throw failure;
+      });
+      await expect(loader({ source: Uint8Array.of(2), format: 'step' })).rejects.toBe(failure);
+      expect(released).toEqual([]);
+    } finally {
+      await loader.releaseAll();
+    }
+  });
   it('should keep a scope for the next one and release only the subjects it did not load again', async () => {
     const { engine, readSource, released } = contentEngine();
     const carried = new Map<string, unknown>();
@@ -517,6 +703,7 @@ describe('native model loader carried scopes', () => {
     expect([...carried.keys()]).toStrictEqual(['2'.repeat(64)]);
 
     refuseNext();
-    await expect(second({ source: 'a.step', format: 'step' })).rejects.toMatchObject({ code: 'limit-exceeded' });
+    await expect(second({ source: 'a.step', format: 'step' })).resolves.toMatchObject({ subjectHash: '1'.repeat(64) });
+    await second.releaseAll();
   });
 });

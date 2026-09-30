@@ -8,7 +8,7 @@
 
 import { getRegisteredGeoSpecHostBinding, geoSpecEngineUnavailableDiagnostic } from '#engine/registry.js';
 import { createGeoSpecAssertionClient } from '#assertion-client/client.js';
-import { bindGeoSpecSubject, resolveGeoSpecSubject } from '#model/subject.js';
+import { bindGeoSpecSubject, rawSubjectResidency, resolveGeoSpecSubject } from '#model/subject.js';
 import type { GeoSpecSubject } from '#model/subject.js';
 import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
@@ -59,12 +59,14 @@ export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): Mana
     const loader = async (options: LoadModelOptions): Promise<GeoSpecSubject> => {
       const current = generation;
       const identity = await raw({ ...modelDefaults, ...options });
+      const ensureResident = rawSubjectResidency(identity);
       return bindGeoSpecSubject({
         client,
         engine,
         identity: { subjectHash: identity.subjectHash },
         ...(identity.load === undefined ? {} : { load: identity.load }),
         isLive: () => generation === current,
+        ...(ensureResident === undefined ? {} : { ensureResident }),
       });
     };
     return Object.assign(loader, {

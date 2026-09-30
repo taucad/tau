@@ -183,6 +183,9 @@ export function createWorkbenchEntriesStore(
     expectedReset: Uint8Array<ArrayBuffer> | null,
     pathChange?: QueuedPathChange,
   ): Promise<'saved' | 'retry' | 'blocked'> => {
+    if (isDisposed()) {
+      return 'blocked';
+    }
     if (!observed && !(await read())) {
       return 'retry';
     }
@@ -196,6 +199,9 @@ export function createWorkbenchEntriesStore(
       return 'saved';
     }
     for (let attempt = 0; attempt < (reset ? 1 : 3); attempt++) {
+      if (isDisposed()) {
+        return 'blocked';
+      }
       const current = state.record ?? { version: 1, entries: {} };
       const existing = current.entries[patch?.path ?? ''];
       const merged = pathChange
@@ -258,7 +264,7 @@ export function createWorkbenchEntriesStore(
     return 'retry';
   };
   const retry = (): void => {
-    if ((deferred.size === 0 && deferredPathChanges.length === 0) || retryTimer) {
+    if (isDisposed() || (deferred.size === 0 && deferredPathChanges.length === 0) || retryTimer) {
       return;
     }
     retryTimer = setTimeout(() => {
@@ -316,9 +322,16 @@ export function createWorkbenchEntriesStore(
         if (saved) {
           deferred.delete(path);
           retryDelay = 250;
-        } else if (status === 'retry') {
-          deferred.set(path, combine(deferred.get(path), patch));
-          retry();
+        } else {
+          const remaining = combine(deferred.get(path), patch);
+          if (status === 'retry' || Object.keys(remaining.fields).length > 0) {
+            deferred.set(path, remaining);
+          } else {
+            deferred.delete(path);
+          }
+          if (status === 'retry') {
+            retry();
+          }
         }
         if (intended.get(path) === next && saved) {
           intended.set(path, state.record?.entries[path] ?? next);
@@ -345,6 +358,9 @@ export function createWorkbenchEntriesStore(
   return {
     read,
     edit: async (path, next) => {
+      if (isDisposed()) {
+        return false;
+      }
       const base = intended.get(path) ?? state.record?.entries[path];
       const fields: Patch['fields'] = {};
       if (!same(base?.renderTimeout, next.renderTimeout)) {
@@ -385,6 +401,9 @@ export function createWorkbenchEntriesStore(
       });
     },
     changePaths: async (operation) => {
+      if (isDisposed()) {
+        return false;
+      }
       if (retryTimer) {
         clearTimeout(retryTimer);
         retryTimer = undefined;
@@ -415,9 +434,11 @@ export function createWorkbenchEntriesStore(
       const result = pending
         .then(async () => (deferredPathChanges.length > 0 ? 'retry' : write(undefined, undefined, null, change)))
         .then((status) => {
-          if (status === 'retry') {
+          if (status !== 'saved') {
             deferredPathChanges.push(change);
-            retry();
+            if (status === 'retry') {
+              retry();
+            }
           }
           return status === 'saved';
         });
@@ -425,11 +446,29 @@ export function createWorkbenchEntriesStore(
       return result;
     },
     reset: async (next) => {
-      if (state.refusal?.code !== 'INVALID_RECORD') {
+      if (isDisposed() || state.refusal?.code !== 'INVALID_RECORD') {
         return false;
       }
       const { bytes } = state;
-      const result = pending.then(async () => write(undefined, next, bytes)).then((status) => status === 'saved');
+      await drainEdits();
+      const sequence = ++editSequence;
+      const result = pending
+        .then(async () => write(undefined, next, bytes))
+        .then((status) => {
+          if (status !== 'saved') {
+            return false;
+          }
+          deferred.clear();
+          deferredPathChanges.length = 0;
+          settledSequence = sequence;
+          if (sequence === editSequence) {
+            intended.clear();
+            for (const [path, entry] of Object.entries(next.entries)) {
+              intended.set(path, entry);
+            }
+          }
+          return true;
+        });
       pending = result;
       return result;
     },

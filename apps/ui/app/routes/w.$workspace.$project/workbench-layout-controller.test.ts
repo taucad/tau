@@ -73,6 +73,188 @@ function memoryFiles(initial: WorkbenchLayout | undefined = layout()) {
 }
 
 describe('workbench layout checked store', () => {
+  it('should keep invalid bytes preservable when an unchanged edit owes no fields', async () => {
+    const data = memoryFiles();
+    const store = createWorkbenchLayoutStore({
+      root: '/root',
+      files: data.files,
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await store.read();
+      const invalid = encoder.encode('{broken');
+      data.setBytes(invalid);
+      await store.read();
+      expect(await store.edit(layout())).toBe(false);
+      expect(await store.flush()).toBe(true);
+      expect(data.get()).toEqual(invalid);
+      expect(data.writes).not.toHaveBeenCalled();
+    } finally {
+      store.dispose();
+    }
+  });
+
+  it('should hold an accepted edit and flush until its first record read settles', async () => {
+    const data = memoryFiles();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const store = createWorkbenchLayoutStore({
+      root: '/root',
+      files: {
+        ...data.files,
+        readFile: async () => {
+          entered.resolve();
+          await release.promise;
+          return data.files.readFile();
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      const hydration = store.read();
+      await entered.promise;
+      const next = { ...layout(), lanes: { chat: false, workbench: true } };
+      const edited = store.edit(next);
+      let settled = false;
+      const drained = (async () => {
+        const saved = await store.flush();
+        settled = true;
+        return saved;
+      })();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(data.writes).not.toHaveBeenCalled();
+      release.resolve();
+      await hydration;
+      expect(await edited).toBe(true);
+      expect(await drained).toBe(true);
+      expect(workbenchRecords.layout.read(data.get()!)).toMatchObject({ status: 'current', record: next });
+    } finally {
+      release.resolve();
+      store.dispose();
+    }
+  });
+
+  it.each(['{broken', '{"version":2}'])(
+    'should retain blocked layout intent through flush and repair (%s)',
+    async (invalid) => {
+      const data = memoryFiles();
+      const store = createWorkbenchLayoutStore({
+        root: '/root',
+        files: data.files,
+        onChange: () => undefined,
+        onError: (error) => {
+          throw error;
+        },
+      });
+      try {
+        await store.read();
+        const release = data.delayNextWrite();
+        const edited = store.edit({ ...layout(), lanes: { chat: false, workbench: true } });
+        await vi.waitFor(() => {
+          expect(data.writes).toHaveBeenCalledOnce();
+        });
+        const foreign = encoder.encode(invalid);
+        data.setBytes(foreign);
+        release();
+        expect(await edited).toBe(false);
+        expect(await store.flush()).toBe(false);
+        expect(data.get()).toEqual(foreign);
+        data.set(layout());
+        await store.read();
+        expect(await store.flush()).toBe(true);
+        expect(workbenchRecords.layout.read(data.get()!)).toMatchObject({
+          status: 'current',
+          record: { lanes: { chat: false } },
+        });
+      } finally {
+        store.dispose();
+      }
+    },
+  );
+
+  it('should preserve invalid layout bytes on a clean flush', async () => {
+    const data = memoryFiles();
+    const foreign = encoder.encode('{broken');
+    data.setBytes(foreign);
+    const store = createWorkbenchLayoutStore({
+      root: '/root',
+      files: data.files,
+      onChange: () => undefined,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    try {
+      await store.read();
+      expect(await store.flush()).toBe(true);
+      expect(data.get()).toEqual(foreign);
+      expect(data.writes).not.toHaveBeenCalled();
+    } finally {
+      store.dispose();
+    }
+  });
+
+  it('should resolve blocked layout intent only after an explicit checked Reset', async () => {
+    const data = memoryFiles();
+    const store = createWorkbenchLayoutStore({
+      root: '/root',
+      files: data.files,
+      onChange: () => undefined,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    try {
+      await store.read();
+      data.setBytes(encoder.encode('{broken'));
+      await store.read();
+      expect(await store.edit({ ...layout(), lanes: { chat: false, workbench: true } })).toBe(false);
+      expect(await store.flush()).toBe(false);
+      expect(await store.reset(layout())).toBe(true);
+      expect(await store.flush()).toBe(true);
+      expect(workbenchRecords.layout.read(data.get()!)).toEqual({ status: 'current', record: layout() });
+    } finally {
+      store.dispose();
+    }
+  });
+
+  it('should retire a disposed layout owner before a late write failure can retry', async () => {
+    vi.useFakeTimers();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const data = memoryFiles();
+    const writeFileChecked = vi.fn(async (): Promise<CheckedFileWriteResult> => {
+      entered.resolve();
+      await release.promise;
+      throw new Error('offline');
+    });
+    const store = createWorkbenchLayoutStore({
+      root: '/root',
+      files: { ...data.files, writeFileChecked },
+      onChange: () => undefined,
+      onError: vi.fn(),
+    });
+    try {
+      await store.read();
+      const edited = store.edit({ ...layout(), lanes: { chat: false, workbench: true } });
+      await entered.promise;
+      store.dispose();
+      release.resolve();
+      expect(await edited).toBe(false);
+      await vi.runOnlyPendingTimersAsync();
+      expect(writeFileChecked).toHaveBeenCalledOnce();
+      expect(await store.edit({ ...layout(), lanes: { chat: true, workbench: false } })).toBe(false);
+      expect(writeFileChecked).toHaveBeenCalledOnce();
+    } finally {
+      release.resolve();
+      store.dispose();
+      vi.useRealTimers();
+    }
+  });
   it('does not report superseded or disposed reads and reannounces same bytes after an IO error', async () => {
     const memory = memoryFiles();
     let stale = Promise.withResolvers<void>();

@@ -959,11 +959,93 @@ Library.Go(1f, () =>
         Assert.Equal("CS_TAU_VIEWER_CAPABILITY", unsupported.Issues[0].Code);
     }
 
+    [Theory]
+    [InlineData(6)]
+    [InlineData(64)]
+    public void PrismNormalsPreserveFlatFacesAndSmoothRoundSides(int sides)
+    {
+        var positions = new float[(sides * 2 + 2) * 3];
+        for (var ring = 0; ring < 2; ring++)
+        for (var side = 0; side < sides; side++)
+        {
+            var angle = 2 * MathF.PI * side / sides;
+            var offset = (ring * sides + side) * 3;
+            positions[offset] = MathF.Cos(angle);
+            positions[offset + 1] = MathF.Sin(angle);
+            positions[offset + 2] = ring;
+        }
+        positions[(sides * 2 + 1) * 3 + 2] = 1;
+        var triangles = new List<uint>();
+        for (var side = 0; side < sides; side++)
+        {
+            var a = (uint)side;
+            var b = (uint)((side + 1) % sides);
+            var c = a + (uint)sides;
+            var d = b + (uint)sides;
+            triangles.AddRange([a, b, d, a, d, c, (uint)(sides * 2), b, a, (uint)(sides * 2 + 1), c, d]);
+        }
+        var indices = triangles.ToArray();
+        var original = indices.SelectMany(index => positions.AsSpan((int)index * 3, 3).ToArray()).ToArray();
+        float[] normals;
+        using var library = new Library(1f);
+        Library.RegisterGlobalLibrary(library);
+        try
+        {
+            using var mesh = new Mesh();
+            for (var vertex = 0; vertex < positions.Length; vertex += 3)
+                mesh.nAddVertex(new Vector3(positions[vertex], positions[vertex + 1], positions[vertex + 2]));
+            for (var triangle = 0; triangle < indices.Length; triangle += 3)
+                mesh.nAddTriangle((int)indices[triangle], (int)indices[triangle + 1], (int)indices[triangle + 2]);
+            using var backend = new CaptureViewerBackend(Path.Combine(root, "normal-artifacts"));
+            backend.Add(mesh, 0);
+            var component = Assert.Single(backend.Extract().Components);
+            positions = component.Positions;
+            indices = component.Indices;
+            normals = component.Normals;
+        }
+        finally
+        {
+            Library.UnregisterGlobalLibrary();
+        }
+        Assert.Equal(original, indices.SelectMany(index => positions.AsSpan((int)index * 3, 3).ToArray()));
+        for (var triangle = 0; triangle < indices.Length; triangle += 3)
+        {
+            Vector3 Point(int corner) => new(positions[indices[triangle + corner] * 3], positions[indices[triangle + corner] * 3 + 1], positions[indices[triangle + corner] * 3 + 2]);
+            var face = Vector3.Normalize(Vector3.Cross(Point(1) - Point(0), Point(2) - Point(0)));
+            for (var corner = 0; corner < 3; corner++)
+            {
+                var offset = indices[triangle + corner] * 3;
+                var actual = new Vector3(normals[offset], normals[offset + 1], normals[offset + 2]);
+                var expected = sides == 6 || MathF.Abs(face.Z) > 0.5f
+                    ? face
+                    : Vector3.Normalize(new Vector3(positions[offset], positions[offset + 1], 0));
+                Assert.True(Vector3.Dot(expected, actual) > 0.999f, $"{sides} sides, triangle {triangle / 3}: expected {expected}, got {actual}");
+            }
+        }
+    }
+
+    [Fact]
+    public void NormalsKeepPointTouchingFansSeparateAndDegenerateValuesFinite()
+    {
+        var angle = MathF.PI / 9;
+        float[] positions = [0, 0, 0, 1, 0, 0, 0, 1, 0, -1, 0, 0, 0, -MathF.Cos(angle), -MathF.Sin(angle), 2, 2, 2, 3, 3, 3];
+        uint[] indices = [0, 1, 2, 0, 3, 4, 5, 5, 5];
+        var normals = ModelRunner.VertexNormals(ref positions, ref indices);
+        Assert.NotEqual(indices[0], indices[3]);
+        Vector3 Normal(int corner) => new(normals[indices[corner] * 3], normals[indices[corner] * 3 + 1], normals[indices[corner] * 3 + 2]);
+        Assert.Equal(Vector3.UnitZ, Normal(0));
+        Assert.True(Vector3.Dot(new Vector3(0, -MathF.Sin(angle), MathF.Cos(angle)), Normal(3)) > 0.999f);
+        Assert.All(normals, value => Assert.True(float.IsFinite(value)));
+        Assert.Equal(Vector3.UnitZ, Normal(6));
+        Assert.Equal(new float[] { 0, 0, 1 }, normals[18..21]); // Unused source vertex.
+    }
+
     [Fact]
     public void NormalsAndMixedArtifactLayoutAreDeterministic()
     {
         var positions = new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 5 };
-        var normals = ModelRunner.VertexNormals(positions, [0, 1, 2]);
+        uint[] indices = [0, 1, 2];
+        var normals = ModelRunner.VertexNormals(ref positions, ref indices);
         Assert.Equal(new float[] { 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1 }, normals);
         var components = new[]
         {

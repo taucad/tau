@@ -86,7 +86,7 @@ const hash = (value: string): string => createHash('sha256').update(value).diges
 const ready = `process.stdout.write('{"protocolVersion":1,"type":"ready"}\\n');`;
 const keepAlive = `setInterval(()=>{},1000);`;
 
-const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 2000) => {
+const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 2000, maxProtocolLineBytes?: number) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'tau-native-session-test-')));
   roots.push(root);
   const workspacePath = join(root, 'workspace');
@@ -129,6 +129,7 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 2000) => 
     },
     requestTimeout,
     maxArtifactBytes: 32,
+    maxProtocolLineBytes,
     logger,
     sessionName: 'Test native',
     executableName: 'test executable',
@@ -171,7 +172,11 @@ const readline=require('node:readline').createInterface({input:process.stdin});
 readline.on('line',(line)=>{const request=JSON.parse(line);const result=${response};process.stdout.write(JSON.stringify(result)+'\\n');if(request.method==='shutdown')setTimeout(()=>process.exit(0),5)});
 ${keepAlive}`;
 const privateSession = (session: NativeProcessSession<Issue>) =>
-  session as unknown as { child?: ChildProcessWithoutNullStreams; pending: Map<string, unknown> };
+  session as unknown as {
+    child?: ChildProcessWithoutNullStreams;
+    pending: Map<string, unknown>;
+    onStdout: (chunk: Uint8Array<ArrayBuffer>) => void;
+  };
 const delay = async (milliseconds: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, milliseconds);
@@ -212,6 +217,58 @@ afterEach(() => {
 });
 
 describe('NativeProcessSession', () => {
+  it('should accept a response above the default limit when the session allows it', async () => {
+    const value = fixture(
+      respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'x'.repeat(1_048_577)}}`),
+      2000,
+      2 * 1024 * 1024,
+    );
+    try {
+      await expect(request(value.session)).resolves.toEqual({ value: 'x'.repeat(1_048_577) });
+    } finally {
+      await value.session.cleanup();
+    }
+  });
+
+  it('should reject invalid protocol byte limits before launching a worker', () => {
+    const value = fixture();
+    for (const maxProtocolLineBytes of [0, -1, 1.5, Number.NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => new NativeProcessSession({ ...value.options, maxProtocolLineBytes })).toThrow(
+        new TypeError('maxProtocolLineBytes must be a positive safe integer.'),
+      );
+    }
+  });
+
+  it('should reject oversized complete frames and unfinished tails after another frame', async () => {
+    for (const maximum of [undefined, 256]) {
+      const limit = maximum ?? 1_048_576;
+      for (const suffix of ['\n', '']) {
+        const value = fixture(undefined, 2000, maximum);
+        const operation = request(value.session, {
+          events: { parseEvent: (event) => event as { stage: string }, onEvent: () => undefined },
+        });
+        const assertion = expect(operation).rejects.toThrow(/oversized protocol frame/);
+        try {
+          const internals = privateSession(value.session);
+          while (internals.pending.size === 0) {
+            await delay(1);
+          }
+          const frame = JSON.stringify({
+            protocolVersion: 1,
+            type: 'event',
+            requestId: [...internals.pending.keys()][0],
+            sequence: 1,
+            event: { stage: 'coarse' },
+          });
+          internals.onStdout(Buffer.from(`${frame}\n${'x'.repeat(limit + 1)}${suffix}`));
+          await assertion;
+        } finally {
+          await value.session.cleanup();
+        }
+      }
+    }
+  });
+
   it('delivers validated request events in sequence without settling the terminal response', async () => {
     const worker = `${ready}
 const readline=require('node:readline').createInterface({input:process.stdin});

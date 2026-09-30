@@ -908,13 +908,13 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
             />
           </When>
           <When shouldRender={!isEditing}>
-            {/* Matches focused-edit ChatTextarea natural max (max-h-48 editor + in-flow toolbar + border = 14.625rem). Keep in sync so click-to-edit does not jump. */}
+            {/* Matches focused-edit ChatTextarea natural max (max-h-48 editor + toolbar + padding + border = 15.375rem). Keep in sync so click-to-edit does not jump. */}
             <div
               className={cn(
                 'flex flex-col gap-0 min-w-0',
                 isUser &&
                   'relative z-10 cursor-action rounded-lg border bg-background px-3 py-1 outline-none hover:border-primary focus-visible:focus-outline',
-                shouldRenderCollapsedUserRows && 'max-h-58.5 overflow-hidden',
+                shouldRenderCollapsedUserRows && 'max-h-61.5 overflow-hidden',
                 fileParts.length > 0 && 'pt-3',
               )}
               role={isUser ? 'button' : undefined}

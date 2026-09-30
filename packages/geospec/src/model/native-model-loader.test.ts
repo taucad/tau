@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { RuntimeDocument } from '@taucad/runtime/client';
 import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import type { GeoSpecNativeModelEngine } from '#model/native-model-loader.js';
 import type { GeoSpecRuntimeClient } from '#model/types.js';
@@ -35,15 +37,20 @@ describe('native model loader ownership', () => {
     const read = Uint8Array.of(1);
     const exported = Uint8Array.of(2);
     const resource = Uint8Array.of(3);
+    const document = mock<RuntimeDocument>();
+    document.export.mockResolvedValue({
+      success: true,
+      exportId: 'glb',
+      evaluationId: 'evaluation-1',
+      files: [
+        { name: 'model.glb', mimeType: 'model/gltf-binary', bytes: exported },
+        { name: 'model.bin', mimeType: 'application/octet-stream', bytes: resource },
+      ],
+      issues: [],
+    });
     const runtime: GeoSpecRuntimeClient = {
       connect: vi.fn(async () => undefined),
-      export: vi.fn().mockResolvedValue({
-        success: true,
-        data: [
-          { name: 'model.glb', bytes: exported },
-          { name: 'model.bin', bytes: resource },
-        ],
-      }),
+      open: vi.fn(() => document),
       terminate: vi.fn(),
     };
     const loader = createGeoSpecNativeModelLoader({ engine, runtime, readSource: async () => read });
@@ -64,18 +71,22 @@ describe('native model loader ownership', () => {
 
   it('coalesces inline Runtime exports, drains release, and retries after failure', async () => {
     const { engine, ingestSubject, releaseSubject } = testEngine();
-    const firstExport = Promise.withResolvers<Awaited<ReturnType<GeoSpecRuntimeClient['export']>>>();
+    const firstExport = Promise.withResolvers<Awaited<ReturnType<RuntimeDocument['export']>>>();
     const exportModel = vi
       .fn()
       .mockImplementationOnce(async () => firstExport.promise)
       .mockResolvedValue({
         success: true,
-        data: [{ name: 'model.glb', bytes: Uint8Array.of(8) }],
+        exportId: 'glb',
+        evaluationId: 'evaluation-1',
+        files: [{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: Uint8Array.of(8) }],
+        issues: [],
       });
     const terminate = vi.fn();
+    const document = mock<RuntimeDocument>({ export: exportModel });
     const runtime: GeoSpecRuntimeClient = {
       connect: vi.fn(async () => undefined),
-      export: exportModel,
+      open: vi.fn(() => document),
       terminate,
     };
     const loader = createGeoSpecNativeModelLoader({ engine, runtime });
@@ -99,7 +110,7 @@ describe('native model loader ownership', () => {
     code['main.ts'] = 'model B';
     await loader(options);
     expect(exportModel).toHaveBeenCalledTimes(3);
-    expect(exportModel.mock.calls[2]?.[1]).toMatchObject({
+    expect(vi.mocked(runtime.open).mock.calls[2]?.[0]).toMatchObject({
       source: { files: { 'main.ts': 'model B' } },
     });
     await loader.releaseAll();
@@ -108,11 +119,13 @@ describe('native model loader ownership', () => {
 
   it('keeps a shared Runtime admission alive until releaseAll drains it', async () => {
     const { engine, ingestSubject, releaseSubject } = testEngine();
-    const exported = Promise.withResolvers<Awaited<ReturnType<GeoSpecRuntimeClient['export']>>>();
+    const exported = Promise.withResolvers<Awaited<ReturnType<RuntimeDocument['export']>>>();
     const terminate = vi.fn();
+    const exportModel = vi.fn(async () => exported.promise);
+    const document = mock<RuntimeDocument>({ export: exportModel });
     const runtime: GeoSpecRuntimeClient = {
       connect: vi.fn(async () => undefined),
-      export: vi.fn(async () => exported.promise),
+      open: vi.fn(() => document),
       terminate,
     };
     const loader = createGeoSpecNativeModelLoader({
@@ -128,14 +141,16 @@ describe('native model loader ownership', () => {
     const duplicate = loader(options);
     const cleanup = loader.releaseAll();
     await vi.waitFor(() => {
-      expect(runtime.export).toHaveBeenCalledTimes(1);
+      expect(exportModel).toHaveBeenCalledTimes(1);
     });
     expect(releaseSubject).not.toHaveBeenCalled();
     expect(terminate).not.toHaveBeenCalled();
     exported.resolve({
       success: true,
+      exportId: 'glb',
+      evaluationId: 'evaluation-1',
       issues: [],
-      data: [
+      files: [
         {
           name: 'model.glb',
           mimeType: 'model/gltf-binary',

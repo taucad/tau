@@ -13,7 +13,7 @@ import type {
   LoadModelSourceOptions,
 } from '#model/types.js';
 import type { GeometryDiagnostic } from '#mesh/types.js';
-import type { KernelIssue } from '@taucad/runtime/types';
+import type { ExportFile, KernelIssue } from '@taucad/runtime/types';
 
 const protocolHeader = {
   canonicalProfile: 'geospec-jcs-v1',
@@ -121,14 +121,6 @@ export type ManagedGeoSpecNativeModelLoader = GeoSpecNativeModelLoader & {
 };
 
 type RuntimeOptions = Exclude<LoadModelOptions, { source: unknown }>;
-type RuntimeExport = (
-  format: string,
-  options: {
-    source: { files: Record<string, string>; entry: string } | { path: string };
-    parameters?: Record<string, unknown>;
-    exportOptions: Record<string, unknown>;
-  },
-) => ReturnType<GeoSpecRuntimeClient['export']>;
 
 const failure = (diagnostics: GeometryDiagnostic[]): GeoSpecModelLoadError => new GeoSpecModelLoadError(diagnostics);
 
@@ -434,15 +426,22 @@ export const createGeoSpecNativeModelLoader = (
     if ('success' in requested) {
       throw failure(requested.diagnostics);
     }
-    const exported = await (runtime.export as unknown as RuntimeExport)(format, {
+    const document = runtime.open({
       source: runtimeSource(options),
       ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
-      exportOptions: requested.options,
     });
+    const exported = await (async () => {
+      try {
+        return await document.export(format, { options: requested.options });
+      } finally {
+        document.close();
+      }
+    })();
     if (!exported.success) {
       throw failure(exported.issues.map(runtimeIssueDiagnostic));
     }
-    const [primary, ...resources] = exported.data;
+    const files: ExportFile[] = [...exported.files];
+    const [primary, ...resources] = files;
     if (primary === undefined) {
       throw failure([
         diagnostic({

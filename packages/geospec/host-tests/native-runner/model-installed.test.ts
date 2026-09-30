@@ -5,6 +5,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { VmFileSystem } from '@taucad/esbuild/vm';
 import { describe, expect, it } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { RuntimeDocument } from '@taucad/runtime/client';
 import type {
   GeoSpecAssertionClient,
   GeoSpecCanonicalClaimReport,
@@ -240,13 +242,19 @@ for (const route of routes) {
             },
           };
         },
-        async export(format, options) {
-          runtimeCalls.push({ format, options });
-          return {
-            success: true,
-            issues: [],
-            data: [{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: Uint8Array.from(glbBytes) }],
-          };
+        open(input) {
+          const document = mock<RuntimeDocument>();
+          document.export.mockImplementation(async (format, request) => {
+            runtimeCalls.push({ format, options: { source: input.source, options: request?.options } });
+            return {
+              success: true,
+              exportId: 'glb',
+              evaluationId: 'evaluation-1',
+              issues: [],
+              files: [{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: Uint8Array.from(glbBytes) }],
+            };
+          });
+          return document;
         },
       };
       const events: GeoSpecRunnerEvent[] = [];
@@ -321,7 +329,7 @@ for (const route of routes) {
             format: 'glb',
             options: {
               source: { path: 'model.ts' },
-              exportOptions: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+              options: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
             },
           },
         ]);

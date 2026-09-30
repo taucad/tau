@@ -74,8 +74,8 @@ const picovoxelBuild = {
   scripts: 'e19aa9a77efb2c44cb0aa359ba7e3b64d2a022dbf98b2a4abf0126122aac9d7c',
 } as const;
 
-/** Kernel version: the plugin's handle semantics (1.1: zero-area triangles dropped) plus the PicoVoxel build it runs. */
-const kernelVersion = `1.1.0+picovoxel.${picovoxelBuild.version}.serial-${picovoxelBuild.serial.slice(0, 12)}.multi-${picovoxelBuild.multi.slice(0, 12)}.scripts-${picovoxelBuild.scripts.slice(0, 12)}`;
+/** Kernel version: the plugin's handle semantics (1.2: authored part names) plus the PicoVoxel build it runs. */
+const kernelVersion = `1.2.0+picovoxel.${picovoxelBuild.version}.serial-${picovoxelBuild.serial.slice(0, 12)}.multi-${picovoxelBuild.multi.slice(0, 12)}.scripts-${picovoxelBuild.scripts.slice(0, 12)}`;
 
 /**
  * Explicit URLs of the assets each artifact loads (D20): the WebAssembly binary and, for the
@@ -512,24 +512,29 @@ const ownedUint32 = (values: Uint32Array): Uint32Array<ArrayBuffer> =>
  * triangles are dropped here, once, so the viewer and every export see the same mesh (D36).
  *
  * @param mesh - A mesh `main()` returned, or one derived from returned voxels.
- * @param index - Zero-based shape index.
+ * @param part - Resolved display name and zero-based output index.
  * @param sessionLane - The session's resolved lane, used when a mesh carries no lane.
  * @returns The durable snapshot.
  */
-const snapshotMesh = (mesh: Mesh, index: number, sessionLane: PicovoxelLane): PicovoxelShapeSnapshot => {
-  const name = resolveShapeName({ index, source: 'generated' });
+const snapshotMesh = (
+  mesh: Mesh,
+  part: Readonly<{ index: number; name: string }>,
+  sessionLane: PicovoxelLane,
+): PicovoxelShapeSnapshot => {
+  const { name, index } = part;
+  const label = `${name} (output ${index + 1})`;
   const vertices = ownedFloat32(mesh.vertices);
   const triangles = ownedUint32(mesh.triangles);
   if (vertices.length === 0 || triangles.length === 0) {
-    throw new TypeError(`PicoVoxel ${name} is empty. Return [] for an empty scene.`);
+    throw new TypeError(`PicoVoxel ${label} is empty. Return [] for an empty scene.`);
   }
   if (vertices.length % 3 !== 0 || triangles.length % 3 !== 0) {
-    throw new TypeError(`PicoVoxel ${name} must contain vertex and triangle triples.`);
+    throw new TypeError(`PicoVoxel ${label} must contain vertex and triangle triples.`);
   }
   // oxlint-disable-next-line typescript/prefer-for-of, unicorn-js/no-for-loop -- indexed scans; `for…of` over a typed array was measured 10x slower (picogk-mesh.ts).
   for (let offset = 0; offset < vertices.length; offset++) {
     if (!Number.isFinite(vertices[offset]!)) {
-      throw new TypeError(`PicoVoxel ${name} contains a non-finite vertex coordinate.`);
+      throw new TypeError(`PicoVoxel ${label} contains a non-finite vertex coordinate.`);
     }
   }
   const vertexCount = vertices.length / 3;
@@ -537,14 +542,14 @@ const snapshotMesh = (mesh: Mesh, index: number, sessionLane: PicovoxelLane): Pi
   for (let offset = 0; offset < triangles.length; offset++) {
     if (triangles[offset]! >= vertexCount) {
       throw new TypeError(
-        `PicoVoxel ${name} triangle index ${triangles[offset]} is outside its ${vertexCount} vertices.`,
+        `PicoVoxel ${label} triangle index ${triangles[offset]} is outside its ${vertexCount} vertices.`,
       );
     }
   }
   const kept = dropZeroAreaTriangles(vertices, triangles);
   if (kept.length === 0) {
     // Checked after the D36 filter: a shape of zero-area triangles only is empty, not an index-less mesh.
-    throw new TypeError(`PicoVoxel ${name} is empty: every triangle has zero area. Return [] for an empty scene.`);
+    throw new TypeError(`PicoVoxel ${label} is empty: every triangle has zero area. Return [] for an empty scene.`);
   }
   const meshLane: unknown = mesh.lane;
   return { name, vertices, triangles: kept, lane: isLane(meshLane) ? meshLane : sessionLane };
@@ -563,22 +568,70 @@ const describeValue = (value: unknown): string =>
 const normalizeResult = (result: unknown, sessionLane: PicovoxelLane): PicovoxelNativeHandle => {
   const values = Array.isArray(result) ? result : [result];
   const shapes = values.map((value: unknown, index) => {
-    if (isMesh(value)) {
-      return snapshotMesh(value, index, sessionLane);
-    }
-    if (isVoxels(value)) {
-      if (value.isEmpty) {
+    let shape = value;
+    let name: string | undefined;
+    if (isRecordObject(value) && !isMesh(value) && !isVoxels(value)) {
+      if ('children' in value) {
         throw new TypeError(
-          `PicoVoxel ${resolveShapeName({ index, source: 'generated' })} is an empty Voxels field. Return [] for an empty scene.`,
+          `PicoVoxel main() result ${index + 1} cannot contain children. Return a flat array of parts.`,
         );
       }
-      return snapshotMesh(value.toMesh(), index, sessionLane);
+      if (value['name'] !== undefined && typeof value['name'] !== 'string') {
+        throw new TypeError(
+          `PicoVoxel main() result ${index + 1} name must be a string. Omit it for a generated name.`,
+        );
+      }
+      ({ name, shape } = value);
+    }
+    const part = { index, name: resolveShapeName({ index, name, source: 'authored' }) };
+    if (isMesh(shape)) {
+      return snapshotMesh(shape, part, sessionLane);
+    }
+    if (isVoxels(shape)) {
+      if (shape.isEmpty) {
+        throw new TypeError(
+          `PicoVoxel ${part.name} (output ${index + 1}) is an empty Voxels field. Return [] for an empty scene.`,
+        );
+      }
+      return snapshotMesh(shape.toMesh(), part, sessionLane);
     }
     throw new TypeError(
-      `PicoVoxel main() result ${index + 1} must be Mesh or Voxels; received ${describeValue(value)}.`,
+      `PicoVoxel main() result ${index + 1} must be Mesh, Voxels or { shape: Mesh | Voxels, name?: string }; received ${describeValue(shape)}.`,
     );
   });
   return { shapes };
+};
+
+/**
+ * Safe export basenames are independent of display labels and payload-local identity.
+ * @param shapes - Delivered part snapshots in output order.
+ * @returns One safe unique filename per part.
+ */
+const stlFilenames = (shapes: readonly PicovoxelShapeSnapshot[]): string[] => {
+  const used = new Set<string>();
+  const encoder = new TextEncoder();
+  return shapes.map(({ name }, index) => {
+    // Replace path syntax and control characters; preserve safe Unicode in the actual filename.
+    // oxlint-disable-next-line no-control-regex -- export filename trust boundary
+    let stem = name.replaceAll(/[\u0000-\u001F\u007F-\u009F<>:"/\\|?*]/gu, '_').replace(/[. ]+$/u, '');
+    if (/^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³]) *(?:\.|$)/iu.test(stem)) {
+      stem = `_${stem}`;
+    }
+    let truncated = '';
+    for (const point of stem) {
+      if (encoder.encode(truncated + point).length > 120) {
+        break;
+      }
+      truncated += point;
+    }
+    stem = truncated.replace(/[. ]+$/u, '') || resolveShapeName({ index });
+    let candidate = stem;
+    for (let suffix = 2; used.has(candidate.normalize('NFC').toLowerCase()); suffix++) {
+      candidate = `${stem} ${suffix}`;
+    }
+    used.add(candidate.normalize('NFC').toLowerCase());
+    return `${candidate}.stl`;
+  });
 };
 
 // =============================================================================
@@ -977,7 +1030,7 @@ export const picovoxelKernel = defineKernel({
           );
         }
         return {
-          name: value['name'],
+          name: resolveShapeName({ index, name: value['name'], source: 'authored' }),
           vertices: ownedFloat32(value['vertices']),
           triangles: ownedUint32(value['triangles']),
           lane: value['lane'],
@@ -1005,11 +1058,12 @@ export const picovoxelKernel = defineKernel({
           return createKernelError([noShapesIssue()]);
         }
         const { unit, scale, offset, lane } = input.options;
+        const filenames = stlFilenames(shapes);
         return createKernelSuccess(
-          shapes.map((shape) =>
+          shapes.map((shape, index) =>
             createExportFile(
               'stl',
-              `${shape.name}.stl`,
+              filenames[index]!,
               // An explicit fast export is the consent: the header carries LANE=fast, as does any shape
               // with fast provenance. An exact export of an exact handle never stamps.
               // `acceptLane` is PicoVoxel's own form of that consent (rider R2).

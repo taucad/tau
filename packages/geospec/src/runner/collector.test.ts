@@ -7,6 +7,9 @@ import { createTestGeoSpecEngineProtocol } from '#engine/protocol.test-support.j
 import type { GeoSpecSubmitClaimsRequest, GeoSpecSubmitClaimsResult } from '#engine/protocol.js';
 import type { GeometryDiagnostic } from '#mesh/types.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
+import { bindGeoSpecSubject } from '#model/subject.js';
+import { createGeoSpecAssertionClient } from '#assertion-client/index.js';
+import type { GeoSpecAssertionClientOptions } from '#assertion-client/index.js';
 
 import {
   clearCollectorGlobals,
@@ -18,6 +21,64 @@ import {
 } from '#runner/collector.js';
 
 const failure: GeometryDiagnostic = { code: 'FIXTURE_FAIL', severity: 'error', message: 'nope' };
+
+describe('compiled report outcome accounting', () => {
+  it.each([
+    ['passed', 'passed'],
+    ['failed', 'failed'],
+    ['unsupported', 'unsupported'],
+    ['refused', 'inconclusive'],
+    ['cancelled', 'inconclusive'],
+    ['invalid', 'failed'],
+    ['engine-error', 'failed'],
+  ])('should retain core %s as test %s without changing canonical bytes', async (status, expected) => {
+    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+    let canonicalResult: Uint8Array<ArrayBuffer> | undefined;
+    const engine: GeoSpecAssertionClientOptions['engine'] = {
+      processRequest: (input) => input,
+      evaluateClaim: (input) => {
+        const envelope = JSON.parse(new TextDecoder().decode(input)) as {
+          plan: { claims: Array<{ claimId: string }> };
+        };
+        canonicalResult = encode({ results: [{ claimId: envelope.plan.claims[0]?.claimId, status, diagnostics: [] }] });
+        return {
+          canonicalClaim: encode(envelope.plan.claims[0]),
+          canonicalPlan: encode(envelope.plan),
+          canonicalResult,
+        };
+      },
+    };
+    const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 1000 });
+    const admitted = bindGeoSpecSubject({
+      engine,
+      client,
+      identity: { subjectHash: 'a'.repeat(64) },
+      load: {
+        loadId: 'part-load',
+        status: 'complete',
+        format: 'gsm1',
+        parameters: {},
+        ingestOptions: {},
+        artifacts: [{ name: 'part.gsm1', byteLength: 1, sha256: 'a'.repeat(64) }],
+      },
+      isLive: () => true,
+    });
+    const collector = createCollector({ nativeAssertions: { engine, workUnitLimit: 1000 } });
+    collector.it('claim', () => {
+      try {
+        collector.expectGeo(admitted).not.toBeWatertight();
+      } catch {
+        /* Caught non-pass is still recorded. */
+      }
+    });
+    await collector.waitForCompletion();
+    expect(collector.tests[0]?.status).toBe(expected);
+    expect(collector.tests[0]?.assertions[0]?.report?.status).toBe(status);
+    expect(collector.tests[0]?.assertions[0]?.report?.polarity).toBe('negative');
+    expect(collector.tests[0]?.assertions[0]?.report?.canonicalResult).toBe(canonicalResult);
+    expect(collector.tests[0]?.assertions[0]?.loadId).toBe('part-load');
+  });
+});
 
 const subject = { kind: 'geometry-subject-reference', subjectId: 'subject-1', contentHash: 'sha256:test' };
 

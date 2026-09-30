@@ -1,6 +1,10 @@
 import type { VmFileSystem } from '@taucad/esbuild/vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GeoSpecAssertionClientOptions } from '#assertion-client/index.js';
+import type { GeoSpecModelLoadEvidence } from '#model/native-model-loader.js';
+import { bindGeoSpecSubject } from '#model/subject.js';
+import { createGeoSpecAssertionClient } from '#assertion-client/client.js';
+import type { SourceRevision } from '@taucad/runtime/types';
 import { geoSpecEngineProtocolVersion } from '#engine/protocol.js';
 import { clearGeoSpecEngine, registerGeoSpecEngine } from '#engine/seam.js';
 import type { GeoSpecEngineHostBindings } from '#engine/seam.js';
@@ -79,6 +83,208 @@ afterEach(() => {
 });
 
 describe('runGeoSpecModule', () => {
+  it('should detect edited direct-file bytes even when the host admits equal geometry', async () => {
+    let generation = 0;
+    const nativeModelLoader = async () => ({
+      contentHash: 'a'.repeat(64),
+      load: {
+        loadId: 'host-load',
+        status: 'complete',
+        format: 'gsm1',
+        parameters: {},
+        ingestOptions: {},
+        sourcePath: 'part.gsm1',
+        artifacts: [{ name: 'part.gsm1', sha256: (++generation === 1 ? 'b' : 'c').repeat(64), byteLength: 1 }],
+      } satisfies GeoSpecModelLoadEvidence,
+    });
+    const result = await runModule(
+      [
+        [
+          'spec.geospec.ts',
+          `
+      import { it } from 'geospec'; import { loadModel } from 'geospec/model';
+      it('direct edits', async () => { await loadModel({ source: 'part.gsm1' }); await loadModel({ source: 'part.gsm1' }); });
+    `,
+        ],
+      ],
+      { nativeAssertions, nativeModelLoader },
+    );
+    expect(result).toMatchObject({
+      success: true,
+      passed: false,
+      lineage: { status: 'mixed', loads: [{ status: 'complete' }, { status: 'complete' }] },
+    });
+  });
+
+  it('should retain registered not-run tests and module identity after execution fails', async () => {
+    const result = await runModule([
+      [
+        'spec.geospec.ts',
+        `import { it } from 'geospec'; it('pending', () => {}); throw new Error('registration interrupted');`,
+      ],
+    ]);
+    expect(result).toMatchObject({
+      success: false,
+      tests: [{ status: 'not-run' }],
+      accounting: { discovered: 1, selected: 0, completed: 0, notRun: 1 },
+      lineage: { modules: [{ entryPath: 'spec.geospec.ts' }] },
+    });
+  });
+
+  it('should account for discovered filtered-out tests without claiming they ran', async () => {
+    const result = await runModule(
+      [['spec.geospec.ts', `import { it } from 'geospec'; it('selected', () => {}); it('excluded', () => {});`]],
+      { testNamePattern: '^selected$' },
+    );
+    expect(result).toMatchObject({
+      success: true,
+      passed: true,
+      tests: [{ name: 'selected', status: 'passed' }],
+      accounting: { discovered: 2, selected: 1, completed: 1, passed: 1, notRun: 1 },
+    });
+  });
+
+  it('should retain conflicting load graphs instead of laundering the last graph as coherent', async () => {
+    // Fixed lowercase-hex fixture digests exercise lineage bookkeeping, not a geometry producer.
+    const digest = (letter: 'b' | 'c' | 'e') => `sha256:${letter.repeat(64)}` as SourceRevision['files'][string];
+    let generation = 0;
+    const nativeModelLoader = async () => ({
+      subjectHash: 'a'.repeat(64),
+      load: {
+        loadId: 'host-load',
+        status: 'complete',
+        format: 'glb',
+        parameters: {},
+        ingestOptions: {},
+        artifacts: [{ name: 'part.glb', sha256: 'd'.repeat(64), byteLength: 1 }],
+        sourceRevision: {
+          entry: 'main.ts',
+          files: { 'main.ts': digest('b'), 'cache.json': digest(++generation === 1 ? 'c' : 'e') },
+        },
+      } satisfies GeoSpecModelLoadEvidence,
+    });
+    const result = await runModule(
+      [
+        [
+          'spec.geospec.ts',
+          `
+      import { it } from 'geospec'; import { loadModel } from 'geospec/model';
+      it('two generations', async () => { await loadModel({ file: 'main.ts' }); await loadModel({ file: 'main.ts' }); });
+    `,
+        ],
+      ],
+      { nativeAssertions, nativeModelLoader },
+    );
+    expect(result).toMatchObject({
+      success: true,
+      passed: false,
+      lineage: {
+        status: 'mixed',
+        loads: [
+          { evidence: { sourceRevision: { files: { 'cache.json': digest('c') } } } },
+          { evidence: { sourceRevision: { files: { 'cache.json': digest('e') } } } },
+        ],
+      },
+    });
+    if (!result.success || result.lineage === undefined) {
+      throw new Error('Expected observed lineage.');
+    }
+    expect(new Set(result.lineage.loads.map((load) => load.loadId)).size).toBe(2);
+  });
+
+  it('should accept contentHash host identities and keep same-geometry parameter loads distinct', async () => {
+    let width = 0;
+    const nativeModelLoader = async () => ({
+      contentHash: 'a'.repeat(64),
+      load: {
+        loadId: 'host-load',
+        status: 'complete',
+        format: 'gsm1',
+        parameters: { width: ++width },
+        ingestOptions: {},
+        artifacts: [{ name: 'part.gsm1', sha256: 'b'.repeat(64), byteLength: 1 }],
+      } satisfies GeoSpecModelLoadEvidence,
+    });
+    const result = await runModule(
+      [
+        [
+          'spec.geospec.ts',
+          `
+      import { it } from 'geospec'; import { loadModel } from 'geospec/model';
+      it('variants', async () => { await loadModel({ source: 'part.gsm1' }); await loadModel({ source: 'part.gsm1' }); });
+    `,
+        ],
+      ],
+      { nativeAssertions, nativeModelLoader },
+    );
+    expect(result).toMatchObject({
+      success: true,
+      passed: true,
+      lineage: {
+        status: 'complete',
+        loads: [
+          { subject: { contentHash: 'a'.repeat(64) }, evidence: { parameters: { width: 1 } } },
+          { subject: { contentHash: 'a'.repeat(64) }, evidence: { parameters: { width: 2 } } },
+        ],
+      },
+    });
+  });
+
+  it('should not report coherent success for a host load without per-load lineage', async () => {
+    const result = await runModule(
+      [
+        [
+          'spec.geospec.ts',
+          `
+      import { it } from 'geospec';
+      import { loadModel } from 'geospec/model';
+      it('loads', async () => { await loadModel({ source: 'part.step', format: 'step' }); });
+    `,
+        ],
+      ],
+      { nativeAssertions, nativeModelLoader: async () => ({ subjectHash: 'a'.repeat(64) }) },
+    );
+    expect(result).toMatchObject({
+      success: true,
+      passed: false,
+      lineage: { status: 'unavailable', loads: [{ status: 'unavailable' }] },
+    });
+  });
+
+  it('should retain a rejected detached admission before final module settlement', async () => {
+    const result = await runModule(
+      [
+        [
+          'spec.geospec.ts',
+          `
+      import { it } from 'geospec';
+      import { loadModel } from 'geospec/model';
+      it('starts a detached load', () => { void loadModel({ source: 'part.step', format: 'step' }).catch(() => {}); });
+    `,
+        ],
+      ],
+      {
+        nativeAssertions,
+        nativeModelLoader: async () => {
+          throw new Error('load interrupted');
+        },
+      },
+    );
+    expect(result).toMatchObject({ success: true, passed: false, lineage: { loads: [{ status: 'failed' }] } });
+  });
+
+  it('should retain collect-only work as not-run rather than a completed pass', async () => {
+    const result = await runModule([['spec.geospec.ts', `import { it } from 'geospec'; it('pending', () => {});`]], {
+      collectOnly: true,
+    });
+    expect(result).toMatchObject({
+      success: true,
+      passed: false,
+      tests: [{ status: 'not-run' }],
+      accounting: { discovered: 1, selected: 0, completed: 0, notRun: 1 },
+    });
+  });
+
   it('should execute an authored module through the VM geospec builtin', async () => {
     const result = await runModule(
       [
@@ -141,7 +347,7 @@ describe('runGeoSpecModule', () => {
       { collectOnly: true },
     );
 
-    expect(result.success && result.tests.map((entry) => entry.status)).toStrictEqual(['skipped']);
+    expect(result.success && result.tests.map((entry) => entry.status)).toStrictEqual(['not-run']);
     expect((globalThis as Record<string, unknown>)['__RAN__']).toBeUndefined();
   });
 
@@ -326,6 +532,66 @@ describe('runGeoSpecModule', () => {
     expect(nativeModelLoader).toHaveBeenCalledOnce();
   });
 
+  it('should retain canonical opaque host admission lineage without a raw loader or entry-path map', async () => {
+    const load: GeoSpecModelLoadEvidence = {
+      loadId: 'host-load',
+      status: 'complete',
+      format: 'glb',
+      parameters: { width: 2 },
+      ingestOptions: {},
+      artifacts: [{ name: 'part.glb', sha256: 'a'.repeat(64), byteLength: 24 }],
+    };
+    const modelLoader = async () =>
+      bindGeoSpecSubject({
+        ...nativeAssertions,
+        client: createGeoSpecAssertionClient(nativeAssertions),
+        identity: { subjectHash: 'b'.repeat(64) },
+        load,
+        isLive: () => true,
+      });
+    const result = await runModule(
+      [
+        [
+          'spec.geospec.ts',
+          `import { it } from 'geospec'; import { loadModel } from 'geospec/model';
+      it('load', async () => { await loadModel({ source: 'part.glb' }); });`,
+        ],
+      ],
+      { nativeAssertions, modelLoader },
+    );
+    expect(result).toMatchObject({
+      success: true,
+      passed: true,
+      lineage: {
+        status: 'complete',
+        loads: [
+          {
+            status: 'complete',
+            subject: { subjectHash: 'b'.repeat(64) },
+            evidence: { parameters: { width: 2 }, artifacts: load.artifacts },
+          },
+        ],
+      },
+    });
+    expect(result.lineage?.loads[0]?.loadId).not.toBe('host-load');
+  });
+
+  it('should preserve definition ordinals for duplicate names and filtered collections', async () => {
+    const result = await runModule(
+      [
+        [
+          'spec.geospec.ts',
+          `import { it } from 'geospec'; it('excluded', () => {}); it('same', () => {}); it('same', () => {});`,
+        ],
+      ],
+      { testNamePattern: '^same$' },
+    );
+    expect(result.tests?.map((test) => [test.name, test.ordinal])).toEqual([
+      ['same', 1],
+      ['same', 2],
+    ]);
+  });
+
   it('should admit canonical loads when only the compiled loader is bound', async () => {
     const nativeModelLoader = vi.fn(async () => ({ subjectHash: 'native-subject' }));
     const result = await runModule(
@@ -404,7 +670,11 @@ describe('runGeoSpecModule', () => {
     expect(completed).toBe(false);
     admitted.resolve({ subjectHash: 'native-subject' });
 
-    await expect(completion).resolves.toMatchObject({ success: true, passed: true });
+    await expect(completion).resolves.toMatchObject({
+      success: true,
+      passed: false,
+      lineage: { status: 'unavailable' },
+    });
   });
 
   it('should drain successive finite chained admissions before the module completes', async () => {
@@ -450,7 +720,8 @@ describe('runGeoSpecModule', () => {
 
       await expect(completion).resolves.toMatchObject({
         success: true,
-        passed: true,
+        passed: false,
+        lineage: { status: 'unavailable' },
         tests: [{ name: 'admits a finite chain', status: 'passed' }],
       });
       expect(nativeModelLoader.mock.calls).toStrictEqual([
@@ -515,7 +786,8 @@ describe('runGeoSpecModule', () => {
 
       await expect(completion).resolves.toMatchObject({
         success: true,
-        passed: true,
+        passed: false,
+        lineage: { status: 'unavailable' },
         tests: [{ name: 'returns a finite chain', status: 'passed' }],
       });
       expect(nativeModelLoader.mock.calls).toStrictEqual([
@@ -576,6 +848,24 @@ describe('serial runner shell', () => {
       ['first.geospec.ts', passing('first')],
       ['second.geospec.ts', passing('second')],
     ]),
+  });
+
+  it('should reject duplicate files before run-start without silently deduplicating the request', async () => {
+    const runner = createSerialGeoSpecRunner(runnerOptions());
+    const start = vi.fn();
+    runner.on('run-start', start);
+    const result = await runner.run({ files: ['first.geospec.ts', 'first.geospec.ts'] });
+    expect(start).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: false,
+      issues: [{ code: 'GEOSPEC_DUPLICATE_FILES' }],
+      accounting: {
+        requestedFiles: ['first.geospec.ts', 'first.geospec.ts'],
+        notRunFiles: ['first.geospec.ts', 'first.geospec.ts'],
+        discoveryComplete: false,
+      },
+    });
+    await runner.close();
   });
 
   it('should run every file and emit the lifecycle events', async () => {
@@ -697,6 +987,12 @@ describe('serial runner shell', () => {
 
     expect(result.issues?.[0]?.code).toBe('GEOSPEC_RUNNER_ABORTED');
     expect(result.issues?.[0]?.message).toContain('operator');
+    expect(result.accounting).toMatchObject({
+      cancelled: true,
+      completedFiles: ['first.geospec.ts'],
+      notRunFiles: ['second.geospec.ts'],
+      discoveryComplete: false,
+    });
   });
 
   it('should default the abort reason', async () => {
@@ -724,6 +1020,13 @@ describe('serial runner shell', () => {
 
     expect(result.issues?.some((issue) => issue.code === 'GEOSPEC_RUNNER_BAILED')).toBe(true);
     expect(result.files).toHaveLength(1);
+    expect(result.accounting).toMatchObject({
+      requestedFiles: ['a.geospec.ts', 'b.geospec.ts'],
+      completedFiles: ['a.geospec.ts'],
+      notRunFiles: ['b.geospec.ts'],
+      discoveryComplete: false,
+      bailed: true,
+    });
   });
 
   it('should report when filters select nothing', async () => {

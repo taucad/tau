@@ -7,7 +7,8 @@ import type {
   GeoSpecRunnerRunOptions,
 } from '#runner/worker/index.js';
 import { createNoMatchingGeoSpecTestsIssue } from '#runner/worker/index.js';
-import type { GeoSpecModuleBundleCache, GeoSpecTestCase } from '#runner/types.js';
+import type { GeoSpecModuleBundleCache, GeoSpecTestCase, GeoSpecRunResult } from '#runner/types.js';
+import type { GeoSpecRunnerAccounting } from '#runner/worker/runner-types.js';
 import type { VmIssue } from '@taucad/esbuild/vm';
 
 const createRunnerClosedIssue = (): VmIssue => ({
@@ -52,7 +53,7 @@ export const countRunnerTests = (tests: readonly GeoSpecTestCase[]): { passed: n
     }
     if (test.status === 'failed') {
       failed += 1;
-    } else {
+    } else if (test.status === 'passed') {
       passed += 1;
     }
   }
@@ -82,13 +83,32 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
 
   const getAbortReason = (): string | undefined => state.aborted;
 
-  const failedResult = (issue: VmIssue): GeoSpecRunnerResult => ({
+  const emptyAccounting = (files: readonly string[]): GeoSpecRunnerAccounting => ({
+    requestedFiles: [...files],
+    completedFiles: [],
+    notRunFiles: [...files],
+    discoveryComplete: false,
+    discovered: 0,
+    selected: 0,
+    completed: 0,
+    passed: 0,
+    failed: 0,
+    unsupported: 0,
+    inconclusive: 0,
+    skipped: 0,
+    notRun: 0,
+    cancelled: false,
+    bailed: false,
+  });
+  const failedResult = (issue: VmIssue, files: readonly string[]): GeoSpecRunnerResult => ({
     success: false,
     passed: 0,
     failed: 1,
     selectedTests: 0,
     files: [],
     issues: [issue],
+    accounting: emptyAccounting(files),
+    lineageStatus: 'unavailable',
   });
 
   const executeRun = async (runOptions: GeoSpecRunnerRunOptions): Promise<GeoSpecRunnerResult> => {
@@ -109,6 +129,10 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
     let selectedTests = 0;
     const fileResults: GeoSpecRunnerResult['files'] = [];
     const issues: VmIssue[] = [];
+    const accounting = emptyAccounting(files);
+    let complete = true;
+    let lineageStatus: 'complete' | 'unavailable' | 'mixed' = 'complete';
+    const sourceFiles = new Map<string, string>();
     try {
       for (const file of files) {
         const abortReason = getAbortReason();
@@ -117,13 +141,15 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
           issues.push(issue);
           failed += 1;
           emit({ type: 'abort', reason: abortReason });
+          accounting.cancelled = true;
+          complete = false;
           break;
         }
 
         emit({ type: 'file-start', file });
         const fileStartedAt = performance.now();
         // oxlint-disable-next-line no-await-in-loop -- Within one worker, CAD tests run serially for deterministic evidence and bounded runtime pressure; the pool runner (R3) parallelizes across workers.
-        const result = await runGeoSpecModule({
+        const result: GeoSpecRunResult = await runGeoSpecModule({
           filesystem: options.filesystem,
           entryPath: file,
           testNamePattern: runOptions.testNamePattern,
@@ -137,10 +163,67 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
           ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
           ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),
           ...(options.internalProfile ? { internalProfile: options.internalProfile } : {}),
-        });
+        }).catch(
+          (error: unknown): GeoSpecRunResult => ({
+            success: false,
+            issues: [
+              {
+                code: 'GEOSPEC_MODULE_INTERRUPTED',
+                message: error instanceof Error ? error.message : String(error),
+                severity: 'error',
+                type: 'runtime',
+              },
+            ],
+          }),
+        );
         const durationMs = performance.now() - fileStartedAt;
         emit({ type: 'file-complete', file, result, durationMs });
         fileResults.push({ file, result, durationMs });
+        accounting.completedFiles = fileResults.map((entry) => entry.file);
+        accounting.notRunFiles = files.slice(fileResults.length);
+        complete &&= result.success && result.passed;
+        if (result.lineage === undefined || result.lineage.status === 'unavailable') {
+          if (lineageStatus !== 'mixed') {
+            lineageStatus = 'unavailable';
+          }
+        } else if (result.lineage.status === 'mixed') {
+          lineageStatus = 'mixed';
+        }
+        const directGraphs =
+          result.lineage?.loads.flatMap((load) => {
+            const { evidence } = load;
+            const primary = evidence?.artifacts[0];
+            return evidence?.sourcePath === undefined || evidence.exportOptions !== undefined || primary === undefined
+              ? []
+              : [{ [evidence.sourcePath]: `sha256:${primary.sha256}` }];
+          }) ?? [];
+        for (const graph of [
+          ...(result.lineage?.modules.map((module_) => module_.files) ?? []),
+          ...directGraphs,
+          ...(result.lineage?.loads.map((load) => load.evidence?.sourceRevision?.files ?? {}) ?? []),
+        ]) {
+          for (const [path, digest] of Object.entries(graph)) {
+            if (sourceFiles.has(path) && sourceFiles.get(path) !== digest) {
+              lineageStatus = 'mixed';
+            }
+            sourceFiles.set(path, digest);
+          }
+        }
+        if (result.accounting !== undefined) {
+          for (const key of [
+            'discovered',
+            'selected',
+            'completed',
+            'passed',
+            'failed',
+            'unsupported',
+            'inconclusive',
+            'skipped',
+            'notRun',
+          ] as const) {
+            accounting[key] += result.accounting[key];
+          }
+        }
 
         if (result.success) {
           selectedTests += result.tests.length;
@@ -151,8 +234,9 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
           failed += 1;
         }
 
-        if (runOptions.bail === true && failed > 0) {
+        if (runOptions.bail === true && (!complete || failed > 0)) {
           issues.push(createRunnerBailIssue(file));
+          accounting.bailed = true;
           break;
         }
       }
@@ -162,15 +246,30 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
         failed += 1;
       }
 
-      await releaseNativeSubjects();
+      try {
+        await releaseNativeSubjects();
+      } catch (error) {
+        issues.push({
+          code: 'GEOSPEC_NATIVE_CLEANUP_FAILED',
+          message: error instanceof Error ? error.message : String(error),
+          severity: 'error',
+          type: 'runtime',
+        });
+        complete = false;
+      }
+      accounting.discoveryComplete =
+        accounting.notRunFiles.length === 0 &&
+        fileResults.every((entry) => entry.result.success && entry.result.accounting !== undefined);
       const aggregate: GeoSpecRunnerResult = {
-        success: failed === 0 && issues.length === 0,
+        success: complete && lineageStatus === 'complete' && failed === 0 && issues.length === 0,
         passed,
         failed,
         selectedTests,
         files: fileResults,
         ...(issues.length > 0 ? { issues } : {}),
         durationMs: performance.now() - runStartedAt,
+        accounting,
+        lineageStatus,
       };
       emit({ type: 'run-complete', result: aggregate });
       return aggregate;
@@ -181,11 +280,22 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
 
   return {
     async run(runOptions: GeoSpecRunnerRunOptions): Promise<GeoSpecRunnerResult> {
+      if (new Set(runOptions.files).size !== runOptions.files.length) {
+        return failedResult(
+          {
+            code: 'GEOSPEC_DUPLICATE_FILES',
+            message: 'GeoSpec requested files must be unique.',
+            severity: 'error',
+            type: 'runtime',
+          },
+          runOptions.files,
+        );
+      }
       if (state.closed) {
-        return failedResult(createRunnerClosedIssue());
+        return failedResult(createRunnerClosedIssue(), runOptions.files);
       }
       if (activeDrain !== undefined) {
-        return failedResult(createRunnerActiveIssue());
+        return failedResult(createRunnerActiveIssue(), runOptions.files);
       }
 
       delete state.aborted;

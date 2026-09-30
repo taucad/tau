@@ -31,6 +31,7 @@ export const expectGeoSubject = (subject: GeoSpecSubject): GeoSpecMatcher => {
         return {
           kind: invocation.kind,
           subject: admission.identity,
+          ...(admission.load === undefined ? {} : { loadId: admission.load.loadId }),
           expected: invocation.expected,
           passed: report.status === 'passed',
           diagnostics,

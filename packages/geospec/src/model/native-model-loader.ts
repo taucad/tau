@@ -13,7 +13,8 @@ import type {
   LoadModelSourceOptions,
 } from '#model/types.js';
 import type { GeometryDiagnostic } from '#mesh/types.js';
-import type { KernelIssue } from '@taucad/runtime/types';
+import type { KernelIssue, SourceRevision } from '@taucad/runtime/types';
+import { sha256Bytes } from '@taucad/runtime/kernel';
 
 const protocolHeader = {
   canonicalProfile: 'geospec-jcs-v1',
@@ -52,7 +53,25 @@ export type GeoSpecNativeLoadModelOptions<Code extends Record<string, string> = 
   };
 
 /** Subject identity returned by native STEP/GLB admission. @public */
-export type GeoSpecNativeModelSubject = GeoSpecNativeSubject & { readonly subjectHash: string };
+export type GeoSpecNativeModelSubject = GeoSpecNativeSubject & {
+  readonly subjectHash: string;
+  /** Exact successful-load evidence retained by the admitting host, when available. */
+  readonly load?: GeoSpecModelLoadEvidence;
+};
+
+/** Immutable identity of the inputs and artifacts consumed by one model load. @public */
+export type GeoSpecModelLoadEvidence = {
+  readonly loadId: string;
+  readonly status: 'complete' | 'unavailable';
+  readonly format: string;
+  readonly parameters: Readonly<Record<string, unknown>>;
+  readonly exportOptions?: Readonly<Record<string, unknown>>;
+  readonly ingestOptions: Readonly<Record<string, unknown>>;
+  readonly sourceRevision?: SourceRevision;
+  /** Actual direct-source locator, when the load read one; absent for anonymous in-memory bytes. */
+  readonly sourcePath?: string;
+  readonly artifacts: ReadonlyArray<{ readonly name: string; readonly sha256: string; readonly byteLength: number }>;
+};
 
 /**
  * Resolve a non-memory source into ordinary ArrayBuffer-backed bytes.
@@ -372,13 +391,32 @@ export const createGeoSpecNativeModelLoader = (
         bytes: await directBytes(source, defaults.readSource),
       })),
     );
-    return admit({
+    const artifacts = await Promise.all(
+      [{ name: options.path ?? options.name ?? 'primary', bytes: primary }, ...resources].map(
+        async ({ name, bytes }) => ({ name, sha256: await sha256Bytes(bytes), byteLength: bytes.byteLength }),
+      ),
+    );
+    const subject = admit({
       format,
       primary,
       resources,
       ...(options.ingestOptions === undefined ? {} : { ingestOptions: options.ingestOptions }),
       ...(options.sourceUnit === undefined ? {} : { sourceUnit: options.sourceUnit }),
     });
+    return {
+      ...subject,
+      load: {
+        loadId: '',
+        status: 'complete',
+        format,
+        parameters: options.parameters ?? {},
+        ingestOptions: options.ingestOptions ?? {},
+        ...(typeof options.source === 'string' || options.path !== undefined
+          ? { sourcePath: typeof options.source === 'string' ? options.source : options.path }
+          : {}),
+        artifacts,
+      } satisfies GeoSpecModelLoadEvidence,
+    };
   };
 
   const loadRuntime = async (options: RuntimeOptions & GeoSpecNativeLoadModelOptions) => {
@@ -411,10 +449,11 @@ export const createGeoSpecNativeModelLoader = (
     if ('success' in requested) {
       throw failure(requested.diagnostics);
     }
+    const exportOptions = structuredClone(requested.options);
     const exported = await (runtime.export as unknown as RuntimeExport)(format, {
       source: runtimeSource(options),
       ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
-      exportOptions: requested.options,
+      exportOptions: structuredClone(exportOptions),
     });
     if (!exported.success) {
       throw failure(exported.issues.map(runtimeIssueDiagnostic));
@@ -435,13 +474,40 @@ export const createGeoSpecNativeModelLoader = (
       throw failure(honored.diagnostics);
     }
     // The export is consumed synchronously by admission, so its bytes need no copy.
-    return admit({
+    const artifacts = await Promise.all(
+      exported.data.map(async ({ name, bytes }) => ({
+        name,
+        sha256: await sha256Bytes(bytes),
+        byteLength: bytes.byteLength,
+      })),
+    );
+    const sourceRevision = exported.sourceRevision === undefined ? undefined : structuredClone(exported.sourceRevision);
+    const completeSourceRevision =
+      sourceRevision !== undefined &&
+      /^sha256:[0-9a-f]{64}$/u.test(sourceRevision.files[sourceRevision.entry] ?? '') &&
+      Object.values(sourceRevision.files).every(
+        (digest) => digest === 'missing' || /^sha256:[0-9a-f]{64}$/u.test(digest),
+      );
+    const subject = admit({
       format,
       primary: primary.bytes,
       resources,
       sourceUnit: honored.sourceUnit,
       ...(options.ingestOptions === undefined ? {} : { ingestOptions: options.ingestOptions }),
     });
+    return {
+      ...subject,
+      load: {
+        loadId: '',
+        status: completeSourceRevision ? 'complete' : 'unavailable',
+        format,
+        parameters: options.parameters ?? {},
+        exportOptions,
+        ingestOptions: options.ingestOptions ?? {},
+        ...(sourceRevision === undefined ? {} : { sourceRevision }),
+        artifacts,
+      } satisfies GeoSpecModelLoadEvidence,
+    };
   };
 
   const coalescedRuntime = async (options: RuntimeOptions & GeoSpecNativeLoadModelOptions) => {
@@ -498,6 +564,13 @@ export const createGeoSpecNativeModelLoader = (
 
   // oxlint-disable-next-line typescript/promise-function-async -- Return the tracked admission promise unchanged to its author.
   const loader: GeoSpecNativeModelLoader = (options) => {
+    const loadId = nextRequestId('load');
+    const snapshot = {
+      ...options,
+      ...('code' in options ? { code: Object.fromEntries(Object.entries(options.code)) } : {}),
+      ...(options.parameters === undefined ? {} : { parameters: structuredClone(options.parameters) }),
+      ...(options.ingestOptions === undefined ? {} : { ingestOptions: structuredClone(options.ingestOptions) }),
+    };
     const requestedFormat = options.format ?? defaults.format ?? 'glb';
     const invalidOption = [
       'stepStreaming',
@@ -522,10 +595,14 @@ export const createGeoSpecNativeModelLoader = (
         ]),
       );
     }
-    const pending =
+    const admission =
       'source' in options
-        ? loadDirect(options)
-        : coalescedRuntime(options as RuntimeOptions & GeoSpecNativeLoadModelOptions);
+        ? loadDirect(snapshot as Extract<GeoSpecNativeLoadModelOptions, { source: unknown }>)
+        : coalescedRuntime(snapshot as RuntimeOptions & GeoSpecNativeLoadModelOptions);
+    const pending = (async () => {
+      const subject = await admission;
+      return { ...subject, ...(subject.load === undefined ? {} : { load: { ...subject.load, loadId } }) };
+    })();
     pendingLoads.add(pending);
     return pending;
   };

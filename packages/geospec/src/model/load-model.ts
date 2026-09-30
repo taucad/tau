@@ -59,7 +59,13 @@ export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): Mana
     const loader = async (options: LoadModelOptions): Promise<GeoSpecSubject> => {
       const current = generation;
       const identity = await raw({ ...modelDefaults, ...options });
-      return bindGeoSpecSubject({ client, engine, identity, isLive: () => generation === current });
+      return bindGeoSpecSubject({
+        client,
+        engine,
+        identity: { subjectHash: identity.subjectHash },
+        ...(identity.load === undefined ? {} : { load: identity.load }),
+        isLive: () => generation === current,
+      });
     };
     return Object.assign(loader, {
       async dispose() {

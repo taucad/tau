@@ -16,9 +16,11 @@ import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import type { GeoSpecNativeModelEngine } from 'geospec/runner/native';
 import type { GeoSpecRunnerEvent } from 'geospec/runner/worker';
 import type { GeoSpecRuntimeClient, RuntimeClientWithRoutes } from 'geospec/model';
+import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
+import { createGeoSpecAssertionClient } from '#assertion-client/client.js';
 
 type NativeModule = {
-  Engine: new () => GeoSpecNativeModelEngine & { close?: () => void };
+  Engine: new () => GeoSpecNativeModelEngine & { close?: () => void; observations(): Uint8Array<ArrayBuffer> };
   initialize?: () => Promise<void>;
 };
 type InstalledClientModule = {
@@ -161,6 +163,38 @@ const serializableReport = (report: GeoSpecCanonicalClaimReport) => ({
 });
 
 describe('canonical authoring admission', () => {
+  it('honors STEP mesh:false with zero eager tessellations and permits explicit demand', async () => {
+    const modulePath = resolve(installedRoot, 'node_modules/@taucad/geospec-engine-native/dist/node.mjs');
+    const native = (await import(/* @vite-ignore */ pathToFileURL(modulePath).href)) as NativeModule;
+    const engine = new native.Engine();
+    const loader = createGeoSpecNativeModelLoader({ engine });
+    const observations = () =>
+      JSON.parse(decoder.decode(engine.observations())) as { physical: { tessellations: string } };
+    try {
+      const source = new Uint8Array(
+        await readFile(
+          resolve(root, 'packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/model.step'),
+        ),
+      );
+      const subject = await loader({ source, format: 'step', mesh: false });
+      expect(observations().physical.tessellations).toBe('0');
+      const client = createGeoSpecAssertionClient({
+        engine,
+        claimId: () => 'mesh-false-demand',
+        workUnitLimit: 8_000_000,
+      });
+      const report = client.expectGeo(subject).toHaveVoidContinuity({
+        material: ['housing'],
+        path: [{ occurrence: 'cartridge' }, [0, 0, 30]],
+        bounds: { min: [-40, -40, -10], max: [40, 40, 80] },
+      });
+      expect(report.status).toBe('passed');
+      expect(BigInt(observations().physical.tessellations)).toBeGreaterThan(0n);
+    } finally {
+      await loader.releaseAll();
+      engine.close?.();
+    }
+  });
   it('rejects canonical loading without a compiled host', async () => {
     const result = await runGeoSpecModule({ filesystem, entryPath: legacyGuardEntryPath });
     expect(result.success).toBe(true);

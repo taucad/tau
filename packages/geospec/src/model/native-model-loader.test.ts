@@ -30,6 +30,37 @@ const testEngine = () => {
 };
 
 describe('native model loader ownership', () => {
+  it('should honor no eager STEP mesh without forwarding an unsupported ingest flag', async () => {
+    const { engine, ingestSubject } = testEngine();
+    const runtime: GeoSpecRuntimeClient = {
+      connect: async () => undefined,
+      terminate: () => undefined,
+      export: vi
+        .fn()
+        .mockResolvedValue({ success: true, issues: [], data: [{ name: 'part.step', bytes: Uint8Array.of(1) }] }),
+    };
+    const loader = createGeoSpecNativeModelLoader({ engine, format: 'stp', runtime });
+    try {
+      await loader({ source: Uint8Array.of(1), mesh: false });
+      const request: unknown = JSON.parse(new TextDecoder().decode(ingestSubject.mock.calls[0]![0]));
+      expect(request).toMatchObject({ format: 'step', ingestOptions: {} });
+      await loader({ file: 'main.ts', format: 'step', mesh: false });
+      for (const options of [
+        { format: 'step', mesh: true },
+        { format: 'glb', mesh: false },
+        { format: 'step', mesh: false, stepStreaming: 'native-stream' },
+        { format: 'step', mesh: false, meshLinearTolerance: 0.1 },
+      ] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- Each unsupported policy must fail before another admission.
+        await expect(loader({ source: Uint8Array.of(1), ...options })).rejects.toMatchObject({
+          diagnostics: [expect.objectContaining({ code: 'GEOSPEC_MODEL_OPTION_UNSUPPORTED' })],
+        });
+      }
+      expect(ingestSubject).toHaveBeenCalledTimes(2);
+    } finally {
+      await loader.releaseAll();
+    }
+  });
   it('should retain only actual source locators in load lineage', async () => {
     const { engine } = testEngine();
     const loader = createGeoSpecNativeModelLoader({ engine, readSource: async () => Uint8Array.of(1) });

@@ -2,6 +2,7 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- public root client facade */
 export { createRuntimeClient } from '#client/runtime-document-client-core.js';
 export { RuntimeTerminatedError, isRuntimeTerminatedError } from '#client/runtime-terminated-error.js';
+export type { RuntimeTerminatedCause, RuntimeTerminatedDetail } from '#client/runtime-terminated-error.js';
 export type {
   RuntimeClient,
   RuntimeClientOptions,

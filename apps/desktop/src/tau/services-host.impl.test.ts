@@ -972,7 +972,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     await vi.waitFor(() => {
       expect(runtimeClientCalls[0]!.lifecycleState).toBe('terminated');
     });
-    await expect(client.evaluate({ source: { files: { 'main.ts': 'model' } } })).rejects.toMatchObject({
+    await expect(client.describe({ source: { files: { 'main.ts': 'model' } } })).rejects.toMatchObject({
       code: 'RUNTIME_TERMINATED',
       causeKind: 'transport-closed',
     });

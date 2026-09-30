@@ -7,6 +7,7 @@ import {
   OperationAbortedError,
   OperationTimeoutError,
   RuntimeTerminatedError,
+  isRuntimeTerminatedError,
   SharedPoolEntryNotFoundError,
 } from '#index.js';
 import { RuntimeConfigError } from '#worker/runtime-definition.js';
@@ -46,5 +47,39 @@ describe('public runtime error codes', () => {
     expectTypeOf(config.code).toEqualTypeOf<'RUNTIME_CONFIG_INVALID'>();
     expectTypeOf(terminated.code).toEqualTypeOf<'RUNTIME_TERMINATED'>();
     expectTypeOf(missing.code).toEqualTypeOf<'RUNTIME_SHARED_POOL_KEY_MISSING'>();
+  });
+
+  it('recognizes serialized termination causes and rejects malformed discriminators', () => {
+    const serialized: unknown = runInNewContext(
+      "({ name: 'RuntimeTerminatedError', code: 'RUNTIME_TERMINATED', message: 'host exited', causeKind: 'transport-closed' })",
+    );
+    expect(isRuntimeTerminatedError(serialized)).toBe(true);
+    expect(
+      isRuntimeTerminatedError(
+        runInNewContext(
+          "({ name: 'RuntimeTerminatedError', code: 'RUNTIME_TERMINATED', message: 'host exited', causeKind: 'transport-closed', detail: { phase: 'session', exitCode: 9, released: false, stderrTail: 'fault' } })",
+        ),
+      ),
+    ).toBe(true);
+    expect(isRuntimeTerminatedError({ name: 'RuntimeTerminatedError', code: 'RUNTIME_TERMINATED', message: 'x' })).toBe(
+      false,
+    );
+    expect(
+      isRuntimeTerminatedError({
+        name: 'RuntimeTerminatedError',
+        code: 'RUNTIME_TERMINATED',
+        message: 'x',
+        causeKind: 'unknown',
+      }),
+    ).toBe(false);
+    expect(
+      isRuntimeTerminatedError({
+        name: 'RuntimeTerminatedError',
+        code: 'RUNTIME_TERMINATED',
+        message: 'x',
+        causeKind: 'transport-closed',
+        detail: { phase: 'startup' },
+      }),
+    ).toBe(false);
   });
 });

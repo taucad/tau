@@ -55,32 +55,24 @@ export const ChatErrorUnauthorized = memo(function ({ className }: { readonly cl
       description='Your turn is paused. Sign in and Tau resumes where it stopped.'
       actions={
         <>
-          <Button asChild variant='default' size='sm'>
-            <NavLink to={signIn} tabIndex={-1}>
-              {({ isPending }) =>
-                isPending ? (
-                  <Loader />
-                ) : (
-                  <>
-                    <LogIn className='size-3.5' />
-                    Sign in
-                  </>
-                )
-              }
+          <Button asChild variant='default' size='xs'>
+            <NavLink to={signIn}>
+              {({ isPending }) => (
+                <span aria-busy={isPending} className='inline-flex items-center gap-1.5'>
+                  {isPending ? <Loader className='size-3.5' /> : <LogIn className='size-3.5' />}
+                  Sign in
+                </span>
+              )}
             </NavLink>
           </Button>
-          <Button asChild variant='outline' size='sm'>
-            <NavLink to={signUp} tabIndex={-1}>
-              {({ isPending }) =>
-                isPending ? (
-                  <Loader />
-                ) : (
-                  <>
-                    <UserPlus className='size-3.5' />
-                    Create account
-                  </>
-                )
-              }
+          <Button asChild variant='outline' size='xs'>
+            <NavLink to={signUp}>
+              {({ isPending }) => (
+                <span aria-busy={isPending} className='inline-flex items-center gap-1.5'>
+                  {isPending ? <Loader className='size-3.5' /> : <UserPlus className='size-3.5' />}
+                  Create account
+                </span>
+              )}
             </NavLink>
           </Button>
         </>

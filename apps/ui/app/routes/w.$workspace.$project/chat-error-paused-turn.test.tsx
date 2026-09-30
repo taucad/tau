@@ -6,6 +6,11 @@ import { ChatErrorPausedTurn } from '#routes/w.$workspace.$project/chat-error-pa
 
 const continueChat = vi.fn();
 const regenerate = vi.fn();
+const debug = vi.hoisted(() => ({ enabled: false }));
+
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: () => debug.enabled,
+}));
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => ({ continueChat, regenerate }),
@@ -24,6 +29,7 @@ vi.mock('#components/code/code-viewer.js', () => ({
 describe('ChatErrorPausedTurn', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    debug.enabled = false;
   });
 
   it('should name the failure in the provider words and promise the turn is saved', () => {
@@ -86,7 +92,19 @@ describe('ChatErrorPausedTurn', () => {
     expect(buttons).toEqual(['Switch model', 'Resume']);
   });
 
-  it('should keep the raw failure behind a disclosure, outside the consequence and the action', async () => {
+  it('should omit diagnostics when Tau Debug is off while keeping recovery visible', () => {
+    render(
+      <ChatErrorPausedTurn resumable reason='Tau could not read the reply.' raw='{"code":"MALFORMED_RESPONSE"}' />,
+    );
+
+    expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /details/iu })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
+  });
+
+  it('should disclose the raw failure only when Tau Debug is enabled', async () => {
+    debug.enabled = true;
     const user = userEvent.setup();
     render(
       <ChatErrorPausedTurn resumable reason='Tau could not read the reply.' raw='{"code":"MALFORMED_RESPONSE"}' />,
@@ -96,7 +114,7 @@ describe('ChatErrorPausedTurn', () => {
     expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
     expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Details' }));
+    await user.click(screen.getByRole('button', { name: 'Debug details' }));
 
     expect(screen.getByTestId('code-viewer')).toHaveTextContent('MALFORMED_RESPONSE');
   });

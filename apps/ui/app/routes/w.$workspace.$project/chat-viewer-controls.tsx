@@ -25,13 +25,7 @@ type Tool = 'section' | 'measure';
 
 /** Never the first thing on its line: the grid readout before it renders nothing until the grid has a size. */
 const Hairline = ({ className = 'mx-0' }: { readonly className?: string }): React.JSX.Element => (
-  <Separator
-    orientation='vertical'
-    className={cn(
-      'first:hidden data-[orientation=vertical]:h-4 [:hover+&]:opacity-0 has-[+*:hover]:opacity-0',
-      className,
-    )}
-  />
+  <Separator orientation='vertical' className={cn('first:hidden data-[orientation=vertical]:h-4', className)} />
 );
 
 /** When a row unmounts holding focus, the keyboard returns to the toggle that started its tool. */

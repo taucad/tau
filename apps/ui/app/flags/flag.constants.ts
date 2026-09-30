@@ -32,11 +32,6 @@ export const flagRegistry = {
     label: 'Parts warehouse',
     description: 'Browse and remix reusable parametric parts.',
   },
-  nativeGeoSpec: {
-    schema: z.boolean().default(false),
-    label: 'Native GeoSpec',
-    description: 'Use the native GeoSpec engine for new project hosts. Reload the project after changing.',
-  },
   planMode: {
     schema: z.boolean().default(false),
     label: 'Planning Mode',

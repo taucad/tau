@@ -15,15 +15,15 @@ import type { GeoSpecRunner } from '#runner/worker/runner-types.js';
 export type GeoSpecNodePoolRunnerOptions = {
   /** Absolute project root path. */
   projectPath: string;
-  /** Worker count; omit for auto-sizing (`min(shards, cpus − 2, mem/3.5 GiB)`). */
+  /** Compiled worker count; defaults to one, within the caller-inclusive host cap. */
   workers?: number;
   /** Per-shard non-verdict watchdog override, milliseconds (R11). */
   shardTimeout?: number;
-  /** Enable the authenticated persistent evidence cache. Defaults to true. */
+  /** Persistent reference-engine evidence caching is unsupported; omit or use false. True is refused. */
   cache?: boolean;
-  /** Absolute out-of-tree evidence-cache directory used by every worker. */
+  /** Reference-engine cache directories are unsupported and refused when supplied. */
   cacheDirectory?: string;
-  /** Node module exporting the runtime factory every worker should use. */
+  /** Reference-engine runtime factories are unsupported and refused when supplied. */
   runtimeFactoryModule?: {
     /** Absolute URL or resolvable Node module specifier. */
     specifier: string;

@@ -167,7 +167,6 @@ describe('geometry broker', () => {
     broker.connectSuite({
       root: '/project',
       context: { projectRoot: '/project' },
-      engine: 'native',
       stillAuthorized: () => true,
     });
     const { port1, port2 } = new MessageChannel();
@@ -236,7 +235,6 @@ describe('geometry broker', () => {
         observers.delete(observe);
       };
     });
-    runner.sourceRevisions = () => [{ entry: 'main.ts', files: { 'main.ts': 'missing' } }];
     runner.run.mockImplementation(async () => {
       for (const event of [
         { type: 'run-start', files: ['model.test.ts'] },
@@ -267,7 +265,6 @@ describe('geometry broker', () => {
           requestId: 1,
           kind: 'suite',
           root: '/project',
-          engine: 'native',
           input,
           runtimeConfig: { tauApiUrl: 'http://localhost', tauWebSocketUrl: 'ws://localhost' },
         },
@@ -278,7 +275,7 @@ describe('geometry broker', () => {
       await expect(client.run({ files: ['model.test.ts'] })).resolves.toEqual(result);
       expect(fileComplete).toHaveBeenCalledExactlyOnceWith({ type: 'file-complete', ...result.files[0]! });
       expect(runComplete).toHaveBeenCalledExactlyOnceWith({ type: 'run-complete', result });
-      expect(client.sourceRevisions?.()).toEqual(runner.sourceRevisions());
+      expect(client).not.toHaveProperty('sourceRevisions');
       expect(runner.abort).not.toHaveBeenCalled();
       expect(runner.close).toHaveBeenCalledOnce();
       expect(leases[0]!.dispose).toHaveBeenCalledOnce();
@@ -405,7 +402,6 @@ describe('geometry broker', () => {
       broker.connectSuite({
         root: '/project/checkout',
         context: { projectRoot: '/project/checkout' },
-        engine: 'native',
         stillAuthorized,
       });
       channels[index]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
@@ -432,7 +428,6 @@ describe('geometry broker', () => {
     broker.connectSuite({
       root: '/project/checkout',
       context: { projectRoot: '/project/checkout' },
-      engine: 'native',
       stillAuthorized: () => firstGenerationAuthorized,
     });
     channels[0]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
@@ -451,7 +446,6 @@ describe('geometry broker', () => {
     broker.connectSuite({
       root: '/project/checkout',
       context: { projectRoot: '/project/checkout', attachmentGeneration: '2' },
-      engine: 'native',
       stillAuthorized: () => true,
     });
     channels[1]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
@@ -470,7 +464,6 @@ describe('geometry broker', () => {
     broker.connectSuite({
       root: '/project/A',
       context: { projectRoot: '/project/A' },
-      engine: 'native',
       stillAuthorized: () => aAuthorized,
     });
     channels[0]!.broker.send({ type: 'run', options: { files: ['a.test.ts'] } });
@@ -483,7 +476,6 @@ describe('geometry broker', () => {
     broker.connectSuite({
       root: '/project/B',
       context: { projectRoot: '/project/B' },
-      engine: 'legacy',
       stillAuthorized: () => true,
     });
     channels[1]!.broker.send({ type: 'run', options: { files: ['b.test.ts'] } });
@@ -507,7 +499,6 @@ describe('geometry broker', () => {
     broker.connectSuite({
       root: '/project/A',
       context: { projectRoot: '/project/A' },
-      engine: 'native',
       stillAuthorized: () => aAuthorized,
     });
     channels[0]!.broker.send({ type: 'run', options: { files: ['a.test.ts'] } });
@@ -520,7 +511,6 @@ describe('geometry broker', () => {
     broker.connectSuite({
       root: '/project/B',
       context: { projectRoot: '/project/B' },
-      engine: 'native',
       stillAuthorized: () => true,
     });
     channels[1]!.broker.send({ type: 'run', options: { files: ['b.test.ts'] } });
@@ -548,7 +538,6 @@ describe('geometry broker', () => {
       broker.connectSuite({
         root: '/project/A',
         context: { projectRoot: '/project/A' },
-        engine: 'native',
         stillAuthorized: grantA,
       });
       channels[index]!.broker.send({ type: 'run', options: { files: ['a.test.ts'] } });
@@ -565,7 +554,6 @@ describe('geometry broker', () => {
     broker.connectSuite({
       root: '/project/B',
       context: { projectRoot: '/project/B' },
-      engine: 'legacy',
       stillAuthorized: () => true,
     });
     channels[2]!.broker.send({ type: 'run', options: { files: ['b.test.ts'] } });
@@ -586,7 +574,6 @@ describe('geometry broker', () => {
       broker.connectSuite({
         root: '/project/A',
         context: { projectRoot: '/project/A' },
-        engine: 'native',
         stillAuthorized: () => true,
       });
       channels[index]!.broker.send({ type: 'run', options: { files: ['a.test.ts'] } });
@@ -616,7 +603,6 @@ describe('geometry broker', () => {
     broker.connectSuite({
       root: '/project',
       context: { projectRoot: '/project' },
-      engine: 'native',
       stillAuthorized: () => {
         if (predicateThrows) {
           throw new Error('root generation unavailable');
@@ -646,7 +632,6 @@ describe('geometry broker', () => {
     broker.connectSuite({
       root: '/project',
       context: { projectRoot: '/project' },
-      engine: 'native',
       stillAuthorized: () => true,
     });
     channels[0]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
@@ -677,7 +662,6 @@ describe('geometry broker', () => {
       broker.connectSuite({
         root: '/project',
         context: { projectRoot: '/project' },
-        engine: 'native',
         stillAuthorized: () => true,
       });
       channels[0]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
@@ -778,17 +762,17 @@ describe('geometry broker', () => {
     broker.connectSuite({
       root: '/project/checkout',
       context: { projectRoot: '/project/checkout', computeMode: 'memory' },
-      engine: 'native',
       stillAuthorized: () => true,
     });
     channels[0]!.broker.send({ type: 'run', options: { files: ['tests/geospec.test.ts'] } });
     expect(leases).toHaveLength(1);
-    expect(utilities[0]!.posted[0]).toMatchObject({ kind: 'suite', root: '/project/checkout', engine: 'native' });
+    expect(utilities[0]!.posted[0]).toMatchObject({ kind: 'suite', root: '/project/checkout' });
+    expect(utilities[0]!.posted[0]).not.toHaveProperty('engine');
     utilities[0]!.message({
       type: 'geometry-result',
       generation: 1,
       requestId: 1,
-      value: { type: 'result', result: { success: true }, sourceRevisions: [] },
+      value: { type: 'result', result: { success: true } },
     });
     expect(leases[0]!.dispose).toHaveBeenCalledOnce();
     expect(channels[0]!.broker.posted).toMatchObject([{ type: 'result' }]);
@@ -802,7 +786,6 @@ describe('geometry broker', () => {
     broker.connectSuite({
       root: '/project/checkout',
       context: { projectRoot: '/project/checkout' },
-      engine: 'native',
       stillAuthorized: () => false,
     });
     channels[0]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });

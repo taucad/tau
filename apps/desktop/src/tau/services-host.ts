@@ -48,15 +48,15 @@ const pendingRuntimePorts = new Map<
     }): void;
   }
 >();
-const pendingGeometryPorts = new Map<string, {
-  readonly geometryPortTimeout: ReturnType<typeof setTimeout>;
-  resolve(port: UtilityMessage['ports'][number]): void;
-  reject(error: Error): void;
-}>();
-const requestGeometryPort = async (
-  workspaceRoot: string,
-  engine: 'native' | 'legacy',
-): Promise<UtilityMessage['ports'][number]> => {
+const pendingGeometryPorts = new Map<
+  string,
+  {
+    readonly geometryPortTimeout: ReturnType<typeof setTimeout>;
+    resolve(port: UtilityMessage['ports'][number]): void;
+    reject(error: Error): void;
+  }
+>();
+const requestGeometryPort = async (workspaceRoot: string): Promise<UtilityMessage['ports'][number]> => {
   const requestId = randomUUID();
   const answer = new Promise<UtilityMessage['ports'][number]>((resolve, reject) => {
     const geometryPortTimeout = setTimeout(() => {
@@ -66,7 +66,7 @@ const requestGeometryPort = async (
     pendingGeometryPorts.set(requestId, { geometryPortTimeout, resolve, reject });
   });
   try {
-    parentPort.postMessage({ type: 'geometry-port-request', requestId, workspaceRoot, engine });
+    parentPort.postMessage({ type: 'geometry-port-request', requestId, workspaceRoot });
   } catch (error) {
     const pending = pendingGeometryPorts.get(requestId);
     if (pending) {

@@ -14,7 +14,7 @@ import {
   parameterManifestWireSchema,
 } from '@taucad/chat/schemas';
 import { asKnownArtifact } from '@taucad/runtime';
-import type { RuntimeClient, ViewOffer } from '@taucad/runtime';
+import type { RuntimeClient, ViewOffer, WideViewRequest } from '@taucad/runtime';
 import type { ExportFile, KernelIssue } from '@taucad/runtime/types';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
@@ -29,7 +29,17 @@ const glbMagic = 0x46_54_6c_67;
 const glbVersion = 2;
 
 /** Runtime surface required by request-scoped agent geometry operations. @public */
-export type RuntimeAgentClient = Pick<RuntimeClient, 'open' | 'describe' | 'capabilities'>;
+export type RuntimeAgentClient = Pick<RuntimeClient, 'describe' | 'capabilities'> & {
+  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'signal'>) => Pick<
+    ReturnType<RuntimeClient['open']>,
+    'evaluation' | 'export' | 'close'
+  > & {
+    view: (
+      id?: string,
+      request?: Pick<WideViewRequest, 'instance' | 'options'>,
+    ) => Pick<ReturnType<ReturnType<RuntimeClient['open']>['view']>, 'rendering' | 'close'>;
+  };
+};
 
 /** Existing image-service request injected by each runtime placement. @public */
 export type RuntimeAgentImageJob = (

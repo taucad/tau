@@ -74,8 +74,8 @@ const picovoxelBuild = {
   scripts: 'e19aa9a77efb2c44cb0aa359ba7e3b64d2a022dbf98b2a4abf0126122aac9d7c',
 } as const;
 
-/** Kernel version: the plugin's handle semantics (1.1: zero-area triangles dropped) plus the PicoVoxel build it runs. */
-const kernelVersion = `1.1.0+picovoxel.${picovoxelBuild.version}.serial-${picovoxelBuild.serial.slice(0, 12)}.multi-${picovoxelBuild.multi.slice(0, 12)}.scripts-${picovoxelBuild.scripts.slice(0, 12)}`;
+/** Kernel version: 1.2 stores snapshot mesh arrays as codec-stable bytes. */
+const kernelVersion = `1.2.0+picovoxel.${picovoxelBuild.version}.serial-${picovoxelBuild.serial.slice(0, 12)}.multi-${picovoxelBuild.multi.slice(0, 12)}.scripts-${picovoxelBuild.scripts.slice(0, 12)}`;
 
 /**
  * Explicit URLs of the assets each artifact loads (D20): the WebAssembly binary and, for the
@@ -503,6 +503,19 @@ const ownedUint32 = (values: Uint32Array): Uint32Array<ArrayBuffer> =>
   values.buffer instanceof ArrayBuffer
     ? new Uint32Array(values.buffer, values.byteOffset, values.length)
     : new Uint32Array(values);
+
+const snapshotBytes = (values: Float32Array<ArrayBuffer> | Uint32Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
+  new Uint8Array(values.buffer, values.byteOffset, values.byteLength).slice();
+
+const restoredWords = (value: unknown, index: number, field: 'vertices' | 'triangles'): ArrayBuffer => {
+  if (!(value instanceof Uint8Array)) {
+    throw new TypeError(`Invalid PicoVoxel serialized shape ${index}: ${field} must be bytes.`);
+  }
+  if (value.byteLength % Uint32Array.BYTES_PER_ELEMENT !== 0) {
+    throw new TypeError(`Invalid PicoVoxel serialized shape ${index}: ${field} byte length must be divisible by four.`);
+  }
+  return new Uint8Array(value).buffer;
+};
 
 /**
  * Validate one returned mesh and keep PicoVoxel's own JavaScript copy.
@@ -961,7 +974,14 @@ export const picovoxelKernel = defineKernel({
   },
 
   serializeHandle({ handle }) {
-    return handle;
+    return {
+      shapes: handle.shapes.map(({ name, vertices, triangles, lane }) => ({
+        name,
+        vertices: snapshotBytes(vertices),
+        triangles: snapshotBytes(triangles),
+        lane,
+      })),
+    };
   },
 
   deserializeHandle({ serialized }) {
@@ -973,18 +993,18 @@ export const picovoxelKernel = defineKernel({
         if (
           !isRecordObject(value) ||
           typeof value['name'] !== 'string' ||
-          !(value['vertices'] instanceof Float32Array) ||
-          !(value['triangles'] instanceof Uint32Array) ||
+          !(value['vertices'] instanceof Uint8Array) ||
+          !(value['triangles'] instanceof Uint8Array) ||
           !isLane(value['lane'])
         ) {
           throw new TypeError(
-            `Invalid PicoVoxel serialized shape ${index}: expected name, Float32Array vertices, Uint32Array triangles and an exact/fast lane.`,
+            `Invalid PicoVoxel serialized shape ${index}: expected name, Uint8Array mesh bytes and an exact/fast lane.`,
           );
         }
         return {
           name: value['name'],
-          vertices: ownedFloat32(value['vertices']),
-          triangles: ownedUint32(value['triangles']),
+          vertices: new Float32Array(restoredWords(value['vertices'], index, 'vertices')),
+          triangles: new Uint32Array(restoredWords(value['triangles'], index, 'triangles')),
           lane: value['lane'],
         };
       }),

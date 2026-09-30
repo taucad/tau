@@ -6,13 +6,11 @@ import type * as IsolationModule from '@taucad/runtime/cross-origin-isolation';
 import type { IsolationStatus } from '@taucad/runtime/cross-origin-isolation';
 import type * as KernelModule from '@taucad/runtime/kernel';
 import type { KernelIssue } from '@taucad/runtime/types';
-import { RenderAbortedError } from '@taucad/runtime';
 import { createMockKernelRuntime, expectKernelProjectionOrder, glbToDocument } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { CreatePicoOptions, CreatePicoRuntimeOptions, Mesh, Pico, PicoRuntime, Voxels } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
 
-import type { PicovoxelNativeHandle } from '#picovoxel.geometry.js';
 import { picovoxelBuiltinModuleNames, picovoxelDetectPattern, picovoxelKernel } from '#picovoxel.kernel.js';
 import type { PicovoxelOptionsInput } from '#picovoxel.schemas.js';
 
@@ -21,6 +19,7 @@ type Artifact = 'serial' | 'multi';
 const isolation = vi.hoisted(() => ({ status: undefined as IsolationStatus | undefined }));
 const abort = vi.hoisted(() => ({ after: Infinity, checks: 0 }));
 const registered = vi.hoisted(() => new Map<string, unknown>());
+const renderAborted = () => Object.assign(new Error('Render aborted'), { name: 'RenderAbortedError' });
 const sessions = vi.hoisted(() => ({
   created: [] as Array<{ artifact: 'serial' | 'multi'; options: CreatePicoOptions; pico: Pico }>,
   runtimes: [] as Array<{ artifact: 'serial' | 'multi'; runtime: PicoRuntime; options: CreatePicoRuntimeOptions }>,
@@ -51,7 +50,7 @@ vi.mock('@taucad/runtime/kernel', async (importOriginal) => {
     checkAbort() {
       abort.checks++;
       if (abort.checks > abort.after) {
-        throw new RenderAbortedError();
+        throw renderAborted();
       }
     },
   };
@@ -226,7 +225,7 @@ describe('picovoxel kernel', () => {
   describe('identity', () => {
     it('should key the kernel version on the PicoVoxel version, both artifact digests and its scripts', () => {
       expect(definition.version).toMatch(
-        /^1\.1\.0\+picovoxel\.[\w.-]+\.serial-[\da-f]{12}\.multi-[\da-f]{12}\.scripts-[\da-f]{12}$/,
+        /^1\.2\.0\+picovoxel\.[\w.-]+\.serial-[\da-f]{12}\.multi-[\da-f]{12}\.scripts-[\da-f]{12}$/,
       );
     });
 
@@ -962,7 +961,7 @@ describe('picovoxel kernel', () => {
         .evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context)
         .catch((error: unknown) => error);
 
-      expect(aborted).toBeInstanceOf(RenderAbortedError);
+      expect(aborted).toMatchObject({ name: 'RenderAbortedError' });
       expect(runtime.logger.debug).toHaveBeenCalledWith('PicoVoxel stopped a superseded build after 1 PicoVoxel calls');
       await definition.onDispose!(context);
     }, 60_000);
@@ -1074,7 +1073,7 @@ describe('picovoxel kernel', () => {
 
       const aborted = await render().catch((error: unknown) => error);
 
-      expect(aborted).toBeInstanceOf(RenderAbortedError);
+      expect(aborted).toMatchObject({ name: 'RenderAbortedError' });
       expect(abort.checks).toBe(2);
       // The evidence DP15 reads: where the cooperative check caught the build.
       expect(runtime.logger.debug).toHaveBeenCalledWith('PicoVoxel stopped a superseded build after 1 PicoVoxel calls');
@@ -1393,6 +1392,8 @@ describe('picovoxel kernel', () => {
       const { runtime, context, result } = await evaluate({ module: { default: helloCube } });
       const snapshot = structuredClone(definition.serializeHandle!({ handle: result.handle }, runtime, context));
 
+      expect(snapshot.shapes[0]?.vertices).toBeInstanceOf(Uint8Array);
+      expect(snapshot.shapes[0]?.triangles).toBeInstanceOf(Uint8Array);
       expect(definition.deserializeHandle!({ serialized: snapshot }, runtime, context)).toEqual(result.handle);
     });
 
@@ -1404,12 +1405,16 @@ describe('picovoxel kernel', () => {
         { shapes: [{ name: 'Shape 1', vertices: new Float32Array(), triangles: new Uint32Array(), lane: 'open' }] },
         'shape 0',
       ],
+      [
+        { shapes: [{ name: 'Shape 1', vertices: new Uint8Array(3), triangles: new Uint8Array(), lane: 'exact' }] },
+        'vertices byte length must be divisible by four',
+      ],
     ])('should refuse the malformed snapshot %j', async (snapshot, message) => {
       const { runtime, context } = await evaluate({ module: { default: () => [] } });
 
-      expect(() =>
-        definition.deserializeHandle!({ serialized: snapshot as unknown as PicovoxelNativeHandle }, runtime, context),
-      ).toThrow(message);
+      expect(() => {
+        Reflect.apply(definition.deserializeHandle!, undefined, [{ serialized: snapshot }, runtime, context]);
+      }).toThrow(message);
     });
   });
 });

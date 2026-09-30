@@ -46,25 +46,43 @@ const createClient = () =>
   });
 
 type Client = ReturnType<typeof createClient>;
+const documents = new WeakMap<Client, ReturnType<Client['open']>>();
+const lanes = new WeakMap<Client, 'fast' | 'exact'>();
+const documentFor = (client: Client) => {
+  let document = documents.get(client);
+  if (!document) {
+    document = client.open({ source: { path: 'main.ts' }, watch: false });
+    documents.set(client, document);
+    lanes.set(client, 'fast');
+  }
+  return document;
+};
 
 const render = async (client: Client, lane?: 'fast' | 'exact') => {
-  const outcome = await client.render({
-    source: { path: 'main.ts' },
-    content: { includeEdges: true },
-    ...(lane ? { renderOptions: { lane } } : {}),
-  });
-  if (outcome.superseded || !outcome.geometry.success) {
+  const document = documentFor(client);
+  const requestedLane = lane ?? 'fast';
+  if (lanes.get(client) !== requestedLane) {
+    const updated = await document.update({ evaluateOptions: { lane: requestedLane } });
+    if (updated.superseded || !updated.evaluation.success) {
+      throw new Error('PicoVoxel evaluation failed');
+    }
+    lanes.set(client, requestedLane);
+  }
+  const view = document.view('model', { content: { includeEdges: true } });
+  const outcome = await view.rendering();
+  view.close();
+  if (outcome.superseded || !outcome.rendering.success) {
     throw new Error('PicoVoxel render failed');
   }
-  return outcome.geometry;
+  return outcome.rendering;
 };
 
 const exportStl = async (client: Client, exportOptions?: { lane: 'fast' | 'exact' }) => {
-  const result = await client.export('stl', exportOptions ? { exportOptions } : undefined);
+  const result = await documentFor(client).export('stl', exportOptions ? { options: exportOptions } : {});
   if (!result.success) {
     throw new Error(result.issues.map(({ message }) => message).join('; '));
   }
-  return result.data[0]!.bytes;
+  return result.files[0].bytes;
 };
 
 beforeEach(() => {
@@ -129,7 +147,7 @@ describe('PicoVoxel dual path through the runtime', () => {
       const exact = await render(client, 'exact');
 
       expect(sessions.lanes).toEqual(['fast', 'exact']);
-      expect(fast.data).not.toEqual(exact.data);
+      expect(fast.artifact).not.toEqual(exact.artifact);
     } finally {
       await client.shutdown();
     }
@@ -150,7 +168,7 @@ describe('PicoVoxel dual path through the runtime', () => {
       const exactAgain = await render(client, 'exact');
 
       expect(sessions.lanes).toEqual(['fast', 'exact']);
-      expect([fastAgain.data, exactAgain.data]).toEqual([fast.data, exact.data]);
+      expect([fastAgain.artifact, exactAgain.artifact]).toEqual([fast.artifact, exact.artifact]);
     } finally {
       await client.shutdown();
     }
@@ -169,14 +187,16 @@ describe('PicoVoxel dual path through the runtime', () => {
     }
   }, 120_000);
 
-  it('should build a request-scoped export once, in the exact lane', async () => {
+  it('should build an export-only document once, in the exact lane', async () => {
     const client = createClient();
+    const document = client.open({ source: { path: 'main.ts' }, evaluateOptions: { lane: 'exact' }, watch: false });
     try {
-      const result = await client.export('glb', { source: { path: 'main.ts' } });
+      const result = await document.export('glb');
 
       expect(result.success).toBe(true);
       expect(sessions.lanes).toEqual(['exact']);
     } finally {
+      document.close();
       await client.shutdown();
     }
   }, 120_000);

@@ -11,11 +11,12 @@ export type NativeBuildInput = {
   readonly parameters: Record<string, unknown>;
 } & ({ readonly options: Record<string, unknown> } | { readonly options?: never });
 
-/** Private result carrier used to preserve exact replay input through middleware and caches. @public */
+/** Replay identity shared with middleware cache implementations. @public */
 export const nativeBuildInputSymbol: unique symbol = Symbol('nativeBuildInput');
 
-/** @public */
+/** The replay carrier; its symbol property is runtime-owned. @public */
 export type NativeBuildInputCarrier = {
+  /** @internal */
   readonly [nativeBuildInputSymbol]?: NativeBuildInput;
 };
 

@@ -31,6 +31,7 @@ import type {
   ComputeStoreEntry,
   KernelComputeCapability,
   KernelFileSystem,
+  KernelServices,
   RuntimeLogger,
 } from '@taucad/runtime/kernel';
 import { assertRootedPath } from '@taucad/runtime/kernel';
@@ -46,10 +47,8 @@ import type {
   EvaluateResult,
   KernelErrorResult,
   KernelIssue,
-  KernelRuntime,
   KernelResult,
   KernelSuccessResult,
-  RuntimeContentInput,
   RuntimeSourceSnapshotResult,
 } from '@taucad/runtime/types';
 import type { AnyRuntimeDefinition, RuntimeDefinition } from '@taucad/runtime/worker';
@@ -101,48 +100,20 @@ export function createTestGeometry<
     readonly view?: (document: TestGeometryDocument<Runtime>) => SelectedView;
   },
 ): Promise<Rendering<Extract<SelectedView['view'], string>>>;
-/** Retains existing fixture call sites until their named views are migrated. @public */
-export function createTestGeometry(
-  input: CreateTestRuntimeClientOptions & {
-    readonly mainFile: string;
-    readonly parameters?: Record<string, unknown>;
-    readonly content?: RuntimeContentInput;
-  },
-): Promise<Rendering>;
-/** Implements both fixture entry forms over one actual document client. @public */
+/** Implements the fixture over one actual document client. @public */
 export async function createTestGeometry(
-  input: CreateTestRuntimeClientOptions &
-    (
-      | {
-          readonly open: Parameters<TestGeometryClient<RuntimeDefinition>['open']>[0];
-          readonly view?: (document: TestGeometryDocument<RuntimeDefinition>) => ViewSubscription;
-        }
-      | {
-          readonly mainFile: string;
-          readonly parameters?: Record<string, unknown>;
-          readonly content?: RuntimeContentInput;
-        }
-    ),
+  input: CreateTestRuntimeClientOptions & {
+    readonly open: Parameters<TestGeometryClient<RuntimeDefinition>['open']>[0];
+    readonly view?: (document: TestGeometryDocument<RuntimeDefinition>) => ViewSubscription;
+  },
 ): Promise<Rendering> {
   const { runtime, files } = input;
   const client = createTestRuntimeClient({ runtime, files });
   let document: ReturnType<typeof client.open> | undefined;
   let view: ViewSubscription | undefined;
   try {
-    document =
-      'open' in input
-        ? client.open(input.open)
-        : client.open({
-            source: { path: input.mainFile },
-            ...(input.parameters ? { parameters: input.parameters } : {}),
-            watch: false,
-          });
-    view =
-      'open' in input
-        ? (input.view?.(document) ?? document.view())
-        : input.content
-          ? document.view('model', { content: input.content })
-          : document.view();
+    document = client.open({ ...input.open, watch: input.open.watch ?? false });
+    view = input.view?.(document) ?? document.view();
     const outcome = await view.rendering();
     if (outcome.superseded) {
       throw new Error('Test render was superseded');
@@ -510,7 +481,7 @@ const createMockComputeRuntime = (signal: AbortSignal): KernelComputeCapability 
 export const createMockKernelRuntime = (options?: {
   readonly filesystemOverrides?: MockFileSystemOptions;
   readonly signal?: AbortSignal;
-}): KernelRuntime & {
+}): KernelServices & {
   logger: ReturnType<typeof createMockLogger>;
   filesystem: MockFileSystem;
   tracer: { startSpan: ReturnType<typeof vi.fn> };
@@ -518,7 +489,6 @@ export const createMockKernelRuntime = (options?: {
   const signal = options?.signal ?? new AbortController().signal;
   return {
     signal,
-    emitEvent: () => undefined,
     logger: createMockLogger(),
     filesystem: createMockFileSystem(options?.filesystemOverrides),
     fileContentCache: new Map(),

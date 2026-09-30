@@ -70,6 +70,11 @@ test('test client retains exact public routes and supports dynamic client assign
 test('geometry fixture preserves required evaluation options and named view routes', () => {
   void createTestGeometry({
     runtime: requiredRuntime,
+    // @ts-expect-error Fixture callers must select a document source with open.
+    mainFile: 'main.cad',
+  });
+  void createTestGeometry({
+    runtime: requiredRuntime,
     open: { source: { path: 'main.cad' }, evaluateOptions: { quality: 4 } },
     view: (document) => document.view('model'),
   });

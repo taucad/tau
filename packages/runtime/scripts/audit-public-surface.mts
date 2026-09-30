@@ -236,6 +236,8 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
 
   // Lifecycle errors + guards
   'RuntimeTerminatedError',
+  'RuntimeTerminatedCause',
+  'RuntimeTerminatedDetail',
   'isRuntimeTerminatedError',
   'OperationAbortedError',
   'isOperationAbortedError',

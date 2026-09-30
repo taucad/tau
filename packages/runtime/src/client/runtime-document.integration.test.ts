@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { createRuntimeClient } from '#client/runtime-document-client-core.js';
 import { createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
@@ -110,7 +110,13 @@ it('reports transport.closed as termination for pending document, view, and expo
   const runtime = defineRuntime({ kernels: [kernel] });
   const base = inProcessTransport({ runtime, fileSystem: fromMemoryFs({}) });
   const owned = base.materialize();
-  const lost = Promise.withResolvers<{ cause: 'host-exit'; phase: 'session' }>();
+  const lost = Promise.withResolvers<{
+    cause: 'host-exit';
+    phase: 'session';
+    exitCode: number;
+    released: boolean;
+    stderrTail: string;
+  }>();
   const transport = { ...base, materialize: () => ({ ...owned, closed: lost.promise }) };
   const client = createRuntimeClient({ transport });
   const document = client.open({ source: { files: { 'model.circuit': 'board' } }, watch: false });
@@ -135,17 +141,56 @@ it('reports transport.closed as termination for pending document, view, and expo
   const outcomes = [update, read, viewUpdate, viewRead, exported].map(async (promise) => {
     try {
       await promise;
-      return 'resolved';
+      return undefined;
     } catch (error) {
-      return error instanceof Error ? error.name : 'unknown';
+      return error;
     }
   });
-  lost.resolve({ cause: 'host-exit', phase: 'session' });
-  expect(await Promise.all(outcomes)).toEqual(Array.from({ length: 5 }, () => 'RuntimeTerminatedError'));
+  lost.resolve({ cause: 'host-exit', phase: 'session', exitCode: 7, released: false, stderrTail: 'kernel crash\n' });
+  for (const error of await Promise.all(outcomes)) {
+    expect(error).toMatchObject({
+      name: 'RuntimeTerminatedError',
+      code: 'RUNTIME_TERMINATED',
+      causeKind: 'transport-closed',
+      detail: { phase: 'session', exitCode: 7, released: false, stderrTail: 'kernel crash\n' },
+    });
+  }
   expect(documentStatuses.at(-1)).toBe('error');
   expect(viewStatuses.at(-1)).toBe('error');
   expect(client.lifecycleState).toBe('terminated');
-  await expect(document.evaluation()).rejects.toMatchObject({ name: 'RuntimeTerminatedError' });
-  await expect(view.rendering()).rejects.toMatchObject({ name: 'RuntimeTerminatedError' });
+  await expect(document.evaluation()).rejects.toMatchObject({
+    name: 'RuntimeTerminatedError',
+    causeKind: 'transport-closed',
+    detail: { exitCode: 7, stderrTail: 'kernel crash\n' },
+  });
+  await expect(view.rendering()).rejects.toMatchObject({
+    name: 'RuntimeTerminatedError',
+    causeKind: 'transport-closed',
+    detail: { exitCode: 7, stderrTail: 'kernel crash\n' },
+  });
+  await expect(client.describe({ source: { files: { 'model.circuit': 'board' } } })).rejects.toMatchObject({
+    code: 'RUNTIME_TERMINATED',
+    causeKind: 'transport-closed',
+    detail: { exitCode: 7, stderrTail: 'kernel crash\n' },
+  });
+  await owned.close();
+});
+
+it('retains a transport operation-timeout cause on later client calls', async () => {
+  const base = inProcessTransport({ runtime: defineRuntime({ kernels: [] }), fileSystem: fromMemoryFs({}) });
+  const owned = base.materialize();
+  const lost = Promise.withResolvers<{ cause: 'operation-timeout' }>();
+  const client = createRuntimeClient({
+    transport: { ...base, materialize: () => ({ ...owned, closed: lost.promise }) },
+  });
+
+  lost.resolve({ cause: 'operation-timeout' });
+  await vi.waitFor(() => {
+    expect(client.lifecycleState).toBe('terminated');
+  });
+  await expect(client.describe({ source: { files: { 'model.circuit': 'board' } } })).rejects.toMatchObject({
+    code: 'RUNTIME_TERMINATED',
+    causeKind: 'operation-timeout',
+  });
   await owned.close();
 });

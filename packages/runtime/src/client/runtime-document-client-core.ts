@@ -247,6 +247,8 @@ export function createRuntimeClient(options: {
   let connectPromise: Promise<void> | undefined;
   const terminated = Promise.withResolvers<never>();
   void consumeRejection(terminated.promise);
+  let terminalError: RuntimeTerminatedError | undefined;
+  const terminationFailure = (): RuntimeTerminatedError => terminalError ?? new RuntimeTerminatedError();
   let session: RuntimeDocumentSessionClient | undefined;
   let activeTimeout = options.operationTimeout ?? 0;
   let transcodeTimeout = 60_000;
@@ -297,7 +299,7 @@ export function createRuntimeClient(options: {
   validateTimeout(activeTimeout);
   const connect = async (): Promise<void> => {
     if (lifecycleState === 'terminated') {
-      throw new RuntimeTerminatedError();
+      throw terminationFailure();
     }
     if (lifecycleState === 'connected') {
       return;
@@ -309,17 +311,17 @@ export function createRuntimeClient(options: {
     connectPromise = (async () => {
       const config = typeof options.config === 'function' ? await (options.config as () => unknown)() : options.config;
       if (currentLifecycle() === 'terminated') {
-        throw new RuntimeTerminatedError();
+        throw terminationFailure();
       }
       const { channel } = await transport.open();
       await channel.ready;
       validateProtocolHeader({ v: channel.hello.payload.protocolVersion });
       if (currentLifecycle() === 'terminated') {
-        throw new RuntimeTerminatedError();
+        throw terminationFailure();
       }
       const initialized = await transport.initialize(config === undefined ? {} : { config });
       if (currentLifecycle() === 'terminated') {
-        throw new RuntimeTerminatedError();
+        throw terminationFailure();
       }
       capabilities = initialized.capabilities;
       topics.capabilities.emit(capabilities);
@@ -373,14 +375,18 @@ export function createRuntimeClient(options: {
   const connectedSession = async (): Promise<RuntimeDocumentSessionClient> => {
     await connect();
     if (!session) {
-      throw new RuntimeTerminatedError();
+      throw terminationFailure();
     }
     return session;
   };
   const observeTransportClosed = async (): Promise<void> => {
-    await transport.closed;
+    const close = await transport.closed;
+    if (lifecycleState === 'terminated') {
+      return;
+    }
     lifecycleState = 'terminated';
-    const failure = new RuntimeTerminatedError();
+    const failure = new RuntimeTerminatedError(close);
+    terminalError = failure;
     terminated.reject(failure);
     clearRecovery();
     session?.terminate(failure);
@@ -395,6 +401,7 @@ export function createRuntimeClient(options: {
     }
     lifecycleState = 'terminated';
     const failure = new RuntimeTerminatedError();
+    terminalError = failure;
     terminated.reject(failure);
     clearRecovery();
     session?.terminate(failure);
@@ -423,7 +430,7 @@ export function createRuntimeClient(options: {
     connect,
     open(input) {
       if (lifecycleState === 'terminated') {
-        throw new RuntimeTerminatedError();
+        throw terminationFailure();
       }
       const normalized = withStagedFiles(normalizeRuntimeSource(input.source), input.stage);
       const document = openDeferredDocument(
@@ -581,7 +588,7 @@ export function createRuntimeClient(options: {
     },
     on(event, handler, settings) {
       if (lifecycleState === 'terminated') {
-        throw new RuntimeTerminatedError();
+        throw terminationFailure();
       }
       switch (event) {
         case 'capabilities': {

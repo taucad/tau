@@ -110,7 +110,13 @@
         "cwd": "libs/api-extractor"
       },
       "cache": true,
-      "inputs": ["{projectRoot}/src/extract-picovoxel-types.ts", "{workspaceRoot}/pnpm-lock.yaml", "sharedGlobals"],
+      "inputs": [
+        "{projectRoot}/src/extract-picovoxel-types.ts",
+        "{projectRoot}/src/emit-package-declarations.ts",
+        "{workspaceRoot}/packages/plugins/picovoxel/src/model.ts",
+        "{workspaceRoot}/pnpm-lock.yaml",
+        "sharedGlobals"
+      ],
       "outputs": ["{projectRoot}/src/generated/picovoxel"]
     },
     "generate-bundles": {

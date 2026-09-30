@@ -33,7 +33,7 @@ const runtime = defineRuntime({ plugins: [picovoxel()] });
 ```
 
 Picovoxel source files export `default main(pico, params)` and return a `Mesh`, `Voxels`, or a flat
-non-empty array of those values. Tau owns the selected session lifecycle:
+array of those values, or `{ shape, name }` descriptors; `[]` is an empty scene. Tau owns the selected session lifecycle:
 
 ```typescript
 import type { Pico } from 'picovoxel';
@@ -44,6 +44,38 @@ export default function main(pico: Pico, params = defaultParams) {
   return pico.createVoxels({ shape: 'sphere', radius: params.radius });
 }
 ```
+
+### Part names
+
+Name each independently delivered part at the return boundary. Geometry operations still use raw
+`Mesh`/`Voxels` values; the descriptor is display metadata.
+
+```typescript
+import type { Pico } from 'picovoxel';
+import type { PicovoxelResult } from '@taucad/picovoxel';
+
+export default function main(pico: Pico): PicovoxelResult {
+  const housing = pico.createVoxels({ shape: 'sphere', radius: 10 });
+  const pins = [0, 1, 2].map((index) => ({
+    shape: pico.createVoxels({ shape: 'sphere', center: [20 + index * 8, 0, 0], radius: 2 }),
+    name: `Pin ${index + 1}`,
+  }));
+  return [{ shape: housing, name: 'Housing / 蓋' }, ...pins];
+}
+```
+
+Raw values retain `Shape N` names by their one-based output position. Descriptor names are trimmed;
+blank or omitted names use the same fallback. Duplicate labels and Unicode are preserved. Rename
+or reorder descriptors deliberately: labels follow their parts, while viewer IDs remain addresses
+within each payload. Naming does not create hierarchy, stable identity or assembly occurrences.
+Nested arrays, `children`, invalid shapes and non-string names fail with an indexed diagnostic.
+
+Wrap the final geometry after transforms, booleans or cloning. In multiple files, helpers can return
+raw geometry or descriptors; import `PicovoxelResult` with `import type` only. No runtime naming
+helper is required. Both preview and exact export execute the same author code; avoid lane-dependent
+names. Cached/restored snapshots retain labels. GLB node and mesh names match viewer labels; STL
+has no part-label field, so per-part filenames are sanitized and deduplicated independently. Direct
+upstream `Mesh.toGlb()` calls bypass Tau's descriptor handling.
 
 ### Lanes
 
@@ -116,6 +148,7 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 | ----------------- | --------------- | ----------------------------------------------------------------------------- |
 | `picovoxel`       | toolkit factory | package-named authoring factory; presets select capabilities                  |
 | `plugin`          | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key |
+| `PicovoxelResult` | type            | author model return: raw or named single parts and flat arrays                |
 | `picovoxelKernel` | kernel factory  | direct `kernels` composition, with options                                    |
 
 One preset, `default`, selecting `kernels.default`.

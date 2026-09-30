@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { esbuild } from '@taucad/esbuild';
 import { geometryCache } from '@taucad/middleware';
-import { createTestRuntimeClient } from '@taucad/runtime-testing';
+import { createTestRuntimeClient, glbToDocument, readGltfNamingSummary } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 import type { CreatePicoOptions, CreatePicoRuntimeOptions } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
@@ -72,6 +72,75 @@ beforeEach(() => {
 });
 
 describe('PicoVoxel dual path through the runtime', () => {
+  it.each(['fast', 'exact'] as const)(
+    'should retain names through cached %s delivery without changing booleans, clones or offsets',
+    async (lane) => {
+      const source = (named: boolean) => `
+      import type { Pico } from 'picovoxel';
+      import type { PicovoxelResult } from '@taucad/picovoxel';
+      export const defaultParams = { voxelSize: 1 };
+      export default function main(pico: Pico): PicovoxelResult {
+        const sphere = pico.createVoxels({ shape: 'sphere', radius: 4 });
+        const bore = pico.createVoxels({ shape: 'sphere', center: [3, 0, 0], radius: 2 });
+        const shape = sphere.subtract(bore).clone().offset({ distance: 0.6 });
+        return ${named ? "[{ shape, name: '蓋 / Mesh' }, { shape: shape.toMesh(), name: '蓋 / Mesh' }]" : '[shape, shape.toMesh()]'};
+      }
+    `;
+      const client = createTestRuntimeClient({
+        runtime: defineRuntime({
+          plugins: [picovoxel({ kernels: { default: { wasm: 'serial' } } }), esbuild()],
+          middleware: [geometryCache()],
+        }),
+      });
+      const attributes = async (bytes: Uint8Array<ArrayBuffer>) => {
+        const document = await glbToDocument(bytes);
+        return document
+          .getRoot()
+          .listMeshes()
+          .map((mesh) =>
+            mesh.listPrimitives().map((primitive) => ({
+              positions: primitive.getAttribute('POSITION')!.getArray(),
+              min: primitive.getAttribute('POSITION')!.getMin([]),
+              max: primitive.getAttribute('POSITION')!.getMax([]),
+              normals: primitive.getAttribute('NORMAL')!.getArray(),
+              indices: primitive.getIndices()!.getArray(),
+            })),
+          );
+      };
+      const build = async (named: boolean) => {
+        const result = await client.render({
+          source: { files: { 'main.ts': source(named) } },
+          renderOptions: { lane },
+        });
+        if (result.superseded || !result.geometry.success || result.geometry.data.format !== 'gltf') {
+          throw new Error('Named render failed');
+        }
+        return result.geometry.data.content;
+      };
+      try {
+        const raw = await build(false);
+        const named = await build(true);
+        const again = await build(true);
+        expect(sessions.lanes).toEqual([lane, lane]);
+        expect(again).toEqual(named);
+        expect(await attributes(named)).toEqual(await attributes(raw));
+        const summary = await readGltfNamingSummary(again);
+        expect(summary.nodeNames).toEqual(['蓋 / Mesh', '蓋 / Mesh']);
+        expect(summary.meshNames).toEqual(summary.nodeNames);
+        const exported = await client.export('glb');
+        expect(exported.success).toBe(true);
+        if (!exported.success) {
+          throw new Error('Exact export failed');
+        }
+        const exportedNames = await readGltfNamingSummary(exported.data[0]!.bytes);
+        expect(exportedNames.nodeNames).toEqual(summary.nodeNames);
+      } finally {
+        await client.shutdown();
+      }
+    },
+    120_000,
+  );
+
   it('should render the viewer in the fast lane and replay the model exactly for each export', async () => {
     const client = createClient();
     try {

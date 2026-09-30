@@ -13,6 +13,7 @@ import {
   ChatExplorerTree,
   ComponentRow,
   getComponentRowPaddingLeft,
+  getVisibleModelComponents,
 } from '#routes/w.$workspace.$project/chat-explorer.js';
 
 const mocks = vi.hoisted(() => ({
@@ -131,6 +132,25 @@ const capabilities: GeometryComponentManifest['capabilities'] = {
   hasPreciseTopology: false,
   exports: [{ fidelity: 'mesh', formats: ['glb'], available: true }],
 };
+
+describe('Model component projection', () => {
+  it('should retain traversal order and matching ancestors without unrelated descendants', () => {
+    const parent = createNode('assembly', 'Nozzle');
+    const child = createNode('tube', 'Cooling tube');
+    const sibling = createNode('wall', 'Hot wall');
+    parent.childIds = [child.id, sibling.id];
+    child.parentId = parent.id;
+    child.depth = 2;
+    sibling.parentId = parent.id;
+    sibling.depth = 2;
+    const manifest = createManifest([parent, child, sibling]);
+    manifest.nodesById['root']!.childIds = [parent.id];
+    expect(getVisibleModelComponents(manifest, '').map((node) => node.id)).toEqual(['assembly', 'tube', 'wall']);
+    expect(getVisibleModelComponents(manifest, 'cooling').map((node) => node.id)).toEqual(['assembly', 'tube']);
+    expect(getVisibleModelComponents(manifest, 'nozzle').map((node) => node.id)).toEqual(['assembly']);
+    expect(getVisibleModelComponents(manifest, 'absent')).toEqual([]);
+  });
+});
 
 function createNode(id: string, name: string, appearance?: GeometryComponentAppearance): GeometryComponentNode {
   return {
@@ -258,17 +278,20 @@ function mockProjectForExplorer({
   viewGraphics,
   geometryUnitFiles,
   editorRef = createStaticActor({ context: { viewSettings } }),
+  viewEntryPaths = new Map(Object.entries(viewSettings).map(([id, view]) => [id, view.entryPath])),
 }: {
   readonly mainEntryPath: string;
   readonly viewSettings: Record<string, { readonly entryPath: string }>;
   readonly viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
   readonly geometryUnitFiles: readonly string[];
   readonly editorRef?: EditorTestActor;
+  readonly viewEntryPaths?: ReadonlyMap<string, string>;
 }): void {
   mocks.useProject.mockReturnValue({
     mainEntryPath,
     editorRef,
     viewGraphics,
+    viewEntryPaths,
     viewRecords: new Map(Object.entries(viewSettings)),
     geometryUnits: new Map(geometryUnitFiles.map((entryPath) => [entryPath, createStaticActor({})])),
   });
@@ -429,7 +452,7 @@ describe('ChatExplorerTree', () => {
       });
 
       await waitFor(() => {
-        expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+        expect(screen.getByRole('button', { name: 'helper_part' })).toHaveFocus();
       });
       expect(setIsExpanded).toHaveBeenCalledWith(true);
       expect(screen.getByRole('searchbox', { name: 'Filter parts' })).toHaveValue('');
@@ -1097,5 +1120,21 @@ describe('Chat explorer component rows', () => {
       unitId,
       source: 'explorer',
     });
+  });
+});
+
+describe('shared preview model binding', () => {
+  it('should show live components without editor view records', () => {
+    mockProjectForExplorer({
+      mainEntryPath: unitId,
+      geometryUnitFiles: [unitId],
+      viewSettings: {},
+      viewEntryPaths: new Map([['preview', unitId]]),
+      viewGraphics: new Map([
+        ['preview', createGraphicsRefForUnit(unitId, [createNode('preview-part', 'Preview part')])],
+      ]),
+    });
+    renderExplorerTree();
+    expect(screen.getByText('Preview part')).toBeInTheDocument();
   });
 });

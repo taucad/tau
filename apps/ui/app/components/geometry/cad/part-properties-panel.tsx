@@ -1,3 +1,5 @@
+import { useCallback, useMemo, useState } from 'react';
+import { PaneVirtualList } from '#components/panes/pane-virtual-list.js';
 import { Box, ChevronDown, CircleHelp } from 'lucide-react';
 import type { GeometryComponentNode } from '@taucad/types';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
@@ -68,40 +70,7 @@ export function PartPropertiesPanel({ node, entryPath, quantity = {} }: PartProp
       <section aria-label='Appearance'>
         <h3 className='mb-1 text-xs font-medium text-muted-foreground'>Appearance</h3>
         {materials.length > 0 ? (
-          materials.map((material, ordinal) => (
-            <Collapsible key={material.materialIndex ?? `default-${ordinal}`}>
-              <CollapsibleTrigger className='flex min-h-7 w-full items-center gap-2 rounded-sm text-left focus-visible:focus-outline'>
-                <MaterialSwatch materials={[material]} />
-                <span className='min-w-0 flex-1 truncate'>
-                  {typeof material.name === 'string' && material.name.trim() ? material.name : 'Unnamed material'}
-                </span>
-                {material.extensions && Object.keys(material.extensions).length > 0 ? (
-                  <span className='truncate text-xs text-muted-foreground'>· extensions</span>
-                ) : undefined}
-                <ChevronDown aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
-              </CollapsibleTrigger>
-              <CollapsibleContent className={disclosureMotion}>
-                <dl className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 py-2 pl-6 text-xs @max-[14rem]/properties:grid-cols-1 @max-[14rem]/properties:pl-0'>
-                  <Fact label='Base color' value={String(material.color ?? 'glTF default')} />
-                  <Fact label='Texture' value={textureLabel(material.textures)} />
-                  <Fact label='Metalness' value={String(material.metalness ?? 'glTF default')} />
-                  <Fact label='Roughness' value={String(material.roughness ?? 'glTF default')} />
-                  <Fact
-                    label='Extensions'
-                    value={material.extensions ? Object.keys(material.extensions).join(', ') || 'None' : 'None'}
-                  />
-                  <Fact
-                    label='Source'
-                    value={
-                      material.materialIndex === undefined
-                        ? 'Default glTF material'
-                        : `Material ${material.materialIndex + 1} of the source file; before selection and opacity overrides`
-                    }
-                  />
-                </dl>
-              </CollapsibleContent>
-            </Collapsible>
-          ))
+          <AppearanceMaterials key={node.id} materials={materials} />
         ) : (
           <p className='text-xs text-muted-foreground'>{appearanceLabel(node)}</p>
         )}
@@ -150,5 +119,76 @@ export function PartPropertiesPanel({ node, entryPath, quantity = {} }: PartProp
         </CollapsibleContent>
       </Collapsible>
     </div>
+  );
+}
+
+type AppearanceMaterial = NonNullable<NonNullable<GeometryComponentNode['appearance']>['materials']>[number];
+type AppearanceRow = { readonly material: AppearanceMaterial; readonly key: string };
+const appearanceKey = (row: AppearanceRow): string => row.key;
+
+function AppearanceMaterials({ materials }: { readonly materials: readonly AppearanceMaterial[] }): React.JSX.Element {
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const data = useMemo(
+    () =>
+      materials.map((material, ordinal) => ({ material, key: `${material.materialIndex ?? 'default'}-${ordinal}` })),
+    [materials],
+  );
+  const renderMaterial = useCallback(
+    (_index: number, { material, key }: AppearanceRow) => (
+      <Collapsible
+        open={open.has(key)}
+        onOpenChange={(isOpen) => {
+          setOpen((current) => {
+            const next = new Set(current);
+            if (isOpen) {
+              next.add(key);
+            } else {
+              next.delete(key);
+            }
+            return next;
+          });
+        }}
+      >
+        <CollapsibleTrigger className='flex min-h-7 w-full items-center gap-2 rounded-sm text-left focus-visible:focus-outline'>
+          <MaterialSwatch materials={[material]} />
+          <span className='min-w-0 flex-1 truncate'>
+            {typeof material.name === 'string' && material.name.trim() ? material.name : 'Unnamed material'}
+          </span>
+          {material.extensions && Object.keys(material.extensions).length > 0 ? (
+            <span className='truncate text-xs text-muted-foreground'>· extensions</span>
+          ) : undefined}
+          <ChevronDown aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
+        </CollapsibleTrigger>
+        <CollapsibleContent className={disclosureMotion}>
+          <dl className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 py-2 pl-6 text-xs @max-[14rem]/properties:grid-cols-1 @max-[14rem]/properties:pl-0'>
+            <Fact label='Base color' value={String(material.color ?? 'glTF default')} />
+            <Fact label='Texture' value={textureLabel(material.textures)} />
+            <Fact label='Metalness' value={String(material.metalness ?? 'glTF default')} />
+            <Fact label='Roughness' value={String(material.roughness ?? 'glTF default')} />
+            <Fact
+              label='Extensions'
+              value={material.extensions ? Object.keys(material.extensions).join(', ') || 'None' : 'None'}
+            />
+            <Fact
+              label='Source'
+              value={
+                material.materialIndex === undefined
+                  ? 'Default glTF material'
+                  : `Material ${material.materialIndex + 1} of the source file; before selection and opacity overrides`
+              }
+            />
+          </dl>
+        </CollapsibleContent>
+      </Collapsible>
+    ),
+    [open],
+  );
+  return (
+    <PaneVirtualList
+      data={data}
+      getItemKey={appearanceKey}
+      itemContent={renderMaterial}
+      ariaLabel='Appearance materials'
+    />
   );
 }

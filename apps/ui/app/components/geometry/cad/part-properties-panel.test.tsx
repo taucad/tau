@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { VirtuosoMockContext } from 'react-virtuoso';
 import { mock } from 'vitest-mock-extended';
 import type { GeometryComponentNode } from '@taucad/types';
 import { PartPropertiesPanel } from '#components/geometry/cad/part-properties-panel.js';
+
+const mockViewport = { viewportHeight: 180, itemHeight: 30 };
 
 describe('PartPropertiesPanel', () => {
   it('should show an empty selection without inventing physical facts', () => {
@@ -35,5 +38,27 @@ describe('PartPropertiesPanel', () => {
     expect(screen.getByText(/Material 3 of the source file/)).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Details' }));
     expect(screen.getByText('Not supplied; a finish is not a material')).toBeVisible();
+  });
+  it('should bound a generated collection of 1709 appearance disclosures', async () => {
+    const node: GeometryComponentNode = {
+      ...mock<GeometryComponentNode>(),
+      id: 'many-materials',
+      name: 'Assembly part',
+      kind: 'part',
+      appearance: {
+        materials: Array.from({ length: 1709 }, (_, materialIndex) => ({
+          materialIndex,
+          name: `Finish ${materialIndex + 1}`,
+        })),
+      },
+    };
+    render(
+      <VirtuosoMockContext.Provider value={mockViewport}>
+        <PartPropertiesPanel node={node} />
+      </VirtuosoMockContext.Provider>,
+    );
+    await screen.findByRole('button', { name: 'Finish 1' });
+    expect(screen.getAllByRole('listitem').length).toBeLessThan(30);
+    expect(screen.queryByRole('button', { name: 'Finish 1709' })).toBeNull();
   });
 });

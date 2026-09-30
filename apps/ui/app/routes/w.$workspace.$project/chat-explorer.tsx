@@ -1,5 +1,5 @@
 import { XIcon, Box, Eye, EyeOff, Target } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
@@ -34,7 +34,7 @@ import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#mac
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
-import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import {
   PaneviewHeader,
   PaneviewHeaderAction,
@@ -47,6 +47,7 @@ import {
   getInitialPanelOptions,
   usePaneviewPersistence,
 } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
+import { PaneVirtualList } from '#components/panes/pane-virtual-list.js';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 const keyCombinationEditor = projectWorkspaceKeyCombinations.model;
@@ -232,14 +233,9 @@ function ChatGeometryExplorerContent({
 }): React.JSX.Element {
   const resolveGraphicsForFile = useCallback(
     (entryPath: string): GraphicsActorRef | undefined => {
-      for (const [viewId, graphicsRef] of project.viewGraphics) {
-        if (project.viewRecords.get(viewId)?.entryPath === entryPath) {
-          return graphicsRef;
-        }
-      }
-      return undefined;
+      return findEntryGraphics(project.viewGraphics, project.viewEntryPaths, entryPath);
     },
-    [project.viewGraphics, project.viewRecords],
+    [project.viewGraphics, project.viewEntryPaths],
   );
   const entries = useMemo(
     () =>
@@ -402,8 +398,6 @@ function LiveComponentTree({
   readonly graphicsRef: GraphicsActorRef;
   readonly modelRef: ModelInteractionRef;
 }): React.JSX.Element {
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [activeRowId, setActiveRowId] = useState<string>();
   const unitId = deriveModelInteractionUnitId({ sourceFile: params.entryPath });
   const unitState = useSelector(modelRef, (state) => getModelInteractionUnitState(state.context, unitId));
   const {
@@ -418,15 +412,18 @@ function LiveComponentTree({
   const root = manifest ? manifest.nodesById[manifest.rootId] : undefined;
   const childCount = root?.childIds.length ?? 0;
   const normalizedQuery = params.query.trim().toLowerCase();
-  const matchingChildCount = manifest && root ? countMatchingChildren({ manifest, node: root, normalizedQuery }) : 0;
-  const visibleIds = manifest && root ? visibleComponentIds(manifest, root, normalizedQuery) : [];
-  const currentSelection = selectedComponentIds.at(-1);
-  const focusableRowId = [activeRowId, currentSelection].find((id) => id && visibleIds.includes(id)) ?? visibleIds[0];
-  const leafPartIds =
-    manifest?.nodeOrder.filter((id) => {
-      const node = manifest.nodesById[id];
-      return node?.kind === 'part' && node.childIds.length === 0;
-    }) ?? [];
+  const visibleNodes = useMemo(
+    () => (manifest ? getVisibleModelComponents(manifest, normalizedQuery) : []),
+    [manifest, normalizedQuery],
+  );
+  const leafPartIds = useMemo(
+    () =>
+      manifest?.nodeOrder.filter((id) => {
+        const node = manifest.nodesById[id];
+        return node?.kind === 'part' && node.childIds.length === 0;
+      }) ?? [],
+    [manifest],
+  );
   const project = useProject({ enableNoContext: true });
 
   useEffect(() => {
@@ -434,24 +431,12 @@ function LiveComponentTree({
     params.onSelectionChange?.(unitId, selectedId ? manifest?.nodesById[selectedId] : undefined, params.entryPath);
   }, [manifest, params.entryPath, params.onSelectionChange, selectedComponentIds, unitId]);
 
-  useEffect(() => {
-    if (!params.revealTarget || params.revealTarget.unitId !== unitId) {
-      return;
-    }
-    const row = [...(contentRef.current?.querySelectorAll<HTMLElement>('[data-model-component-row]') ?? [])].find(
-      (candidate) => candidate.dataset['modelComponentId'] === params.revealTarget?.componentId,
-    );
-    row?.scrollIntoView({ block: 'center' });
-    row?.querySelector<HTMLElement>('[data-model-part-button]')?.focus();
-  }, [params.revealTarget, unitId]);
-
   if (!manifest || !root || childCount === 0) {
     return <ModelPaneviewPanelSurface />;
   }
 
   return (
     <ModelPaneviewPanelSurface
-      contentRef={contentRef}
       footer={
         <Collapsible>
           <div className='flex min-w-0 items-center justify-between gap-2 border-t px-2 py-1 text-xs text-muted-foreground'>
@@ -463,38 +448,27 @@ function LiveComponentTree({
               </CollapsibleTrigger>
             ) : undefined}
           </div>
-          <CollapsibleContent className='max-h-32 overflow-y-auto border-t p-1'>
-            {leafPartIds.map((id) => (
-              <button
-                key={id}
-                type='button'
-                className='block w-full truncate rounded-sm px-2 py-1 text-left text-xs hover:bg-sidebar-accent focus-visible:focus-outline'
-                onClick={() => {
-                  graphicsRef.send({ type: 'selectModelComponent', unitId, componentId: id, source: 'explorer' });
-                  project?.editorRef.send({
-                    type: 'revealModelComponentInExplorer',
-                    entryPath: params.entryPath,
-                    unitId,
-                    componentId: id,
-                  });
-                }}
-              >
-                {manifest.nodesById[id]?.name ?? id}
-              </button>
-            ))}
+          <CollapsibleContent className='border-t p-1'>
+            <MissingPartList
+              manifest={manifest}
+              ids={leafPartIds}
+              graphicsRef={graphicsRef}
+              unitId={unitId}
+              entryPath={params.entryPath}
+              onReveal={project?.editorRef}
+            />
           </CollapsibleContent>
         </Collapsible>
       }
     >
-      {normalizedQuery && matchingChildCount === 0 ? (
+      {normalizedQuery && visibleNodes.length === 0 ? (
         <ExplorerNoMatchesState />
       ) : (
         <ComponentRows
           ariaLabel={`Model components for ${params.entryPath}`}
           manifest={manifest}
-          node={root}
+          nodes={visibleNodes}
           query={params.query}
-          normalizedQuery={normalizedQuery}
           graphicsRef={graphicsRef}
           unitId={unitId}
           hoveredComponentId={hoveredComponentId}
@@ -504,8 +478,7 @@ function LiveComponentTree({
           focusedComponentId={focusedComponentId}
           opacityByComponentId={opacityByComponentId}
           rootDepth={root.depth}
-          activeRowId={focusableRowId}
-          onRowFocus={setActiveRowId}
+          revealTarget={params.revealTarget?.unitId === unitId ? params.revealTarget : undefined}
         />
       )}
     </ModelPaneviewPanelSurface>
@@ -513,21 +486,15 @@ function LiveComponentTree({
 }
 
 function ModelPaneviewPanelSurface({
-  contentRef,
   children,
   footer,
 }: {
-  readonly contentRef?: React.Ref<HTMLDivElement>;
   readonly children?: React.ReactNode;
   readonly footer?: React.ReactNode;
 }): React.JSX.Element {
   return (
     <div data-slot='model-unit-surface' className={cn('flex h-full flex-col', paneviewAttachedBodyClassName)}>
-      <div
-        ref={contentRef}
-        data-slot='model-unit-scroller'
-        className='min-h-0 flex-1 scroll-shadows-y overflow-y-auto p-2 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'
-      >
+      <div data-slot='model-unit-scroller' className='min-h-0 flex-1 overflow-hidden p-2'>
         {children ?? <ExplorerUnavailableState />}
       </div>
       {footer}
@@ -644,69 +611,94 @@ function ModelPropertiesPaneviewHeader({ api }: { readonly api: PaneviewPanelApi
 const paneviewComponents = { modelPanel: ModelPaneviewPanel, propertiesPanel: ModelPropertiesPaneviewPanel };
 const paneviewHeaderComponents = { modelHeader: ModelPaneviewHeader, propertiesHeader: ModelPropertiesPaneviewHeader };
 
-function componentMatchesQuery({
-  manifest,
-  node,
-  normalizedQuery,
-}: {
-  readonly manifest: GeometryComponentManifest;
-  readonly node: GeometryComponentNode;
-  readonly normalizedQuery: string;
-}): boolean {
-  if (!normalizedQuery) {
-    return true;
-  }
-  if (node.name.toLowerCase().includes(normalizedQuery)) {
-    return true;
-  }
-  if (
-    node.appearance?.materials?.some(
-      (material) => typeof material.name === 'string' && material.name.toLowerCase().includes(normalizedQuery),
-    )
-  ) {
-    return true;
-  }
-  return node.childIds.some((childId) => {
-    const child = manifest.nodesById[childId];
-    return child ? componentMatchesQuery({ manifest, node: child, normalizedQuery }) : false;
-  });
-}
+const componentKey = (node: GeometryComponentNode): string => node.id;
+const partKey = (id: string): string => id;
 
-function countMatchingChildren({
-  manifest,
-  node,
-  normalizedQuery,
-}: {
-  readonly manifest: GeometryComponentManifest;
-  readonly node: GeometryComponentNode;
-  readonly normalizedQuery: string;
-}): number {
-  return node.childIds.filter((childId) => {
-    const child = manifest.nodesById[childId];
-    return child ? componentMatchesQuery({ manifest, node: child, normalizedQuery }) : false;
-  }).length;
-}
-
-function visibleComponentIds(
+/** Preorder projection retaining matching ancestors, computed once per manifest/search. */
+export function getVisibleModelComponents(
   manifest: GeometryComponentManifest,
-  node: GeometryComponentNode,
   normalizedQuery: string,
-): string[] {
-  return node.childIds.flatMap((childId) => {
-    const child = manifest.nodesById[childId];
-    if (!child || !componentMatchesQuery({ manifest, node: child, normalizedQuery })) {
-      return [];
+): GeometryComponentNode[] {
+  const root = manifest.nodesById[manifest.rootId];
+  if (!root) {
+    return [];
+  }
+  const ordered: GeometryComponentNode[] = [];
+  const pending = [...root.childIds].reverse();
+  while (pending.length > 0) {
+    const node = manifest.nodesById[pending.pop()!];
+    if (!node) {
+      continue;
     }
-    return [child.id, ...visibleComponentIds(manifest, child, normalizedQuery)];
-  });
+    ordered.push(node);
+    for (let index = node.childIds.length - 1; index >= 0; index -= 1) {
+      pending.push(node.childIds[index]!);
+    }
+  }
+  if (!normalizedQuery) {
+    return ordered;
+  }
+  const matching = new Set<string>();
+  for (let index = ordered.length - 1; index >= 0; index -= 1) {
+    const node = ordered[index]!;
+    if (
+      node.name.toLowerCase().includes(normalizedQuery) ||
+      (node.appearance?.materials?.some((material) => material.name?.toLowerCase().includes(normalizedQuery)) ??
+        false) ||
+      node.childIds.some((id) => matching.has(id))
+    ) {
+      matching.add(node.id);
+    }
+  }
+  return ordered.filter((node) => matching.has(node.id));
+}
+
+function MissingPartList({
+  manifest,
+  ids,
+  graphicsRef,
+  unitId,
+  entryPath,
+  onReveal,
+}: {
+  readonly manifest: GeometryComponentManifest;
+  readonly ids: readonly string[];
+  readonly graphicsRef: GraphicsActorRef;
+  readonly unitId: string;
+  readonly entryPath: string;
+  readonly onReveal: NonNullable<ReturnType<typeof useProject>>['editorRef'] | undefined;
+}): React.JSX.Element {
+  const renderItem = useCallback(
+    (_index: number, id: string) => (
+      <button
+        type='button'
+        className='block w-full truncate rounded-sm px-2 py-1 text-left text-xs hover:bg-sidebar-accent focus-visible:focus-outline'
+        onClick={() => {
+          graphicsRef.send({ type: 'selectModelComponent', unitId, componentId: id, source: 'explorer' });
+          onReveal?.send({ type: 'revealModelComponentInExplorer', entryPath, unitId, componentId: id });
+        }}
+      >
+        {manifest.nodesById[id]?.name ?? id}
+      </button>
+    ),
+    [entryPath, graphicsRef, manifest, onReveal, unitId],
+  );
+  return (
+    <PaneVirtualList
+      data={ids}
+      getItemKey={partKey}
+      itemContent={renderItem}
+      ariaLabel='Parts with unknown weight'
+      className='h-32'
+    />
+  );
 }
 
 function ComponentRows({
   ariaLabel,
   manifest,
-  node,
+  nodes,
   query,
-  normalizedQuery,
   graphicsRef,
   unitId,
   hoveredComponentId,
@@ -716,14 +708,12 @@ function ComponentRows({
   focusedComponentId,
   opacityByComponentId,
   rootDepth,
-  activeRowId,
-  onRowFocus,
+  revealTarget,
 }: {
-  readonly ariaLabel?: string;
+  readonly ariaLabel: string;
   readonly manifest: GeometryComponentManifest;
-  readonly node: GeometryComponentNode;
+  readonly nodes: GeometryComponentNode[];
   readonly query: string;
-  readonly normalizedQuery: string;
   readonly graphicsRef: GraphicsActorRef;
   readonly unitId: string;
   readonly hoveredComponentId: string | undefined;
@@ -733,88 +723,67 @@ function ComponentRows({
   readonly focusedComponentId: string | undefined;
   readonly opacityByComponentId: Readonly<Record<string, number>>;
   readonly rootDepth: number;
-  readonly activeRowId?: string;
-  readonly onRowFocus?: (id: string) => void;
+  readonly revealTarget: ModelComponentRevealTarget | undefined;
 }): React.JSX.Element {
+  const selected = useMemo(() => new Set(selectedComponentIds), [selectedComponentIds]);
+  const hidden = useMemo(() => new Set(hiddenComponentIds), [hiddenComponentIds]);
+  const isolated = useMemo(() => new Set(isolatedComponentIds), [isolatedComponentIds]);
+  const hasOpacityOverrides = Object.keys(opacityByComponentId).length > 0;
+  const reveal = useMemo(
+    () => (revealTarget ? { key: revealTarget.componentId, requestId: revealTarget.requestId } : undefined),
+    [revealTarget],
+  );
+  const renderItem = useCallback(
+    (_index: number, node: GeometryComponentNode) => (
+      <div className='pb-0.5'>
+        <ComponentRow
+          manifest={manifest}
+          node={node}
+          query={query}
+          graphicsRef={graphicsRef}
+          unitId={unitId}
+          rootDepth={rootDepth}
+          hoveredComponentId={hoveredComponentId}
+          isSelected={selected.has(node.id)}
+          isHidden={hidden.has(node.id)}
+          isIsolated={isolated.has(node.id)}
+          isFocused={focusedComponentId === node.id}
+          hasHiddenComponents={hidden.size > 0}
+          hasOpacityOverrides={hasOpacityOverrides}
+          opacity={opacityByComponentId[node.id] ?? 1}
+        />
+      </div>
+    ),
+    [
+      focusedComponentId,
+      graphicsRef,
+      hasOpacityOverrides,
+      hidden,
+      hoveredComponentId,
+      isolated,
+      manifest,
+      opacityByComponentId,
+      query,
+      rootDepth,
+      selected,
+      unitId,
+    ],
+  );
   return (
-    <ul
-      aria-label={ariaLabel}
-      className='flex list-none flex-col gap-0.5'
-      onKeyDown={
-        ariaLabel
-          ? (event) => {
-              if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
-                return;
-              }
-              const rows = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-model-part-button]')];
-              const currentIndex = rows.indexOf(event.target as HTMLButtonElement);
-              const nextIndex =
-                event.key === 'Home'
-                  ? 0
-                  : event.key === 'End'
-                    ? rows.length - 1
-                    : Math.max(0, Math.min(rows.length - 1, currentIndex + (event.key === 'ArrowDown' ? 1 : -1)));
-              event.preventDefault();
-              rows[nextIndex]?.focus();
-            }
-          : undefined
-      }
-    >
-      {node.childIds.map((childId) => {
-        const child = manifest.nodesById[childId];
-        if (!child) {
-          return null;
-        }
-        if (!componentMatchesQuery({ manifest, node: child, normalizedQuery })) {
-          return null;
-        }
-        return (
-          <li key={child.id} className='flex list-none flex-col gap-0.5'>
-            <ComponentRow
-              manifest={manifest}
-              node={child}
-              query={query}
-              graphicsRef={graphicsRef}
-              unitId={unitId}
-              rootDepth={rootDepth}
-              hoveredComponentId={hoveredComponentId}
-              isSelected={selectedComponentIds.includes(child.id)}
-              isHidden={hiddenComponentIds.includes(child.id)}
-              isIsolated={isolatedComponentIds.includes(child.id)}
-              isFocused={focusedComponentId === child.id}
-              hasHiddenComponents={hiddenComponentIds.length > 0}
-              hasOpacityOverrides={Object.keys(opacityByComponentId).length > 0}
-              opacity={opacityByComponentId[child.id] ?? 1}
-              activeRowId={activeRowId}
-              onRowFocus={onRowFocus}
-            />
-            {child.childIds.length > 0 ? (
-              <ComponentRows
-                manifest={manifest}
-                node={child}
-                query={query}
-                normalizedQuery={normalizedQuery}
-                graphicsRef={graphicsRef}
-                unitId={unitId}
-                hoveredComponentId={hoveredComponentId}
-                selectedComponentIds={selectedComponentIds}
-                hiddenComponentIds={hiddenComponentIds}
-                isolatedComponentIds={isolatedComponentIds}
-                focusedComponentId={focusedComponentId}
-                opacityByComponentId={opacityByComponentId}
-                rootDepth={rootDepth}
-                activeRowId={activeRowId}
-                onRowFocus={onRowFocus}
-              />
-            ) : undefined}
-          </li>
-        );
-      })}
-    </ul>
+    <PaneVirtualList
+      enableKeyboardNavigation
+      data={nodes}
+      getItemKey={componentKey}
+      itemContent={renderItem}
+      ariaLabel={ariaLabel}
+      className='h-full'
+      reveal={reveal}
+      focusSelector='[data-model-part-button]'
+    />
   );
 }
 
-export function ComponentRow({
+export const ComponentRow = memo(function ComponentRow({
   manifest,
   node,
   query = '',
@@ -1032,7 +1001,7 @@ export function ComponentRow({
       />
     </ContextMenu>
   );
-}
+});
 
 function ExplorerEmptyState(): React.JSX.Element {
   return (

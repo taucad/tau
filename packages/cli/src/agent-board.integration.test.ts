@@ -82,8 +82,8 @@ it('serves real board issues and pinned BOM/netlist through the current host too
     expect(bomText).toContain('"R2","10k","10k","res0402"');
     expect(bomText).toContain('"LED1","","","0603"');
     expect(bomText).toContain('"U1","","","soic8"');
-    const r2Pins = netlistText.split('COMPONENT_PINS:\n')[1]?.split('R2 (10kΩ res0402)\n')[1]?.split('\nLED1\n')[0];
-    expect(r2Pins).toContain('- pin1(anode, pos, left): NOT_CONNECTED');
+    const r2Section = netlistText.split(/\r?\n\r?\n/u).find((section) => section.startsWith('R2 (10kΩ res0402)\n'));
+    expect(r2Section?.split(/\r?\n/u)).toContain('- pin1(anode, pos, left): NOT_CONNECTED');
     expect(await readFile(join(workspaceRoot, bomFile.artifactPath), 'utf8')).toBe(bomText);
   } finally {
     await client.shutdown();

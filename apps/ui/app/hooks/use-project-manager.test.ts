@@ -2133,8 +2133,11 @@ describe('useProjectManager.createProject', () => {
         expect(completed).toBe(false);
         expect(mockCompletePending).not.toHaveBeenCalled();
         const startup = mockPrepareProjectCreation.mock.calls.at(-1)?.[0].chat.startupRequest;
-        expect(startup?.messageId).toBe(startup?.message.id);
-        expect(startup?.message.parts).toContainEqual({
+        if (startup?.message === undefined) {
+          throw new Error('Expected the prepared startup request to retain its durable message.');
+        }
+        expect(startup.messageId).toBe(startup.message.id);
+        expect(startup.message.parts).toContainEqual({
           type: 'file',
           url: `attachments/${image.hash}.png`,
           mediaType: 'image/png',

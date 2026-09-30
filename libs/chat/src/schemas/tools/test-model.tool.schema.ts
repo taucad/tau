@@ -63,7 +63,14 @@ export const geoSpecRunLineageSchema = z
               sourceRevision: sourceRevisionSchema.optional(),
               sourcePath: z.string().optional(),
               artifacts: z.array(
-                z.object({ name: z.string(), sha256: sha256Schema, byteLength: observedCountSchema }).strict(),
+                z
+                  .object({
+                    name: z.string(),
+                    sha256: sha256Schema,
+                    byteLength: observedCountSchema,
+                    sourcePath: z.string().optional(),
+                  })
+                  .strict(),
               ),
             })
             .strict()

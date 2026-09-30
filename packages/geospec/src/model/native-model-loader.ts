@@ -70,7 +70,13 @@ export type GeoSpecModelLoadEvidence = {
   readonly sourceRevision?: SourceRevision;
   /** Actual direct-source locator, when the load read one; absent for anonymous in-memory bytes. */
   readonly sourcePath?: string;
-  readonly artifacts: ReadonlyArray<{ readonly name: string; readonly sha256: string; readonly byteLength: number }>;
+  readonly artifacts: ReadonlyArray<{
+    readonly name: string;
+    readonly sha256: string;
+    readonly byteLength: number;
+    /** Actual source locator consumed by a direct load; absent for bytes and Runtime exports. */
+    readonly sourcePath?: string;
+  }>;
 };
 
 /**
@@ -393,12 +399,23 @@ export const createGeoSpecNativeModelLoader = (
       (options.resources ?? []).map(async ({ name, source }) => ({
         name,
         bytes: await directBytes(source, defaults.readSource),
+        ...(typeof source === 'string' ? { sourcePath: source } : {}),
       })),
     );
     const artifacts = await Promise.all(
-      [{ name: options.path ?? options.name ?? 'primary', bytes: primary }, ...resources].map(
-        async ({ name, bytes }) => ({ name, sha256: await sha256Bytes(bytes), byteLength: bytes.byteLength }),
-      ),
+      [
+        {
+          name: options.path ?? options.name ?? 'primary',
+          bytes: primary,
+          ...(typeof options.source === 'string' ? { sourcePath: options.source } : {}),
+        },
+        ...resources,
+      ].map(async ({ name, bytes, sourcePath }) => ({
+        name,
+        sha256: await sha256Bytes(bytes),
+        byteLength: bytes.byteLength,
+        ...(sourcePath === undefined ? {} : { sourcePath }),
+      })),
     );
     const subject = admit({
       format,

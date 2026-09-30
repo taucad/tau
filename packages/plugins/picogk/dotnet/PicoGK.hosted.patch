@@ -1,8 +1,57 @@
+diff --git a/Base/Mesh.cs b/Base/Mesh.cs
+index 8446ad225..eab75dd09 100644
+--- a/Base/Mesh.cs
++++ b/Base/Mesh.cs
+@@ -152,7 +152,11 @@ namespace PicoGK
+         /// <returns>The index of the vertex (to be used in triangles)</returns>
+         public int nAddVertex(in Vector3 vec)
+         {
+-            return _nAddVertex(lib.hThis, hThis, vec);
++            lock (m_tauSnapshotGate)
++            {
++                ObjectDisposedException.ThrowIf(m_bDisposed, this);
++                return _nAddVertex(lib.hThis, hThis, vec);
++            }
+         }
+ 
+         public void AddVertices(    in  IEnumerable<Vector3> avecVertices,
+@@ -200,9 +204,11 @@ namespace PicoGK
+         /// <returns>The triangle index of the added triangle</returns>
+         public int nAddTriangle(in Triangle t)
+         {
+-            return _nAddTriangle(   lib.hThis, 
+-                                    hThis, 
+-                                    t);
++            lock (m_tauSnapshotGate)
++            {
++                ObjectDisposedException.ThrowIf(m_bDisposed, this);
++                return _nAddTriangle(lib.hThis, hThis, t);
++            }
+         }
+ 
+         /// <summary>
 diff --git a/Internals/Interop.cs b/Internals/Interop.cs
-index 254cedb..ef6740a 100644
+index 254cedbb8..458803130 100644
 --- a/Internals/Interop.cs
 +++ b/Internals/Interop.cs
-@@ -793,7 +793,10 @@ namespace PicoGK
+@@ -203,6 +203,8 @@ namespace PicoGK
+ 
+         protected virtual void Dispose(bool bDisposing)
+         {
++            lock (m_tauSnapshotGate)
++            {
+             if (m_bDisposed)
+             {
+                 return;
+@@ -216,6 +218,7 @@ namespace PicoGK
+ 
+             _Destroy(lib.hThis, hThis);
+             m_bDisposed = true;
++            }
+         }
+ 
+         bool m_bDisposed = false;
+@@ -793,7 +796,10 @@ namespace PicoGK
                  // Nothing to do in this class
              }
  
@@ -14,7 +63,7 @@ index 254cedb..ef6740a 100644
              m_bDisposed = true;
          }
  
-@@ -1391,4 +1394,4 @@ namespace PicoGK
+@@ -1391,4 +1397,4 @@ namespace PicoGK
          internal readonly VdbMetaHandle hThis;
          public readonly Library lib;
      }
@@ -22,7 +71,7 @@ index 254cedb..ef6740a 100644
 \ No newline at end of file
 +}
 diff --git a/Library/LibraryGlobal.cs b/Library/LibraryGlobal.cs
-index 5fbe983..870e4a6 100644
+index 5fbe98389..870e4a66b 100644
 --- a/Library/LibraryGlobal.cs
 +++ b/Library/LibraryGlobal.cs
 @@ -373,11 +373,32 @@ namespace PicoGK
@@ -68,7 +117,7 @@ index 5fbe983..870e4a6 100644
 +}
 diff --git a/Library/LibraryHost.cs b/Library/LibraryHost.cs
 new file mode 100644
-index 0000000..6c0ed94
+index 000000000..6c0ed9460
 --- /dev/null
 +++ b/Library/LibraryHost.cs
 @@ -0,0 +1,68 @@
@@ -140,583 +189,90 @@ index 0000000..6c0ed94
 +        static ILibraryHost? m_xLibraryHost;
 +    }
 +}
-diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
---- a/Viewer/Viewer.cs
-+++ b/Viewer/Viewer.cs
-@@ -46,6 +46,51 @@
-     public partial class Viewer
-     {
-         /// <summary>
-+        /// Initialize a hosted Viewer that delegates display operations without creating a native window.
-+        /// </summary>
-+        public Viewer(IViewerBackend xBackend,
-+                      ILog           xLog)
-+        {
-+            ArgumentNullException.ThrowIfNull(xBackend);
-+            ArgumentNullException.ThrowIfNull(xLog);
-+            m_xBackend = xBackend;
-+            m_xLog = xLog;
-+            m_iMainThreadID = Environment.CurrentManagedThreadId;
-+
-+            float f45   = float.Pi/4;
-+            float f90   = f45 * 2;
-+            float f180  = f90 * 2;
-+            qOrientationTop      = Quaternion.Identity;
-+            qOrientationBottom   = Quaternion.CreateFromAxisAngle(Vector3.UnitY, f180) * qOrientationTop;
-+            qOrientationFront    = Quaternion.CreateFromAxisAngle(Vector3.UnitX, f90) * qOrientationTop;
-+            qOrientationRight    = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, f90) * qOrientationFront;
-+            qOrientationBack     = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, f90) * qOrientationRight;
-+            qOrientationLeft     = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, f90) * qOrientationBack;
-+            qOrientationHome     = qOrientationTop
-+                                    * Quaternion.CreateFromAxisAngle(Vector3.UnitZ, f45)
-+                                    * Quaternion.CreateFromAxisAngle(Vector3.UnitX, f45);
-+            m_oCamera.qOrientation = qOrientationHome;
-+
-+            m_fnInfoCB = null!;
-+            m_fnUpdateCB = null!;
-+            m_fnKeyPressedCB = null!;
-+            m_fnMouseMovedCB = null!;
-+            m_fnMouseButtonCB = null!;
-+            m_fnScrollWheelCB = null!;
-+            m_fnWindowSizeCB = null!;
-+            hThis = IntPtr.Zero;
-+        }
-+
-+        /// <summary>Capture an application-defined mechanism on a hosted viewer.</summary>
-+        public void SetMechanism(object source)
-+        {
-+            m_xBackend?.SetMechanism(source);
-+        }
-+
-+        /// <summary>True when viewer operations are delegated to an embedding backend.</summary>
-+        public bool bIsHosted => m_xBackend is not null;
-+
-+        /// <summary>
-         /// Initialize a new Viewer
-         /// </summary>
-         /// <param name="strTitle">Window title</param>
-@@ -195,6 +240,22 @@
-         /// </summary>
-         public bool bPoll()
-         {
-+            if (m_xBackend is not null)
-+            {
-+                bool bAnimated;
-+                lock (m_oAnims)
-+                    bAnimated = m_oAnims.bPulse();
-+                if (bAnimated)
-+                    m_xBackend.RequestUpdate();
-+                lock (m_oTLLock)
-+                {
-+                    if (m_oTimeLapse?.bDue(out string strScreenShotPath) == true)
-+                        m_xBackend.RequestScreenShot(strScreenShotPath);
-+                }
-+                m_xBackend.Poll();
-+                return bAnimated;
-+            }
-+
-             Debug.Assert(m_iMainThreadID == Environment.CurrentManagedThreadId);
-             // Call this function only from the main() thread of the application
- 
-@@ -247,6 +308,11 @@
-         /// </summary>
-         public void RequestUpdate()
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.RequestUpdate();
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RequestUpdateAction());
-@@ -307,13 +373,18 @@
- 
-                     lock (m_oActions)
-                     {
-+                        if (m_xBackend is not null)
-+                        {
-+                            m_xBackend.LoadLightSetup(abyDiffuseData, abySpecularData);
-+                            return;
-+                        }
-                         m_oActions.Enqueue(new LoadLightSetupAction(    m_xLog,
-                                                                         abyDiffuseData,
-                                                                         abySpecularData));
-                     }
-                 }
- 
--                catch
-+                catch when (m_xBackend is null)
-                 {
-                     Console.WriteLine("Unable to load lights");
-                 }
-@@ -323,9 +394,23 @@
-         /// <summary>
-         /// Add the object to the viewer, using the specified viewer group
-         /// </summary>
-+        /// <summary>Add a named object to the hosted viewer. Native viewers retain ordinary rendering.</summary>
-+        public void Add(in Voxels vox, string name, int nGroupID = 0)
-+        {
-+            if (m_xBackend is not null)
-+                m_xBackend.Add(vox, name, nGroupID);
-+            else
-+                Add(vox, nGroupID);
-+        }
-+
-         public void Add(    in Voxels vox,
-                             int nGroupID = 0)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.Add(vox, nGroupID);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new AddVoxelsAction(vox, nGroupID));
-@@ -337,6 +422,11 @@
-         /// </summary>
-         public void Remove(Voxels vox)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.Remove(vox);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RemoveVoxelsAction(vox));
-@@ -349,6 +439,11 @@
-         public void SetObjectMatrix(    Voxels vox,
-                                         in Matrix4x4 mat)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.SetObjectMatrix(vox, mat);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetVoxelsMatrixAction(vox, mat));
-@@ -358,9 +453,23 @@
-         /// <summary>
-         /// Add the object to the viewer, using the specified viewer group
-         /// </summary>
-+        /// <summary>Add a named object to the hosted viewer. Native viewers retain ordinary rendering.</summary>
-+        public void Add(Mesh msh, string name, int nGroupID = 0)
-+        {
-+            if (m_xBackend is not null)
-+                m_xBackend.Add(msh, name, nGroupID);
-+            else
-+                Add(msh, nGroupID);
-+        }
-+
-         public void Add(    Mesh msh,
-                             int nGroupID = 0)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.Add(msh, nGroupID);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new AddMeshAction(msh, nGroupID));
-@@ -372,6 +481,11 @@
-         /// </summary>
-         public void Remove(Mesh msh)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.Remove(msh);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RemoveMeshAction(msh));
-@@ -384,6 +498,11 @@
-         public void SetObjectMatrix(    Mesh msh,
-                                         in Matrix4x4 mat)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.SetObjectMatrix(msh, mat);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetMeshMatrixAction(msh, mat));
-@@ -393,9 +512,23 @@
-         /// <summary>
-         /// Add the object to the viewer, using the specified viewer group
-         /// </summary>
-+        /// <summary>Add a named object to the hosted viewer. Native viewers retain ordinary rendering.</summary>
-+        public void Add(PolyLine oPoly, string name, int nGroupID = 0)
-+        {
-+            if (m_xBackend is not null)
-+                m_xBackend.Add(oPoly, name, nGroupID);
-+            else
-+                Add(oPoly, nGroupID);
-+        }
-+
-         public void Add(    PolyLine oPoly,
-                             int nGroupID = 0)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.Add(oPoly, nGroupID);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new AddPolyLineAction(oPoly, nGroupID));
-@@ -407,6 +540,11 @@
-         /// </summary>
-         public void Remove(PolyLine oPoly)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.Remove(oPoly);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RemovePolyLineAction(oPoly));
-@@ -419,6 +557,11 @@
-         public void SetObjectMatrix(    PolyLine poly,
-                                         in Matrix4x4 mat)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.SetObjectMatrix(poly, mat);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetPolyLineMatrixAction(poly, mat));
-@@ -430,6 +573,11 @@
-         /// </summary>
-         public void RemoveAllObjects()
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.RemoveAllObjects();
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RemoveAllObjectsAction());
-@@ -442,6 +590,11 @@
-         /// </summary>
-         public void RequestScreenShot(string strScreenShotPath)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.RequestScreenShot(strScreenShotPath);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RequestScreenShotAction(strScreenShotPath));
-@@ -453,6 +606,11 @@
-         /// </summary>
-         public void EnableExperimental(bool bEnable)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.EnableExperimental(bEnable);
-+                return;
-+            }
-             _EnableExperimental(hThis, bEnable);
-         }
- 
-@@ -462,10 +620,26 @@
-         public void SetGroupVisible(int nGroupID,
-                                         bool bVisible)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.SetGroupVisible(nGroupID, bVisible);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetGroupVisibleAction(nGroupID, bVisible));
-             }
-+        }
-+
-+        /// <summary>Assign a typed physical material to every object in the hosted group.</summary>
-+        /// <param name="groupId">Existing viewer group assignment.</param>
-+        /// <param name="material">Appearance and encoded textures, snapshotted synchronously.</param>
-+        public void SetGroupMaterial(int groupId, Material material)
-+        {
-+            ArgumentNullException.ThrowIfNull(material);
-+            if (m_xBackend is null)
-+                throw new NotSupportedException("Typed materials require the hosted PicoGK viewer backend");
-+            m_xBackend.SetGroupMaterial(groupId, material);
-         }
--
-+
-         /// <summary>
-@@ -480,6 +654,11 @@
-                                         float       fMetallic,
-                                         float       fRoughness)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.SetGroupMaterial(nGroupID, clr, fMetallic, fRoughness);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetGroupMaterialAction(  nGroupID,
-@@ -495,6 +674,11 @@
-         public void SetGroupMatrix( int nGroupID,
-                                     Matrix4x4 mat)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.SetGroupMatrix(nGroupID, mat);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetGroupMatrixAction(    nGroupID,
-@@ -512,6 +696,11 @@
-                                             Overhang uWarning,
-                                             Overhang uError)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.EnableOverhangWarning(nGroupID, uWarning, uError);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new EnableGroupOverhangWarningAction(    nGroupID, 
-@@ -542,6 +731,11 @@
-         /// </summary>
-         public void DisableOverhangWarning(int nGroupID)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.DisableOverhangWarning(nGroupID);
-+                return;
-+            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new DisableGroupOverhangWarningAction(nGroupID));
-@@ -553,6 +747,8 @@
-         /// </summary>
-         public BBox3 oBBox()
-         {
-+            if (m_xBackend is not null)
-+                return m_xBackend.GetBoundingBox();
-             BBox3 oBBox = new();
-             _GetBoundingBox(hThis, ref oBBox);
-             return oBBox;
-@@ -563,6 +759,11 @@
-         /// </summary>
-         public void SetBackgroundColor(ColorFloat clr)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.SetBackgroundColor(clr);
-+                return;
-+            }
-             m_clrBackground = clr;
-             RequestUpdate();
-         }
-@@ -572,6 +773,11 @@
-         /// </summary>
-         public void ZoomToFit()
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.ZoomToFit();
-+                return;
-+            }
-             m_bForceZoomToFit = true;
-             RequestUpdate();
-         }
-@@ -581,6 +787,11 @@
-         /// </summary>
-         public void SetFov(float fAngle)
-         {
-+            if (m_xBackend is not null)
-+            {
-+                m_xBackend.SetFieldOfView(fAngle);
-+                return;
-+            }
-             m_oCamera.SetVerticalFov(fAngle);
-             RequestUpdate();
-         }
-@@ -590,9 +801,14 @@
-         /// </summary>
-         public Quaternion qOrientation
-         {
--            get => m_oCamera.qOrientation;
-+            get => m_xBackend?.Orientation ?? m_oCamera.qOrientation;
-             set
-             {
-+                if (m_xBackend is not null)
-+                {
-+                    m_xBackend.Orientation = value;
-+                    return;
-+                }
-                 m_oCamera.qOrientation = value; 
-                 RequestUpdate();
-             }
-@@ -614,6 +830,8 @@
-         /// false: Viewer actions still pending (busy)</returns>
-         public bool bIsIdle()
-         {
-+            if (m_xBackend is not null)
-+                return m_xBackend.IsIdle;
-             lock (m_oActions)
-             {
-                 if (m_oActions.Count() > 0)
-@@ -625,11 +843,13 @@
- 
-         bool m_bIdle = false;
- 
-+        IViewerBackend? m_xBackend;
-+
-         int m_iMainThreadID = -1;
- 
-         ColorFloat m_clrBackground = new(0.3f);
- 
--    
-+
-                void DoRemove(Mesh msh)
-         {
-             _RemoveMesh(    msh.lib.hThis,
-@@ -822,4 +1042,3 @@
-         }
-     }
- }
--    
-\ No newline at end of file
-diff --git a/Viewer/ViewerBackend.cs b/Viewer/ViewerBackend.cs
+diff --git a/Library/MeshReadback.cs b/Library/MeshReadback.cs
 new file mode 100644
-index 0000000..e1fc632
+index 000000000..686b54008
 --- /dev/null
-+++ b/Viewer/ViewerBackend.cs
-@@ -0,0 +1,47 @@
-+//
++++ b/Library/MeshReadback.cs
+@@ -0,0 +1,75 @@
 +// SPDX-License-Identifier: Apache-2.0
-+//
-+
 +using System.Numerics;
-+using PicoGK.Numerics;
++using System.Runtime.CompilerServices;
++using System.Runtime.InteropServices;
 +
-+namespace PicoGK
++[assembly: InternalsVisibleTo("Tau.PicoGK.Worker")]
++[assembly: InternalsVisibleTo("Tau.PicoGK.Worker.Tests")]
++
++namespace PicoGK;
++
++public partial class Mesh
 +{
-+    /// <summary>
-+    /// Backend for embedding PicoGK's concrete <see cref="Viewer"/> API without a native window.
-+    /// </summary>
-+    public interface IViewerBackend : IDisposable
++    private readonly object m_tauSnapshotGate = new();
++    private static int m_tauBulkAvailable;
++
++    [DllImport("tau-picogk-readback", CallingConvention = CallingConvention.Cdecl, EntryPoint = "Mesh_GetVertices")]
++    private static extern int TauGetVertices(LibHandle library, MshHandle mesh, IntPtr buffer, int capacity);
++    [DllImport("tau-picogk-readback", CallingConvention = CallingConvention.Cdecl, EntryPoint = "Mesh_GetTriangles")]
++    private static extern int TauGetTriangles(LibHandle library, MshHandle mesh, IntPtr buffer, int capacity);
++
++    // Private host integration: no new model-author API. Synchronizes with managed mesh mutation
++    // and disposal for one consistent snapshot, including when an older library needs element reads.
++    internal (float[] Positions, uint[] Indices) TauCopyGeometry(bool allowBulk = true)
 +    {
-+        bool Poll();
-+        bool IsIdle { get; }
-+        void RequestUpdate();
-+        void LoadLightSetup(byte[] abyDiffuseDds, byte[] abySpecularDds);
-+        void SetBackgroundColor(ColorFloat color);
-+        void SetFieldOfView(float radians);
-+        void ZoomToFit();
-+        Quaternion Orientation { get; set; }
-+        void Add(Voxels vox, int nGroupID);
-+        void Add(Voxels vox, string name, int nGroupID);
-+        void Remove(Voxels vox);
-+        void SetObjectMatrix(Voxels vox, Matrix4x4 mat);
-+        void Add(Mesh msh, int nGroupID);
-+        void Add(Mesh msh, string name, int nGroupID);
-+        void Remove(Mesh msh);
-+        void SetObjectMatrix(Mesh msh, Matrix4x4 mat);
-+        void Add(PolyLine poly, int nGroupID);
-+        void Add(PolyLine poly, string name, int nGroupID);
-+        void Remove(PolyLine poly);
-+        void SetObjectMatrix(PolyLine poly, Matrix4x4 mat);
-+        void RemoveAllObjects();
-+        void SetMechanism(object source);
-+        void RequestScreenShot(string strScreenShotPath);
-+        void EnableExperimental(bool bEnable);
-+        void SetGroupVisible(int nGroupID, bool bVisible);
-+        void SetGroupMaterial(int nGroupID, ColorFloat clr, float fMetallic, float fRoughness);
-+        void SetGroupMaterial(int groupId, Material material);
-+        void SetGroupMatrix(int nGroupID, Matrix4x4 mat);
-+        void EnableOverhangWarning(int nGroupID, Overhang uWarning, Overhang uError);
-+        void DisableOverhangWarning(int nGroupID);
-+        BBox3 GetBoundingBox();
++        lock (m_tauSnapshotGate)
++        {
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            var vertexCount = nVertexCount();
++            var triangleCount = nTriangleCount();
++            if (vertexCount < 0 || triangleCount < 0) throw new InvalidOperationException("PicoGK returned a negative mesh count.");
++            var positions = new float[checked(vertexCount * 3)];
++            var indices = new uint[checked(triangleCount * 3)];
++            var copied = false;
++            if (allowBulk && System.Threading.Volatile.Read(ref m_tauBulkAvailable) >= 0)
++            {
++                var verticesHandle = GCHandle.Alloc(positions, GCHandleType.Pinned);
++                GCHandle trianglesHandle = default;
++                try
++                {
++                    trianglesHandle = GCHandle.Alloc(indices, GCHandleType.Pinned);
++                    if (TauGetVertices(lib.hThis, hThis, verticesHandle.AddrOfPinnedObject(), vertexCount) != vertexCount ||
++                        TauGetTriangles(lib.hThis, hThis, trianglesHandle.AddrOfPinnedObject(), triangleCount) != triangleCount)
++                        throw new InvalidOperationException("PicoGK bulk readback returned inconsistent mesh counts.");
++                    System.Threading.Volatile.Write(ref m_tauBulkAvailable, 1);
++                    copied = true;
++                }
++                catch (Exception error) when (error is EntryPointNotFoundException or DllNotFoundException)
++                {
++                    System.Threading.Volatile.Write(ref m_tauBulkAvailable, -1);
++                }
++                finally { if (trianglesHandle.IsAllocated) trianglesHandle.Free(); verticesHandle.Free(); }
++            }
++            if (!copied)
++            {
++                for (var vertex = 0; vertex < vertexCount; vertex++)
++                {
++                    var value = vecVertexAt(vertex);
++                    positions[vertex * 3] = value.X; positions[vertex * 3 + 1] = value.Y; positions[vertex * 3 + 2] = value.Z;
++                }
++                for (var triangle = 0; triangle < triangleCount; triangle++)
++                {
++                    var value = oTriangleAt(triangle);
++                    indices[triangle * 3] = checked((uint)value.A);
++                    indices[triangle * 3 + 1] = checked((uint)value.B);
++                    indices[triangle * 3 + 2] = checked((uint)value.C);
++                }
++            }
++            foreach (var index in indices)
++                if (index >= vertexCount) throw new InvalidOperationException("PicoGK readback returned an out-of-range triangle index.");
++            foreach (var value in positions)
++                if (!float.IsFinite(value)) throw new InvalidOperationException("PicoGK readback returned a nonfinite vertex.");
++            return (positions, indices);
++        }
 +    }
 +}
-diff --git a/Viewer/ViewerGpuTex.cs b/Viewer/ViewerGpuTex.cs
-index 9b4213b..6fee77a 100644
---- a/Viewer/ViewerGpuTex.cs
-+++ b/Viewer/ViewerGpuTex.cs
-@@ -47,6 +47,8 @@ namespace PicoGK
-             public GpuTex(  Viewer oSetViewer,
-                             ImageRgba32 img)
-             {
-+                if (oSetViewer.bIsHosted)
-+                    throw new NotSupportedException("GPU textures require the native PicoGK viewer backend");
-                 oViewer = oSetViewer;
- 
-                 GCHandle handle = GCHandle.Alloc(img.m_aclrValues, GCHandleType.Pinned);
-@@ -89,4 +91,3 @@ namespace PicoGK
-         } 
-     }
- }
--    
-\ No newline at end of file
-diff --git a/Viewer/ViewerImageQuad.cs b/Viewer/ViewerImageQuad.cs
-index 6bcf599..9b7336d 100644
---- a/Viewer/ViewerImageQuad.cs
-+++ b/Viewer/ViewerImageQuad.cs
-@@ -53,6 +53,8 @@ namespace PicoGK
-                                 bool bFlipY,
-                                 bool bDoubleSided)
-             {
-+                if (oSetViewer.bIsHosted)
-+                    throw new NotSupportedException("Image quads require the native PicoGK viewer backend");
-                 oViewer = oSetViewer;
-                 m_oTex = new(oSetViewer, img);
- 
-@@ -79,4 +81,3 @@ namespace PicoGK
-         } 
-     }
- }
--    
-\ No newline at end of file
-diff --git a/Viewer/Viewer_Gui.cs b/Viewer/Viewer_Gui.cs
-index b9692ac..8386afa 100644
---- a/Viewer/Viewer_Gui.cs
-+++ b/Viewer/Viewer_Gui.cs
-@@ -45,6 +45,8 @@ namespace PicoGK
-                                             ColorFloat clrNormal,
-                                             ColorFloat clrHovered)
-         {
-+            if (bIsHosted)
-+                throw new NotSupportedException("Sidebars require the native PicoGK viewer backend");
-             if (m_oSideBarLeft is not null)
-                 m_oSideBarLeft.Dispose();
- 
-@@ -58,6 +60,8 @@ namespace PicoGK
-                                             ColorFloat clrNormal,
-                                             ColorFloat clrHovered)
-         {
-+            if (bIsHosted)
-+                throw new NotSupportedException("Sidebars require the native PicoGK viewer backend");
-             if (m_oSideBarRight is not null)
-                 m_oSideBarRight.Dispose();
- 
-@@ -91,4 +95,3 @@ namespace PicoGK
-         }
-     }
- }
--
 diff --git a/Material.cs b/Material.cs
 new file mode 100644
+index 000000000..d544bbb35
 --- /dev/null
 +++ b/Material.cs
 @@ -0,0 +1,66 @@
@@ -786,3 +342,580 @@ new file mode 100644
 + public MaterialTransmission? Transmission { get; init; }
 + public MaterialVolume? Volume { get; init; }
 +}
+diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
+index fe3d87d5b..c5b029ce2 100644
+--- a/Viewer/Viewer.cs
++++ b/Viewer/Viewer.cs
+@@ -45,6 +45,51 @@ namespace PicoGK
+     /// </summary>
+     public partial class Viewer
+     {
++        /// <summary>
++        /// Initialize a hosted Viewer that delegates display operations without creating a native window.
++        /// </summary>
++        public Viewer(IViewerBackend xBackend,
++                      ILog           xLog)
++        {
++            ArgumentNullException.ThrowIfNull(xBackend);
++            ArgumentNullException.ThrowIfNull(xLog);
++            m_xBackend = xBackend;
++            m_xLog = xLog;
++            m_iMainThreadID = Environment.CurrentManagedThreadId;
++
++            float f45   = float.Pi/4;
++            float f90   = f45 * 2;
++            float f180  = f90 * 2;
++            qOrientationTop      = Quaternion.Identity;
++            qOrientationBottom   = Quaternion.CreateFromAxisAngle(Vector3.UnitY, f180) * qOrientationTop;
++            qOrientationFront    = Quaternion.CreateFromAxisAngle(Vector3.UnitX, f90) * qOrientationTop;
++            qOrientationRight    = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, f90) * qOrientationFront;
++            qOrientationBack     = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, f90) * qOrientationRight;
++            qOrientationLeft     = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, f90) * qOrientationBack;
++            qOrientationHome     = qOrientationTop
++                                    * Quaternion.CreateFromAxisAngle(Vector3.UnitZ, f45)
++                                    * Quaternion.CreateFromAxisAngle(Vector3.UnitX, f45);
++            m_oCamera.qOrientation = qOrientationHome;
++
++            m_fnInfoCB = null!;
++            m_fnUpdateCB = null!;
++            m_fnKeyPressedCB = null!;
++            m_fnMouseMovedCB = null!;
++            m_fnMouseButtonCB = null!;
++            m_fnScrollWheelCB = null!;
++            m_fnWindowSizeCB = null!;
++            hThis = IntPtr.Zero;
++        }
++
++        /// <summary>Capture an application-defined mechanism on a hosted viewer.</summary>
++        public void SetMechanism(object source)
++        {
++            m_xBackend?.SetMechanism(source);
++        }
++
++        /// <summary>True when viewer operations are delegated to an embedding backend.</summary>
++        public bool bIsHosted => m_xBackend is not null;
++
+         /// <summary>
+         /// Initialize a new Viewer
+         /// </summary>
+@@ -195,6 +240,22 @@ namespace PicoGK
+         /// </summary>
+         public bool bPoll()
+         {
++            if (m_xBackend is not null)
++            {
++                bool bAnimated;
++                lock (m_oAnims)
++                    bAnimated = m_oAnims.bPulse();
++                if (bAnimated)
++                    m_xBackend.RequestUpdate();
++                lock (m_oTLLock)
++                {
++                    if (m_oTimeLapse?.bDue(out string strScreenShotPath) == true)
++                        m_xBackend.RequestScreenShot(strScreenShotPath);
++                }
++                m_xBackend.Poll();
++                return bAnimated;
++            }
++
+             Debug.Assert(m_iMainThreadID == Environment.CurrentManagedThreadId);
+             // Call this function only from the main() thread of the application
+ 
+@@ -247,6 +308,11 @@ namespace PicoGK
+         /// </summary>
+         public void RequestUpdate()
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.RequestUpdate();
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new RequestUpdateAction());
+@@ -307,13 +373,18 @@ namespace PicoGK
+ 
+                     lock (m_oActions)
+                     {
++                        if (m_xBackend is not null)
++                        {
++                            m_xBackend.LoadLightSetup(abyDiffuseData, abySpecularData);
++                            return;
++                        }
+                         m_oActions.Enqueue(new LoadLightSetupAction(    m_xLog,
+                                                                         abyDiffuseData,
+                                                                         abySpecularData));
+                     }
+                 }
+ 
+-                catch
++                catch when (m_xBackend is null)
+                 {
+                     Console.WriteLine("Unable to load lights");
+                 }
+@@ -323,9 +394,23 @@ namespace PicoGK
+         /// <summary>
+         /// Add the object to the viewer, using the specified viewer group
+         /// </summary>
++        /// <summary>Add a named object to the hosted viewer. Native viewers retain ordinary rendering.</summary>
++        public void Add(in Voxels vox, string name, int nGroupID = 0)
++        {
++            if (m_xBackend is not null)
++                m_xBackend.Add(vox, name, nGroupID);
++            else
++                Add(vox, nGroupID);
++        }
++
+         public void Add(    in Voxels vox,
+                             int nGroupID = 0)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.Add(vox, nGroupID);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new AddVoxelsAction(vox, nGroupID));
+@@ -337,6 +422,11 @@ namespace PicoGK
+         /// </summary>
+         public void Remove(Voxels vox)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.Remove(vox);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new RemoveVoxelsAction(vox));
+@@ -349,6 +439,11 @@ namespace PicoGK
+         public void SetObjectMatrix(    Voxels vox,
+                                         in Matrix4x4 mat)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetObjectMatrix(vox, mat);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new SetVoxelsMatrixAction(vox, mat));
+@@ -358,9 +453,23 @@ namespace PicoGK
+         /// <summary>
+         /// Add the object to the viewer, using the specified viewer group
+         /// </summary>
++        /// <summary>Add a named object to the hosted viewer. Native viewers retain ordinary rendering.</summary>
++        public void Add(Mesh msh, string name, int nGroupID = 0)
++        {
++            if (m_xBackend is not null)
++                m_xBackend.Add(msh, name, nGroupID);
++            else
++                Add(msh, nGroupID);
++        }
++
+         public void Add(    Mesh msh,
+                             int nGroupID = 0)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.Add(msh, nGroupID);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new AddMeshAction(msh, nGroupID));
+@@ -372,6 +481,11 @@ namespace PicoGK
+         /// </summary>
+         public void Remove(Mesh msh)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.Remove(msh);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new RemoveMeshAction(msh));
+@@ -384,6 +498,11 @@ namespace PicoGK
+         public void SetObjectMatrix(    Mesh msh,
+                                         in Matrix4x4 mat)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetObjectMatrix(msh, mat);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new SetMeshMatrixAction(msh, mat));
+@@ -393,9 +512,23 @@ namespace PicoGK
+         /// <summary>
+         /// Add the object to the viewer, using the specified viewer group
+         /// </summary>
++        /// <summary>Add a named object to the hosted viewer. Native viewers retain ordinary rendering.</summary>
++        public void Add(PolyLine oPoly, string name, int nGroupID = 0)
++        {
++            if (m_xBackend is not null)
++                m_xBackend.Add(oPoly, name, nGroupID);
++            else
++                Add(oPoly, nGroupID);
++        }
++
+         public void Add(    PolyLine oPoly,
+                             int nGroupID = 0)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.Add(oPoly, nGroupID);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new AddPolyLineAction(oPoly, nGroupID));
+@@ -407,6 +540,11 @@ namespace PicoGK
+         /// </summary>
+         public void Remove(PolyLine oPoly)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.Remove(oPoly);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new RemovePolyLineAction(oPoly));
+@@ -419,6 +557,11 @@ namespace PicoGK
+         public void SetObjectMatrix(    PolyLine poly,
+                                         in Matrix4x4 mat)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetObjectMatrix(poly, mat);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new SetPolyLineMatrixAction(poly, mat));
+@@ -430,6 +573,11 @@ namespace PicoGK
+         /// </summary>
+         public void RemoveAllObjects()
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.RemoveAllObjects();
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new RemoveAllObjectsAction());
+@@ -442,6 +590,11 @@ namespace PicoGK
+         /// </summary>
+         public void RequestScreenShot(string strScreenShotPath)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.RequestScreenShot(strScreenShotPath);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new RequestScreenShotAction(strScreenShotPath));
+@@ -453,6 +606,11 @@ namespace PicoGK
+         /// </summary>
+         public void EnableExperimental(bool bEnable)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.EnableExperimental(bEnable);
++                return;
++            }
+             _EnableExperimental(hThis, bEnable);
+         }
+ 
+@@ -462,12 +620,28 @@ namespace PicoGK
+         public void SetGroupVisible(int nGroupID,
+                                         bool bVisible)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetGroupVisible(nGroupID, bVisible);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new SetGroupVisibleAction(nGroupID, bVisible));
+             }
+         }
+ 
++        /// <summary>Assign a typed physical material to every object in the hosted group.</summary>
++        /// <param name="groupId">Existing viewer group assignment.</param>
++        /// <param name="material">Appearance and encoded textures, snapshotted synchronously.</param>
++        public void SetGroupMaterial(int groupId, Material material)
++        {
++            ArgumentNullException.ThrowIfNull(material);
++            if (m_xBackend is null)
++                throw new NotSupportedException("Typed materials require the hosted PicoGK viewer backend");
++            m_xBackend.SetGroupMaterial(groupId, material);
++        }
++
+         /// <summary>
+         /// Set the material for this viewer group
+         /// </summary>
+@@ -480,6 +654,11 @@ namespace PicoGK
+                                         float       fMetallic,
+                                         float       fRoughness)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetGroupMaterial(nGroupID, clr, fMetallic, fRoughness);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new SetGroupMaterialAction(  nGroupID,
+@@ -495,6 +674,11 @@ namespace PicoGK
+         public void SetGroupMatrix( int nGroupID,
+                                     Matrix4x4 mat)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetGroupMatrix(nGroupID, mat);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new SetGroupMatrixAction(    nGroupID,
+@@ -512,6 +696,11 @@ namespace PicoGK
+                                             Overhang uWarning,
+                                             Overhang uError)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.EnableOverhangWarning(nGroupID, uWarning, uError);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new EnableGroupOverhangWarningAction(    nGroupID, 
+@@ -542,6 +731,11 @@ namespace PicoGK
+         /// </summary>
+         public void DisableOverhangWarning(int nGroupID)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.DisableOverhangWarning(nGroupID);
++                return;
++            }
+             lock (m_oActions)
+             {
+                 m_oActions.Enqueue(new DisableGroupOverhangWarningAction(nGroupID));
+@@ -553,6 +747,8 @@ namespace PicoGK
+         /// </summary>
+         public BBox3 oBBox()
+         {
++            if (m_xBackend is not null)
++                return m_xBackend.GetBoundingBox();
+             BBox3 oBBox = new();
+             _GetBoundingBox(hThis, ref oBBox);
+             return oBBox;
+@@ -563,6 +759,11 @@ namespace PicoGK
+         /// </summary>
+         public void SetBackgroundColor(ColorFloat clr)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetBackgroundColor(clr);
++                return;
++            }
+             m_clrBackground = clr;
+             RequestUpdate();
+         }
+@@ -572,6 +773,11 @@ namespace PicoGK
+         /// </summary>
+         public void ZoomToFit()
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.ZoomToFit();
++                return;
++            }
+             m_bForceZoomToFit = true;
+             RequestUpdate();
+         }
+@@ -581,6 +787,11 @@ namespace PicoGK
+         /// </summary>
+         public void SetFov(float fAngle)
+         {
++            if (m_xBackend is not null)
++            {
++                m_xBackend.SetFieldOfView(fAngle);
++                return;
++            }
+             m_oCamera.SetVerticalFov(fAngle);
+             RequestUpdate();
+         }
+@@ -590,9 +801,14 @@ namespace PicoGK
+         /// </summary>
+         public Quaternion qOrientation
+         {
+-            get => m_oCamera.qOrientation;
++            get => m_xBackend?.Orientation ?? m_oCamera.qOrientation;
+             set
+             {
++                if (m_xBackend is not null)
++                {
++                    m_xBackend.Orientation = value;
++                    return;
++                }
+                 m_oCamera.qOrientation = value; 
+                 RequestUpdate();
+             }
+@@ -614,6 +830,8 @@ namespace PicoGK
+         /// false: Viewer actions still pending (busy)</returns>
+         public bool bIsIdle()
+         {
++            if (m_xBackend is not null)
++                return m_xBackend.IsIdle;
+             lock (m_oActions)
+             {
+                 if (m_oActions.Count() > 0)
+@@ -625,11 +843,13 @@ namespace PicoGK
+ 
+         bool m_bIdle = false;
+ 
++        IViewerBackend? m_xBackend;
++
+         int m_iMainThreadID = -1;
+ 
+         ColorFloat m_clrBackground = new(0.3f);
+ 
+-    
++
+                void DoRemove(Mesh msh)
+         {
+             _RemoveMesh(    msh.lib.hThis,
+@@ -822,4 +1042,3 @@ namespace PicoGK
+         }
+     }
+ }
+-    
+\ No newline at end of file
+diff --git a/Viewer/ViewerBackend.cs b/Viewer/ViewerBackend.cs
+new file mode 100644
+index 000000000..e98439f9e
+--- /dev/null
++++ b/Viewer/ViewerBackend.cs
+@@ -0,0 +1,47 @@
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++
++using System.Numerics;
++using PicoGK.Numerics;
++
++namespace PicoGK
++{
++    /// <summary>
++    /// Backend for embedding PicoGK's concrete <see cref="Viewer"/> API without a native window.
++    /// </summary>
++    public interface IViewerBackend : IDisposable
++    {
++        bool Poll();
++        bool IsIdle { get; }
++        void RequestUpdate();
++        void LoadLightSetup(byte[] abyDiffuseDds, byte[] abySpecularDds);
++        void SetBackgroundColor(ColorFloat color);
++        void SetFieldOfView(float radians);
++        void ZoomToFit();
++        Quaternion Orientation { get; set; }
++        void Add(Voxels vox, int nGroupID);
++        void Add(Voxels vox, string name, int nGroupID);
++        void Remove(Voxels vox);
++        void SetObjectMatrix(Voxels vox, Matrix4x4 mat);
++        void Add(Mesh msh, int nGroupID);
++        void Add(Mesh msh, string name, int nGroupID);
++        void Remove(Mesh msh);
++        void SetObjectMatrix(Mesh msh, Matrix4x4 mat);
++        void Add(PolyLine poly, int nGroupID);
++        void Add(PolyLine poly, string name, int nGroupID);
++        void Remove(PolyLine poly);
++        void SetObjectMatrix(PolyLine poly, Matrix4x4 mat);
++        void RemoveAllObjects();
++        void SetMechanism(object source);
++        void RequestScreenShot(string strScreenShotPath);
++        void EnableExperimental(bool bEnable);
++        void SetGroupVisible(int nGroupID, bool bVisible);
++        void SetGroupMaterial(int nGroupID, ColorFloat clr, float fMetallic, float fRoughness);
++        void SetGroupMaterial(int groupId, Material material);
++        void SetGroupMatrix(int nGroupID, Matrix4x4 mat);
++        void EnableOverhangWarning(int nGroupID, Overhang uWarning, Overhang uError);
++        void DisableOverhangWarning(int nGroupID);
++        BBox3 GetBoundingBox();
++    }
++}
+diff --git a/Viewer/ViewerGpuTex.cs b/Viewer/ViewerGpuTex.cs
+index 9b4213b90..6fee77a14 100644
+--- a/Viewer/ViewerGpuTex.cs
++++ b/Viewer/ViewerGpuTex.cs
+@@ -47,6 +47,8 @@ namespace PicoGK
+             public GpuTex(  Viewer oSetViewer,
+                             ImageRgba32 img)
+             {
++                if (oSetViewer.bIsHosted)
++                    throw new NotSupportedException("GPU textures require the native PicoGK viewer backend");
+                 oViewer = oSetViewer;
+ 
+                 GCHandle handle = GCHandle.Alloc(img.m_aclrValues, GCHandleType.Pinned);
+@@ -89,4 +91,3 @@ namespace PicoGK
+         } 
+     }
+ }
+-    
+\ No newline at end of file
+diff --git a/Viewer/ViewerImageQuad.cs b/Viewer/ViewerImageQuad.cs
+index 6bcf599e1..9b7336d4b 100644
+--- a/Viewer/ViewerImageQuad.cs
++++ b/Viewer/ViewerImageQuad.cs
+@@ -53,6 +53,8 @@ namespace PicoGK
+                                 bool bFlipY,
+                                 bool bDoubleSided)
+             {
++                if (oSetViewer.bIsHosted)
++                    throw new NotSupportedException("Image quads require the native PicoGK viewer backend");
+                 oViewer = oSetViewer;
+                 m_oTex = new(oSetViewer, img);
+ 
+@@ -79,4 +81,3 @@ namespace PicoGK
+         } 
+     }
+ }
+-    
+\ No newline at end of file
+diff --git a/Viewer/Viewer_Gui.cs b/Viewer/Viewer_Gui.cs
+index b9692acc5..8386afa86 100644
+--- a/Viewer/Viewer_Gui.cs
++++ b/Viewer/Viewer_Gui.cs
+@@ -45,6 +45,8 @@ namespace PicoGK
+                                             ColorFloat clrNormal,
+                                             ColorFloat clrHovered)
+         {
++            if (bIsHosted)
++                throw new NotSupportedException("Sidebars require the native PicoGK viewer backend");
+             if (m_oSideBarLeft is not null)
+                 m_oSideBarLeft.Dispose();
+ 
+@@ -58,6 +60,8 @@ namespace PicoGK
+                                             ColorFloat clrNormal,
+                                             ColorFloat clrHovered)
+         {
++            if (bIsHosted)
++                throw new NotSupportedException("Sidebars require the native PicoGK viewer backend");
+             if (m_oSideBarRight is not null)
+                 m_oSideBarRight.Dispose();
+ 
+@@ -91,4 +95,3 @@ namespace PicoGK
+         }
+     }
+ }
+-

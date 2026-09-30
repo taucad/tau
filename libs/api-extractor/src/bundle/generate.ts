@@ -301,12 +301,13 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'PicoGK C# authoring',
     title: 'PicoGK C# authoring',
     description:
-      'Guides PicoGK C# geometry, named parts and animated mechanisms. Use for PicoGK models, part identification or moving-part requests in Tau Desktop.',
-    whenToUse: 'Use for PicoGK C# models, named parts and moving mechanisms in Tau Desktop.',
+      'Guides PicoGK C# geometry, PBR materials, textures, named parts and mechanisms. Use for PicoGK modeling, appearance or moving-part requests in Tau Desktop.',
+    whenToUse:
+      'Use for PicoGK C# models, physical materials, textures, named parts and moving mechanisms in Tau Desktop.',
     corpus: committedCorpus('picogk/picogk.corpus.json'),
     // C# namespaces: `PicoGK`, `PicoGK.Shapes`, `System.Numerics`.
     groupBy: (entry) => entry.path ?? 'other',
-    authoredReferences: ['kinematics-reference.md'],
+    authoredReferences: ['kinematics-reference.md', 'materials-reference.md'],
   },
   {
     slug: 'cad-picovoxel',

@@ -1,6 +1,102 @@
 # PicoGK — PicoGK (3)
 
-10 top-level symbols. Signatures are verbatim csharp.
+17 top-level symbols. Signatures are verbatim csharp.
+
+SdfVisualizer
+
+  // Create a color image which encodes the signed distance values contained in the ScalarField
+  public static ImageColor imgEncodeFromSdf(ScalarField oField, float fBackgroundValue, int nSlice, ColorFloat? _clrBackground = null, ColorFloat? _clrSurface = null, ColorFloat? _clrInside = null, ColorFloat? _clrOutside = null, ColorFloat? _clrDefect = null)
+  //   oField: Scalar field to visualize
+  //   fBackgroundValue: Background value, usually 3.0f
+  //   nSlice: Slice to visualize
+  //   _clrBackground: Color used for background value voxels
+  //   _clrSurface: Color used for surface value voxels
+  //   _clrInside: Color used for the voxels on the inside
+  //   _clrOutside: Color used for the voxels on the outside
+  //   _clrDefect: Color used for defective voxels
+
+  // Checks if the scalar field slice contains a defective voxel
+  public static bool bDoesSliceContainDefect(ScalarField oField, int nSlice)
+  //   oField: Field to analyze
+  //   nSlice: Slice to analyze
+
+  // Saves a stack of TGA files, visualizing the signed distance field contained in the ScalarField
+  public static bool bVisualizeSdfSlicesAsTgaStack(ScalarField oField, float fBackgroundValue, string strPath, string strFilePrefix = "Sdf_", bool bOnlyDefective = false, ColorFloat? _clrBackground = null, ColorFloat? _clrSurface = null, ColorFloat? _clrInside = null, ColorFloat? _clrOutside = null, ColorFloat? _clrDefect = null)
+  //   oField: Scalar SDF to visualize (you can build one from if a Voxels object if needed
+  //   fBackgroundValue: Background value (usually 3.0f)
+  //   strPath: Path to write the image stack to
+  //   strFilePrefix: File prefix to use, before slice number is appended
+  //   bOnlyDefective: Write only frames that contain defective values (such as NaN, Infinity)
+  //   _clrBackground: Color used for background value voxels
+  //   _clrSurface: Color used for surface value voxels
+  //   _clrInside: Color used for the voxels on the inside
+  //   _clrOutside: Color used for the voxels on the outside
+  //   _clrDefect: Color used for defective voxels
+
+SliceViz
+
+  // The number of slices in this voxel field
+  nSliceCount: int
+
+  public SliceViz(Viewer oViewer, Voxels vox, Voxels.ESliceAxis eAxis = Z)
+
+  // Visualize the slice in the viewer using a normalized parameter from 0..1
+  public void Visualize(float fNormalized)
+  public void Visualize(int nSlice)
+
+  // Dispose the object (IDispose)
+  public void Dispose()
+
+// This class allows you to split progress reporting into multiple subtasks
+SplitProgress
+
+  // Create a new SplitProgress object
+  public SplitProgress(IProgress xProgress, int nSubTasks)
+  //   xProgress: Progress reporting interface to use
+  //   nSubTasks: Number of subtasks, each with their independet 0..1 progress
+
+  // Report progress from 0..1 - this function automatically scales the value to reflect the current subtask
+  public void Progress(float f)
+
+  // Allow you to use ++ to count up to the next subtask
+  public static SplitProgress operator ++(SplitProgress pc)
+
+SurfaceNormalFieldExtractor
+
+  public static VectorField oExtract(Voxels vox, float fSurfaceThresholdVx = 0.5, Vector3? vecDirectionFilter = null, float fDirectionFilterTolerance = 0, Vector3? vecScaleBy = null)
+
+  protected SurfaceNormalFieldExtractor(Voxels voxSource, VectorField oDestination, float fSurfaceThresholdVx, Vector3 vecDirFilter, float fDirTolerance, Vector3 vecScaleBy)
+
+  protected void Run()
+
+  public void InformActiveValue(in Vector3 vecPosition, float fValue)
+
+Text
+
+  oDefaultTypeface: SKTypeface
+
+  public static ImageRgba32 imgRenderText(string strText, int nFontHeight, int nPadding = 10, ColorFloat? _clrBackground = null, ColorFloat? _clrText = null, SKTypeface? _oTypeface = null)
+
+TgaIo
+
+  public static void SaveTga(string strFilename, in Image img)
+  public static void SaveTga(in BinaryWriter oWriter, in Image img)
+
+  public static void GetFileInfo(string strFilename, out Image.EType eType, out int nWidth, out int nHeight)
+  public static void GetFileInfo(in BinaryReader oReader, out Image.EType eType, out int nWidth, out int nHeight)
+
+  public static void LoadTga(string strFilename, out Image img)
+  public static void LoadTga(in BinaryReader oReader, out Image img)
+
+Triangle
+
+  A: int
+
+  B: int
+
+  C: int
+
+  public Triangle(int a, int b, int c)
 
 Utils
 
@@ -478,12 +574,11 @@ Viewer
   // Enable or disable the display of a viewer group
   public void SetGroupVisible(int nGroupID, bool bVisible)
 
-  // Set the material for this viewer group
+  // Assign a typed physical material to every object in the hosted group
+  public void SetGroupMaterial(int groupId, Material material)
   public void SetGroupMaterial(int nGroupID, ColorFloat clr, float fMetallic, float fRoughness)
-  //   nGroupID: Group ID
-  //   clr: Color of the meshes in this group
-  //   fMetallic: Metallic factor 0..1
-  //   fRoughness: Roughness factor 0..1
+  //   groupId: Existing viewer group assignment
+  //   material: Appearance and encoded textures, snapshotted synchronously
 
   // Set the group's transformation matrix
   public void SetGroupMatrix(int nGroupID, Matrix4x4 mat)

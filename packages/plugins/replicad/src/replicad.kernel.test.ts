@@ -3887,8 +3887,7 @@ describe('includeEdges content', () => {
     const result = await createTestGeometry({
       runtime: createReplicadRuntime({ workerOptions: { wasm: 'single' } }),
       files: { 'box.ts': boxCode },
-      mainFile: 'box.ts',
-      parameters: {},
+      open: { source: { path: 'box.ts' } },
     });
 
     assertRenderingSuccess(result);
@@ -3900,9 +3899,8 @@ describe('includeEdges content', () => {
     const result = await createTestGeometry({
       runtime: createReplicadRuntime(),
       files: { 'box.ts': boxCode },
-      mainFile: 'box.ts',
-      parameters: {},
-      content: { includeEdges: true },
+      open: { source: { path: 'box.ts' } },
+      view: (document) => document.view('model', { content: { includeEdges: true } }),
     });
 
     assertRenderingSuccess(result);
@@ -3914,16 +3912,14 @@ describe('includeEdges content', () => {
     const withoutEdges = await createTestGeometry({
       runtime: createReplicadRuntime(),
       files: { 'box.ts': boxCode },
-      mainFile: 'box.ts',
-      parameters: {},
-      content: { includeEdges: false },
+      open: { source: { path: 'box.ts' } },
+      view: (document) => document.view('model', { content: { includeEdges: false } }),
     });
     const withEdges = await createTestGeometry({
       runtime: createReplicadRuntime(),
       files: { 'box.ts': boxCode },
-      mainFile: 'box.ts',
-      parameters: {},
-      content: { includeEdges: true },
+      open: { source: { path: 'box.ts' } },
+      view: (document) => document.view('model', { content: { includeEdges: true } }),
     });
 
     assertRenderingSuccess(withoutEdges);
@@ -3960,9 +3956,8 @@ describe('includeEdges content', () => {
     const result = await createTestGeometry({
       runtime: createReplicadRuntime(),
       files: { 'box.ts': boxCode },
-      mainFile: 'box.ts',
-      parameters: {},
-      content: { includeEdges: true },
+      open: { source: { path: 'box.ts' } },
+      view: (document) => document.view('model', { content: { includeEdges: true } }),
     });
 
     assertRenderingSuccess(result);
@@ -4112,8 +4107,7 @@ describe('Normal consistency', () => {
           }
         `,
       },
-      mainFile: 'box.ts',
-      parameters: {},
+      open: { source: { path: 'box.ts' } },
     });
 
     assertRenderingSuccess(result);
@@ -4192,8 +4186,7 @@ describe('Normal consistency', () => {
           }
         `,
       },
-      mainFile: 'hollow.ts',
-      parameters: {},
+      open: { source: { path: 'hollow.ts' } },
     });
 
     assertRenderingSuccess(result);
@@ -4260,8 +4253,7 @@ describe('Normal consistency', () => {
           }
         `,
       },
-      mainFile: 'fillet.ts',
-      parameters: {},
+      open: { source: { path: 'fillet.ts' } },
     });
 
     assertRenderingSuccess(result);
@@ -4296,8 +4288,7 @@ describe('Normal consistency', () => {
           }
         `,
       },
-      mainFile: 'tray.ts',
-      parameters: {},
+      open: { source: { path: 'tray.ts' } },
     });
 
     assertRenderingSuccess(result);

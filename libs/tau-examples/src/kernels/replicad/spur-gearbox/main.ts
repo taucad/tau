@@ -1,3 +1,4 @@
+import type { MechanismSource } from '@taucad/kinematics';
 import {
   draw,
   drawCircle,
@@ -141,7 +142,7 @@ function gear(
   return blank.cutAll(cuts);
 }
 
-export default function main(params = defaultParams): ShapeConfig[] {
+function resolveParams(params: Partial<typeof defaultParams>) {
   const p = { ...defaultParams, ...params };
   if (
     ![p.faceWidth, p.backlash, p.inputAngle, p.coverLift].every(
@@ -159,6 +160,13 @@ export default function main(params = defaultParams): ShapeConfig[] {
     );
   }
 
+  return p;
+}
+
+export default function main(
+  params: Partial<typeof defaultParams> = defaultParams,
+): ShapeConfig[] {
+  const p = resolveParams(params);
   const parts: ShapeConfig[] = [];
   const add = (
     name: string,
@@ -344,4 +352,89 @@ export default function main(params = defaultParams): ShapeConfig[] {
     throw new Error(`Unknown part: ${p.part}`);
   }
   return parts;
+}
+
+/** 18/54 reduction and the lifting cover, relative to the as-built input angle and cover lift. */
+export function mechanism(
+  parameters: Partial<typeof defaultParams> = {},
+): MechanismSource | undefined {
+  const p = resolveParams(parameters);
+  if (p.part !== 'assembly') {
+    return undefined;
+  }
+  return {
+    schemaVersion: 1,
+    units: { length: 'mm', angle: 'deg' },
+    root: 'housing',
+    links: {
+      housing: {
+        shapes: [
+          'Housing',
+          'Gasket',
+          'Input lower bearing',
+          'Output lower bearing',
+        ],
+      },
+      input: { shapes: ['Input pinion', 'Input shaft', 'Input key'] },
+      output: { shapes: ['Output wheel', 'Output shaft', 'Output key'] },
+      cover: {
+        shapes: [
+          'Cover',
+          'Input upper bearing',
+          'Output upper bearing',
+          ...screwCenters.map((_, index) => `Cover screw ${index + 1}`),
+        ],
+      },
+    },
+    joints: {
+      input: {
+        type: 'revolute',
+        name: 'Input shaft',
+        parent: 'housing',
+        child: 'input',
+        origin: [-72, 0, 0],
+        axis: [0, 0, 1],
+      },
+      output: {
+        type: 'revolute',
+        name: 'Output shaft',
+        parent: 'housing',
+        child: 'output',
+        origin: [0, 0, 0],
+        axis: [0, 0, 1],
+      },
+      cover: {
+        type: 'prismatic',
+        name: 'Inspection cover',
+        parent: 'housing',
+        child: 'cover',
+        origin: [0, 0, 34.5 + p.coverLift],
+        axis: [0, 0, 1],
+        limits: { lower: -p.coverLift, upper: 80 - p.coverLift },
+      },
+    },
+    couplings: [{ driver: 'input', follower: 'output', ratio: -1 / 3 }],
+    animations: [
+      {
+        id: 'reduction',
+        name: 'Three input turns',
+        duration: 6,
+        loop: 'repeat',
+        keyframes: [
+          { time: 0, coordinates: { input: 0 } },
+          { time: 6, coordinates: { input: 1080 } },
+        ],
+      },
+      {
+        id: 'cover',
+        name: 'Lift inspection cover',
+        duration: 4,
+        loop: 'pingPong',
+        keyframes: [
+          { time: 0, coordinates: { cover: -p.coverLift } },
+          { time: 4, coordinates: { cover: 80 - p.coverLift } },
+        ],
+      },
+    ],
+  };
 }

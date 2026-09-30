@@ -7,9 +7,24 @@ const maximumDiscoveryBytes = 8192;
 const maximumStatusBytes = 262_144;
 const maximumStillBytes = 4 * 1024 * 1024;
 const identifier = /^[A-Za-z0-9_-]{1,64}$/u;
-const x1cSerialIdentifier = /^00M[A-Za-z0-9_-]{1,61}$/u;
-const normalizeX1cModel = (value: string | undefined): string | undefined =>
-  value === 'BL-P001' || value === 'X1 Carbon' || value === 'Bambu Lab X1 Carbon' ? 'X1C' : value;
+/** Models qualified for this LAN adapter. @internal */
+export type BambuModel = 'X1C' | 'A1 mini';
+
+/** Admit a serial only for its model's product prefix.
+ * @param serial - Advertised or authenticated serial.
+ * @param model - Qualified model.
+ * @returns Whether the serial belongs to that product family.
+ * @internal
+ */
+export const isBambuSerial = (serial: string, model: BambuModel): boolean =>
+  identifier.test(serial) && serial.startsWith(model === 'X1C' ? '00M' : '030') && serial.length > 3;
+
+const normalizeBambuModel = (value: string | undefined): string | undefined =>
+  value === 'BL-P001' || value === 'X1 Carbon' || value === 'Bambu Lab X1 Carbon'
+    ? 'X1C'
+    : value === 'N1' || value === 'A1 mini'
+      ? 'A1 mini'
+      : value;
 
 /** Normalized X1C run state; unknown provider values remain unknown. @internal */
 export type BambuRunState =
@@ -76,7 +91,7 @@ export type BambuStatus = Readonly<{
 }>;
 
 /** Identity-qualified printer firmware facts returned by `info.get_version`. @internal */
-export type BambuVersion = Readonly<{ serial: string; firmware: string }>;
+export type BambuVersion = Readonly<{ serial: string; firmware: string; model?: string }>;
 
 /** Correlated command result that never treats transport delivery as acceptance. @internal */
 export type BambuCommandResult =
@@ -475,15 +490,15 @@ export const parseBambuDiscoveryDatagram = (
     }
     headers.set(name, value);
   }
-  const model = normalizeX1cModel(boundedString(headers.get('devmodel.bambu.com'), 64));
+  const model = normalizeBambuModel(boundedString(headers.get('devmodel.bambu.com'), 64));
   const serial = boundedString(headers.get('usn') ?? headers.get('devid.bambu.com'), 64);
   const name = boundedString(headers.get('devname.bambu.com'), 128) ?? 'Bambu printer';
-  if (model !== 'X1C' || (serial !== undefined && !x1cSerialIdentifier.test(serial))) {
+  if ((model !== 'X1C' && model !== 'A1 mini') || (serial !== undefined && !isBambuSerial(serial, model))) {
     return protocolError('BAMBU_DISCOVERY_INVALID');
   }
   const { address, interface: networkInterface } = input.datagram.peer;
   return Object.freeze({
-    id: `bambu:${serial ?? address}`,
+    id: `${model === 'X1C' ? 'bambu' : 'bambu-a1-mini'}:${serial ?? address}`,
     name,
     endpoint: Object.freeze({ address, interface: networkInterface }),
     claimedIdentity: Object.freeze({ model, ...(serial ? { serial } : {}) }),
@@ -647,7 +662,7 @@ export const parseBambuStatusPayload = (bytes: Uint8Array<ArrayBuffer>): BambuSt
   const remainingMinutes = finite({ value: print['mc_remaining_time'], minimum: 0, maximum: 100_000 });
   const parsed: BambuStatus = definedFields({
     sequence: boundedString(print['sequence_id'], 128),
-    model: normalizeX1cModel(boundedString(print['printer_type'], 64)),
+    model: normalizeBambuModel(boundedString(print['printer_type'], 64)),
     firmware: boundedString(print['firmware'], 64),
     nozzleDiameter:
       nozzleDiameter === undefined
@@ -715,7 +730,11 @@ export const parseBambuVersionPayload = (bytes: Uint8Array<ArrayBuffer>): BambuV
     const serial = boundedString(module['sn'], 64);
     const firmware = boundedString(module['sw_ver'], 64);
     if (module['name'] === 'ota' && serial && identifier.test(serial) && firmware) {
-      return Object.freeze({ serial, firmware });
+      return Object.freeze({
+        serial,
+        firmware,
+        ...definedFields({ model: normalizeBambuModel(boundedString(module['project_name'], 64)) }),
+      });
     }
   }
   return protocolError('BAMBU_VERSION_INVALID');

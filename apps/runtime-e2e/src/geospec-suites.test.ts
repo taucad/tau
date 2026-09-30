@@ -92,6 +92,12 @@ describe('geospec example suites (regression backbone)', () => {
     expect(report.success).toBe(true);
   });
 
+  it('PicoVoxel lead-screw-stage geospec suite passes', { timeout: 180_000 }, async () => {
+    const report = await runGeoSpecSuite('libs/tau-examples/src/kernels/picovoxel/lead-screw-stage');
+    expect(report.failed, JSON.stringify(report.files)).toBe(0);
+    expect(report.success).toBe(true);
+  });
+
   it('logo-keychain geospec suite passes', { timeout: 180_000 }, async () => {
     const report = await runGeoSpecSuite('libs/tau-examples/src/kernels/replicad/logo-keychain');
     expect(report.failed).toBe(0);

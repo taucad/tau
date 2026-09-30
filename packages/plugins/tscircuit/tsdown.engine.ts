@@ -47,7 +47,7 @@ const writeLicenses = (roots: ReadonlySet<string>): void => {
       .map((name) => join(root, name))
       .find((path) => existsSync(path));
     const text =
-      licensePath === undefined ? undefined : readFileSync(licensePath, 'utf8').replace(/\r\n?/gu, '\n').trim();
+      licensePath === undefined ? undefined : readFileSync(licensePath, 'utf8').replaceAll(/\r\n?/gu, '\n').trim();
     return [
       {
         name: manifest.name,

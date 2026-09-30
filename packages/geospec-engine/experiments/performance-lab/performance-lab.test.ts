@@ -1,5 +1,5 @@
 // eslint-disable-next-line @nx/enforce-module-boundaries -- Test-only registry inventory checks the static browser catalog against the public matcher list.
-import { createGeoSpecMatcherMethods, geoSpecNativeMatcherDescriptors } from 'geospec/assertion-client';
+import { createGeoSpecMatcherMethods, geoSpecMatcherDescriptors } from 'geospec/assertion-client';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- Test-only authoring type checks the private catalog against the public API.
 import type { GeoSpecAuthoringInvocation } from 'geospec/assertion-client';
 import assert from 'node:assert/strict';
@@ -184,7 +184,7 @@ void describe('performance lab catalog', () => {
   });
 
   void it('covers every exported matcher with independently authored ordinary positive and negative claims', async () => {
-    const names = Object.keys(geoSpecNativeMatcherDescriptors).sort();
+    const names = Object.keys(geoSpecMatcherDescriptors).sort();
     assert.deepStrictEqual([...new Set(performanceLabQualifiedCases.map((entry) => entry.matcher))].sort(), names);
     assert.equal(performanceLabQualifiedCases.length, names.length * 2);
     const authorityRecord = manifest.claimAuthority;

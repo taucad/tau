@@ -3,7 +3,7 @@
 import {
   createGeoSpecAssertionClient,
   GeoSpecAssertionError,
-  geoSpecNativeMatcherDescriptors,
+  geoSpecMatcherDescriptors,
 } from 'geospec/assertion-client';
 // eslint-disable-next-line @nx/enforce-module-boundaries, import-x/no-extraneous-dependencies -- Type-only public query vocabulary for the private bench adapter.
 import type { GeoSpecQueryCapability, GeoSpecCanonicalClaimReport } from 'geospec/assertion-client';
@@ -357,7 +357,7 @@ export const parsePerformanceLabRunInput = async (value: unknown): Promise<Perfo
       (entry['kind'] !== 'matcher' && entry['kind'] !== 'query') ||
       typeof entry['matcher'] !== 'string' ||
       (entry['kind'] === 'matcher'
-        ? !Object.hasOwn(geoSpecNativeMatcherDescriptors, entry['matcher'])
+        ? !Object.hasOwn(geoSpecMatcherDescriptors, entry['matcher'])
         : !queryCapabilities.has(entry['matcher'] as GeoSpecQueryCapability)) ||
       !Array.isArray(entry['arguments']) ||
       entry['arguments'].length > 16 ||

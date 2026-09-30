@@ -178,6 +178,29 @@
         "cwd": "{workspaceRoot}",
         "command": "node apps/ui-e2e/scripts/verify-safari-remote-host.mts"
       }
+    },
+    "test:e2e:picovoxel-naming": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "Qualify hover, selection, list labels and source edits on the serial browser path; the existing picovoxel-multi spec owns browser pthread and cross-origin-isolation qualification."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "pnpm exec nx run ui:build",
+          "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/picovoxel-naming.spec.ts"
+        ],
+        "env": {
+          "PORT": "3017",
+          "TAU_E2E_UI_SNAPSHOT": "true",
+          "TAU_E2E_DISABLE_COI": "true",
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
+        }
+      }
     }
   }
 }

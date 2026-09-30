@@ -167,6 +167,17 @@ describe('picovoxelToGlb', () => {
     expect(summary.materialNames).toEqual(['']);
   });
 
+  it('should preserve duplicate Unicode labels and leave every decoded geometry attribute unchanged', async () => {
+    const raw = { shapes: [createWeldedShape(8), createWeldedShape(10)] };
+    const named = { shapes: raw.shapes.map((shape) => ({ ...shape, name: '蓋 / Mesh 🧩' })) };
+    const bytes = picovoxelToGlb(named);
+    const summary = await readGltfNamingSummary(bytes);
+    expect(summary.nodeNames).toEqual(['蓋 / Mesh 🧩', '蓋 / Mesh 🧩']);
+    expect(summary.meshNames).toEqual(summary.nodeNames);
+    expect(summary.sceneNames).toEqual(['']);
+    expect(await readPrimitives(bytes)).toEqual(await readPrimitives(picovoxelToGlb(raw)));
+  });
+
   it('should write the canonical empty scene for an empty handle', async () => {
     const document = await glbToDocument(picovoxelToGlb({ shapes: [] }));
 

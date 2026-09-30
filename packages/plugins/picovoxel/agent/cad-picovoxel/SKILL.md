@@ -8,7 +8,7 @@ description: Guides PicoVoxel voxel, SDF and lattice CAD in main.ts. Use when cr
 ## Workflow
 
 1. Author `main.ts`: `import type { Pico, Voxels, Mesh } from 'picovoxel'`, helpers from `picovoxel/shapekernel`, `picovoxel/latticelibrary` and `picovoxel/numerics`.
-2. Export `defaultParams` with a `voxelSize` and a default `main(pico, params = defaultParams)` returning `Voxels`, `Mesh`, or a flat array of them; `[]` is an empty scene.
+2. Export `defaultParams` with a `voxelSize` and a default `main(pico, params = defaultParams)` returning `Voxels`, `Mesh`, `{ shape, name }`, or a flat mixed array; `[]` is an empty scene.
 3. Use the `pico` session Tau passes in. Never call `createPico()` or import `picovoxel/multi`, `picovoxel/raw` or `picovoxel/three`.
 
 For multiple files, import helpers through explicit ESM paths such as `./lib/widget.js` and pass `pico` into them.
@@ -21,29 +21,33 @@ For multiple files, import helpers through explicit ESM paths such as `./lib/wid
 - Dispose large intermediates after their last use.
 - The viewer shows a fast preview; exports and GeoSpec checks replay the model exactly, so they can differ by about one voxel. Never request `lane: 'fast'` for manufacturing exports.
 
-PicoVoxel is PicoGK compiled to WebAssembly and runs in the browser, desktop and CLI. Native PicoGK is C# (`main.cs`) on the desktop only. Route `.ts` PicoGK-style requests here and `.cs` to `cad-picogk`; projects do not convert between them.
+Route TypeScript PicoGK requests here; native C# `main.cs` uses desktop `cad-picogk`.
 
-## Canonical pattern
+Check a missing default export, a wrong return type and a non-positive `voxelSize` first. `PICO_OUT_OF_MEMORY` means coarsen `voxelSize` or shrink the bounds.
+
+## Part names
+
+Name final parts with `{ shape, name }` after transforms, booleans or clones. Import
+`PicovoxelResult` with `import type` only.
 
 ```ts
-import type { Pico, Voxels } from 'picovoxel';
+import type { Pico } from 'picovoxel';
+import type { PicovoxelResult } from '@taucad/picovoxel';
 
-export const defaultParams = { voxelSize: 0.5, radius: 10, boreRadius: 3.5 };
-
-export default function main(pico: Pico, params = defaultParams): Voxels {
-  const sphere = pico.createVoxels({ shape: 'sphere', radius: params.radius });
-  const beam = (axis: 0 | 1 | 2) => {
-    const start: [number, number, number] = [0, 0, 0];
-    const end: [number, number, number] = [0, 0, 0];
-    start[axis] = -params.radius * 1.2;
-    end[axis] = params.radius * 1.2;
-    return pico.createVoxels({ shape: 'beam', start, end, radius: params.boreRadius });
-  };
-  return sphere.subtract(beam(0), beam(1), beam(2));
+export default function main(pico: Pico): PicovoxelResult {
+  const housing = pico.createVoxels({ shape: 'sphere', radius: 10 });
+  const pins = [0, 1, 2].map((index) => ({
+    shape: pico.createVoxels({ shape: 'sphere', center: [20 + index * 8, 0, 0], radius: 2 }),
+    name: `Pin ${index + 1}`,
+  }));
+  return [{ shape: housing, name: 'Housing' }, ...pins];
 }
 ```
 
-Check a missing default export, a wrong return type and a non-positive `voxelSize` first. `PICO_OUT_OF_MEMORY` means coarsen `voxelSize` or shrink the bounds.
+Names trim; blank/omitted names use ordinal `Shape N`. Duplicate labels and Unicode survive
+preview, exact GLB and caches. STL filenames are safe unique derivatives. Raw parts remain valid.
+Nested arrays, `children`, invalid shapes/non-string names fail with the output index. Names do not
+create stable IDs, hierarchy or assembly occurrences. Use author indexes to distinguish repeated parts.
 
 ## API reference
 

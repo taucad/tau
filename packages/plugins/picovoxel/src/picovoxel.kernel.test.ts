@@ -226,7 +226,7 @@ describe('picovoxel kernel', () => {
   describe('identity', () => {
     it('should key the kernel version on the PicoVoxel version, both artifact digests and its scripts', () => {
       expect(definition.version).toMatch(
-        /^1\.1\.0\+picovoxel\.[\w.-]+\.serial-[\da-f]{12}\.multi-[\da-f]{12}\.scripts-[\da-f]{12}$/,
+        /^1\.2\.0\+picovoxel\.[\w.-]+\.serial-[\da-f]{12}\.multi-[\da-f]{12}\.scripts-[\da-f]{12}$/,
       );
     });
 
@@ -371,6 +371,35 @@ describe('picovoxel kernel', () => {
   });
 
   describe('results', () => {
+    it('should preserve authored labels for mixed descriptors and raw parts after session disposal', async () => {
+      const { result } = await createGeometry({
+        module: {
+          default: (pico: Pico) => {
+            const mesh = helloCube(pico);
+            return [
+              { shape: mesh, name: '  Housing / 蓋 🧩  ' },
+              { shape: pico.createVoxels({ shape: 'sphere', radius: 2 }), name: 'Mesh' },
+              mesh,
+              { shape: mesh, name: 'Housing / 蓋 🧩' },
+              { shape: mesh, name: '  ' },
+              { shape: mesh },
+            ];
+          },
+        },
+      });
+      expect(result.nativeHandle.shapes.map(({ name }) => name)).toEqual([
+        'Housing / 蓋 🧩',
+        'Mesh',
+        'Shape 3',
+        'Housing / 蓋 🧩',
+        'Shape 5',
+        'Shape 6',
+      ]);
+      expect(result.nativeHandle.shapes[0]!.vertices).toEqual(result.nativeHandle.shapes[2]!.vertices);
+      expect(result.nativeHandle.shapes[0]!.triangles).toEqual(result.nativeHandle.shapes[2]!.triangles);
+      expect(() => sessions.created[0]!.pico.memory).toThrow('disposed');
+    });
+
     it('should keep a returned mesh and flat arrays of meshes and voxels as numbered shapes', async () => {
       const { result } = await createGeometry({
         module: { default: (pico: Pico) => [helloCube(pico), pico.createVoxels({ shape: 'sphere', radius: 2 })] },
@@ -378,6 +407,61 @@ describe('picovoxel kernel', () => {
 
       expect(result.nativeHandle.shapes.map(({ name }) => name)).toEqual(['Shape 1', 'Shape 2']);
       expect([...result.nativeHandle.shapes[0]!.triangles.subarray(0, 3)]).toEqual([0, 2, 1]);
+    });
+
+    it('should accept a single named part and retain generated-looking authored labels', async () => {
+      for (const name of ['Geometry', 'Shape_0']) {
+        // oxlint-disable-next-line no-await-in-loop -- builds share the recorded session list
+        const { result } = await createGeometry({
+          module: { default: (pico: Pico) => ({ shape: helloCube(pico), name }) },
+        });
+        expect(result.nativeHandle.shapes.map((shape) => shape.name)).toEqual([name]);
+      }
+    });
+
+    it.each([
+      [42, 'name must be a string'],
+      [null, 'name must be a string'],
+      [false, 'name must be a string'],
+    ])('should reject descriptor name %j and release the session', async (name, message) => {
+      const issues = await buildIssues(
+        createGeometry({
+          module: {
+            default: (pico: Pico) => [helloCube(pico), { shape: helloCube(pico), name }],
+          },
+        }),
+      );
+      expect(issues[0]).toMatchObject({ code: 'RUNTIME', message: expect.stringContaining(`result 2 ${message}`) });
+      expect(() => sessions.created[0]!.pico.allocated).toThrow(expect.objectContaining({ code: 'PICO_DISPOSED' }));
+    });
+
+    it.each([
+      [{ shape: null }, 'received null'],
+      [{ name: 'Missing' }, 'received undefined'],
+      [{ shape: [] }, 'received an array'],
+      [{ shape: { shape: null, name: 'Nested' } }, 'received object'],
+      [{ children: [] }, 'cannot contain children. Return a flat array of parts'],
+    ])('should reject malformed descriptor %j', async (value, message) => {
+      const issues = await buildIssues(createGeometry({ module: { default: () => [value] } }));
+      expect(issues[0]).toMatchObject({ code: 'RUNTIME', message: expect.stringContaining(message) });
+      expect(issues[0]!.message).toContain('result 1');
+    });
+
+    it('should identify the failing duplicate by label and output index', async () => {
+      const issues = await buildIssues(
+        createGeometry({
+          module: {
+            default: (pico: Pico) => [
+              { shape: helloCube(pico), name: 'Pin' },
+              { shape: pico.createVoxels({ shape: 'empty' }), name: 'Pin' },
+            ],
+          },
+        }),
+      );
+      expect(issues[0]).toMatchObject({
+        code: 'RUNTIME',
+        message: 'PicoVoxel Pin (output 2) is an empty Voxels field. Return [] for an empty scene.',
+      });
     });
 
     it('should drop exactly-zero-area triangles once, for the viewer and every export (D36)', async () => {
@@ -405,7 +489,7 @@ describe('picovoxel kernel', () => {
       );
 
       expect(issues[0]!.message).toBe(
-        'PicoVoxel Shape 1 is empty: every triangle has zero area. Return [] for an empty scene.',
+        'PicoVoxel Shape 1 (output 1) is empty: every triangle has zero area. Return [] for an empty scene.',
       );
     });
 
@@ -422,16 +506,19 @@ describe('picovoxel kernel', () => {
     });
 
     it.each([
-      [{ default: () => 42 }, 'PicoVoxel main() result 1 must be Mesh or Voxels; received number.'],
+      [
+        { default: () => 42 },
+        'PicoVoxel main() result 1 must be Mesh, Voxels or { shape: Mesh | Voxels, name?: string }; received number.',
+      ],
       [{ default: () => null }, 'received null.'],
       [{ default: () => [[]] }, 'received an array.'],
       [
         { default: (pico: Pico) => pico.createVoxels({ shape: 'empty' }) },
-        'PicoVoxel Shape 1 is an empty Voxels field.',
+        'PicoVoxel Shape 1 (output 1) is an empty Voxels field.',
       ],
       [
         { default: (pico: Pico) => pico.createMesh({ vertices: [], triangles: [] }) },
-        'PicoVoxel Shape 1 is empty. Return [] for an empty scene.',
+        'PicoVoxel Shape 1 (output 1) is empty. Return [] for an empty scene.',
       ],
       [{ main: () => [] }, 'PicoVoxel source must default-export a main(pico, params) function.'],
     ])('should refuse an invalid result %#', async (module, message) => {
@@ -1279,6 +1366,69 @@ describe('picovoxel kernel', () => {
       expect(new DataView(file!.bytes.buffer).getUint32(80, true)).toBe(12);
     });
 
+    it('should make safe unique STL filenames without changing labels or STL geometry', async () => {
+      const names = [
+        '../Housing',
+        'A/B',
+        String.raw`a\b`,
+        'A_B 2',
+        'CON.txt',
+        'lpt²',
+        'aux',
+        '... ',
+        'NUL',
+        '蓋 🧩',
+        'é',
+        'e\u0301',
+        'x'.repeat(121),
+        'x'.repeat(120),
+        '🧩'.repeat(31),
+        'control\u0000<>:"|?*',
+        'NUL .txt',
+        'CONIN$',
+        'conout$.log',
+      ];
+      const result = await exportFrom(
+        {
+          default: (pico: Pico) => {
+            const shape = helloCube(pico);
+            return names.map((name) => ({ shape, name }));
+          },
+        },
+        { format: 'stl' },
+      );
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        throw new Error('STL export failed');
+      }
+      expect(result.data.map((file) => file.name)).toEqual([
+        '.._Housing.stl',
+        'A_B.stl',
+        'a_b 2.stl',
+        'A_B 2 2.stl',
+        '_CON.txt.stl',
+        '_lpt².stl',
+        '_aux.stl',
+        'Shape 8.stl',
+        '_NUL.stl',
+        '蓋 🧩.stl',
+        'é.stl',
+        'e\u0301 2.stl',
+        `${'x'.repeat(120)}.stl`,
+        `${'x'.repeat(120)} 2.stl`,
+        `${'🧩'.repeat(30)}.stl`,
+        'control________.stl',
+        '_NUL .txt.stl',
+        '_CONIN$.stl',
+        '_conout$.log.stl',
+      ]);
+      const raw = await exportFrom({ default: helloCube }, { format: 'stl' });
+      expect(raw.success).toBe(true);
+      for (const file of result.data) {
+        expect(file.bytes).toEqual(raw.success && raw.data[0]!.bytes);
+      }
+    });
+
     it('should honour STL units, scale and offset', async () => {
       const result = await exportFrom(
         { default: helloCube },
@@ -1385,6 +1535,40 @@ describe('picovoxel kernel', () => {
       expect(definition.deserializeNativeHandle!({ serializedNativeHandle: snapshot }, runtime, context)).toEqual(
         result.nativeHandle,
       );
+    });
+
+    it('should preserve authored and legacy snapshot labels and repair blank restored names', async () => {
+      const { runtime, context, result } = await createGeometry({ module: { default: helloCube } });
+      const nativeHandle = definition.deserializeNativeHandle!(
+        {
+          serializedNativeHandle: {
+            shapes: ['  蓋 / Lid  ', 'Mesh', 'Shape 1', ''].map((name) => ({
+              ...result.nativeHandle.shapes[0]!,
+              name,
+            })),
+          },
+        },
+        runtime,
+        context,
+      );
+      expect(nativeHandle.shapes.map(({ name }) => name)).toEqual(['蓋 / Lid', 'Mesh', 'Shape 1', 'Shape 4']);
+      const exported = await definition.exportGeometry(
+        { format: 'glb', nativeHandle, options: definition.exportFormats.glb.optionsSchema.parse({}) },
+        runtime,
+        context,
+      );
+      expect(exported.success).toBe(true);
+      // The cube has exact provenance in either session lane.
+      if (!exported.success) {
+        throw new Error('Restored GLB export failed');
+      }
+      const document = await glbToDocument(exported.data[0]!.bytes);
+      expect(
+        document
+          .getRoot()
+          .listNodes()
+          .map((node) => node.getName()),
+      ).toEqual(['蓋 / Lid', 'Mesh', 'Shape 1', 'Shape 4']);
     });
 
     it.each([

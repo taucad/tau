@@ -150,7 +150,7 @@ class CanvasDepthRestorePass extends Pass {
     const previousTarget = renderer.getRenderTarget();
     renderer.setRenderTarget(target ?? null);
     try {
-      renderer.clearDepth();
+      // AlwaysDepth replaces every depth texel; clearing first repeats the same work.
       renderer.render(this.scene, this.camera);
     } finally {
       renderer.setRenderTarget(previousTarget);

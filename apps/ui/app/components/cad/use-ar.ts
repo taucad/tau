@@ -1,8 +1,7 @@
 import { useCallback, useState } from 'react';
-import type { Geometry } from '@taucad/types';
+import type { Artifact, RuntimeDocument } from '@taucad/runtime';
 import { mimeTypes } from '@taucad/types/constants';
 import { toast } from '#components/ui/sonner.js';
-import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 
 type ArCapability = {
   readonly isQuickLookSupported: boolean;
@@ -65,14 +64,14 @@ function launchQuickLook(usdzBlobUrl: string): void {
  * and GLTF geometry is available. Call `activateAr()` from a user click handler
  * to export the model to USDZ via the runtime client and open AR Quick Look.
  */
-export function useAr(geometry: Geometry | undefined, kernelClient?: AppRuntimeClient): ArCapability {
+export function useAr(artifact: Artifact | undefined, runtimeDocument?: RuntimeDocument): ArCapability {
   const [isConverting, setIsConverting] = useState(false);
 
-  const hasGltfGeometry = geometry?.format === 'gltf';
-  const canActivateAr = isQuickLookSupported && hasGltfGeometry && Boolean(kernelClient);
+  const hasGltfArtifact = artifact?.mimeType === 'model/gltf-binary';
+  const canActivateAr = isQuickLookSupported && hasGltfArtifact && Boolean(runtimeDocument);
 
   const activateAr = useCallback(async () => {
-    if (!canActivateAr || !kernelClient) {
+    if (!canActivateAr || !runtimeDocument) {
       return;
     }
 
@@ -80,22 +79,22 @@ export function useAr(geometry: Geometry | undefined, kernelClient?: AppRuntimeC
     let blobUrl: string | undefined;
 
     try {
-      const result = await kernelClient.export('usdz');
+      const result = await runtimeDocument.export('usdz');
       if (!result.success) {
         throw new Error(result.issues[0]?.message ?? 'USDZ export failed');
       }
 
       if (
-        result.data.length !== 1 ||
-        result.data[0]?.name.endsWith('.usdz') !== true ||
-        result.data[0].mimeType !== mimeTypes.usdz
+        result.files.length !== 1 ||
+        !result.files[0].name.endsWith('.usdz') ||
+        result.files[0].mimeType !== mimeTypes.usdz
       ) {
         throw new Error(
-          `USDZ export expected exactly one .usdz artifact (${mimeTypes.usdz}), received ${result.data.length}: ${result.data.map((file) => `${file.name} (${file.mimeType})`).join(', ')}`,
+          `USDZ export expected exactly one .usdz artifact (${mimeTypes.usdz}), received ${result.files.length}: ${result.files.map((file) => `${file.name} (${file.mimeType})`).join(', ')}`,
         );
       }
 
-      const file = result.data[0];
+      const file = result.files[0];
       blobUrl = URL.createObjectURL(new Blob([file.bytes], { type: file.mimeType }));
 
       launchQuickLook(blobUrl);
@@ -109,7 +108,7 @@ export function useAr(geometry: Geometry | undefined, kernelClient?: AppRuntimeC
 
       setIsConverting(false);
     }
-  }, [canActivateAr, kernelClient]);
+  }, [canActivateAr, runtimeDocument]);
 
   return {
     isQuickLookSupported,

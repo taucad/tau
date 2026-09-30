@@ -43,6 +43,36 @@ describe('native model loader ownership', () => {
     }
   });
 
+  it('should retain direct resource locators independently from artifact labels', async () => {
+    const { engine } = testEngine();
+    let resource = 1;
+    const loader = createGeoSpecNativeModelLoader({ engine, readSource: async () => Uint8Array.of(resource) });
+    try {
+      const options = {
+        source: Uint8Array.of(0),
+        path: 'display.glb',
+        format: 'glb',
+        resources: [
+          { name: 'mesh.bin', source: 'assets/actual.bin' },
+          { name: 'anonymous.bin', source: Uint8Array.of(2) },
+        ],
+      } as const;
+      const first = await loader(options);
+      resource = 3;
+      const edited = await loader(options);
+      expect(first.load?.artifacts).toMatchObject([
+        { name: 'display.glb' },
+        { name: 'mesh.bin', sourcePath: 'assets/actual.bin' },
+        { name: 'anonymous.bin' },
+      ]);
+      expect(first.load?.artifacts[0]).not.toHaveProperty('sourcePath');
+      expect(first.load?.artifacts[2]).not.toHaveProperty('sourcePath');
+      expect(edited.load?.artifacts[1]?.sha256).not.toBe(first.load?.artifacts[1]?.sha256);
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+
   it('should admit successful Runtime issues into the compiled subject', async () => {
     const { engine, ingestSubject } = testEngine();
     const runtime: GeoSpecRuntimeClient = {

@@ -83,38 +83,48 @@ afterEach(() => {
 });
 
 describe('runGeoSpecModule', () => {
-  it('should detect edited direct-file bytes even when the host admits equal geometry', async () => {
-    let generation = 0;
-    const nativeModelLoader = async () => ({
-      contentHash: 'a'.repeat(64),
-      load: {
-        loadId: 'host-load',
-        status: 'complete',
-        format: 'gsm1',
-        parameters: {},
-        ingestOptions: {},
-        sourcePath: 'part.gsm1',
-        artifacts: [{ name: 'part.gsm1', sha256: (++generation === 1 ? 'b' : 'c').repeat(64), byteLength: 1 }],
-      } satisfies GeoSpecModelLoadEvidence,
-    });
-    const result = await runModule(
-      [
+  it.each(['primary', 'resource'] as const)(
+    'should detect edited %s bytes even when the host admits equal geometry',
+    async (kind) => {
+      let generation = 0;
+      const nativeModelLoader = async () => ({
+        contentHash: 'a'.repeat(64),
+        load: {
+          loadId: 'host-load',
+          status: 'complete',
+          format: 'gsm1',
+          parameters: {},
+          ingestOptions: {},
+          ...(kind === 'primary' ? { sourcePath: 'part.gsm1' } : {}),
+          artifacts: [
+            {
+              name: 'alias.bin',
+              sourcePath: 'part.gsm1',
+              sha256: (++generation === 1 ? 'b' : 'c').repeat(64),
+              byteLength: 1,
+            },
+          ],
+        } satisfies GeoSpecModelLoadEvidence,
+      });
+      const result = await runModule(
         [
-          'spec.geospec.ts',
-          `
+          [
+            'spec.geospec.ts',
+            `
       import { it } from 'geospec'; import { loadModel } from 'geospec/model';
       it('direct edits', async () => { await loadModel({ source: 'part.gsm1' }); await loadModel({ source: 'part.gsm1' }); });
     `,
+          ],
         ],
-      ],
-      { nativeAssertions, nativeModelLoader },
-    );
-    expect(result).toMatchObject({
-      success: true,
-      passed: false,
-      lineage: { status: 'mixed', loads: [{ status: 'complete' }, { status: 'complete' }] },
-    });
-  });
+        { nativeAssertions, nativeModelLoader },
+      );
+      expect(result).toMatchObject({
+        success: true,
+        passed: false,
+        lineage: { status: 'mixed', loads: [{ status: 'complete' }, { status: 'complete' }] },
+      });
+    },
+  );
 
   it('should retain registered not-run tests and module identity after execution fails', async () => {
     const result = await runModule([

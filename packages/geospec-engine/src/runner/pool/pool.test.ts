@@ -1027,6 +1027,34 @@ describe('mergeShardResults', () => {
     });
   });
 
+  it('should reject mixed actual resource locators despite equal artifact aliases', () => {
+    const withResource = (sha256: string): GeoSpecRunResult => ({
+      ...passing('one', 0, 2),
+      lineage: {
+        status: 'complete',
+        modules: [],
+        loads: [
+          {
+            loadId: 'resource-load',
+            status: 'complete',
+            evidence: {
+              loadId: 'resource-load',
+              status: 'complete',
+              format: 'gltf',
+              parameters: {},
+              ingestOptions: {},
+              artifacts: [{ name: 'alias.bin', sourcePath: 'textures/data.bin', sha256, byteLength: 1 }],
+            },
+          },
+        ],
+      },
+    });
+    expect(mergeShardResults(withResource('a'.repeat(64)), withResource('b'.repeat(64)))).toMatchObject({
+      passed: false,
+      lineage: { status: 'mixed' },
+    });
+  });
+
   it('should preserve ambiguous overlapping claims without inventing complete discovery', () => {
     const merged = mergeShardResults(passing('one'), passing('also ordinal zero'));
     expect(merged.tests).toHaveLength(2);

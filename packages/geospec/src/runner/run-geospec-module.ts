@@ -470,6 +470,13 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
       const observed = new Map<string, string>(Object.entries(files));
       for (const load of loads) {
         const { evidence } = load;
+        for (const artifact of evidence?.exportOptions === undefined ? (evidence?.artifacts ?? []) : []) {
+          if (artifact.sourcePath !== undefined) {
+            const digest = `sha256:${artifact.sha256}`;
+            consistent &&= !observed.has(artifact.sourcePath) || observed.get(artifact.sourcePath) === digest;
+            observed.set(artifact.sourcePath, digest);
+          }
+        }
         if (evidence?.sourcePath !== undefined && evidence.exportOptions === undefined) {
           const primary = evidence.artifacts[0];
           if (primary !== undefined) {

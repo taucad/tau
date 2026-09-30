@@ -199,6 +199,44 @@ describe('createSerialGeoSpecRunner', () => {
     'second.geospec.ts': passingSpec('second'),
   };
 
+  it('should qualify cross-file resource generations using actual locators, not aliases', async () => {
+    let generation = 0;
+    const spec = `import { it } from 'geospec'; import { loadModel } from 'geospec/model';
+      it('resource', async () => { await loadModel({ source: new Uint8Array([1]), format: 'gltf', resources: [{ name: 'alias.bin', source: 'textures/data.bin' }] }); });`;
+    const runner = createSerialGeoSpecRunner({
+      filesystem: memoryFileSystem({ 'first.geospec.ts': spec, 'second.geospec.ts': spec }),
+      nativeModelLoader: Object.assign(
+        async (): Promise<Awaited<ReturnType<NonNullable<GeoSpecRunnerOptions['nativeModelLoader']>>>> => ({
+          subjectHash: 'a'.repeat(64),
+          load: {
+            loadId: 'resource-load',
+            status: 'complete',
+            format: 'gltf',
+            parameters: {},
+            ingestOptions: {},
+            artifacts: [
+              {
+                name: 'alias.bin',
+                sourcePath: 'textures/data.bin',
+                sha256: (++generation === 1 ? 'b' : 'c').repeat(64),
+                byteLength: 1,
+              },
+            ],
+          },
+        }),
+        {
+          async releaseAll() {
+            /* This fixture retains no native handles. */
+          },
+        },
+      ),
+      nativeAssertions: { engine: mock<NonNullable<GeoSpecRunnerOptions['nativeAssertions']>['engine']>() },
+    });
+    const result = await runner.run({ files: ['first.geospec.ts', 'second.geospec.ts'] });
+    await runner.close();
+    expect(result).toMatchObject({ success: false, failed: 0, lineageStatus: 'mixed' });
+  });
+
   it('should reject duplicate requested files before admission and preserve exact not-run accounting', async () => {
     const runner = createSerialGeoSpecRunner(runnerOptions(twoFiles));
     const starts = vi.fn();

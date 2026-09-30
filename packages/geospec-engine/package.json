@@ -122,6 +122,7 @@
     "@taucad/middleware": "workspace:*",
     "@taucad/occt-core": "workspace:*",
     "@taucad/opencascade": "workspace:*",
+    "@taucad/openrscad": "workspace:*",
     "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/rhino": "workspace:*",
@@ -132,7 +133,6 @@
   },
   "devDependencies": {
     "@libcascade/toolchain": "catalog:",
-    "@taucad/openrscad": "workspace:*",
     "@taucad/tau-examples": "workspace:*",
     "@vitest/browser-playwright": "catalog:",
     "vitest": "catalog:"

@@ -3582,6 +3582,9 @@ importers:
       '@taucad/opencascade':
         specifier: workspace:*
         version: link:../plugins/opencascade
+      '@taucad/openrscad':
+        specifier: workspace:*
+        version: link:../plugins/openrscad
       '@taucad/picovoxel':
         specifier: workspace:*
         version: link:../plugins/picovoxel
@@ -3607,9 +3610,6 @@ importers:
       '@libcascade/toolchain':
         specifier: 'catalog:'
         version: 3.0.2
-      '@taucad/openrscad':
-        specifier: workspace:*
-        version: link:../plugins/openrscad
       '@taucad/tau-examples':
         specifier: workspace:*
         version: link:../../libs/tau-examples

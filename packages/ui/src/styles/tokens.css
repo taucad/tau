@@ -102,6 +102,7 @@
   --popover-foreground: oklch(var(--l-deepest) 0 none);
   --menu-ring: color-mix(in oklch, black 10%, var(--popover));
   --menu-highlight: color-mix(in oklch, var(--neutral) 20%, var(--popover));
+  --selected-indicator: oklch(var(--l-emphasized) 0 none);
   --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 10%, var(--popover));
   --menu-destructive-foreground: color-mix(in oklch, var(--foreground) 5%, var(--destructive));
   --card: oklch(var(--l-base) 0 none);
@@ -567,6 +568,7 @@
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-menu-highlight: var(--menu-highlight);
+  --color-selected-indicator: var(--selected-indicator);
   --color-menu-highlight-destructive: var(--menu-highlight-destructive);
   --color-menu-destructive-foreground: var(--menu-destructive-foreground);
   --color-highlighter: var(--highlighter);

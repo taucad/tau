@@ -95,6 +95,7 @@ function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): Tur
   const settled = useRevisionCard(log?.settlement?.revisionId);
   const placement = log?.placement;
   const baseRevisionId = placement?.baseRevisionId;
+  const status = useRevisionStatus();
   /* The base only names a working or unconfirmed turn, which only the latest turn can be. */
   const baseCard = useRevisionCard(isLatestTurn && log?.settlement === undefined ? baseRevisionId : undefined);
   const recorded = turnSave(useTurnRevision(userMessageId), baseRevisionId);
@@ -115,6 +116,12 @@ function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): Tur
     settled,
     recorded,
     base,
+    hasChanges:
+      isLatestTurn &&
+      status?.dirty === true &&
+      status.checkoutId !== undefined &&
+      status.checkoutId === placement?.checkoutId &&
+      status.headRevisionId === baseRevisionId,
     isUnreachable: isLatestTurn && hasError,
     isReconnecting: isLatestTurn && run?.state === 'reconnecting',
     previous: held,
@@ -207,7 +214,7 @@ function SavedRevisionDetails({
  * One request's revision summary, directly after its user message.
  *
  * A card attached under the user message whose header is the disclosure.
- * Pending, saved and unconfirmed work update this line in place; a confirmed no-change request
+ * Once files change, pending, saved and unconfirmed work update this line in place; a confirmed no-change request
  * renders nothing. Earlier saved requests link to Revisions instead of
  * expanding in the conversation.
  */

@@ -31,6 +31,8 @@ export type TurnRevisionFacts = Readonly<{
   recorded: RevisionCard | undefined;
   /** The starting point attempt 1's placement names. */
   base: TurnRevisionBase | undefined;
+  /** The turn's checkout has file changes after its starting revision. */
+  hasChanges: boolean;
   /**
    * The host cannot be reached.
    *
@@ -83,7 +85,8 @@ const settledState = (
  * Derive one request's revision summary from its newest attempt (§5.8).
  *
  * The settlement row decides; before it, the attempt's terminal row says the save is on its way, and before that the
- * attempt is working. A run the log placed nowhere never settles, so the revision client's record answers for it.
+ * attempt is working once files change. A run the log placed nowhere never settles, so the revision client's record
+ * answers for it.
  *
  * @param facts - The turn's facts.
  * @returns The state the summary renders.
@@ -97,6 +100,12 @@ export const deriveTurnRevisionState = (facts: TurnRevisionFacts): TurnRevisionS
   }
   if (log === undefined || (log.terminal !== undefined && log.placement === undefined)) {
     return facts.recorded === undefined ? hidden : { kind: 'saved', revision: facts.recorded, isInterrupted };
+  }
+  /* A save can clear dirty before its settlement arrives; keep changes already shown visible until it answers. */
+  const hadChanges =
+    facts.previous?.kind === 'working' || facts.previous?.kind === 'saving' || facts.previous?.kind === 'unconfirmed';
+  if (!facts.hasChanges && !hadChanges) {
+    return hidden;
   }
   if (facts.isUnreachable) {
     return { kind: 'unconfirmed', base: facts.base ?? unknownBase };

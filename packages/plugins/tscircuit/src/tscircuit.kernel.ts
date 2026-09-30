@@ -456,8 +456,8 @@ export const tscircuitKernel = defineKernel({
       import('#engine/jsx-runtime.js'),
       import('#engine/core.js'),
     ]);
-    const react = reactModule.default;
-    const jsxRuntime = jsxRuntimeModule.default;
+    const { React: react } = reactModule;
+    const { jsxRuntime } = jsxRuntimeModule;
     const tscircuitCore: Record<string, unknown> = { ...core };
     // `React` as a global lets the bundler's classic JSX transform resolve without an import.
     registerKernelModule(runtime, {

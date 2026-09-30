@@ -19,10 +19,11 @@ export type Link = Readonly<{ components: readonly string[] }>;
 /**
  * A rigid body as authored: the names of the returned shapes that always move together.
  * {@link resolveMechanismComponents} turns it into a {@link Link}.
+ * An optional name union catches spelling mistakes without changing runtime admission.
  *
  * @public
  */
-export type LinkSource = Readonly<{ shapes: readonly string[] }>;
+export type LinkSource<ShapeName extends string = string> = Readonly<{ shapes: readonly ShapeName[] }>;
 
 /**
  * Inclusive travel bounds for one degree of freedom, in mechanism units. Limits are deltas from
@@ -197,10 +198,14 @@ export type Mechanism = Readonly<{
 /**
  * A mechanism as authored next to a model: identical to {@link Mechanism} except that links
  * name the model's returned shapes. Check it with `satisfies MechanismSource`.
+ * Use `MechanismSource<'Base' | 'Lid'>` to restrict those names at compile time;
+ * the default still accepts dynamic strings, and delivery validates actual returned shapes.
  *
  * @public
  */
-export type MechanismSource = Readonly<Omit<Mechanism, 'links'> & { links: Readonly<Record<string, LinkSource>> }>;
+export type MechanismSource<ShapeName extends string = string> = Readonly<
+  Omit<Mechanism, 'links'> & { links: Readonly<Record<string, LinkSource<ShapeName>>> }
+>;
 
 /** The current mechanism schema version. @public */
 export const mechanismSchemaVersion = 1;

@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
 import * as THREE from 'three';
+import { InspectorBase } from 'three/webgpu';
 import { useFrame, useThree } from '@react-three/fiber';
+import type { RendererInstance } from '#components/geometry/graphics/three/renderer.js';
 import { perspectiveVerticalSpan } from '@taucad/camera';
 import type { RenderFrame } from '@taucad/spatial';
 import { toThreeRenderPoint } from '@taucad/three/spatial';
@@ -197,6 +199,19 @@ export type SectionViewTestBridgeApi = Readonly<{
   getGraphicsBackend(): 'webgl' | 'webgpu';
   /** Identity from this viewport's renderer, never a separately created probe context. */
   getRendererIdentity(): Readonly<{ api: 'webgl' | 'webgpu'; name: string; frame: number }>;
+  /** Warmed full R3F frame submission and completion latency, in milliseconds; excludes RAF/vsync. */
+  measureRenderFrames(): Promise<
+    Readonly<{
+      submission: readonly number[];
+      completion: readonly number[];
+      drawCalls: number;
+      triangles: number;
+      revision: string;
+      width: number;
+      height: number;
+      pixelRatio: number;
+    }>
+  >;
   getViewportCanvas(): HTMLCanvasElement;
   /** The durable record this view persists, for revisit-equals-reload assertions (Law 4). */
   getViewSettings(): GraphicsViewSettings | undefined;
@@ -565,6 +580,78 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           api,
           name: debug ? String(context?.getParameter(debug.UNMASKED_RENDERER_WEBGL) ?? '') : '',
           frame: gl.info.render.frame,
+        };
+      },
+      async measureRenderFrames() {
+        const state = get();
+        const renderer = state.gl as RendererInstance;
+        const previousFrameloop = state.frameloop;
+        const previousAutoReset = renderer.info.autoReset;
+        const previousInspector = renderer instanceof THREE.WebGLRenderer ? undefined : renderer.inspector;
+        const previousTimestampTracking =
+          'backend' in renderer ? (Reflect.get(renderer.backend, 'trackTimestamp') as boolean | undefined) : undefined;
+        if (!(renderer instanceof THREE.WebGLRenderer)) {
+          renderer.inspector = new InspectorBase();
+          Reflect.set(renderer.backend, 'trackTimestamp', false);
+        }
+        const submission: number[] = [];
+        const completion: number[] = [];
+        // Three exposes the native device on its backend; its declaration omits the device field.
+        const device =
+          'backend' in renderer
+            ? (Reflect.get(renderer.backend, 'device') as { queue: { onSubmittedWorkDone(): Promise<void> } })
+            : undefined;
+        let drawCalls = 0;
+        let triangles = 0;
+        state.setFrameloop('never');
+        renderer.info.autoReset = false;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- serialize frames so completion covers this frame alone.
+          for (let index = 0; index < 140; index++) {
+            // Three advances its FRAME node cache on RAF; exclude pacing from the measured work.
+            // oxlint-disable-next-line no-await-in-loop -- each sample must render a fresh scene pass.
+            await new Promise<void>((resolve) => {
+              requestAnimationFrame(() => {
+                resolve();
+              });
+            });
+            renderer.info.reset();
+            const startedAt = performance.now();
+            state.advance(startedAt / 1000, false);
+            const submittedAt = performance.now();
+            if (device) {
+              // oxlint-disable-next-line no-await-in-loop -- completion fence for the measured frame.
+              await device.queue.onSubmittedWorkDone();
+            } else if (renderer instanceof THREE.WebGLRenderer) {
+              renderer.getContext().finish();
+            }
+            const completedAt = performance.now();
+            if (index >= 20) {
+              submission.push(submittedAt - startedAt);
+              completion.push(completedAt - startedAt);
+            }
+            drawCalls =
+              'drawCalls' in renderer.info.render ? renderer.info.render.drawCalls : renderer.info.render.calls;
+            triangles = renderer.info.render.triangles;
+          }
+        } finally {
+          renderer.info.autoReset = previousAutoReset;
+          if (!(renderer instanceof THREE.WebGLRenderer) && previousInspector) {
+            renderer.inspector = previousInspector;
+            Reflect.set(renderer.backend, 'trackTimestamp', previousTimestampTracking);
+          }
+          state.setFrameloop(previousFrameloop);
+          state.invalidate();
+        }
+        return {
+          submission,
+          completion,
+          drawCalls,
+          triangles,
+          revision: THREE.REVISION,
+          width: renderer.domElement.width,
+          height: renderer.domElement.height,
+          pixelRatio: renderer.getPixelRatio(),
         };
       },
       getViewportCanvas() {

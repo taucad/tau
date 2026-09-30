@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
 import {
   defaultPrinterPlate,
+  a1MiniPlates,
+  printerHotendForModel,
+  printerPlateModelForMachine,
+  printerPlatesForModel,
   plateForBedType,
   plateModelMatrix,
   x1cPlates,
@@ -49,5 +53,17 @@ describe('plateModelMatrix', () => {
     expect(point.x).toBeCloseTo(100, 6);
     expect(point.y).toBeCloseTo(50, 6);
     expect(point.z).toBeCloseTo(2, 6);
+  });
+});
+
+describe('model-specific hardware', () => {
+  it('should resolve Mini sheets and nozzle independently from X1C', () => {
+    expect(printerPlatesForModel('a1-mini').map(({ id }) => id)).toEqual(['high-temperature', 'textured-pei']);
+    expect(printerPlateModelForMachine(defaultPrinterPlate, 'a1-mini')).toBe(a1MiniPlates[1]?.model);
+    expect(printerPlateModelForMachine(x1cPlates[0]!, 'a1-mini')).toBeUndefined();
+    expect(printerPlateModelForMachine(defaultPrinterPlate, 'x1c')).toBe(defaultPrinterPlate.model);
+    expect(printerPlateModelForMachine(defaultPrinterPlate, 'unknown')).toBeUndefined();
+    expect(printerHotendForModel('a1-mini')?.pathname).toContain('a1-mini-hotend.glb');
+    expect(printerHotendForModel('unknown')).toBeUndefined();
   });
 });

@@ -12,12 +12,12 @@
 
 import { Color, Matrix4 } from 'three';
 import { resolveCoordinateTransform } from '@taucad/spatial';
-import { bambuX1cHotend, bambuX1cPlates } from '@taucad/bambu/plate';
+import { bambuA1MiniHotend, bambuA1MiniPlates, bambuX1cHotend, bambuX1cPlates } from '@taucad/bambu/plate';
 import type { BambuPlateModel } from '@taucad/bambu/plate';
 import { canonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
 import { printerBody } from '#components/printer/printer-colors.constants.js';
 
-/** One X1C build plate id, as Tau's slicers name it. */
+/** One Bambu build plate id, as Tau's slicers name it. */
 export type PrinterPlateId = BambuPlateModel['id'];
 
 /** A build plate the scene can draw. */
@@ -34,17 +34,28 @@ export type PrinterPlateModel = Readonly<{
   model?: URL;
 }>;
 
-/** The four plates Bambu Lab ships for the X1 series, as `@taucad/bambu` models them. */
-export const x1cPlates: readonly PrinterPlateModel[] = bambuX1cPlates.map(
-  ({ id, label, bedTypeNames, surface, model }) => ({
-    id,
-    label,
-    bedTypeNames,
-    color: surface.color,
-    finish: surface.finish,
-    model,
-  }),
-);
+/** Map package descriptors into the viewer's existing surface contract. */
+const viewerPlate = ({ id, label, bedTypeNames, surface, model }: BambuPlateModel): PrinterPlateModel => ({
+  id,
+  label,
+  bedTypeNames,
+  color: surface.color,
+  finish: surface.finish,
+  model,
+});
+
+/** The four X1C plates. */
+export const x1cPlates: readonly PrinterPlateModel[] = bambuX1cPlates.map((plate) => viewerPlate(plate));
+/** Mini has its own outline and two supported surfaces. */
+export const a1MiniPlates: readonly PrinterPlateModel[] = bambuA1MiniPlates.map((plate) => viewerPlate(plate));
+
+/** Only hardware matching the selected model is offered. */
+export const printerPlatesForModel = (model: string | undefined): readonly PrinterPlateModel[] =>
+  model === 'a1-mini' ? a1MiniPlates : model === 'x1c' || model === undefined ? x1cPlates : [];
+
+/** Resolve an asset by both plate kind and printer identity. */
+export const printerPlateModelForMachine = (plate: PrinterPlateModel, model: string | undefined): URL | undefined =>
+  model === undefined ? undefined : printerPlatesForModel(model).find(({ id }) => id === plate.id)?.model;
 
 /**
  * How far the print surface lifts toward white. The plates' true surfaces are near black, so the
@@ -58,6 +69,9 @@ export const liftPlateSurface = (color: Color): Color => color.lerp(plateSurface
 
 /** The X1C hotend tip drawn at the extruding nozzle: its origin is the nozzle tip. */
 export const printerHotendModel: URL = bambuX1cHotend.model;
+/** Installed hotend for one recognized machine; an unknown machine keeps the schematic fallback. */
+export const printerHotendForModel = (model: string | undefined): URL | undefined =>
+  model === 'a1-mini' ? bambuA1MiniHotend.model : model === 'x1c' ? printerHotendModel : undefined;
 
 /** The plate frame: Z up, the printer's front toward -Y, millimetres. */
 const plateFrame = { up: '+z', forward: '-y', metersPerUnit: 0.001 } as const;

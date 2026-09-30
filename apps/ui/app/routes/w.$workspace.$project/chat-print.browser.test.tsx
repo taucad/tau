@@ -123,6 +123,46 @@ afterEach(() => {
 });
 
 describe('Print pane screenshots', () => {
+  it.each(
+    ['Machine', 'Plate', 'Material', 'Process', 'Filament A1'].flatMap((label) => [
+      { label, width: 720, theme: 'light' },
+      { label, width: 480, theme: 'dark' },
+    ]),
+  )(
+    'should overlay the selected $label option at $width in $theme without layout shift',
+    async ({ label, width, theme }) => {
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+      await page.viewport(800, 1200);
+      const container = await mount('studio', width);
+      // Leave room for grouped options above the trigger, avoiding viewport collision repositioning.
+      container.style.paddingTop = '120px';
+      const trigger = screen.getByRole('combobox', { name: label });
+      trigger.scrollIntoView({ block: 'center' });
+      const before = trigger.getBoundingClientRect();
+      const radius = getComputedStyle(trigger).borderRadius;
+      const swatch = trigger.querySelector('[data-slot="material-swatch"]')?.getBoundingClientRect();
+      await page.getByRole('combobox', { name: label }).click();
+      const option = screen.getByRole('option', { selected: true });
+      const after = option.getBoundingClientRect();
+      await page.screenshot({ path: `${outputDirectory}/select-${label.replaceAll(' ', '-')}-${theme}.png` });
+      expect({ x: after.x, y: after.y, width: after.width, height: after.height }).toEqual({
+        x: before.x,
+        y: before.y,
+        width: before.width,
+        height: before.height,
+      });
+      expect(getComputedStyle(option).borderRadius).toBe(radius);
+      expect(trigger.getBoundingClientRect().toJSON()).toEqual(before.toJSON());
+      if (swatch) {
+        expect(option.querySelector('[data-slot="material-swatch"]')?.getBoundingClientRect().toJSON()).toEqual(
+          swatch.toJSON(),
+        );
+      }
+      await page.getByRole('option', { selected: true }).click();
+      expect(screen.getByRole('combobox', { name: label }).getBoundingClientRect().toJSON()).toEqual(before.toJSON());
+    },
+  );
+
   for (const scenario of ['prepare', 'approval', 'busy', 'studio'] as const) {
     for (const [size, width] of Object.entries(widths)) {
       for (const theme of themes) {

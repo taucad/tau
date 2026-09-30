@@ -548,16 +548,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         try
         {
             var extraction = Stopwatch.StartNew();
-            var positions = new float[checked(mesh.nVertexCount() * 3)];
-            for (var index = 0; index < mesh.nVertexCount(); index++) WriteVector(positions, index, mesh.vecVertexAt(index));
-            var indices = new uint[checked(mesh.nTriangleCount() * 3)];
-            for (var index = 0; index < mesh.nTriangleCount(); index++)
-            {
-                var triangle = mesh.oTriangleAt(index);
-                indices[index * 3] = checked((uint)triangle.A);
-                indices[index * 3 + 1] = checked((uint)triangle.B);
-                indices[index * 3 + 2] = checked((uint)triangle.C);
-            }
+            var (positions, indices) = mesh.TauCopyGeometry();
             extraction.Stop();
             meshExtraction += extraction.Elapsed.TotalMilliseconds;
             return new GeometrySnapshot("triangles", positions, indices, null);
@@ -583,45 +574,47 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             if (item.Geometry.Kind == "lines" && authored is not null && MaterialCapture.NeedsCoordinates(authored))
                 throw MaterialCapture.Invalid($"group {item.Group}", "cannot apply texture maps or anisotropy to a PolyLine; use a surface mesh");
             var materialJson = authored is null ? (JsonElement?)null : MaterialCapture.Project(authored, resources);
-            if (materialized.TryGetValue(item.Identity, out var cached) &&
-                cached.Group == item.Group && cached.Matrix == matrix && cached.Material == material && cached.Component.Name == item.Name)
+            if (!materialized.TryGetValue(item.Identity, out var cached) || cached.Matrix != matrix)
             {
-                components.Add(cached.Component with { Material = materialJson });
-                continue;
-            }
-            var positions = TransformPositions(item.Geometry.Positions, matrix);
-            var indices = item.Geometry.Indices;
-            float[]? texCoords = null; float[]? tangents = null;
-            var normals = Array.Empty<float>();
-            if (item.Geometry.Kind == "triangles")
-            {
-                var generation = Stopwatch.StartNew();
-                normals = ModelRunner.VertexNormals(ref positions, ref indices, out var sources);
-                if (authored is not null && MaterialCapture.NeedsCoordinates(authored))
+                var positions = TransformPositions(item.Geometry.Positions, matrix);
+                var indices = item.Geometry.Indices;
+                var normals = Array.Empty<float>();
+                var sources = Array.Empty<int>();
+                if (item.Geometry.Kind == "triangles")
                 {
-                    var modelPositions = RemapVectors(item.Geometry.Positions, sources);
-                    var coordinates = SurfaceCoordinates.Project(modelPositions, indices);
-                    positions = RemapVectors(positions, coordinates.Sources);
-                    normals = RemapVectors(normals, coordinates.Sources);
-                    indices = coordinates.Indices;
-                    (texCoords, tangents) = SurfaceCoordinates.Expand(coordinates, normals, matrix);
+                    var generation = Stopwatch.StartNew();
+                    normals = ModelRunner.VertexNormals(ref positions, ref indices, out sources);
+                    generation.Stop();
+                    normalGeneration += generation.Elapsed.TotalMilliseconds;
                 }
-                generation.Stop();
-                normalGeneration += generation.Elapsed.TotalMilliseconds;
+                var geometry = new ExtractedComponent(item.Id, item.Geometry.Kind, item.Name,
+                    ColorValues(material.Color), material.Metallic, material.Roughness, positions, normals, indices);
+                cached = new MaterializedComponent(matrix, geometry, sources);
+                materialized[item.Identity] = cached;
             }
-            var component = new ExtractedComponent(
-                item.Id,
-                item.Geometry.Kind,
-                item.Name,
-                ColorValues(material.Color),
-                material.Metallic,
-                material.Roughness,
-                positions,
-                normals,
-                indices,
-                materialJson, texCoords, tangents);
-            materialized[item.Identity] = new MaterializedComponent(item.Group, matrix, material, component);
-            components.Add(component);
+            var component = cached.Component;
+            if (item.Geometry.Kind == "triangles" && authored is not null && MaterialCapture.NeedsCoordinates(authored))
+            {
+                if (cached.TexturedComponent is null)
+                {
+                    var modelPositions = RemapVectors(item.Geometry.Positions, cached.Sources);
+                    var coordinates = SurfaceCoordinates.Project(modelPositions, component.Indices);
+                    var normals = RemapVectors(component.Normals, coordinates.Sources);
+                    var (texCoords, tangents) = SurfaceCoordinates.Expand(coordinates, normals, matrix);
+                    cached = cached with { TexturedComponent = component with
+                    {
+                        Positions = RemapVectors(component.Positions, coordinates.Sources),
+                        Normals = normals, Indices = coordinates.Indices, TexCoords = texCoords, Tangents = tangents,
+                    } };
+                    materialized[item.Identity] = cached;
+                }
+                component = cached.TexturedComponent!;
+            }
+            components.Add(component with
+            {
+                Name = item.Name, Color = ColorValues(material.Color), Metallic = material.Metallic,
+                Roughness = material.Roughness, Material = materialJson,
+            });
         }
         return components;
     }
@@ -699,6 +692,6 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         string? Name,
         GeometrySnapshot Geometry,
         Matrix4x4 Matrix);
-    private sealed record MaterializedComponent(int Group, Matrix4x4 Matrix, Material Material, ExtractedComponent Component);
+    private sealed record MaterializedComponent(Matrix4x4 Matrix, ExtractedComponent Component, int[] Sources, ExtractedComponent? TexturedComponent = null);
     private sealed record Material(ColorFloat Color, float Metallic, float Roughness, global::PicoGK.Material? Authored = null);
 }

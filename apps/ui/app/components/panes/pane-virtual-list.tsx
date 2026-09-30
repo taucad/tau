@@ -3,6 +3,7 @@ import type { KeyboardEvent, ReactNode } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { cn } from '@taucad/ui/utils/cn';
+import { paneCollectionItemSpacing, paneSpacingClassName } from '#components/panes/pane-spacing.styles.js';
 
 type PaneListReveal = { readonly key: string; readonly requestId: number; readonly shouldFocus?: boolean };
 const tabbableSelector =
@@ -26,6 +27,7 @@ export function PaneVirtualList<Item>({
   itemContent,
   ariaLabel,
   className,
+  itemSpacing,
   reveal,
   focusSelector = 'button, input, [role=spinbutton]',
   enableKeyboardNavigation = false,
@@ -37,6 +39,8 @@ export function PaneVirtualList<Item>({
   readonly ariaLabel: string;
   /** Virtualized viewport size. Embedded collections default to 16rem; pane bodies use h-full. */
   readonly className?: string;
+  /** Gap between measured rows. Omit for controls that already own their internal row padding. */
+  readonly itemSpacing?: keyof typeof paneCollectionItemSpacing;
   readonly reveal?: PaneListReveal;
   readonly focusSelector?: string;
   readonly enableKeyboardNavigation?: boolean;
@@ -88,6 +92,9 @@ export function PaneVirtualList<Item>({
   }, [enableKeyboardNavigation, focusSelector, keys]);
 
   const settleFocus = useCallback(() => {
+    if (!containerRef.current) {
+      return;
+    }
     if (focusFrame.current !== undefined) {
       cancelAnimationFrame(focusFrame.current);
     }
@@ -194,11 +201,12 @@ export function PaneVirtualList<Item>({
         aria-posinset={index + 1}
         aria-setsize={items.length}
         data-pane-list-key={getItemKey(item)}
+        className={cn(index > 0 && itemSpacing && paneCollectionItemSpacing[itemSpacing])}
       >
         {itemContent(index, item)}
       </div>
     ),
-    [getItemKey, itemContent, items.length],
+    [getItemKey, itemContent, itemSpacing, items.length],
   );
   const computeItemKey = useCallback((_index: number, item: Item) => getItemKey(item), [getItemKey]);
   const handleKeyDown = useCallback(
@@ -277,7 +285,11 @@ export function PaneVirtualList<Item>({
       role='list'
       aria-label={ariaLabel}
       data-slot='pane-virtual-list'
-      className={cn('min-h-0', isVirtual ? (className ?? 'h-64') : cn('overflow-y-auto', className))}
+      className={cn(
+        'min-h-0',
+        paneSpacingClassName,
+        isVirtual ? (className ?? 'h-64') : cn('overflow-y-auto', className),
+      )}
       onKeyDown={handleKeyDown}
       onFocusCapture={(event) => {
         if (event.target.closest('[data-slot=pane-virtual-list]') === event.currentTarget) {

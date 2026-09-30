@@ -312,9 +312,9 @@ describe('KinematicsPanelBody', () => {
     // Inside its group the driver's control is labelled by what it sets.
     expect(screen.getByText('Angle')).toBeInTheDocument();
     const driverRows = within(screen.getByRole('list', { name: 'Joints and drivers' })).getAllByRole('listitem');
-    expect(driverRows[0]?.firstElementChild).not.toHaveClass('pt-1.5');
+    expect(driverRows[0]).not.toHaveClass('pt-(--pane-group-gap)');
     for (const row of driverRows.slice(1)) {
-      expect(row.firstElementChild).toHaveClass('pt-1.5');
+      expect(row).toHaveClass('pt-(--pane-group-gap)');
     }
 
     await openSunFollowers(user);
@@ -961,7 +961,7 @@ describe('large generated kinematics collections', () => {
     await waitFor(() => {
       expect(screen.getByRole('spinbutton', { name: 'vane-1709' })).toHaveFocus();
     });
-    expect(field('vane-1709').closest('[data-slot=kinematics-driver-row]')).toHaveClass('pt-1.5');
+    expect(field('vane-1709').closest('[data-pane-list-key]')).toHaveClass('pt-(--pane-group-gap)');
   });
 
   it('should bound expanded followers and reveal an offscreen follower', async () => {

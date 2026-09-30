@@ -56,6 +56,38 @@ const renderList = (data = rows) =>
   );
 
 describe('PaneVirtualList', () => {
+  it.each(['compact', 'groups'] as const)(
+    'should retain %s gaps across natural and virtual rows',
+    async (itemSpacing) => {
+      const spacing = itemSpacing === 'compact' ? 'pt-(--pane-row-gap)' : 'pt-(--pane-group-gap)';
+      const view = (data: string[]) => (
+        <VirtuosoMockContext.Provider value={mockViewport}>
+          <PaneVirtualList
+            enableKeyboardNavigation
+            data={data}
+            getItemKey={itemKey}
+            itemContent={itemContent}
+            itemSpacing={itemSpacing}
+            ariaLabel='Parts'
+          />
+        </VirtuosoMockContext.Provider>
+      );
+      const { rerender } = render(view(rows.slice(0, 3)));
+      expect(screen.getAllByRole('listitem')[0]).not.toHaveClass(spacing);
+      expect(screen.getAllByRole('listitem')[1]).toHaveClass(spacing);
+      rerender(view(rows));
+      const first = await screen.findByRole('button', { name: 'Part 1' });
+      expect(first.closest('[role=listitem]')).not.toHaveClass(spacing);
+      first.focus();
+      fireEvent.keyDown(first, { key: 'End' });
+      const last = await screen.findByRole('button', { name: 'Part 1709' });
+      expect(last.closest('[role=listitem]')).toHaveClass(spacing);
+      await waitFor(() => {
+        expect(last).toHaveFocus();
+      });
+    },
+  );
+
   it('should bound mounted rows for a 1709-part collection and expose full positions', async () => {
     renderList();
     await screen.findByRole('button', { name: 'Part 1' });
@@ -95,6 +127,7 @@ describe('PaneVirtualList', () => {
     });
     expect(first).toHaveAttribute('tabindex', '-1');
     expect(screen.getAllByRole('listitem')).toHaveLength(3);
+    expect(screen.getAllByRole('listitem')[1]).not.toHaveClass('pt-(--pane-row-gap)', 'pt-(--pane-group-gap)');
   });
   it('should consume a reveal once and preserve subsequent search focus', async () => {
     const reveal = { key: 'Part 1709', requestId: 1 };

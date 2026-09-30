@@ -27,6 +27,7 @@ import { formatDisplayLabel } from '#utils/string.utils.js';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { HighlightText } from '#components/highlight-text.js';
 import { PaneVirtualList } from '#components/panes/pane-virtual-list.js';
+import { paneFieldGroupSpacingClassName } from '#components/panes/pane-spacing.styles.js';
 import { ParameterGroupCard } from '#components/geometry/parameters/parameter-group-card.js';
 import {
   FieldLabelContext,
@@ -197,7 +198,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     }
 
     return (
-      <div data-slot='field-group' className='field-group group/field-group [&+.field-group]:mt-2'>
+      <div data-slot='field-group' className={cn('field-group group/field-group', paneFieldGroupSpacingClassName)}>
         <CompositeFieldTemplate
           id={id}
           formData={formData}
@@ -226,7 +227,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     }
 
     return (
-      <div data-slot='field-group' className='field-group group/field-group [&+.field-group]:mt-2'>
+      <div data-slot='field-group' className={cn('field-group group/field-group', paneFieldGroupSpacingClassName)}>
         {children}
       </div>
     );
@@ -624,7 +625,13 @@ const ParameterArrayList = memo(function ParameterArrayList({
     [title],
   );
   return (
-    <PaneVirtualList data={items} getItemKey={arrayItemKey} itemContent={renderItem} ariaLabel={`Items: ${title}`} />
+    <PaneVirtualList
+      data={items}
+      getItemKey={arrayItemKey}
+      itemContent={renderItem}
+      itemSpacing={items.some((item) => isObjectLikeSchema(item.schema)) ? 'groups' : undefined}
+      ariaLabel={`Items: ${title}`}
+    />
   );
 });
 

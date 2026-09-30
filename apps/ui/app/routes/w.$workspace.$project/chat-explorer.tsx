@@ -429,11 +429,7 @@ function ModelPaneview({
   return (
     <PaneviewReact
       key={paneviewKey}
-      className={cn(
-        paneviewAttachedSurfaceStyleOverrides,
-        // oxlint-disable-next-line tau-lint/no-arbitrary-pixel-size -- Paneview headerSize is a physical pixel API; rem scaling overlays its 40px body.
-        '[&_[data-slot=paneview-header]]:h-[32px]! [&_[data-slot=paneview-header]]:mt-[8px]!',
-      )}
+      className={paneviewAttachedSurfaceStyleOverrides}
       components={paneviewComponents}
       headerComponents={paneviewHeaderComponents}
       onReady={handleReady}
@@ -1049,28 +1045,26 @@ function ComponentRows({
   );
   const renderItem = useCallback(
     (_index: number, node: GeometryComponentNode) => (
-      <div className='pb-0.5'>
-        <ComponentRow
-          manifest={manifest}
-          node={node}
-          query={query}
-          graphicsRef={graphicsRef}
-          unitId={unitId}
-          rootDepth={rootDepth}
-          hoveredComponentId={hoveredComponentId}
-          isSelected={selected.has(node.id)}
-          isHidden={hidden.has(node.id)}
-          isIsolated={isolated.has(node.id)}
-          isFocused={focusedComponentId === node.id}
-          hasHiddenComponents={hidden.size > 0}
-          hasOpacityOverrides={hasOpacityOverrides}
-          opacity={opacityByComponentId[node.id] ?? 1}
-          preview={previews.get(node.id)}
-          onRetryPreview={onRetryPreview}
-          onPreviewDecodeError={onPreviewDecodeError}
-          onPreviewDecoded={onPreviewDecoded}
-        />
-      </div>
+      <ComponentRow
+        manifest={manifest}
+        node={node}
+        query={query}
+        graphicsRef={graphicsRef}
+        unitId={unitId}
+        rootDepth={rootDepth}
+        hoveredComponentId={hoveredComponentId}
+        isSelected={selected.has(node.id)}
+        isHidden={hidden.has(node.id)}
+        isIsolated={isolated.has(node.id)}
+        isFocused={focusedComponentId === node.id}
+        hasHiddenComponents={hidden.size > 0}
+        hasOpacityOverrides={hasOpacityOverrides}
+        opacity={opacityByComponentId[node.id] ?? 1}
+        preview={previews.get(node.id)}
+        onRetryPreview={onRetryPreview}
+        onPreviewDecodeError={onPreviewDecodeError}
+        onPreviewDecoded={onPreviewDecoded}
+      />
     ),
     [
       focusedComponentId,
@@ -1098,6 +1092,7 @@ function ComponentRows({
       getItemKey={componentKey}
       itemContent={renderItem}
       ariaLabel={ariaLabel}
+      itemSpacing='compact'
       className='h-full'
       reveal={reveal}
       focusSelector='[data-model-part-button]'

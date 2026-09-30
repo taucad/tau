@@ -4,15 +4,17 @@ import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
 import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 
 /** @public */
-export const exportModelInputSchema = z.object({
-  targetFile: rootedFilePathSchema.describe('Project-relative CAD source file to export.'),
-  to: z.string().min(1).describe('A declared export ID or unambiguous reachable file extension without a dot.'),
-  options: z
-    .any()
-    .describe('JSON object of options for the chosen export or route.')
-    .pipe(z.record(z.string(), z.json()))
-    .optional(),
-});
+export const exportModelInputSchema = z
+  .object({
+    targetFile: rootedFilePathSchema.describe('Project-relative CAD source file to export.'),
+    to: z.string().min(1).describe('A declared export ID or unambiguous reachable file extension without a dot.'),
+    options: z
+      .any()
+      .describe('JSON object of options for the chosen export or route.')
+      .pipe(z.record(z.string(), z.json()))
+      .optional(),
+  })
+  .strict();
 
 /** @public */
 export const exportModelOutputSchema = z.object({

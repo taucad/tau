@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { on } from 'node:events';
+import { isIP } from 'node:net';
 import { Duplex } from 'node:stream';
 
 import type {
@@ -22,13 +23,15 @@ import type { Quantity } from '@taucad/units/quantity';
 import type { Client as FtpClientConstructor } from 'basic-ftp';
 import type { MqttClient as MqttClientConstructor } from 'mqtt';
 
-import type { BambuCommandResult, BambuStatus } from '#bambu.protocol.js';
+import type { BambuCommandResult, BambuModel, BambuStatus } from '#bambu.protocol.js';
 import {
   bambuExternalSpoolSlot,
   bambuRemoteName,
   bambuStage,
   bambuTopic,
   definedFields,
+  isBambuSerial,
+  parseBambuStill,
   mergeBambuStatus,
   parseBambuCommandPayload,
   parseBambuDiscoveryDatagram,
@@ -36,7 +39,7 @@ import {
   parseBambuVersionPayload,
 } from '#bambu.protocol.js';
 import { prepareBambuArtifact } from '#bambu.archive.js';
-import { bambuX1cManifest } from '#bambu.manifest.js';
+import { bambuA1MiniManifest, bambuX1cManifest } from '#bambu.manifest.js';
 
 type Binding = Readonly<{
   logicalId: string;
@@ -49,14 +52,13 @@ type Submission = Readonly<{
   expectedBedType: string;
   expectedFilamentDiameter: number;
   expectedMaterials: ReadonlyArray<Readonly<{ slot: number; materialId: string }>>;
-  expectedModel: 'X1C';
+  expectedModel: BambuModel;
   expectedNozzleDiameter: number;
   operatorConfirmedBedType?: string;
   flowCalibration: boolean;
   timelapse: boolean;
 }>;
 const serialIdentifier = /^[A-Za-z0-9_-]{1,64}$/u;
-const x1cSerialIdentifier = /^00M[A-Za-z0-9_-]{1,61}$/u;
 const remoteNamePattern = /^tau-[A-Za-z0-9_-]{1,64}\.gcode\.3mf$/u;
 const memberMd5Pattern = /^[0-9a-f]{32}$/u;
 const bambuWireId = (operationId: string): string =>
@@ -122,30 +124,35 @@ const advertisementWindow = 11_000;
 /** Execute one bounded provider discovery pass through the host-owned datagram port.
  * @param input - Qualified provider configuration and cancellation.
  * @param runtime - Host-owned bounded datagram authority.
+ * @param model - Model admitted by this provider.
  * @returns Normalized discovery events.
  */
 export async function* discoverBambuMachines(
   input: MachineDiscoveryInput<Binding>,
   runtime: MachineDiscoveryRuntime,
+  model: BambuModel = 'X1C',
 ): AsyncGenerator<MachineDiscoveryEvent> {
   if (input.configuration.address) {
     const { address } = input.configuration;
-    if (input.configuration.serial && !x1cSerialIdentifier.test(input.configuration.serial)) {
+    if (input.configuration.serial && !isBambuSerial(input.configuration.serial, model)) {
       throw new TypeError('BAMBU_SERIAL_INVALID');
     }
-    if (!/^(?=.{1,253}$)(?!.*[\s/\\?#@])(?:[A-Za-z0-9-]+\.)*[A-Za-z0-9-]+$/u.test(address)) {
+    if (
+      (/^[0-9.]+$/u.test(address) && isIP(address) !== 4) ||
+      !/^(?=.{1,253}$)(?!.*[\s/\\?#@])(?:[A-Za-z0-9-]+\.)*[A-Za-z0-9-]+$/u.test(address)
+    ) {
       throw new TypeError('BAMBU_MANUAL_ADDRESS_INVALID');
     }
     const observedAt = runtime.clock.now();
     yield Object.freeze({
       type: 'found',
       candidate: Object.freeze({
-        id: `bambu:${input.configuration.serial ?? address}`,
+        id: `${model === 'X1C' ? 'bambu' : 'bambu-a1-mini'}:${input.configuration.serial ?? address}`,
         name: input.configuration.logicalId,
         endpoint: Object.freeze({ address, interface: 'manual' }),
         claimedIdentity: Object.freeze({
           serial: input.configuration.serial,
-          model: 'X1C',
+          model,
         }),
         observedAt,
         expiresAt: new Date(Date.parse(observedAt) + 30_000).toISOString(),
@@ -169,6 +176,9 @@ export async function* discoverBambuMachines(
         observedAt,
         expiresAt: new Date(Date.parse(observedAt) + 30_000).toISOString(),
       });
+      if (candidate.claimedIdentity.model !== model) {
+        continue;
+      }
       const type = seen.has(candidate.id) ? 'updated' : 'found';
       seen.add(candidate.id);
       yield Object.freeze({ type, candidate });
@@ -223,6 +233,18 @@ const toDuplex = (stream: MachineNetworkStream): Duplex => {
         callback,
         'BAMBU_MQTT_WRITE_FAILED',
       );
+    },
+    writev(chunks, callback) {
+      // MQTT packet encoding corks one packet. Preserve that batch in one TLS write: Mini's broker drops fragmented CONNECTs.
+      const bytes = Buffer.concat(
+        chunks.map(({ chunk }: { readonly chunk: unknown }) => {
+          if (typeof chunk !== 'string' && !Buffer.isBuffer(chunk)) {
+            throw new TypeError('BAMBU_MQTT_WRITE_INVALID');
+          }
+          return typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+        }),
+      );
+      settle(stream.write(Uint8Array.from(bytes)), callback, 'BAMBU_MQTT_WRITE_FAILED');
     },
     final(callback) {
       settle(close(), callback, 'BAMBU_MQTT_CLOSE_FAILED');
@@ -342,9 +364,82 @@ const openMqttStream = async (
   }
 };
 
+/** Capture one bounded A1 mini JPEG frame over its pinned TLS camera service.
+ * @param input - Admitted connection input.
+ * @param runtime - Host-owned network and secret authority.
+ * @param signal - Cancels this capture independently of the observation session.
+ * @returns The first complete JPEG frame.
+ */
+const captureA1MiniStill = async (
+  input: MachineConnectInput<Binding>,
+  runtime: MachineConnectionRuntime,
+  signal: AbortSignal,
+) => {
+  const accessCode = await resolveAccessCode(input, runtime);
+  if (Buffer.byteLength(accessCode) > 32) {
+    throw new Error('BAMBU_CAMERA_ACCESS_CODE_INVALID');
+  }
+  const trust = input.connection.serviceTrust['camera'];
+  if (trust?.type !== 'pinned') {
+    throw new Error('BAMBU_CAMERA_PIN_REQUIRED');
+  }
+  const captureSignal = AbortSignal.any([signal, input.signal, AbortSignal.timeout(60_000)]);
+  const stream = await runtime.connectStream({
+    endpoint: { address: input.candidate.endpoint.address, port: 6000 },
+    transport: 'tls',
+    trust,
+    connectTimeout: 10_000,
+    idleTimeout: 60_000,
+    maximumReadBytes: maximumCameraBytes + 16,
+    maximumWriteBytes: 80,
+    signal: captureSignal,
+  });
+  try {
+    const auth = Buffer.alloc(80);
+    auth.writeUInt32LE(0x40, 0);
+    auth.writeUInt32LE(0x30_00, 4);
+    auth.write('bblp', 16, 32, 'utf8');
+    auth.write(accessCode, 48, 32, 'utf8');
+    await stream.write(auth);
+    const header = Buffer.alloc(16);
+    let headerBytes = 0;
+    let frame: Uint8Array<ArrayBuffer> | undefined;
+    let frameBytes = 0;
+    for await (const chunk of stream.readable) {
+      captureSignal.throwIfAborted();
+      let offset = 0;
+      if (headerBytes < header.length) {
+        const count = Math.min(header.length - headerBytes, chunk.length);
+        header.set(chunk.subarray(0, count), headerBytes);
+        headerBytes += count;
+        offset = count;
+        if (headerBytes < header.length) {
+          continue;
+        }
+        const length = header.readUInt32LE(0);
+        if (length < 4 || length > maximumCameraBytes) {
+          throw new Error('BAMBU_CAMERA_FRAME_INVALID');
+        }
+        frame = new Uint8Array(length);
+      }
+      if (frame) {
+        const count = Math.min(frame.length - frameBytes, chunk.length - offset);
+        frame.set(chunk.subarray(offset, offset + count), frameBytes);
+        frameBytes += count;
+        if (frameBytes === frame.length) {
+          return parseBambuStill(frame, runtime.clock.now());
+        }
+      }
+    }
+    throw new Error('BAMBU_CAMERA_FRAME_INCOMPLETE');
+  } finally {
+    await stream.close();
+  }
+};
+
 /**
  * An X1C's still: the host captures one frame from the pinned RTSPS camera. Another model's camera needs its own
- * manifest and pin, so it offers none here.
+ * manifest and pin; the A1 mini uses framed JPEG over TLS instead.
  *
  * @param input - Admitted connection input with the camera trust and secret.
  * @param runtime - Host capture authority.
@@ -358,12 +453,18 @@ const bambuStillCapture = (
 ): MachineSession<Submission>['stillCapture'] => {
   const trust = input.connection.serviceTrust['camera'];
   const { captureNetworkStill } = runtime;
-  if (trust?.type !== 'pinned' || model !== 'X1C' || !captureNetworkStill) {
+  if (trust?.type !== 'pinned' || (model !== 'A1 mini' && (model !== 'X1C' || !captureNetworkStill))) {
     return Object.freeze({ type: 'unsupported' });
   }
   return Object.freeze({
     type: 'supported',
     async capture(captureInput: Readonly<{ signal: AbortSignal }>) {
+      if (model === 'A1 mini') {
+        return captureA1MiniStill(input, runtime, captureInput.signal);
+      }
+      if (!captureNetworkStill) {
+        throw new Error('BAMBU_CAMERA_UNSUPPORTED');
+      }
       return captureNetworkStill({
         endpoint: {
           address: input.candidate.endpoint.address,
@@ -384,15 +485,18 @@ const bambuStillCapture = (
 /** Connect one host-owned, pinned MQTTS observation session.
  * @param input - Admitted connection input.
  * @param runtime - Host-owned secret, clock, log and bounded network services.
+ * @param model - Model and hardware manifest selected by the provider.
  * @returns One live machine session. The simulator is a separate provider (`bambuSimulatorMachine`).
  */
 export const connectBambuMachine = async (
   input: MachineConnectInput<Binding>,
   runtime: MachineConnectionRuntime,
+  model: BambuModel = 'X1C',
 ): Promise<MachineSession<Submission>> => {
+  const manifest = model === 'X1C' ? bambuX1cManifest : bambuA1MiniManifest;
   if (input.candidate.endpoint.address !== 'simulator.invalid') {
     const serial = input.candidate.claimedIdentity.serial ?? input.configuration.serial;
-    if (!serial || !x1cSerialIdentifier.test(serial)) {
+    if (!serial || !isBambuSerial(serial, model)) {
       throw new TypeError('BAMBU_SERIAL_REQUIRED');
     }
     const trust = input.connection.serviceTrust['mqtt'];
@@ -434,6 +538,7 @@ export const connectBambuMachine = async (
     let status: ReturnType<typeof parseBambuStatusPayload> | undefined;
     let statusObservedAt: string | undefined;
     let versionSerial: string | undefined;
+    let versionModel: string | undefined;
     const snapshot = (): MachineSnapshot => {
       const state = status ? mapRunState(status.runState) : 'unknown';
       const active = state === 'paused' || state === 'preparing' || state === 'printing' || state === 'finishing';
@@ -468,19 +573,19 @@ export const connectBambuMachine = async (
           nozzleTarget: facts.nozzleTargetTemperature,
           bed: facts.bedTemperature,
           bedTarget: facts.bedTargetTemperature,
-          chamber: facts.chamberTemperature,
+          chamber: model === 'X1C' ? facts.chamberTemperature : undefined,
         }),
         fans: definedFields({
           part: facts.partFanPercent,
-          auxiliary: facts.auxiliaryFanPercent,
-          chamber: facts.chamberFanPercent,
+          auxiliary: model === 'X1C' ? facts.auxiliaryFanPercent : undefined,
+          chamber: model === 'X1C' ? facts.chamberFanPercent : undefined,
         }),
         materialSystem: Object.freeze({
           ...definedFields({ currentSlot: facts.currentMaterialSlot, targetSlot: facts.targetMaterialSlot }),
           units: facts.materialUnits ?? [],
         }),
         network: definedFields({ wifiSignalDbm: facts.wifiSignalDbm }),
-        lights: definedFields({ chamber: facts.chamberLight }),
+        lights: definedFields({ chamber: model === 'X1C' ? facts.chamberLight : undefined }),
         ...definedFields({ removableStorage: facts.removableStorage, alerts: facts.alerts }),
       });
     };
@@ -492,6 +597,7 @@ export const connectBambuMachine = async (
         const version = parseBambuVersionPayload(Uint8Array.from(message));
         firmware = version.firmware;
         versionSerial = version.serial;
+        versionModel = version.model;
         updates.dispatchEvent(new Event('facts'));
         return;
       } catch {
@@ -580,7 +686,13 @@ export const connectBambuMachine = async (
         });
       }
       input.signal.throwIfAborted();
-      if (!status || !firmware || versionSerial !== serial) {
+      if (
+        !status ||
+        !firmware ||
+        versionSerial !== serial ||
+        (versionModel !== undefined && versionModel !== model) ||
+        (status.model !== undefined && status.model !== model)
+      ) {
         throw new Error('BAMBU_INITIAL_FACTS_INVALID');
       }
     } catch {
@@ -722,7 +834,7 @@ export const connectBambuMachine = async (
           id: serial,
           name: input.candidate.name,
           vendor: 'Bambu Lab',
-          model: status?.model ?? input.candidate.claimedIdentity.model ?? 'X1C',
+          model,
           technology: 'additive.fff',
           firmware: firmware ?? status?.firmware ?? 'unknown',
           accepts: [
@@ -749,15 +861,15 @@ export const connectBambuMachine = async (
             ...(stillCapture.type === 'supported' ? ['still'] : []),
           ],
           ratedEnvelope: {
-            width: 0.256,
-            depth: 0.256,
-            height: 0.256,
+            width: manifest.geometry.buildVolume.x / 1000,
+            depth: manifest.geometry.buildVolume.y / 1000,
+            height: manifest.geometry.buildVolume.z / 1000,
             unit: 'm',
           },
           printableEnvelope: {
-            width: 0.256,
-            depth: 0.256,
-            height: 0.256,
+            width: manifest.geometry.buildVolume.x / 1000,
+            depth: manifest.geometry.buildVolume.y / 1000,
+            height: manifest.geometry.buildVolume.z / 1000,
             unit: 'm',
           },
           tools: [
@@ -767,8 +879,8 @@ export const connectBambuMachine = async (
               ...(status?.nozzleDiameter ? { nozzleDiameter: status.nozzleDiameter } : {}),
             },
           ],
-          materialSystem: { kind: 'ams', slotCount: 16 },
-          bedTypes: bambuX1cManifest.bed.plates.map(({ id }) => id),
+          materialSystem: { kind: model === 'X1C' ? 'ams' : 'ams-lite', slotCount: model === 'X1C' ? 16 : 4 },
+          bedTypes: manifest.bed.plates.map(({ id }) => id),
         };
         return Object.freeze(descriptor);
       },
@@ -996,7 +1108,7 @@ export const connectBambuMachine = async (
               bed_leveling: configuration.bedLeveling,
               auto_bed_leveling: configuration.bedLeveling ? 1 : 0,
               vibration_cali: true,
-              layer_inspect: true,
+              layer_inspect: model === 'X1C',
               nozzle_offset_cali: 0,
               bed_type: 'auto',
               use_ams: configuration.amsMapping.length > 0 && !external,

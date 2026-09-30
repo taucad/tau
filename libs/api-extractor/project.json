@@ -112,8 +112,9 @@
       "cache": true,
       "inputs": [
         "{projectRoot}/src/extract-picovoxel-types.ts",
-        "{projectRoot}/src/emit-package-declarations.ts",
         "{workspaceRoot}/packages/plugins/picovoxel/src/model.ts",
+        "{workspaceRoot}/packages/core/geometry/src/utils/glb-material.ts",
+        "{workspaceRoot}/libs/types/src/types/json-value.types.ts",
         "{workspaceRoot}/pnpm-lock.yaml",
         "sharedGlobals"
       ],

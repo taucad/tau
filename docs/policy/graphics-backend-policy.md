@@ -3,7 +3,7 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, and backend evidence'
 status: active
 created: '2026-05-07'
-updated: '2026-09-27'
+updated: '2026-10-01'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -17,13 +17,13 @@ related:
 
 # Graphics Backend Policy
 
-Tau maintains WebGL and WebGPU Three.js paths in `apps/ui`. WebGL is the public interactive baseline; WebGPU is an internal validation path until a separate readiness decision changes that status.
+Tau maintains WebGL and WebGPU Three.js paths in `apps/ui`. WebGL is the default interactive baseline. The default-off `webGpu` feature flag enables experimental WebGPU viewers when an adapter is available; this opt-in does not establish default-backend readiness.
 
 ## Rules
 
 ### 1. Resolve the backend once
 
-Consume `resolvedGraphicsBackend` from `apps/ui/app/components/geometry/graphics/graphics-backend.ts`. Normalize persisted public settings to WebGL. The internal `?graphicsBackend=` override is for manual and e2e evidence, not a public selector.
+Resolve interactive viewers through `resolveViewerGraphicsBackend` in `apps/ui/app/components/geometry/graphics/graphics-backend.ts`: the `webGpu` feature flag requests WebGPU only when an adapter is available, otherwise WebGL. Keep persisted per-view preferences normalized to WebGL; the experimental flag is the public opt-in. The internal `?graphicsBackend=` override takes precedence for manual and e2e evidence.
 
 Key `ThreeCanvasInstance` by backend as `ThreeProvider` does. A backend switch must recreate renderer-owned state rather than reusing an incompatible canvas, material graph, controls instance, or post-processing pipeline.
 

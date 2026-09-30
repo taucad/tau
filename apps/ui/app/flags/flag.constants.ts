@@ -32,6 +32,11 @@ export const flagRegistry = {
     label: 'Parts warehouse',
     description: 'Browse and remix reusable parametric parts.',
   },
+  webGpu: {
+    schema: z.boolean().default(false),
+    label: 'WebGPU rendering',
+    description: 'Use the experimental WebGPU renderer when supported. Turn off to return to WebGL.',
+  },
   planMode: {
     schema: z.boolean().default(false),
     label: 'Planning Mode',

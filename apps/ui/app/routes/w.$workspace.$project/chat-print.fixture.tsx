@@ -142,6 +142,8 @@ type ProjectSeam = Readonly<{
   projectId: string;
   geometryUnits: Map<string, typeof cadActor>;
   mainEntryPath: string;
+  viewRecords: Record<string, { entryPath: string }>;
+  entriesRecord: { entries: Record<string, { renderTimeout?: number }> };
   editorRef: {
     send: typeof mockEditorSend;
     getSnapshot: () => {
@@ -187,6 +189,8 @@ export const projectMock = {
     projectId,
     geometryUnits,
     mainEntryPath: 'main.ts',
+    viewRecords: viewSettings,
+    entriesRecord: { entries: {} },
     editorRef,
     projectRef,
   }),

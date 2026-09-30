@@ -301,12 +301,13 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'PicoGK C# authoring',
     title: 'PicoGK C# authoring',
     description:
-      'Guides PicoGK C# geometry, named parts and animated mechanisms. Use for PicoGK models, part identification or moving-part requests in Tau Desktop.',
-    whenToUse: 'Use for PicoGK C# models, named parts and moving mechanisms in Tau Desktop.',
+      'Guides PicoGK C# geometry, PBR materials, textures, named parts and mechanisms. Use for PicoGK modeling, appearance or moving-part requests in Tau Desktop.',
+    whenToUse:
+      'Use for PicoGK C# models, physical materials, textures, named parts and moving mechanisms in Tau Desktop.',
     corpus: committedCorpus('picogk/picogk.corpus.json'),
     // C# namespaces: `PicoGK`, `PicoGK.Shapes`, `System.Numerics`.
     groupBy: (entry) => entry.path ?? 'other',
-    authoredReferences: ['kinematics-reference.md'],
+    authoredReferences: ['kinematics-reference.md', 'materials-reference.md'],
   },
   {
     slug: 'cad-picovoxel',
@@ -314,10 +315,11 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'PicoVoxel authoring',
     title: 'PicoVoxel authoring',
     description:
-      'Guides PicoVoxel voxel, SDF and lattice CAD in main.ts. Use when creating or editing TypeScript models that import picovoxel.',
-    whenToUse: 'Use when creating or editing TypeScript models that import picovoxel.',
+      'Guides PicoVoxel voxel, SDF and lattice CAD, named parts and PBR materials. Use for TypeScript PicoVoxel geometry, appearance or texture authoring.',
+    whenToUse: 'Use for TypeScript PicoVoxel models, named parts, physical materials and textures.',
     corpus: bundledTypescriptCorpus('picovoxel/picovoxel.bundled.json', 'picovoxel', 'packages/plugins/picovoxel'),
     groupBy: byKind,
+    authoredReferences: ['materials-reference.md'],
   },
   {
     slug: 'cad-openscad',

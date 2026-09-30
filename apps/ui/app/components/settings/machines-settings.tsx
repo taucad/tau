@@ -37,6 +37,7 @@ import { printersInUseElsewhere, useMachineDirectory, useMachinesFacet } from '#
 
 const simulatorProviderId = 'bambu-simulator';
 const bambuProviderId = 'bambu';
+const miniProviderId = 'bambu-a1-mini';
 /* The display name; the host slugs it to the id `simulated-x1c` (blueprint D3), which names its folder. */
 const simulatorName = 'Simulated X1C';
 
@@ -65,6 +66,15 @@ const refusals: ReadonlyMap<string, string | undefined> = new Map([
   [
     'MACHINE_CREDENTIAL_TRUST_CHANGED',
     "The printer's certificate changed since the code was saved. Enter the access code to bind it again.",
+  ],
+  ['BAMBU_MANUAL_ADDRESS_INVALID', 'Enter a valid IP address or printer hostname.'],
+  [
+    'BAMBU_SERIAL_INVALID',
+    'The serial does not match the selected printer model. Check Printer details or find it on the network.',
+  ],
+  [
+    'BAMBU_SERIAL_REQUIRED',
+    'Open Printer details and enter the serial, or find the printer on the network to fill it automatically.',
   ],
   ['MACHINE_BINDING_BUSY', "Resolve this printer's pending print requests first."],
   ['MACHINE_CREDENTIAL_SAVE_FAILED', 'Tau could not save the access code to your Keychain.'],
@@ -161,27 +171,33 @@ const bind = async (client: MachineClient, input: BindInput): Promise<MachineBin
  * two advertisement periods). Nothing is sent to a printer: discovery only hears broadcasts.
  *
  * @param client - This computer's machines facet.
+ * @param providerIds - Physical Bambu models offered by this host.
  * @param onHeard - Every distinct candidate so far, each time a new one is heard.
  * @returns Every distinct candidate heard, latest advertisement winning.
  */
 const findOnNetwork = async (
   client: MachineClient,
+  providerIds: readonly string[],
   onHeard: (candidates: readonly MachineCandidate[]) => void,
 ): Promise<readonly MachineCandidate[]> => {
   const found = new Map<string, MachineCandidate>();
-  for await (const frame of client.discover({
-    providerId: bambuProviderId,
-    configuration: { logicalId: 'discovery' },
-    signal: AbortSignal.timeout(20_000),
-  })) {
-    if (frame.type === 'found' || frame.type === 'updated') {
-      const isNew = !found.has(frame.candidate.id);
-      found.set(frame.candidate.id, frame.candidate);
-      if (isNew) {
-        onHeard([...found.values()]);
+  await Promise.all(
+    providerIds.map(async (providerId) => {
+      for await (const frame of client.discover({
+        providerId,
+        configuration: { logicalId: 'discovery' },
+        signal: AbortSignal.timeout(20_000),
+      })) {
+        if (frame.type === 'found' || frame.type === 'updated') {
+          const isNew = !found.has(frame.candidate.id);
+          found.set(frame.candidate.id, frame.candidate);
+          if (isNew) {
+            onHeard([...found.values()]);
+          }
+        }
       }
-    }
-  }
+    }),
+  );
   return [...found.values()];
 };
 
@@ -321,6 +337,8 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
   /* The host holds a code for the picked printer and the person has not chosen to type another; never the code. */
   const [isCodeSaved, setIsCodeSaved] = useState(false);
   const [simulatorFields, setSimulatorFields] = useState<Record<string, unknown>>({});
+  const [selectedProviderId, setSelectedProviderId] = useState(bambuProviderId);
+  const [isBinding, setIsBinding] = useState(false);
   const [bindFields, setBindFields] = useState<Record<string, unknown>>({});
   const [candidates, setCandidates] = useState<readonly MachineCandidate[]>();
   const bindForm = useRef<HTMLFormElement>(null);
@@ -331,7 +349,8 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     [directory.providers],
   );
   const simulator = providers.get(simulatorProviderId);
-  const bambu = providers.get(bambuProviderId);
+  const bambu = providers.get(selectedProviderId);
+  const physicalProviders = directory.providers.filter(({ id }) => id === bambuProviderId || id === miniProviderId);
 
   /** Bind and say how it went; `true` when the host answered with an outcome rather than a refusal. */
   const run = async (name: string, input: BindInput): Promise<boolean> => {
@@ -377,7 +396,13 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     /* Rendered now, so whichever control comes next exists to take focus. */
     flushSync(() => {
       setIsCodeSaved(isSaved);
+      setSelectedProviderId(candidate.claimedIdentity.model === 'A1 mini' ? miniProviderId : bambuProviderId);
+      setIsBinding(true);
     });
+    const codeField = formInput('accessCode');
+    if (codeField) {
+      codeField.value = '';
+    }
     setBindFields({
       logicalId: candidate.name.slice(0, 64),
       address: candidate.endpoint.address,
@@ -398,14 +423,15 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     setCandidates(undefined);
     setStatus('Listening for printers on this network…');
     try {
-      // The first printer heard fills the form at once; the pass keeps listening for others.
-      const heard = await findOnNetwork(client, (sofar) => {
-        setCandidates(sofar);
-        setStatus(listeningForMore);
-        if (sofar.length === 1 && sofar[0]) {
-          pick(sofar[0]);
-        }
-      });
+      // Advertisements never overwrite the printer the operator is configuring.
+      const heard = await findOnNetwork(
+        client,
+        physicalProviders.map(({ id }) => id),
+        (sofar) => {
+          setCandidates(sofar);
+          setStatus(listeningForMore);
+        },
+      );
       setCandidates(heard);
       // A bind finished meanwhile keeps its own message.
       setStatus((current) =>
@@ -431,7 +457,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
       return typeof value === 'string' ? value.trim() : '';
     };
     const input = {
-      providerId: bambuProviderId,
+      providerId: selectedProviderId,
       name: field('logicalId'),
       address: field('address'),
       serial: field('serial'),
@@ -451,6 +477,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
       form.reset();
       setBindFields({});
       setIsCodeSaved(false);
+      setIsBinding(false);
     }
   };
 
@@ -481,109 +508,205 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
           {directory.error}
         </p>
       )}
-      <section aria-labelledby='machines-simulator-title' className='flex flex-col gap-2 border-t pt-4'>
-        <h3 id='machines-simulator-title' className='text-sm font-medium'>
-          Simulated X1C
+      <section aria-labelledby='machines-add-title' className='flex flex-col gap-2 border-t pt-4'>
+        <h3 id='machines-add-title' className='text-sm font-medium'>
+          Add a printer
         </h3>
-        <p className='text-xs text-muted-foreground'>
-          A dry-run printer with no hardware, address or code. Its settings only change the simulation; they are not
-          printer settings.
-        </p>
-        {simulator === undefined ? null : (
-          <ConfigurationFields
-            providerId={simulator.id}
-            name='binding'
-            configuration={simulator.bindingConfiguration}
-            values={simulatorFields}
-            omit={flowFilledFields}
-            onChange={setSimulatorFields}
-          />
-        )}
-        <div>
-          <Button
-            size='sm'
-            variant='outline'
-            disabled={busy || simulator === undefined}
-            onClick={async () =>
-              run(simulatorName, { providerId: simulatorProviderId, name: simulatorName, fields: simulatorFields })
-            }
-          >
-            Add simulated X1C
-          </Button>
-        </div>
-      </section>
-      <form
-        ref={bindForm}
-        className='grid gap-3 border-t pt-4 lg:grid-cols-2'
-        aria-labelledby='machines-bind-title'
-        onSubmit={onBindSubmit}
-      >
-        <h3 id='machines-bind-title' className='text-sm font-medium lg:col-span-2'>
-          Bind a Bambu Lab X1C
-        </h3>
-        <div className='flex flex-wrap items-center gap-2 lg:col-span-2'>
+        <div className='flex flex-wrap gap-2'>
           <Button
             type='button'
             size='sm'
             variant='outline'
-            disabled={busy || finding || !providers.has(bambuProviderId)}
+            className='h-auto min-h-8 max-w-full whitespace-normal'
+            disabled={busy || finding || physicalProviders.length === 0}
             onClick={onFind}
           >
-            Find on network
+            {finding ? <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' /> : null}Find on
+            network
           </Button>
-          {candidates !== undefined && candidates.length > 1
-            ? candidates.map((candidate) => (
-                <Button
-                  key={candidate.id}
-                  type='button'
-                  size='sm'
-                  variant='ghost'
-                  onClick={() => {
-                    pick(candidate);
-                  }}
-                >
-                  {candidate.name} · {candidate.endpoint.address}
+          <Button
+            type='button'
+            size='sm'
+            variant='ghost'
+            className='h-auto min-h-8 max-w-full whitespace-normal'
+            disabled={busy || physicalProviders.length === 0}
+            onClick={() => {
+              setIsBinding(true);
+              setBindFields({});
+              setIsCodeSaved(false);
+            }}
+          >
+            Enter address
+          </Button>
+        </div>
+        {candidates?.map((candidate) => {
+          const existing = entries.some((entry) => entry.descriptor.id === candidate.claimedIdentity.serial);
+          return (
+            <Button
+              key={candidate.id}
+              type='button'
+              variant='outline'
+              className='h-auto min-h-9 max-w-full justify-start text-left whitespace-normal'
+              disabled={busy || existing}
+              onClick={() => {
+                pick(candidate);
+              }}
+            >
+              <span className='flex flex-wrap items-baseline gap-x-2'>
+                <span>{candidate.name}</span>
+                <span className='text-xs text-muted-foreground'>
+                  {candidate.claimedIdentity.model} · {candidate.endpoint.address}
+                  {existing ? ' · Already added' : ''}
+                </span>
+              </span>
+            </Button>
+          );
+        })}
+      </section>
+      {isBinding ? (
+        <form
+          ref={bindForm}
+          className='grid gap-3 border-t pt-4 lg:grid-cols-2'
+          aria-labelledby='machines-bind-title'
+          onSubmit={onBindSubmit}
+        >
+          <h3 id='machines-bind-title' className='text-sm font-medium lg:col-span-2'>
+            Connect a Bambu Lab printer
+          </h3>
+          <div className='grid gap-1.5 lg:col-span-2'>
+            <Label htmlFor='machines-bind-model'>Printer model</Label>
+            <select
+              id='machines-bind-model'
+              className='min-h-8 rounded-md border bg-background px-2 text-sm'
+              value={selectedProviderId}
+              onChange={(event) => {
+                setSelectedProviderId(event.target.value);
+                setBindFields((current) => ({ ...current, serial: '' }));
+                setIsCodeSaved(false);
+                const codeField = formInput('accessCode');
+                if (codeField) {
+                  codeField.value = '';
+                }
+              }}
+            >
+              {physicalProviders.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.manifest.identity.displayName}
+                </option>
+              ))}
+            </select>
+          </div>
+          {bambu ? (
+            <div className='min-w-0 lg:col-span-2' role='group' aria-label='Printer binding fields'>
+              <ConfigurationFields
+                providerId={selectedProviderId}
+                name='binding'
+                configuration={bambu.bindingConfiguration}
+                values={bindFields}
+                omit={['serial']}
+                titles={bindTitles}
+                presentation='embedded'
+                onChange={setBindFields}
+              />
+            </div>
+          ) : null}
+          {bambu ? (
+            <Collapsible className='lg:col-span-2'>
+              <CollapsibleTrigger className='flex min-h-8 items-center gap-2 text-xs text-muted-foreground'>
+                Printer details
+                <ChevronDown aria-hidden className='size-3.5' />
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <ConfigurationFields
+                  providerId={selectedProviderId}
+                  name='binding'
+                  configuration={bambu.bindingConfiguration}
+                  values={bindFields}
+                  omit={['logicalId', 'address']}
+                  titles={bindTitles}
+                  presentation='embedded'
+                  onChange={setBindFields}
+                />
+              </CollapsibleContent>
+            </Collapsible>
+          ) : null}
+          {isCodeSaved ? (
+            <div role='group' aria-labelledby='machines-bind-access-code-label' className='grid gap-1.5'>
+              <p id='machines-bind-access-code-label' className='text-sm leading-none font-medium'>
+                Access code
+              </p>
+              <p className='flex min-h-8 flex-wrap items-center gap-2 text-sm'>
+                Saved in your Keychain
+                <Button type='button' size='xs' variant='outline' onClick={enterDifferentCode}>
+                  Use a different code
                 </Button>
-              ))
-            : null}
-        </div>
-        {bambu ? (
-          <div className='min-w-0 lg:col-span-2' role='group' aria-label='Printer binding fields'>
-            <ConfigurationFields
-              providerId={bambuProviderId}
-              name='binding'
-              configuration={bambu.bindingConfiguration}
-              values={bindFields}
-              titles={bindTitles}
-              presentation='embedded'
-              onChange={setBindFields}
-            />
+              </p>
+            </div>
+          ) : (
+            <div className='grid gap-1.5'>
+              <Label htmlFor='machines-bind-access-code'>Access code</Label>
+              <PasswordInput id='machines-bind-access-code' name='accessCode' maxLength={64} autoComplete='off' />
+            </div>
+          )}
+          <div className='lg:col-span-2'>
+            <Button ref={bindButton} type='submit' size='sm' disabled={busy || bambu === undefined}>
+              {busy ? 'Connecting…' : 'Bind'}
+            </Button>
+            <Button
+              type='button'
+              size='sm'
+              variant='ghost'
+              disabled={busy}
+              onClick={() => {
+                setIsBinding(false);
+                setBindFields({});
+                setIsCodeSaved(false);
+              }}
+            >
+              Cancel
+            </Button>
           </div>
-        ) : null}
-        {isCodeSaved ? (
-          <div role='group' aria-labelledby='machines-bind-access-code-label' className='grid gap-1.5'>
-            <p id='machines-bind-access-code-label' className='text-sm leading-none font-medium'>
-              Access code
+        </form>
+      ) : null}
+      <Collapsible>
+        <section aria-labelledby='machines-simulator-title' className='flex flex-col gap-2 border-t pt-4'>
+          <h3 id='machines-simulator-title' className='text-sm font-medium'>
+            <CollapsibleTrigger className='flex min-h-8 w-full items-center justify-between text-left'>
+              Simulated X1C
+              <ChevronDown aria-hidden className='size-4' />
+            </CollapsibleTrigger>
+          </h3>
+          <CollapsibleContent className='flex flex-col gap-2'>
+            <p className='text-xs text-muted-foreground'>
+              A dry-run printer with no hardware, address or code. Its settings only change the simulation; they are not
+              printer settings.
             </p>
-            <p className='flex min-h-8 flex-wrap items-center gap-2 text-sm'>
-              Saved in your Keychain
-              <Button type='button' size='xs' variant='outline' onClick={enterDifferentCode}>
-                Use a different code
+            {simulator === undefined ? null : (
+              <ConfigurationFields
+                providerId={simulator.id}
+                name='binding'
+                configuration={simulator.bindingConfiguration}
+                values={simulatorFields}
+                omit={flowFilledFields}
+                onChange={setSimulatorFields}
+              />
+            )}
+            <div>
+              <Button
+                size='sm'
+                variant='outline'
+                disabled={busy || simulator === undefined}
+                onClick={async () =>
+                  run(simulatorName, { providerId: simulatorProviderId, name: simulatorName, fields: simulatorFields })
+                }
+              >
+                Add simulated X1C
               </Button>
-            </p>
-          </div>
-        ) : (
-          <div className='grid gap-1.5'>
-            <Label htmlFor='machines-bind-access-code'>Access code</Label>
-            <PasswordInput id='machines-bind-access-code' name='accessCode' maxLength={64} autoComplete='off' />
-          </div>
-        )}
-        <div className='lg:col-span-2'>
-          <Button ref={bindButton} type='submit' size='sm' disabled={busy || !providers.has(bambuProviderId)}>
-            Bind
-          </Button>
-        </div>
-      </form>
+            </div>
+          </CollapsibleContent>
+        </section>
+      </Collapsible>
+
       <p role='status' aria-live='polite' className='text-xs text-muted-foreground'>
         {status}
       </p>

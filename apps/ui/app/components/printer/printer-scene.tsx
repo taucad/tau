@@ -18,13 +18,19 @@ import {
   framePrinterCamera,
   partBounds,
   plateOffsetForHeight,
+  plateOffsetForY,
   printerCameraFov,
   toolheadLiftForHeight,
 } from '#components/printer/printer-geometry.js';
 import type { PrinterBounds, PrinterBox, PrinterGeometry, PrinterPanel } from '#components/printer/printer-geometry.js';
 import { eventValueAt } from '#components/printer/printer-playback.js';
 import type { PlaybackStore } from '#components/printer/printer-playback.js';
-import { liftPlateSurface, plateModelMatrix, printerHotendModel } from '#components/printer/printer-plates.js';
+import {
+  liftPlateSurface,
+  plateModelMatrix,
+  printerHotendForModel,
+  printerPlateModelForMachine,
+} from '#components/printer/printer-plates.js';
 import type { PrinterPlateModel } from '#components/printer/printer-plates.js';
 import {
   createToolpathPalette,
@@ -457,7 +463,9 @@ function PrinterHotendModel({
   toolhead,
   standIn,
   nozzleMaterial,
+  model,
 }: Readonly<{
+  model: URL;
   toolhead: THREE.Group;
   standIn: THREE.Group;
   nozzleMaterial: THREE.MeshStandardMaterial;
@@ -469,7 +477,7 @@ function PrinterHotendModel({
     let isActive = true;
     const load = async (): Promise<void> => {
       try {
-        const gltf = await gltfLoader.loadAsync(printerHotendModel.href);
+        const gltf = await gltfLoader.loadAsync(model.href);
         scene = gltf.scene;
       } catch {
         return;
@@ -499,7 +507,7 @@ function PrinterHotendModel({
       }
       standIn.visible = true;
     };
-  }, [invalidate, nozzleMaterial, standIn, toolhead]);
+  }, [invalidate, model, nozzleMaterial, standIn, toolhead]);
   return undefined;
 }
 
@@ -524,7 +532,7 @@ function PrinterPlateSurface({
     [flat],
   );
   useEffect(() => {
-    const url = geometry.model === 'x1c' ? plate.model : undefined;
+    const url = printerPlateModelForMachine(plate, geometry.model);
     if (!url) {
       return;
     }
@@ -643,11 +651,13 @@ function PrinterObjects({
       }
     }
     // With only the plate drawn, the plate stays put and the nozzle climbs with the print.
+    const bedY = isWholePrinter ? plateOffsetForY(geometry, head.y) : 0;
+    machine.plateGroup.position.y = bedY;
     machine.plateGroup.position.z = isWholePrinter ? plateOffsetForHeight(geometry, head.z) : 0;
     const headZ = isWholePrinter ? toolheadLiftForHeight(geometry, head.z) : head.z;
-    machine.toolhead.position.set(head.x, head.y, headZ);
+    machine.toolhead.position.set(head.x, head.y + bedY, headZ);
     if (machine.beam) {
-      machine.beam.position.y = head.y;
+      machine.beam.position.y = head.y + bedY;
       machine.beam.position.z = geometry.gantry.beamZ + headZ;
     }
     const target = liveNozzleTarget ?? eventValueAt(program.events, 'nozzle-temperature', time) ?? 0;
@@ -660,18 +670,20 @@ function PrinterObjects({
     }
   });
 
+  const hotendModel = printerHotendForModel(geometry.model);
   return (
     <>
       {/* Keyed: R3F keeps the first object when a primitive's `object` alone changes. */}
       <primitive key={machine.root.uuid} object={machine.root} />
       <PrinterPlateSurface geometry={geometry} plate={plate} parent={machine.plateGroup} />
-      {isWholePrinter || geometry.model !== 'x1c' ? null : (
+      {hotendModel ? (
         <PrinterHotendModel
+          model={hotendModel}
           toolhead={machine.toolhead}
           standIn={machine.hotendStandIn}
           nozzleMaterial={machine.nozzleMaterial}
         />
-      )}
+      ) : null}
     </>
   );
 }

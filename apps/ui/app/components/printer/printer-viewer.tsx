@@ -52,7 +52,7 @@ import type {
   PlaybackStore,
 } from '#components/printer/printer-playback.js';
 import { loadPrinterProgram } from '#components/printer/printer-program.js';
-import { defaultPrinterPlate, printerPlateById, x1cPlates } from '#components/printer/printer-plates.js';
+import { defaultPrinterPlate, printerPlatesForModel, x1cPlates } from '#components/printer/printer-plates.js';
 import type { PrinterPlateId, PrinterPlateModel } from '#components/printer/printer-plates.js';
 import { PrinterScene } from '#components/printer/printer-scene.js';
 import {
@@ -122,6 +122,9 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
   const [resource, setResource] = useState<ProgramResource>({ kind: 'loading' });
   const [frameRequest, setFrameRequest] = useState(0);
   const [isWholePrinter, setIsWholePrinter] = useState(false);
+  const live = usePrinterLive(resource.kind === 'ready' ? resource.digest : undefined);
+  const model = live?.manifest?.identity.model;
+  const plates = printerPlatesForModel(model);
   const [plateChoice, setPlateChoice] = useState<PrinterPlateId | 'as-sliced'>('as-sliced');
   const requestFrame = useCallback((): void => {
     setFrameRequest((count) => count + 1);
@@ -187,8 +190,12 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
       ),
     });
   }
-  const slicedPlate = resource.slicedPlate ?? defaultPrinterPlate;
-  const plate = plateChoice === 'as-sliced' ? slicedPlate : printerPlateById(plateChoice);
+  const slicedPlate =
+    plates.find(({ id }) => id === resource.slicedPlate?.id) ??
+    plates.find(({ id }) => id === 'textured-pei') ??
+    defaultPrinterPlate;
+  const plate =
+    plateChoice === 'as-sliced' ? slicedPlate : (plates.find(({ id }) => id === plateChoice) ?? slicedPlate);
   return renderPane({
     actions: (
       <DropdownMenu modal={false}>
@@ -210,10 +217,10 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
           <DropdownMenuRadioGroup aria-label='Build plate' value={plateChoice} onValueChange={handlePlate}>
             <DropdownMenuRadioItem value='as-sliced'>
               {resource.slicedPlate
-                ? `As sliced (${resource.slicedPlate.label})`
+                ? `As sliced (${slicedPlate.label})`
                 : `As sliced (not recorded; ${defaultPrinterPlate.label})`}
             </DropdownMenuRadioItem>
-            {x1cPlates.map((candidate) => (
+            {plates.map((candidate) => (
               <DropdownMenuRadioItem key={candidate.id} value={candidate.id}>
                 {candidate.label}
               </DropdownMenuRadioItem>
@@ -227,7 +234,7 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
         name={name}
         program={resource.program}
         slicedFilamentColors={resource.filamentColors}
-        digest={resource.digest}
+        live={live}
         frameRequest={frameRequest}
         isWholePrinter={isWholePrinter}
         plate={plate}
@@ -347,7 +354,7 @@ function PrinterSimulation({
   name,
   program,
   slicedFilamentColors,
-  digest,
+  live,
   frameRequest,
   isWholePrinter,
   plate,
@@ -356,14 +363,13 @@ function PrinterSimulation({
   program: ToolpathProgram;
   /** The colours the file was sliced with, in filament order, which the model's own colours set. */
   slicedFilamentColors: readonly string[];
-  digest: string | undefined;
+  live: PrinterLiveState | undefined;
   frameRequest: number;
   isWholePrinter: boolean;
   plate: PrinterPlateModel;
 }>): React.JSX.Element {
   const isReducedMotion = useSyncExternalStore(subscribeMotion, getMotion, serverMotion);
   const { theme } = useTheme();
-  const live = usePrinterLive(digest);
   const hintId = useId();
   const [sceneError, setSceneError] = useState<string>();
   const { manifest, geometry } = usePrinterGeometry(live);

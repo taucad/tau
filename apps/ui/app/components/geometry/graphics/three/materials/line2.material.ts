@@ -11,11 +11,9 @@ import { NoBlending } from 'three';
 import { Line2NodeMaterial as ThreeLine2NodeMaterial } from 'three/webgpu';
 import {
   attribute,
-  cameraFar,
   cameraNear,
   cameraProjectionMatrix,
   dashSize,
-  depth,
   float,
   Fn,
   gapSize,
@@ -30,7 +28,6 @@ import {
   mix,
   modelViewMatrix,
   positionGeometry,
-  positionView,
   screenCoordinate,
   screenDPR,
   screenUV,
@@ -44,9 +41,6 @@ import {
   varyingProperty,
   viewport,
   viewportTexture,
-  viewZToLogarithmicDepth,
-  viewZToPerspectiveDepth,
-  viewZToReversedPerspectiveDepth,
 } from 'three/tsl';
 
 /**
@@ -103,23 +97,11 @@ export const compositeOverViewportSrgb = (rgb: unknown, alpha: unknown, viewport
  * uses TSL **`cameraNear`** so the near estimate stays **`-camera.near`** in camera space for
  * both standard and reversed depth buffers.
  *
- * **Divergence 3 — renderer-aware depth encoding.** Tau instantiates three different WebGPU
- * renderer presets in `apps/ui/app/components/geometry/graphics/three/renderer.ts`:
- * `viewport` runs with `reversedDepthBuffer: true` (closer = larger clip-z, GTAO benefit);
- * `screenshot` and `offscreen` run with `logarithmicDepthBuffer: true` (uniform precision
- * across large CAD models). Surface materials fall through to `NodeMaterial.setupDepth` and
- * automatically pick `viewZToLogarithmicDepth` under the log-depth path, but a fat-line
- * material that hardcodes `material.depthNode = viewZToReversedPerspectiveDepth(...)` from
- * the factory emits reversed `[1..0]` values into a forward-Z log-depth buffer. The depth
- * comparison breaks: every occluded line fragment produces a smaller depth than the surface
- * in front of it and leaks through. The same material instance can be consumed by several
- * renderers in one frame budget (live viewport plus an out-of-band screenshot capture), so
- * the encoder must be picked per `builder` rather than locked at construction time. We
- * override `setupDepth(builder)` and dispatch on `builder.renderer.reversedDepthBuffer` /
- * `builder.renderer.logarithmicDepthBuffer`, mirroring the exact pattern three.js itself
- * uses in `PointShadowNode` and `NodeMaterial.setupDepth`. Each encoder receives the exact
- * geometric `positionView.z`; coplanar separation belongs to the triangle material so a
- * hidden line can never be promoted through an opaque surface.
+ * **Depth follows NodeMaterial.** Reversed and standard depth use the rasterizer's
+ * geometric sample depth. Reconstructing view Z and writing fragment depth here hid
+ * coplanar CAD edges under MSAA and added unnecessary fragment-depth work. The inherited
+ * implementation still encodes logarithmic depth for offscreen renderers, and respects
+ * explicit depth nodes and MRT depth. Surface materials own coplanar separation.
  *
  * **Divergence 4 — gamma-space alpha blend for backend parity.** The transparent-branch
  * `outputNode` below performs an explicit manual composition against the Tau-owned
@@ -205,53 +187,6 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
 
   public override set alphaToCoverage(value: boolean) {
     super.alphaToCoverage = value;
-  }
-
-  /**
-   * Renderer-aware depth encoding (Divergence 3). Picks the matching `viewZTo*Depth`
-   * encoder from `builder.renderer` flags so the line emits depth in the same space as
-   * the surrounding surface rasterizer:
-   *
-   * - `reversedDepthBuffer` viewport          → `viewZToReversedPerspectiveDepth`
-   * - `logarithmicDepthBuffer` screenshot path → `viewZToLogarithmicDepth`
-   * - Standard perspective fallback           → `viewZToPerspectiveDepth`
-   *
-   * Orthographic cameras, MRT depth attachments, and call sites that have manually
-   * assigned `material.depthNode` delegate to `super.setupDepth(builder)` so the upstream
-   * decision tree (including the ortho-log branch) stays authoritative.
-   *
-   * The geometric `positionView.z` is encoded unchanged so ordinary depth comparison keeps
-   * genuinely hidden edge fragments behind their occluders.
-   */
-  public override setupDepth(builder: unknown): void {
-    const { renderer, camera } = builder as {
-      readonly renderer: {
-        readonly reversedDepthBuffer?: boolean;
-        readonly logarithmicDepthBuffer?: boolean;
-        // Three.js's runtime returns `null` from `getMRT()` when no MRT is configured, but the
-        // workspace lint rule (`typescript-eslint(no-restricted-types)`) bans `null` as a type
-        // annotation. The optional-chain reader (`mrt?.has('depth')`) treats null and undefined
-        // identically at runtime, so the typing stays lossless.
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- `getMRT` mirrors three.js's external Renderer API name
-        getMRT?: () => { has(name: string): boolean } | undefined;
-      };
-      readonly camera: { readonly isPerspectiveCamera?: boolean };
-    };
-
-    const mrt = typeof renderer.getMRT === 'function' ? renderer.getMRT() : undefined;
-
-    if (this.depthNode !== null || mrt?.has('depth') === true || camera.isPerspectiveCamera !== true) {
-      super.setupDepth(builder);
-      return;
-    }
-
-    const depthNode = renderer.reversedDepthBuffer
-      ? viewZToReversedPerspectiveDepth(positionView.z, cameraNear, cameraFar)
-      : renderer.logarithmicDepthBuffer
-        ? viewZToLogarithmicDepth(positionView.z, cameraNear, cameraFar)
-        : viewZToPerspectiveDepth(positionView.z, cameraNear, cameraFar);
-
-    depth.assign(depthNode).toStack();
   }
 
   /** @inheritdoc */

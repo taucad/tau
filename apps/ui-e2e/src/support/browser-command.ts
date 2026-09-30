@@ -330,7 +330,10 @@ export const uiReadTauVertexOperations: BrowserCommand<[email: string], TargetTa
   return JSON.parse(result) as TargetTauBillingOperation[];
 };
 
-export const uiOpenTarget: BrowserCommand = async (commandContext) => {
+export const uiOpenTarget: BrowserCommand<[options?: { deviceScaleFactor?: number }]> = async (
+  commandContext,
+  options,
+) => {
   if (commandContext.provider.name !== 'playwright') {
     throw new TypeError(`UI E2E requires the Playwright provider, received '${commandContext.provider.name}'.`);
   }
@@ -343,7 +346,7 @@ export const uiOpenTarget: BrowserCommand = async (commandContext) => {
   if (!browser) {
     throw new Error('Vitest Playwright browser is unavailable.');
   }
-  const context = await browser.newContext();
+  const context = await browser.newContext(options);
   context.setDefaultTimeout(10_000);
   const primary = await context.newPage();
   const session: Session = {

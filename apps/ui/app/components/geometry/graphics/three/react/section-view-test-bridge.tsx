@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import * as THREE from 'three';
-import { InspectorBase } from 'three/webgpu';
+import { createRenderFrameTimer } from '#components/geometry/graphics/three/render-frame-timing.js';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { RendererInstance } from '#components/geometry/graphics/three/renderer.js';
 import { perspectiveVerticalSpan } from '@taucad/camera';
@@ -200,10 +200,15 @@ export type SectionViewTestBridgeApi = Readonly<{
   /** Identity from this viewport's renderer, never a separately created probe context. */
   getRendererIdentity(): Readonly<{ api: 'webgl' | 'webgpu'; name: string; frame: number }>;
   /** Warmed full R3F frame submission and completion latency, in milliseconds; excludes RAF/vsync. */
-  measureRenderFrames(): Promise<
+  measureRenderFrames(options?: Readonly<{ gpuTiming?: boolean; orbit?: boolean }>): Promise<
     Readonly<{
       submission: readonly number[];
       completion: readonly number[];
+      gpu: ReadonlyArray<number | undefined>;
+      gpuMethod: string;
+      firstSubmission: number;
+      geometries: number;
+      textures: number;
       drawCalls: number;
       triangles: number;
       revision: string;
@@ -573,33 +578,34 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       },
       getRendererIdentity() {
         const { gl } = get();
+        const renderer = gl as RendererInstance;
         const api = 'isWebGPURenderer' in gl && gl.isWebGPURenderer ? 'webgpu' : 'webgl';
         const context = api === 'webgl' ? gl.getContext() : undefined;
         const debug = context?.getExtension('WEBGL_debug_renderer_info');
         return {
           api,
           name: debug ? String(context?.getParameter(debug.UNMASKED_RENDERER_WEBGL) ?? '') : '',
-          frame: gl.info.render.frame,
+          frame: 'drawCalls' in renderer.info.render ? renderer.info.render.calls : renderer.info.render.frame,
         };
       },
-      async measureRenderFrames() {
+      async measureRenderFrames(options = {}) {
         const state = get();
+        const initialCamera = bridge.getCamera();
+        const offset = new THREE.Vector3(...initialCamera.position).sub(new THREE.Vector3(...initialCamera.target));
         const renderer = state.gl as RendererInstance;
         const previousFrameloop = state.frameloop;
         const previousAutoReset = renderer.info.autoReset;
-        const previousInspector = renderer instanceof THREE.WebGLRenderer ? undefined : renderer.inspector;
-        const previousTimestampTracking =
-          'backend' in renderer ? (Reflect.get(renderer.backend, 'trackTimestamp') as boolean | undefined) : undefined;
-        if (!(renderer instanceof THREE.WebGLRenderer)) {
-          renderer.inspector = new InspectorBase();
-          Reflect.set(renderer.backend, 'trackTimestamp', false);
-        }
+        const timer = createRenderFrameTimer(renderer, options.gpuTiming === true);
+        const gpu: Array<number | undefined> = [];
+        let firstSubmission = 0;
         const submission: number[] = [];
         const completion: number[] = [];
         // Three exposes the native device on its backend; its declaration omits the device field.
         const device =
           'backend' in renderer
-            ? (Reflect.get(renderer.backend, 'device') as { queue: { onSubmittedWorkDone(): Promise<void> } })
+            ? (Reflect.get(renderer.backend, 'device') as {
+                queue: { onSubmittedWorkDone(): Promise<void> };
+              })
             : undefined;
         let drawCalls = 0;
         let triangles = 0;
@@ -616,9 +622,23 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
               });
             });
             renderer.info.reset();
+            if (options.orbit) {
+              const position = offset.clone().applyAxisAngle(new THREE.Vector3(0, 0, 1), index * 0.005);
+              position.add(new THREE.Vector3(...initialCamera.target));
+              bridge.setCamera({
+                position: [position.x, position.y, position.z],
+                target: initialCamera.target,
+                zoom: initialCamera.zoom,
+              });
+            }
+            timer.begin();
             const startedAt = performance.now();
             state.advance(startedAt / 1000, false);
             const submittedAt = performance.now();
+            timer.end();
+            if (index === 0) {
+              firstSubmission = submittedAt - startedAt;
+            }
             if (device) {
               // oxlint-disable-next-line no-await-in-loop -- completion fence for the measured frame.
               await device.queue.onSubmittedWorkDone();
@@ -626,7 +646,10 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
               renderer.getContext().finish();
             }
             const completedAt = performance.now();
+            // oxlint-disable-next-line no-await-in-loop -- resolve all passes from this frame before the next.
+            const gpuDuration = await timer.resolve();
             if (index >= 20) {
+              gpu.push(gpuDuration);
               submission.push(submittedAt - startedAt);
               completion.push(completedAt - startedAt);
             }
@@ -636,9 +659,13 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           }
         } finally {
           renderer.info.autoReset = previousAutoReset;
-          if (!(renderer instanceof THREE.WebGLRenderer) && previousInspector) {
-            renderer.inspector = previousInspector;
-            Reflect.set(renderer.backend, 'trackTimestamp', previousTimestampTracking);
+          timer.dispose();
+          if (options.orbit) {
+            bridge.setCamera({
+              position: initialCamera.position,
+              target: initialCamera.target,
+              zoom: initialCamera.zoom,
+            });
           }
           state.setFrameloop(previousFrameloop);
           state.invalidate();
@@ -646,6 +673,11 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         return {
           submission,
           completion,
+          gpu,
+          gpuMethod: timer.method,
+          firstSubmission,
+          geometries: renderer.info.memory.geometries,
+          textures: renderer.info.memory.textures,
           drawCalls,
           triangles,
           revision: THREE.REVISION,

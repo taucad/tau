@@ -424,7 +424,7 @@ describe('runReportJson', () => {
             loadId: 'load-1',
             status: 'complete',
             format: 'gltf',
-            parameters: { size: 2 },
+            parameters: { subjectId: 'authored-name', size: 2, nested: { subjectId: 'nested-name', keep: true } },
             ingestOptions: {},
             artifacts: [{ name: 'alias.bin', sourcePath: 'assets/actual.bin', sha256: 'actual-hash', byteLength: 2 }],
           },

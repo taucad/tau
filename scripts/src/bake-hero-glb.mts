@@ -32,27 +32,36 @@ async function main(): Promise<void> {
 
   const client = await createNodeClient({ runtime: defineRuntime({ plugins: [esbuild(), jscad()] }) });
 
-  for (const bake of bakes) {
-    // oxlint-disable-next-line eslint/no-await-in-loop -- sequential: the bakes share one runtime client; concurrency risks kernel state and saves nothing for two models
-    const result = await client.export('glb', {
-      source: { files: { 'main.js': gearSource } },
-      parameters: bake.parameters,
-    });
+  try {
+    for (const bake of bakes) {
+      const document = client.open({
+        source: { files: { 'main.js': gearSource }, entry: 'main.js' },
+        parameters: bake.parameters,
+        watch: false,
+      });
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- Sequential bakes share one kernel client.
+        const result = await document.export('glb');
+        if (!result.success) {
+          throw new Error(`Failed to bake ${bake.name}: ${result.issues.map((issue) => issue.message).join('; ')}`);
+        }
+        if (result.files.length !== 1 || result.files[0].mimeType !== 'model/gltf-binary') {
+          throw new Error(
+            `Expected one GLB artifact for ${bake.name}, received ${result.files.length}: ${result.files.map((file) => file.name).join(', ')}`,
+          );
+        }
 
-    if (!result.success) {
-      throw new Error(`Failed to bake ${bake.name}: ${result.issues.map((issue) => issue.message).join('; ')}`);
+        const [file] = result.files;
+        const outputPath = join(outputDirectory, bake.name);
+        // oxlint-disable-next-line no-await-in-loop -- Sequential one-shot asset writes are intentional.
+        await writeFile(outputPath, file.bytes);
+        console.log(`Baked ${bake.name} (${file.bytes.byteLength} bytes) → ${outputPath}`);
+      } finally {
+        document.close();
+      }
     }
-    if (result.data.length !== 1 || result.data[0]?.mimeType !== 'model/gltf-binary') {
-      throw new Error(
-        `Expected one GLB artifact for ${bake.name}, received ${result.data.length}: ${result.data.map((file) => file.name).join(', ')}`,
-      );
-    }
-
-    const [file] = result.data;
-    const outputPath = join(outputDirectory, bake.name);
-    // oxlint-disable-next-line eslint/no-await-in-loop -- see above; one-shot build script, sequential is intentional
-    await writeFile(outputPath, file.bytes);
-    console.log(`Baked ${bake.name} (${file.bytes.byteLength} bytes) → ${outputPath}`);
+  } finally {
+    await client.shutdown();
   }
 }
 

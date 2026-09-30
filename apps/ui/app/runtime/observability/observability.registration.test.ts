@@ -16,7 +16,7 @@ describe('observability middleware registration', () => {
 
   it('keeps worker implementation details out of the public plugin shape', () => {
     const plugin = observabilityMiddleware();
-    expect(Object.keys(plugin)).toEqual(['id', 'options']);
+    expect(Object.keys(plugin)).toEqual(['id']);
     expect(`module${'Url'}` in plugin).toBe(false);
   });
 

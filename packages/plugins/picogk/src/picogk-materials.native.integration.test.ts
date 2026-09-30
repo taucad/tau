@@ -1,6 +1,6 @@
 // @vitest-environment node
 /* oxlint-disable typescript/no-unsafe-assignment -- Private kernel context is erased by the public plugin definition. */
-import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -21,6 +21,8 @@ import {
 } from '@taucad/runtime-testing';
 import { describe, expect, it, vi } from 'vitest';
 import { loadPicogkKernelOptions, picogkKernel } from '#index.js';
+import { PicogkSession } from '#picogk-session.js';
+import { picogkBuildSchema, picogkProtocolVersion } from '#picogk.protocol.js';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const options = loadPicogkKernelOptions({ resourceRoot: resolve(workspaceRoot, 'apps/desktop/resources/picogk') });
@@ -64,6 +66,57 @@ const parse = async (bytes: Uint8Array<ArrayBuffer>) => {
 };
 
 describe('typed PicoGK materials through the production worker', () => {
+  it('should receive full material metadata above 1 MiB through the production session', async () => {
+    const root = realpathSync(await mkdtemp(join(tmpdir(), 'tau-picogk-large-response-')));
+    const workspacePath = join(root, 'workspace');
+    const artifactPath = join(root, 'artifacts');
+    mkdirSync(workspacePath);
+    mkdirSync(artifactPath);
+    writeFileSync(
+      join(workspacePath, 'main.cs'),
+      `using System.Numerics;
+using PicoGK;
+Library.Go(1f, () => {
+ var viewer = Library.oViewer();
+ viewer.SetGroupMaterial(0, new Material {
+   Name = "Machined steel fasteners and fittings", Color = new("AAB3BA"), Metallic = .95f, Roughness = .3f,
+   Anisotropy = new() { Strength = .4f, Rotation = .2f },
+   Clearcoat = new() { Factor = .2f, Roughness = .3f }, Ior = 1.5f
+ });
+ for (var index = 0; index < 2500; index++)
+   viewer.Add(Utils.mshCreateCube(new Vector3(2,3,4)), $"Machined fastener {index}", 0);
+});`,
+    );
+    const session = new PicogkSession({
+      ...options,
+      workspacePath,
+      artifactPath,
+      logger: createMockKernelRuntime().logger,
+    });
+    try {
+      const result = await session.request({
+        method: 'build',
+        params: { entryPath: 'main.cs', parameters: {} },
+        schema: picogkBuildSchema,
+        signal: new AbortController().signal,
+      });
+      const bytes = Buffer.byteLength(
+        JSON.stringify({ protocolVersion: picogkProtocolVersion, requestId: '1:1', result }),
+      );
+      expect(bytes).toBeGreaterThan(1024 * 1024);
+      expect(bytes).toBeLessThan(4 * 1024 * 1024);
+      expect(result.components).toHaveLength(2500);
+      expect(result.components[2499]).toMatchObject({
+        name: 'Machined fastener 2499',
+        material: { name: 'Machined steel fasteners and fittings' },
+      });
+      expect(await session.readArtifact(result)).toHaveLength(result.byteLength);
+    } finally {
+      await session.cleanup();
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it('preserves all factors, maps, shared resources, UV frames, exports and restored handles', async () => {
     const client = createTestRuntimeClient({ runtime, files: { 'main.cs': fullMaterialSource } });
     try {

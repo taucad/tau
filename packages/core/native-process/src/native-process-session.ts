@@ -81,6 +81,8 @@ export type NativeProcessSessionOptions<Issue> = {
   readonly parseResponse: (value: unknown) => NativeProtocolResponse<Issue>;
   readonly requestTimeout: number;
   readonly maxArtifactBytes: number;
+  /** Maximum UTF-8 bytes per worker response/event line; positive safe integer, default 1 MiB. */
+  readonly maxProtocolLineBytes?: number;
   readonly logger: RuntimeLogger;
   readonly sessionName: string;
   readonly executableName: string;
@@ -269,8 +271,13 @@ export class NativeProcessSession<Issue> {
   private closed = false;
   // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly forbids parameter properties.
   private readonly options: NativeProcessSessionOptions<Issue>;
+  private readonly maxProtocolLineBytes: number;
 
   public constructor(options: NativeProcessSessionOptions<Issue>) {
+    this.maxProtocolLineBytes = options.maxProtocolLineBytes ?? maxProtocolLineBytes;
+    if (!Number.isSafeInteger(this.maxProtocolLineBytes) || this.maxProtocolLineBytes <= 0) {
+      throw new TypeError('maxProtocolLineBytes must be a positive safe integer.');
+    }
     this.options = options;
   }
 
@@ -523,20 +530,19 @@ export class NativeProcessSession<Issue> {
 
   private onStdout(chunk: Uint8Array<ArrayBuffer>): void {
     this.stdout += this.decoder.write(chunk);
-    if (Buffer.byteLength(this.stdout) > maxProtocolLineBytes && !this.stdout.includes('\n')) {
-      this.requestTermination(new Error(`${this.options.sessionName} emitted an oversized protocol frame.`));
-      return;
-    }
     let newline = this.stdout.indexOf('\n');
     while (newline >= 0) {
       const line = this.stdout.slice(0, newline);
       this.stdout = this.stdout.slice(newline + 1);
-      if (Buffer.byteLength(line) > maxProtocolLineBytes) {
+      if (Buffer.byteLength(line) > this.maxProtocolLineBytes) {
         this.requestTermination(new Error(`${this.options.sessionName} emitted an oversized protocol frame.`));
         return;
       }
       this.onLine(line);
       newline = this.stdout.indexOf('\n');
+    }
+    if (Buffer.byteLength(this.stdout) > this.maxProtocolLineBytes) {
+      this.requestTermination(new Error(`${this.options.sessionName} emitted an oversized protocol frame.`));
     }
   }
 

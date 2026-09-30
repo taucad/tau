@@ -1,7 +1,7 @@
 ## Workflow
 
 1. Author `main.ts`: `import type { Pico, Voxels, Mesh } from 'picovoxel'`, helpers from `picovoxel/shapekernel`, `picovoxel/latticelibrary` and `picovoxel/numerics`.
-2. Export `defaultParams` with a `voxelSize` and a default `main(pico, params = defaultParams)` returning `Voxels`, `Mesh`, `{ shape, name }`, or a flat mixed array; `[]` is an empty scene.
+2. Export `defaultParams` with a `voxelSize` and a default `main(pico, params = defaultParams)` returning `Voxels`, `Mesh`, `{ shape, name?, material? }`, a model envelope, or a flat mixed array; `[]` is an empty scene.
 3. Use the `pico` session Tau passes in. Never call `createPico()` or import `picovoxel/multi`, `picovoxel/raw` or `picovoxel/three`.
 
 For multiple files, import helpers through explicit ESM paths such as `./lib/widget.js` and pass `pico` into them.
@@ -28,12 +28,10 @@ import type { Pico } from 'picovoxel';
 import type { PicovoxelResult } from '@taucad/picovoxel';
 
 export default function main(pico: Pico): PicovoxelResult {
-  const housing = pico.createVoxels({ shape: 'sphere', radius: 10 });
-  const pins = [0, 1, 2].map((index) => ({
-    shape: pico.createVoxels({ shape: 'sphere', center: [20 + index * 8, 0, 0], radius: 2 }),
-    name: `Pin ${index + 1}`,
-  }));
-  return [{ shape: housing, name: 'Housing' }, ...pins];
+  return {
+    shape: pico.createVoxels({ shape: 'sphere', radius: 10 }),
+    name: 'Housing',
+  };
 }
 ```
 
@@ -41,3 +39,10 @@ Names trim; blank/omitted names use ordinal `Shape N`. Duplicate labels and Unic
 preview, exact GLB and caches. STL filenames are safe unique derivatives. Raw parts remain valid.
 Nested arrays, `children`, invalid shapes/non-string names fail with the output index. Names do not
 create stable IDs, hierarchy or assembly occurrences. Use author indexes to distinguish repeated parts.
+
+## Materials
+
+Attach `material` to final descriptors. Return `{ shapes, images?, textures?, samplers? }`
+for indexed maps. Use root type aliases `Material`, `Image`, `Resources`, `PicovoxelModel`.
+Read [materials-reference.md](materials-reference.md) for all 17 maps, 11 extensions,
+units, UV0 and exports.

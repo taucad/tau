@@ -3,6 +3,7 @@ import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 import type { GeoSpecCanonicalClaimReport } from 'geospec/assertion-client';
 import type { GeometryDiagnostic } from 'geospec/mesh';
 import type { GeoSpecTestCase } from 'geospec/runner';
+import type { GeoSpecRunnerResult } from 'geospec/runner/worker';
 import { runnerResultToTestModelOutput } from '#geospec/result.js';
 
 const project = (test: GeoSpecTestCase, file = 'gear.geospec.ts') =>
@@ -29,7 +30,7 @@ const project = (test: GeoSpecTestCase, file = 'gear.geospec.ts') =>
 
 const bytes = (...values: number[]): Uint8Array<ArrayBuffer> => Uint8Array.from(values);
 
-const nativeReport = (options: {
+const claimReport = (options: {
   readonly claimId: string;
   readonly polarity: 'negative' | 'positive';
   readonly seed: number;
@@ -92,19 +93,132 @@ describe('model-facing diagnostics', () => {
   });
 });
 
-describe('native canonical reports', () => {
-  it('projects every passed, failed, and refused claim as JSON without canonical engine bytes', () => {
-    const passedOne = nativeReport({ claimId: 'pass-1', status: 'passed', polarity: 'positive', seed: 10 });
-    const passedTwo = nativeReport({ claimId: 'pass-2', status: 'passed', polarity: 'negative', seed: 20 });
-    const failed = nativeReport({ claimId: 'fail-1', status: 'failed', polarity: 'positive', seed: 30 });
-    const refused = nativeReport({ claimId: 'refused-1', status: 'refused', polarity: 'negative', seed: 40 });
+describe('canonical reports', () => {
+  it('should retain completed claim bytes and registered tests when the module later fails', () => {
+    const report = claimReport({ claimId: 'before-crash', status: 'passed', polarity: 'positive', seed: 60 });
+    const output = runnerResultToTestModelOutput(
+      {
+        success: false,
+        passed: 0,
+        failed: 1,
+        selectedTests: 1,
+        files: [
+          {
+            file: 'gear.geospec.ts',
+            result: {
+              success: false,
+              issues: [],
+              tests: [
+                {
+                  ordinal: 0,
+                  suite: [],
+                  name: 'before crash',
+                  status: 'passed',
+                  diagnostics: [],
+                  assertions: [{ kind: 'watertight', subject: {}, expected: true, passed: true, report }],
+                },
+              ],
+            },
+          },
+        ],
+      },
+      ['gear.geospec.ts'],
+    );
+    expect(output.runStatus).toBe('failed');
+    expect(output.tests).toEqual([
+      {
+        id: 'gear.geospec.ts:0',
+        ordinal: 0,
+        requirement: 'before crash',
+        targetFile: 'gear.geospec.ts',
+        status: 'passed',
+      },
+    ]);
+    expect(output.passes[0]?.reports?.[0]?.canonical?.result).toEqual([...report.canonicalResult]);
+    expect(output.failures[0]?.id).toBe('gear.geospec.ts:bundle');
+  });
+  it('should retain skipped and not-run requirements in requested-run accounting', () => {
+    const accounting = {
+      discovered: 3,
+      selected: 2,
+      completed: 1,
+      passed: 1,
+      failed: 0,
+      unsupported: 0,
+      inconclusive: 0,
+      skipped: 1,
+      notRun: 1,
+      requestedFiles: ['gear.geospec.ts', 'missing.geospec.ts'],
+      completedFiles: ['gear.geospec.ts'],
+      notRunFiles: ['missing.geospec.ts'],
+      discoveryComplete: false,
+      cancelled: true,
+      bailed: false,
+    };
+    const statuses: Array<GeoSpecTestCase['status']> = ['passed', 'skipped', 'not-run'];
+    const result: GeoSpecRunnerResult = {
+      success: false,
+      passed: 1,
+      failed: 0,
+      selectedTests: 2,
+      accounting,
+      lineageStatus: 'unavailable',
+      files: [
+        {
+          file: 'gear.geospec.ts',
+          result: {
+            success: true,
+            passed: false,
+            tests: statuses.map((status, index) => ({
+              suite: [],
+              name: `requirement ${index}`,
+              status,
+              assertions: [],
+              diagnostics: [],
+            })),
+            bundle: { success: true, code: '', issues: [], dependencies: [], unresolvedPaths: [] },
+          },
+        },
+      ],
+    };
+    const output = runnerResultToTestModelOutput(result, accounting.requestedFiles);
+    expect(output).toMatchObject({ accounting, lineageStatus: 'unavailable', runStatus: 'inconclusive' });
+    expect(output.tests?.map(({ status }) => status)).toEqual(['passed', 'skipped', 'not-run']);
+    expect(testModelOutputSchema.parse(output)).toStrictEqual(output);
+  });
+  it.each(['unsupported', 'inconclusive', 'refused', 'cancelled', 'unknown'])(
+    'does not turn a %s negative claim into a passing tool row',
+    (status) => {
+      const report = {
+        ...claimReport({ claimId: 'missing-evidence', status: 'refused', polarity: 'negative', seed: 50 }),
+        status,
+        result: { status },
+      };
+      const output = project({
+        suite: [],
+        name: 'evidence required',
+        status: 'passed',
+        assertions: [{ kind: 'watertight', subject: {}, expected: false, passed: true, report }],
+        diagnostics: [],
+      });
+      expect(output.passes).toHaveLength(0);
+      expect(output.failures).toHaveLength(1);
+      expect(output.failures[0]?.reports?.[0]?.status).toBe(status);
+    },
+  );
+
+  it('should preserve exact core bytes before compact result normalization', () => {
+    const passedOne = claimReport({ claimId: 'pass-1', status: 'passed', polarity: 'positive', seed: 10 });
+    const passedTwo = claimReport({ claimId: 'pass-2', status: 'passed', polarity: 'negative', seed: 20 });
+    const failed = claimReport({ claimId: 'fail-1', status: 'failed', polarity: 'positive', seed: 30 });
+    const refused = claimReport({ claimId: 'refused-1', status: 'refused', polarity: 'negative', seed: 40 });
     const passing = project({
       suite: ['native'],
       name: 'passes',
       status: 'passed',
       assertions: [
-        { kind: 'watertight', subject: {}, expected: true, passed: true, nativeReport: passedOne },
-        { kind: 'watertight', subject: {}, expected: false, passed: true, nativeReport: passedTwo },
+        { kind: 'watertight', subject: {}, expected: true, passed: true, report: passedOne },
+        { kind: 'watertight', subject: {}, expected: false, passed: true, report: passedTwo },
       ],
       diagnostics: [],
     });
@@ -113,8 +227,8 @@ describe('native canonical reports', () => {
       name: 'fails and refuses',
       status: 'failed',
       assertions: [
-        { kind: 'watertight', subject: {}, expected: true, passed: false, nativeReport: failed },
-        { kind: 'watertight', subject: {}, expected: false, passed: false, nativeReport: refused },
+        { kind: 'watertight', subject: {}, expected: true, passed: false, report: failed },
+        { kind: 'watertight', subject: {}, expected: false, passed: false, report: refused },
       ],
       diagnostics: [],
     });
@@ -147,11 +261,16 @@ describe('native canonical reports', () => {
         result: original.result,
         diagnostics: original.diagnostics,
         evidence: original.evidence,
+        canonical: {
+          claim: [...original.canonicalClaim],
+          plan: [...original.canonicalPlan],
+          result: [...original.canonicalResult],
+        },
       });
     }
   });
 
-  it('leaves legacy passed and failed row shapes unchanged', () => {
+  it('preserves passed and failed row shapes for reports without compiled claims', () => {
     expect(
       project({
         suite: [],
@@ -171,6 +290,16 @@ describe('native canonical reports', () => {
       ],
       passed: 1,
       total: 1,
+      runStatus: 'failed',
+      lineageStatus: 'unavailable',
+      tests: [
+        {
+          id: 'gear.geospec.ts:legacy pass',
+          requirement: 'legacy pass',
+          targetFile: 'gear.geospec.ts',
+          status: 'passed',
+        },
+      ],
     });
     expect(
       project({
@@ -194,12 +323,22 @@ describe('native canonical reports', () => {
       passes: [],
       passed: 0,
       total: 1,
+      runStatus: 'failed',
+      lineageStatus: 'unavailable',
+      tests: [
+        {
+          id: 'gear.geospec.ts:legacy fail',
+          requirement: 'legacy fail',
+          targetFile: 'gear.geospec.ts',
+          status: 'failed',
+        },
+      ],
     });
   });
 });
 
 describe('GeoSpec authoring recovery', () => {
-  it('should direct an empty project to its selected recipe without assuming legacy', () => {
+  it('should direct an empty project to the canonical recipe without engine selection', () => {
     const output = runnerResultToTestModelOutput(
       { success: true, passed: 0, failed: 0, selectedTests: 0, files: [] },
       [],
@@ -210,8 +349,7 @@ describe('GeoSpec authoring recovery', () => {
       id: 'missing_geospec_file',
       targetFile: '*.geospec.ts',
     });
-    expect(output.failures[0]?.suggestion).toContain('selected API recipe in the test_model description');
-    expect(output.failures[0]?.suggestion).toContain('loadModel with expectGeo for legacy');
-    expect(output.failures[0]?.suggestion).toContain('loadNativeModel with expectNativeGeo for native');
+    expect(output.failures[0]?.suggestion).toContain('loadModel from geospec/model and expectGeo from geospec');
+    expect(output.failures[0]?.suggestion).not.toMatch(/native|legacy/u);
   });
 });

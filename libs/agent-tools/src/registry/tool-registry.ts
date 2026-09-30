@@ -12,10 +12,10 @@
  * @module
  */
 
-import { rpcClientErrorCode } from '@taucad/chat';
+import { rpcClientErrorCode, testModelOutputSchema } from '@taucad/chat';
 import type { RpcCall, RpcName } from '@taucad/chat';
 import { mutatingRpcNames, rpcName, toolDescriptions, toolMode, toolName } from '@taucad/chat/constants';
-import { createRpcDispatcher } from '@taucad/chat/rpc';
+import { createRpcDispatcher, writeArtifactSet } from '@taucad/chat/rpc';
 import type {
   RpcFileSystem,
   RpcGeoSpecClient,
@@ -495,6 +495,83 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
               },
               isError: true,
             };
+          }
+        }
+        if (mapped.rpc === rpcName.runGeoSpecTests && result.success) {
+          const verdict = testModelOutputSchema.parse(result);
+          const full = JSON.stringify(result);
+          const bytes = new TextEncoder().encode(full);
+          const oversized = bytes.byteLength > 128 * 1024;
+          const hasCanonical = [...verdict.failures, ...verdict.passes].some((row) =>
+            row.reports?.some((report) => report.canonical !== undefined),
+          );
+          if (hasCanonical || oversized) {
+            const recordFileSystem = (options.recordFileSystemFor ?? options.fileSystemFor)(invocation.signal);
+            const [artifact] =
+              (await writeArtifactSet(
+                {
+                  toolCallId: invocation.toolCallId,
+                  targetFile: 'geospec-run',
+                  format: 'json',
+                  files: [{ name: 'result.json', mimeType: 'application/json', bytes }],
+                },
+                recordFileSystem,
+              )) ?? [];
+            assertNotAborted(invocation.signal);
+            if (artifact === undefined || artifact.byteLength !== bytes.byteLength) {
+              return {
+                content: {
+                  errorCode: rpcClientErrorCode.ioError,
+                  message: 'Failed to persist complete GeoSpec evidence to the project record filesystem.',
+                },
+                isError: true,
+              };
+            }
+            const fullResult = {
+              path: artifact.artifactPath,
+              mimeType: 'application/json',
+              byteLength: bytes.byteLength,
+              sha256: await sha256String(full),
+            } satisfies NonNullable<typeof verdict.fullResult>;
+            assertNotAborted(invocation.signal);
+            const compactReports = (reports: NonNullable<(typeof verdict.passes)[number]['reports']>) =>
+              reports.map(({ canonical: _canonical, ...report }) => report);
+            const { failures, passes, sourceRevisions, tests, lineage, ...summary } = verdict;
+            const compact = oversized
+              ? {
+                  ...summary,
+                  failures: failures.slice(0, 20).map(({ id, requirement, reason, suggestion, targetFile }) => ({
+                    id: id.slice(0, 512),
+                    requirement: requirement.slice(0, 512),
+                    reason: reason.slice(0, 512),
+                    suggestion: suggestion.slice(0, 512),
+                    targetFile,
+                  })),
+                  passes: [],
+                  omittedFailures: failures.length - Math.min(failures.length, 20),
+                  omittedPasses: passes.length,
+                  omittedSourceRevisions: sourceRevisions?.length ?? 0,
+                  omittedTests: tests?.length ?? 0,
+                  omittedLineage: lineage?.length ?? 0,
+                  fullResult,
+                }
+              : {
+                  ...summary,
+                  ...(sourceRevisions === undefined ? {} : { sourceRevisions }),
+                  ...(tests === undefined ? {} : { tests }),
+                  ...(lineage === undefined ? {} : { lineage }),
+                  failures: failures.map((row) => ({
+                    ...row,
+                    ...(row.reports === undefined ? {} : { reports: compactReports(row.reports) }),
+                  })),
+                  passes: passes.map((row) => ({
+                    ...row,
+                    ...(row.reports === undefined ? {} : { reports: compactReports(row.reports) }),
+                  })),
+                  fullResult,
+                };
+            // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- The validated RPC payload was successfully serialized as JSON before compact projection.
+            return { content: structuredClone({ success: true, ...compact }) as JsonValue, isError: false };
           }
         }
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- RPC results are JSON by construction.

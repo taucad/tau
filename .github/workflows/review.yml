@@ -6,7 +6,7 @@ on:
   # never get a review app — production rolls out via `prod-deploy-on-merge.yml`
   # against the long-lived `tau-api` Fly app and the `taucad-prod-us` Netlify site.
   pull_request:
-    types: [opened, reopened, synchronize, closed]
+    types: [opened, reopened, ready_for_review, synchronize, closed]
     branches-ignore:
       - production
 
@@ -28,8 +28,9 @@ jobs:
   review_app_api:
     name: Deploy API Review App
     runs-on: ubuntu-latest
-    # Skip Dependabot PRs
-    if: github.actor != 'dependabot[bot]'
+    # Draft repair/spike PRs must not provision review infrastructure.
+    # Keep close events enabled so an existing app can still be cleaned up.
+    if: github.actor != 'dependabot[bot]' && (github.event.action == 'closed' || !github.event.pull_request.draft)
     permissions:
       pull-requests: write
       contents: read

@@ -57,7 +57,9 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
         var initialize = Stopwatch.StartNew();
         Library? library = null;
         Viewer? viewer = null;
-        using var backend = new CaptureViewerBackend(artifactRoot);
+        Task? task = null;
+        ExceptionDispatchInfo? failure = null;
+        var backend = new CaptureViewerBackend(artifactRoot);
         var log = new LogConsole();
         try
         {
@@ -71,7 +73,7 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
             // W17: a cancelled build fails the model's next viewer call, which unwinds it at a
             // boundary the host owns. A model that makes no further viewer call runs to its end.
             using var registration = cancellation.Register(backend.Cancel);
-            var task = Task.Run(fnTask.Invoke);
+            task = Task.Run(fnTask.Invoke);
             // D25: the model's completion wakes this thread. Sleeping the poll interval instead
             // paid up to a whole interval after the model had already finished, on every render.
             var completed = ((IAsyncResult)task).AsyncWaitHandle;
@@ -107,13 +109,30 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
                 captured.Warnings,
                 captured.Resources);
         }
+        catch (Exception error)
+        {
+            failure = ExceptionDispatchInfo.Capture(error);
+        }
         finally
         {
+            // Each owner is released even if another cleanup fails; the first failure wins.
+            void Cleanup(Action action)
+            {
+                try { action(); }
+                catch (Exception error) { failure ??= ExceptionDispatchInfo.Capture(error); }
+            }
+            // Native teardown must follow model completion even when polling failed first.
+            Cleanup(() => task?.GetAwaiter().GetResult());
             Library.UnregisterGlobalViewer();
             Library.UnregisterGlobalLog();
             Library.UnregisterGlobalLibrary();
-            viewer?.Dispose();
-            library?.Dispose();
+            Cleanup(() => viewer?.Dispose());
+            Cleanup(() => library?.Dispose());
+            Cleanup(backend.Dispose);
+        }
+        if (failure is not null)
+        {
+            failure.Throw();
         }
     }
 
@@ -136,7 +155,13 @@ internal sealed record CapturedScene(
     IReadOnlyList<Issue> Warnings,
     MaterialResources? Resources = null);
 
-internal sealed record GeometrySnapshot(string Kind, float[] Positions, uint[] Indices, ColorFloat? LineColor);
+internal sealed record GeometrySnapshot(string Kind, float[] Positions, uint[] Indices, ColorFloat? LineColor)
+{
+    internal (Library Library, string Kind, ulong Generation) Identity { get; init; }
+    internal int Owners { get; set; }
+    internal BBox3? CachedBounds { get; set; }
+    internal long ByteLength => checked(((long)Positions.Length + Indices.Length) * sizeof(uint));
+}
 
 /// <summary>
 /// Applies hosted viewer calls on a bounded pump. One drained batch is one native-style poll update;
@@ -146,6 +171,15 @@ internal sealed class CaptureViewerBackend : IViewerBackend
 {
     private static readonly Material DefaultMaterial = new(new ColorFloat("B8BCC4"), 0f, 0.7f);
     private readonly object gate = new();
+    private readonly object geometryGate = new();
+    private readonly CancellationTokenSource admissionCancellation = new();
+    private readonly Dictionary<(Library Library, string Kind, ulong Generation), GeometrySnapshot> geometry = [];
+    private long geometryBytes;
+    private long geometryCopies;
+    // This bounds owned source arrays, separately from the final artifact and material limits.
+    private const long MaximumOwnedGeometryBytes = 256L * 1024 * 1024;
+    internal long GeometryBytes { get { lock (geometryGate) return geometryBytes; } }
+    internal long GeometryCopies { get { lock (geometryGate) return geometryCopies; } }
     private readonly string artifactRoot;
     private readonly BlockingCollection<ViewerCommand> commands;
     private readonly Task pump;
@@ -214,21 +248,22 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         set => throw UnsupportedCapability("camera orientation");
     }
 
-    public void Add(Voxels vox, int nGroupID) => Enqueue(new ViewerCommand(() => AddObject(vox, null, nGroupID)));
+    public void Add(Voxels vox, int nGroupID) => EnqueueGeometry(vox, null, nGroupID);
     public void Add(Voxels vox, string name, int nGroupID) => EnqueueNamed(vox, name, nGroupID);
     public void Remove(Voxels vox) => Enqueue(new ViewerCommand(() => RemoveObject(vox)));
     public void SetObjectMatrix(Voxels vox, Matrix4x4 mat) => Enqueue(new ViewerCommand(() => SetMatrix(vox, mat)));
-    public void Add(Mesh msh, int nGroupID) => Enqueue(new ViewerCommand(() => AddObject(msh, null, nGroupID)));
+    public void Add(Mesh msh, int nGroupID) => EnqueueGeometry(msh, null, nGroupID);
     public void Add(Mesh msh, string name, int nGroupID) => EnqueueNamed(msh, name, nGroupID);
     public void Remove(Mesh msh) => Enqueue(new ViewerCommand(() => RemoveObject(msh)));
     public void SetObjectMatrix(Mesh msh, Matrix4x4 mat) => Enqueue(new ViewerCommand(() => SetMatrix(msh, mat)));
-    public void Add(PolyLine poly, int nGroupID) => Enqueue(new ViewerCommand(() => AddObject(poly, null, nGroupID)));
+    public void Add(PolyLine poly, int nGroupID) => EnqueueGeometry(poly, null, nGroupID);
     public void Add(PolyLine poly, string name, int nGroupID) => EnqueueNamed(poly, name, nGroupID);
     public void Remove(PolyLine poly) => Enqueue(new ViewerCommand(() => RemoveObject(poly)));
     public void SetObjectMatrix(PolyLine poly, Matrix4x4 mat) => Enqueue(new ViewerCommand(() => SetMatrix(poly, mat)));
 
     public void RemoveAllObjects() => Enqueue(new ViewerCommand(() =>
     {
+        foreach (var item in objects) ReleaseGeometry(item.Geometry);
         objects.Clear();
         objectIndex.Clear();
         materialized.Clear();
@@ -401,6 +436,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         {
             lock (gate)
             {
+                foreach (var item in objects) ReleaseGeometry(item.Geometry);
                 objects.Clear();
                 objectIndex.Clear();
                 componentIdentities.Clear();
@@ -412,6 +448,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                 warnings.Clear();
             }
             commands.Dispose();
+            admissionCancellation.Dispose();
         }
     }
 
@@ -423,7 +460,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             while (commands.TryTake(out var first, Timeout.Infinite))
             {
                 var batch = new List<ViewerCommand> { first };
-                while (commands.TryTake(out var next)) batch.Add(next);
+                while (batch.Count < MaximumPendingCommands && commands.TryTake(out var next)) batch.Add(next);
                 ApplyBatch(batch);
             }
         }
@@ -431,7 +468,11 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         {
             pumpError = ExceptionDispatchInfo.Capture(error);
             commands.CompleteAdding();
-            while (commands.TryTake(out var command)) command.Completion?.Set();
+            while (commands.TryTake(out var command))
+            {
+                command.Release?.Invoke();
+                command.Completion?.Set();
+            }
         }
     }
 
@@ -451,7 +492,11 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             }
             finally
             {
-                foreach (var command in batch) command.Completion?.Set();
+                foreach (var command in batch)
+                {
+                    command.Release?.Invoke();
+                    command.Completion?.Set();
+                }
             }
         }
     }
@@ -465,29 +510,38 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     }
 
     /// <summary>Fail every viewer call from here on, so a cancelled model stops at its next one.</summary>
-    internal void Cancel() => cancelled = true;
+    internal void Cancel()
+    {
+        lock (gate)
+        {
+            if (disposed) return;
+            cancelled = true;
+            admissionCancellation.Cancel();
+        }
+    }
 
     private void Enqueue(ViewerCommand command)
     {
-        RethrowPumpError();
-        if (cancelled) throw new OperationCanceledException("The PicoGK build was cancelled.");
-        lock (gate)
-        {
-            ThrowIfDisposed();
-            if (completed) throw new InvalidOperationException("The PicoGK viewer command pump has completed.");
-        }
+        var accepted = false;
         try
         {
-            commands.Add(command);
+            var admission = CheckAdmission();
+            try
+            {
+                commands.Add(command, admission);
+                accepted = true;
+            }
+            catch (InvalidOperationException)
+            {
+                RethrowPumpError();
+                throw;
+            }
+            if (command.Completion is null) RethrowPumpError();
         }
-        catch (InvalidOperationException)
+        finally
         {
-            // Completion may close admission after the check above. Preserve the capture failure.
-            RethrowPumpError();
-            throw;
+            if (!accepted) command.Release?.Invoke();
         }
-        // An accepted barrier owns its event until the pump signals it. Flush rethrows after waiting.
-        if (command.Completion is null) RethrowPumpError();
     }
 
     [ExcludeFromCodeCoverage]
@@ -497,10 +551,36 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     {
         if (string.IsNullOrWhiteSpace(name) || name != name.Trim())
             throw InvalidName("PicoGK authored names must be nonempty and have no surrounding whitespace.");
-        Enqueue(new ViewerCommand(() => AddObject(identity, name, group)));
+        EnqueueGeometry(identity, name, group);
     }
 
-    private void AddObject(object identity, string? name, int group)
+    private CancellationToken CheckAdmission()
+    {
+        RethrowPumpError();
+        if (cancelled) throw new OperationCanceledException("The PicoGK build was cancelled.");
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            if (completed) throw new InvalidOperationException("The PicoGK viewer command pump has completed.");
+            return admissionCancellation.Token;
+        }
+    }
+
+    private void EnqueueGeometry(object identity, string? name, int group)
+    {
+        _ = CheckAdmission();
+        // Allocate the command before retaining arrays; an allocation failure cannot orphan them.
+        GeometrySnapshot? snapshot = null;
+        var command = new ViewerCommand(() => AddObject(identity, name, group, snapshot!))
+        {
+            Release = () => ReleaseGeometry(snapshot!),
+        };
+        // Both callbacks become reachable only after this owned capture completes.
+        snapshot = SnapshotGeometry(identity);
+        Enqueue(command);
+    }
+
+    private void AddObject(object identity, string? name, int group, GeometrySnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(identity);
         if (!componentIdentities.TryGetValue(identity, out var componentIdentity))
@@ -514,15 +594,8 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             authoredNames.Remove(identity);
             authoredNames.Add(identity, new AuthoredName(name));
         }
-        if (objectIndex.TryGetValue(identity, out var existing))
-        {
-            objects.Remove(existing);
-            objectIndex.Remove(identity);
-            materialized.Remove(identity);
-        }
-        // A model may keep mutating the queued object. The snapshot must read an owned copy.
-        using var ownedVoxels = (identity as Voxels)?.voxDuplicate();
-        var snapshot = SnapshotGeometry((object?)ownedVoxels ?? identity);
+        objects.EnsureCapacity(objects.Count + 1);
+        objectIndex.EnsureCapacity(objectIndex.Count + 1);
         var item = new SceneObject(
             identity,
             componentIdentity.Id,
@@ -530,6 +603,14 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             authoredNames.TryGetValue(identity, out var authored) ? authored.Value : null,
             snapshot,
             Matrix4x4.Identity);
+        if (objectIndex.TryGetValue(identity, out var existing))
+        {
+            objects.Remove(existing);
+            objectIndex.Remove(identity);
+            materialized.Remove(identity);
+            ReleaseGeometry(existing.Geometry);
+        }
+        lock (geometryGate) snapshot.Owners++;
         objects.Add(item);
         objectIndex.Add(identity, item);
     }
@@ -539,6 +620,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         if (!objectIndex.Remove(identity, out var item)) return;
         objects.Remove(item);
         materialized.Remove(identity);
+        ReleaseGeometry(item.Geometry);
     }
 
     private void SetMatrix(object identity, Matrix4x4 matrix)
@@ -550,39 +632,57 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         materialized.Remove(identity);
     }
 
-    private GeometrySnapshot SnapshotGeometry(object geometry)
+    private GeometrySnapshot SnapshotGeometry(object source)
     {
-        if (geometry is PolyLine line)
-        {
-            line.GetColor(out var color);
-            var count = line.nVertexCount();
-            var positions = new float[checked(count * 3)];
-            for (var index = 0; index < count; index++) WriteVector(positions, index, line.vecVertexAt(index));
-            var indices = new uint[Math.Max(0, checked((count - 1) * 2))];
-            for (var index = 0; index < count - 1; index++)
-            {
-                indices[index * 2] = checked((uint)index);
-                indices[index * 2 + 1] = checked((uint)(index + 1));
-            }
-            return new GeometrySnapshot("lines", positions, indices, color);
-        }
-
-        var ownsMesh = geometry is Voxels;
+        ArgumentNullException.ThrowIfNull(source);
         var construction = Stopwatch.StartNew();
-        var mesh = geometry is Voxels voxels ? new Mesh(voxels) : (Mesh)geometry;
-        construction.Stop();
-        if (ownsMesh) meshConstruction += construction.Elapsed.TotalMilliseconds;
-        try
+        using var capture = source switch
         {
+            Mesh mesh => mesh.TauAcquireGeometry(),
+            Voxels voxels => voxels.TauAcquireGeometry(),
+            PolyLine line => line.TauAcquireGeometry(),
+            _ => throw new ArgumentException("Unsupported PicoGK viewer geometry.", nameof(source)),
+        };
+        construction.Stop();
+        var kind = source is PolyLine ? "lines" : "triangles";
+        var key = (capture.Library, kind, capture.Generation);
+        lock (geometryGate)
+        {
+            if (source is Voxels) meshConstruction += construction.Elapsed.TotalMilliseconds;
+            if (geometry.TryGetValue(key, out var existing))
+            {
+                existing.Owners++;
+                return existing;
+            }
+            var bytes = checked(((long)capture.PositionCount + capture.IndexCount) * sizeof(uint));
+            if (bytes > MaximumOwnedGeometryBytes - geometryBytes)
+                throw new WorkerException(new Issue("PicoGK owned source geometry exceeds 256 MiB.",
+                    "CS_TAU_RUNTIME", "validation", "error"));
             var extraction = Stopwatch.StartNew();
-            var (positions, indices) = mesh.TauCopyGeometry();
+            var positions = new float[capture.PositionCount];
+            var indices = new uint[capture.IndexCount];
+            capture.Copy(positions, indices);
             extraction.Stop();
             meshExtraction += extraction.Elapsed.TotalMilliseconds;
-            return new GeometrySnapshot("triangles", positions, indices, null);
+            var snapshot = new GeometrySnapshot(kind, positions, indices, source is PolyLine ? capture.Color : (ColorFloat?)null)
+            {
+                Identity = key,
+                Owners = 1,
+            };
+            geometry.Add(key, snapshot);
+            geometryBytes += bytes;
+            geometryCopies++;
+            return snapshot;
         }
-        finally
+    }
+
+    private void ReleaseGeometry(GeometrySnapshot snapshot)
+    {
+        lock (geometryGate)
         {
-            if (ownsMesh) mesh.Dispose();
+            if (--snapshot.Owners != 0) return;
+            geometry.Remove(snapshot.Identity);
+            geometryBytes -= snapshot.ByteLength;
         }
     }
 
@@ -674,11 +774,13 @@ internal sealed class CaptureViewerBackend : IViewerBackend
 
     private static BBox3 BoundsOf(GeometrySnapshot geometry)
     {
+        if (geometry.CachedBounds is { } cached) return cached;
         var bounds = new BBox3();
         for (var index = 0; index < geometry.Positions.Length; index += 3)
         {
             bounds.Include(new Vector3(geometry.Positions[index], geometry.Positions[index + 1], geometry.Positions[index + 2]));
         }
+        geometry.CachedBounds = bounds;
         return bounds;
     }
 
@@ -709,7 +811,10 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         "error"));
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(disposed, this);
 
-    private sealed record ViewerCommand(Action Apply, ManualResetEventSlim? Completion = null);
+    private sealed record ViewerCommand(Action Apply, ManualResetEventSlim? Completion = null)
+    {
+        internal Action? Release { get; init; }
+    }
     private sealed record ComponentIdentity(string Id);
     private sealed record AuthoredName(string Value);
     private sealed record SceneObject(

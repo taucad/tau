@@ -676,8 +676,8 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     await expectRenderCycleSince(page, beforeParameter);
 
     await page.keyboard.press('Control+a');
-    const body = page.getByRole('button', { name: 'group-0-object-1', exact: true });
-    const sphere = page.getByRole('button', { name: 'group-1-object-2', exact: true });
+    const body = page.getByRole('button', { name: 'Shape 1', exact: true });
+    const sphere = page.getByRole('button', { name: 'Shape 2', exact: true });
     await expectVisible(body, 60_000);
     await expectVisible(sphere, 60_000);
     const bodyMaterial = await body.locator('[data-slot="material-swatch"]').getAttribute('style');

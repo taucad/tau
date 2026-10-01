@@ -903,10 +903,10 @@ describe('the page client of the worker revision root', () => {
     view.unmount();
     await settle();
 
-    expect(root.inspect()).toMatchObject({ status: 'stopped', children: [] });
     // Closing waits for the operation log's last append, so the registry lets go after the root stops.
     await vi.waitFor(
       () => {
+        expect(root.inspect()).toMatchObject({ status: 'stopped', children: [] });
         expect(registry.openProjectIds()).toEqual([]);
       },
       { timeout: 10_000 },

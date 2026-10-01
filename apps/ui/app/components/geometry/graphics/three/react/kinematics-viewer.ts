@@ -3,7 +3,7 @@
  * the scene posed from it, drives playback ticks while playing and visible, owns drag-to-IK and, under the
  * `tauDebug` flag, exposes `window.__TAU_KINEMATICS_TEST__` for end-to-end assertions.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { Box3, Matrix4, Vector3 } from 'three';
 import type { Mesh, Object3D } from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -174,7 +174,7 @@ export function useKinematicsViewer({
   const mechanism = manifest?.mechanism;
 
   // Load alongside `loadManifest`: every presentation carries (or drops) its mechanism.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!manifest) {
       return;
     }

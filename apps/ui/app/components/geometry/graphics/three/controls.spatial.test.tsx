@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RenderFrame } from '@taucad/spatial';
 import { Controls } from '#components/geometry/graphics/three/controls.js';
@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => {
     metersPerRenderUnit: 0.001,
   };
   return {
-    context: { isSectionViewActive: true },
+    context: { isSectionViewActive: true, isMeasureActive: false, measurements: [] },
     renderFrame,
     cameraControlProperties: undefined as Record<string, unknown> | undefined,
     handlesPicker: undefined as unknown,
@@ -78,10 +78,12 @@ describe('Controls', () => {
     expect(mocks.cameraControlProperties?.['initialTarget']).toEqual([-10_000, -20_000, -30_000]);
   });
 
-  it('should hand the section handles the view cube plane picker', () => {
+  it('should hand the section handles the view cube plane picker', async () => {
     renderControls(true);
 
-    expect(mocks.handlesPicker).toBeDefined();
+    await waitFor(() => {
+      expect(mocks.handlesPicker).toBeDefined();
+    });
     expect(mocks.cubePicker).toBe(mocks.handlesPicker);
   });
 
@@ -89,7 +91,7 @@ describe('Controls', () => {
     mocks.context.isSectionViewActive = false;
     renderControls(true);
 
-    expect(mocks.handlesPicker).toBeDefined();
+    expect(mocks.handlesPicker).toBeUndefined();
     expect(mocks.cubePicker).toBeUndefined();
   });
 

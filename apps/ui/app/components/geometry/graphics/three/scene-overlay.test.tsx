@@ -1,3 +1,5 @@
+import { useLayoutEffect } from 'react';
+import { WebGLRenderTarget } from 'three';
 import { render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -8,6 +10,7 @@ const mocks = vi.hoisted(() => {
   const camera = { isCamera: true };
   let frame: ((state: { gl: typeof gl; scene: typeof mainScene; camera: typeof camera }) => void) | undefined;
   let framePriority: number | undefined;
+  const frames: Array<{ callback: NonNullable<typeof frame>; priority?: number }> = [];
   return {
     camera,
     gl,
@@ -15,9 +18,13 @@ const mocks = vi.hoisted(() => {
     renderScene,
     getFrame: () => frame,
     getFramePriority: () => framePriority,
+    frames,
     setFrame: (next: typeof frame, priority?: number) => {
       frame = next;
       framePriority = priority;
+      if (next) {
+        frames.push({ callback: next, priority });
+      }
     },
   };
 });
@@ -37,6 +44,7 @@ describe('SceneOverlay depth ownership', () => {
     mocks.mainScene.traverse.mockClear();
     mocks.renderScene.mockClear();
     mocks.setFrame(undefined);
+    mocks.frames.length = 0;
   });
 
   it('does not register a positive-priority frame owner when overlays are disabled', async () => {
@@ -46,7 +54,9 @@ describe('SceneOverlay depth ownership', () => {
         <SceneOverlay overlayActive={false}>grid</SceneOverlay>
       </OverlayDepthProvider>,
     );
-    expect(mocks.getFrame()).toBeUndefined();
+    expect(mocks.getFramePriority()).toBe(0);
+    mocks.getFrame()?.({ gl: mocks.gl, scene: mocks.mainScene, camera: mocks.camera });
+    expect(mocks.renderScene).not.toHaveBeenCalled();
   });
 
   it('restores authoritative post depth then renders only the overlay scene once', async () => {
@@ -79,6 +89,45 @@ describe('SceneOverlay depth ownership', () => {
     expect(mocks.mainScene.traverse).not.toHaveBeenCalled();
     expect(mocks.gl.autoClear).toBe(true);
     expect(mocks.gl.clearDepth).not.toHaveBeenCalled();
+  });
+
+  it('should stamp shared canvas depth once per frame and retain independent mask targets', async () => {
+    const { OverlayDepthProvider, useOverlayDepthRestore, useOverlayDepthRestorer } =
+      await import('#components/geometry/graphics/three/scene-overlay.js');
+    const stamp = vi.fn();
+    const restorers: Array<ReturnType<typeof useOverlayDepthRestorer>> = [];
+    function Register(): React.ReactNode {
+      useOverlayDepthRestore(stamp);
+      return null;
+    }
+    function Consumer(): React.ReactNode {
+      const restore = useOverlayDepthRestorer();
+      useLayoutEffect(() => {
+        restorers.push(restore);
+      }, [restore]);
+      return null;
+    }
+    render(
+      <OverlayDepthProvider>
+        <Register />
+        <Consumer />
+        <Consumer />
+      </OverlayDepthProvider>,
+    );
+    const state = { gl: mocks.gl, scene: mocks.mainScene, camera: mocks.camera };
+    const reset = mocks.frames.find(({ priority }) => priority === 0)!.callback;
+    reset(state);
+    restorers[0]!();
+    restorers[1]!();
+    expect(stamp).toHaveBeenCalledTimes(1);
+    const mask = new WebGLRenderTarget(1, 1);
+    restorers[1]!(mask);
+    expect(stamp).toHaveBeenLastCalledWith(mask);
+    expect(stamp).toHaveBeenCalledTimes(2);
+    reset(state);
+    restorers[0]!();
+    expect(stamp).toHaveBeenCalledTimes(3);
+    mask.dispose();
   });
 
   it('uses existing canvas depth when no post restore is registered', async () => {

@@ -15,6 +15,7 @@ const rig = {
           direction: [0, 0, 1],
           up: [0, 0, 1],
           verticalSpan: 20,
+          viewport: { width: 1, height: 1, pixelRatio: 2 },
         },
       },
     }),
@@ -70,7 +71,10 @@ describe('useCameraFraming portable camera events', () => {
       }),
     );
 
-    const setView = send.mock.calls[0]?.[0] as { direction: [number, number, number]; up: [number, number, number] };
+    const setView = send.mock.calls.find(([event]) => event.type === 'setView')?.[0] as {
+      direction: [number, number, number];
+      up: [number, number, number];
+    };
     expect(new Vector3(...setView.direction).cross(new Vector3(...setView.up)).lengthSq()).toBeGreaterThan(1e-8);
     expect(send).toHaveBeenCalledWith({ type: 'setBounds', bounds: { min: [-10, -5, -2], max: [10, 5, 2] } });
     expect(send).toHaveBeenLastCalledWith({ type: 'frame', margin: 0.1 });
@@ -164,7 +168,14 @@ describe('useCameraFraming portable camera events', () => {
     expect(send).not.toHaveBeenCalledWith({ type: 'reset' });
     expect(send).toHaveBeenLastCalledWith({ type: 'frame', margin: 0.1 });
     hook.unmount();
-    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(unsubscribe).toHaveBeenCalledTimes(2);
+  });
+
+  it('publishes the actual canvas viewport before the first fit', () => {
+    const bounds = new Box3(new Vector3(-1, -1, -1), new Vector3(1, 1, 1));
+    renderHook(() => useCameraFraming({ geometryRadius: 2, geometryBounds: bounds }));
+    expect(send.mock.calls[0]).toEqual([{ type: 'setViewport', viewport: { width: 800, height: 600, pixelRatio: 2 } }]);
+    expect(send).toHaveBeenCalledWith({ type: 'frame', margin: 0.1 });
   });
 
   it('does not frame empty geometry', () => {

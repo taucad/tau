@@ -67,7 +67,7 @@ export function ThreeCanvasInstance({
   ...canvasProperties
 }: ThreeCanvasInstanceProps): React.JSX.Element {
   const dpr = Math.min(globalThis.devicePixelRatio, 2);
-  const isTauDebugEnabled = useFeature('tauDebug');
+  const isInspectorEnabled = useFeature('webGpuInspector');
   const [isCanvasReady, setIsCanvasReady] = useState(false);
   const [isContextLost, setIsContextLost] = useState(false);
   const cameraRig = useCameraRig();
@@ -149,7 +149,7 @@ export function ThreeCanvasInstance({
         </Scene>
         <OverlayDepthProvider>
           <PostProcessing settings={postProcessingSettings} />
-          {isTauDebugEnabled ? <WebGpuInspectorOverlay /> : null}
+          {isInspectorEnabled ? <WebGpuInspectorOverlay /> : null}
           <ModelEmphasisOverlay />
           <SceneOverlay overlayActive={enableAxes || enableGrid}>
             {enableAxes ? <AxesHelper /> : null}

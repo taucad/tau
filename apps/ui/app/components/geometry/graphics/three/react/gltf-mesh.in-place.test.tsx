@@ -201,6 +201,110 @@ describe('GltfMesh in-place updates', () => {
     expect([...(position.array as Float32Array)]).toEqual([0, 0, 0, 1, 0, 0, 0, 1, 5]);
   });
 
+  it('should serialize a slow parse and prepare only the newest waiting revision', async () => {
+    const original = GLTFLoader.prototype.parseAsync;
+    const gate = Promise.withResolvers<void>();
+    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockImplementationOnce(async (data, path) => {
+      await gate.promise;
+      return original.call(new GLTFLoader(), data, path);
+    });
+    const view = render(
+      <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+    );
+    await waitFor(() => {
+      expect(parseAsync).toHaveBeenCalledTimes(1);
+    });
+    view.rerender(
+      <GltfMesh gltfFile={buildGlb({ lift: 1 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
+    );
+    view.rerender(
+      <GltfMesh gltfFile={buildGlb({ lift: 2 })} geometryHash='c' presentationRevision={3} enableMatcap={false} />,
+    );
+    expect(parseAsync).toHaveBeenCalledTimes(1);
+    gate.resolve();
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([3]);
+    });
+    expect(parseAsync).toHaveBeenCalledTimes(2);
+    mocks.frameCallback?.();
+    const measured = mocks.graphicsActor.send.mock.calls
+      .map((call) => call[0] as { type: string; telemetry?: unknown })
+      .find((event) => event.type === 'gltfPresentationMeasured');
+    expect(measured?.telemetry).toMatchObject({
+      activeParses: 0,
+      activeParseHighWaterMark: 1,
+      parsesStarted: 2,
+      parsesDiscarded: 1,
+    });
+  });
+
+  it('should retain one parsed scene across many edits and dispose its live resources once on teardown', async () => {
+    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+    const view = render(
+      <GltfMesh gltfFile={buildGlb()} geometryHash='0' presentationRevision={1} enableMatcap={false} />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+    const gltf = (await parseAsync.mock.results[0]?.value) as GLTF;
+    const surface = findSurface(gltf.scene);
+    const disposeGeometry = vi.spyOn(surface.geometry, 'dispose');
+    const material = Array.isArray(surface.material) ? surface.material[0]! : surface.material;
+    const disposeMaterial = vi.spyOn(material, 'dispose');
+    for (let revision = 2; revision <= 40; revision++) {
+      view.rerender(
+        <GltfMesh
+          gltfFile={buildGlb({ lift: revision })}
+          geometryHash={String(revision)}
+          presentationRevision={revision}
+          enableMatcap={false}
+        />,
+      );
+      // oxlint-disable-next-line no-await-in-loop -- Each revision must be committed before its successor exercises reuse.
+      await waitFor(() => {
+        expect(committedRevisions().at(-1)).toBe(revision);
+      });
+    }
+    expect(parseAsync).toHaveBeenCalledTimes(1);
+    expect(surface.geometry.getAttribute('position').getZ(2)).toBe(40);
+    expect(disposeGeometry).not.toHaveBeenCalled();
+    expect(disposeMaterial).not.toHaveBeenCalled();
+    view.unmount();
+    expect(disposeGeometry).toHaveBeenCalledTimes(1);
+    expect(disposeMaterial).toHaveBeenCalledTimes(1);
+  });
+
+  it('should retain every live buffer when replacement metadata is malformed', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+    const view = render(
+      <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+    const gltf = (await parseAsync.mock.results[0]!.value) as GLTF;
+    const position = findSurface(gltf.scene).geometry.getAttribute('position');
+    const before = [...position.array];
+    const { version } = position as BufferAttribute;
+    view.rerender(
+      <GltfMesh
+        gltfFile={new Uint8Array([0, 1, 2])}
+        geometryHash='invalid'
+        presentationRevision={2}
+        enableMatcap={false}
+      />,
+    );
+    await waitFor(() => {
+      expect(mocks.graphicsActor.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'gltfPresentationFailed', revision: 2 }),
+      );
+    });
+    expect([...position.array]).toEqual(before);
+    expect((position as BufferAttribute).version).toBe(version);
+    expect(committedRevisions()).toEqual([1]);
+  });
+
   it('should fall back to a full presentation when the topology changes', async () => {
     const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
     const view = render(

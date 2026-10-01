@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { BufferAttribute, BufferGeometry, Group, LineBasicMaterial, LineSegments, Vector2 } from 'three';
+import { BufferAttribute, BufferGeometry, Group, LineBasicMaterial, LineSegments, Vector2, Vector3 } from 'three';
+import type { Object3D } from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import type { LineSegments2 } from 'three/addons';
 import {
@@ -39,6 +40,44 @@ function makeScene(): { scene: Group; lines: LineSegments2[] } {
 const colorOf = (material: unknown): number => (material as GltfFatLineMaterial).color.getHex();
 
 describe('setGltfFatLineEmphasis', () => {
+  it.each(['webgl', 'webgpu'] as const)(
+    'should retain the live pose owner when hidden %s edges are demanded',
+    (backend) => {
+      const scene = new Group();
+      const geometry = new BufferGeometry();
+      geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0]), 3));
+      const source = new LineSegments(geometry, new LineBasicMaterial());
+      source.position.set(2, 3, 4);
+      scene.add(source);
+      const association = { nodes: 0, meshes: 0, primitives: 1 };
+      const associations = new Map<Object3D, typeof association>([[source, association]]);
+      applyFatLineSegments(
+        { scene, parser: { associations } },
+        {
+          backend,
+          resolution: new Vector2(800, 600),
+          preserveSourceNodes: true,
+        },
+      );
+      const child = source.children[0]!;
+      expect(child.position.toArray()).toEqual([0, 0, 0]);
+      expect(associations.get(source)).toBe(association);
+      expect(associations.get(child)).toBe(association);
+      expect(source.material.visible).toBe(false);
+      source.position.set(6, 7, 8);
+      expect(child.getWorldPosition(new Vector3()).toArray()).toEqual([6, 7, 8]);
+      applyFatLineSegments(
+        { scene, parser: { associations } },
+        {
+          backend,
+          resolution: new Vector2(800, 600),
+          preserveSourceNodes: true,
+        },
+      );
+      expect(source.children).toHaveLength(1);
+    },
+  );
+
   it('swaps only the emphasised line to a shared depth-tested yellow material and restores the base', () => {
     const { lines } = makeScene();
     const [first, second] = lines as [LineSegments2, LineSegments2];

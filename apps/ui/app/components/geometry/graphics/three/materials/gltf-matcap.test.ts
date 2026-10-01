@@ -38,6 +38,22 @@ function getMatcapMaterial(mesh: Mesh): MeshMatcapMaterial {
 }
 
 describe('applyMatcap', () => {
+  it('should reuse the material and restore the source color after repeated tint cycles', async () => {
+    vi.spyOn(TextureLoader.prototype, 'load').mockReturnValue(new Texture());
+    const source = new MeshBasicMaterial({ color: 0xaa_55_22 });
+    const mesh = new Mesh(createTriangleGeometry(), source);
+    const scene = new Scene();
+    scene.add(mesh);
+    await applyMatcap({ scene }, 0.5);
+    const { material } = mesh;
+    await applyMatcap({ scene }, 1);
+    expect(mesh.material).toBe(material);
+    expect(getMatcapMaterial(mesh).color.equals(source.color)).toBe(true);
+    await applyMatcap({ scene }, 0.5);
+    await applyMatcap({ scene }, 1);
+    expect(getMatcapMaterial(mesh).color.equals(source.color)).toBe(true);
+  });
+
   it('should disable depth writes when replacing a translucent source material', async () => {
     vi.spyOn(TextureLoader.prototype, 'load').mockReturnValue(new Texture());
     const sourceMaterial = new MeshBasicMaterial({ color: 0xaa_55_22, opacity: 0.4, transparent: true });

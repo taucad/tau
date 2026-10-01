@@ -1,5 +1,5 @@
 import { Profiler } from 'react';
-import { act } from '@testing-library/react';
+import { act, waitFor } from '@testing-library/react';
 import { createRoot, events as createPointerEvents, extend } from '@react-three/fiber';
 import type { ReconcilerRoot, RootState } from '@react-three/fiber';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +12,7 @@ import { GraphicsProvider } from '#hooks/use-graphics.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { AddSectionCutPayload } from '#machines/graphics.machine.js';
 import type { SectionCutPatch } from '#components/geometry/graphics/section-cuts.js';
+import { getMeshMeasurementFeatures } from '#components/geometry/graphics/three/utils/measurement-features.js';
 import { MeasureTool } from '#components/geometry/graphics/three/react/measure-tool.js';
 import { SectionHandles } from '#components/geometry/graphics/three/react/section-handles.js';
 import type { SectionPlanePicker } from '#components/geometry/graphics/three/controls/section-plane-picker.js';
@@ -44,6 +45,7 @@ describe('MeasureTool with section cuts', () => {
   let canvas: HTMLCanvasElement;
   let root: ReconcilerRoot<HTMLCanvasElement>;
   let getState: () => RootState;
+  let model: THREE.Mesh;
   let measureCommits = 0;
   // Beside the view cube in the viewer; here only its picks matter, and it picks nothing unless a test says so.
   let planePicker: MockProxy<SectionPlanePicker>;
@@ -185,9 +187,12 @@ describe('MeasureTool with section cuts', () => {
           state.events.connect?.(parent);
         },
       });
+      model = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
+      // These checks isolate cut/pointer behavior; cold worker preparation has its own suite.
+      getMeshMeasurementFeatures(model);
       const store = root.render(
         <GraphicsProvider graphicsRef={actor}>
-          <primitive object={new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial())} />
+          <primitive object={model} />
           <Profiler
             id='measure'
             onRender={() => {
@@ -289,9 +294,12 @@ describe('MeasureTool with section cuts', () => {
     expect(measurementMarkHeights()).toEqual(marks);
   });
 
-  it('should retain chosen catalog targets across unchanged frames and invalidate them when the camera changes', () => {
+  it('should retain chosen catalog targets across unchanged frames and invalidate them when the camera changes', async () => {
     act(() => {
       actor.send({ type: 'requestMeasureCatalog' });
+    });
+    await waitFor(() => {
+      expect(actor.getSnapshot().context.measureCandidates.length).toBeGreaterThan(0);
     });
     const { measureCandidates, measureCatalogRequest } = actor.getSnapshot().context;
     expect(measureCandidates.length).toBeGreaterThan(0);
@@ -323,6 +331,9 @@ describe('MeasureTool with section cuts', () => {
     act(() => {
       actor.send({ type: 'requestMeasureCatalog' });
     });
+    await waitFor(() => {
+      expect(actor.getSnapshot().context.measureCandidates.length).toBeGreaterThan(0);
+    });
     const { measureCandidates, measureCatalogRequest } = actor.getSnapshot().context;
     expect(measureCandidates.length).toBeGreaterThan(0);
     const chosenId = measureCandidates[0]!.id;
@@ -337,7 +348,7 @@ describe('MeasureTool with section cuts', () => {
     await act(async () => {
       root.render(
         <GraphicsProvider graphicsRef={actor}>
-          <primitive object={new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial())} />
+          <primitive object={model} />
           <MeasureTool key='remounted' />
         </GraphicsProvider>,
       );

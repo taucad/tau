@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { awaitGeometryPresentation } from '#components/geometry/graphics/three/utils/geometry-presentation-admission.js';
 import { useActorRef } from '@xstate/react';
 import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -90,6 +91,12 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
           throw new Error('source-unavailable: settled canonical geometry not ready');
         }
         const generation = generationRef.current;
+        if (request.kind === 'automatic-thumbnail' && geometry.format === 'gltf') {
+          await awaitGeometryPresentation(geometry.content, request.signal);
+          if (generation !== generationRef.current) {
+            throw new DOMException('Thumbnail source was superseded.', 'AbortError');
+          }
+        }
         const renderedLocatorIdentity = locatorIdentity(await getProjectFileSystemConfig(projectId));
         const files = await imageService.export(
           geometry.format === 'svg'
@@ -190,8 +197,11 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
       return;
     }
     const subscription = mainCadActor.on('geometryEvaluated', (event) => {
-      generationRef.current += 1;
-      identityRef.current = `${projectId}:${mainEntryPath}:${event.geometry.hash}:webp:q0.9:${thumbnailWidth}x${thumbnailHeight}:m0.1:lw${thumbnailLineWidth}:camera-bounds-v1:edges:studio-v5`;
+      const identity = `${projectId}:${mainEntryPath}:${event.geometry.hash}:webp:q0.9:${thumbnailWidth}x${thumbnailHeight}:m0.1:lw${thumbnailLineWidth}:camera-bounds-v1:edges:studio-v5`;
+      if (identityRef.current !== identity) {
+        generationRef.current += 1;
+        identityRef.current = identity;
+      }
       thumbnailActor.send({ type: 'settled', hash: identityRef.current });
     });
     let requestId = mainCadActor.getSnapshot().context.lastRequestedRenderId;

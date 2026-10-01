@@ -372,6 +372,54 @@ describe('picovoxel kernel', () => {
   });
 
   describe('results', () => {
+    it.each([
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- JSON.stringify invokes this standardized hook name.
+      { toJSON: () => null },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- JSON.stringify invokes this standardized hook name.
+      { toJSON: () => ({ pbrMetallicRoughness: { roughnessFactor: 2 } }) },
+    ])('should reject invalid material produced by JSON serialization %#', async (material) => {
+      const issues = await buildIssues(
+        createGeometry({ module: { default: (pico: Pico) => ({ shape: helloCube(pico), name: 'Pin', material }) } }),
+      );
+      expect(issues[0]!.message).toMatch(
+        /Pin \(output 1\): (material must be an object|material\.pbrMetallicRoughness\.roughnessFactor must be within \[0, 1])/,
+      );
+    });
+
+    it('should reject invalid resources produced by JSON serialization', async () => {
+      const issues = await buildIssues(
+        createGeometry({
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- JSON.stringify invokes this standardized hook name.
+          module: { default: () => ({ shapes: [], samplers: [{ wrapS: 10_497, toJSON: () => ({ wrapS: 1 }) }] }) },
+        }),
+      );
+      expect(issues[0]!.message).toContain('model resources: samplers[0].wrapS must be a standard glTF sampler value');
+    });
+
+    it('should own JSON metadata and image bytes while omitting undefined object fields', async () => {
+      const extras = { nested: { value: 1 }, omitted: undefined, array: [undefined, 2] };
+      const data = new Uint8Array([1, 2, 3]);
+      const sampler = { wrapS: 10_497, extras };
+      const { runtime, context, result } = await createGeometry({
+        module: { default: () => ({ shapes: [], images: [{ mimeType: 'image/png', data }], samplers: [sampler] }) },
+      });
+      try {
+        expect(result.nativeHandle.samplers).toEqual([
+          { wrapS: 10_497, extras: { nested: { value: 1 }, array: [null, 2] } },
+        ]);
+        expect(result.nativeHandle.images?.[0]?.data).toEqual(data);
+        expect(result.nativeHandle.images?.[0]?.data).not.toBe(data);
+        expect(extras).toHaveProperty('omitted', undefined);
+        extras.nested.value = 9;
+        data[0] = 9;
+        expect(result.nativeHandle.samplers?.[0]?.extras).toEqual({ nested: { value: 1 }, array: [null, 2] });
+        expect(result.nativeHandle.images?.[0]?.data).toEqual(new Uint8Array([1, 2, 3]));
+      } finally {
+        await definition.cleanup!(context);
+        expect(runtime.logger.error).not.toHaveBeenCalled();
+      }
+    });
+
     it('should reject a malformed model envelope before capturing its parts', async () => {
       const issues = await buildIssues(createGeometry({ module: { default: () => ({ shapes: {} }) } }));
 

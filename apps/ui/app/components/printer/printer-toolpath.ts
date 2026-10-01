@@ -1,145 +1,25 @@
-/**
- * Toolpath rendering: one `LineSegments` per filter group, each revealed
- * through its draw range, plus a short fresh-filament trail.
- *
- * The program's `positions` buffer uploads as-is (two vertices per segment)
- * and every group shares it and one colour buffer; a group owns only an index
- * buffer of its segments in program order, so hiding a group is one
- * `visible` flag and revealing it is one binary search per frame. Colours are
- * baked once per segment from its tool's filament, its kind and its height,
- * and only the active layer's range is recoloured when the layer changes.
- * Nothing here allocates inside the frame loop.
- *
- * @module
- */
+/** Compact instanced filament and indexed travel, revealed without rebuilding buffers. @module */
 
 import * as THREE from 'three';
 import { segmentAtTime, toolpathSegmentKinds } from '@taucad/slicer/toolpath';
 import type { ToolpathProgram, ToolpathSegmentKind } from '@taucad/slicer/toolpath';
-import { printerToolpath } from '#components/printer/printer-colors.constants.js';
+import { printerToolpath, printerAccent } from '#components/printer/printer-colors.constants.js';
+import { createBeadData } from '#components/printer/printer-bead-data.js';
+import type { BeadChunk, BeadData } from '#components/printer/printer-bead-data.js';
+import {
+  createFilamentMaterialForBackend,
+  createFilamentUniforms,
+  filamentModes,
+} from '#components/printer/printer-filament-material.js';
+import type { FilamentMode, FilamentUniforms } from '#components/printer/printer-filament-material.js';
 import { layerAtTime } from '#components/printer/printer-playback.js';
 
-/** What the G-code filter shows and hides; every segment belongs to exactly one group. */
-export const toolpathGroups = [
-  'preparation',
-  'walls',
-  'infill',
-  'support',
-  'skirt-brim',
-  'other',
-  'wipe',
-  'travel',
-] as const;
-
-/** One filter group. */
-export type ToolpathGroup = (typeof toolpathGroups)[number];
-
-/** The filter's name for each group. */
-export const toolpathGroupLabels: Readonly<Record<ToolpathGroup, string>> = {
-  preparation: 'Preparation',
-  walls: 'Walls',
-  infill: 'Infill',
-  support: 'Support',
-  'skirt-brim': 'Skirt and brim',
-  other: 'Other extrusion',
-  wipe: 'Wipes',
-  travel: 'Travel',
-};
-
-/** The segment kind whose tint stands for each group in the filter's legend. */
-export const toolpathGroupSwatchKind: Readonly<Record<ToolpathGroup, ToolpathSegmentKind>> = {
-  preparation: 'purge',
-  walls: 'outer-wall',
-  infill: 'infill',
-  support: 'support',
-  'skirt-brim': 'skirt',
-  other: 'unknown',
-  wipe: 'wipe',
-  travel: 'travel',
-};
-
-/** Moves that lay down no filament start hidden. */
-export const defaultHiddenToolpathGroups: ReadonlySet<ToolpathGroup> = new Set(['travel', 'wipe']);
-
-const kindGroup: Readonly<Record<ToolpathSegmentKind, ToolpathGroup>> = {
-  travel: 'travel',
-  // Zero-length extruder moves draw nothing; they ride with travel.
-  retract: 'travel',
-  wipe: 'wipe',
-  'outer-wall': 'walls',
-  'inner-wall': 'walls',
-  // The parser folds top and bottom surfaces, bridges and ironing into infill.
-  infill: 'infill',
-  support: 'support',
-  skirt: 'skirt-brim',
-  brim: 'skirt-brim',
-  // Purge lines, flushes and the prime tower prepare the nozzle; they are not the part.
-  purge: 'preparation',
-  unknown: 'other',
-};
-const kindGroupIndex = toolpathSegmentKinds.map((kind) => toolpathGroups.indexOf(kindGroup[kind]));
-const preparationGroup = toolpathGroups.indexOf('preparation');
-const movingGroups: ReadonlySet<number> = new Set([toolpathGroups.indexOf('travel'), toolpathGroups.indexOf('wipe')]);
-
-/** The group of every segment, and how many segments each group holds. */
-export type ToolpathGrouping = Readonly<{
-  /** Index into {@link toolpathGroups} per segment. */
-  groupOf: Uint8Array<ArrayBuffer>;
-  /** Segments per group, in {@link toolpathGroups} order. */
-  counts: readonly number[];
-}>;
-
-/**
- * Sort every segment into one filter group. Extrusion in the start sequence
- * (before the first layer annotation) is preparation whatever its label; its
- * moves stay travel and wipes.
- *
- * @param program - Kinds, segment count and preamble length.
- * @returns The group per segment and the group sizes.
- */
-export const groupToolpath = (
-  program: Pick<ToolpathProgram, 'segmentCount' | 'kinds' | 'preambleSegmentCount'>,
-): ToolpathGrouping => {
-  const groupOf = new Uint8Array(program.segmentCount);
-  const counts = toolpathGroups.map(() => 0);
-  for (let segment = 0; segment < program.segmentCount; segment += 1) {
-    const group = kindGroupIndex[program.kinds[segment]!] ?? kindGroupIndex.at(-1)!;
-    const resolved = segment < program.preambleSegmentCount && !movingGroups.has(group) ? preparationGroup : group;
-    groupOf[segment] = resolved;
-    counts[resolved]! += 1;
-  }
-  return { groupOf, counts };
-};
-
-/**
- * The tools that lay down filament, ascending: the filaments the program prints with, its preparation included.
- *
- * @param program - Segment count, extrusion and tool per segment.
- * @returns Each extruding tool once.
- */
-export const extrudingTools = (
-  program: Pick<ToolpathProgram, 'segmentCount' | 'extrusion' | 'tools'>,
-): readonly number[] => {
-  // One flag per value the tools column can hold.
-  const extruding = new Uint8Array(256);
-  for (let segment = 0; segment < program.segmentCount; segment += 1) {
-    if (program.extrusion[segment]! > 0) {
-      extruding[program.tools[segment]!] = 1;
-    }
-  }
-  return [...extruding.keys()].filter((tool) => extruding[tool] === 1);
-};
-
+import { groupToolpath, movingGroups, toolpathGroups } from '#components/printer/printer-toolpath-groups.js';
+import type { ToolpathGroup, ToolpathGrouping } from '#components/printer/printer-toolpath-groups.js';
 /** Tint per segment kind. */
 export type ToolpathPalette = Readonly<Record<ToolpathSegmentKind, THREE.Color>> &
   Readonly<{ muted: THREE.Color; trail: THREE.Color }>;
 
-/** Segments the trail keeps lit behind the nozzle. */
-export const trailSegmentCount = 32;
-/** How far back the trail looks for extruding segments before giving up. */
-const trailLookback = 512;
-/** How far lower layers drift toward the muted tint at the plate. */
-const depthFade = 0.35;
 /** How far the active layer brightens toward the highlight tint. */
 const activeBrighten = 0.3;
 
@@ -156,6 +36,9 @@ export const createToolpathPalette = (
     'inner-wall': outer.clone().offsetHSL(0, -0.08, -0.1),
     infill: outer.clone().offsetHSL(0, -0.3, -0.18),
     support: new THREE.Color(printerToolpath.support),
+    'support-interface': new THREE.Color(printerToolpath.support),
+    bridge: outer.clone(),
+    ironing: outer.clone(),
     skirt: new THREE.Color(printerToolpath.skirt),
     brim: new THREE.Color(printerToolpath.brim),
     purge: new THREE.Color(
@@ -170,167 +53,6 @@ export const createToolpathPalette = (
     muted: new THREE.Color(printerToolpath.muted[theme]),
     trail: outer.clone().lerp(new THREE.Color(printerToolpath.highlight), 0.55),
   };
-};
-
-/** Renderer-owned toolpath objects; `dispose` releases everything allocated here. */
-export type ToolpathReveal = {
-  /** Holds one `LineSegments` per non-empty group. */
-  readonly lines: THREE.Group;
-  /** Per {@link toolpathGroups} entry; `undefined` for a group the program never uses. */
-  readonly groupLines: ReadonlyArray<THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial> | undefined>;
-  readonly groupOf: Uint8Array<ArrayBuffer>;
-  readonly trail: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>;
-  /** The trail's tint per tool, from each palette. */
-  readonly trailColors: readonly THREE.Color[];
-  readonly baseColors: Float32Array;
-  readonly colors: THREE.BufferAttribute;
-  readonly trailPositions: THREE.BufferAttribute;
-  activeLayer: number;
-  readonly dispose: () => void;
-};
-
-const kindOf = (program: Pick<ToolpathProgram, 'kinds'>, segment: number): ToolpathSegmentKind =>
-  toolpathSegmentKinds[program.kinds[segment]!] ?? 'unknown';
-
-/**
- * Allocate the toolpath objects for one program. `palettes` holds one per tool: entry *i* tints the
- * segments tool `T<i>` prints, and a tool past its end takes the first.
- */
-export const createToolpathReveal = (
-  program: ToolpathProgram,
-  palettes: readonly ToolpathPalette[],
-  { groupOf, counts }: ToolpathGrouping = groupToolpath(program),
-): ToolpathReveal => {
-  const vertexCount = program.segmentCount * 2;
-  const baseColors = new Float32Array(vertexCount * 3);
-  // Fade by layer rather than Z: end sequences lift the head far above the last printed layer.
-  const topLayer = Math.max(1, program.layerTable.length - 1);
-  const color = new THREE.Color();
-  for (let segment = 0; segment < program.segmentCount; segment += 1) {
-    const palette = palettes[program.tools[segment]!] ?? palettes[0]!;
-    if (groupOf[segment] === preparationGroup) {
-      // Preparation keeps its one tint: faded toward the muted shade, it sinks into the plate.
-      color.copy(palette.purge);
-    } else {
-      const height = Math.min(1, program.layers[segment]! / topLayer);
-      color.copy(palette[kindOf(program, segment)]).lerp(palette.muted, depthFade * (1 - height));
-    }
-    color.toArray(baseColors, segment * 6);
-    color.toArray(baseColors, segment * 6 + 3);
-  }
-  const colors = new THREE.BufferAttribute(new Float32Array(baseColors), 3);
-  colors.setUsage(THREE.DynamicDrawUsage);
-  const position = new THREE.BufferAttribute(program.positions, 3);
-  const material = new THREE.LineBasicMaterial({ vertexColors: true });
-  const indices = counts.map((count) => new Uint32Array(count * 2));
-  const filled = counts.map(() => 0);
-  for (let segment = 0; segment < program.segmentCount; segment += 1) {
-    const group = groupOf[segment]!;
-    indices[group]![filled[group]!] = segment * 2;
-    indices[group]![filled[group]! + 1] = segment * 2 + 1;
-    filled[group]! += 2;
-  }
-  const lines = new THREE.Group();
-  const groupLines = indices.map((index) => {
-    if (index.length === 0) {
-      return undefined;
-    }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', position);
-    geometry.setAttribute('color', colors);
-    geometry.setIndex(new THREE.BufferAttribute(index, 1));
-    geometry.setDrawRange(0, 0);
-    const object = new THREE.LineSegments(geometry, material);
-    object.frustumCulled = false;
-    lines.add(object);
-    return object;
-  });
-
-  const trailPositions = new THREE.BufferAttribute(new Float32Array(trailSegmentCount * 6), 3);
-  trailPositions.setUsage(THREE.DynamicDrawUsage);
-  const trailGeometry = new THREE.BufferGeometry();
-  trailGeometry.setAttribute('position', trailPositions);
-  trailGeometry.setDrawRange(0, 0);
-  const trailColors = palettes.map((palette) => palette.trail);
-  const trail = new THREE.LineSegments(
-    trailGeometry,
-    new THREE.LineBasicMaterial({ color: trailColors[0], transparent: true, opacity: 0.95, depthWrite: false }),
-  );
-  trail.frustumCulled = false;
-  trail.renderOrder = 1;
-
-  return {
-    lines,
-    groupLines,
-    groupOf,
-    trail,
-    trailColors,
-    baseColors,
-    colors,
-    trailPositions,
-    activeLayer: -1,
-    dispose: () => {
-      for (const object of groupLines) {
-        object?.geometry.dispose();
-      }
-      material.dispose();
-      trailGeometry.dispose();
-      trail.material.dispose();
-    },
-  };
-};
-
-/** Show every group except the hidden ones; the next reveal skips hidden segments in the trail too. */
-export const setToolpathVisibility = (reveal: ToolpathReveal, hidden: ReadonlySet<ToolpathGroup>): void => {
-  for (const [group, object] of reveal.groupLines.entries()) {
-    if (object) {
-      object.visible = !hidden.has(toolpathGroups[group]!);
-    }
-  }
-};
-
-const isShown = (reveal: ToolpathReveal, segment: number): boolean =>
-  reveal.groupLines[reveal.groupOf[segment]!]?.visible === true;
-
-/** How many entries of an ascending index buffer fall below a vertex. */
-const verticesBefore = (index: ArrayLike<number>, vertex: number): number => {
-  let low = 0;
-  let high = index.length;
-  while (low < high) {
-    const middle = Math.floor((low + high) / 2);
-    if (index[middle]! < vertex) {
-      low = middle + 1;
-    } else {
-      high = middle;
-    }
-  }
-  return low;
-};
-
-const recolorLayer = (
-  reveal: ToolpathReveal,
-  program: ToolpathProgram,
-  { layer, brighten }: Readonly<{ layer: number; brighten: number }>,
-): void => {
-  const window = program.layerTable[layer];
-  if (!window || window.segmentCount === 0) {
-    return;
-  }
-  const start = window.firstSegment * 6;
-  const length = window.segmentCount * 6;
-  const target = reveal.colors.array as Float32Array;
-  const color = new THREE.Color();
-  const highlight = new THREE.Color(printerToolpath.highlight);
-  for (let offset = start; offset < start + length; offset += 3) {
-    color.fromArray(reveal.baseColors, offset);
-    // Preparation shares layer 0 but stays its tint: brightened, it fades into the lifted plate.
-    if (brighten > 0 && reveal.groupOf[Math.floor(offset / 6)] !== preparationGroup) {
-      color.lerp(highlight, brighten);
-    }
-    color.toArray(target, offset);
-  }
-  reveal.colors.addUpdateRange(start, length);
-  reveal.colors.needsUpdate = true;
 };
 
 /** Where the nozzle is at the cursor: inside the current segment or parked at its ends. */
@@ -360,69 +82,319 @@ export const headPositionAt = (
   return segment;
 };
 
-/**
- * Reveal the program up to one time: completed segments through the draw
- * range, the active layer brightened, and the trail rebuilt behind the head.
- *
- * @returns The active segment and layer indices.
- */
+/** One renderer owns GPU resources; CPU instances are immutable and may be shared. */
+export type ToolpathReveal = {
+  readonly lines: THREE.Group;
+  readonly trail: THREE.Group;
+  readonly chunks: ReadonlyArray<{ mesh: THREE.Mesh<THREE.InstancedBufferGeometry>; data: BeadChunk }>;
+  readonly groupLines: ReadonlyArray<THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial> | undefined>;
+  readonly active: THREE.Mesh<THREE.InstancedBufferGeometry>;
+  readonly uniforms: FilamentUniforms;
+  readonly activeUniforms: FilamentUniforms;
+  readonly palette: THREE.DataTexture;
+  readonly groupOf: Uint8Array<ArrayBuffer>;
+  activeLayer: number;
+  time: number;
+  visibilityGeneration: number;
+  appliedVisibilityGeneration: number;
+  readonly dispose: () => void;
+};
+
+/** Ten profile points include the two ends of each supported flat face. */
+const profilePoints: ReadonlyArray<readonly [number, number, number]> = [
+  [1, 0, 1],
+  [Math.SQRT1_2, Math.SQRT1_2, 1],
+  [0, 1, 1],
+  [0, 1, -1],
+  [-Math.SQRT1_2, Math.SQRT1_2, -1],
+  [-1, 0, -1],
+  [-Math.SQRT1_2, -Math.SQRT1_2, -1],
+  [0, -1, -1],
+  [0, -1, 1],
+  [Math.SQRT1_2, -Math.SQRT1_2, 1],
+];
+
+const createProfile = (): THREE.BufferGeometry => {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const profiles: number[] = [];
+  const indices: number[] = [];
+  for (const along of [0, 1]) {
+    for (const [cosine, sine, side] of profilePoints) {
+      positions.push(cosine, sine, along);
+      normals.push(cosine, sine, 0);
+      profiles.push(along, cosine, sine, side);
+    }
+  }
+  for (let point = 0; point < profilePoints.length; point += 1) {
+    const next = (point + 1) % profilePoints.length;
+    indices.push(point, next, point + 10, next, next + 10, point + 10);
+  }
+  for (const along of [0, 1]) {
+    const first = positions.length / 3;
+    positions.push(0, 0, along);
+    normals.push(0, 0, along === 0 ? -1 : 1);
+    profiles.push(along, 0, 0, 0);
+    for (const [cosine, sine, side] of profilePoints) {
+      positions.push(cosine, sine, along);
+      normals.push(0, 0, along === 0 ? -1 : 1);
+      profiles.push(along, cosine, sine, side);
+    }
+    for (let point = 0; point < profilePoints.length; point += 1) {
+      const a = first + 1 + point;
+      const b = first + 1 + ((point + 1) % profilePoints.length);
+      indices.push(first, ...(along === 0 ? [b, a] : [a, b]));
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute('aProfile', new THREE.Float32BufferAttribute(profiles, 4));
+  geometry.setIndex(indices);
+  return geometry;
+};
+
+const createInstanceGeometry = (profile: THREE.BufferGeometry, data: BeadChunk): THREE.InstancedBufferGeometry => {
+  const geometry = new THREE.InstancedBufferGeometry();
+  for (const [name, attribute] of Object.entries(profile.attributes)) {
+    geometry.setAttribute(name, attribute);
+  }
+  geometry.setIndex(profile.index);
+  const positions = new THREE.InstancedInterleavedBuffer(data.positions, 6);
+  geometry.setAttribute('aStart', new THREE.InterleavedBufferAttribute(positions, 3, 0));
+  geometry.setAttribute('aEnd', new THREE.InterleavedBufferAttribute(positions, 3, 3));
+  geometry.setAttribute('aDimensions', new THREE.InstancedBufferAttribute(data.dimensions, 4));
+  geometry.setAttribute('aJoins', new THREE.InstancedBufferAttribute(data.joins, 4));
+  geometry.setAttribute('aMetrics', new THREE.InstancedBufferAttribute(data.metrics, 2));
+  geometry.setAttribute('aRole', new THREE.InstancedBufferAttribute(data.roles, 1));
+  geometry.boundingBox = new THREE.Box3(new THREE.Vector3(...data.min), new THREE.Vector3(...data.max));
+  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
+  geometry.instanceCount = 0;
+  return geometry;
+};
+
+/** Update only a tiny palette texture; recorded tool colours remain unchanged by role or layer. */
+export const setToolpathPalettes = (reveal: ToolpathReveal, palettes: readonly ToolpathPalette[]): void => {
+  const array = reveal.palette.image.data;
+  if (!array) {
+    return;
+  }
+  for (let tool = 0; tool < 64; tool += 1) {
+    const palette = palettes[tool] ?? palettes[0]!;
+    for (let row = 0; row < 16; row += 1) {
+      const kind = toolpathSegmentKinds[row - 1] ?? 'outer-wall';
+      const color = row === 0 ? palette['outer-wall'] : palette[kind];
+      const offset = (row * 64 + tool) * 4;
+      array[offset] = Math.round(color.r * 255);
+      array[offset + 1] = Math.round(color.g * 255);
+      array[offset + 2] = Math.round(color.b * 255);
+      array[offset + 3] = 255;
+    }
+  }
+  reveal.palette.needsUpdate = true;
+};
+
+/** Choose appearance in place, with no geometry or material recreation. */
+export const setToolpathAppearance = (
+  reveal: ToolpathReveal,
+  {
+    mode,
+    maximum = 1,
+    emphasizeLayer: emphasis = false,
+  }: Readonly<{ mode: FilamentMode; maximum?: number; emphasizeLayer?: boolean }>,
+): void => {
+  for (const handles of [reveal.uniforms, reveal.activeUniforms]) {
+    handles.mode.value = filamentModes.indexOf(mode);
+    handles.maximum.value = maximum;
+    handles.emphasis.value = emphasis ? activeBrighten : 0;
+  }
+};
+
+/** Allocate bounded instanced beads and optional travel/wipe lines for one renderer. */
+export const createToolpathReveal = (
+  program: ToolpathProgram,
+  palettes: readonly ToolpathPalette[],
+  options: Readonly<{ grouping?: ToolpathGrouping; backend?: 'webgl' | 'webgpu'; data?: BeadData }> = {},
+): ToolpathReveal => {
+  if (palettes.length === 0) {
+    palettes = [createToolpathPalette(printerAccent, 'dark')];
+  }
+  const grouping = options.grouping ?? groupToolpath(program);
+  const data = options.data ?? createBeadData(program, grouping.groupOf);
+  const profile = createProfile();
+  const palette = new THREE.DataTexture(new Uint8Array(64 * 16 * 4), 64, 16);
+  palette.minFilter = THREE.NearestFilter;
+  palette.magFilter = THREE.NearestFilter;
+  const uniforms = createFilamentUniforms(palette);
+  const activeUniforms = createFilamentUniforms(palette);
+  const material = createFilamentMaterialForBackend(options.backend ?? 'webgl', uniforms);
+  const activeMaterial = createFilamentMaterialForBackend(options.backend ?? 'webgl', activeUniforms);
+  const lines = new THREE.Group();
+  const chunks = data.chunks.map((chunk) => {
+    const mesh = new THREE.Mesh(createInstanceGeometry(profile, chunk), material);
+    lines.add(mesh);
+    return { mesh, data: chunk };
+  });
+  const activeData: BeadChunk = {
+    group: 0,
+    segments: new Uint32Array(1),
+    positions: new Float32Array(6),
+    dimensions: new Float32Array(4),
+    joins: new Float32Array(4),
+    metrics: new Float32Array(2),
+    roles: new Uint8Array(1),
+    min: [0, 0, 0],
+    max: [0, 0, 0],
+  };
+  const active = new THREE.Mesh(createInstanceGeometry(profile, activeData), activeMaterial);
+  active.frustumCulled = false;
+  const trail = new THREE.Group();
+  trail.add(active);
+  const lineMaterial = new THREE.LineBasicMaterial({ color: palettes[0]!.travel, depthWrite: false });
+  const position = new THREE.BufferAttribute(program.positions, 3);
+  const groupLines = toolpathGroups.map((group, groupIndex) => {
+    if (!movingGroups.has(groupIndex) || !grouping.counts[groupIndex]) {
+      return undefined;
+    }
+    const indices = grouping.lineIndices[groupIndex]!;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', position);
+    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    geometry.setDrawRange(0, 0);
+    const object = new THREE.LineSegments(geometry, lineMaterial);
+    object.name = group;
+    object.frustumCulled = false;
+    lines.add(object);
+    return object;
+  });
+  const reveal: ToolpathReveal = {
+    lines,
+    trail,
+    chunks,
+    active,
+    groupLines,
+    uniforms,
+    activeUniforms,
+    palette,
+    groupOf: grouping.groupOf,
+    activeLayer: -1,
+    time: Number.NaN,
+    visibilityGeneration: 0,
+    appliedVisibilityGeneration: -1,
+    dispose: () => {
+      for (const { mesh } of chunks) {
+        mesh.geometry.dispose();
+      }
+      for (const object of groupLines) {
+        object?.geometry.dispose();
+      }
+      active.geometry.dispose();
+      profile.dispose();
+      material.dispose();
+      activeMaterial.dispose();
+      lineMaterial.dispose();
+      palette.dispose();
+    },
+  };
+  setToolpathPalettes(reveal, palettes);
+  return reveal;
+};
+
+/** Hiding groups mutates objects and fences unchanged-time reveal work. */
+export const setToolpathVisibility = (reveal: ToolpathReveal, hidden: ReadonlySet<ToolpathGroup>): void => {
+  for (const { mesh, data } of reveal.chunks) {
+    mesh.visible = !hidden.has(toolpathGroups[data.group]!);
+  }
+  for (const [index, object] of reveal.groupLines.entries()) {
+    if (object) {
+      object.visible = !hidden.has(toolpathGroups[index]!);
+    }
+  }
+  reveal.visibilityGeneration += 1;
+};
+
+const entriesBefore = (indices: ArrayLike<number>, value: number): number => {
+  let low = 0;
+  let high = indices.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (indices[middle]! < value) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+};
+
+const activeColumns = [
+  ['aDimensions', 'dimensions', 4],
+  ['aJoins', 'joins', 4],
+  ['aMetrics', 'metrics', 2],
+  ['aRole', 'roles', 1],
+] as const;
+
+/** Draw ranges and one partial, capped bead; backward seeks use the same immutable instance buffers. */
 export const updateToolpathReveal = ({
   reveal,
   program,
   time,
   head,
-}: Readonly<{
-  reveal: ToolpathReveal;
-  program: ToolpathProgram;
-  time: number;
-  /** Receives the nozzle position at `time`. */
-  head: THREE.Vector3;
-}>): Readonly<{ segment: number; layer: number }> => {
+}: Readonly<{ reveal: ToolpathReveal; program: ToolpathProgram; time: number; head: THREE.Vector3 }>): Readonly<{
+  segment: number;
+  layer: number;
+}> => {
   const segment = headPositionAt(program, time, head);
-  // `times` is float32, so the last end can round above the float64 duration; the end draws everything.
+  const layer = layerAtTime(program, time);
+  if (reveal.time === time && reveal.appliedVisibilityGeneration === reveal.visibilityGeneration) {
+    return { segment, layer };
+  }
+  reveal.time = time;
+  reveal.appliedVisibilityGeneration = reveal.visibilityGeneration;
+  reveal.activeLayer = layer;
+  reveal.uniforms.layer.value = layer;
+  reveal.activeUniforms.layer.value = layer;
   const completed =
     time >= program.duration ? program.segmentCount : Math.min(program.segmentCount, Math.max(0, segment));
-  for (const object of reveal.groupLines) {
-    if (object) {
-      object.geometry.setDrawRange(0, verticesBefore(object.geometry.index!.array, completed * 2));
-    }
-  }
-
-  const layer = layerAtTime(program, time);
-  if (layer !== reveal.activeLayer) {
-    reveal.colors.clearUpdateRanges();
-    recolorLayer(reveal, program, { layer: reveal.activeLayer, brighten: 0 });
-    recolorLayer(reveal, program, { layer, brighten: activeBrighten });
-    reveal.activeLayer = layer;
-  }
-
-  // ponytail: the trail takes the filament at the head; just after a tool change its tail over the last
-  // filament's segments takes it too, until they scroll out. Per-vertex trail colours if that ever shows.
-  const headTool = program.tools[Math.min(Math.max(segment, 0), program.segmentCount - 1)] ?? 0;
-  reveal.trail.material.color.copy(reveal.trailColors[headTool] ?? reveal.trailColors[0]!);
-  const trail = reveal.trailPositions.array as Float32Array;
-  let count = 0;
-  if (segment >= 0 && segment < program.segmentCount && program.extrusion[segment]! > 0 && isShown(reveal, segment)) {
-    const offset = segment * 6;
-    trail[0] = program.positions[offset]!;
-    trail[1] = program.positions[offset + 1]!;
-    trail[2] = program.positions[offset + 2]!;
-    trail[3] = head.x;
-    trail[4] = head.y;
-    trail[5] = head.z;
-    count = 1;
-  }
-  const floor = Math.max(0, completed - trailLookback);
-  for (let index = completed - 1; index >= floor && count < trailSegmentCount; index -= 1) {
-    if (program.extrusion[index]! <= 0 || !isShown(reveal, index)) {
+  reveal.active.visible = false;
+  for (const { mesh, data } of reveal.chunks) {
+    const count = entriesBefore(data.segments, completed);
+    mesh.geometry.instanceCount = count;
+    if (segment < 0 || segment >= program.segmentCount || !mesh.visible || data.segments[count] !== segment) {
       continue;
     }
-    trail.set(program.positions.subarray(index * 6, index * 6 + 6), count * 6);
-    count += 1;
+    const start = program.times[segment * 2]!;
+    const end = program.times[segment * 2 + 1]!;
+    const fraction = end > start ? (time - start) / (end - start) : 1;
+    const begins = program.deposition?.starts[segment] ?? 0;
+    if (fraction <= begins) {
+      continue;
+    }
+    const positions = reveal.active.geometry.getAttribute('aStart');
+    if (positions instanceof THREE.InterleavedBufferAttribute) {
+      for (let i = 0; i < 6; i += 1) {
+        positions.data.array[i] = data.positions[count * 6 + i]!;
+      }
+      positions.data.needsUpdate = true;
+    }
+    for (const [name, column, size] of activeColumns) {
+      const values = data[column];
+      const attribute = reveal.active.geometry.getAttribute(name);
+      if (attribute instanceof THREE.BufferAttribute) {
+        for (let i = 0; i < size; i += 1) {
+          attribute.array[i] = values[count * size + i]!;
+        }
+        attribute.needsUpdate = true;
+      }
+    }
+    reveal.activeUniforms.fraction.value = Math.min(1, (fraction - begins) / (1 - begins));
+    reveal.active.geometry.instanceCount = 1;
+    reveal.active.visible = true;
   }
-  reveal.trail.geometry.setDrawRange(0, count * 2);
-  reveal.trailPositions.clearUpdateRanges();
-  reveal.trailPositions.addUpdateRange(0, count * 6);
-  reveal.trailPositions.needsUpdate = true;
+  for (const object of reveal.groupLines) {
+    if (object) {
+      object.geometry.setDrawRange(0, entriesBefore(object.geometry.index!.array, completed * 2));
+    }
+  }
   return { segment, layer };
 };

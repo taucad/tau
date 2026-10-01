@@ -6,6 +6,19 @@ import { exportFidelityValues } from '@taucad/types/constants';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import { isJsonSchema, isWireJson } from '#types/runtime-metadata-validation.js';
 
+/**
+ * Keep exact registration branches while emitting a Zod 4.0-compatible union type.
+ * @param discriminator - The wire discriminator.
+ * @param branches - The validated registration variants.
+ * @returns The discriminated parser under the stable union type.
+ */
+const discriminatedRegistrationUnion = <
+  const Branches extends readonly [z.core.$ZodTypeDiscriminable, ...z.core.$ZodTypeDiscriminable[]],
+>(
+  discriminator: string,
+  branches: Branches,
+): z.ZodUnion<Branches> => z.discriminatedUnion(discriminator, branches);
+
 const runtimePluginPermissionsSchema = z
   .object({
     network: z.array(z.string()).readonly().optional(),
@@ -18,7 +31,7 @@ const runtimeRegistrationCommonShape = {
   permissions: runtimePluginPermissionsSchema.optional(),
 } as const;
 
-const knownRuntimeCapabilityRegistrationSchema = z.discriminatedUnion('kind', [
+const knownRuntimeCapabilityRegistrationSchema = discriminatedRegistrationUnion('kind', [
   z
     .object({
       ...runtimeRegistrationCommonShape,

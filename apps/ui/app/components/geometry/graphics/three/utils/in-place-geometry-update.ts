@@ -1,5 +1,5 @@
-import { Box3, BufferAttribute, Sphere, Vector3 } from 'three';
-import type { BufferGeometry, InterleavedBuffer, InterleavedBufferAttribute, Mesh, Object3D } from 'three';
+import { Box3, BufferAttribute, BufferGeometry, Sphere, Vector3 } from 'three';
+import type { InterleavedBuffer, InterleavedBufferAttribute, Material, Object3D, Texture } from 'three';
 import { parseGltfBytes } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import type {
   GltfJson,
@@ -33,6 +33,8 @@ type AccessorArray = Float32Array<ArrayBuffer> | IndexArray;
  * The in-place path is an optimisation: bytes it cannot read are handed to the full presentation,
  * which owns reporting the failure.
  */
+const isBufferGeometry = (value: unknown): value is BufferGeometry => value instanceof BufferGeometry;
+
 function readGltf(bytes: Uint8Array<ArrayBuffer>): ParsedGltf | undefined {
   try {
     return parseGltfBytes(bytes);
@@ -59,16 +61,34 @@ type PrimitiveTarget = {
 export type InPlaceGeometryTargets = {
   readonly materialsSignature: string;
   readonly imageBytes: ReadonlyArray<Uint8Array<ArrayBuffer>>;
-  readonly primitives: readonly PrimitiveTarget[];
+  readonly sceneSignature: string;
+  readonly primitives: ReadonlyArray<readonly PrimitiveTarget[]>;
 };
 
 /** Input for {@link captureInPlaceGeometryTargets}. */
 export type CaptureInPlaceGeometryTargetsInput = {
   readonly scene: Object3D;
   /** `GLTFLoader` stores `undefined` for a cached material with no mapping of its own. */
-  readonly associations: ReadonlyMap<Object3D, { meshes?: number; primitives?: number } | undefined>;
+  readonly associations: ReadonlyMap<
+    Object3D | Material | Texture,
+    { meshes?: number; primitives?: number } | undefined
+  >;
   readonly bytes: Uint8Array<ArrayBuffer>;
+  readonly parsed?: ParsedGltf;
 };
+
+// Admit only the same scene, ownership and primitive semantics. Accessor storage may move,
+// but transforms, skins, morph targets, extensions and node extras require the full loader.
+function sceneSignature(json: GltfJson): string {
+  return JSON.stringify(
+    Object.fromEntries(
+      Object.entries(json).filter(
+        ([key]) =>
+          !['accessors', 'bufferViews', 'buffers', 'materials', 'textures', 'samplers', 'images'].includes(key),
+      ),
+    ),
+  );
+}
 
 function materialSignature(json: GltfJson): string {
   return JSON.stringify([json.materials ?? [], json.textures ?? [], json.samplers ?? [], json.images ?? []]);
@@ -78,7 +98,15 @@ function readImages({ json, bin }: ParsedGltf): Array<Uint8Array<ArrayBuffer>> |
   const images: Array<Uint8Array<ArrayBuffer>> = [];
   for (const image of json.images ?? []) {
     const view = image.bufferView === undefined ? undefined : json.bufferViews?.[image.bufferView];
-    if (!view || (view.byteOffset ?? 0) + view.byteLength > bin.byteLength) {
+    if (
+      !view ||
+      ('buffer' in view && view.buffer !== 0) ||
+      !Number.isSafeInteger(view.byteOffset ?? 0) ||
+      (view.byteOffset ?? 0) < 0 ||
+      !Number.isSafeInteger(view.byteLength) ||
+      view.byteLength < 0 ||
+      (view.byteOffset ?? 0) + view.byteLength > bin.byteLength
+    ) {
       // External resources have no immutable bytes to compare; use the full loader path.
       return undefined;
     }
@@ -92,7 +120,7 @@ function describePrimitive(json: GltfJson, primitive: GltfPrimitive): string {
   const attributes = Object.entries(primitive.attributes ?? {})
     .map(([name, index]) => {
       const accessor = accessors[index];
-      return `${name}:${accessor?.count ?? -1}:${accessor?.componentType ?? -1}:${accessor?.type ?? ''}`;
+      return `${name}:${accessor?.count ?? -1}:${accessor?.componentType ?? -1}:${accessor?.type ?? ''}:${accessor && 'normalized' in accessor ? Boolean(accessor.normalized) : false}`;
     })
     .sort()
     .join(',');
@@ -104,7 +132,13 @@ function readAccessor(json: GltfJson, bin: Uint8Array<ArrayBuffer>, accessorInde
   const accessor = accessorIndex === undefined ? undefined : json.accessors?.[accessorIndex];
   const bufferView = accessor?.bufferView === undefined ? undefined : json.bufferViews?.[accessor.bufferView];
   const components = componentsByType[accessor?.type ?? ''];
-  if (!accessor || !bufferView || components === undefined) {
+  if (
+    !accessor ||
+    !bufferView ||
+    components === undefined ||
+    'sparse' in accessor ||
+    ('buffer' in bufferView && bufferView.buffer !== 0)
+  ) {
     return undefined;
   }
 
@@ -120,7 +154,18 @@ function readAccessor(json: GltfJson, bin: Uint8Array<ArrayBuffer>, accessorInde
 
   const start = bin.byteOffset + (bufferView.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
   const byteLength = elements * bytesPerComponent;
-  if (start + byteLength > bin.byteOffset + bin.byteLength) {
+  if (
+    !Number.isSafeInteger(accessor.count) ||
+    accessor.count < 0 ||
+    !Number.isSafeInteger(bufferView.byteOffset ?? 0) ||
+    (bufferView.byteOffset ?? 0) < 0 ||
+    !Number.isSafeInteger(accessor.byteOffset ?? 0) ||
+    (accessor.byteOffset ?? 0) < 0 ||
+    !Number.isSafeInteger(bufferView.byteLength) ||
+    bufferView.byteLength < 0 ||
+    (accessor.byteOffset ?? 0) + byteLength > bufferView.byteLength ||
+    start + byteLength > bin.byteOffset + bin.byteLength
+  ) {
     return undefined;
   }
   // A misaligned accessor cannot be viewed directly; copying it is rare and still cheaper than a reparse.
@@ -145,7 +190,7 @@ function readAccessor(json: GltfJson, bin: Uint8Array<ArrayBuffer>, accessorInde
   }
 }
 
-function sameElements(left: AccessorArray | undefined, right: ArrayLike<number> | undefined): boolean {
+function sameElements(left: ArrayLike<number> | undefined, right: ArrayLike<number> | undefined): boolean {
   if (!left || !right || left.length !== right.length) {
     return false;
   }
@@ -210,7 +255,9 @@ function planSurfaceUpdate({ json, bin, primitive, target }: PrimitiveUpdate): (
     if (!values || !attribute) {
       return undefined;
     }
-    writes.push([attribute, values]);
+    if (!sameElements(values, attribute.array)) {
+      writes.push([attribute, values]);
+    }
   }
 
   return () => {
@@ -218,11 +265,16 @@ function planSurfaceUpdate({ json, bin, primitive, target }: PrimitiveUpdate): (
       (attribute.array as Float32Array).set(values as Float32Array);
       attribute.needsUpdate = true;
     }
-    setBoundsFromAccessor(json, target.geometry, primitive.attributes?.['POSITION']);
+    if (writes.some(([attribute]) => attribute === target.geometry.getAttribute('position'))) {
+      setBoundsFromAccessor(json, target.geometry, primitive.attributes?.['POSITION']);
+    }
   };
 }
 
 function planLineUpdate({ json, bin, primitive, target }: PrimitiveUpdate): (() => void) | undefined {
+  if (!target.geometry.attributes['instanceStart']) {
+    return planSurfaceUpdate({ json, bin, primitive, target });
+  }
   const indices = readAccessor(json, bin, primitive.indices);
   if (primitive.indices !== undefined && !sameElements(indices, target.sourceIndices)) {
     return undefined;
@@ -238,6 +290,10 @@ function planLineUpdate({ json, bin, primitive, target }: PrimitiveUpdate): (() 
     indices === undefined ? positions : deindexPositions(positions, indices as Uint32Array | Uint16Array);
   if (buffer.array.length !== segmentPositions.length) {
     return undefined;
+  }
+
+  if (sameElements(segmentPositions, buffer.array)) {
+    return () => undefined;
   }
 
   return () => {
@@ -256,10 +312,12 @@ function planLineUpdate({ json, bin, primitive, target }: PrimitiveUpdate): (() 
  * then unavailable for this presentation and every result takes the full path.
  */
 export function captureInPlaceGeometryTargets({
+  scene,
   associations,
   bytes,
+  parsed: suppliedParsed,
 }: CaptureInPlaceGeometryTargetsInput): InPlaceGeometryTargets | undefined {
-  const parsed = readGltf(bytes);
+  const parsed = suppliedParsed ?? readGltf(bytes);
   if (!parsed) {
     return undefined;
   }
@@ -268,42 +326,60 @@ export function captureInPlaceGeometryTargets({
   if (!imageBytes) {
     return undefined;
   }
-  const objectsByAddress = new Map<string, Object3D>();
+  const presented = new Set<Object3D>();
+  scene.traverse((object) => presented.add(object));
+  const objectsByAddress = new Map<string, Object3D[]>();
   for (const [object, association] of associations) {
-    if (association?.meshes === undefined || association.primitives === undefined) {
+    if (
+      !('isObject3D' in object) ||
+      !presented.has(object) ||
+      association?.meshes === undefined ||
+      association.primitives === undefined
+    ) {
       continue;
     }
     const address = `${association.meshes}/${association.primitives}`;
-    if (!objectsByAddress.has(address)) {
-      objectsByAddress.set(address, object);
-    }
+    const objects = objectsByAddress.get(address) ?? [];
+    objects.push(object);
+    objectsByAddress.set(address, objects);
   }
 
-  const primitives: PrimitiveTarget[] = [];
+  const primitives: PrimitiveTarget[][] = [];
   for (const [meshIndex, mesh] of (json.meshes ?? []).entries()) {
     for (const [primitiveIndex, primitive] of (mesh.primitives ?? []).entries()) {
-      const object = objectsByAddress.get(`${meshIndex}/${primitiveIndex}`);
-      const geometry = (object as Mesh | undefined)?.geometry;
-      if (!object || !geometry) {
+      const occurrences = objectsByAddress.get(`${meshIndex}/${primitiveIndex}`);
+      if (!occurrences?.length) {
         return undefined;
       }
-      const isLine = primitive.mode === linesMode;
-      // A fat line's own index belongs to the instanced quad, never to the source segments, so the
-      // de-indexed replacement is the only admissible source there.
-      const isFatLine = 'instanceStart' in geometry.attributes;
-      const sourceIndices = isLine
-        ? isFatLine
-          ? getFatLineSourceIndices(object)
-          : (geometry.index?.array as IndexArray | undefined)
-        : undefined;
-      if (isLine && primitive.indices !== undefined && !sourceIndices) {
-        return undefined;
+      const targets: PrimitiveTarget[] = [];
+      const geometries = new Set<BufferGeometry>();
+      for (const object of occurrences) {
+        if (!('geometry' in object) || !isBufferGeometry(object.geometry)) {
+          return undefined;
+        }
+        const { geometry } = object;
+        const isLine = primitive.mode === linesMode;
+        // A fat line's own index belongs to the instanced quad, never to the source segments, so the
+        // de-indexed replacement is the only admissible source there.
+        const isFatLine = 'instanceStart' in geometry.attributes;
+        const sourceIndices = isLine
+          ? isFatLine
+            ? getFatLineSourceIndices(object)
+            : (geometry.index?.array as IndexArray | undefined)
+          : undefined;
+        if (isLine && primitive.indices !== undefined && !sourceIndices) {
+          return undefined;
+        }
+        if (!geometries.has(geometry)) {
+          geometries.add(geometry);
+          targets.push({ geometry, isLine, sourceIndices, descriptor: describePrimitive(json, primitive) });
+        }
       }
-      primitives.push({ geometry, isLine, sourceIndices, descriptor: describePrimitive(json, primitive) });
+      primitives.push(targets);
     }
   }
 
-  return { materialsSignature: materialSignature(json), imageBytes, primitives };
+  return { materialsSignature: materialSignature(json), sceneSignature: sceneSignature(json), imageBytes, primitives };
 }
 
 /**
@@ -313,8 +389,12 @@ export function captureInPlaceGeometryTargets({
  * Nothing is mutated unless every primitive validates, so a `false` return leaves the presented scene
  * exactly as it was and the caller presents the result the full way.
  */
-export function applyInPlaceGeometryUpdate(targets: InPlaceGeometryTargets, bytes: Uint8Array<ArrayBuffer>): boolean {
-  const parsed = readGltf(bytes);
+export function applyInPlaceGeometryUpdate(
+  targets: InPlaceGeometryTargets,
+  bytes: Uint8Array<ArrayBuffer>,
+  suppliedParsed?: ParsedGltf,
+): boolean {
+  const parsed = suppliedParsed ?? readGltf(bytes);
   if (!parsed) {
     return false;
   }
@@ -322,6 +402,7 @@ export function applyInPlaceGeometryUpdate(targets: InPlaceGeometryTargets, byte
   const imageBytes = readImages(parsed);
   if (
     materialSignature(json) !== targets.materialsSignature ||
+    sceneSignature(json) !== targets.sceneSignature ||
     !imageBytes ||
     imageBytes.length !== targets.imageBytes.length ||
     imageBytes.some((bytes, index) => !sameElements(bytes, targets.imageBytes[index]))
@@ -330,21 +411,27 @@ export function applyInPlaceGeometryUpdate(targets: InPlaceGeometryTargets, byte
   }
 
   const writes: Array<() => void> = [];
+  let primitiveIndex = 0;
   for (const mesh of json.meshes ?? []) {
     for (const primitive of mesh.primitives ?? []) {
-      const target = targets.primitives[writes.length];
-      if (!target || describePrimitive(json, primitive) !== target.descriptor) {
+      const occurrences = targets.primitives[primitiveIndex++];
+      if (!occurrences?.length) {
         return false;
       }
-      const update = { json, bin, primitive, target };
-      const write = target.isLine ? planLineUpdate(update) : planSurfaceUpdate(update);
-      if (!write) {
-        return false;
+      for (const target of occurrences) {
+        if (describePrimitive(json, primitive) !== target.descriptor) {
+          return false;
+        }
+        const update = { json, bin, primitive, target };
+        const write = target.isLine ? planLineUpdate(update) : planSurfaceUpdate(update);
+        if (!write) {
+          return false;
+        }
+        writes.push(write);
       }
-      writes.push(write);
     }
   }
-  if (writes.length !== targets.primitives.length) {
+  if (primitiveIndex !== targets.primitives.length) {
     return false;
   }
 

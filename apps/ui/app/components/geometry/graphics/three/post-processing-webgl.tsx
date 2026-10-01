@@ -25,7 +25,9 @@ type ComposerResources = Readonly<{
   composer: EffectComposer;
   renderPass: RenderPass;
   depthRestore: CanvasDepthRestorePass;
-  aoPasses: ReadonlyMap<ThreeCamera, ManagedN8AoPass>;
+  aoPasses: Map<ThreeCamera, ManagedN8AoPass>;
+  scene: Scene;
+  state: { sync?: ComposerSync };
   beforeAoToneMappingEffect: ToneMappingEffect;
   beforeAoToneMappingPass: EffectPass;
   toneMappingEffect: ToneMappingEffect;
@@ -45,6 +47,11 @@ const aoDisplayModes = { combined: 0, ao: 1, 'no-ao': 2 } as const;
 
 const selectComposerCamera = (resource: ComposerResources, camera: ThreeCamera, aoEnabled: boolean): void => {
   resource.renderPass.mainCamera = camera;
+  if (aoEnabled && !resource.aoPasses.has(camera)) {
+    const aoPass = new ManagedN8AoPass(resource.scene, camera);
+    resource.aoPasses.set(camera, aoPass);
+    resource.composer.addPass(aoPass, resource.composer.passes.indexOf(resource.toneMappingPass));
+  }
   for (const [endpoint, aoPass] of resource.aoPasses) {
     // N8AO bakes camera projection into three materials. Keep those cameras fixed.
     aoPass.enabled = aoEnabled && endpoint === camera;
@@ -93,15 +100,24 @@ type ComposerSync = Readonly<{
 }>;
 
 /** Size the composer and apply the viewer's settings for the active camera. */
-const syncComposer = (
-  resource: ComposerResources,
-  activeCamera: ThreeCamera,
-  { settings, viewport }: ComposerSync,
-): void => {
+const syncComposer = (resource: ComposerResources, activeCamera: ThreeCamera, sync: ComposerSync): void => {
+  const { settings, viewport } = sync;
+  const previous = resource.state.sync;
   // EffectComposer sizes its buffers from the renderer's pixel ratio, which R3F has set to `viewport.dpr`.
-  resource.composer.setSize(viewport.width, viewport.height);
-  selectComposerCamera(resource, activeCamera, settings.aoEnabled);
-  configureComposer(resource, settings, viewport);
+  if (
+    !previous ||
+    previous.viewport.width !== viewport.width ||
+    previous.viewport.height !== viewport.height ||
+    previous.viewport.dpr !== viewport.dpr
+  ) {
+    resource.composer.setSize(viewport.width, viewport.height);
+  }
+  const count = resource.aoPasses.size;
+  selectComposerCamera(resource, activeCamera, settings.aoEnabled && settings.displayMode !== 'no-ao');
+  if (previous !== sync || count !== resource.aoPasses.size) {
+    configureComposer(resource, settings, viewport);
+  }
+  resource.state.sync = sync;
 };
 
 /** Receives the composer's stable depth texture, then writes it to the canvas or a caller's target. */
@@ -160,12 +176,10 @@ class CanvasDepthRestorePass extends Pass {
 
 const createComposer = ({
   camera,
-  cameras,
   gl,
   scene,
 }: {
   readonly camera: ThreeCamera;
-  readonly cameras: readonly ThreeCamera[];
   readonly gl: WebGLRenderer;
   readonly scene: Scene;
 }): ComposerResources => {
@@ -190,17 +204,13 @@ const createComposer = ({
   const toneMappingPass = new EffectPass(camera, toneMappingEffect);
   const aoPasses = new Map<ThreeCamera, ManagedN8AoPass>();
   try {
-    for (const endpoint of cameras) {
-      aoPasses.set(endpoint, new ManagedN8AoPass(scene, endpoint));
-    }
     composer.addPass(renderPass);
     composer.addPass(depthRestore);
     composer.addPass(beforeAoToneMappingPass);
-    for (const aoPass of aoPasses.values()) {
-      composer.addPass(aoPass);
-    }
     composer.addPass(toneMappingPass);
     return {
+      scene,
+      state: {},
       composer,
       renderPass,
       depthRestore,
@@ -221,26 +231,7 @@ const createComposer = ({
   }
 };
 
-const warmComposer = (resource: ComposerResources, renderer: WebGLRenderer, activeCamera: ThreeCamera): void => {
-  const target = renderer.getRenderTarget();
-  const cubeFace = renderer.getActiveCubeFace();
-  const mipmapLevel = renderer.getActiveMipmapLevel();
-  const { renderToScreen } = resource.toneMappingPass;
-  const aoEnabled = resource.aoPasses.get(activeCamera)?.enabled ?? false;
-  resource.toneMappingPass.renderToScreen = false;
-  try {
-    for (const camera of resource.aoPasses.keys()) {
-      selectComposerCamera(resource, camera, aoEnabled);
-      resource.composer.render(0);
-    }
-  } finally {
-    selectComposerCamera(resource, activeCamera, aoEnabled);
-    resource.toneMappingPass.renderToScreen = renderToScreen;
-    renderer.setRenderTarget(target, cubeFace, mipmapLevel);
-  }
-};
-
-/** One shared composer with prewarmed, fixed-camera AO passes for both projections. */
+/** One shared composer with fixed-camera AO passes created only when demanded. */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- WebGL acronym matches the public component API.
 export function PostProcessingWebGL({ settings }: { readonly settings?: Partial<PostProcessingSettings> }): undefined {
   const { gl, scene, size, viewport, invalidate } = useThree();
@@ -308,7 +299,6 @@ export function PostProcessingWebGL({ settings }: { readonly settings?: Partial<
     try {
       resource = createComposer({
         camera: cameraRig.activeCamera,
-        cameras: [cameraRig.perspectiveCamera, cameraRig.orthographicCamera],
         gl,
         scene,
       });
@@ -317,34 +307,41 @@ export function PostProcessingWebGL({ settings }: { readonly settings?: Partial<
       return undefined;
     }
     try {
-      // Warm with the current size and settings, so the first real frame compiles nothing.
+      // Configure the requested endpoint. Render once in the real frame/context.
       if (syncRef.current) {
         syncComposer(resource, cameraRig.activeCamera, syncRef.current);
       }
-      warmComposer(resource, gl, cameraRig.activeCamera);
     } catch (error) {
       resource.composer.dispose();
-      console.error('Failed to warm WebGL post-processing pipeline', error);
+      console.error('Failed to configure WebGL post-processing pipeline', error);
       invalidate();
       return undefined;
     }
     resourceRef.current = resource;
     invalidate();
     return () => {
-      resource.composer.dispose();
-      resourceRef.current = undefined;
+      if (resourceRef.current === resource) {
+        resource.composer.dispose();
+        resourceRef.current = undefined;
+      }
     };
   }, [cameraRig, gl, invalidate, scene]);
 
-  const retarget = useCallback(
-    (camera: ThreeCamera): void => {
-      const resource = resourceRef.current;
-      if (resource) {
-        selectComposerCamera(resource, camera, aoEnabled);
+  const retarget = useCallback((camera: ThreeCamera): void => {
+    const resource = resourceRef.current;
+    if (resource) {
+      try {
+        if (syncRef.current) {
+          syncComposer(resource, camera, syncRef.current);
+        }
+      } catch (error) {
+        // An endpoint failure retires the owner once; future frames use direct rendering.
+        resource.composer.dispose();
+        resourceRef.current = undefined;
+        console.error('Failed to configure WebGL post-processing endpoint', error);
       }
-    },
-    [aoEnabled],
-  );
+    }
+  }, []);
   useCameraRetarget(retarget);
 
   const restoreDepth = useCallback(

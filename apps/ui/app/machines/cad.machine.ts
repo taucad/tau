@@ -1,3 +1,4 @@
+import { markGeometryReceipt } from '#lib/renderer-telemetry.js';
 import { setup, types, waitFor } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import type { CodeIssue, Geometry, LogLevel, LogOrigin } from '@taucad/types';
@@ -288,6 +289,9 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   cleanups.push(
     client.on('geometry', (result: HashedGeometryResult) => {
       if (result.success) {
+        if (result.data.format === 'gltf') {
+          markGeometryReceipt(result.data.content);
+        }
         machineRef.send({
           type: 'geometryComputed',
           geometry: result.data,

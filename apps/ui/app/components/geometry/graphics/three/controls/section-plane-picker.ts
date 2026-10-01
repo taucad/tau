@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import { sectionPlaneAxes } from '#components/geometry/graphics/section-cuts.js';
 import type { SectionPlane } from '#components/geometry/graphics/section-cuts.js';
 import {
@@ -124,14 +125,14 @@ const tileDistance = 0.56;
 const labelDistance = tileDistance + 0.06;
 
 /** Builds the picker once; the plane in use and the pointer only repaint it. */
-export const createSectionPlanePicker = (): SectionPlanePicker => {
+export const createSectionPlanePicker = (backend: ResolvedGraphicsBackend = 'webgl'): SectionPlanePicker => {
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera(-1.05, 1.05, 1.05, -1.05, 0.1, 20);
   const labelMaterial = createViewportControlLabelMaterial({ map: getSelectorLabelAtlasTexture() });
   const tiles = planes.map((plane) => {
     const axis = sectionPlaneAxes[plane];
     const color = sectionAxisColors[axis];
-    const material = createGripMaterial(color);
+    const material = createGripMaterial(color, backend);
     const tile = new THREE.Group();
     tile.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(...tileBases[plane]));
     const face = new THREE.Mesh(getTileGeometry(), material);

@@ -230,7 +230,9 @@ export type PrinterBounds = Readonly<{
 
 /** Segment kinds that lay down the part itself; purge lines, skirts, brims and moves are not the part. */
 const partKinds: ReadonlySet<number> = new Set(
-  (['outer-wall', 'inner-wall', 'infill', 'support'] as const).map((kind) => toolpathSegmentKinds.indexOf(kind)),
+  (['outer-wall', 'inner-wall', 'infill', 'support', 'support-interface', 'bridge', 'ironing'] as const).map((kind) =>
+    toolpathSegmentKinds.indexOf(kind),
+  ),
 );
 
 /**

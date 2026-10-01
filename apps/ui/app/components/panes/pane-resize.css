@@ -85,14 +85,15 @@
   height: calc(var(--spacing) / 2);
   border-radius: var(--radius-xl);
   background: var(--resize-idle);
-  opacity: 1;
   transform: translate(-50%, -50%);
 }
 .section-resize .dv-sash:is(:hover, :focus-visible)::after {
   background: var(--muted-foreground);
+  opacity: 1;
 }
 .section-resize .dv-sash[data-resize-dragging]::after {
   background: var(--resize-drag);
+  opacity: 1;
   transform: translate(-50%, -50%) scale(1.333333, 1.5);
   transition: none;
 }

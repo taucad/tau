@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
+/* oxlint-disable no-bitwise -- Decode the parser confidence flags for inspection. */
+import type { PrinterProgram } from '#components/printer/printer-program.js';
+import type { BeadData } from '#components/printer/printer-bead-data.js';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import {
   ChevronDown,
@@ -12,7 +15,10 @@ import {
   SkipBack,
   SkipForward,
 } from 'lucide-react';
+import { segmentAtTime, toolpathSegmentKinds } from '@taucad/slicer/toolpath';
 import type { ToolpathProgram } from '@taucad/slicer/toolpath';
+import { filamentModes } from '#components/printer/printer-filament-material.js';
+import type { FilamentMode } from '#components/printer/printer-filament-material.js';
 import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import {
@@ -30,7 +36,7 @@ import { Switch } from '@taucad/ui/components/switch';
 import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import { cn } from '@taucad/ui/utils/cn';
 import { useTheme } from '#hooks/use-theme.js';
-import { digestBytes } from '#utils/crypto.utils.js';
+import { printerPreparation } from '#components/printer/printer-preparation.js';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import { printerAccent } from '#components/printer/printer-colors.constants.js';
@@ -38,7 +44,6 @@ import type { PrinterFileKind } from '#components/printer/printer-file.js';
 import { derivePrinterGeometry } from '#components/printer/printer-geometry.js';
 import { resolvePrinterManifest } from '#components/printer/printer-manifest.fixture.js';
 import {
-  createExtrusionPrefix,
   createPlaybackStore,
   eventValueAt,
   extrudedLengthAt,
@@ -51,20 +56,18 @@ import type {
   PlaybackSpeed,
   PlaybackStore,
 } from '#components/printer/printer-playback.js';
-import { loadPrinterProgram } from '#components/printer/printer-program.js';
 import { defaultPrinterPlate, printerPlatesForModel } from '#components/printer/printer-plates.js';
 import type { PrinterPlateId, PrinterPlateModel } from '#components/printer/printer-plates.js';
 import { PrinterScene } from '#components/printer/printer-scene.js';
+import { createToolpathPalette } from '#components/printer/printer-toolpath.js';
 import {
-  createToolpathPalette,
   defaultHiddenToolpathGroups,
-  extrudingTools,
   groupToolpath,
   toolpathGroupLabels,
   toolpathGroupSwatchKind,
   toolpathGroups,
-} from '#components/printer/printer-toolpath.js';
-import type { ToolpathGroup } from '#components/printer/printer-toolpath.js';
+} from '#components/printer/printer-toolpath-groups.js';
+import type { ToolpathGroup } from '#components/printer/printer-toolpath-groups.js';
 import { usePrinterLive } from '#components/printer/use-printer-live.js';
 import type { PrinterLiveState } from '#components/printer/use-printer-live.js';
 import type { FileViewerRenderRequest } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
@@ -81,6 +84,9 @@ type ProgramResource =
   | Readonly<{ kind: 'loading' }>
   | Readonly<{
       kind: 'ready';
+      prepared: PrinterProgram;
+      opened: number;
+      beads: BeadData;
       program: ToolpathProgram;
       slicedPlate: PrinterPlateModel | undefined;
       recordedBedType: string | undefined;
@@ -144,19 +150,42 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
   );
 
   useEffect(() => {
-    let active = true;
+    const controller = new AbortController();
+    const opened = performance.now();
     const load = async (): Promise<void> => {
       try {
         const bytes = await readAll();
-        const { program, slicedPlate, filamentColors, recordedBedType } = loadPrinterProgram(bytes, kind);
-        // The print request ledger names artifacts by digest; Live mode follows a run only from its own bytes.
-        // WebCrypto needs a secure context: without one (a LAN address over http) Live mode stays off.
-        const digest = await digestBytes(bytes).catch(() => undefined);
-        if (active) {
-          setResource({ kind: 'ready', program, slicedPlate, filamentColors, recordedBedType, digest });
+        const prepared = await printerPreparation.prepare({ bytes, kind, signal: controller.signal });
+        if (prepared.kind === 'refused') {
+          throw new Error(prepared.summary.previewRefusal);
+        }
+        const { program, beads, slicedPlate, filamentColors, recordedBedType } = prepared.value;
+        if (!controller.signal.aborted) {
+          performance.clearMeasures('tau.printer.prepared');
+          performance.measure('tau.printer.prepared', {
+            start: opened,
+            end: performance.now(),
+            detail: {
+              bytes: bytes.byteLength,
+              segments: program.segmentCount,
+              preparationDuration: prepared.preparationDuration,
+              stages: prepared.stageDurations,
+            },
+          });
+          setResource({
+            prepared: prepared.value,
+            opened,
+            kind: 'ready',
+            program,
+            beads,
+            slicedPlate,
+            filamentColors,
+            recordedBedType,
+            digest: prepared.digest,
+          });
         }
       } catch (error) {
-        if (active) {
+        if (!controller.signal.aborted) {
           setResource({
             kind: 'error',
             message: error instanceof Error ? error.message : 'The file could not be read.',
@@ -167,7 +196,7 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
     // async-iife: bootstrap — React effects cannot await the parse; the cleanup flag owns its lifecycle.
     void load();
     return () => {
-      active = false;
+      controller.abort();
     };
   }, [kind, readAll]);
 
@@ -245,6 +274,9 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
       <PrinterSimulation
         name={name}
         program={resource.program}
+        beads={resource.beads}
+        prepared={resource.prepared}
+        opened={resource.opened}
         slicedFilamentColors={resource.filamentColors}
         live={live}
         frameRequest={frameRequest}
@@ -320,8 +352,8 @@ const useToolpathColors = ({
  * @param program - The loaded toolpath.
  * @returns The grouping, the hidden set (a new set per change) and its toggle.
  */
-const useToolpathFilter = (program: ToolpathProgram) => {
-  const grouping = useMemo(() => groupToolpath(program), [program]);
+const useToolpathFilter = (program: ToolpathProgram, preparedGrouping?: PrinterProgram['grouping']) => {
+  const grouping = useMemo(() => preparedGrouping ?? groupToolpath(program), [program, preparedGrouping]);
   const [hiddenGroups, setHiddenGroups] = useState(defaultHiddenToolpathGroups);
   const handleGroupShown = useCallback((group: ToolpathGroup, isShown: boolean): void => {
     setHiddenGroups((previous) => {
@@ -375,6 +407,9 @@ const useLivePlayback = (
 function PrinterSimulation({
   name,
   program,
+  beads,
+  prepared,
+  opened,
   slicedFilamentColors,
   live,
   frameRequest,
@@ -385,6 +420,9 @@ function PrinterSimulation({
 }: Readonly<{
   name: string;
   program: ToolpathProgram;
+  beads: BeadData;
+  prepared: PrinterProgram;
+  opened: number;
   /** The colours the file was sliced with, in filament order, which the model's own colours set. */
   slicedFilamentColors: readonly string[];
   live: PrinterLiveState | undefined;
@@ -397,16 +435,44 @@ function PrinterSimulation({
   const isReducedMotion = useSyncExternalStore(subscribeMotion, getMotion, serverMotion);
   const { theme } = useTheme();
   const hintId = useId();
+  const [appearance, setAppearance] = useState<FilamentMode>('filament');
+  const [emphasizeLayer, setEmphasizeLayer] = useState(false);
+  const { maximums } = prepared;
+  const analysisMaximum =
+    appearance === 'width' || appearance === 'speed' || appearance === 'flow' ? maximums[appearance] : 1;
   const [assetStatus, setAssetStatus] = useState<string>();
   const [sceneError, setSceneError] = useState<string>();
   const { manifest, geometry } = usePrinterGeometry(live);
   // One cursor per loaded program; the parent remounts this tree when the file changes. It opens on
   // the finished print; the sliders and Play review how it got there.
   const [store] = useState(() => createPlaybackStore(program, { time: program.duration }));
-  const prefix = useMemo(() => createExtrusionPrefix(program), [program]);
+  const scene = useRef<HTMLElement>(null);
+  const firstFrame = useCallback(() => {
+    performance.clearMeasures('tau.printer.open');
+    performance.measure('tau.printer.open', {
+      start: opened,
+      end: performance.now(),
+      detail: { segments: program.segmentCount },
+    });
+  }, [opened, program]);
+  useEffect(() => {
+    if (!scene.current || typeof IntersectionObserver === 'undefined') {
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0] && !entries[0].isIntersecting) {
+        store.pause();
+      }
+    });
+    observer.observe(scene.current);
+    return () => {
+      observer.disconnect();
+    };
+  }, [store]);
+  const { prefix } = prepared;
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-  const { grouping, hiddenGroups, handleGroupShown } = useToolpathFilter(program);
-  const tools = useMemo(() => extrudingTools(program), [program]);
+  const { grouping, hiddenGroups, handleGroupShown } = useToolpathFilter(program, prepared.grouping);
+  const { tools } = prepared;
   const { toolColors, groupColors, filaments } = useToolpathColors({
     recorded: slicedFilamentColors,
     loaded: live?.filamentColor,
@@ -454,6 +520,7 @@ function PrinterSimulation({
 
   return (
     <section
+      ref={scene}
       aria-label={`Printer simulation: ${name}`}
       className='flex h-full min-h-0 flex-col bg-background'
       onKeyDown={handleKeyDown}
@@ -470,6 +537,12 @@ function PrinterSimulation({
           >
             <PrinterScene
               program={program}
+              beads={beads}
+              preparedBounds={prepared.summary.partBounds}
+              onFirstFrame={firstFrame}
+              appearance={appearance}
+              analysisMaximum={analysisMaximum}
+              emphasizeLayer={emphasizeLayer}
               geometry={geometry}
               store={store}
               theme={theme}
@@ -504,7 +577,50 @@ function PrinterSimulation({
         <p id={hintId} className='sr-only'>
           Space plays or pauses. Left and right arrows step one segment.
         </p>
-        <PrintHud program={program} snapshot={snapshot} prefix={prefix} live={live} />
+        <details className='absolute right-2 bottom-2 max-h-full max-w-xs overflow-auto rounded-md bg-background/90 px-2 py-1 text-xs'>
+          <summary className='cursor-action py-1 focus-visible:focus-outline'>Filament inspection</summary>
+          <label className='flex items-center justify-between gap-3 py-1'>
+            Colour by
+            <select
+              aria-label='Filament colour mode'
+              value={appearance}
+              className='rounded border border-input bg-background px-2 py-1 focus-visible:focus-outline'
+              onChange={(event) => {
+                const mode = filamentModes.find((value) => value === event.target.value);
+                if (mode) {
+                  setAppearance(mode);
+                }
+              }}
+            >
+              <option value='filament'>Filament</option>
+              <option value='role'>Feature</option>
+              <option value='width'>Width</option>
+              <option value='speed'>Speed</option>
+              <option value='flow'>Volumetric flow</option>
+            </select>
+          </label>
+          {appearance === 'width' || appearance === 'speed' || appearance === 'flow' ? (
+            <p>
+              Low → high: 0–{analysisMaximum.toFixed(2)}{' '}
+              {appearance === 'width' ? 'mm' : appearance === 'speed' ? 'mm/s' : 'mm³/s'}
+            </p>
+          ) : null}
+          <label className='flex items-center gap-2 py-1'>
+            <Checkbox
+              checked={emphasizeLayer}
+              onCheckedChange={(value) => {
+                setEmphasizeLayer(value === true);
+              }}
+            />
+            Emphasize current layer
+          </label>
+          <FilamentInspection
+            program={program}
+            time={snapshot.time}
+            hasRecordedColors={slicedFilamentColors.length > 0}
+          />
+        </details>
+        <PrintHud eventIndex={prepared.eventIndex} program={program} snapshot={snapshot} prefix={prefix} live={live} />
         <ToolpathFilter
           counts={grouping.counts}
           colors={groupColors}
@@ -518,21 +634,88 @@ function PrinterSimulation({
   );
 }
 
+/** Exact deposition values at the playback cursor, alongside their limitations. */
+function FilamentInspection({
+  program,
+  time,
+  hasRecordedColors,
+}: Readonly<{ program: ToolpathProgram; time: number; hasRecordedColors: boolean }>): React.JSX.Element {
+  const segment = Math.min(program.segmentCount - 1, segmentAtTime(program, time));
+  const { deposition } = program;
+  const confidence = deposition?.confidence[segment] ?? 0;
+  const offset = Math.max(0, segment) * 6;
+  const length =
+    segment < 0
+      ? 0
+      : Math.hypot(
+          program.positions[offset + 3]! - program.positions[offset]!,
+          program.positions[offset + 4]! - program.positions[offset + 1]!,
+          program.positions[offset + 5]! - program.positions[offset + 2]!,
+        ) *
+        (1 - (deposition?.starts[segment] ?? 0));
+  const flow = length > 0 ? ((deposition?.volumes[segment] ?? 0) / length) * program.feedrates[segment]! : 0;
+  const provenance =
+    confidence & 1 ? 'Annotated width' : confidence & 8 ? 'Width inferred from extrusion' : 'Width assumed';
+  return (
+    <div className='space-y-2 py-2'>
+      <p>
+        {hasRecordedColors
+          ? 'File filament colours'
+          : 'Filament colour assumed from the loaded spool or preview default'}
+        .
+      </p>
+      {segment >= 0 && deposition ? (
+        <dl className='grid grid-cols-2 gap-1 tabular-nums'>
+          <dt>Feature</dt>
+          <dd>{toolpathSegmentKinds[program.kinds[segment]!]}</dd>
+          <dt>Width / height</dt>
+          <dd>
+            {deposition.widths[segment]!.toFixed(3)} / {deposition.heights[segment]!.toFixed(3)} mm
+          </dd>
+          <dt>Deposited volume</dt>
+          <dd>{deposition.volumes[segment]!.toFixed(3)} mm³</dd>
+          <dt>Speed</dt>
+          <dd>{program.feedrates[segment]!.toFixed(2)} mm/s</dd>
+          <dt>Volumetric flow</dt>
+          <dd>{flow.toFixed(3)} mm³/s</dd>
+          <dt>Tool</dt>
+          <dd>T{program.tools[segment]}</dd>
+          <dt>Dimensions</dt>
+          <dd>
+            {deposition.volumes[segment]! > 0 && deposition.widths[segment]! > 0
+              ? `${provenance}; ${confidence & 2 ? 'annotated height' : confidence & 4 ? 'file settings' : 'inferred or assumed height'}`
+              : 'No rendered deposition'}
+          </dd>
+        </dl>
+      ) : null}
+      <p>
+        Ideal deposited shape. Bridges are unsagged; ironing uses a thin assumed height when unannotated. Pressure,
+        cooling and surface texture are not simulated.
+      </p>
+      {deposition?.warnings.map((warning) => (
+        <p key={warning}>{warning}</p>
+      ))}
+    </div>
+  );
+}
+
 /** Where the run stands, top left over the scene: layer, time, temperatures, filament and the followed machine. */
 function PrintHud({
+  eventIndex,
   program,
   snapshot,
   prefix,
   live,
 }: Readonly<{
+  eventIndex: PrinterProgram['eventIndex'];
   program: ToolpathProgram;
   snapshot: PlaybackSnapshot;
   /** Filament fed before each segment, from `createExtrusionPrefix`. */
   prefix: Float64Array;
   live: PrinterLiveState | undefined;
 }>): React.JSX.Element {
-  const nozzleTarget = live?.nozzleTarget ?? eventValueAt(program.events, 'nozzle-temperature', snapshot.time);
-  const bedTarget = live?.bedTarget ?? eventValueAt(program.events, 'bed-temperature', snapshot.time);
+  const nozzleTarget = live?.nozzleTarget ?? eventValueAt(eventIndex, 'nozzle-temperature', snapshot.time);
+  const bedTarget = live?.bedTarget ?? eventValueAt(eventIndex, 'bed-temperature', snapshot.time);
   const isLiveAvailable = live?.printsThisFile === true;
   return (
     <section

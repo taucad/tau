@@ -322,6 +322,7 @@ describe('createHostToolRegistry', () => {
   it('names the source revision of every model test_model loaded (R4)', async () => {
     const workspaceRoot = await makeWorkspace();
     await writeFile(join(workspaceRoot, 'cube.geospec.ts'), 'export const spec = 1;\n', 'utf8');
+    await writeFile(join(workspaceRoot, 'cube.ts'), 'cube source control', 'utf8');
     const sourceRevision: SourceRevision = runtimeProtocolSchemas.calls.export.result.parse({
       success: false,
       issues: [],

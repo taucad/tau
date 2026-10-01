@@ -4,6 +4,7 @@ import type { Pass } from 'postprocessing';
 // @ts-expect-error -- n8ao 1.10.2 does not publish TypeScript declarations.
 import { N8AOPostPass } from 'n8ao';
 import type { ThreeCamera } from '@taucad/three/camera';
+import { sceneTransparencyRevision } from '#components/geometry/graphics/three/utils/scene-transparency-revision.js';
 
 type FullscreenTriangle = { readonly material: ShaderMaterial };
 
@@ -41,6 +42,9 @@ export class ManagedN8AoPass extends n8AoConstructor {
   // Defer detection to the first render to avoid allocating the transparency targets twice.
   private readonly isReady: boolean;
   private isDisposed = false;
+  private isRendering = false;
+  private classifiedThisFrame = false;
+  private transparencyRevision: number | undefined;
 
   public constructor(scene: Scene, camera: ThreeCamera) {
     super(scene, camera);
@@ -60,29 +64,54 @@ export class ManagedN8AoPass extends n8AoConstructor {
   ): void {
     // Native N8AO finishes reading input into its own outputTargetInternal before
     // the final copy. With no swap, that copy can safely overwrite the input.
-    super.render(renderer, inputBuffer, this.needsSwap ? outputBuffer : inputBuffer, deltaTime, stencilTest);
+    this.isRendering = true;
+    this.classifiedThisFrame = false;
+    try {
+      // Upstream stops calling detection after finding transparency; refresh on semantic changes.
+      this.detectTransparency();
+      super.render(renderer, inputBuffer, this.needsSwap ? outputBuffer : inputBuffer, deltaTime, stencilTest);
+    } finally {
+      this.isRendering = false;
+    }
   }
 
   public override detectTransparency(): void {
     if (!this.isReady) {
       return;
     }
+    const revision = sceneTransparencyRevision(this.scene);
+    if (this.isRendering && this.classifiedThisFrame) {
+      return;
+    }
+    if (this.isRendering) {
+      this.classifiedThisFrame = true;
+    }
+    if (this.isRendering && revision !== undefined && revision === this.transparencyRevision) {
+      return;
+    }
 
     let hasTransparency = false;
     this.scene.traverseVisible((object) => {
-      if (!('material' in object) || !(object.material instanceof Material) || !object.material.visible) {
+      if (!('material' in object)) {
         return;
       }
+      const materials: unknown[] = Array.isArray(object.material) ? object.material : [object.material];
       if (
-        (object.material.transparent && object.userData['treatAsOpaque'] !== true) ||
-        object.userData['cannotReceiveAO'] === true
+        materials.some(
+          (material) =>
+            material instanceof Material &&
+            material.visible &&
+            ((material.transparent && object.userData['treatAsOpaque'] !== true) ||
+              object.userData['cannotReceiveAO'] === true),
+        )
       ) {
         hasTransparency = true;
       }
     });
-    // Upstream stops auto-detecting after the first transparent mesh. Isolation changes
-    // material transparency in place, so reevaluate on each requested frame, in both directions.
+    // Isolation changes material transparency in place. Owned scenes notify semantic
+    // changes; unknown scenes retain classification on each requested frame.
     this.configuration.transparencyAware = hasTransparency;
+    this.transparencyRevision = revision;
   }
 
   public override configureTransparencyTarget(): void {

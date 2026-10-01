@@ -141,22 +141,65 @@ export const liveTime = (program: PlaybackProgram, run: LiveRunPosition): number
   return clampTime(program, inside ? progressTime : layer.startTime);
 };
 
+/** Compact kind indexes prepared once, independently of playback or appearance. */
+export type ToolpathEventIndex = Partial<
+  Record<
+    ToolpathProgram['events'][number]['kind'],
+    Readonly<{ times: Float64Array<ArrayBuffer>; values: Float64Array<ArrayBuffer> }>
+  >
+>;
+
+/** Index reported values; events without values never erase a prior reading. */
+export const createToolpathEventIndex = (events: ToolpathProgram['events']): ToolpathEventIndex => {
+  const columns = new Map<ToolpathProgram['events'][number]['kind'], { times: number[]; values: number[] }>();
+  for (const event of events) {
+    if (event.value === undefined) {
+      continue;
+    }
+    let column = columns.get(event.kind);
+    if (!column) {
+      column = { times: [], values: [] };
+      columns.set(event.kind, column);
+    }
+    column.times.push(event.time);
+    column.values.push(event.value);
+  }
+  return Object.fromEntries(
+    [...columns].map(([kind, column]) => [
+      kind,
+      { times: new Float64Array(column.times), values: new Float64Array(column.values) },
+    ]),
+  );
+};
+const eventIndexes = new WeakMap<ToolpathProgram['events'], ToolpathEventIndex>();
 /** Value of the last event of one kind at or before a time, if any. */
 export const eventValueAt = (
-  events: ToolpathProgram['events'],
+  events: ToolpathProgram['events'] | ToolpathEventIndex,
   kind: ToolpathProgram['events'][number]['kind'],
   time: number,
 ): number | undefined => {
-  let value: number | undefined;
-  for (const event of events) {
-    if (event.time > time) {
-      break;
-    }
-    if (event.kind === kind && event.value !== undefined) {
-      value = event.value;
+  let index: ToolpathEventIndex;
+  if (Array.isArray(events)) {
+    index = eventIndexes.get(events) ?? createToolpathEventIndex(events);
+    eventIndexes.set(events, index);
+  } else {
+    index = events as ToolpathEventIndex;
+  }
+  const column = index[kind];
+  if (!column) {
+    return undefined;
+  }
+  let low = 0;
+  let high = column.times.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (column.times[middle]! <= time) {
+      low = middle + 1;
+    } else {
+      high = middle;
     }
   }
-  return value;
+  return low === 0 ? undefined : column.values[low - 1];
 };
 
 /** Running total of filament per segment, so the HUD reads used length in constant time. */

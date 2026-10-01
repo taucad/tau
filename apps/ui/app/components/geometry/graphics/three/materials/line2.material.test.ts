@@ -141,6 +141,37 @@ describe('Line2NodeMaterial.outputNode (gamma-space blend regression guard)', ()
     }
   }
 
+  it('should keep its semantic cache key stable across setup and equivalent materials', () => {
+    const material = new Line2NodeMaterial({ transparent: true });
+    const key = material.customProgramCacheKey();
+    runSetupWithStubbedAncestors(material);
+    expect(material.customProgramCacheKey()).toBe(key);
+    runSetupWithStubbedAncestors(material);
+    expect(material.customProgramCacheKey()).toBe(key);
+    expect(new Line2NodeMaterial({ transparent: true }).customProgramCacheKey()).toBe(key);
+    material.worldUnits = true;
+    expect(material.customProgramCacheKey()).not.toBe(key);
+    material.worldUnits = false;
+    material.opacityNode = vec4(1).a;
+    expect(material.customProgramCacheKey()).not.toBe(key);
+  });
+
+  it('should distinguish embedded presentation widths and structural line variants', () => {
+    const material = new Line2NodeMaterial();
+    material.edgePresentationCoverage = true;
+    const key = material.customProgramCacheKey();
+    material.edgePresentationLineWidth = 2;
+    expect(material.customProgramCacheKey()).not.toBe(key);
+    material.edgePresentationLineWidth = 1;
+    expect(material.customProgramCacheKey()).toBe(key);
+    for (const property of ['worldUnits', 'dashed', 'vertexColors', 'useViewportSrgbBlend'] as const) {
+      material[property] = !material[property];
+      expect(material.customProgramCacheKey()).not.toBe(key);
+      material[property] = !material[property];
+      expect(material.customProgramCacheKey()).toBe(key);
+    }
+  });
+
   function fingerprint(node: unknown): string {
     return serialiseStrippedTslGraph((node as TslChainable).toJSON());
   }

@@ -13,8 +13,12 @@ import type {
 } from '@taucad/runtime/machine';
 import { bambuPlates, resolveBambuStudioSelection } from '@taucad/slicer/bambu-studio';
 import type { BambuStudioInstallation } from '@taucad/slicer/bambu-studio';
-import { bambuPlateMember, readBambuContainer, readBambuContainerProducer } from '@taucad/slicer/container';
-import type { BambuContainer } from '@taucad/slicer/container';
+import {
+  slicedFilamentColors,
+  bambuPlateMember,
+  readBambuContainer,
+  readBambuContainerProducer,
+} from '@taucad/slicer/container';
 import { parseGcode } from '@taucad/slicer/toolpath';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { z } from 'zod';
@@ -32,38 +36,6 @@ import type { BambuStudioEngine, PrintChoices, ResolvedMachinePreferences } from
 
 /** The export target every print goes through (blueprint D3). */
 const printFormat = 'gcode.3mf';
-
-/** Bambu Studio's header names the filaments a plate prints, counted from 1: `; filament: 1,2`. */
-const printedFilaments = /^;\s*filament:\s*(\d+(?:\s*,\s*\d+)*)\s*$/mu;
-/** Bambu Studio writes that header first, so the reader looks no further. */
-const headerBytes = 65_536;
-const headerDecoder = new TextDecoder();
-
-/**
- * The colours of the filaments a slice prints, in filament order: entry *i* is filament *i* + 1,
- * which the plate prints with `T<i>`. Bambu Studio records a colour for every filament preset it
- * loaded, and a one-part slice loads every preset it is given, so the list stops at the last
- * filament its header says the plate prints. The planner and the Print pane's slice summary read
- * a slice's filaments through it.
- *
- * @param container - The slice as `readBambuContainer` read it.
- * @returns `#RRGGBB` per printed filament; empty when the slice records no colour.
- * @public
- */
-export const slicedFilamentColors = ({
-  gcode,
-  filamentColors,
-}: Pick<BambuContainer, 'gcode' | 'filamentColors'>): readonly string[] => {
-  const printed = printedFilaments.exec(headerDecoder.decode(gcode.subarray(0, headerBytes)))?.[1];
-  if (printed === undefined) {
-    return filamentColors;
-  }
-  let last = 0;
-  for (const id of printed.split(',')) {
-    last = Math.max(last, Number(id));
-  }
-  return filamentColors.slice(0, last);
-};
 
 /** `#RRGGBB` from a colour as a file or a tray records it; the printer's carries an alpha byte. */
 const opaqueColor = (color: string | undefined): string | undefined => {
@@ -294,7 +266,7 @@ const summarize = (bytes: Uint8Array<ArrayBuffer>): Omit<PrintRequestSummary, 'f
  * as before; a real Bambu printer then refuses the file at preflight.
  *
  * @param provider - The machine's provider.
- * @param input - The choices to slice with, the project's print intent
+ * @param input - The choices to slice with, the project's selected profile
  *   already applied, and the machine with its plate resolved.
  * @param bambuStudio - Whether Bambu Studio slices for this machine on this host.
  * @returns Slicer options for the export route.
@@ -627,6 +599,7 @@ export const createMachinePrintPlanner =
     if (accepted === undefined) {
       throw new Error(`${machine.descriptor.name} declares no accepted container.`);
     }
+    const summary = summarize(bytes);
     return {
       artifact: {
         projectId: deps.projectId,
@@ -638,23 +611,26 @@ export const createMachinePrintPlanner =
         selectedMember: accepted.requiredMembers[0] ?? bambuPlateMember,
       },
       configuration,
-      summary: {
-        ...summarize(bytes),
-        ...(input.preferences
-          ? {
-              preferences: {
-                scope: 'project',
-                typeId: provider.manifest.identity.typeId,
-                profileId: input.preferences.profileId,
-                configurationVersions: Object.fromEntries(
-                  Object.entries(
-                    input.preferences.record.profiles[input.preferences.profileId]?.configurations ?? {},
-                  ).flatMap(([id, block]) => (block ? [[id, block.version]] : [])),
-                ),
-              },
-            }
-          : {}),
-      },
+      summary:
+        summary === undefined && input.preferences === undefined
+          ? undefined
+          : {
+              ...summary,
+              ...(input.preferences
+                ? {
+                    preferences: {
+                      scope: 'project',
+                      typeId: provider.manifest.identity.typeId,
+                      profileId: input.preferences.profileId,
+                      configurationVersions: Object.fromEntries(
+                        Object.entries(
+                          input.preferences.record.profiles[input.preferences.profileId]?.configurations ?? {},
+                        ).flatMap(([id, block]) => (block ? [[id, block.version]] : [])),
+                      ),
+                    },
+                  }
+                : {}),
+            },
       ...(machinePreferences === undefined ? {} : { machinePreferences }),
       ...(warnings.length === 0 ? {} : { warnings }),
     };

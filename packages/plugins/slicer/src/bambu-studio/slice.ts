@@ -382,19 +382,23 @@ export const sliceWithBambuStudio = async (input: BambuStudioSliceInput): Promis
   queue = new Promise((resolve) => {
     release = resolve;
   });
+  const { promise: aborted, resolve } = Promise.withResolvers<void>();
+  const onAbort = (): void => {
+    resolve();
+  };
+  input.signal.addEventListener('abort', onAbort, { once: true });
+  if (input.signal.aborted) {
+    onAbort();
+  }
   try {
-    // A cancel while waiting behind another slice rejects now, not when that slice ends.
-    const { promise: aborted, resolve } = Promise.withResolvers<void>();
-    input.signal.addEventListener(
-      'abort',
-      () => {
-        resolve();
-      },
-      { once: true },
-    );
     await Promise.race([previous, aborted]);
+    input.signal.throwIfAborted();
     return await sliceNow(input);
   } finally {
-    release();
+    input.signal.removeEventListener('abort', onAbort);
+    // Cancellation acknowledges immediately, but the next request must still wait for the running predecessor.
+    // async-iife: bootstrap — Queued cancellation acknowledges immediately; admission waits for the running predecessor.
+    // oxlint-disable-next-line promise/prefer-await-to-then -- Awaiting would delay the cancellation acknowledgement.
+    void previous.then(release, release);
   }
 };

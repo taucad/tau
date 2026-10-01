@@ -1,15 +1,17 @@
 # geospec
 
-GeoSpec is a CAD geometry testing library with Vitest-style authoring APIs.
+GeoSpec is a CAD geometry testing library with one host-independent authoring API:
+`loadModel` from `geospec/model` and `expectGeo` from `geospec`.
 
 This package is the **matcher-API substrate** (Apache-2.0): the authoring DSL,
 the selector language, the diagnostics and evidence schemas, the matcher
-registry, and the executor seam. It executes no geometry on its own. Install
-[`@taucad/geospec-engine`](../geospec-engine) and import
-`@taucad/geospec-engine/register` once at startup to supply the engine — it
-also ships the `geospec` CLI. Without a registered engine every engine-backed
-entry point answers with a `GEOSPEC_ENGINE_UNAVAILABLE` diagnostic rather than
-crashing.
+registry, and host integration. It executes no geometry on its own. Tau's
+qualified desktop/browser composition and the
+[`geospec` CLI](../geospec-engine/README.md) supply the compiled binding.
+Authored tests do not import or select an engine. A bare registration import
+does not establish every host binding or a model's lifetime.
+
+The following is a `*.geospec.ts` module for the CLI or Tau `test_model`:
 
 ```ts
 import { describe, expectGeo, it } from 'geospec';
@@ -39,51 +41,38 @@ describe('bracket', () => {
 
 ## Running specs
 
-### Lightweight subjects and explicit measurements
+### Subjects and host lifetime
 
-Loaded subjects expose only mesh counts (`vertexCount`, `meshCount`, `triangleCount`),
-provenance, capabilities, and diagnostics. Matchers resolve the retained engine
-evidence and compute only the facets they need. For programmatic measurements,
-use the existing `analyzeMesh()` operation:
+Await `loadModel`, then make synchronous `expectGeo` assertions. Its
+`GeoSpecSubject` is opaque: do not read mesh fields, forge a subject hash, or
+reuse a subject after its owning loader/run is disposed. The host retains the
+source and parameter identity and owns geometry admission, reuse and release.
 
-```ts
-import { loadModel } from 'geospec/model';
-import { analyzeMesh } from 'geospec/mesh';
+Standalone and Vitest hosts supply a managed loader through `createModelLoader`
+and the existing host integration; `geospec/vitest` supplies the framework
+adapter. Vitest's `describe`/`it` come from Vitest, while the helpers imported
+from `geospec` above belong to GeoSpec's VM runner. Ordinary assertions remain
+`expectGeo`; the optional Vitest `expect` extension has its own asynchronous
+settlement contract. See the [host binding documentation](../geospec-engine-native/README.md).
 
-const subject = await loadModel({ file: 'main.ts' });
-const analysis = await analyzeMesh({ subject });
-if (!analysis.success) {
-  throw new Error(analysis.diagnostics.map(({ message }) => message).join('\n'));
-}
-const { boundingBox, meshQuality, watertight } = analysis.stats;
-```
+Python uses `load_model`/`expect_geo` from `geospec`, with the wheel's pytest
+plugin scope or a standalone `GeoSpecEngine` context. Tau `test_model` discovers
+TypeScript/JavaScript tests, not Python files.
 
-This replaces removed reads such as `subject.mesh.stats.boundingBox`: the
-counts-only summary is a **breaking public API change**. Source input
-`analyzeMesh({ source, ... })` remains supported. Source and subject inputs are
-mutually exclusive; a retained subject cannot receive unit or format overrides.
-
-Subject analysis does not export or parse again. It uses the original subject
-unit/frame and requires that subject to remain alive in the same engine.
-Repeated requests reuse computations but return independent, JSON-safe snapshots;
-mutating a snapshot cannot change matcher verdicts. A snapshot remains readable
-after release, but further operations on its released handle fail. Non-finite
-full measurements produce structured failures, never successful NaN-to-null data.
-The engine must advertise the `analyzeMesh` capability; unsupported hosts do not
-silently reload source. Authored specs can import it from `geospec/mesh` too.
-
-`test_model` still reports matcher failures, not every explicit analysis result.
-All diagnostics emitted by executed assertions and structured load failures are
-preserved, including spatial details. Assertion fail-fast behavior is unchanged.
-Runtime warnings remain on the subject; use `toHaveNoDiagnostics()` to reject them.
+Read `runStatus`, complete accounting, discovery and source-lineage status when
+interpreting a run. Unsupported, inconclusive, skipped and not-run requirements
+are not passes. Compact `test_model` output can omit details; its retained
+`fullResult` remains the complete result. An empty failures list alone is not
+qualification, and filtered requirements remain outside the demonstrated scope.
 
 ### Runner configuration
 
 Execution lives in the engine. Install
-[`@taucad/geospec-engine`](../geospec-engine) and either run its `geospec` CLI
-or embed one of its runners — **both take the same path**, so a verdict never
-depends on how the spec was invoked. The CLI's flags, the worker pool and the
-runner factories are documented in that package's README.
+[`@taucad/geospec-engine`](../geospec-engine) for its `geospec` CLI or Node pool
+integration. These use the same compiled Node composition. Other embeddings
+must qualify their actual binding, input representation and supported domain;
+shared authoring syntax alone does not establish verdict equivalence. The CLI's
+flags and runner factories are documented in that package's README.
 
 The filters below are the shared vocabulary of the CLI, the embedded runners
 and the Tau `test_model` tool:
@@ -94,11 +83,11 @@ and the Tau `test_model` tool:
 - `testNamePattern`: JavaScript regular expression matched against full `suite > test` names
 - `testTimeout`: async test timeout in milliseconds
 
-The Tau runtime contract remains file/bytes based: render or export geometry, then pass GLB/glTF or STEP bytes into GeoSpec loaders. `geospec/model` is built on `@taucad/runtime` as a package dependency for CAD-source loading, while direct GLB/glTF and STEP loaders remain usable for already-exported evidence. Tau project tests should use `loadModel` from `geospec/model`.
+The host uses Tau runtime exports or already-exported GLB/glTF/STEP bytes. Authored tests use `loadModel` for both code and direct geometry inputs; low-level parsing/host APIs are not an alternate authored-test dialect.
 
-Runtime-originated diagnostics keep their runtime issue codes, such as `GEOMETRY_INVALID`, inside `GeometrySubject.diagnostics`. GeoSpec adds matcher-facing facets and spatial evidence around those diagnostics instead of remapping them into kernel-specific or GeoSpec-only aliases.
+Load failures carry structured diagnostics. Assertion reports retain the selected claim, evidence, provenance and diagnostics; inspect those reports rather than expecting mutable evidence fields on the opaque subject.
 
-When several tests inspect the same file and parameter set, keep each test readable with its own `loadModel()` call. The GeoSpec runner deduplicates identical runtime-backed `loadModel()` calls within one run, including across selected files in one Node CLI invocation, so this style keeps the same warm-path performance without module-level promise plumbing:
+Keep each test readable with its own `loadModel()` call. Each load captures current source/parameter identity; hosts may reuse admitted computations only under matching identities. Do not assume a filename alone permits cross-file memoization:
 
 ```ts
 import { describe, expectGeo, it } from 'geospec';
@@ -147,15 +136,15 @@ expectGeo(model).toHaveSpatialRelationships({
 });
 ```
 
-STEP/BRep evidence is imported by GeoSpec's own OpenCascade.js build:
+Load STEP through the same authoring API:
 
 ```ts
-import { loadStep } from 'geospec/step';
+import { loadModel } from 'geospec/model';
 
-const subject = await loadStep({ source: stepBytes });
+const subject = await loadModel({ file: 'part.step', format: 'step' });
 ```
 
-Replicad can author and export deterministic fixtures through `loadModel({ file: 'main.ts', format: 'step' })` or inline `loadModel({ code, file: 'main.ts', format: 'step' })`. Tau runtime infers the kernel from the source file and imports; GeoSpec does not use Replicad's STEP importer. STEP bytes are read by `GeoSpecStepStreamReader`, which records native-stream or filesystem-fallback provenance and produces GeoSpec-owned BRep and mesh evidence.
+For CAD source, `loadModel({ file: 'main.ts', format: 'step' })` asks the host to export STEP. The configured compiled engine admits the exact returned bytes through its OCCT binding. Export and source provenance do not by themselves certify a geometric requirement.
 
 Measurement matchers currently support mesh evidence and prefer exact BRep evidence when it is present:
 
@@ -187,25 +176,24 @@ expectGeo(subject).toHaveVoidContinuity({
 });
 ```
 
-`toHaveVoidContinuity` proves negative-space topology: the declared `path`
-waypoints must share one connected open void (outside every `material` solid),
-that void must not reach any `isolatedFrom` point, and its tightest sampled
-cross-section must meet `minCrossSection`. The canonical proof uses Manifold
-Boolean shells, generalized winding-number body identity, and deterministic
-topological cross-sections. Its region padding, tessellation deflection, and
-section spacing are versioned engine constants rather than author options.
+These are requirement examples, not a claim that every admitted model supports
+them. `toHaveVoidContinuity` requires the declared path, material and isolation
+proposition to be proved in a qualified domain. A sampled cross-section cannot
+certify a continuous minimum: the general sampled profile refuses a requested
+`minCrossSection`. Restricted nominal analytic domains have separate premises;
+general mesh lumen, wall and motion qualification remains incomplete.
 
-Advanced tests that need raw selector/fact evidence can use the explicit
-inspection subpath:
+Likewise, watertight edge incidence does not prove manifold validity, a Boolean
+fuse or material connectivity. Bounds and playback cannot certify contact,
+clearance, containment or sealing. Preserve intended geometry and tolerances;
+report unavailable evidence instead of replacing the requirement with a proxy.
 
-```ts
-import { inspectGeometry } from 'geospec/inspection';
-
-const inspection = inspectGeometry({
-  subject: model,
-  selectors: [{ kind: 'occurrence', name: /^Fastener \d+$/ }],
-});
-```
+The [canonical API index](agent/geospec-authoring/api-index.md) describes
+ordinary authoring. The separate
+[complete public API index](agent/geospec-authoring/public-api-index.md)
+retains host/framework and low-level inspection contracts. A low-level
+`GeometrySubject` input is not interchangeable with the opaque subject returned
+by canonical `loadModel`.
 
 When a geometry assertion needs a parameter variant, pass that variant directly to `loadModel`. Omitting `parameters` exercises the defaults authored by the model:
 
@@ -234,7 +222,6 @@ describe('parameter variants', () => {
 ## License
 
 **Apache-2.0.** This package is the permissive perimeter: your specs, your
-models and your verdicts carry no obligation from it, and neither does the
-fair-source engine that executes them. See
+models and your verdicts do not inherit this package's license. See
 [LICENSING.md](../../LICENSING.md) at the repository root for the routing map
 and the internal-use FAQ.

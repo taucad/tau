@@ -603,9 +603,9 @@ const describeValue = (value: unknown): string =>
  * @param value - Material or resource metadata.
  * @returns Deeply owned JSON data.
  */
-const snapshotJson = <Value>(value: Value): Value =>
+const snapshotJson = (value: unknown): unknown => {
   // oxlint-disable-next-line unicorn/prefer-structured-clone -- MessagePack restores undefined as null; JSON omission preserves optional fields.
-  JSON.parse(
+  const snapshot: unknown = JSON.parse(
     JSON.stringify(value, (_key, child: unknown) => {
       if (
         (typeof child === 'number' && !Number.isFinite(child)) ||
@@ -615,12 +615,16 @@ const snapshotJson = <Value>(value: Value): Value =>
       }
       return child;
     }),
-  ) as Value;
+  );
+  return snapshot;
+};
 
 const snapshotResources = (value: unknown): GlbResources => {
   try {
     validateGlbResources(value);
-    return {
+    const resources = {
+      ...(value.textures ? { textures: snapshotJson(value.textures) } : {}),
+      ...(value.samplers ? { samplers: snapshotJson(value.samplers) } : {}),
       ...(value.images
         ? {
             images: value.images.map((image) => ({
@@ -630,9 +634,9 @@ const snapshotResources = (value: unknown): GlbResources => {
             })),
           }
         : {}),
-      ...(value.textures ? { textures: snapshotJson(value.textures) } : {}),
-      ...(value.samplers ? { samplers: snapshotJson(value.samplers) } : {}),
     };
+    validateGlbResources(resources);
+    return resources;
   } catch (error) {
     throw new TypeError(`PicoVoxel model resources: ${error instanceof Error ? error.message : String(error)}`, {
       cause: error,
@@ -651,7 +655,13 @@ const snapshotMaterial = (value: unknown, label: string, textureCount: number): 
     const material: GlbMaterial = value;
     // The mapper generates UV0 and tangents for every mapped/anisotropic material.
     validateGlbMaterial(material, { textureCount, texCoordCount: 1, hasTangents: true });
-    return snapshotJson(material);
+    const snapshot = snapshotJson(material);
+    if (!isRecordObject(snapshot)) {
+      throw new TypeError('material must be an object.');
+    }
+    const owned: GlbMaterial = snapshot;
+    validateGlbMaterial(owned, { textureCount, texCoordCount: 1, hasTangents: true });
+    return owned;
   } catch (error) {
     throw new TypeError(`PicoVoxel ${label}: ${error instanceof Error ? error.message : String(error)}`, {
       cause: error,

@@ -1,3 +1,137 @@
+--- a/API/PicoGK.h
++++ b/API/PicoGK.h
+@@ -747,6 +747,41 @@
+ PICOGK_API void             Viewer_SideBar_Destroy(         PKVIEWER            hThis,
+                                                             PKGUI               hSideBar);
+ 
++
++// Tau private immutable capture ABI. kind: 0 mesh, 1 voxels, 2 polyline.
++// Position capacity/count is float elements, index capacity/count is uint32 elements.
++// 0 success; -1 invalid input/count; -2 native failure; -3 invalid lifetime.
++PICOGK_API int32_t TauCapture_Acquire(PKINSTANCE library, int32_t kind, uint64_t object,
++    uint64_t* snapshot, uint64_t* generation, int32_t* positions, int32_t* indices, PKColorFloat* color);
++PICOGK_API int32_t TauCapture_Copy(PKINSTANCE library, uint64_t snapshot,
++    float* positions, int32_t positionCapacity, uint32_t* indices, int32_t indexCapacity);
++PICOGK_API int32_t TauCapture_Release(PKINSTANCE library, uint64_t snapshot);
++// counters: acquisitions, copies, surface builds, surface hits, active snapshot handles.
++PICOGK_API int32_t TauCapture_Counters(PKINSTANCE library, uint64_t* counters, int32_t capacity);
++
++// Private host boundary: 0 success, -1 invalid input, -2 native failure,
++// -3 invalid object/library lifetime, -4 author callback requested stop.
++typedef int32_t (*TauCheckedSdf)(const PKVector3*, float*);
++typedef int32_t (*TauCheckedScalar)(const PKVector3*, float);
++typedef int32_t (*TauCheckedVector)(const PKVector3*, const PKVector3*);
++PICOGK_API int32_t Tau_Voxels_RenderImplicitChecked(PKINSTANCE, PKVOXELS, const PKBBox3*, TauCheckedSdf);
++PICOGK_API int32_t Tau_Voxels_IntersectImplicitChecked(PKINSTANCE, PKVOXELS, TauCheckedSdf);
++PICOGK_API int32_t Tau_ScalarField_TraverseActiveChecked(PKINSTANCE, PKSCALARFIELD, TauCheckedScalar);
++PICOGK_API int32_t Tau_VectorField_TraverseActiveChecked(PKINSTANCE, PKVECTORFIELD, TauCheckedVector);
++// Private indexed value-copy ABI; counts are scalar XYZ/ABC elements, output is zero on failure.
++PICOGK_API int32_t TauMesh_CreateIndexed(PKINSTANCE, const float*, int32_t, const uint32_t*, int32_t, PKMESH*);
++PICOGK_API int32_t TauMesh_CreateCopy(PKINSTANCE, uint64_t, PKMESH*);
++PICOGK_API int32_t TauMesh_AppendIndexed(PKINSTANCE, PKMESH, const float*, int32_t, const uint32_t*, int32_t);
++
++#ifdef __cplusplus
++#define TAU_NOEXCEPT noexcept
++#else
++#define TAU_NOEXCEPT
++#endif
++PICOGK_API int32_t Tau_Mesh_GetVertices(PKINSTANCE, PKMESH, PKVector3*, int32_t) TAU_NOEXCEPT;
++PICOGK_API int32_t Tau_Mesh_GetTriangles(PKINSTANCE, PKMESH, PKTriangle*, int32_t) TAU_NOEXCEPT;
++#undef TAU_NOEXCEPT
++
+ #endif
+  
+ 
+--- a/API/PicoGKApiTypes.h
++++ b/API/PicoGKApiTypes.h
+@@ -54,65 +54,70 @@
+ 
+ #else
+ 
+-#include  <cstdint>
++#ifdef __cplusplus
++#include <cstdint>
++#else
++#include <stdint.h>
++#include <stdbool.h>
++#endif
+ 
+ #pragma pack(1)
+-struct PKTriangle
++typedef struct PKTriangle
+ {
+     int32_t A;
+     int32_t B;
+     int32_t C;
+-};
++} PKTriangle;
+ 
+-struct PKCoord
++typedef struct PKCoord
+ {
+     int32_t X;
+     int32_t Y;
+     int32_t Z;
+-};
++} PKCoord;
+ 
+-struct PKVector2
++typedef struct PKVector2
+ {
+     float X;
+     float Y;
+-};
++} PKVector2;
+ 
+-struct PKVector3
++typedef struct PKVector3
+ {
+     float X;
+     float Y;
+     float Z;
+-};
++} PKVector3;
+ 
+-struct PKVector4
++typedef struct PKVector4
+ {
+     float X;
+     float Y;
+     float Z;
+     float W;
+-};
++} PKVector4;
+ 
+-struct PKBBox3
++typedef struct PKBBox3
+ {
+     PKVector3 vecMin;
+     PKVector3 vecMax;
+-};
++} PKBBox3;
+ 
+-struct PKMatrix4x4
++typedef struct PKMatrix4x4
+ {
+     PKVector4 vec1;
+     PKVector4 vec2;
+     PKVector4 vec3;
+     PKVector4 vec4;
+-};
++} PKMatrix4x4;
+ 
+-struct PKColorFloat
++typedef struct PKColorFloat
+ {
+     float R;
+     float G;
+     float B;
+     float A;
+-};
++} PKColorFloat;
+ 
+ #pragma pack()
+ 
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -234,14 +234,13 @@
@@ -48,42 +182,573 @@
  endfunction()
  
  generate_build_header()
---- a/API/PicoGK.h
-+++ b/API/PicoGK.h
-@@ -173,6 +173,14 @@
-                                                             PKMESH              hThis,
-                                                             PKBBox3*            poBox);
+--- /dev/null
++++ b/Source/PicoGKCapture.h
+@@ -0,0 +1,14 @@
++// SPDX-License-Identifier: Apache-2.0
++#ifndef PICOGK_CAPTURE_H
++#define PICOGK_CAPTURE_H
++#include "PicoGKMesh.h"
++#include "PicoGKPolyLine.h"
++namespace PicoGK {
++struct TauCapturedGeometry {
++    Mesh::Ptr mesh;
++    PolyLine::Ptr line;
++    uint64_t generation = 0;
++    int64_t nMemUsage() const { return sizeof(*this) + (mesh ? mesh->nMemUsage() : line->nMemUsage()); }
++};
++}
++#endif
+--- /dev/null
++++ b/Source/PicoGKCaptureIdentity.h
+@@ -0,0 +1,20 @@
++// SPDX-License-Identifier: Apache-2.0
++#ifndef PICOGK_CAPTURE_IDENTITY_H
++#define PICOGK_CAPTURE_IDENTITY_H
++#include <atomic>
++#include <cstdint>
++#include <stdexcept>
++namespace PicoGK {
++inline uint64_t TauAllocateGeneration(std::atomic<uint64_t>& next) {
++    auto value = next.load(std::memory_order_relaxed);
++    for (;;) {
++        if (value == UINT64_MAX) throw std::overflow_error("PicoGK generation exhausted");
++        if (next.compare_exchange_weak(value, value + 1, std::memory_order_relaxed)) return value + 1;
++    }
++}
++inline uint64_t TauNextGeneration() {
++    static std::atomic<uint64_t> next{0};
++    return TauAllocateGeneration(next);
++}
++}
++#endif
+--- a/Source/PicoGKGLViewerObjects.cpp
++++ b/Source/PicoGKGLViewerObjects.cpp
+@@ -43,9 +43,10 @@
+ Viewer::Group::ViewPolyLine::ViewPolyLine(  const ShaderProgMeshPoly& oShader,
+                                             const PicoGK::PolyLine& oPoly)
+ {
+-    oShader.CreateBufferInstance(oPoly.vVertices(), &m_roVertexBuffer);
+-    m_clrLine           = oPoly.clrLines();
+-    m_oBBox             = oPoly.oBBox();
++    auto snapshot = oPoly.TauCapture();
++    oShader.CreateBufferInstance(snapshot->vVertices(), &m_roVertexBuffer);
++    m_clrLine           = snapshot->clrLines();
++    m_oBBox             = snapshot->oBBox();
+ }
  
-+// Tau private caller-buffer ABI. Zero: null buffer/nonpositive capacity (no lookup).
-+// Minus one: resolver failure; buffer untouched. Success: count of copied elements.
-+// Caller must exclude mutation for the complete count/copy transaction.
-+PICOGK_API int32_t Tau_Mesh_GetVertices(PKINSTANCE hInstance, PKMESH hMesh,
-+                                      PKVector3* pBuffer, int32_t nCapacity) noexcept;
-+PICOGK_API int32_t Tau_Mesh_GetTriangles(PKINSTANCE hInstance, PKMESH hMesh,
-+                                       PKTriangle* pBuffer, int32_t nCapacity) noexcept;
+ void Viewer::Group::ViewPolyLine::SetMatrix(const Matrix4x4& mat)
+@@ -111,10 +112,11 @@
+ Viewer::Group::ViewMesh::ViewMesh(  const ShaderProgMeshPoly& oShader,
+                                     const Mesh& oMesh)
+ {
+-    oShader.CreateBufferInstance(   oMesh.vVertices(),
+-                                    oMesh.vTriangles(),
++    auto snapshot = oMesh.TauCapture();
++    oShader.CreateBufferInstance(   snapshot->vVertices(),
++                                    snapshot->vTriangles(),
+                                     &m_roElementBuffer);
+-    m_oBBox = oMesh.oBBox();
++    m_oBBox = snapshot->oBBox();
+     CHECKGLERRORS;
+ }
+ 
+--- /dev/null
++++ b/Source/PicoGKGridState.h
+@@ -0,0 +1,111 @@
++// SPDX-License-Identifier: Apache-2.0
++#ifndef PICOGK_GRID_STATE_H
++#define PICOGK_GRID_STATE_H
++#include <openvdb/openvdb.h>
++#include "PicoGKMesh.h"
++#include <mutex>
++#include <unordered_map>
++#include <array>
++#include <limits>
++namespace PicoGK {
++struct TauCaptureCounters {
++    std::atomic<uint64_t> surfaceBuilds{0};
++    std::atomic<uint64_t> surfaceHits{0};
++};
++struct TauSurfaceGeneration {
++    uint64_t identity = TauNextGeneration();
++    std::recursive_mutex gate;
++    Mesh::Ptr surface;
++};
++struct TauGridState;
++struct TauGridRegistry {
++    std::mutex gate;
++    std::unordered_map<const openvdb::GridBase*, std::weak_ptr<TauGridState>> states;
++};
++inline TauGridRegistry& TauGrids() { static auto* registry = new TauGridRegistry(); return *registry; }
++struct TauGridState {
++    const openvdb::GridBase* key;
++    std::recursive_mutex gate;
++    std::shared_ptr<TauSurfaceGeneration> generation = std::make_shared<TauSurfaceGeneration>();
++    bool cacheable = true;
++    std::shared_ptr<TauCaptureCounters> counters;
++    explicit TauGridState(const openvdb::GridBase* value) : key(value) {}
++    ~TauGridState() {
++        auto& registry = TauGrids(); std::lock_guard<std::mutex> lock(registry.gate);
++        auto found = registry.states.find(key);
++        if (found != registry.states.end() && found->second.expired()) registry.states.erase(found);
++    }
++};
++inline std::shared_ptr<TauGridState> TauStateFor(const openvdb::GridBase::Ptr& grid, bool trusted = true) {
++    auto& registry = TauGrids(); std::lock_guard<std::mutex> lock(registry.gate);
++    auto& slot = registry.states[grid.get()];
++    if (auto state = slot.lock()) return state;
++    auto state = std::make_shared<TauGridState>(grid.get()); state->cacheable = trusted; slot = state; return state;
++}
++class TauGridMutation {
++    std::shared_ptr<TauGridState> state;
++    std::unique_lock<std::recursive_mutex> lock;
++public:
++    explicit TauGridMutation(std::shared_ptr<TauGridState> value) : state(std::move(value)), lock(state->gate) {
++        state->generation = std::make_shared<TauSurfaceGeneration>();
++    }
++    void Unlock() { lock.unlock(); }
++    void Lock() { lock.lock(); }
++    void Retarget(std::shared_ptr<TauGridState> current) {
++        if (current == state) return;
++        if (state->generation->surface) state->generation = std::make_shared<TauSurfaceGeneration>();
++        lock.unlock(); state = std::move(current);
++        lock = std::unique_lock<std::recursive_mutex>(state->gate);
++        state->generation = std::make_shared<TauSurfaceGeneration>();
++    }
++    std::shared_ptr<TauGridState> State() const { return state; }
++    ~TauGridMutation() {
++        if (!lock.owns_lock()) lock.lock();
++        // A reentrant callback may have captured an intermediate revision. Never retain that
++        // intermediate surface as the completed operation's generation, including on failure.
++        if (state->generation->surface) {
++            try { state->generation = std::make_shared<TauSurfaceGeneration>(); }
++            catch (...) { state->cacheable = false; }
++        }
++    }
++};
++using TauTraversalKey = std::array<int64_t, 6>;
++inline TauTraversalKey TauActiveKey(const openvdb::Coord& xyz, unsigned depth, bool afterRegion) {
++    const int64_t high = std::numeric_limits<int64_t>::max();
++    auto offset = [&](unsigned shift, unsigned bits) -> int64_t {
++        const unsigned mask = (1u << bits) - 1;
++        return ((static_cast<uint32_t>(xyz.x()) >> shift & mask) << (2 * bits)) |
++               ((static_cast<uint32_t>(xyz.y()) >> shift & mask) << bits) |
++               (static_cast<uint32_t>(xyz.z()) >> shift & mask);
++    };
++    return {xyz.x() & ~4095, xyz.y() & ~4095, xyz.z() & ~4095,
++        depth == 0 && afterRegion ? high : offset(7, 5),
++        depth <= 1 && afterRegion ? high : offset(3, 4),
++        depth <= 2 && afterRegion ? high : offset(0, 3)};
++}
++template<class TGrid, class TCallback>
++inline void TauTraverseValues(const typename TGrid::Ptr& grid, const std::shared_ptr<TauGridState>& state, TCallback callback) {
++    using Upper = typename TGrid::TreeType::RootNodeType::ChildNodeType;
++    using Lower = typename Upper::ChildNodeType;
++    using Leaf = typename Lower::ChildNodeType;
++    static_assert(Upper::TOTAL == 12 && Lower::TOTAL == 7 && Leaf::TOTAL == 3);
++    std::unique_lock<std::recursive_mutex> lock(state->gate);
++    auto iterator = grid->cbeginValueOn();
++    while (iterator) {
++        const auto location = iterator.getCoord();
++        const auto value = iterator.getValue();
++        const auto generation = state->generation->identity;
++        const auto end = TauActiveKey(location, iterator.getDepth(), true);
++        lock.unlock(); callback(location, value); lock.lock();
++        if (generation == state->generation->identity) ++iterator;
++        else {
++            // ponytail: mutating callbacks restart O(M) to avoid invalidated native iterators;
++            // add a tree cursor seek only if those workloads make this O(M^2) path material.
++            iterator = grid->cbeginValueOn();
++            while (iterator && TauActiveKey(iterator.getCoord(), iterator.getDepth(), false) <= end) ++iterator;
++        }
++    }
++}
 +
- // LATTICE
++}
++#endif
+--- a/Source/PicoGKHandleManager.h
++++ b/Source/PicoGKHandleManager.h
+@@ -66,6 +66,15 @@
+         return m_hCurrent;
+     }
  
- PICOGK_API PKLATTICE        Lattice_hCreate(                PKINSTANCE          hInstance);
++    // Host capture tokens use a process-unique identity, so another Library cannot accept a foreign lease.
++    inline Handle hAddWithIdentity(std::shared_ptr<T> obj, Handle identity)
++    {
++        std::unique_lock lk(m_mtx);
++        if (identity == 0 || !m_map.emplace(identity, std::move(obj)).second)
++            throw std::invalid_argument("duplicate or empty immutable capture identity");
++        return identity;
++    }
++
+     /// Retrieve the object for a handle. 
+     /// Throws exception if invalid.
+     inline std::shared_ptr<T> roGet(Handle h) const
 --- a/Source/PicoGKLibrary.cpp
 +++ b/Source/PicoGKLibrary.cpp
-@@ -33,6 +33,7 @@
- // limitations under the License.
- //
+@@ -35,6 +35,8 @@
  
-+#include <type_traits>
  #include "gl/glad.h"
  #include "PicoGKTypes.h"
++#include <cmath>
++#include <climits>
  #include "PicoGK.h"
-@@ -299,6 +300,45 @@
+ 
+ #include "PicoGKLibraryMgr.h"
+@@ -44,6 +46,13 @@
+ #include "PicoGKTrace.h"
+ 
+ using namespace PicoGK;
++
++// All voxel creation/import/copy routes bind counters at native admission.
++static PKVOXELS TauAddVoxels(const Library::Instance::Ptr& library, Voxels::Ptr value) {
++    value->TauBindCounters(library->m_tauCounters);
++    return library->m_oVoxels.hAdd(std::move(value));
++}
++
+ 
+ void SafeCopyInfoString(const std::string s, char psz[PKINFOSTRINGLEN])
+ {
+@@ -397,7 +406,7 @@
+ PICOGK_API PKVOXELS Voxels_hCreate(PKINSTANCE hLib)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
-     return roLib->m_oMeshes.roGet(hThis)->GetTriangle( nTriangle, psTri);
+-    return roLib->m_oVoxels.hAdd(   std::make_shared<Voxels>(   roLib->fVoxelSizeMM(),
++    return TauAddVoxels(roLib,    std::make_shared<Voxels>(   roLib->fVoxelSizeMM(),
+                                                                 PICOGK_VOXEL_DEFAULTNARROWBAND));
+ }
+ 
+@@ -405,7 +414,7 @@
+                                         PKVOXELS hSource)
+ {
+     Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    return roLib->m_oVoxels.hAdd(std::make_shared<Voxels>(*roLib->m_oVoxels.roGet(hSource)));
++    return TauAddVoxels(roLib, std::make_shared<Voxels>(*roLib->m_oVoxels.roGet(hSource)));
+ }
+ 
+ PICOGK_API PKVOXELS Voxels_hCreateSphere(   PKINSTANCE          hLib,
+@@ -413,7 +422,7 @@
+                                             float               fRadius)
+ {
+     Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    return roLib->m_oVoxels.hAdd(std::make_shared<Voxels>(  roLib->fVoxelSizeMM(),
++    return TauAddVoxels(roLib, std::make_shared<Voxels>(  roLib->fVoxelSizeMM(),
+                                                             PICOGK_VOXEL_DEFAULTNARROWBAND,
+                                                             *pvecCenter,
+                                                             fRadius));
+@@ -426,7 +435,7 @@
+                                             float               fRadius2)
+ {
+     Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    return roLib->m_oVoxels.hAdd(std::make_shared<Voxels>(  roLib->fVoxelSizeMM(),
++    return TauAddVoxels(roLib, std::make_shared<Voxels>(  roLib->fVoxelSizeMM(),
+                                                             PICOGK_VOXEL_DEFAULTNARROWBAND,
+                                                             *pvecStart,
+                                                             *pvecStop,
+@@ -439,7 +448,7 @@
+                                                 float               fRadius)
+ {
+     Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    return roLib->m_oVoxels.hAdd(std::make_shared<Voxels>(  roLib->fVoxelSizeMM(),
++    return TauAddVoxels(roLib, std::make_shared<Voxels>(  roLib->fVoxelSizeMM(),
+                                                             PICOGK_VOXEL_DEFAULTNARROWBAND,
+                                                             *roLib->m_oMeshes.roGet(hMesh),
+                                                             fRadius));
+@@ -861,7 +870,9 @@
+     Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+     auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
+     
+-    GridBase::Ptr roGrid = roVdbFile->roGridAt(nIndex);
++    GridBase::Ptr roGrid = roVdbFile->TauGridAt(nIndex);
++    auto state = TauStateFor(roGrid);
++    std::lock_guard<std::recursive_mutex> gridLock(state->gate);
+             
+     if (!roGrid->isType<FloatGrid>())
+         return 0;
+@@ -869,7 +880,7 @@
+     if (roGrid->getGridClass() != GRID_LEVEL_SET)
+         return 0; // not a voxel field
+             
+-    return roLib->m_oVoxels.hAdd(std::make_shared<Voxels>(  gridPtrCast<FloatGrid>(roGrid),
++    return TauAddVoxels(roLib, std::make_shared<Voxels>(  gridPtrCast<FloatGrid>(roGrid),
+                                                             PICOGK_VOXEL_DEFAULTNARROWBAND));
+ }
+ 
+@@ -879,8 +890,8 @@
+                                         PKVOXELS    hVoxels)
+ {
+     Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    return roLib->m_oVdbFiles.roGet(hThis)
+-        ->nAddGrid(pszFieldName, roLib->m_oVoxels.roGet(hVoxels)->roVdbGrid());
++    auto pinned = roLib->m_oVoxels.roGet(hVoxels)->TauPinGrid();
++    return roLib->m_oVdbFiles.roGet(hThis)->nAddGrid(pszFieldName, pinned.grid);
+     
+ }
+ 
+@@ -891,7 +902,9 @@
+     Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+     auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
+     
+-    GridBase::Ptr roGrid = roVdbFile->roGridAt(nIndex);
++    GridBase::Ptr roGrid = roVdbFile->TauGridAt(nIndex);
++    auto state = TauStateFor(roGrid);
++    std::lock_guard<std::recursive_mutex> gridLock(state->gate);
+             
+     if (!roGrid->isType<FloatGrid>())
+         return 0;
+@@ -909,7 +922,7 @@
+ {
+     Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+     return roLib->m_oVdbFiles.roGet(hThis)
+-        ->nAddGrid(pszFieldName, roLib->m_oScalarFields.roGet(hScalarField)->roVdbGrid());
++        ->nAddGrid(pszFieldName, roLib->m_oScalarFields.roGet(hScalarField)->TauGrid());
+ }
+ 
+ PICOGK_API PKVECTORFIELD VdbFile_hGetVectorField(   PKINSTANCE hLib,
+@@ -919,7 +932,9 @@
+     Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+     auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
+     
+-    GridBase::Ptr roGrid = roVdbFile->roGridAt(nIndex);
++    GridBase::Ptr roGrid = roVdbFile->TauGridAt(nIndex);
++    auto state = TauStateFor(roGrid);
++    std::lock_guard<std::recursive_mutex> gridLock(state->gate);
+     
+     if (!roGrid->isType<Vec3SGrid>())
+         return 0;
+@@ -935,7 +950,7 @@
+     Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+     
+     return roLib->m_oVdbFiles.roGet(hThis)
+-        ->nAddGrid(pszFieldName, roLib->m_oVectorFields.roGet(hVectorField)->roVdbGrid());
++        ->nAddGrid(pszFieldName, roLib->m_oVectorFields.roGet(hVectorField)->TauGrid());
+ }
+ 
+ PICOGK_API int32_t VdbFile_nFieldCount( PKINSTANCE hLib,
+@@ -1212,7 +1227,8 @@
+ {
+     Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+     auto roField = roLib->m_oVoxels.roGet(hField);
+-    return roLib->m_oVdbMetas.hAdd(std::make_shared<VdbMeta>(roField->roVdbGrid()));
++    auto pinned = roField->TauPinGrid();
++    return roLib->m_oVdbMetas.hAdd(std::make_shared<VdbMeta>(pinned.grid, pinned.state));
+ }
+ 
+ PICOGK_API PKMETADATA Metadata_hFromScalarField(    PKINSTANCE hLib,
+@@ -1220,7 +1236,7 @@
+ {
+     Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+     auto roField = roLib->m_oScalarFields.roGet(hField);
+-    return roLib->m_oVdbMetas.hAdd(std::make_shared<VdbMeta>(roField->roVdbGrid()));
++    return roLib->m_oVdbMetas.hAdd(std::make_shared<VdbMeta>(roField->TauGrid(), roField->TauState()));
+ }
+ 
+ PICOGK_API PKMETADATA Metadata_hFromVectorField(    PKINSTANCE hLib,
+@@ -1228,7 +1244,7 @@
+ {
+     Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+     auto roField = roLib->m_oVectorFields.roGet(hField);
+-    return roLib->m_oVdbMetas.hAdd(std::make_shared<VdbMeta>(roField->roVdbGrid()));
++    return roLib->m_oVdbMetas.hAdd(std::make_shared<VdbMeta>(roField->TauGrid(), roField->TauState()));
+ }
+ 
+ PICOGK_API void Metadata_Destroy(   PKINSTANCE hLib,
+@@ -1796,3 +1812,229 @@
+     
+     poThis->DestroySideBar(hSideBar);
+ }
++
++// Immutable copies retain COW vector backing without retaining the source handle/library.
++static int32_t TauCapturePositionCount(const TauCapturedGeometry& value) {
++    const auto size = value.mesh ? value.mesh->vVertices().size() : value.line->vVertices().size();
++    if (size > static_cast<size_t>(INT32_MAX / 3)) throw std::overflow_error("capture position count");
++    return static_cast<int32_t>(size * 3);
++}
++static int32_t TauCaptureIndexCount(const TauCapturedGeometry& value) {
++    const auto elements = value.mesh ? value.mesh->vTriangles().size() :
++        (value.line->vVertices().empty() ? 0 : value.line->vVertices().size() - 1);
++    const auto width = value.mesh ? size_t(3) : size_t(2);
++    if (elements > static_cast<size_t>(INT32_MAX) / width) throw std::overflow_error("capture index count");
++    return static_cast<int32_t>(elements * width);
++}
++PICOGK_API int32_t TauCapture_Acquire(PKINSTANCE library, int32_t kind, uint64_t object,
++    uint64_t* snapshot, uint64_t* generation, int32_t* positions, int32_t* indices, PKColorFloat* color) {
++    if (!snapshot || !generation || !positions || !indices || !color) return -1;
++    *snapshot = 0; *generation = 0; *positions = 0; *indices = 0;
++    try {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto result = std::make_shared<TauCapturedGeometry>();
++        if (kind == 0) {
++            result->mesh = owner->m_oMeshes.roGet(object)->TauCapture();
++            result->generation = result->mesh->TauGeneration();
++        } else if (kind == 1) {
++            auto captured = owner->m_oVoxels.roGet(object)->TauCaptureSurface();
++            result->mesh = std::move(captured.first); result->generation = captured.second;
++        } else if (kind == 2) {
++            result->line = owner->m_oPolyLines.roGet(object)->TauCapture();
++            result->generation = result->line->TauGeneration();
++        } else return -1;
++        const auto positionCount = TauCapturePositionCount(*result);
++        const auto indexCount = TauCaptureIndexCount(*result);
++        if (result->mesh ? !result->mesh->TauValidate() : !result->line->TauValidate()) return -1;
++        const auto handle = owner->m_tauCaptures.hAddWithIdentity(result, TauNextGeneration());
++        *snapshot = handle; *generation = result->generation; *positions = positionCount; *indices = indexCount;
++        *color = result->line ? result->line->clrLines() : ColorFloat{1, 1, 1, 1};
++        ++owner->m_tauCaptureAcquires;
++        return 0;
++    } catch (const std::out_of_range&) { return -3; }
++      catch (const std::invalid_argument&) { return -1; }
++      catch (const std::overflow_error&) { return -1; }
++      catch (...) { return -2; }
++}
++PICOGK_API int32_t TauCapture_Copy(PKINSTANCE library, uint64_t snapshot,
++    float* positions, int32_t positionCapacity, uint32_t* indices, int32_t indexCapacity) {
++    if (positionCapacity < 0 || indexCapacity < 0) return -1;
++    try {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_tauCaptures.roGet(snapshot);
++        const auto pCount = TauCapturePositionCount(*source), iCount = TauCaptureIndexCount(*source);
++        if (positionCapacity < pCount || indexCapacity < iCount || (pCount && !positions) || (iCount && !indices)) return -1;
++        const auto& vertices = source->mesh ? source->mesh->vVertices() : source->line->vVertices();
++        for (size_t i = 0; i < vertices.size(); ++i) {
++            positions[i * 3] = vertices[i].X; positions[i * 3 + 1] = vertices[i].Y; positions[i * 3 + 2] = vertices[i].Z;
++        }
++        if (source->mesh) {
++            const auto& triangles = source->mesh->vTriangles();
++            for (size_t i = 0; i < triangles.size(); ++i) {
++                indices[i * 3] = static_cast<uint32_t>(triangles[i].A);
++                indices[i * 3 + 1] = static_cast<uint32_t>(triangles[i].B);
++                indices[i * 3 + 2] = static_cast<uint32_t>(triangles[i].C);
++            }
++        } else {
++            for (size_t i = 0; i + 1 < vertices.size(); ++i) { indices[i * 2] = static_cast<uint32_t>(i); indices[i * 2 + 1] = static_cast<uint32_t>(i + 1); }
++        }
++        ++owner->m_tauCaptureCopies;
++        return 0;
++    } catch (const std::out_of_range&) { return -3; }
++      catch (const std::overflow_error&) { return -1; }
++      catch (...) { return -2; }
++}
++PICOGK_API int32_t TauCapture_Release(PKINSTANCE library, uint64_t snapshot) {
++    try { return Library::oLib().roGetInstance(library)->m_tauCaptures.bDestroy(snapshot) ? 0 : -3; }
++    catch (const std::out_of_range&) { return -3; }
++    catch (...) { return -2; }
++}
++PICOGK_API int32_t TauCapture_Counters(PKINSTANCE library, uint64_t* counters, int32_t capacity) {
++    if (!counters || capacity < 5) return -1;
++    try {
++        auto owner = Library::oLib().roGetInstance(library);
++        counters[0] = owner->m_tauCaptureAcquires.load(); counters[1] = owner->m_tauCaptureCopies.load();
++        counters[2] = owner->m_tauCounters->surfaceBuilds.load(); counters[3] = owner->m_tauCounters->surfaceHits.load();
++        counters[4] = owner->m_tauCaptures.nAllocatedCount(); return 0;
++    } catch (const std::out_of_range&) { return -3; }
++    catch (...) { return -2; }
++}
++
++namespace {
++struct TauCallbackStopped {};
++template<class T> struct TauCheckedScope {
++    static thread_local T current;
++    T previous;
++    explicit TauCheckedScope(T callback): previous(current) { current = callback; }
++    ~TauCheckedScope() { current = previous; }
++};
++template<class T> thread_local T TauCheckedScope<T>::current = nullptr;
++float TauSdfAdapter(const PKVector3* point) {
++    float value = 0;
++    if (TauCheckedScope<TauCheckedSdf>::current(point, &value)) throw TauCallbackStopped{};
++    if (!std::isfinite(value)) throw std::invalid_argument("nonfinite SDF callback value");
++    return value;
++}
++void TauScalarAdapter(const PKVector3* point, float value) {
++    if (TauCheckedScope<TauCheckedScalar>::current(point, value)) throw TauCallbackStopped{};
++}
++void TauVectorAdapter(const PKVector3* point, const PKVector3* value) {
++    if (TauCheckedScope<TauCheckedVector>::current(point, value)) throw TauCallbackStopped{};
++}
++template<class T> int32_t TauCheckedInvoke(T operation) noexcept {
++    try { operation(); return 0; }
++    catch (const TauCallbackStopped&) { return -4; }
++    catch (const std::out_of_range&) { return -3; }
++    catch (const std::invalid_argument&) { return -1; }
++    catch (const std::overflow_error&) { return -1; }
++    catch (...) { return -2; }
++}
++}
++PICOGK_API int32_t Tau_Voxels_RenderImplicitChecked(PKINSTANCE library, PKVOXELS object,
++    const PKBBox3* bounds, TauCheckedSdf callback) {
++    if (!bounds || !callback) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_oVoxels.roGet(object);
++        if (!source->TauImplicitBoundsValid(*bounds)) throw std::invalid_argument("implicit bounds exceed coordinate range");
++        TauCheckedScope<TauCheckedSdf> scope(callback);
++        source->RenderImplicit(*bounds, TauSdfAdapter);
++    });
++}
++PICOGK_API int32_t Tau_Voxels_IntersectImplicitChecked(PKINSTANCE library, PKVOXELS object,
++    TauCheckedSdf callback) {
++    if (!callback) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_oVoxels.roGet(object);
++        TauCheckedScope<TauCheckedSdf> scope(callback);
++        source->IntersectImplicit(TauSdfAdapter);
++    });
++}
++PICOGK_API int32_t Tau_ScalarField_TraverseActiveChecked(PKINSTANCE library, PKSCALARFIELD object,
++    TauCheckedScalar callback) {
++    if (!callback) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_oScalarFields.roGet(object);
++        TauCheckedScope<TauCheckedScalar> scope(callback);
++        source->TraverseActive(TauScalarAdapter);
++    });
++}
++PICOGK_API int32_t Tau_VectorField_TraverseActiveChecked(PKINSTANCE library, PKVECTORFIELD object,
++    TauCheckedVector callback) {
++    if (!callback) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_oVectorFields.roGet(object);
++        TauCheckedScope<TauCheckedVector> scope(callback);
++        source->TraverseActive(TauVectorAdapter);
++    });
++}
++
++PICOGK_API int32_t TauMesh_CreateIndexed(PKINSTANCE library, const float* positions, int32_t positionCount,
++    const uint32_t* indices, int32_t indexCount, PKMESH* output) {
++    if (!output) return -1;
++    *output = 0;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto mesh = Mesh::TauCreateIndexed(positions, positionCount, indices, indexCount);
++        *output = owner->m_oMeshes.hAdd(mesh);
++    });
++}
++PICOGK_API int32_t TauMesh_CreateCopy(PKINSTANCE library, uint64_t snapshot, PKMESH* output) {
++    if (!output) return -1;
++    *output = 0;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto capture = owner->m_tauCaptures.roGet(snapshot);
++        if (!capture->mesh) throw std::invalid_argument("copy requires a frozen mesh capture");
++        *output = owner->m_oMeshes.hAdd(capture->mesh->TauCapture());
++    });
++}
++PICOGK_API int32_t TauMesh_AppendIndexed(PKINSTANCE library, PKMESH target,
++    const float* positions, int32_t positionCount, const uint32_t* indices, int32_t indexCount) {
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        owner->m_oMeshes.roGet(target)->TauAppendIndexed(positions, positionCount, indices, indexCount);
++    });
 +}
 +
 +// One retained library/object lookup and a typed contiguous copy. The managed
-+// snapshot gate serializes this legacy mesh path; immutable generation capture
-+// is a separate ABI and must also cover mutation through native aliases.
++// counts are copied from one retained immutable generation per call. Multi-call
++// transactions use the capture-token ABI, not separate mutable-handle reads.
 +PICOGK_API int32_t Tau_Mesh_GetVertices(PKINSTANCE hLib, PKMESH hMesh,
 +                                      PKVector3* pBuffer, int32_t nCapacity) noexcept
 +{
@@ -93,7 +758,7 @@
 +    {
 +        // Resolve everything before writing. Typed assignment cannot throw.
 +        auto roLib = Library::oLib().roGetInstance(hLib);
-+        auto roMesh = roLib->m_oMeshes.roGet(hMesh);
++        auto roMesh = roLib->m_oMeshes.roGet(hMesh)->TauCapture();
 +        const auto& vertices = roMesh->vVertices();
 +        const auto count = std::min(vertices.size(), static_cast<size_t>(nCapacity));
 +        std::copy_n(vertices.begin(), count, pBuffer);
@@ -111,13 +776,1476 @@
 +    {
 +        // Resolve everything before writing. Typed assignment cannot throw.
 +        auto roLib = Library::oLib().roGetInstance(hLib);
-+        auto roMesh = roLib->m_oMeshes.roGet(hMesh);
++        auto roMesh = roLib->m_oMeshes.roGet(hMesh)->TauCapture();
 +        const auto& triangles = roMesh->vTriangles();
 +        const auto count = std::min(triangles.size(), static_cast<size_t>(nCapacity));
 +        std::copy_n(triangles.begin(), count, pBuffer);
 +        return static_cast<int32_t>(count);
 +    }
 +    catch (...) { return -1; }
++}
+--- a/Source/PicoGKLibraryMgr.h
++++ b/Source/PicoGKLibraryMgr.h
+@@ -48,6 +48,7 @@
+ #include "PicoGKVdbMeta.h"
+ #include "PicoGKHandleManager.h"
+ #include "PicoGKTrace.h"
++#include "PicoGKCapture.h"
+ 
+ namespace PicoGK
+ {
+@@ -80,9 +81,14 @@
+                 nResult += m_oScalarFields.nMemUsage();
+                 nResult += m_oVectorFields.nMemUsage();
+                 nResult += m_oVdbMetas.nMemUsage();
++                nResult += m_tauCaptures.nMemUsage();
+                 return nResult;
+             }
+             
++            HandleManager<TauCapturedGeometry> m_tauCaptures {"TauCaptures"};
++            std::atomic<uint64_t> m_tauCaptureAcquires{0};
++            std::atomic<uint64_t> m_tauCaptureCopies{0};
++            std::shared_ptr<TauCaptureCounters> m_tauCounters = std::make_shared<TauCaptureCounters>();
+             HandleManager<PicoGK::Mesh>         m_oMeshes       {"Meshes"};
+             HandleManager<PicoGK::Lattice>      m_oLattices     {"Lattices"};
+             HandleManager<PicoGK::PolyLine>     m_oPolyLines    {"PolyLines"};
+--- a/Source/PicoGKMesh.h
++++ b/Source/PicoGKMesh.h
+@@ -37,6 +37,10 @@
+ #define PICOGKMESH_H_
+ 
+ #include "PicoGKTypes.h"
++#include "PicoGKCaptureIdentity.h"
++#include <mutex>
++#include <cmath>
++#include <type_traits>
+ 
+ #include <memory>
+ #include <vector>
+@@ -54,19 +58,92 @@
+     {
+     }
+     
+-    Mesh(const Mesh&)            = default;
+-    
+-    Mesh& operator=(const Mesh&) = default;
+-    
++    Mesh(const Mesh& source) {
++        std::lock_guard<std::recursive_mutex> lock(source.m_tauGate);
++        m_tauData = source.m_tauData;
++    }
++
++    Mesh& operator=(const Mesh& source) {
++        if (this != &source) {
++            std::scoped_lock lock(m_tauGate, source.m_tauGate);
++            m_tauData = source.m_tauData;
++        }
++        return *this;
++    }
++    uint64_t TauGeneration() const { std::lock_guard<std::recursive_mutex> lock(m_tauGate); return m_tauData->generation; }
++    Mesh::Ptr TauCapture() const { return std::make_shared<Mesh>(*this); }
++    void TauSetSurfaceIdentity(uint64_t generation) {
++        std::lock_guard<std::recursive_mutex> owner(m_tauGate);
++        if (m_tauData.use_count() != 1) throw std::logic_error("surface identity requires unshared backing");
++        m_tauData->generation = generation;
++    }
++    bool TauValidate() const {
++        std::lock_guard<std::recursive_mutex> owner(m_tauGate);
++        std::lock_guard<std::mutex> admission(m_tauData->admissionGate);
++        if (!m_tauData->validated) {
++            m_tauData->valid = true;
++            for (const auto& vertex : m_tauData->vertices)
++                if (!std::isfinite(vertex.X) || !std::isfinite(vertex.Y) || !std::isfinite(vertex.Z)) m_tauData->valid = false;
++            for (const auto& triangle : m_tauData->triangles)
++                if (triangle.A < 0 || triangle.B < 0 || triangle.C < 0 ||
++                    static_cast<size_t>(triangle.A) >= m_tauData->vertices.size() ||
++                    static_cast<size_t>(triangle.B) >= m_tauData->vertices.size() ||
++                    static_cast<size_t>(triangle.C) >= m_tauData->vertices.size()) m_tauData->valid = false;
++            m_tauData->validated = true;
++        }
++        return m_tauData->valid;
++    }
++
++    static Mesh::Ptr TauCreateIndexed(const float* positions, int32_t positionCount,
++                                      const uint32_t* indices, int32_t indexCount) {
++        auto result = std::make_shared<Mesh>();
++        result->TauAppendIndexed(positions, positionCount, indices, indexCount);
++        return result;
++    }
++    void TauAppendIndexed(const float* positions, int32_t positionCount,
++                          const uint32_t* indices, int32_t indexCount) {
++        TauCheckIndexed(positions, positionCount, indices, indexCount);
++        std::lock_guard<std::recursive_mutex> owner(m_tauGate);
++        const size_t count = static_cast<size_t>(positionCount / 3);
++        const size_t triangles = static_cast<size_t>(indexCount / 3);
++        const size_t offset = m_tauData->vertices.size();
++        if (count > static_cast<size_t>(INT32_MAX) - offset ||
++            triangles > static_cast<size_t>(INT32_MAX) - m_tauData->triangles.size())
++            throw std::overflow_error("indexed append exceeds native count range");
++        const auto generation = TauNextGeneration();
++        auto data = m_tauData.use_count() == 1 ? m_tauData : std::make_shared<Data>(*m_tauData);
++        // Reserve both tables before changing observable geometry. Typed writes below cannot throw.
++        data->vertices.reserve(offset + count);
++        data->triangles.reserve(data->triangles.size() + triangles);
++        static_assert(std::is_nothrow_copy_constructible_v<Vector3>);
++        static_assert(std::is_nothrow_copy_constructible_v<Triangle>);
++        for (size_t i = 0; i < count; ++i) {
++            const Vector3 value(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
++            data->vertices.push_back(value);
++            data->bounds.Include(value);
++        }
++        for (size_t i = 0; i < triangles; ++i) {
++            const Triangle value(static_cast<int32_t>(offset + indices[i * 3]),
++                                 static_cast<int32_t>(offset + indices[i * 3 + 1]),
++                                 static_cast<int32_t>(offset + indices[i * 3 + 2]));
++            data->triangles.push_back(value);
++        }
++        data->generation = generation;
++        data->validated = false;
++        m_tauData = std::move(data);
++    }
++
+     inline int64_t nMemUsage() const
+     {
+-        return sizeof(Mesh) + m_nMemUsage;
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
++        return sizeof(Mesh) + m_tauData->vertices.capacity() * sizeof(Vector3) + m_tauData->triangles.capacity() * sizeof(Triangle);
+     }
+     
+     inline int32_t  nAddTriangle(   const Vector3& vecA,
+                                     const Vector3& vecB,
+                                     const Vector3& vecC)
+     {
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
+         int32_t a = nAddVertex(vecA);
+         int32_t b = nAddVertex(vecB);
+         int32_t c = nAddVertex(vecC);
+@@ -75,34 +152,38 @@
+     
+     inline int32_t nAddVertex(const Vector3& vecVertex)
+     {
+-        m_nMemUsage += sizeof(Vector3);
+-        
+-        m_oBBox.Include(vecVertex);
+-        m_oVertices.push_back(vecVertex);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
++        TauWrite();
++
++        m_tauData->vertices.push_back(vecVertex);
++        m_tauData->bounds.Include(vecVertex);
+         return nVertexCount() - 1;
+     }
+     
+     inline int32_t nAddTriangle(const Triangle& sTri)
+     {
+-        m_nMemUsage += sizeof(Triangle);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
++        TauWrite();
+         
+         assert(sTri.A < nVertexCount());
+         assert(sTri.B < nVertexCount());
+         assert(sTri.C < nVertexCount());
+-        m_oTriangles.push_back(sTri);
++        m_tauData->triangles.push_back(sTri);
+         return nTriangleCount() - 1;
+     }
+     
+     inline int32_t nTriangleCount() const
+     {
+-        size_t nSize = m_oTriangles.size();
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
++        size_t nSize = m_tauData->triangles.size();
+         assert(nSize < std::numeric_limits<int32_t>::max());
+         return (int32_t) nSize;
+     }
+     
+     inline int32_t nVertexCount() const
+     {
+-        size_t nSize = m_oVertices.size();
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
++        size_t nSize = m_tauData->vertices.size();
+         assert(nSize < std::numeric_limits<int32_t>::max());
+         return (int32_t)nSize;
+     }
+@@ -110,15 +191,17 @@
+     inline void GetVertex(  int32_t     nVertex,
+                             Vector3*    pvecVertex) const
+     {
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
+         assert(nVertex < nVertexCount());
+-        *pvecVertex = m_oVertices.at(nVertex);
++        *pvecVertex = m_tauData->vertices.at(nVertex);
+     }
+     
+     inline void GetTriangle(    int32_t     nTriangle,
+                                 Triangle*   psTriangle) const
+     {
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
+         assert(nTriangle < nTriangleCount());
+-        *psTriangle = m_oTriangles.at(nTriangle);
++        *psTriangle = m_tauData->triangles.at(nTriangle);
+     }
+     
+     inline void GetTriangle(    int32_t  nTriangle,
+@@ -126,17 +209,19 @@
+                                 Vector3* pvecB,
+                                 Vector3* pvecC) const
+     {
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
+         assert(nTriangle < nTriangleCount());
+         
+-        Triangle sTri = m_oTriangles.at(nTriangle);
+-        *pvecA = m_oVertices.at(sTri.A);
+-        *pvecB = m_oVertices.at(sTri.B);
+-        *pvecC = m_oVertices.at(sTri.C);
++        Triangle sTri = m_tauData->triangles.at(nTriangle);
++        *pvecA = m_tauData->vertices.at(sTri.A);
++        *pvecB = m_tauData->vertices.at(sTri.B);
++        *pvecC = m_tauData->vertices.at(sTri.C);
+     }
+     
+     bool bGetSurfaceNormal( const Vector3& vecSurfacePoint,
+                             Vector3* pvecNormal)
+     {
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
+         Vector3 vec1(0,0,0);
+         Vector3 vec2(0,0,0);
+         Vector3 vec3(0,0,0);
+@@ -153,27 +238,52 @@
+     
+     inline BBox3 oBBox() const
+     {
+-        return m_oBBox;
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
++        return m_tauData->bounds;
+     }
+     
+ public:
+     
+     const std::vector<Vector3>& vVertices() const
+     {
+-        return m_oVertices;
++        return m_tauData->vertices;
+     }
+     
+     const std::vector<Triangle>& vTriangles() const
+     {
+-        return m_oTriangles;
++        return m_tauData->triangles;
+     }
+     
+ protected:
+-    BBox3                   m_oBBox;
+-    std::vector<Vector3>    m_oVertices;
+-    std::vector<Triangle>   m_oTriangles;
+-    int64_t                 m_nMemUsage = 0;
+-    
++    struct Data {
++        BBox3 bounds;
++        std::vector<Vector3> vertices;
++        std::vector<Triangle> triangles;
++        uint64_t generation = TauNextGeneration();
++        mutable std::mutex admissionGate;
++        mutable bool validated = false, valid = true;
++        Data() = default;
++        Data(const Data& source) : bounds(source.bounds), vertices(source.vertices), triangles(source.triangles), generation(source.generation) {}
++    };
++    std::shared_ptr<Data> m_tauData = std::make_shared<Data>();
++    mutable std::recursive_mutex m_tauGate;
++    static void TauCheckIndexed(const float* positions, int32_t positionCount,
++                                const uint32_t* indices, int32_t indexCount) {
++        if (positionCount < 0 || indexCount < 0 || positionCount % 3 || indexCount % 3 ||
++            (positionCount && !positions) || (indexCount && !indices))
++            throw std::invalid_argument("invalid indexed mesh arrays");
++        for (int32_t i = 0; i < positionCount; ++i)
++            if (!std::isfinite(positions[i])) throw std::invalid_argument("nonfinite indexed mesh position");
++        const auto count = static_cast<uint32_t>(positionCount / 3);
++        for (int32_t i = 0; i < indexCount; ++i)
++            if (indices[i] >= count) throw std::invalid_argument("indexed mesh triangle outside vertex table");
++    }
++    void TauWrite() {
++        if (m_tauData.use_count() != 1) m_tauData = std::make_shared<Data>(*m_tauData);
++        m_tauData->generation = TauNextGeneration();
++        m_tauData->validated = false;
++    }
++
+     bool bIsPointInTriangle(    const Vector3& vecSurfacePoint,
+                                 const Vector3& vecVertex1,
+                                 const Vector3& vecVertex2,
+--- a/Source/PicoGKPolyLine.h
++++ b/Source/PicoGKPolyLine.h
+@@ -37,6 +37,9 @@
+ #define PICOGKGLPOLYLINE_H_
+ 
+ #include "PicoGKTypes.h"
++#include "PicoGKCaptureIdentity.h"
++#include <mutex>
++#include <cmath>
+ #include <vector>
+ #include <memory>
+ #include <assert.h>
+@@ -50,12 +53,28 @@
+     
+     PolyLine(const ColorFloat& clr)
+     {
+-        m_clrLines = clr;
++        m_tauData->color = clr;
+     }
+     
+-    PolyLine(const PolyLine&)            = default;
++    PolyLine(const PolyLine& source) { std::lock_guard<std::recursive_mutex> lock(source.m_tauGate); m_tauData = source.m_tauData; }
+     
+-    PolyLine& operator=(const PolyLine&) = default;
++    PolyLine& operator=(const PolyLine& source) {
++        if (this != &source) { std::scoped_lock lock(m_tauGate, source.m_tauGate); m_tauData = source.m_tauData; }
++        return *this;
++    }
++    uint64_t TauGeneration() const { std::lock_guard<std::recursive_mutex> lock(m_tauGate); return m_tauData->generation; }
++    PolyLine::Ptr TauCapture() const { return std::make_shared<PolyLine>(*this); }
++    bool TauValidate() const {
++        std::lock_guard<std::recursive_mutex> owner(m_tauGate);
++        std::lock_guard<std::mutex> admission(m_tauData->admissionGate);
++        if (!m_tauData->validated) {
++            m_tauData->valid = true;
++            for (const auto& vertex : m_tauData->vertices)
++                if (!std::isfinite(vertex.X) || !std::isfinite(vertex.Y) || !std::isfinite(vertex.Z)) m_tauData->valid = false;
++            m_tauData->validated = true;
++        }
++        return m_tauData->valid;
++    }
+     
+     ~PolyLine()
+     {
+@@ -63,47 +82,62 @@
+     
+     int64_t nMemUsage() const
+     {
+-        return sizeof(PolyLine) + m_oVertices.capacity() * sizeof(Vector3);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
++        return sizeof(PolyLine) + m_tauData->vertices.capacity() * sizeof(Vector3);
+     }
+     
+     int32_t nAddVertex(const Vector3& vec)
+     {
+-        m_oBBox.Include(vec);
+-        m_oVertices.push_back(vec);
+-        return int32_t(m_oVertices.size() - 1);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
++        if (m_tauData.use_count() != 1) m_tauData = std::make_shared<Data>(*m_tauData);
++        m_tauData->generation = TauNextGeneration();
++        m_tauData->validated = false;
++        m_tauData->vertices.push_back(vec);
++        m_tauData->bounds.Include(vec);
++        return int32_t(m_tauData->vertices.size() - 1);
+     }
+ 
+     void GetVertex( int32_t nIndex,
+                     Vector3* pvec) const
+     {
+-        assert(nIndex < m_oVertices.size());
+-        *pvec = m_oVertices[nIndex];
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
++        assert(nIndex < m_tauData->vertices.size());
++        *pvec = m_tauData->vertices[nIndex];
+     }
+ 
+     int32_t nVertexCount() const
+     {
+-        return (int32_t) m_oVertices.size();
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
++        return (int32_t) m_tauData->vertices.size();
+     }
+     
+     const std::vector<Vector3>& vVertices() const
+     {
+-        return m_oVertices;
++        return m_tauData->vertices;
+     }
+ 
+     ColorFloat clrLines() const
+     {
+-        return m_clrLines;
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
++        return m_tauData->color;
+     }
+     
+     inline BBox3 oBBox() const
+     {
+-        return m_oBBox;
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
++        return m_tauData->bounds;
+     }
+     
+ protected:
+-    std::vector<Vector3>    m_oVertices;
+-    ColorFloat              m_clrLines;
+-    BBox3                   m_oBBox;
++    struct Data {
++        std::vector<Vector3> vertices; ColorFloat color; BBox3 bounds; uint64_t generation = TauNextGeneration();
++        mutable std::mutex admissionGate;
++        mutable bool validated = false, valid = true;
++        Data() = default;
++        Data(const Data& source) : vertices(source.vertices), color(source.color), bounds(source.bounds), generation(source.generation) {}
++    };
++    std::shared_ptr<Data> m_tauData = std::make_shared<Data>();
++    mutable std::recursive_mutex m_tauGate;
+ };
  }
  
- PICOGK_API void Mesh_GetTriangleV(  PKINSTANCE hLib,
+--- a/Source/PicoGKTypes.h
++++ b/Source/PicoGKTypes.h
+@@ -91,7 +91,7 @@
+ #endif
+     }
+     
+-    Coord(const Coord& oSrc)
++    Coord(const Coord& oSrc) noexcept
+     {
+         X = oSrc.X;
+         Y = oSrc.Y;
+@@ -143,7 +143,7 @@
+         Z = fZ;
+     }
+     
+-    Vector3(const Vector3& vec) : Vector3(vec.X, vec.Y, vec.Z)
++    Vector3(const Vector3& vec) noexcept : Vector3(vec.X, vec.Y, vec.Z)
+     {
+     }
+ 
+--- a/Source/PicoGKVdbField.h
++++ b/Source/PicoGKVdbField.h
+@@ -38,6 +38,7 @@
+ 
+ #include <openvdb/openvdb.h>
+ #include "PicoGKTypes.h"
++#include "PicoGKGridState.h"
+ 
+ using namespace openvdb;
+ 
+@@ -53,33 +54,45 @@
+     {
+         m_roGrid = TFieldType::create();
+         m_roGrid->setTransform(openvdb::math::Transform::createLinearTransform(fVoxelSizeMM));
+-    };
++            m_tauState = TauStateFor(m_roGrid);
++};
+     
+     Field(typename TFieldType::Ptr roGrid)
+     {
+         m_roGrid = roGrid;
+-    };
++            m_tauState = TauStateFor(m_roGrid, false);
++};
+     
+     Field(const Field& oSource)
+     {
++        std::lock_guard<std::recursive_mutex> tauLock(oSource.m_tauState->gate);
+         m_roGrid = deepCopyTypedGrid<TFieldType>(oSource.m_roGrid);
+-    };
++            m_tauState = TauStateFor(m_roGrid);
++        if (oSource.m_tauState->cacheable) m_tauState->generation = oSource.m_tauState->generation;
++};
+     
+     int64_t nMemUsage() const
+     {
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         return sizeof(TFieldType) + m_roGrid->memUsage();
+     }
+     
+-    typename TFieldType::Ptr roVdbGrid() const {return m_roGrid;}
++    std::shared_ptr<TauGridState> TauState() const { return m_tauState; }
++    typename TFieldType::Ptr TauGrid() const { return m_roGrid; }
++    typename TFieldType::Ptr roVdbGrid() const {
++        std::lock_guard<std::recursive_mutex> lock(m_tauState->gate); m_tauState->cacheable = false; return m_roGrid;
++    }
+     
+     inline VoxelSize oVoxelSize() const
+     {
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         assert(bHasValidPicoGKTransform(m_roGrid));
+         return VoxelSize(m_roGrid->voxelSize().x());
+     }
+     
+ protected:
+     typename TFieldType::Ptr             m_roGrid;
++    std::shared_ptr<TauGridState> m_tauState;
+     
+     static bool bHasValidPicoGKTransform(const TFieldType::Ptr roGrid)
+     {
+@@ -105,32 +118,41 @@
+     : Field(fVoxelSizeMM)
+     {
+         m_roGrid->setGridClass(GRID_FOG_VOLUME);
+-    }
++            m_tauState = TauStateFor(m_roGrid);
++}
+     
+     ScalarField(const ScalarField& roSource)
+     : Field(roSource)
+     {
++        if (m_roGrid->getGridClass() != GRID_FOG_VOLUME) {
++            TauGridMutation mutation(m_tauState);
++            m_roGrid->setGridClass(GRID_FOG_VOLUME);
++        }
++            m_tauState = TauStateFor(m_roGrid);
++}
++
++    ScalarField(const Voxels& oSource)
++    : ScalarField(oSource.TauCopyGrid())
++    {
+         m_roGrid->setGridClass(GRID_FOG_VOLUME);
+-    }
+-    
+-    ScalarField(const Voxels& oSource)
+-    : ScalarField(deepCopyTypedGrid<FloatGrid>(oSource.roVdbGrid()))
+-    {
+     }
+     
+     ScalarField(const FloatGrid::Ptr roSource)
+     : Field(roSource)
+     {
+-        m_roGrid->setGridClass(GRID_FOG_VOLUME);
+-    }
++            m_tauState = TauStateFor(m_roGrid);
++}
+     
+     void BuildFieldFrom(    Voxels::Ptr roVoxels,
+                             float fScalarValue,
+                             float fThreshold)
+     {
++        auto tauSource = roVoxels->TauPinGrid();
++        std::scoped_lock states(m_tauState->gate, tauSource.state->gate);
++        TauGridMutation tauMutation(m_tauState);
+         auto oField     = m_roGrid->getAccessor();
+-        auto oVoxels    = roVoxels->roVdbGrid()->getConstAccessor();
+-        CoordBBox oBBox = roVoxels->roVdbGrid()->evalActiveVoxelBoundingBox();
++        auto oVoxels    = tauSource.grid->getConstAccessor();
++        CoordBBox oBBox = tauSource.grid->evalActiveVoxelBoundingBox();
+         
+         for (auto x=oBBox.min().x(); x<=oBBox.max().x(); x++)
+         for (auto y=oBBox.min().y(); y<=oBBox.max().y(); y++)
+@@ -148,6 +170,7 @@
+     void SetValue(  Vector3     vecPos,
+                     float       fValue)
+     {
++        TauGridMutation tauMutation(m_tauState);
+         auto oAccess = m_roGrid->getAccessor();
+         
+         openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
+@@ -160,6 +183,7 @@
+     bool bGetValue( Vector3 vecPos,
+                     float* pfValue)
+     {
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         auto oAccess = m_roGrid->getConstAccessor();
+     
+         openvdb::Coord xyz( oVoxelSize().iToVoxels(vecPos.X),
+@@ -172,6 +196,7 @@
+     
+     void RemoveValue(Vector3 vecPos)
+     {
++        TauGridMutation tauMutation(m_tauState);
+         auto oAccess = m_roGrid->getAccessor();
+         
+         openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
+@@ -188,6 +213,7 @@
+                                 int32_t* pnYSize,
+                                 int32_t* pnZSize) const
+     {
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
+         
+         *pnXMin     = oBBox.min().x();
+@@ -201,6 +227,7 @@
+     void GetSlice( int32_t nZSlice,
+                    float* pfBuffer)
+     {
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
+         openvdb::Coord xyz(0, 0, nZSlice + oBBox.min().z());
+         
+@@ -217,21 +244,13 @@
+     
+     void TraverseActive(PKFnTraverseActiveS pfnCallback)
+     {
+-        for (auto iter = m_roGrid->cbeginValueOn(); iter; ++iter)
+-        {
+-            openvdb::Coord xyz = iter.getCoord();
+-            Vector3 vecLocation = oVoxelSize().vecToMM(   Coord(    xyz.x(),
+-                                                                    xyz.y(),
+-                                                                    xyz.z()));
+-            pfnCallback(    &vecLocation,
+-                            iter.getValue());
+-        }
+-    }
+-    
+-    inline FloatGrid::Ptr roGrid() const
+-    {
+-        return m_roGrid;
+-    }
++        TauTraverseValues<FloatGrid>(m_roGrid, m_tauState, [&](const openvdb::Coord& xyz, const auto& value) {
++            Vector3 location = oVoxelSize().vecToMM(Coord(xyz.x(), xyz.y(), xyz.z()));
++            pfnCallback(&location, value);
++        });
++    }
++
++    inline FloatGrid::Ptr roGrid() const { return roVdbGrid(); }
+ };
+ 
+ class VectorField : public Field<Vec3SGrid>
+@@ -242,20 +261,25 @@
+     VectorField(float fVoxelSizeMM)
+     : Field(fVoxelSizeMM)
+     {
+-    }
++            m_tauState = TauStateFor(m_roGrid);
++}
+     
+     VectorField(Vec3SGrid::Ptr roField)
+     : Field(roField)
+     {
+-    }
++            m_tauState = TauStateFor(m_roGrid);
++}
+     
+     void AddGradientFieldFrom(Voxels::Ptr roVoxels)
+     {
++        auto tauSource = roVoxels->TauPinGrid();
++        std::scoped_lock states(m_tauState->gate, tauSource.state->gate);
++        TauGridMutation tauMutation(m_tauState);
+         auto oField     = m_roGrid->getAccessor();
+-        auto oVoxels    = roVoxels->roVdbGrid()->getConstAccessor();
+-        CoordBBox oBBox = roVoxels->roVdbGrid()->evalActiveVoxelBoundingBox();
+-        
+-        math::GradStencil oStencil(*roVoxels->roVdbGrid());
++        auto oVoxels    = tauSource.grid->getConstAccessor();
++        CoordBBox oBBox = tauSource.grid->evalActiveVoxelBoundingBox();
++
++        math::GradStencil oStencil(*tauSource.grid);
+         
+         for (auto x=oBBox.min().x(); x<=oBBox.max().x(); x++)
+         for (auto y=oBBox.min().y(); y<=oBBox.max().y(); y++)
+@@ -276,9 +300,12 @@
+                             Vector3 vecValue,
+                             float fThreshold)
+     {
++        auto tauSource = roVoxels->TauPinGrid();
++        std::scoped_lock states(m_tauState->gate, tauSource.state->gate);
++        TauGridMutation tauMutation(m_tauState);
+         auto oField     = m_roGrid->getAccessor();
+-        auto oVoxels    = roVoxels->roVdbGrid()->getConstAccessor();
+-        CoordBBox oBBox = roVoxels->roVdbGrid()->evalActiveVoxelBoundingBox();
++        auto oVoxels    = tauSource.grid->getConstAccessor();
++        CoordBBox oBBox = tauSource.grid->evalActiveVoxelBoundingBox();
+         
+         openvdb::Vec3s vec(vecValue.X, vecValue.Y, vecValue.Z);
+         
+@@ -298,6 +325,7 @@
+     void SetValue(  Vector3 vecPos,
+                     Vector3 vecValue)
+     {
++        TauGridMutation tauMutation(m_tauState);
+         auto oAccess = m_roGrid->getAccessor();
+         
+         Vec3s vec(vecValue.X, vecValue.Y, vecValue.Z);
+@@ -311,6 +339,7 @@
+     bool bGetValue( Vector3 vecPos,
+                     Vector3* pvecValue)
+     {
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         auto oAccess = m_roGrid->getConstAccessor();
+     
+         openvdb::Coord xyz( oVoxelSize().iToVoxels(vecPos.X),
+@@ -328,6 +357,7 @@
+     
+     void RemoveValue(Vector3 vecPos)
+     {
++        TauGridMutation tauMutation(m_tauState);
+         auto oAccess = m_roGrid->getAccessor();
+         
+         openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
+@@ -339,21 +369,10 @@
+     
+     void TraverseActive(PKFnTraverseActiveV pfnCallback)
+     {
+-        for (auto iter = m_roGrid->cbeginValueOn(); iter; ++iter)
+-        {
+-            openvdb::Coord xyz = iter.getCoord();
+-            Vector3 vecLocation = oVoxelSize().vecToMM(   Coord(    xyz.x(),
+-                                                                    xyz.y(),
+-                                                                    xyz.z()));
+-            auto oValue = iter.getValue();
+-            
+-            Vector3 vecValue(   oValue.x(),
+-                                oValue.y(),
+-                                oValue.z());
+-            
+-            pfnCallback(    &vecLocation,
+-                            &vecValue);
+-        }
++        TauTraverseValues<Vec3SGrid>(m_roGrid, m_tauState, [&](const openvdb::Coord& xyz, const auto& value) {
++            Vector3 location = oVoxelSize().vecToMM(Coord(xyz.x(), xyz.y(), xyz.z()));
++            Vector3 vector(value.x(), value.y(), value.z()); pfnCallback(&location, &vector);
++        });
+     }
+ };
+ 
+--- a/Source/PicoGKVdbFile.h
++++ b/Source/PicoGKVdbFile.h
+@@ -38,6 +38,8 @@
+ 
+ #include <openvdb/openvdb.h>
+ #include <openvdb/io/Stream.h>
++#include "PicoGKGridState.h"
++#include <algorithm>
+ 
+ namespace PicoGK
+ {
+@@ -54,7 +56,7 @@
+             oFile.open();
+             GridPtrVecPtr  roGrids = oFile.getGrids();
+             oFile.close();
+-            return make_shared<VdbFile>(roGrids);
++            return make_shared<VdbFile>(roGrids, true);
+         }
+         
+         catch (const openvdb::IoError& e)
+@@ -76,55 +78,90 @@
+         m_roGrids = std::make_shared<openvdb::GridPtrVec>();
+     }
+     
+-    VdbFile(GridPtrVecPtr roGrids)
++    VdbFile(GridPtrVecPtr roGrids, bool trusted = false)
+     {
+         m_roGrids = roGrids;
++        for (const auto& grid : *m_roGrids) m_tauStates.push_back(TauStateFor(grid, trusted));
+     }
+     
+     int64_t nMemUsage() const
+     {
++        std::lock_guard<std::recursive_mutex> owner(m_tauOwner);
+         return sizeof(VdbFile) + m_nMemUsage;
+     }
+     
+     int32_t nAddGrid(   std::string                     strGridName,
+                         const openvdb::FloatGrid::Ptr   roGrid)
+     {
+-        m_nMemUsage += roGrid->memUsage();
++        std::lock_guard<std::recursive_mutex> owner(m_tauOwner);
++        auto sourceState = TauStateFor(roGrid, false);
++        std::lock_guard<std::recursive_mutex> tauLock(sourceState->gate);
++        const auto bytes = roGrid->memUsage();
+         openvdb::FloatGrid::Ptr roCopy = deepCopyTypedGrid<FloatGrid>(roGrid);
+         roCopy->setName(strGridName);
++        auto state = TauStateFor(roCopy);
++        if (sourceState->cacheable) state->generation = sourceState->generation;
++        m_roGrids->reserve(m_roGrids->size() + 1);
++        m_tauStates.reserve(m_tauStates.size() + 1);
+         m_roGrids->push_back(roCopy);
++        m_tauStates.push_back(state);
++        m_nMemUsage += bytes;
+         return (int32_t) m_roGrids->size()-1;
+     }
+     
+     int32_t nAddGrid(   std::string                     strGridName,
+                         const openvdb::Vec3SGrid::Ptr   roGrid)
+     {
++        std::lock_guard<std::recursive_mutex> owner(m_tauOwner);
++        auto sourceState = TauStateFor(roGrid, false);
++        std::lock_guard<std::recursive_mutex> tauLock(sourceState->gate);
+         openvdb::Vec3SGrid::Ptr roCopy = deepCopyTypedGrid<Vec3SGrid>(roGrid);
+         roCopy->setName(strGridName);
++        auto state = TauStateFor(roCopy);
++        if (sourceState->cacheable) state->generation = sourceState->generation;
++        m_roGrids->reserve(m_roGrids->size() + 1);
++        m_tauStates.reserve(m_tauStates.size() + 1);
+         m_roGrids->push_back(roCopy);
++        m_tauStates.push_back(state);
+         return (int32_t) m_roGrids->size()-1;
+     }
+     
+     int32_t nGridCount() const
+     {
++        std::lock_guard<std::recursive_mutex> owner(m_tauOwner);
+         return (int32_t) m_roGrids->size();
+     }
+     
+-    GridBase::Ptr roGridAt(int32_t nIndex) const
+-    {
++    GridBase::Ptr TauGridAt(int32_t nIndex) const
++    {
++        std::lock_guard<std::recursive_mutex> owner(m_tauOwner);
+         assert(nIndex < nGridCount());
+         return m_roGrids->at(nIndex);
+     }
+     
++    GridBase::Ptr roGridAt(int32_t nIndex) const {
++        auto grid = TauGridAt(nIndex);
++        auto state = TauStateFor(grid, false);
++        std::lock_guard<std::recursive_mutex> lock(state->gate);
++        state->cacheable = false;
++        return grid;
++    }
++
+     std::string strNameAt(int32_t nIndex) const
+     {
+-        auto roGrid = roGridAt(nIndex);
++        std::lock_guard<std::recursive_mutex> owner(m_tauOwner);
++        auto roGrid = TauGridAt(nIndex);
++        auto state = TauStateFor(roGrid);
++        std::lock_guard<std::recursive_mutex> gridLock(state->gate);
+         return roGrid->getName();
+     }
+     
+     int nTypeAt(int32_t nIndex) const
+     {
+-        auto roGrid = roGridAt(nIndex);
++        std::lock_guard<std::recursive_mutex> owner(m_tauOwner);
++        auto roGrid = TauGridAt(nIndex);
++        auto state = TauStateFor(roGrid);
++        std::lock_guard<std::recursive_mutex> gridLock(state->gate);
+         
+         if (roGrid->isType<openvdb::FloatGrid>())
+         {
+@@ -152,6 +189,12 @@
+     
+     bool bSaveToFile(std::string strFileName)
+     {
++        std::lock_guard<std::recursive_mutex> owner(m_tauOwner);
++        auto states = m_tauStates;
++        std::sort(states.begin(), states.end(), [](const auto& a, const auto& b) { return std::less<TauGridState*>{}(a.get(), b.get()); });
++        states.erase(std::unique(states.begin(), states.end()), states.end());
++        std::vector<std::unique_lock<std::recursive_mutex>> gridLocks;
++        for (const auto& state : states) gridLocks.emplace_back(state->gate);
+         std::vector<openvdb::GridBase::Ptr> oGrids;
+         for (const auto& roGrid : *m_roGrids)
+         {
+@@ -179,8 +222,10 @@
+     }
+ 
+ protected:
++    mutable std::recursive_mutex m_tauOwner;
+     int64_t                 m_nMemUsage = 0;
+     openvdb::GridPtrVecPtr  m_roGrids;
++    std::vector<std::shared_ptr<TauGridState>> m_tauStates;
+ };
+ }
+ #endif
+--- a/Source/PicoGKVdbMeta.h
++++ b/Source/PicoGKVdbMeta.h
+@@ -55,13 +55,15 @@
+         METATYPE_VECTOR
+     };
+     
+-    VdbMeta(MetaMap::Ptr roMetaMap)
++    VdbMeta(MetaMap::Ptr roMetaMap, std::shared_ptr<TauGridState> state = nullptr)
+     {
+         m_roMetaMap = roMetaMap;
++        m_tauState = std::move(state);
+     }
+     
+     int32_t nCount() const
+     {
++        auto metadata = TauReadLock();
+         return (int32_t) m_roMetaMap->metaCount();
+     }
+     
+@@ -75,6 +77,7 @@
+     
+     std::string strNameAt(int32_t nIndex)
+     {
++        auto metadata = TauReadLock();
+         int32_t n=0;
+         
+         for (   auto iter = m_roMetaMap->beginMeta();
+@@ -92,6 +95,7 @@
+     
+     EType eTypeAt(const std::string& strValueName)
+     {
++        auto metadata = TauReadLock();
+         openvdb::Metadata::Ptr roMeta = (*m_roMetaMap)[strValueName];
+         
+         if (roMeta == nullptr)
+@@ -109,6 +113,7 @@
+     bool bGetValueAt(   const std::string& strValueName,
+                         std::string* pstrValue)
+     {
++        auto metadata = TauReadLock();
+         openvdb::Metadata::Ptr roMeta = (*m_roMetaMap)[strValueName];
+         
+         if (roMeta == nullptr)
+@@ -124,6 +129,7 @@
+     bool bGetValueAt(  const std::string& strValueName,
+                        float* pfValue)
+     {
++        auto metadata = TauReadLock();
+         openvdb::Metadata::Ptr roMeta = (*m_roMetaMap)[strValueName];
+         
+         if (roMeta == nullptr)
+@@ -139,6 +145,7 @@
+     bool bGetValueAt(   const std::string& strValueName,
+                         Vector3* pvecValue)
+     {
++        auto metadata = TauReadLock();
+         openvdb::Metadata::Ptr roMeta = (*m_roMetaMap)[strValueName];
+         
+         if (roMeta == nullptr)
+@@ -157,12 +164,18 @@
+     
+     void RemoveAt(const std::string& strValueName)
+     {
++        auto metadata = TauReadLock();
++        std::unique_ptr<TauGridMutation> mutation;
++        if (m_tauState && strValueName == "class") mutation = std::make_unique<TauGridMutation>(m_tauState);
+         m_roMetaMap->removeMeta(strValueName);
+     }
+     
+     void SetValue(  const std::string& strValueName,
+                     const std::string& strValue)
+     {
++        auto metadata = TauReadLock();
++        std::unique_ptr<TauGridMutation> mutation;
++        if (m_tauState && strValueName == "class") mutation = std::make_unique<TauGridMutation>(m_tauState);
+         
+         m_roMetaMap->insertMeta(    strValueName,
+                                     openvdb::StringMetadata(strValue));
+@@ -171,6 +184,9 @@
+     void SetValue(  const std::string&  strValueName,
+                     float               fValue)
+     {
++        auto metadata = TauReadLock();
++        std::unique_ptr<TauGridMutation> mutation;
++        if (m_tauState && strValueName == "class") mutation = std::make_unique<TauGridMutation>(m_tauState);
+         
+         m_roMetaMap->insertMeta(    strValueName,
+                                     openvdb::FloatMetadata(fValue));
+@@ -179,6 +195,9 @@
+     void SetValue(  const std::string&  strValueName,
+                     Vector3             vecValue)
+     {
++        auto metadata = TauReadLock();
++        std::unique_ptr<TauGridMutation> mutation;
++        if (m_tauState && strValueName == "class") mutation = std::make_unique<TauGridMutation>(m_tauState);
+         m_roMetaMap->insertMeta(    strValueName,
+                                     openvdb::Vec3SMetadata(
+                                         openvdb::Vec3s( vecValue.X,
+@@ -186,7 +205,14 @@
+                                                         vecValue.Z)));
+     }
+     
++private:
++    std::unique_lock<std::recursive_mutex> TauReadLock() const {
++        return m_tauState ? std::unique_lock<std::recursive_mutex>(m_tauState->gate)
++                          : std::unique_lock<std::recursive_mutex>();
++    }
++public:
+     MetaMap::Ptr m_roMetaMap;
++    std::shared_ptr<TauGridState> m_tauState;
+ };
+ 
+ }
+--- a/Source/PicoGKVdbVoxels.h
++++ b/Source/PicoGKVdbVoxels.h
+@@ -50,6 +50,7 @@
+ #include <openvdb/tools/LevelSetDilatedMesh.h>
+ 
+ #include "PicoGKMesh.h"
++#include "PicoGKGridState.h"
+ #include "PicoGKTrace.h"
+ 
+ using namespace openvdb;
+@@ -72,6 +73,7 @@
+         m_roGrid            = FloatGrid::create(oVoxelSize.fToMM(nNarrowBand));
+         m_roGrid->setGridClass(GRID_LEVEL_SET);
+         m_roGrid->setTransform(openvdb::math::Transform::createLinearTransform(oVoxelSize));
++        m_tauState = TauStateFor(m_roGrid);
+     };
+     
+     Voxels( FloatGrid::Ptr roGrid,
+@@ -84,11 +86,18 @@
+         
+         m_nSdfNarrowBand    = nNarrowBand;
+         m_roGrid            = roGrid;
+-        m_roGrid->setGridClass(GRID_LEVEL_SET);
++        m_tauState = TauStateFor(m_roGrid, false);
++        std::lock_guard<std::recursive_mutex> state(m_tauState->gate);
++        if (m_roGrid->getGridClass() != GRID_LEVEL_SET) {
++            TauGridMutation mutation(m_tauState);
++            m_roGrid->setGridClass(GRID_LEVEL_SET);
++        }
+     };
+     
+     Voxels(const Voxels& oSource)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(oSource.m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(oSource.m_tauState->gate);
+         PKTRACE(Voxels_CopyConstructor);
+         
+         m_roGrid = deepCopyTypedGrid<FloatGrid>(oSource.m_roGrid);
+@@ -96,6 +105,8 @@
+         
+         assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
+         assert(bHasValidPicoGKTransform(m_roGrid));
++        m_tauState = TauStateFor(m_roGrid);
++        if (oSource.m_tauState->cacheable) m_tauState->generation = oSource.m_tauState->generation;
+     };
+     
+     Voxels( VoxelSize oVoxSize,
+@@ -116,6 +127,7 @@
+         
+         assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
+         assert(bHasValidPicoGKTransform(m_roGrid));
++        m_tauState = TauStateFor(m_roGrid);
+     }
+     
+     Voxels( VoxelSize oVoxSize,
+@@ -142,6 +154,7 @@
+         
+         assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
+         assert(bHasValidPicoGKTransform(m_roGrid));
++        m_tauState = TauStateFor(m_roGrid);
+     }
+     
+     Voxels( VoxelSize oVoxSize,
+@@ -149,8 +162,9 @@
+             const Mesh& oMesh,
+             float fRadius)
+     {
+-        m_roGrid = openvdb::tools::createLevelSetDilatedMesh<FloatGrid>(    (const std::vector<math::Vec3<float>>&) oMesh.vVertices(),
+-                                                                            (const std::vector<Vec3I>&)             oMesh.vTriangles(),
++        auto tauMesh = oMesh.TauCapture();
++        m_roGrid = openvdb::tools::createLevelSetDilatedMesh<FloatGrid>(    (const std::vector<math::Vec3<float>>&) tauMesh->vVertices(),
++                                                                            (const std::vector<Vec3I>&)             tauMesh->vTriangles(),
+                                                                             fRadius,
+                                                                             oVoxSize,
+                                                                             nNarrowBand);
+@@ -159,24 +173,29 @@
+         
+         assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
+         assert(bHasValidPicoGKTransform(m_roGrid));
+-    }
+-
+-    ~Voxels()
+-    {
+-    }
++        m_tauState = TauStateFor(m_roGrid);
++}
++
++    ~Voxels() = default;
+     
+     std::string strDiagnose() const
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         return tools::checkLevelSet<FloatGrid>(*m_roGrid);
+     }
+     
+     int64_t nMemUsage() const
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         return sizeof(Voxels) + m_roGrid->memUsage();
+     }
+     
+     bool bIsEmpty() const
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         PKTRACE(Voxels_bIsEmpty);
+         
+         if (m_roGrid->tree().empty())
+@@ -199,6 +218,9 @@
+     
+     bool bIsEqual(const Voxels& oCompare) const
+     {
++        std::scoped_lock tauObject(m_tauObjectGate, oCompare.m_tauObjectGate);
++        std::scoped_lock tauStates(m_tauState->gate, oCompare.m_tauState->gate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         PKTRACE(Voxels_bIsEqual);
+         
+         if (m_roGrid->transform() != oCompare.m_roGrid->transform())
+@@ -246,6 +268,9 @@
+ 
+     void BoolAdd(const Voxels& oOther)
+     {
++        std::scoped_lock tauObject(m_tauObjectGate, oOther.m_tauObjectGate);
++        std::scoped_lock tauStates(m_tauState->gate, oOther.m_tauState->gate);
++        TauGridMutation tauMutation(m_tauState);
+         PKTRACE(Voxels_BoolAdd);
+         
+         FloatGrid::Ptr roOperand = deepCopyTypedGrid<FloatGrid>(oOther.m_roGrid);
+@@ -256,6 +281,9 @@
+ 
+     void BoolSubtract(const Voxels& oOther)
+     {
++        std::scoped_lock tauObject(m_tauObjectGate, oOther.m_tauObjectGate);
++        std::scoped_lock tauStates(m_tauState->gate, oOther.m_tauState->gate);
++        TauGridMutation tauMutation(m_tauState);
+         PKTRACE(Voxels_BoolSubtract);
+         
+         FloatGrid::Ptr roOperand = deepCopyTypedGrid<FloatGrid>(oOther.m_roGrid);
+@@ -266,6 +294,9 @@
+ 
+     void BoolIntersect(const Voxels& oOther)
+     {
++        std::scoped_lock tauObject(m_tauObjectGate, oOther.m_tauObjectGate);
++        std::scoped_lock tauStates(m_tauState->gate, oOther.m_tauState->gate);
++        TauGridMutation tauMutation(m_tauState);
+         PKTRACE(Voxels_BoolIntersect);
+         
+         FloatGrid::Ptr roOperand = deepCopyTypedGrid<FloatGrid>(oOther.m_roGrid);
+@@ -276,6 +307,8 @@
+     
+     void Offset(float fSize)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        TauGridMutation tauMutation(m_tauState);
+         PKTRACE(Voxels_Offset);
+         
+         // Create a clean level set with the extended size narrow band
+@@ -292,6 +325,8 @@
+     void DoubleOffset(  float fSize1,
+                         float fSize2)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        TauGridMutation tauMutation(m_tauState);
+         PKTRACE(Voxels_DoubleOffset);
+         
+         // Create a clean level set with the extended size narrow band
+@@ -309,6 +344,8 @@
+     
+     void TripleOffset(float fSize)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        TauGridMutation tauMutation(m_tauState);
+         PKTRACE(Voxels_TripleOffset);
+         
+         // Create a clean level set with the extended size narrow band
+@@ -331,6 +368,8 @@
+ 
+     void RenderMesh(const Mesh& oMesh)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        TauGridMutation tauMutation(m_tauState);
+         PKTRACE(Voxels_RenderMesh);
+         
+         FloatGrid::Ptr roVoxelized = roFloatGridFromMesh(   oMesh,
+@@ -342,6 +381,8 @@
+     
+     void RenderLattice(const Lattice& oLattice)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        TauGridMutation tauMutation(m_tauState);
+         PKTRACE(Voxels_RenderLattice);
+         
+         auto oAccess = m_roGrid->getAccessor();
+@@ -357,9 +398,30 @@
+         }
+     }
+     
++    bool TauImplicitBoundsValid(const BBox3& bounds) const {
++        std::lock_guard<std::recursive_mutex> owner(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> state(m_tauState->gate);
++        const float size = static_cast<float>(oVoxelSize());
++        if (!std::isfinite(size) || size <= 0 || m_nSdfNarrowBand < 0) return false;
++        const double low = static_cast<double>(INT32_MIN) + m_nSdfNarrowBand;
++        const double high = static_cast<double>(INT32_MAX) - m_nSdfNarrowBand - 1;
++        for (float coordinate : {bounds.vecMin.X, bounds.vecMin.Y, bounds.vecMin.Z,
++                                  bounds.vecMax.X, bounds.vecMax.Y, bounds.vecMax.Z}) {
++            const float voxel = coordinate / size;
++            if (!std::isfinite(voxel)) return false;
++            const double rounded = std::round(static_cast<double>(voxel));
++            if (rounded < low || rounded > high) return false;
++        }
++        return true;
++    }
++
+     void RenderImplicit(    const BBox3& oBBox,
+                             PKPFnfSdf pfn)
+     {
++        std::unique_lock<std::recursive_mutex> tauObject(m_tauObjectGate);
++        if (!pfn || !TauImplicitBoundsValid(oBBox)) throw std::invalid_argument("invalid implicit bounds or callback");
++        if (oBBox.vecMin.X > oBBox.vecMax.X || oBBox.vecMin.Y > oBBox.vecMax.Y || oBBox.vecMin.Z > oBBox.vecMax.Z) return;
++        TauGridMutation tauMutation(m_tauState);
+         PKTRACE(Voxels_RenderImplicit);
+         
+         auto oAccess = m_roGrid->getAccessor();
+@@ -374,8 +436,14 @@
+             Vector3 vecSample = oVoxelSize().vecToMM(Coord(x,y,z));
+             openvdb::Coord xyz(x,y,z);
+             
+-            float fValue = std::min(    (*pfn)(&vecSample),
+-                                        oAccess.getValue(xyz));
++            const auto observedGeneration = m_tauState->generation->identity;
++            tauMutation.Unlock(); tauObject.unlock();
++            float sample = (*pfn)(&vecSample);
++            tauObject.lock(); tauMutation.Lock(); tauMutation.Retarget(m_tauState);
++            std::lock_guard<std::recursive_mutex> currentState(m_tauState->gate);
++            if (observedGeneration != m_tauState->generation->identity) oAccess = m_roGrid->getAccessor();
++            if (m_tauState->generation->surface) m_tauState->generation = std::make_shared<TauSurfaceGeneration>();
++            float fValue = std::min(sample, oAccess.getValue(xyz));
+             
+             SetSdValue(&oAccess, xyz, fBackgroundMM(), fValue);
+         }
+@@ -387,9 +455,16 @@
+     {
+         PKTRACE(Voxels_IntersectImplicit);
+         
+-        Voxels oVox(oVoxelSize(), fBackgroundMM());
+-        
+-        CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
++        CoordBBox oBBox;
++        int narrowBand;
++        VoxelSize voxelSize(1.0f);
++        { std::lock_guard<std::recursive_mutex> owner(m_tauObjectGate);
++          std::lock_guard<std::recursive_mutex> state(m_tauState->gate);
++          oBBox = m_roGrid->evalActiveVoxelBoundingBox();
++          if (oBBox.empty()) return;
++          narrowBand = m_nSdfNarrowBand;
++          voxelSize = oVoxelSize(); }
++        Voxels oVox(voxelSize, narrowBand);
+         
+         BBox3 oBBoxMM;
+         oBBoxMM.vecMin.X = oVoxelSize().fToMM(oBBox.min().x());
+@@ -406,12 +481,60 @@
+         // implict grid, and use our grid just as the mask
+         // Not sure if this is really necessary, but the
+         // implicit grid is "perfect"
++        std::scoped_lock owners(m_tauObjectGate, oVox.m_tauObjectGate);
++        std::scoped_lock states(m_tauState->gate, oVox.m_tauState->gate);
+         m_roGrid.swap(oVox.m_roGrid);
++        m_tauState.swap(oVox.m_tauState);
+         
+         BoolIntersect(oVox);
+     }
+ 
+-    Mesh::Ptr roAsMesh() const
++    Mesh::Ptr roAsMesh() const {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> stateLock(m_tauState->gate);
++        auto generation = m_tauState->generation;
++        std::lock_guard<std::recursive_mutex> generationLock(generation->gate);
++        if (!m_tauState->cacheable) {
++            if (m_tauState->counters) ++m_tauState->counters->surfaceBuilds;
++            return TauBuildSurface();
++        }
++        if (!generation->surface) {
++            if (m_tauState->counters) ++m_tauState->counters->surfaceBuilds;
++            generation->surface = TauBuildSurface();
++        } else if (m_tauState->counters) ++m_tauState->counters->surfaceHits;
++        return generation->surface->TauCapture();
++    }
++    void TauBindCounters(std::shared_ptr<TauCaptureCounters> counters) {
++        std::lock_guard<std::recursive_mutex> owner(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> state(m_tauState->gate);
++        m_tauState->counters = std::move(counters);
++    }
++    struct TauGridRead {
++        std::unique_lock<std::recursive_mutex> owner;
++        FloatGrid::Ptr grid;
++        std::shared_ptr<TauGridState> state;
++    };
++    TauGridRead TauPinGrid() const {
++        std::unique_lock<std::recursive_mutex> owner(m_tauObjectGate);
++        return {std::move(owner), m_roGrid, m_tauState};
++    }
++    FloatGrid::Ptr TauCopyGrid() const {
++        auto source = TauPinGrid();
++        std::lock_guard<std::recursive_mutex> state(source.state->gate);
++        return deepCopyTypedGrid<FloatGrid>(source.grid);
++    }
++    std::pair<Mesh::Ptr, uint64_t> TauCaptureSurface() const {
++        std::lock_guard<std::recursive_mutex> owner(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> state(m_tauState->gate);
++        auto result = roAsMesh();
++        return {result, result->TauGeneration()};
++    }
++    uint64_t TauSurfaceIdentity() const {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> lock(m_tauState->gate);
++        return m_tauState->cacheable ? m_tauState->generation->identity : TauNextGeneration();
++    }
++    Mesh::Ptr TauBuildSurface() const
+     {
+         PKTRACE(Voxels_roAsMesh);
+         
+@@ -450,12 +573,15 @@
+                                                         oTri[0]));
+         }
+ 
++        roMesh->TauSetSurfaceIdentity(m_tauState->cacheable ? m_tauState->generation->identity : TauNextGeneration());
+         return roMesh;
+     }
+     
+     void ProjectZSliceDn(   float fZStart,
+                             float fZEnd)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        TauGridMutation tauMutation(m_tauState);
+         assert(fZStart > fZEnd);
+         
+         int32_t iZStart = oVoxelSize().iToVoxels(fZStart);
+@@ -498,6 +624,8 @@
+     void ProjectZSliceUp(   float fZStart,
+                             float fZEnd)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        TauGridMutation tauMutation(m_tauState);
+         assert(fZStart < fZEnd);
+         
+         int32_t iZStart = oVoxelSize().iToVoxels(fZStart);
+@@ -547,6 +675,8 @@
+     
+     float fCalculateVolume()
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         PKTRACE(Voxels_fCalculateVolume);
+         
+         if (m_roGrid->tree().empty())
+@@ -561,6 +691,8 @@
+     
+     inline bool bIsInside(Vector3 vecTest)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         auto oAccess = m_roGrid->getConstAccessor();
+     
+         openvdb::Coord xyz( oVoxelSize().iToVoxels(vecTest.X),
+@@ -573,6 +705,8 @@
+     inline void GetSurfaceNormal(   Vector3 vecPt,
+                                     Vector3* pvecNormal)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         math::GradStencil oStencil(*m_roGrid);
+         Coord xyz = oVoxelSize().xyzToVoxels(vecPt);
+     
+@@ -591,6 +725,8 @@
+     inline bool bFindClosestPointOnSurface( Vector3 vecSearch,
+                                             Vector3* pvecSurfacePoint)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         Coord xyzSearch = oVoxelSize().xyzToVoxels(vecSearch);
+         
+         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
+@@ -638,6 +774,8 @@
+                                     const Vector3& vecDirection,
+                                     Vector3* pvecSurfacePoint)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         tools::LevelSetRayIntersector oIntersector(*m_roGrid);
+         math::Ray<Real> oRay(   Vec3f(  oVoxelSize().fToVoxels(vecSearch.X),
+                                         oVoxelSize().fToVoxels(vecSearch.Y),
+@@ -670,6 +808,8 @@
+                                 int32_t* pnYSize,
+                                 int32_t* pnZSize) const
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
+         
+         *pnXMin     = oBBox.min().x();
+@@ -683,6 +823,8 @@
+     void GetZSlice( int32_t nZSlice,
+                     float* pfBuffer)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
+         openvdb::Coord xyz(0, 0, nZSlice + oBBox.min().z());
+         
+@@ -700,6 +842,8 @@
+     void GetXSlice( int32_t nXSlice,
+                     float* pfBuffer)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
+         openvdb::Coord xyz(nXSlice + oBBox.min().x(), 0, 0);
+         
+@@ -717,6 +861,8 @@
+     void GetYSlice( int32_t nYSlice,
+                     float* pfBuffer)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
+         openvdb::Coord xyz(0, nYSlice + oBBox.min().y(), 0);
+         
+@@ -734,6 +880,8 @@
+     void GetInterpolatedZSlice( float fZSlice,
+                                 float* pfBuffer)
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
+         
+         auto oAccess = m_roGrid->getConstAccessor();
+@@ -750,18 +898,33 @@
+         }
+     }
+     
+-    FloatGrid::Ptr roVdbGrid() const 	{return m_roGrid;}
+-    
+-    inline float fBackgroundMM() const  {return m_roGrid->background();}
++    std::shared_ptr<TauGridState> TauState() const { std::lock_guard<std::recursive_mutex> owner(m_tauObjectGate); return m_tauState; }
++    FloatGrid::Ptr TauGrid() const { std::lock_guard<std::recursive_mutex> owner(m_tauObjectGate); return m_roGrid; }
++    FloatGrid::Ptr roVdbGrid() const {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> lock(m_tauState->gate);
++        m_tauState->cacheable = false;
++        return m_roGrid;
++    }
++
++    inline float fBackgroundMM() const {
++        std::lock_guard<std::recursive_mutex> owner(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> state(m_tauState->gate);
++        return m_roGrid->background();
++    }
+     
+     inline VoxelSize oVoxelSize() const
+     {
++        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
+         assert(bHasValidPicoGKTransform(m_roGrid));
+         return VoxelSize(m_roGrid->voxelSize().x());
+     }
+     
+ protected:
+     FloatGrid::Ptr      m_roGrid;
++    std::shared_ptr<TauGridState> m_tauState;
++    mutable std::recursive_mutex m_tauObjectGate;
+     int32_t             m_nSdfNarrowBand;
+     
+     bool bLevelSetNeedsRebuild() const
+@@ -830,22 +993,23 @@
+                                                 VoxelSize oVoxelSize,
+                                                 int32_t nHalfWidth)
+     {
++        auto tauInput = oMesh.TauCapture();
+         std::vector< openvdb::Vec3s >   oVertices;
+         std::vector< openvdb::Vec3I >   oTriangles;
+         
+-        for (int32_t n=0; n<oMesh.nVertexCount(); n++)
++        for (int32_t n=0; n<tauInput->nVertexCount(); n++)
+         {
+             Vector3 v(0.0f,0.0f,0.0f);
+-            oMesh.GetVertex(n, (Vector3*)&v);
++            tauInput->GetVertex(n, (Vector3*)&v);
+             oVertices.push_back(openvdb::Vec3s( v.X,
+                                                 v.Y,
+                                                 v.Z));
+         }
+         
+-        for (int32_t n=0; n<oMesh.nTriangleCount(); n++)
++        for (int32_t n=0; n<tauInput->nTriangleCount(); n++)
+         {
+             Triangle t;
+-            oMesh.GetTriangle(n, &t);
++            tauInput->GetTriangle(n, &t);
+             oTriangles.push_back(openvdb::Vec3I(    (unsigned int) t.A,
+                                                     (unsigned int) t.B,
+                                                     (unsigned int) t.C));

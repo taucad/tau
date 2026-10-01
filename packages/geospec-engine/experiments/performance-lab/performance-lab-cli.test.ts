@@ -15,6 +15,8 @@ import {
   verifySourceAuthority,
   loadLegacyWithoutPersistence,
   summarizeLabCaseResults,
+  writeLabChildReport,
+  readLabChildReport,
 } from '#experiments/performance-lab/performance-lab-cli.js';
 /* oxlint-disable no-restricted-imports -- Private lab test reads the frozen native catalog and source receipt. */
 import {
@@ -27,6 +29,126 @@ import {
 import currentAuthority from '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v6.json' with { type: 'json' };
 import manifest from '../../../geospec-engine-native/bench/fixtures/performance-lab/manifest.json' with { type: 'json' };
 /* oxlint-enable no-restricted-imports */
+
+void it('should transport complete evidence without embedding large strings in child receipts or parent rows', async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), 'tau-lab-transport-'));
+  const path = resolve(directory, 'result.json');
+  const canonical = JSON.stringify({
+    results: [{ claimId: 'claim', status: 'passed', diagnostics: [], evidence: 'x'.repeat(65_536) }],
+  });
+  const report: Parameters<typeof writeLabChildReport>[1] = {
+    result: {
+      engine: 'native-desktop',
+      backend: 'native-desktop',
+      profile: 'profile',
+      fixtureId: 'fixture',
+      cache: 'cold-module-cold-subject',
+      buildIdentity: { source: 'immutable' },
+      engineObservations: { calls: 1 },
+      initializationTiming: 'startup',
+      timing: { startup: 1, admission: 2, evaluation: 3, cleanup: 4, total: 10 },
+      perCase: [
+        {
+          caseId: 'case',
+          matcher: 'toBeWatertight',
+          repeat: 0,
+          status: 'passed',
+          expectedStatus: 'passed',
+          evaluation: 3,
+          numericProfile: 'profile',
+          diagnostics: [],
+          result: JSON.parse(canonical).results[0],
+          canonicalClaimUtf8: '{"claimId":"claim"}',
+          canonicalResultUtf8: canonical,
+          canonicalResultSha256: createHash('sha256').update(canonical).digest('hex'),
+        },
+      ],
+    },
+    memory: { method: 'test', scope: 'child', peakBytes: 42, observed: 'after cleanup' },
+  };
+  try {
+    await writeLabChildReport(path, report);
+    const receipt = await readLabChildReport(path);
+    const receiptBytes = await readFile(path);
+    assert.ok(receiptBytes.byteLength < 4096, 'Child receipt must reference rather than duplicate large evidence.');
+    assert.ok(JSON.stringify({ ...receipt, host: 'parent' }).length < 4096, 'Parent row must remain compact.');
+    const { result } = receipt;
+    assert.ok(result);
+    const [entry] = result.perCase;
+    assert.ok(entry);
+    assert.equal(entry.status, 'passed');
+    assert.deepEqual(result.timing, report.result?.timing);
+    const { evidence } = entry;
+    assert.equal(await readFile(evidence.canonicalResult!.path, 'utf8'), canonical);
+    assert.equal(evidence.result.path, evidence.canonicalResult!.path);
+    assert.equal(evidence.result.pointer, '/results/0');
+    assert.equal(evidence.diagnostics.pointer, '/results/0/diagnostics');
+    assert.equal(evidence.canonicalResult!.bytes, Buffer.byteLength(canonical));
+    await assert.rejects(writeLabChildReport(path, report), { code: 'EEXIST' });
+    await writeFile(evidence.canonicalResult!.path, `${canonical} `);
+    await assert.rejects(readLabChildReport(path), /Performance evidence artifact changed/);
+    await rm(evidence.canonicalResult!.path);
+    await assert.rejects(readLabChildReport(path), { code: 'ENOENT' });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+void it('should preserve noncanonical decoded evidence and host diagnostics in verified sidecars', async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), 'tau-lab-host-evidence-'));
+  const path = resolve(directory, 'result.json');
+  const text = `${'x'.repeat(65_535)}😀\n"\\`;
+  const report: Parameters<typeof writeLabChildReport>[1] = {
+    result: {
+      engine: 'native-desktop',
+      backend: 'native-desktop',
+      profile: 'profile',
+      fixtureId: 'fixture',
+      cache: 'warm-module-cold-subject',
+      buildIdentity: {},
+      engineObservations: {},
+      initializationTiming: 'startup',
+      timing: { startup: 1, admission: 2, evaluation: 3, cleanup: 4, total: 10 },
+      perCase: [
+        {
+          caseId: 'unsupported',
+          matcher: 'toBeWatertight',
+          repeat: 0,
+          status: 'unsupported',
+          expectedStatus: 'refused',
+          evaluation: 0,
+          numericProfile: null,
+          diagnostics: [text],
+          result: { hostOnly: [text, null, true, 1] },
+          canonicalClaimUtf8: null,
+          canonicalResultUtf8: null,
+          canonicalResultSha256: null,
+        },
+      ],
+    },
+    error: { message: 'retained failure', stack: 'original stack' },
+    memory: { method: 'test', scope: 'child', peakBytes: 42, observed: 'after cleanup' },
+  };
+  try {
+    await writeLabChildReport(path, report);
+    const receipt = await readLabChildReport(path);
+    const { result } = receipt;
+    assert.ok(result);
+    const [entry] = result.perCase;
+    assert.ok(entry);
+    const { evidence } = entry;
+    assert.equal(evidence.canonicalResult, null);
+    assert.deepEqual(JSON.parse(await readFile(evidence.result.path, 'utf8')), report.result!.perCase[0]!.result);
+    assert.deepEqual(JSON.parse(await readFile(evidence.diagnostics.path, 'utf8')), [text]);
+    assert.deepEqual(receipt.error, report.error);
+    assert.deepEqual(receipt.memory, report.memory);
+    assert.equal(entry.status, 'unsupported');
+    const receiptBytes = await readFile(path);
+    assert.ok(receiptBytes.byteLength < 4096);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 void it('admits only the approved public contract transition without changing frozen expectations', async () => {
   const frozen = JSON.stringify(manifest);

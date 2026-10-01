@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,6 +20,10 @@ import { requireRevisionToolchain } from '@taucad/host';
 import type * as TauHost from '@taucad/host';
 import type * as AgentTools from '@taucad/host/agent-tools';
 import type * as RuntimeClient from '@taucad/runtime/client';
+import { createFileSystemBridgeProxy } from '@taucad/runtime/filesystem';
+import { serveElectronFileSystemBridgePort } from '@taucad/runtime/electron/utility';
+import { wrapMessagePort } from '@taucad/rpc';
+import type { WatchEvent } from '@taucad/filesystem';
 
 import { createServicesHost, refusedRuntimePortMessage } from '#tau/services-host.impl.js';
 import type { AgentHostConfig, ServicesHostOptions, UtilityMessage, UtilityPort } from '#tau/services-host.impl.js';
@@ -267,6 +272,130 @@ describe('createServicesHost — concern ports', () => {
     await host.quiesce();
     expect(bridge.dispose).toHaveBeenCalledOnce();
     host.dispose();
+  });
+
+  it('should deliver changed PicoGK source during watch admission and after watch readiness', async () => {
+    const starter = `using System.ComponentModel.DataAnnotations;
+using PicoGK;
+
+Library.Go(Params.VoxelSizeMm, () => { });
+
+public static class Params
+{
+    [Range(0.05, 5.0)]
+    [Display(Name = "Voxel size", Description = "OpenVDB voxel size in millimetres", Order = 0)]
+    public static float VoxelSizeMm { get; set; } = 0.5f;
+}
+`;
+    const fixture = `using System.ComponentModel.DataAnnotations;
+using System.Numerics;
+using PicoGK;
+Library.Go(Params.VoxelSizeMm, () =>
+{
+    var radius = Params.RadiusMm;
+    Library.oViewer().SetGroupMaterial(0, "3159cf", 0f, 0.7f);
+    Library.oViewer().SetGroupMaterial(1, "f2b134", 0f, 0.7f);
+    Library.oViewer().Add(Utils.mshCreateCube(new Vector3(radius, radius * 0.5f, radius * 0.25f)), 0);
+    Library.oViewer().Add(Voxels.voxSphere(new Vector3(radius * 2f, 0, 0), radius * 0.5f), 1);
+});
+
+public static class Params
+{
+    [Range(0.05, 5.0)]
+    [Display(Name = "Voxel size", Order = 0)]
+    public static float VoxelSizeMm { get; set; } = 1f;
+
+    [Range(1.0, 100.0)]
+    [Display(Name = "Radius", Order = 1)]
+    public static float RadiusMm { get; set; } = 12f;
+}
+`;
+    expect(Buffer.byteLength(starter)).toBe(313);
+    expect(Buffer.byteLength(fixture)).toBe(761);
+    expect(createHash('sha256').update(starter).digest('hex')).toBe(
+      '76af0745e78534f33045a8ba17f071d02a578e185405c129f1679cfae2e02ea2',
+    );
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe(
+      '7ff51d066da3d5abf7401ab0451d768daebaef0827a3e41c3ed9a4d3db8d1068',
+    );
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-picogk-watch-'));
+    const root = join(sandbox, 'project');
+    const authorityDirectory = join(sandbox, 'authority');
+    await Promise.all([mkdir(root), mkdir(authorityDirectory)]);
+    await writeFile(join(root, 'main.cs'), starter);
+    const armed = Promise.withResolvers<void>();
+    const acknowledge = Promise.withResolvers<void>();
+    const ports = new MessageChannel();
+    const host = createServicesHost({
+      authorityDirectory,
+      log: vi.fn(),
+      serveRuntimeFileSystem: (served, port) => {
+        const { watch } = served;
+        if (watch === undefined) {
+          throw new Error('The admitted filesystem has no watch.');
+        }
+
+        return serveElectronFileSystemBridgePort(
+          {
+            ...served,
+            async watch(request, handler) {
+              const dispose = await watch.call(served, request, handler);
+              armed.resolve();
+              await acknowledge.promise;
+              return dispose;
+            },
+          },
+          port,
+        );
+      },
+    });
+    const proxy = createFileSystemBridgeProxy({
+      port: wrapMessagePort(ports.port2),
+      dispose: () => {
+        ports.port2.close();
+      },
+    });
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [root] }));
+      host.handleMessage(
+        frame({ type: 'concern', concern: 'runtimeFileSystem', context: { workspaceRoot: root } }, [
+          ports.port1 as unknown as UtilityPort,
+        ]),
+      );
+      await proxy.ready;
+      await expect(proxy.readFile('main.cs', 'utf8')).resolves.toBe(starter);
+      const events: WatchEvent[] = [];
+      const subscription = proxy.watchReady({ paths: ['main.cs'] }, (event) => events.push(event));
+      await armed.promise;
+      await writeFile(join(root, 'main.cs'), fixture);
+      acknowledge.resolve();
+      await subscription.ready;
+      await vi.waitFor(() => {
+        expect(events).toContainEqual({ type: 'change', path: 'main.cs', kind: 'file' });
+      });
+      await expect(proxy.readFile('main.cs', 'utf8')).resolves.toBe(fixture);
+      events.length = 0;
+      await writeFile(join(root, 'main.cs'), starter);
+      await vi.waitFor(() => {
+        expect(events).toContainEqual({ type: 'change', path: 'main.cs', kind: 'file' });
+      });
+      await expect(proxy.readFile('main.cs', 'utf8')).resolves.toBe(starter);
+      events.length = 0;
+      await writeFile(join(root, 'main.cs'), fixture);
+      await vi.waitFor(() => {
+        expect(events).toContainEqual({ type: 'change', path: 'main.cs', kind: 'file' });
+      });
+      await expect(proxy.readFile('main.cs', 'utf8')).resolves.toBe(fixture);
+      subscription.unsubscribe();
+    } finally {
+      acknowledge.resolve();
+      proxy.dispose();
+      await host.quiesce();
+      host.dispose();
+      ports.port1.close();
+      ports.port2.close();
+      await rm(sandbox, { recursive: true, force: true });
+    }
   });
 
   it('should refuse the control plane through the runtime filesystem it serves', async () => {

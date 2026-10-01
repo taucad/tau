@@ -3,21 +3,18 @@ import type { KernelIssue, KernelResult } from '#types/runtime.types.js';
 import type { KernelOffers } from '#types/runtime-kernel-v2.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
+import { nativeBuildInputSymbol as nativeBuildInputIdentity } from '#types/runtime-kernel.types.js';
+import type {
+  NativeBuildInput as KernelNativeBuildInput,
+  NativeBuildInputCarrier as KernelNativeBuildInputCarrier,
+} from '#types/runtime-kernel.types.js';
 
 /** Exact content-free input passed to the terminal kernel create hook. @public */
-export type NativeBuildInput = {
-  readonly entryPath: string;
-  readonly parameters: Record<string, unknown>;
-} & ({ readonly options: Record<string, unknown> } | { readonly options?: never });
-
+export type NativeBuildInput = KernelNativeBuildInput;
 /** Replay identity shared with middleware cache implementations. @public */
-export const nativeBuildInputSymbol: unique symbol = Symbol('nativeBuildInput');
-
+export const nativeBuildInputSymbol: typeof nativeBuildInputIdentity = nativeBuildInputIdentity;
 /** The replay carrier; its symbol property is runtime-owned. @public */
-export type NativeBuildInputCarrier = {
-  /** @internal */
-  readonly [nativeBuildInputSymbol]?: NativeBuildInput;
-};
+export type NativeBuildInputCarrier = KernelNativeBuildInputCarrier;
 
 /**
  * Stable identity for one render request and its dependency graph.

@@ -19,6 +19,21 @@ import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import type { ExecuteResult, KernelBundler } from '#types/runtime-bundler-service.types.js';
 import type { ContentHookInputFor, ContentKeysOf, RuntimeContentDeclaration } from '#types/runtime-content.types.js';
 
+/** Exact content-free input passed to the terminal kernel create hook. @public */
+export type NativeBuildInput = {
+  readonly entryPath: string;
+  readonly parameters: Record<string, unknown>;
+} & ({ readonly options: Record<string, unknown> } | { readonly options?: never });
+
+/** Replay identity shared with middleware cache implementations. @public */
+export const nativeBuildInputSymbol: unique symbol = Symbol('nativeBuildInput');
+
+/** The replay carrier; its symbol property is runtime-owned. @public */
+export type NativeBuildInputCarrier = {
+  /** @internal */
+  readonly [nativeBuildInputSymbol]?: NativeBuildInput;
+};
+
 // =============================================================================
 // Kernel Logging
 // =============================================================================

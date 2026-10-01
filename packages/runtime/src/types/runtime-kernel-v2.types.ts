@@ -7,8 +7,11 @@ import type { CadUnits, ExportFile as ExistingExportFile, MediaType as SharedMed
 import type { ParameterDeclaration, ParameterResolutionOptions } from '@taucad/parameters';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { KernelIssue, KernelErrorResult, KernelSuccessResult } from '#types/runtime.types.js';
-import type { KernelRuntime, RuntimeImplementationAsset } from '#types/runtime-kernel.types.js';
-import type { NativeBuildInputCarrier } from '#framework/render-artifact.js';
+import type {
+  KernelRuntime,
+  NativeBuildInputCarrier,
+  RuntimeImplementationAsset,
+} from '#types/runtime-kernel.types.js';
 import type { KernelPlugin, RuntimePluginDeclaration } from '#plugins/plugin-types.js';
 import {
   attachRuntimePluginDefinition,

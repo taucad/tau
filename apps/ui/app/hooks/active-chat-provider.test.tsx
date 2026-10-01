@@ -3,9 +3,10 @@
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructor omits the `public` keyword to mirror the AI SDK's published shape. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, renderHook, waitFor } from '@testing-library/react';
-import { StrictMode } from 'react';
+import { StrictMode, useEffect } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ReactNode } from 'react';
+import type * as AiSdk from 'ai';
 import type { Chat, MyUIMessage } from '@taucad/chat';
 import { resolveKernel } from '@taucad/types/constants';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -111,7 +112,8 @@ vi.mock('@ai-sdk/react', () => ({
   },
 }));
 
-vi.mock('ai', () => ({
+vi.mock('ai', async (importOriginal) => ({
+  ...(await importOriginal<typeof AiSdk>()),
   // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
   DefaultChatTransport: class {},
   lastAssistantMessageIsCompleteWithApprovalResponses: vi.fn(),
@@ -1084,7 +1086,7 @@ describe('ActiveChatProvider', () => {
       });
 
       await waitFor(() => {
-        expect(harness.getChat).toHaveBeenCalledWith('chat_no_model');
+        expect(harness.getChat).toHaveBeenCalledWith('chat_no_model', 'home');
       });
       expect(result.current.model.modelId).toBe('cookie-model');
     });
@@ -1199,7 +1201,7 @@ describe('ActiveChatProvider', () => {
       });
 
       await waitFor(() => {
-        expect(harness.getChat).toHaveBeenCalledWith('chat_no_kernel');
+        expect(harness.getChat).toHaveBeenCalledWith('chat_no_kernel', 'home');
       });
       expect(result.current.kernel.kernelId).toBe('openscad');
     });
@@ -1272,6 +1274,170 @@ describe('ActiveChatProvider', () => {
     expect(harness.patchChat).not.toHaveBeenCalledWith('chat_persist', 'draft', expect.anything());
   });
 
+  it.each([false, true])(
+    'should preserve the viewer mount when switching to an evicted chat (retained target: %s)',
+    async (isTargetRetained) => {
+      const mounted = vi.fn();
+      const disposed = vi.fn();
+      const identities: string[][] = [];
+      const stores: Array<ReturnType<typeof useChatSessionStore>> = [];
+
+      function RetainedTarget(): ReactNode {
+        const store = useChatSessionStore();
+        stores.push(store);
+        useEffect(() => {
+          if (!isTargetRetained) {
+            return;
+          }
+          store.acquire('chat_new', 'home');
+          return () => {
+            store.release('chat_new');
+          };
+        }, [store]);
+        return null;
+      }
+
+      function Viewer(): ReactNode {
+        const session = useActiveChatSession();
+        identities.push([session.activeChatId, session.chat.id]);
+        useEffect(() => {
+          mounted();
+          return disposed;
+        }, []);
+        return (
+          <div role='img' aria-label='Project viewer'>
+            {session.activeChatId}
+          </div>
+        );
+      }
+
+      function Surface({ chatId }: { readonly chatId: string }): ReactNode {
+        return (
+          <ChatSessionStoreProvider>
+            <RetainedTarget />
+            <ActiveChatProvider chatId={chatId} projectId='home'>
+              <Viewer />
+            </ActiveChatProvider>
+          </ChatSessionStoreProvider>
+        );
+      }
+
+      const { getByRole, rerender, unmount } = render(<Surface chatId='chat_initial' />);
+      const viewer = getByRole('img', { name: 'Project viewer' });
+      rerender(<Surface chatId='chat_new' />);
+      await waitFor(() => {
+        expect(getByRole('img', { name: 'Project viewer' })).toHaveTextContent('chat_new');
+      });
+      expect(getByRole('img', { name: 'Project viewer' })).toBe(viewer);
+      expect(stores[0]?.get('chat_initial')).toBeUndefined();
+      rerender(<Surface chatId='chat_initial' />);
+      await waitFor(() => {
+        expect(getByRole('img', { name: 'Project viewer' })).toHaveTextContent('chat_initial');
+      });
+      expect(getByRole('img', { name: 'Project viewer' })).toBe(viewer);
+      expect(mounted).toHaveBeenCalledOnce();
+      expect(disposed).not.toHaveBeenCalled();
+      expect(identities.every(([activeId, instanceId]) => activeId === instanceId)).toBe(true);
+      unmount();
+      expect(disposed).toHaveBeenCalledOnce();
+      expect(stores[0]?.get('chat_initial')).toBeUndefined();
+      expect(stores[0]?.get('chat_new')).toBeUndefined();
+    },
+  );
+
+  it('should keep the previous presentation until the destination transcript is hydrated', async () => {
+    const metadata = Promise.withResolvers<Chat | undefined>();
+    harness.getChat.mockImplementation(async (id: string) => (id === 'chat_history' ? metadata.promise : undefined));
+    const seen: string[] = [];
+    const stores: Array<ReturnType<typeof useChatSessionStore>> = [];
+    function History(): ReactNode {
+      const store = useChatSessionStore();
+      stores.push(store);
+      const session = useActiveChatSession();
+      const text = `${session.activeChatId}:${session.chat.messages.map((message) => message.id).join(',')}`;
+      seen.push(text);
+      return <button type='button'>{text}</button>;
+    }
+    function Surface({ chatId }: { readonly chatId: string }): ReactNode {
+      return (
+        <ChatSessionStoreProvider>
+          <ActiveChatProvider chatId={chatId} projectId='home'>
+            <History />
+          </ActiveChatProvider>
+        </ChatSessionStoreProvider>
+      );
+    }
+    const view = render(<Surface chatId='chat_current' />);
+    await act(async () => {
+      publishLogRows(stores[0]!, 'chat_history', [
+        lifecycleRow(0, 'admitted'),
+        logRow(1, {
+          type: 'message.appended',
+          message: { id: 'saved-message', role: 'user', content: 'Saved design' },
+        }),
+        lifecycleRow(2, 'completed'),
+      ]);
+    });
+    view.rerender(<Surface chatId='chat_history' />);
+    expect(view.getByRole('button')).toHaveTextContent('chat_current:');
+    expect(view.getByRole('button').closest('[inert]')).not.toBeNull();
+    await act(async () => {
+      metadata.resolve(makeChat({ id: 'chat_history' }));
+    });
+    await waitFor(() => {
+      expect(view.getByRole('button')).toHaveTextContent('chat_history:saved-message');
+    });
+    expect(seen).not.toContain('chat_history:');
+    expect(view.getByRole('button').closest('[inert]')).toBeNull();
+    expect(stores[0]?.get('chat_current')).toBeUndefined();
+    view.unmount();
+    expect(stores[0]?.get('chat_history')).toBeUndefined();
+  });
+
+  it.each(['empty', 'error'] as const)(
+    'should release superseded handoffs and publish a valid %s destination',
+    async (outcome) => {
+      const delayed = Promise.withResolvers<Chat | undefined>();
+      harness.getChat.mockImplementation(async (id: string) => {
+        if (id === 'chat_slow') {
+          return delayed.promise;
+        }
+        if (id === 'chat_final' && outcome === 'error') {
+          throw new Error('Cannot read metadata');
+        }
+        return undefined;
+      });
+      const stores: Array<ReturnType<typeof useChatSessionStore>> = [];
+      function Probe(): ReactNode {
+        stores.push(useChatSessionStore());
+        return <p>{useActiveChatSession().activeChatId}</p>;
+      }
+      function Surface({ chatId }: { readonly chatId: string }): ReactNode {
+        return (
+          <ChatSessionStoreProvider>
+            <ActiveChatProvider chatId={chatId} projectId='home'>
+              <Probe />
+            </ActiveChatProvider>
+          </ChatSessionStoreProvider>
+        );
+      }
+      const view = render(<Surface chatId='chat_current' />);
+      view.rerender(<Surface chatId='chat_slow' />);
+      view.rerender(<Surface chatId='chat_final' />);
+      await waitFor(() => {
+        expect(view.getByText('chat_final')).toBeTruthy();
+      });
+      expect(stores[0]?.get('chat_slow')).toBeUndefined();
+      expect(stores[0]?.get('chat_current')).toBeUndefined();
+      await act(async () => {
+        delayed.resolve(undefined);
+      });
+      expect(view.getByText('chat_final')).toBeTruthy();
+      view.unmount();
+      expect(stores[0]?.get('chat_final')).toBeUndefined();
+    },
+  );
+
   it('should switch draft state cleanly when chatId prop changes', async () => {
     function Probe(): ReactNode {
       return null;
@@ -1285,7 +1451,7 @@ describe('ActiveChatProvider', () => {
       </ChatSessionStoreProvider>,
     );
 
-    expect(harness.getChat).toHaveBeenCalledWith('chat_first');
+    expect(harness.getChat).toHaveBeenCalledWith('chat_first', 'home');
 
     rerender(
       <ChatSessionStoreProvider>
@@ -1296,7 +1462,7 @@ describe('ActiveChatProvider', () => {
     );
 
     await waitFor(() => {
-      expect(harness.getChat).toHaveBeenCalledWith('chat_second');
+      expect(harness.getChat).toHaveBeenCalledWith('chat_second', 'home');
     });
   });
 

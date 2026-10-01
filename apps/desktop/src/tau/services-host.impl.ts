@@ -40,7 +40,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { EmitterPort } from '@taucad/filesystem/backend/node';
 import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
-import { bambuMachine, bambuSimulatorMachine } from '@taucad/bambu';
+import { bambuA1MiniMachine, bambuMachine, bambuSimulatorMachine } from '@taucad/bambu';
 import {
   completeMachineBinding,
   createMachineSecretStore,
@@ -596,7 +596,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       ...(legacyMachinesDirectory === undefined ? {} : { legacyStoreRoots: [legacyMachinesDirectory] }),
       ...identity,
       admission,
-      providers: [bambuMachine(), bambuSimulatorMachine()],
+      providers: [bambuMachine(), bambuA1MiniMachine(), bambuSimulatorMachine()],
       runtime: createNodeMachineRuntime({
         secrets,
         /* The last scan's roots first; a miss, or roots that no longer hold

@@ -306,7 +306,7 @@ catalog:
   isomorphic-git: 1.38.5
   xstate: 6.0.0-alpha.59
   zod: ^4.4.3
-  nanoraster: ^0.5.5
+  nanoraster: ^0.5.7
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
   picovoxel: 0.1.0
   n8ao: 1.10.2

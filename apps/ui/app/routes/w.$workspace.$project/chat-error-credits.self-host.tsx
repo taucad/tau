@@ -21,7 +21,13 @@ export const ChatErrorCredits = memo(function ({
       title='Request could not be completed'
       description='Retry with the providers configured by this server.'
       actions={
-        <Button variant='outline' size='sm' onClick={regenerate}>
+        <Button
+          variant='outline'
+          size='xs'
+          onClick={() => {
+            regenerate();
+          }}
+        >
           <RefreshCcw className='size-3.5' />
           Try again
         </Button>

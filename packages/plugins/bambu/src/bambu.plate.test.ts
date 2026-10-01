@@ -2,9 +2,15 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 // oxlint-disable-next-line no-restricted-imports -- The staleness check shares the render script's own source hash.
 import { hashRenderInputs, renderHashPath } from '../scripts/render-plates.mjs';
-import { bambuPlateForBedType, bambuX1cHotend, bambuX1cPlates } from '#bambu.plate.js';
+import {
+  bambuA1MiniHotend,
+  bambuA1MiniPlates,
+  bambuPlateForBedType,
+  bambuX1cHotend,
+  bambuX1cPlates,
+} from '#bambu.plate.js';
 import type { BambuModelAsset } from '#bambu.plate.js';
-import { bambuX1cManifest } from '#bambu.manifest.js';
+import { bambuA1MiniManifest, bambuX1cManifest } from '#bambu.manifest.js';
 
 type Gltf = {
   asset: { version: string };
@@ -16,8 +22,19 @@ type Gltf = {
     scale?: number[];
     translation?: number[];
   }>;
-  meshes: Array<{ name: string; primitives: Array<{ attributes: { POSITION: number }; material: number }> }>;
-  accessors: Array<{ min: number[]; max: number[] }>;
+  meshes: Array<{
+    name: string;
+    primitives: Array<{ attributes: { POSITION: number }; material: number; indices: number }>;
+  }>;
+  accessors: Array<{
+    min: number[];
+    max: number[];
+    bufferView: number;
+    byteOffset?: number;
+    count: number;
+    componentType: number;
+  }>;
+  bufferViews: Array<{ byteOffset: number }>;
   materials: Array<{ pbrMetallicRoughness: { baseColorFactor: number[] } }>;
 };
 
@@ -94,6 +111,8 @@ describe('bambuX1cPlates', () => {
 describe.each([
   ...bambuX1cPlates.map((plate) => [plate.model.pathname.split('/').at(-1), plate] as const),
   ['x1c-hotend.glb', bambuX1cHotend] as const,
+  ...bambuA1MiniPlates.map((plate) => [plate.model.pathname.split('/').at(-1), plate] as const),
+  ['a1-mini-hotend.glb', bambuA1MiniHotend] as const,
 ])('committed model %s', (_name, asset) => {
   it('should place its geometry at the documented bounds within 0.05 mm', async () => {
     const gltf = await readGlb(asset.model);
@@ -106,18 +125,88 @@ describe.each([
   });
 });
 
-describe.each(bambuX1cPlates.map((plate) => [plate.id, plate] as const))('the %s plate model', (_id, plate) => {
-  it('should colour its surface mesh as the descriptor says', async () => {
-    const gltf = await readGlb(plate.model);
-    const surface = gltf.meshes.find((mesh) => mesh.name === 'surface')!;
-    const [red, green, blue] = gltf.materials[surface.primitives[0]!.material]!.pbrMetallicRoughness.baseColorFactor;
-    expect(`#${toSrgbHex(red!)}${toSrgbHex(green!)}${toSrgbHex(blue!)}`).toBe(plate.surface.color);
-  });
-});
+describe.each([...bambuX1cPlates, ...bambuA1MiniPlates].map((plate) => [plate.id, plate] as const))(
+  'the %s plate model',
+  (_id, plate) => {
+    it('should colour its surface mesh as the descriptor says', async () => {
+      const gltf = await readGlb(plate.model);
+      const surface = gltf.meshes.find((mesh) => mesh.name === 'surface')!;
+      const [red, green, blue] = gltf.materials[surface.primitives[0]!.material]!.pbrMetallicRoughness.baseColorFactor;
+      expect(`#${toSrgbHex(red!)}${toSrgbHex(green!)}${toSrgbHex(blue!)}`).toBe(plate.surface.color);
+    });
+  },
+);
 
 describe('pre-rendered models', () => {
   it('should be rendered from the current Replicad sources (run `pnpm nx run bambu:render-plates`)', async () => {
     const recorded = await readFile(renderHashPath, 'utf8');
     expect(recorded.trim()).toBe(await hashRenderInputs());
   });
+});
+
+describe('A1 mini plate catalogue', () => {
+  it('should match the Mini manifest and keep the physical thin-sheet bounds', () => {
+    expect(bambuA1MiniPlates.map(({ id }) => id)).toEqual(bambuA1MiniManifest.bed.plates.map(({ id }) => id));
+    expect(bambuA1MiniPlates[1]?.bounds).toEqual({ min: [-2, -9.132, -0.55], max: [182, 187.999, 0.04] });
+    expect(bambuA1MiniPlates.every(({ printer }) => printer === 'a1-mini')).toBe(true);
+  });
+});
+
+// Inspect the actual surface triangles: bounds alone would accept a plain rectangle.
+it.each([...bambuX1cPlates, ...bambuA1MiniPlates])('should pierce and shape the $printer $id sheet', async (plate) => {
+  const gltf = await readGlb(plate.model);
+  const bytes = await readFile(plate.model);
+  const binary = 20 + bytes.readUInt32LE(12) + 8;
+  const primitive = gltf.meshes.find(({ name }) => name === 'steel')!.primitives[0]!;
+  const positions = gltf.accessors[primitive.attributes.POSITION]!;
+  const indices = gltf.accessors[primitive.indices]!;
+  expect(positions.componentType).toBe(5126);
+  expect(indices.componentType).toBe(5125);
+  const vertex = (index: number): readonly [number, number, number] => {
+    const offset =
+      binary + gltf.bufferViews[positions.bufferView]!.byteOffset + (positions.byteOffset ?? 0) + index * 12;
+    return [
+      bytes.readFloatLE(offset) * 1000,
+      -bytes.readFloatLE(offset + 8) * 1000,
+      bytes.readFloatLE(offset + 4) * 1000,
+    ];
+  };
+  const covers = (x: number, y: number): boolean => {
+    for (let index = 0; index < indices.count; index += 3) {
+      const offset = binary + gltf.bufferViews[indices.bufferView]!.byteOffset + (indices.byteOffset ?? 0) + index * 4;
+      const [a, b, c] = [0, 4, 8].map((step) => vertex(bytes.readUInt32LE(offset + step)));
+      if ([a!, b!, c!].some((point) => Math.abs(point[2] - positions.max[1]! * 1000) > 0.001)) {
+        continue;
+      }
+      const cross = (p: readonly number[], q: readonly number[]): number =>
+        (q[0]! - p[0]!) * (y - p[1]!) - (q[1]! - p[1]!) * (x - p[0]!);
+      const signs = [cross(a!, b!), cross(b!, c!), cross(c!, a!)];
+      if (signs.every((sign) => sign >= 0) || signs.every((sign) => sign <= 0)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  expect(covers(90, 90)).toBe(true);
+  if (plate.printer === 'x1c') {
+    expect(covers(128, 263)).toBe(true);
+    expect(covers(128, 257.7)).toBe(false);
+    expect(covers(230, -4)).toBe(false);
+    expect(covers(247, -4)).toBe(false);
+    expect(covers(20, -5)).toBe(false);
+    expect(covers(100, -5)).toBe(true);
+    return;
+  }
+  expect(covers(49, 186)).toBe(true);
+  expect(covers(131, 186)).toBe(true);
+  expect(covers(90, 186)).toBe(false);
+  expect(covers(20, -5)).toBe(false);
+  expect(covers(100, -5)).toBe(true);
+  for (const [x, y] of [
+    [57.958, -5.566],
+    [165, -5],
+    [177, -5],
+  ]) {
+    expect(covers(x!, y!)).toBe(false);
+  }
 });

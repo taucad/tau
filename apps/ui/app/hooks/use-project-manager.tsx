@@ -220,6 +220,7 @@ type ProjectManagerContextType = {
   /** Rewrite a degraded `tau.json` as its normalized strict manifest; refuses a JSON syntax error. */
   repairProject: (projectId: string) => Promise<ProjectManifest | undefined>;
   touchProject: (projectId: string, activityAt?: number) => Promise<ProjectLibraryState | undefined>;
+  setGeoSpecCandidateConsent: (projectId: string, enabled: boolean) => Promise<ProjectLibraryState | undefined>;
   duplicateProject: (projectId: string) => Promise<CreatedProject>;
   getProjects: (options?: { includeDeleted?: boolean }) => Promise<ProjectLibraryEntry[]>;
   getProjectListing: (options?: { includeDeleted?: boolean }) => Promise<ProjectListing>;
@@ -275,6 +276,7 @@ type ProjectManagerContextType = {
   getChat: (chatId: string, projectId?: string) => Promise<Chat | undefined>;
   invalidateProjectedChats: (resourceId: string, chatIds: readonly string[]) => void;
   deleteChat: (chatId: string) => Promise<void>;
+  purgeChat: (chatId: string) => Promise<void>;
 };
 
 export type ProjectDiscoveryConflict =
@@ -1712,6 +1714,15 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [ensureDiscoveryReady, getReadiedWorker],
   );
 
+  const setGeoSpecCandidateConsent = useCallback(
+    async (projectId: string, enabled: boolean): Promise<ProjectLibraryState | undefined> => {
+      await ensureDiscoveryReady();
+      const worker = await getReadiedWorker();
+      return worker.setGeoSpecCandidateConsent(projectId, enabled);
+    },
+    [ensureDiscoveryReady, getReadiedWorker],
+  );
+
   const getProjectLibraryState = useCallback(
     async (projectId: string): Promise<ProjectLibraryState | undefined> => {
       await ensureDiscoveryReady();
@@ -2449,6 +2460,18 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [chatStore, invalidateProjectsList, touchProject],
   );
 
+  const purgeChat = useCallback(
+    async (chatId: string): Promise<void> => {
+      const chat = await chatStore.getChat(chatId);
+      await chatStore.purgeChat(chatId);
+      if (chat) {
+        await touchProject(chat.resourceId);
+      }
+      invalidateProjectsList();
+    },
+    [chatStore, invalidateProjectsList, touchProject],
+  );
+
   const value = useMemo<ProjectManagerContextType>(() => {
     return {
       isLoading,
@@ -2463,6 +2486,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       updateProject,
       repairProject,
       touchProject,
+      setGeoSpecCandidateConsent,
       duplicateProject,
       getProjects,
       getProjectListing,
@@ -2496,6 +2520,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       getChat,
       invalidateProjectedChats,
       deleteChat,
+      purgeChat,
     };
   }, [
     isLoading,
@@ -2510,6 +2535,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     updateProject,
     repairProject,
     touchProject,
+    setGeoSpecCandidateConsent,
     duplicateProject,
     getProjects,
     getProjectListing,
@@ -2543,6 +2569,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     getChat,
     invalidateProjectedChats,
     deleteChat,
+    purgeChat,
   ]);
 
   return <ProjectManagerContext.Provider value={value}>{children}</ProjectManagerContext.Provider>;

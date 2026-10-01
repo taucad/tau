@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { FileProvenance } from '@taucad/types';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
 
-const { send } = vi.hoisted(() => ({ send: vi.fn() }));
+const { send, useFileTreeEntry } = vi.hoisted(() => ({
+  send: vi.fn(),
+  useFileTreeEntry: vi.fn<() => { provenance: FileProvenance } | undefined>(),
+}));
+
+vi.mock('#hooks/use-file-tree.js', () => ({ useFileTreeEntry }));
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ editorRef: { send } }),
@@ -33,6 +40,7 @@ vi.mock('#components/files/file-selector.js', () => ({
 describe('ChatEditorBreadcrumbs', () => {
   beforeEach(() => {
     send.mockClear();
+    useFileTreeEntry.mockReset();
   });
 
   it('should scroll breadcrumbs from vertical wheel input while preserving selection and child actions', () => {
@@ -69,5 +77,46 @@ describe('ChatEditorBreadcrumbs', () => {
     const { container } = render(<ChatEditorBreadcrumbs filePath='' />);
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('should explain artifacts beside the current file with unique descriptions for each pane', async () => {
+    useFileTreeEntry.mockReturnValue({
+      provenance: {
+        source: 'project',
+        versioned: false,
+        agentAccess: 'read-only',
+      },
+    });
+    render(
+      <TooltipProvider>
+        <ChatEditorBreadcrumbs filePath='.tau/chats/one/events.jsonl' />
+        <ChatEditorBreadcrumbs filePath='.tau/chats/two/events.jsonl' />
+      </TooltipProvider>,
+    );
+    const badges = screen.getAllByRole('button', { name: 'Artifact' });
+    const description = 'Supporting data used by Tau. Not included in revisions.';
+    expect(badges).toHaveLength(2);
+    expect(badges[0]).toHaveAccessibleDescription(description);
+    expect(badges[1]).toHaveAccessibleDescription(description);
+    expect(badges[0]?.getAttribute('aria-describedby')).not.toBe(badges[1]?.getAttribute('aria-describedby'));
+    expect(screen.getAllByRole('navigation', { name: 'File breadcrumbs' })[0]).toContainElement(badges[0]!);
+    expect(screen.getAllByRole('button', { current: 'page' })[0]).toHaveTextContent('events.jsonl');
+
+    fireEvent.click(badges[0]!);
+    expect(await screen.findByRole('dialog', { name: 'Artifact' })).toHaveTextContent(description);
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['.tau/parameters/part.cs.json', true],
+    ['.tau/cache/preview.png', false],
+    ['.tau/tsconfig.generated.json', false],
+  ])('should not badge %s as an artifact', (filePath, versioned) => {
+    useFileTreeEntry.mockReturnValue({
+      provenance: { source: 'project', versioned, agentAccess: 'read-write' },
+    });
+    render(<ChatEditorBreadcrumbs filePath={filePath} />);
+    expect(screen.queryByRole('button', { name: 'Artifact' })).not.toBeInTheDocument();
   });
 });

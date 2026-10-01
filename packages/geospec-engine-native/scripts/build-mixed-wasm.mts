@@ -32,6 +32,29 @@ type Closure = {
 
 const root = resolve(import.meta.dirname, '../../..');
 const digest = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
+/** Route only the independently verified ST closure into authenticated producer identity.
+ * @param input - Selected variant and already-verified prepared input bytes.
+ * @returns Identity-bearing environment for the Cargo build and receipt.
+ */
+export const mixedProducerEnvironment = (
+  input: Readonly<{
+    variant: 'st' | 'mt';
+    sourceRoot: string;
+    manifestPath: string;
+    manifestBytes: Uint8Array<ArrayBuffer>;
+  }>,
+): Readonly<Record<string, string>> => ({
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact Cargo environment key.
+  GEOSPEC_PRODUCER_ROUTE: input.variant === 'st' ? 'nx-build-mixed-st-release-v1' : 'mixed-mt-unverified',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact Cargo environment key.
+  GEOSPEC_PRODUCER_CARGO_CWD: input.sourceRoot,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact Cargo environment key.
+  GEOSPEC_PRODUCER_MANIFEST: resolve(input.sourceRoot, 'packages/geospec-engine-native/bindings/emscripten/Cargo.toml'),
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact Cargo environment key.
+  GEOSPEC_MIXED_INPUTS: resolve(input.manifestPath),
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact Cargo environment key.
+  GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256: digest(input.manifestBytes),
+});
 const treeDigest = (directory: string): string => {
   const hash = createHash('sha256');
   const visit = (path: string): void => {
@@ -227,6 +250,7 @@ const main = (): void => {
   /* eslint-disable @typescript-eslint/naming-convention -- Exact Rust, Cargo and cc-rs environment keys. */
   const environment = {
     ...closure.environment,
+    ...mixedProducerEnvironment({ variant, sourceRoot: root, manifestPath, manifestBytes }),
     ...(mt ? { EM_CACHE: resolve(cache, 'em-cache') } : {}),
     RUSTC: closure.rustc,
     GEOSPEC_OCCT_PREFIX: mt ? resolve(mtPrefix, 'install') : closure.occtPrefix,
@@ -531,6 +555,7 @@ const main = (): void => {
       linkedSystemLibraries,
       /* eslint-disable @typescript-eslint/naming-convention -- Exact Cargo and cc-rs environment keys. */
       buildEnvironment: {
+        ...mixedProducerEnvironment({ variant, sourceRoot: root, manifestPath, manifestBytes }),
         CARGO_ENCODED_RUSTFLAGS: environment.CARGO_ENCODED_RUSTFLAGS,
         CXXFLAGS_wasm32_unknown_emscripten: environment.CXXFLAGS_wasm32_unknown_emscripten,
         GEOSPEC_WASM_SIMD_PROFILE: environment.GEOSPEC_WASM_SIMD_PROFILE,

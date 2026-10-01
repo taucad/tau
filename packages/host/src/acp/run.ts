@@ -449,9 +449,12 @@ const stopRecorded = (turn: ExternalAgentTurn): boolean => {
   const opening = rows.findLastIndex((row) => row.state !== 'running' && row.state !== 'admitted');
   const prior = rows[opening];
   return (
-    prior?.state === 'failed' &&
-    externalAgentStopCodes.some((code) => code === prior.detail?.code) &&
-    isResumableRunFailure(prior.detail)
+    (prior?.state === 'failed' &&
+      externalAgentStopCodes.some((code) => code === prior.detail?.code) &&
+      isResumableRunFailure(prior.detail)) ||
+    (prior?.state === 'cancelled' &&
+      prior.detail?.code === 'USER_STOPPED' &&
+      stringField(turn.state, 'acpPromptedRequestId')?.startsWith(`${turn.runId}:`) === true)
   );
 };
 
@@ -689,6 +692,11 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       const rememberedCwd = stringField(turn.state, 'cwd');
       const cwdMoved = rememberedCwd !== undefined && rememberedCwd !== cwd;
       const acpSessionId = cwdMoved ? undefined : stringField(turn.state, 'acpSessionId');
+      if (turn.message === undefined && acpSessionId === undefined) {
+        throw Object.assign(new Error('The stopped agent session is unavailable. Try the turn again.'), {
+          code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN',
+        });
+      }
       /* Minted with every acquire and used only when a child is spawned: the
        * server list a session is opened with is the one it keeps for life, and
        * Claude tears a session down when that list changes (V7). */

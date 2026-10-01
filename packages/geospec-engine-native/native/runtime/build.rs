@@ -9,7 +9,12 @@ use std::{
     process::Command,
 };
 
-const BINDING_FEATURES: [&str; 3] = ["binding-node", "binding-python", "standalone"];
+const BINDING_FEATURES: [&str; 4] = [
+    "binding-node",
+    "binding-python",
+    "binding-emscripten",
+    "standalone",
+];
 const PROFILE_ENVIRONMENTS: [&str; 10] = [
     "CARGO_PROFILE_RELEASE_OPT_LEVEL",
     "CARGO_PROFILE_RELEASE_DEBUG",
@@ -76,6 +81,7 @@ struct ResolvedGraphs {
 enum Binding {
     Node,
     Python,
+    Emscripten,
     Standalone,
 }
 
@@ -84,6 +90,7 @@ impl Binding {
         match self {
             Self::Node => "binding-node",
             Self::Python => "binding-python",
+            Self::Emscripten => "binding-emscripten",
             Self::Standalone => "standalone",
         }
     }
@@ -95,6 +102,7 @@ impl Binding {
                 route,
                 "nx-build-python-release-v1" | "nx-build-python314-release-v1"
             ),
+            Self::Emscripten => route == "nx-build-mixed-st-release-v1",
             Self::Standalone => false,
         }
     }
@@ -113,6 +121,8 @@ fn main() {
         "GEOSPEC_PRODUCER_ROUTE",
         "GEOSPEC_PRODUCER_CARGO_CWD",
         "GEOSPEC_PRODUCER_MANIFEST",
+        "GEOSPEC_MIXED_INPUTS",
+        "GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256",
         "CARGO_HOME",
         "HOME",
         "TARGET",
@@ -253,6 +263,7 @@ fn selected_binding() -> Binding {
     match selected[0] {
         "binding-node" => Binding::Node,
         "binding-python" => Binding::Python,
+        "binding-emscripten" => Binding::Emscripten,
         "standalone" => Binding::Standalone,
         _ => unreachable!(),
     }
@@ -263,11 +274,12 @@ fn producer_route(runtime_manifest: &Path, package: &Path, repository: &Path) ->
     let fallback_manifest = match binding {
         Binding::Node => package.join("bindings/node/Cargo.toml"),
         Binding::Python => package.join("bindings/python/Cargo.toml"),
+        Binding::Emscripten => package.join("bindings/emscripten/Cargo.toml"),
         Binding::Standalone => runtime_manifest.join("Cargo.toml"),
     };
     let expected_cwd = match binding {
         Binding::Node => package,
-        Binding::Python | Binding::Standalone => repository,
+        Binding::Python | Binding::Emscripten | Binding::Standalone => repository,
     }
     .canonicalize()
     .expect("canonical owned Cargo cwd");
@@ -290,6 +302,9 @@ fn producer_route(runtime_manifest: &Path, package: &Path, repository: &Path) ->
         verification_reasons.push("unexpected-cargo-cwd".into());
     }
 
+    let owned_manifest = fallback_manifest
+        .canonicalize()
+        .expect("canonical owned producer manifest");
     let selected_manifest = match env::var_os("GEOSPEC_PRODUCER_MANIFEST") {
         Some(path) => canonicalize_declared(
             &resolve_from(&cargo_cwd, Path::new(&path)),
@@ -298,11 +313,12 @@ fn producer_route(runtime_manifest: &Path, package: &Path, repository: &Path) ->
         ),
         None => {
             verification_reasons.push("missing-producer-manifest".into());
-            fallback_manifest
-                .canonicalize()
-                .expect("canonical fallback producer manifest")
+            owned_manifest.clone()
         }
     };
+    if selected_manifest != owned_manifest {
+        verification_reasons.push("unexpected-producer-manifest".into());
+    }
     if !selected_manifest.is_file() {
         panic!(
             "producer manifest is not a file: {}",
@@ -339,25 +355,10 @@ fn supported_profile_context(
 ) -> (Vec<u8>, bool) {
     let mut reasons = route.verification_reasons.clone();
     reasons.extend_from_slice(graph_reasons);
-    for (name, expected) in [
-        ("PROFILE", "release"),
-        ("OPT_LEVEL", "3"),
-        ("DEBUG", "false"),
-    ] {
-        let actual = env::var(name).unwrap_or_default();
-        if actual != expected {
-            reasons.push(format!("{name}={actual}"));
-        }
+    if route.binding == Binding::Emscripten {
+        reasons.extend(mixed_st_profile_reasons(route));
     }
-    let overrides = env::vars()
-        .filter(|(name, _)| name.starts_with("CARGO_PROFILE_"))
-        .collect::<Vec<_>>();
-    reasons.extend(
-        overrides
-            .iter()
-            .map(|(name, value)| format!("{name}={value}")),
-    );
-
+    reasons.extend(release_profile_reasons());
     let cargo = env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
     let version = Command::new(&cargo)
         .arg("-Vv")
@@ -389,6 +390,73 @@ fn supported_profile_context(
         bytes.push(0);
     }
     (bytes, reasons.is_empty())
+}
+
+fn release_profile_reasons() -> Vec<String> {
+    let mut reasons = Vec::new();
+    for (name, expected) in [
+        ("PROFILE", "release"),
+        ("OPT_LEVEL", "3"),
+        ("DEBUG", "false"),
+    ] {
+        let actual = env::var(name).unwrap_or_default();
+        if actual != expected {
+            reasons.push(format!("{name}={actual}"));
+        }
+    }
+    let overrides = env::vars()
+        .filter(|(name, _)| name.starts_with("CARGO_PROFILE_"))
+        .collect::<Vec<_>>();
+    reasons.extend(
+        overrides
+            .iter()
+            .map(|(name, value)| format!("{name}={value}")),
+    );
+    reasons
+}
+
+/// The mixed builder verifies every prepared input before it sets the ST route.
+/// Recheck its exact manifest handoff here without making checkout paths,
+/// source-only receipt fields or the build timestamp part of cache compatibility.
+fn mixed_st_profile_reasons(route: &ProducerRoute) -> Vec<String> {
+    let mut reasons = Vec::new();
+    if env::var("TARGET").as_deref() != Ok("wasm32-unknown-emscripten") {
+        reasons.push("mixed-target".into());
+    }
+    if env::var("GEOSPEC_WASM_SIMD_PROFILE").as_deref() != Ok("simd128-v1")
+        || semantic_rustflags() != ["-C", "target-feature=+simd128"]
+    {
+        reasons.push("mixed-rust-profile".into());
+    }
+    let Some(path) = env::var_os("GEOSPEC_MIXED_INPUTS") else {
+        reasons.push("missing-mixed-inputs".into());
+        return reasons;
+    };
+    let path = PathBuf::from(path);
+    println!("cargo:rerun-if-changed={}", path.display());
+    let Ok(bytes) = fs::read(&path) else {
+        reasons.push("unreadable-mixed-inputs".into());
+        return reasons;
+    };
+    let sha256: String = Sha256::digest(&bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    if env::var("GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256").as_deref() != Ok(&sha256) {
+        reasons.push("changed-mixed-inputs".into());
+    }
+    let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        reasons.push("invalid-mixed-inputs".into());
+        return reasons;
+    };
+    if manifest["schema"] != "geospec-mixed-build-inputs-v3"
+        || manifest["sourceRoot"].as_str() != route.cargo_cwd.to_str()
+        || manifest["cargo"].as_str() != env::var("CARGO").ok().as_deref()
+        || manifest["rustc"].as_str() != env::var("RUSTC").ok().as_deref()
+    {
+        reasons.push("mixed-source-or-toolchain".into());
+    }
+    reasons
 }
 
 fn effective_config_candidates(route: &ProducerRoute) -> Vec<(String, PathBuf)> {
@@ -1008,6 +1076,182 @@ fn semantic_rustflags() -> Vec<String> {
         index += 1;
     }
     semantic
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::*;
+
+    #[test]
+    fn verified_mixed_st_requires_exact_handoff_and_release_profile() {
+        assert!(Binding::Emscripten.accepts_route("nx-build-mixed-st-release-v1"));
+        assert!(!Binding::Emscripten.accepts_route("mixed-mt-unverified"));
+        assert!(!Binding::Standalone.accepts_route("nx-build-mixed-st-release-v1"));
+        assert!(!Binding::Node.accepts_route("nx-build-mixed-st-release-v1"));
+
+        let path =
+            env::temp_dir().join(format!("geospec-mixed-profile-{}.json", std::process::id()));
+        let route = ProducerRoute {
+            binding: Binding::Emscripten,
+            cargo_cwd: PathBuf::from("/source"),
+            selected_manifest: PathBuf::from(
+                "/source/packages/geospec-engine-native/bindings/emscripten/Cargo.toml",
+            ),
+            verification_reasons: Vec::new(),
+        };
+        env::set_var("TARGET", "wasm32-unknown-emscripten");
+        env::set_var("GEOSPEC_WASM_SIMD_PROFILE", "simd128-v1");
+        env::set_var("CARGO_ENCODED_RUSTFLAGS", "-C\u{1f}target-feature=+simd128");
+        env::set_var("CARGO", "/tool/cargo");
+        env::set_var("RUSTC", "/tool/rustc");
+        env::set_var("GEOSPEC_MIXED_INPUTS", &path);
+        env::set_var("PROFILE", "release");
+        env::set_var("OPT_LEVEL", "3");
+        env::set_var("DEBUG", "false");
+        let write_manifest = |schema: &str, root: &str, cargo: &str, rustc: &str| {
+            let bytes = serde_json::to_vec(&serde_json::json!({
+                "schema": schema, "sourceRoot": root, "cargo": cargo, "rustc": rustc,
+            }))
+            .unwrap();
+            fs::write(&path, &bytes).unwrap();
+            let hash: String = Sha256::digest(&bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            env::set_var("GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256", hash);
+        };
+        write_manifest(
+            "geospec-mixed-build-inputs-v3",
+            "/source",
+            "/tool/cargo",
+            "/tool/rustc",
+        );
+        assert!(mixed_st_profile_reasons(&route).is_empty());
+        assert!(release_profile_reasons().is_empty());
+
+        env::remove_var("GEOSPEC_MIXED_INPUTS");
+        assert!(mixed_st_profile_reasons(&route).contains(&"missing-mixed-inputs".into()));
+        env::set_var("GEOSPEC_MIXED_INPUTS", path.with_extension("absent"));
+        assert!(mixed_st_profile_reasons(&route).contains(&"unreadable-mixed-inputs".into()));
+        env::set_var("GEOSPEC_MIXED_INPUTS", &path);
+
+        env::set_var("GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256", "wrong");
+        assert!(mixed_st_profile_reasons(&route).contains(&"changed-mixed-inputs".into()));
+        write_manifest("wrong", "/source", "/tool/cargo", "/tool/rustc");
+        assert!(mixed_st_profile_reasons(&route).contains(&"mixed-source-or-toolchain".into()));
+        write_manifest(
+            "geospec-mixed-build-inputs-v3",
+            "/other",
+            "/tool/cargo",
+            "/tool/rustc",
+        );
+        assert!(mixed_st_profile_reasons(&route).contains(&"mixed-source-or-toolchain".into()));
+        write_manifest(
+            "geospec-mixed-build-inputs-v3",
+            "/source",
+            "/other",
+            "/tool/rustc",
+        );
+        assert!(mixed_st_profile_reasons(&route).contains(&"mixed-source-or-toolchain".into()));
+        write_manifest(
+            "geospec-mixed-build-inputs-v3",
+            "/source",
+            "/tool/cargo",
+            "/other",
+        );
+        assert!(mixed_st_profile_reasons(&route).contains(&"mixed-source-or-toolchain".into()));
+        write_manifest(
+            "geospec-mixed-build-inputs-v3",
+            "/source",
+            "/tool/cargo",
+            "/tool/rustc",
+        );
+        env::set_var(
+            "CARGO_ENCODED_RUSTFLAGS",
+            "-C\u{1f}target-feature=+simd128,+atomics",
+        );
+        assert!(mixed_st_profile_reasons(&route).contains(&"mixed-rust-profile".into()));
+        env::set_var("CARGO_ENCODED_RUSTFLAGS", "-C\u{1f}target-feature=+simd128");
+        env::set_var("CARGO_PROFILE_RELEASE_LTO", "true");
+        assert!(!release_profile_reasons().is_empty());
+        env::remove_var("CARGO_PROFILE_RELEASE_LTO");
+        env::set_var("OPT_LEVEL", "2");
+        assert!(!release_profile_reasons().is_empty());
+        fs::remove_file(path).unwrap();
+
+        let root = env::temp_dir().join(format!("geospec-owned-manifest-{}", std::process::id()));
+        let package = root.join("packages/geospec-engine-native");
+        let runtime = package.join("native/runtime");
+        let manifests = [
+            (
+                "binding-node",
+                "bindings/node/Cargo.toml",
+                "nx-build-node-release-v1",
+            ),
+            (
+                "binding-python",
+                "bindings/python/Cargo.toml",
+                "nx-build-python-release-v1",
+            ),
+            (
+                "binding-emscripten",
+                "bindings/emscripten/Cargo.toml",
+                "nx-build-mixed-st-release-v1",
+            ),
+            (
+                "standalone",
+                "native/runtime/Cargo.toml",
+                "nx-build-mixed-st-release-v1",
+            ),
+        ];
+        for (_, relative, _) in manifests {
+            let manifest = package.join(relative);
+            fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+            fs::write(manifest, "[package]\nname = \"test\"\n").unwrap();
+        }
+        for (feature, relative, accepted_route) in manifests {
+            for (other, _, _) in manifests {
+                env::remove_var(format!(
+                    "CARGO_FEATURE_{}",
+                    other.replace('-', "_").to_ascii_uppercase()
+                ));
+            }
+            env::set_var(
+                format!(
+                    "CARGO_FEATURE_{}",
+                    feature.replace('-', "_").to_ascii_uppercase()
+                ),
+                "1",
+            );
+            env::set_var("GEOSPEC_PRODUCER_ROUTE", accepted_route);
+            env::set_var(
+                "GEOSPEC_PRODUCER_CARGO_CWD",
+                if feature == "binding-node" {
+                    &package
+                } else {
+                    &root
+                },
+            );
+            env::set_var("GEOSPEC_PRODUCER_MANIFEST", package.join(relative));
+            let owned = producer_route(&runtime, &package, &root);
+            assert_eq!(
+                owned.verification_reasons.is_empty(),
+                feature != "standalone",
+                "{feature:?}"
+            );
+            env::set_var(
+                "GEOSPEC_PRODUCER_MANIFEST",
+                package.join("bindings/alternate/Cargo.toml"),
+            );
+            let alternate = package.join("bindings/alternate/Cargo.toml");
+            fs::create_dir_all(alternate.parent().unwrap()).unwrap();
+            fs::write(&alternate, "[package]\nname = \"alternate\"\n").unwrap();
+            assert!(producer_route(&runtime, &package, &root)
+                .verification_reasons
+                .contains(&"unexpected-producer-manifest".into()));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 fn brep_build_context(rust_context: &[u8]) -> Vec<u8> {

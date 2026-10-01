@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Popover as PopoverPrimitive, Slot as SlotPrimitive } from 'radix-ui';
 import { cn } from '#utils/cn.js';
 import { popoverSurfaceVariants } from '#components/popover.variants.js';
+import { useFullscreenElement } from '#hooks/use-fullscreen-element.js';
 
 /**
  * Coordinate an anchored non-modal surface. No single APG pattern covers generic
@@ -77,10 +78,11 @@ function PopoverContent({
    */
   readonly withPortal?: boolean;
 }): React.JSX.Element {
+  const fullscreenElement = useFullscreenElement();
   const Component = withPortal ? PopoverPrimitive.Portal : SlotPrimitive.Slot;
 
   return (
-    <Component>
+    <Component {...(withPortal ? { container: fullscreenElement } : {})}>
       <PopoverPrimitive.Content
         data-slot='popover-content'
         align={align}

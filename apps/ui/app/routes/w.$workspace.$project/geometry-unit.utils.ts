@@ -40,3 +40,18 @@ export const listGeometryEntryPaths = (
     mainEntryPath,
   ).map(([path]) => path);
 };
+
+/** Resolve the displayed entry from live panel bindings, independent of editor persistence. */
+export const findEntryGraphics = <T>(
+  graphics: ReadonlyMap<string, T>,
+  // oxlint-disable-next-line typescript/no-restricted-types -- A live empty viewer has a null entry.
+  entryPaths: ReadonlyMap<string, string | null>,
+  entryPath: string,
+): T | undefined => {
+  for (const [viewId, actor] of graphics) {
+    if (entryPaths.get(viewId) === entryPath) {
+      return actor;
+    }
+  }
+  return undefined;
+};

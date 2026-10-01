@@ -5,6 +5,7 @@ import type {
   PendingProjectOperation,
 } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
+import { announceCandidateConsent, withCandidateConsentLock } from '#lib/geospec-candidate-consent.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
 
@@ -391,6 +392,26 @@ export class IndexedDbStorageProvider implements StorageProvider {
     return this.mutateProjectLibraryState(projectId, (state) =>
       activityAt > state.lastActivityAt ? { ...state, lastActivityAt: activityAt } : state,
     );
+  }
+
+  public async setGeoSpecCandidateConsent(
+    projectId: string,
+    enabled: boolean,
+  ): Promise<ProjectLibraryState | undefined> {
+    // Broadcast revocation intent before waiting behind an in-flight publication.
+    if (!enabled) {
+      announceCandidateConsent(projectId, false);
+    }
+    return withCandidateConsentLock(projectId, async () => {
+      const state = await this.mutateProjectLibraryState(projectId, (current) => ({
+        ...current,
+        syncGeoSpecCandidates: enabled,
+      }));
+      if (state !== undefined && enabled) {
+        announceCandidateConsent(projectId, true);
+      }
+      return state;
+    });
   }
 
   public async trashProject(projectId: string, deletedAt = Date.now()): Promise<ProjectLibraryState | undefined> {

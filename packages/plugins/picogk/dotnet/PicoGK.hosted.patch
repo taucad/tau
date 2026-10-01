@@ -1,8 +1,57 @@
+diff --git a/Base/Mesh.cs b/Base/Mesh.cs
+index 8446ad225..eab75dd09 100644
+--- a/Base/Mesh.cs
++++ b/Base/Mesh.cs
+@@ -152,7 +152,11 @@ namespace PicoGK
+         /// <returns>The index of the vertex (to be used in triangles)</returns>
+         public int nAddVertex(in Vector3 vec)
+         {
+-            return _nAddVertex(lib.hThis, hThis, vec);
++            lock (m_tauSnapshotGate)
++            {
++                ObjectDisposedException.ThrowIf(m_bDisposed, this);
++                return _nAddVertex(lib.hThis, hThis, vec);
++            }
+         }
+ 
+         public void AddVertices(    in  IEnumerable<Vector3> avecVertices,
+@@ -200,9 +204,11 @@ namespace PicoGK
+         /// <returns>The triangle index of the added triangle</returns>
+         public int nAddTriangle(in Triangle t)
+         {
+-            return _nAddTriangle(   lib.hThis, 
+-                                    hThis, 
+-                                    t);
++            lock (m_tauSnapshotGate)
++            {
++                ObjectDisposedException.ThrowIf(m_bDisposed, this);
++                return _nAddTriangle(lib.hThis, hThis, t);
++            }
+         }
+ 
+         /// <summary>
 diff --git a/Internals/Interop.cs b/Internals/Interop.cs
-index 254cedb..ef6740a 100644
+index 254cedbb8..458803130 100644
 --- a/Internals/Interop.cs
 +++ b/Internals/Interop.cs
-@@ -793,7 +793,10 @@ namespace PicoGK
+@@ -203,6 +203,8 @@ namespace PicoGK
+ 
+         protected virtual void Dispose(bool bDisposing)
+         {
++            lock (m_tauSnapshotGate)
++            {
+             if (m_bDisposed)
+             {
+                 return;
+@@ -216,6 +218,7 @@ namespace PicoGK
+ 
+             _Destroy(lib.hThis, hThis);
+             m_bDisposed = true;
++            }
+         }
+ 
+         bool m_bDisposed = false;
+@@ -793,7 +796,10 @@ namespace PicoGK
                  // Nothing to do in this class
              }
  
@@ -14,7 +63,7 @@ index 254cedb..ef6740a 100644
              m_bDisposed = true;
          }
  
-@@ -1391,4 +1394,4 @@ namespace PicoGK
+@@ -1391,4 +1397,4 @@ namespace PicoGK
          internal readonly VdbMetaHandle hThis;
          public readonly Library lib;
      }
@@ -22,7 +71,7 @@ index 254cedb..ef6740a 100644
 \ No newline at end of file
 +}
 diff --git a/Library/LibraryGlobal.cs b/Library/LibraryGlobal.cs
-index 5fbe983..870e4a6 100644
+index 5fbe98389..870e4a66b 100644
 --- a/Library/LibraryGlobal.cs
 +++ b/Library/LibraryGlobal.cs
 @@ -373,11 +373,32 @@ namespace PicoGK
@@ -68,7 +117,7 @@ index 5fbe983..870e4a6 100644
 +}
 diff --git a/Library/LibraryHost.cs b/Library/LibraryHost.cs
 new file mode 100644
-index 0000000..6c0ed94
+index 000000000..6c0ed9460
 --- /dev/null
 +++ b/Library/LibraryHost.cs
 @@ -0,0 +1,68 @@
@@ -140,8 +189,161 @@ index 0000000..6c0ed94
 +        static ILibraryHost? m_xLibraryHost;
 +    }
 +}
+diff --git a/Library/MeshReadback.cs b/Library/MeshReadback.cs
+new file mode 100644
+index 000000000..686b54008
+--- /dev/null
++++ b/Library/MeshReadback.cs
+@@ -0,0 +1,75 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Numerics;
++using System.Runtime.CompilerServices;
++using System.Runtime.InteropServices;
++
++[assembly: InternalsVisibleTo("Tau.PicoGK.Worker")]
++[assembly: InternalsVisibleTo("Tau.PicoGK.Worker.Tests")]
++
++namespace PicoGK;
++
++public partial class Mesh
++{
++    private readonly object m_tauSnapshotGate = new();
++    private static int m_tauBulkAvailable;
++
++    [DllImport("tau-picogk-readback", CallingConvention = CallingConvention.Cdecl, EntryPoint = "Mesh_GetVertices")]
++    private static extern int TauGetVertices(LibHandle library, MshHandle mesh, IntPtr buffer, int capacity);
++    [DllImport("tau-picogk-readback", CallingConvention = CallingConvention.Cdecl, EntryPoint = "Mesh_GetTriangles")]
++    private static extern int TauGetTriangles(LibHandle library, MshHandle mesh, IntPtr buffer, int capacity);
++
++    // Private host integration: no new model-author API. Synchronizes with managed mesh mutation
++    // and disposal for one consistent snapshot, including when an older library needs element reads.
++    internal (float[] Positions, uint[] Indices) TauCopyGeometry(bool allowBulk = true)
++    {
++        lock (m_tauSnapshotGate)
++        {
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            var vertexCount = nVertexCount();
++            var triangleCount = nTriangleCount();
++            if (vertexCount < 0 || triangleCount < 0) throw new InvalidOperationException("PicoGK returned a negative mesh count.");
++            var positions = new float[checked(vertexCount * 3)];
++            var indices = new uint[checked(triangleCount * 3)];
++            var copied = false;
++            if (allowBulk && System.Threading.Volatile.Read(ref m_tauBulkAvailable) >= 0)
++            {
++                var verticesHandle = GCHandle.Alloc(positions, GCHandleType.Pinned);
++                GCHandle trianglesHandle = default;
++                try
++                {
++                    trianglesHandle = GCHandle.Alloc(indices, GCHandleType.Pinned);
++                    if (TauGetVertices(lib.hThis, hThis, verticesHandle.AddrOfPinnedObject(), vertexCount) != vertexCount ||
++                        TauGetTriangles(lib.hThis, hThis, trianglesHandle.AddrOfPinnedObject(), triangleCount) != triangleCount)
++                        throw new InvalidOperationException("PicoGK bulk readback returned inconsistent mesh counts.");
++                    System.Threading.Volatile.Write(ref m_tauBulkAvailable, 1);
++                    copied = true;
++                }
++                catch (Exception error) when (error is EntryPointNotFoundException or DllNotFoundException)
++                {
++                    System.Threading.Volatile.Write(ref m_tauBulkAvailable, -1);
++                }
++                finally { if (trianglesHandle.IsAllocated) trianglesHandle.Free(); verticesHandle.Free(); }
++            }
++            if (!copied)
++            {
++                for (var vertex = 0; vertex < vertexCount; vertex++)
++                {
++                    var value = vecVertexAt(vertex);
++                    positions[vertex * 3] = value.X; positions[vertex * 3 + 1] = value.Y; positions[vertex * 3 + 2] = value.Z;
++                }
++                for (var triangle = 0; triangle < triangleCount; triangle++)
++                {
++                    var value = oTriangleAt(triangle);
++                    indices[triangle * 3] = checked((uint)value.A);
++                    indices[triangle * 3 + 1] = checked((uint)value.B);
++                    indices[triangle * 3 + 2] = checked((uint)value.C);
++                }
++            }
++            foreach (var index in indices)
++                if (index >= vertexCount) throw new InvalidOperationException("PicoGK readback returned an out-of-range triangle index.");
++            foreach (var value in positions)
++                if (!float.IsFinite(value)) throw new InvalidOperationException("PicoGK readback returned a nonfinite vertex.");
++            return (positions, indices);
++        }
++    }
++}
+diff --git a/Material.cs b/Material.cs
+new file mode 100644
+index 000000000..d544bbb35
+--- /dev/null
++++ b/Material.cs
+@@ -0,0 +1,66 @@
++// SPDX-License-Identifier: Apache-2.0
++
++using System;
++using System.Numerics;
++namespace PicoGK;
++/// <summary>Typed MaterialAlphaMode appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public enum MaterialAlphaMode { Opaque, Mask, Blend }
++/// <summary>Typed MaterialImageFormat appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public enum MaterialImageFormat { Png, Jpeg, WebP }
++/// <summary>Typed MaterialWrap appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public enum MaterialWrap { ClampToEdge = 33071, MirroredRepeat = 33648, Repeat = 10497 }
++/// <summary>Typed MaterialMagFilter appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public enum MaterialMagFilter { Nearest = 9728, Linear = 9729 }
++/// <summary>Typed MaterialMinFilter appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public enum MaterialMinFilter { Nearest = 9728, Linear = 9729, NearestMipmapNearest = 9984, LinearMipmapNearest = 9985, NearestMipmapLinear = 9986, LinearMipmapLinear = 9987 }
++/// <summary>Typed MaterialImage appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public sealed record MaterialImage { public required byte[] Data { get; init; } public required MaterialImageFormat Format { get; init; } public string? Name { get; init; } }
++/// <summary>Typed MaterialSampler appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public sealed record MaterialSampler { public MaterialWrap WrapS { get; init; } = MaterialWrap.Repeat; public MaterialWrap WrapT { get; init; } = MaterialWrap.Repeat; public MaterialMagFilter? MagFilter { get; init; } public MaterialMinFilter? MinFilter { get; init; } }
++/// <summary>Typed MaterialTextureTransform appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public sealed record MaterialTextureTransform { public Vector2 Offset { get; init; } public Vector2 Scale { get; init; } = Vector2.One; public float Rotation { get; init; } }
++/// <summary>Typed MaterialTexture appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public sealed record MaterialTexture { public required MaterialImage Image { get; init; } public MaterialSampler? Sampler { get; init; } public MaterialTextureTransform? Transform { get; init; } }
++/// <summary>Typed MaterialAnisotropy appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public sealed record MaterialAnisotropy { public float Strength { get; init; } public float Rotation { get; init; } public MaterialTexture? Texture { get; init; } }
++/// <summary>Typed MaterialClearcoat appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public sealed record MaterialClearcoat { public float Factor { get; init; } public float Roughness { get; init; } public MaterialTexture? Texture { get; init; } public MaterialTexture? RoughnessTexture { get; init; } public MaterialTexture? NormalTexture { get; init; } public float NormalScale { get; init; } = 1; }
++/// <summary>Typed MaterialIridescence appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public sealed record MaterialIridescence { public float Factor { get; init; } public float Ior { get; init; } = 1.3f; public float ThicknessMinimum { get; init; } = 100; public float ThicknessMaximum { get; init; } = 400; public MaterialTexture? Texture { get; init; } public MaterialTexture? ThicknessTexture { get; init; } }
++/// <summary>Typed MaterialSheen appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public sealed record MaterialSheen { public ColorFloat Color { get; init; } = new("000000"); public float Roughness { get; init; } public MaterialTexture? ColorTexture { get; init; } public MaterialTexture? RoughnessTexture { get; init; } }
++/// <summary>Typed MaterialSpecular appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public sealed record MaterialSpecular { public float Factor { get; init; } = 1; public ColorFloat Color { get; init; } = new("FFFFFF"); public MaterialTexture? Texture { get; init; } public MaterialTexture? ColorTexture { get; init; } }
++/// <summary>Typed MaterialTransmission appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public sealed record MaterialTransmission { public float Factor { get; init; } public MaterialTexture? Texture { get; init; } }
++/// <summary>Typed MaterialVolume appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public sealed record MaterialVolume { public float Thickness { get; init; } public float? AttenuationDistance { get; init; } public ColorFloat AttenuationColor { get; init; } = new("FFFFFF"); public MaterialTexture? ThicknessTexture { get; init; } }
++/// <summary>Typed Material appearance; colors are sRGB, rotations radians and volume distances metres.</summary>
++public sealed record Material {
++ public string? Name { get; init; }
++ public ColorFloat Color { get; init; } = new("FFFFFF");
++ public float Metallic { get; init; }
++ public float Roughness { get; init; } = .35f;
++ public MaterialTexture? ColorTexture { get; init; }
++ public MaterialTexture? MetallicRoughnessTexture { get; init; }
++ public MaterialTexture? NormalTexture { get; init; }
++ public float NormalScale { get; init; } = 1;
++ public MaterialTexture? OcclusionTexture { get; init; }
++ public float OcclusionStrength { get; init; } = 1;
++ public ColorFloat Emissive { get; init; } = new("000000");
++ public float EmissiveStrength { get; init; } = 1;
++ public MaterialTexture? EmissiveTexture { get; init; }
++ public MaterialAlphaMode? AlphaMode { get; init; }
++ public float AlphaCutoff { get; init; } = .5f;
++ public bool DoubleSided { get; init; } = true;
++ public bool Unlit { get; init; }
++ public float? Ior { get; init; }
++ public float? Dispersion { get; init; }
++ public MaterialAnisotropy? Anisotropy { get; init; }
++ public MaterialClearcoat? Clearcoat { get; init; }
++ public MaterialIridescence? Iridescence { get; init; }
++ public MaterialSheen? Sheen { get; init; }
++ public MaterialSpecular? Specular { get; init; }
++ public MaterialTransmission? Transmission { get; init; }
++ public MaterialVolume? Volume { get; init; }
++}
 diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
-index fe3d87d..53325b8 100644
+index fe3d87d5b..c5b029ce2 100644
 --- a/Viewer/Viewer.cs
 +++ b/Viewer/Viewer.cs
 @@ -45,6 +45,51 @@ namespace PicoGK
@@ -431,7 +633,7 @@ index fe3d87d..53325b8 100644
              _EnableExperimental(hThis, bEnable);
          }
  
-@@ -462,6 +620,11 @@ namespace PicoGK
+@@ -462,12 +620,28 @@ namespace PicoGK
          public void SetGroupVisible(int nGroupID,
                                          bool bVisible)
          {
@@ -443,7 +645,24 @@ index fe3d87d..53325b8 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new SetGroupVisibleAction(nGroupID, bVisible));
-@@ -480,6 +643,11 @@ namespace PicoGK
+             }
+         }
+ 
++        /// <summary>Assign a typed physical material to every object in the hosted group.</summary>
++        /// <param name="groupId">Existing viewer group assignment.</param>
++        /// <param name="material">Appearance and encoded textures, snapshotted synchronously.</param>
++        public void SetGroupMaterial(int groupId, Material material)
++        {
++            ArgumentNullException.ThrowIfNull(material);
++            if (m_xBackend is null)
++                throw new NotSupportedException("Typed materials require the hosted PicoGK viewer backend");
++            m_xBackend.SetGroupMaterial(groupId, material);
++        }
++
+         /// <summary>
+         /// Set the material for this viewer group
+         /// </summary>
+@@ -480,6 +654,11 @@ namespace PicoGK
                                          float       fMetallic,
                                          float       fRoughness)
          {
@@ -455,7 +674,7 @@ index fe3d87d..53325b8 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new SetGroupMaterialAction(  nGroupID,
-@@ -495,6 +663,11 @@ namespace PicoGK
+@@ -495,6 +674,11 @@ namespace PicoGK
          public void SetGroupMatrix( int nGroupID,
                                      Matrix4x4 mat)
          {
@@ -467,7 +686,7 @@ index fe3d87d..53325b8 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new SetGroupMatrixAction(    nGroupID,
-@@ -512,6 +685,11 @@ namespace PicoGK
+@@ -512,6 +696,11 @@ namespace PicoGK
                                              Overhang uWarning,
                                              Overhang uError)
          {
@@ -479,7 +698,7 @@ index fe3d87d..53325b8 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new EnableGroupOverhangWarningAction(    nGroupID, 
-@@ -542,6 +720,11 @@ namespace PicoGK
+@@ -542,6 +731,11 @@ namespace PicoGK
          /// </summary>
          public void DisableOverhangWarning(int nGroupID)
          {
@@ -491,7 +710,7 @@ index fe3d87d..53325b8 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new DisableGroupOverhangWarningAction(nGroupID));
-@@ -553,6 +736,8 @@ namespace PicoGK
+@@ -553,6 +747,8 @@ namespace PicoGK
          /// </summary>
          public BBox3 oBBox()
          {
@@ -500,7 +719,7 @@ index fe3d87d..53325b8 100644
              BBox3 oBBox = new();
              _GetBoundingBox(hThis, ref oBBox);
              return oBBox;
-@@ -563,6 +748,11 @@ namespace PicoGK
+@@ -563,6 +759,11 @@ namespace PicoGK
          /// </summary>
          public void SetBackgroundColor(ColorFloat clr)
          {
@@ -512,7 +731,7 @@ index fe3d87d..53325b8 100644
              m_clrBackground = clr;
              RequestUpdate();
          }
-@@ -572,6 +762,11 @@ namespace PicoGK
+@@ -572,6 +773,11 @@ namespace PicoGK
          /// </summary>
          public void ZoomToFit()
          {
@@ -524,7 +743,7 @@ index fe3d87d..53325b8 100644
              m_bForceZoomToFit = true;
              RequestUpdate();
          }
-@@ -581,6 +776,11 @@ namespace PicoGK
+@@ -581,6 +787,11 @@ namespace PicoGK
          /// </summary>
          public void SetFov(float fAngle)
          {
@@ -536,7 +755,7 @@ index fe3d87d..53325b8 100644
              m_oCamera.SetVerticalFov(fAngle);
              RequestUpdate();
          }
-@@ -590,9 +790,14 @@ namespace PicoGK
+@@ -590,9 +801,14 @@ namespace PicoGK
          /// </summary>
          public Quaternion qOrientation
          {
@@ -552,7 +771,7 @@ index fe3d87d..53325b8 100644
                  m_oCamera.qOrientation = value; 
                  RequestUpdate();
              }
-@@ -614,6 +819,8 @@ namespace PicoGK
+@@ -614,6 +830,8 @@ namespace PicoGK
          /// false: Viewer actions still pending (busy)</returns>
          public bool bIsIdle()
          {
@@ -561,7 +780,7 @@ index fe3d87d..53325b8 100644
              lock (m_oActions)
              {
                  if (m_oActions.Count() > 0)
-@@ -625,11 +832,13 @@ namespace PicoGK
+@@ -625,11 +843,13 @@ namespace PicoGK
  
          bool m_bIdle = false;
  
@@ -576,7 +795,7 @@ index fe3d87d..53325b8 100644
                 void DoRemove(Mesh msh)
          {
              _RemoveMesh(    msh.lib.hThis,
-@@ -822,4 +1031,3 @@ namespace PicoGK
+@@ -822,4 +1042,3 @@ namespace PicoGK
          }
      }
  }
@@ -584,10 +803,10 @@ index fe3d87d..53325b8 100644
 \ No newline at end of file
 diff --git a/Viewer/ViewerBackend.cs b/Viewer/ViewerBackend.cs
 new file mode 100644
-index 0000000..e1fc632
+index 000000000..e98439f9e
 --- /dev/null
 +++ b/Viewer/ViewerBackend.cs
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,47 @@
 +//
 +// SPDX-License-Identifier: Apache-2.0
 +//
@@ -628,6 +847,7 @@ index 0000000..e1fc632
 +        void EnableExperimental(bool bEnable);
 +        void SetGroupVisible(int nGroupID, bool bVisible);
 +        void SetGroupMaterial(int nGroupID, ColorFloat clr, float fMetallic, float fRoughness);
++        void SetGroupMaterial(int groupId, Material material);
 +        void SetGroupMatrix(int nGroupID, Matrix4x4 mat);
 +        void EnableOverhangWarning(int nGroupID, Overhang uWarning, Overhang uError);
 +        void DisableOverhangWarning(int nGroupID);
@@ -635,7 +855,7 @@ index 0000000..e1fc632
 +    }
 +}
 diff --git a/Viewer/ViewerGpuTex.cs b/Viewer/ViewerGpuTex.cs
-index 9b4213b..6fee77a 100644
+index 9b4213b90..6fee77a14 100644
 --- a/Viewer/ViewerGpuTex.cs
 +++ b/Viewer/ViewerGpuTex.cs
 @@ -47,6 +47,8 @@ namespace PicoGK
@@ -654,7 +874,7 @@ index 9b4213b..6fee77a 100644
 -    
 \ No newline at end of file
 diff --git a/Viewer/ViewerImageQuad.cs b/Viewer/ViewerImageQuad.cs
-index 6bcf599..9b7336d 100644
+index 6bcf599e1..9b7336d4b 100644
 --- a/Viewer/ViewerImageQuad.cs
 +++ b/Viewer/ViewerImageQuad.cs
 @@ -53,6 +53,8 @@ namespace PicoGK
@@ -673,7 +893,7 @@ index 6bcf599..9b7336d 100644
 -    
 \ No newline at end of file
 diff --git a/Viewer/Viewer_Gui.cs b/Viewer/Viewer_Gui.cs
-index b9692ac..8386afa 100644
+index b9692acc5..8386afa86 100644
 --- a/Viewer/Viewer_Gui.cs
 +++ b/Viewer/Viewer_Gui.cs
 @@ -45,6 +45,8 @@ namespace PicoGK

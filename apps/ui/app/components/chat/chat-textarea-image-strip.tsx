@@ -80,7 +80,7 @@ export const ChatTextareaAttachmentRail = memo(function ({
     <>
       <OmniScroller
         aria-label='Attachments'
-        className={cn('w-full scroll-shadows-x', size === 'desktop' ? 'px-3 pt-3 pb-2' : 'pb-1')}
+        className={cn('w-full scroll-shadows-x', size === 'desktop' ? 'px-3 pb-3' : 'pb-1')}
       >
         <div
           className={cn(
@@ -177,7 +177,7 @@ export const ChatTextareaAttachmentRail = memo(function ({
         <p
           id={blockReasonId}
           role='status'
-          className={cn('text-xs text-destructive', size === 'desktop' ? 'px-3 pb-1' : 'pb-1')}
+          className={cn('text-xs text-destructive', size === 'desktop' ? 'px-3 pb-3' : 'pb-1')}
         >
           {blockReason}
         </p>

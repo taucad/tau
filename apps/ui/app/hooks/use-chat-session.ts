@@ -2,10 +2,10 @@
  * Chat Session Hooks (useChatSession / useChatSessionSnapshot)
  *
  * React surface for the vanilla `ChatSessionStore`. `useChatSession(chatId,
- * projectId)` acquires the chat in an effect and reads it through the store's
- * membership, so a render React throws away (StrictMode, Suspense) holds no
- * view reference (PV-S4). The store is the source of truth for lifetime;
- * React components are subscribers, not owners.
+ * projectId)` acquires the chat in a layout effect and keeps the last committed
+ * acquisition through a same-project handoff. A render React throws away
+ * (StrictMode, Suspense) holds no view reference (PV-S4). The store owns session
+ * lifetime; React components hold view references.
  *
  * `useChatSessionSnapshot` is a thin wrapper around `useSyncExternalStore`
  * that re-renders only when the per-chatId callback fires (messages /
@@ -14,8 +14,8 @@
  * live session without manual memoisation gymnastics.
  */
 
-import { useEffect, useRef, useSyncExternalStore } from 'react';
-import type { ChatSession } from '#services/chat-session-store.js';
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 
 /**
@@ -23,23 +23,57 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
  *
  * @param chatId - The chat to hold.
  * @param projectId - The chat's own project; focus never names it (PV-S4, L3 D9).
- * @returns The live session, or `undefined` until the acquiring effect has committed.
+ * @returns The committed session (previous chat during a same-project handoff), or `undefined` before acquisition.
  */
 export function useChatSession(chatId: string, projectId: string): ChatSession | undefined {
   const store = useChatSessionStore();
 
-  useEffect(() => {
-    store.acquire(chatId, projectId);
+  const [acquired, setAcquired] = useState<{
+    readonly store: ChatSessionStore;
+    readonly projectId: string;
+    readonly session: ChatSession;
+  }>();
+
+  const presented = useRef(acquired);
+  useLayoutEffect(() => {
+    presented.current = acquired;
+    if (acquired === undefined) {
+      return;
+    }
+    // The displayed view outlives a pending candidate, including rapid A → B → C switches.
+    acquired.store.acquire(acquired.session.chatId, acquired.projectId);
     return () => {
+      acquired.store.release(acquired.session.chatId);
+    };
+  }, [acquired]);
+
+  useLayoutEffect(() => {
+    const session = store.acquire(chatId, projectId);
+    const controller = new AbortController();
+    const publish = (): void => {
+      if (!controller.signal.aborted) {
+        setAcquired({ store, projectId, session });
+      }
+    };
+    const previous = presented.current;
+    if (previous?.store === store && previous.projectId === projectId) {
+      const prepare = async (): Promise<void> => {
+        await store.preparePresentation(chatId, controller.signal);
+        publish();
+      };
+      // async-iife: bootstrap -- the layout effect cannot await; cleanup aborts the pending handoff.
+      void prepare();
+    } else {
+      // Cold/project-boundary mounting also bootstraps descendants needed by the host.
+      publish();
+    }
+    return () => {
+      controller.abort();
       store.release(chatId);
     };
   }, [store, chatId, projectId]);
 
-  return useSyncExternalStore(
-    (listener) => store.subscribeMembership(listener),
-    () => store.get(chatId),
-    () => undefined,
-  );
+  return acquired?.store === store && acquired.projectId === projectId ? acquired.session : undefined;
 }
 
 /**

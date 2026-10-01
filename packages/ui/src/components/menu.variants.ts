@@ -20,7 +20,8 @@ export const menuItemVariants = cva(
     variants: {
       variant: {
         default: '',
-        destructive: '',
+        destructive:
+          'text-menu-destructive-foreground [&_svg]:text-menu-destructive-foreground! data-disabled:[&_svg]:text-muted-foreground/50!',
       },
       inset: {
         true: 'pl-8', // For items with left indicator (checkbox/radio)

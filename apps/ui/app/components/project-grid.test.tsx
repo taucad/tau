@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BuiltinProjectCardModel } from '#constants/project-examples.js';
+import { warehouseProjects } from '#constants/warehouse-parts.js';
+import { loadBuiltinProjectFiles } from '#constants/project-examples.js';
 import { CommunityProjectGrid } from '#components/project-grid.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
@@ -128,6 +130,30 @@ describe('CommunityProjectGrid', () => {
     createProjectMock.mockResolvedValue({
       id: 'remixed-project',
       slugs: { workspaceSlug: 'tau-workspace', projectSlug: 'remixed-project' },
+    });
+  });
+
+  it('should remix a warehouse part with all editable assets through the existing creation location', async () => {
+    const part = warehouseProjects[0];
+    if (!part) {
+      throw new Error('Expected a warehouse part');
+    }
+    const expectedFiles = await loadBuiltinProjectFiles({ project: part });
+    renderGrid({ projects: [part] });
+    expect(createProjectMock).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: `Remix ${part.name}` }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create remix' }));
+    await waitFor(() => {
+      expect(createProjectMock).toHaveBeenCalledExactlyOnceWith({
+        project: {
+          name: `${part.name} (fork)`,
+          description: part.description,
+          tags: [...part.tags],
+          assets: part.assets,
+        },
+        files: expectedFiles,
+        location: { kind: 'home' },
+      });
     });
   });
 

@@ -48,7 +48,7 @@ export const projectWorkbenchSnapshot = ({
     .slice(0, 16)
     .map(([path, settings]) => ({
       path,
-      ...(settings.operationTimeout === undefined ? {} : { renderTimeout: settings.operationTimeout }),
+      ...(settings.operationTimeout === undefined ? {} : { operationTimeout: settings.operationTimeout }),
       hidden: settings.components?.hidden.length ?? 0,
     }));
   const visible = [...activeTabs(layout.viewer), ...(layout.lanes.workbench ? activeTabs(layout.workbench) : [])].slice(

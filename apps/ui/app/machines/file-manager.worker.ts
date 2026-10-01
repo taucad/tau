@@ -377,6 +377,16 @@ const revisionRegistry = createWorkerRevisionRegistry({
       http: recorder.client,
     });
   },
+  createCandidatePort: (projectId, credential, signal) =>
+    createIsomorphicGitRevisionPort({
+      filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`),
+      checkouts: checkoutRoutes(projectId),
+      http: createRevisionHttpClient({
+        credentials: 'include',
+        ...createGitRemoteTransport(credential),
+        signal,
+      }),
+    }),
   /* The same credential rules as any push: the session cookie for Tau's own
    * origin, and nothing at all for a remote the page never credited. */
   keepalive: async (projectId) => sendKeepalivePush(pushRecorders.get(projectId)?.last(), { credentials: 'include' }),

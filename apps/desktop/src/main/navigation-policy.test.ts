@@ -123,6 +123,10 @@ describe('isPermissionGranted', () => {
     expect(isPermissionGranted('clipboard-sanitized-write')).toBe(true);
   });
 
+  it('should grant user-initiated native viewer fullscreen', () => {
+    expect(isPermissionGranted('fullscreen')).toBe(true);
+  });
+
   it('denies everything the app never asks for', () => {
     for (const permission of [
       'media',
@@ -132,6 +136,9 @@ describe('isPermissionGranted', () => {
       'background-sync',
       'web-app-installation',
       'openExternal',
+      'automatic-fullscreen',
+      'pointerLock',
+      'keyboardLock',
     ]) {
       expect([permission, isPermissionGranted(permission)]).toEqual([permission, false]);
     }

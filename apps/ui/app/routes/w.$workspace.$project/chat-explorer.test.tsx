@@ -1,25 +1,31 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { mock } from 'vitest-mock-extended';
 import type { GeometryComponentAppearance, GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import type { ActorRefFrom } from 'xstate';
 import { createActor } from 'xstate';
+import { StrictMode } from 'react';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { createSourceModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { PartThumbnailService } from '#services/part-thumbnail.service.js';
 import {
   ChatExplorerTree,
   ComponentRow,
   getComponentRowPaddingLeft,
+  getVisibleModelComponents,
 } from '#routes/w.$workspace.$project/chat-explorer.js';
 
 const mocks = vi.hoisted(() => ({
   addContextReferences: vi.fn(),
   paneApis: new Map<string, { setExpanded: ReturnType<typeof vi.fn> }>(),
   useProject: vi.fn(),
+  imageService: undefined as undefined | { export: ReturnType<typeof vi.fn> },
 }));
+const originalCreateObjectUrl = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
 const unitId = 'src/main.ts';
 const internalUnitId = createSourceModelInteractionUnitId(unitId);
 
@@ -30,6 +36,10 @@ vi.mock('#components/chat/chat-context-insertion.js', () => ({
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: mocks.useProject,
+}));
+
+vi.mock('#providers/headless-image-provider.js', () => ({
+  useOptionalHeadlessImageService: () => mocks.imageService,
 }));
 
 vi.mock('#hooks/use-keyboard.js', () => ({
@@ -132,6 +142,25 @@ const capabilities: GeometryComponentManifest['capabilities'] = {
   exports: [{ fidelity: 'mesh', formats: ['glb'], available: true }],
 };
 
+describe('Model component projection', () => {
+  it('should retain traversal order and matching ancestors without unrelated descendants', () => {
+    const parent = createNode('assembly', 'Nozzle');
+    const child = createNode('tube', 'Cooling tube');
+    const sibling = createNode('wall', 'Hot wall');
+    parent.childIds = [child.id, sibling.id];
+    child.parentId = parent.id;
+    child.depth = 2;
+    sibling.parentId = parent.id;
+    sibling.depth = 2;
+    const manifest = createManifest([parent, child, sibling]);
+    manifest.nodesById['root']!.childIds = [parent.id];
+    expect(getVisibleModelComponents(manifest, '').map((node) => node.id)).toEqual(['assembly', 'tube', 'wall']);
+    expect(getVisibleModelComponents(manifest, 'cooling').map((node) => node.id)).toEqual(['assembly', 'tube']);
+    expect(getVisibleModelComponents(manifest, 'nozzle').map((node) => node.id)).toEqual(['assembly']);
+    expect(getVisibleModelComponents(manifest, 'absent')).toEqual([]);
+  });
+});
+
 function createNode(id: string, name: string, appearance?: GeometryComponentAppearance): GeometryComponentNode {
   return {
     id,
@@ -226,9 +255,11 @@ function createGraphicsRefForUnit(
   {
     hiddenComponentIds = [],
     selectedComponentIds = [],
+    previewGeometry,
   }: {
     readonly hiddenComponentIds?: readonly string[];
     readonly selectedComponentIds?: readonly string[];
+    readonly previewGeometry?: { readonly hash: string; readonly content: Uint8Array<ArrayBuffer> };
   } = {},
 ): ActorRefFrom<typeof graphicsMachine> {
   const modelRef = createActor(modelInteractionMachine, { input: {} });
@@ -248,6 +279,9 @@ function createGraphicsRefForUnit(
   return createStaticActor({
     context: {
       modelInteractionRef: modelRef,
+      artifact: previewGeometry && { mimeType: 'model/gltf-binary', content: previewGeometry.content },
+      artifactKey: previewGeometry?.hash,
+      gltfPresentation: { presentedKey: previewGeometry?.hash },
     },
   }) as unknown as ActorRefFrom<typeof graphicsMachine>;
 }
@@ -258,17 +292,20 @@ function mockProjectForExplorer({
   viewGraphics,
   geometryUnitFiles,
   editorRef = createStaticActor({ context: { viewSettings } }),
+  viewEntryPaths = new Map(Object.entries(viewSettings).map(([id, view]) => [id, view.entryPath])),
 }: {
   readonly mainEntryPath: string;
   readonly viewSettings: Record<string, { readonly entryPath: string }>;
   readonly viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
   readonly geometryUnitFiles: readonly string[];
   readonly editorRef?: EditorTestActor;
+  readonly viewEntryPaths?: ReadonlyMap<string, string>;
 }): void {
   mocks.useProject.mockReturnValue({
     mainEntryPath,
     editorRef,
     viewGraphics,
+    viewEntryPaths,
     viewRecords: new Map(Object.entries(viewSettings)),
     geometryUnits: new Map(geometryUnitFiles.map((entryPath) => [entryPath, createStaticActor({})])),
   });
@@ -277,15 +314,18 @@ function mockProjectForExplorer({
 function renderExplorerTree({
   isExpanded = true,
   setIsExpanded,
+  strictMode = false,
 }: {
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
+  readonly strictMode?: boolean;
 } = {}): ReturnType<typeof render> {
-  return render(
+  const tree = (
     <TooltipProvider>
       <ChatExplorerTree isExpanded={isExpanded} setIsExpanded={setIsExpanded} />
-    </TooltipProvider>,
+    </TooltipProvider>
   );
+  return render(strictMode ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 function renderComponentRow(properties: Parameters<typeof ComponentRow>[0]): ReturnType<typeof render> {
@@ -300,9 +340,194 @@ beforeEach(() => {
   mocks.addContextReferences.mockReset();
   mocks.paneApis.clear();
   mocks.useProject.mockReset();
+  mocks.imageService = undefined;
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  for (const [name, original] of [
+    ['createObjectURL', originalCreateObjectUrl],
+    ['revokeObjectURL', originalRevokeObjectUrl],
+  ] as const) {
+    if (original) {
+      Object.defineProperty(URL, name, original);
+    } else {
+      Reflect.deleteProperty(URL, name);
+    }
+  }
 });
 
 describe('ChatExplorerTree', () => {
+  it('submits only the presented, visible part primitives to the shared image queue', async () => {
+    const exportImage = vi.fn().mockResolvedValue(undefined);
+    mocks.imageService = { export: exportImage };
+    const part = {
+      ...createNode(firstComponentId, 'housing'),
+      primitiveRefs: [
+        { nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 },
+        { nodeIndex: 2, meshIndex: 1, primitiveIndex: 1 },
+      ],
+    };
+    const graphicsRef = createGraphicsRefForUnit('src/main.ts', [part], {
+      previewGeometry: { hash: 'presented-glb', content: new Uint8Array([1, 2, 3]) },
+      selectedComponentIds: [firstComponentId],
+    });
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([['mainView', graphicsRef]]),
+    });
+    renderExplorerTree({ strictMode: true });
+    await waitFor(() => {
+      expect(exportImage).toHaveBeenCalled();
+    });
+    expect(exportImage.mock.calls[0]?.[0].geometryHash).toMatch(/^sha256:/u);
+    expect(exportImage.mock.calls[0]?.[0]).toMatchObject({
+      sourcePath: 'src/main.ts',
+      exportOptions: {
+        mode: 'batch',
+        views: [{ visiblePrimitives: part.primitiveRefs }],
+      },
+    });
+  });
+
+  it('should observe newly mounted rows and releases removed-row preview demand', async () => {
+    const demands = vi.spyOn(PartThumbnailService.prototype, 'requestForOwner');
+    const observe = vi.fn();
+    const unobserve = vi.fn();
+    const disconnect = vi.fn();
+    let intersect: IntersectionObserverCallback | undefined;
+    const observer = mock<IntersectionObserver>({ observe, unobserve, disconnect });
+    vi.stubGlobal(
+      'IntersectionObserver',
+      vi.fn(function (callback: IntersectionObserverCallback) {
+        intersect = callback;
+        return observer;
+      }),
+    );
+    const exportImage = vi.fn().mockResolvedValue(undefined);
+    mocks.imageService = { export: exportImage };
+    const parts = [firstComponentId, secondComponentId].map((id, index) => ({
+      ...createNode(id, `Part ${index + 1}`),
+      primitiveRefs: [{ nodeIndex: index, meshIndex: index, primitiveIndex: 0 }],
+    }));
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([
+        [
+          'mainView',
+          createGraphicsRefForUnit('src/main.ts', parts, {
+            previewGeometry: { hash: 'presented-glb', content: new Uint8Array([1, 2, 3]) },
+          }),
+        ],
+      ]),
+    });
+    renderExplorerTree();
+    const first = screen.getByRole('button', { name: 'Part 1' }).closest<HTMLElement>('[data-model-component-row]')!;
+    const second = screen.getByRole('button', { name: 'Part 2' }).closest<HTMLElement>('[data-model-component-row]')!;
+    expect(observe).toHaveBeenCalledWith(first);
+    expect(observe).toHaveBeenCalledWith(second);
+    act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: first, isIntersecting: true }], observer));
+    await waitFor(() => {
+      expect(exportImage).toHaveBeenCalledTimes(1);
+    });
+    first.remove();
+    await waitFor(() => {
+      expect(unobserve).toHaveBeenCalledWith(first);
+    });
+    await waitFor(() => {
+      expect(demands.mock.lastCall?.[2]).toEqual([]);
+    });
+    act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: first, isIntersecting: true }], observer));
+    expect(demands.mock.lastCall?.[2]).toEqual([]);
+    const parent = second.parentElement!;
+    second.remove();
+    await waitFor(() => {
+      expect(unobserve).toHaveBeenCalledWith(second);
+    });
+    act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: second, isIntersecting: true }], observer));
+    expect(exportImage).toHaveBeenCalledTimes(1);
+    const mounts = observe.mock.calls.length;
+    parent.append(second);
+    await waitFor(() => {
+      expect(observe.mock.calls.length).toBeGreaterThan(mounts);
+    });
+    act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: second, isIntersecting: true }], observer));
+    await waitFor(() => {
+      expect(exportImage).toHaveBeenCalledTimes(2);
+    });
+    expect(exportImage.mock.calls[1]?.[0].exportOptions.views).toMatchObject([
+      { visiblePrimitives: parts[1]!.primitiveRefs },
+    ]);
+  });
+
+  it('keeps the selected unit preview when another unit finishes later', async () => {
+    let nextUrl = 0;
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => `blob:part-${++nextUrl}`),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const first = Promise.withResolvers<Array<{ name: string; mimeType: string; bytes: Uint8Array<ArrayBuffer> }>>();
+    const second = Promise.withResolvers<Array<{ name: string; mimeType: string; bytes: Uint8Array<ArrayBuffer> }>>();
+    const exportImage = vi.fn(async (job: { sourcePath: string }) =>
+      job.sourcePath === 'src/main.ts' ? first.promise : second.promise,
+    );
+    mocks.imageService = { export: exportImage };
+    const main = {
+      ...createNode(firstComponentId, 'main_part'),
+      primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+    };
+    const helper = {
+      ...createNode(secondComponentId, 'helper_part'),
+      primitiveRefs: [{ nodeIndex: 1, meshIndex: 1, primitiveIndex: 0 }],
+    };
+    const mainRef = createGraphicsRefForUnit('src/main.ts', [main], {
+      selectedComponentIds: [firstComponentId],
+      previewGeometry: { hash: 'main-glb', content: new Uint8Array([1]) },
+    });
+    const helperRef = createGraphicsRefForUnit('src/helper.ts', [helper], {
+      selectedComponentIds: [secondComponentId],
+      previewGeometry: { hash: 'helper-glb', content: new Uint8Array([2]) },
+    });
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts', 'src/helper.ts'],
+      viewSettings: {
+        mainView: { entryPath: 'src/main.ts' },
+        helperView: { entryPath: 'src/helper.ts' },
+      },
+      viewGraphics: new Map([
+        ['mainView', mainRef],
+        ['helperView', helperRef],
+      ]),
+    });
+    renderExplorerTree();
+    await waitFor(() => {
+      expect(exportImage).toHaveBeenCalledTimes(2);
+    });
+    const properties = screen.getByTestId('model-pane-properties');
+    expect(properties).toHaveTextContent('helper_part');
+    await act(async () => {
+      second.resolve([{ name: 'render-part-0.webp', mimeType: 'image/webp', bytes: new Uint8Array([2]) }]);
+    });
+    await waitFor(() => {
+      expect(properties.querySelector('[data-slot="part-properties"] img')).toBeTruthy();
+    });
+    const selectedSource = properties.querySelector('[data-slot="part-properties"] img')?.getAttribute('src');
+    await act(async () => {
+      first.resolve([{ name: 'render-part-0.webp', mimeType: 'image/webp', bytes: new Uint8Array([1]) }]);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('model-pane-src/main.ts').querySelector('img')).toBeTruthy();
+    });
+    expect(properties.querySelector('[data-slot="part-properties"] img')?.getAttribute('src')).toBe(selectedSource);
+  });
+
   it('keeps a restored hidden viewer file in the model list before its CAD unit starts', () => {
     mockProjectForExplorer({
       mainEntryPath: 'src/main.ts',
@@ -356,7 +581,9 @@ describe('ChatExplorerTree', () => {
     expect(screen.getByTestId('model-pane-src/main.ts')).toHaveAttribute('data-expanded', 'true');
     expect(screen.getByTestId('model-pane-src/helper.ts')).toHaveAttribute('data-expanded', 'true');
     expect(screen.getByTestId('model-pane-src/main.ts')).toHaveAttribute('data-size', '200');
-    expect(screen.getByTestId('model-pane-src/main.ts')).toHaveAttribute('data-minimum-body-size', '80');
+    expect(screen.getByTestId('model-pane-src/main.ts')).toHaveAttribute('data-minimum-body-size', '144');
+    expect(screen.getByTestId('model-pane-properties')).toHaveAttribute('data-size', '392');
+    expect(screen.getByText('No part selected')).toBeVisible();
     expect(screen.getByText('main_part')).toBeInTheDocument();
     expect(screen.getByText('helper_part')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Show search' })).not.toBeInTheDocument();
@@ -366,6 +593,7 @@ describe('ChatExplorerTree', () => {
 
     expect(screen.queryByText('main_part')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'helper_part' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'helper_part' }).tabIndex).toBe(0);
     expect(screen.getByText('helper')).toHaveAttribute('data-slot', 'highlight');
     expect(screen.getByText('No matching parts').closest('[data-slot="panel-empty-state"]')).toBeTruthy();
 
@@ -426,7 +654,7 @@ describe('ChatExplorerTree', () => {
       });
 
       await waitFor(() => {
-        expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+        expect(screen.getByRole('button', { name: 'helper_part' })).toHaveFocus();
       });
       expect(setIsExpanded).toHaveBeenCalledWith(true);
       expect(screen.getByRole('searchbox', { name: 'Filter parts' })).toHaveValue('');
@@ -434,6 +662,8 @@ describe('ChatExplorerTree', () => {
       const rowButton = screen.getByRole('button', { name: 'helper_part' });
       const row = rowButton.parentElement;
       expect(rowButton).toHaveAttribute('aria-pressed', 'true');
+      expect(rowButton.tabIndex).toBe(0);
+      expect(rowButton).toHaveFocus();
       expect(row).toHaveAttribute('data-model-component-row');
       expect(row).toHaveAttribute('data-model-component-unit-id', helperUnitId);
       expect(row).toHaveAttribute('data-model-component-id', secondComponentId);
@@ -441,6 +671,116 @@ describe('ChatExplorerTree', () => {
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     }
+  });
+
+  it('should keep one visible part Tab stop when filtering out the selected row', async () => {
+    const user = userEvent.setup();
+    const first = createNode(firstComponentId, 'planetary_housing');
+    const second = createNode(secondComponentId, 'sun_gear_assembly');
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([
+        [
+          'mainView',
+          createGraphicsRefForUnit('src/main.ts', [first, second], { selectedComponentIds: [firstComponentId] }),
+        ],
+      ]),
+    });
+
+    renderExplorerTree();
+    expect(screen.getByRole('button', { name: 'planetary_housing' }).tabIndex).toBe(0);
+    await user.type(screen.getByRole('searchbox', { name: 'Filter parts' }), 'sun');
+    const visible = screen.getByRole('button', { name: 'sun_gear_assembly' });
+    expect(visible.tabIndex).toBe(0);
+    act(() => {
+      visible.focus();
+    });
+    expect(visible).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Actions for sun_gear_assembly' }).tabIndex).toBe(-1);
+  });
+
+  it('should move the single part Tab stop with arrows, Home, and End', async () => {
+    const user = userEvent.setup();
+    const first = createNode(firstComponentId, 'planetary_housing');
+    const second = createNode(secondComponentId, 'sun_gear_assembly');
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([['mainView', createGraphicsRefForUnit('src/main.ts', [first, second])]]),
+    });
+
+    renderExplorerTree();
+    const firstButton = screen.getByRole('button', { name: 'planetary_housing' });
+    const secondButton = screen.getByRole('button', { name: 'sun_gear_assembly' });
+    act(() => {
+      firstButton.focus();
+    });
+    expect(firstButton.tabIndex).toBe(0);
+    await user.keyboard('{ArrowDown}');
+    expect(secondButton).toHaveFocus();
+    expect(secondButton.tabIndex).toBe(0);
+    expect(firstButton.tabIndex).toBe(-1);
+    await user.keyboard('{Home}');
+    expect(firstButton).toHaveFocus();
+    await user.keyboard('{End}');
+    expect(secondButton).toHaveFocus();
+    await user.keyboard('{ArrowUp}');
+    expect(firstButton).toHaveFocus();
+  });
+
+  it('should find a part by its indexed source material name', async () => {
+    const user = userEvent.setup();
+    const namedMaterial = createNode(firstComponentId, 'housing', {
+      // oxlint-disable-next-line tau-lint/no-hardcoded-color -- GLB material color is source fixture data.
+      materials: [{ materialIndex: 3, name: 'Brushed steel', color: '#aabbcc' }],
+    });
+    const other = createNode(secondComponentId, 'sun_gear');
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([['mainView', createGraphicsRefForUnit('src/main.ts', [namedMaterial, other])]]),
+    });
+
+    renderExplorerTree();
+    await user.type(screen.getByRole('searchbox', { name: 'Filter parts' }), 'brushed');
+    expect(screen.getByRole('button', { name: 'housing' })).toBeInTheDocument();
+    expect(screen.getByText('· Brushed steel')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'sun_gear' })).not.toBeInTheDocument();
+  });
+
+  it('should clear Properties when its selected model unit closes', async () => {
+    const selected = createNode(firstComponentId, 'housing');
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([
+        ['mainView', createGraphicsRefForUnit('src/main.ts', [selected], { selectedComponentIds: [firstComponentId] })],
+      ]),
+    });
+    const view = renderExplorerTree();
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Physical facts' })).toBeVisible();
+    });
+
+    mockProjectForExplorer({
+      mainEntryPath: 'src/other.ts',
+      geometryUnitFiles: ['src/other.ts'],
+      viewSettings: { otherView: { entryPath: 'src/other.ts' } },
+      viewGraphics: new Map([
+        ['otherView', createGraphicsRefForUnit('src/other.ts', [createNode(secondComponentId, 'gear')])],
+      ]),
+    });
+    view.rerender(
+      <TooltipProvider>
+        <ChatExplorerTree isExpanded />
+      </TooltipProvider>,
+    );
+    expect(screen.getByText('No part selected')).toBeVisible();
   });
 
   it('should open requested unavailable renderer sections', async () => {
@@ -653,7 +993,7 @@ describe('Chat explorer component rows', () => {
 
     expect(screen.getByRole('button', { name: 'planetary_housing' })).toHaveAttribute('aria-pressed', 'true');
     expect(selectedRow).toHaveClass('bg-primary/10');
-    expect(selectedRow).toHaveClass('text-primary');
+    expect(selectedRow).toHaveClass('text-foreground');
     expect(focusedRow).not.toHaveClass('bg-primary/10');
     expect(focusedRow).toHaveClass('bg-sidebar-accent/70');
     expect(isolatedRow).not.toHaveClass('bg-primary/10');
@@ -890,8 +1230,39 @@ describe('Chat explorer component rows', () => {
       </TooltipProvider>,
     );
 
-    expect(screen.getByRole('button', { name: 'Remove isolation for planetary_housing' }).tabIndex).toBe(0);
-    expect(screen.getByRole('button', { name: 'Isolate sun_gear_assembly' }).tabIndex).toBe(0);
+    expect(screen.getByRole('button', { name: 'Remove isolation for planetary_housing' }).tabIndex).toBe(-1);
+    expect(screen.getByRole('button', { name: 'Isolate sun_gear_assembly' }).tabIndex).toBe(-1);
+  });
+
+  it('should place the keyboard context menu beside its focused part', () => {
+    const node = createNode(firstComponentId, 'planetary_housing');
+    const manifest = createManifest([node]);
+    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
+    renderComponentRow({
+      manifest,
+      node,
+      graphicsRef,
+      unitId,
+      rootDepth: 0,
+      hoveredComponentId: undefined,
+      isSelected: false,
+      isHidden: false,
+      isIsolated: false,
+      isFocused: false,
+      opacity: 1,
+    });
+    const button = screen.getByRole('button', { name: 'planetary_housing' });
+    const row = button.closest('[data-model-component-row]');
+    if (!row) {
+      throw new Error('Part row missing');
+    }
+    const contextMenu = vi.fn();
+    row.addEventListener('contextmenu', contextMenu);
+    vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ left: 40, width: 120, bottom: 72 } as DOMRect);
+
+    fireEvent.keyDown(button, { key: 'F10', shiftKey: true });
+    expect(contextMenu).toHaveBeenCalledOnce();
+    expect(contextMenu.mock.calls[0]?.[0]).toMatchObject({ clientX: 100, clientY: 72 });
   });
 
   it('should toggle isolation from the first-class target button', async () => {
@@ -951,5 +1322,21 @@ describe('Chat explorer component rows', () => {
       unitId,
       source: 'explorer',
     });
+  });
+});
+
+describe('shared preview model binding', () => {
+  it('should show live components without editor view records', () => {
+    mockProjectForExplorer({
+      mainEntryPath: unitId,
+      geometryUnitFiles: [unitId],
+      viewSettings: {},
+      viewEntryPaths: new Map([['preview', unitId]]),
+      viewGraphics: new Map([
+        ['preview', createGraphicsRefForUnit(unitId, [createNode('preview-part', 'Preview part')])],
+      ]),
+    });
+    renderExplorerTree();
+    expect(screen.getByText('Preview part')).toBeInTheDocument();
   });
 });

@@ -74,8 +74,10 @@ HasRun(r)     == r \in DOMAIN lifecycle
 AttemptOf(r)  == IF r \in DOMAIN att THEN att[r] ELSE 0
 CodeOf(r)     == IF r \in DOMAIN code THEN code[r] ELSE ""
 SettledNow(r) == <<r, AttemptOf(r)>> \in settled
+\* External user markers commit on admission; USER_STOPPED is emitted only after the owner saw the commit.
 Reopenable(r) ==
   \/ lifecycle[r] = "failed" /\ CodeOf(r) \in ReopenCodes
+  \/ lifecycle[r] = "cancelled" /\ CodeOf(r) = "USER_STOPPED"
   \/ lifecycle[r] = "paused" /\ ~\E p \in pending : p[1] = r
 
 (* CL-R9: a `running` row opens the next attempt (`reopens`), settled or not (ChatRunSlot's Att(T)+1; W7.r1). *)
@@ -196,7 +198,7 @@ Write(e) ==
               [] Reopens(e)                            -> (e.runId :> AttemptOf(e.runId) + 1) @@ att
               [] OTHER                                 -> att
   /\ code' = IF ~IsLifecycle(e) THEN code
-             ELSE (e.runId :> IF e.state = "failed" /\ Has(e, "detail") /\ Has(e.detail, "code")
+             ELSE (e.runId :> IF e.state \in {"failed", "cancelled"} /\ Has(e, "detail") /\ Has(e.detail, "code")
                               THEN e.detail.code ELSE "") @@ code
   /\ settled' = IF IsSettlement(e) THEN settled \cup {<<e.runId, SettlementAttempt(e)>>} ELSE settled
   /\ current' = IF IsLifecycle(e) THEN e.runId ELSE current

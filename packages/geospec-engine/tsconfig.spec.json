@@ -141,6 +141,7 @@
     "src/inspection/inspect.test.ts",
     "src/model/load-model.ts",
     "src/model/load-model.test.ts",
+    "src/model/cylindrical-axis-center.test.ts",
     "src/matchers/support.ts",
     "src/matchers/types.ts",
     "src/matchers/mesh-matchers.ts",

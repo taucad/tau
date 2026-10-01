@@ -38,6 +38,12 @@ export type { EdgeDetectionResult } from '#utils/edge-detection.js';
 export { embedGltfResources } from '#utils/gltf-embed.js';
 export { normalizeGltfGeometryNames } from '#utils/gltf-geometry-name-normalizer.js';
 export { transformGltfExportBytes } from '#utils/gltf-export-transform.js';
+export { readMechanismExport, toMechanismKernelIssue } from '#utils/mechanism-export.js';
+export type {
+  ReadMechanismExportInput,
+  ReadMechanismExportOutcome,
+  ToMechanismKernelIssueInput,
+} from '#utils/mechanism-export.js';
 
 // Import staging
 export { createImportFileInventory } from '#import-file-inventory.js';
@@ -56,7 +62,7 @@ export {
 } from '#utils/glb-writer.js';
 export type { GlbInput, GlbManifoldTopology, GlbMaterial, GlbNode, GlbPrimitive } from '#utils/glb-writer.js';
 export type { GlbImage, GlbResources } from '#utils/glb-material.js';
-export { validateGlbResources } from '#utils/glb-material.js';
+export { validateGlbMaterial, validateGlbResources } from '#utils/glb-material.js';
 
 // Names
 export {

@@ -458,7 +458,7 @@ describe('PostProcessingWebGL shared composer and retained camera AO passes', ()
     mocks.getRestoreDepth()?.();
 
     expect(mocks.setRenderTarget).toHaveBeenNthCalledWith(1, null);
-    expect(mocks.clearDepth).toHaveBeenCalledOnce();
+    expect(mocks.clearDepth).not.toHaveBeenCalled();
     expect(mocks.glRender).toHaveBeenCalledOnce();
     expect(mocks.glRender.mock.calls[0]![0]).toEqual({ kind: 'fullscreen-scene' });
     expect(mocks.glRender).not.toHaveBeenCalledWith(mocks.scene, expect.anything());

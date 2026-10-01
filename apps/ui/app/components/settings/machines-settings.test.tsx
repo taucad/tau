@@ -11,6 +11,7 @@ import type {
   MachineDirectoryEntry,
   MachineDirectorySnapshot,
 } from '@taucad/runtime/machine';
+import { bambuA1MiniMachine } from '@taucad/bambu';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import {
   boundEntry,
@@ -120,6 +121,7 @@ describe('MachinesSettings', () => {
         'Printers set up here are available in every project on this computer. Their access codes are kept in your Keychain.',
       ),
     ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Simulated X1C' }));
     const add = screen.getByRole('button', { name: 'Add simulated X1C' });
     await waitFor(() => {
       expect(add).toBeEnabled();
@@ -147,6 +149,7 @@ describe('MachinesSettings', () => {
     const facet = facetWith([]);
     state.facet = facet;
     renderSettings();
+    fireEvent.click(screen.getByRole('button', { name: 'Simulated X1C' }));
     const simulator = screen.getByRole('region', { name: 'Simulated X1C' });
     expect(simulator).toHaveTextContent('Its settings only change the simulation; they are not printer settings.');
     const speed = await within(simulator).findByRole('spinbutton', { name: 'Input for Demo Speed' });
@@ -184,6 +187,10 @@ describe('MachinesSettings', () => {
     const facet = facetWith([]);
     state.facet = facet;
     renderSettings();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Enter address' })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Enter address' }));
     const bind = screen.getByRole('button', { name: 'Bind' });
     await waitFor(() => {
       expect(bind).toBeEnabled();
@@ -200,7 +207,7 @@ describe('MachinesSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Hide password' }));
     expect(accessCode).toHaveAttribute('type', 'password');
 
-    fireEvent.submit(screen.getByRole('form', { name: 'Bind a Bambu Lab X1C' }));
+    fireEvent.submit(screen.getByRole('form', { name: 'Connect a Bambu Lab printer' }));
 
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent('shop-x1c is bound as bambu:sim.');
@@ -239,7 +246,7 @@ describe('MachinesSettings', () => {
 
     fireEvent.click(find);
 
-    const office = await screen.findByRole('button', { name: 'Office X1C · 192.168.0.113' });
+    const office = await screen.findByRole('button', { name: 'Office X1C X1C · 192.168.0.113' });
     expect(screen.getAllByRole('button', { name: /X1C · 192\.168/u })).toHaveLength(2);
     /* Broadcast discovery: no address, nothing sent to a printer. */
     expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
@@ -252,11 +259,12 @@ describe('MachinesSettings', () => {
 
     expect(bindingField('Name')).toHaveValue('Office X1C');
     expect(bindingField('Address')).toHaveValue('192.168.0.113');
-    expect(bindingField('Serial (optional)')).toHaveValue('00M2');
+    fireEvent.click(screen.getByRole('button', { name: 'Printer details' }));
+    expect(await screen.findByRole('textbox', { name: /^Input for Serial/u })).toHaveValue('00M2');
     expect(screen.getByLabelText('Access code')).toHaveFocus();
   });
 
-  it('should fill the form from the first printer heard while the pass keeps listening, with Bind usable', async () => {
+  it('should let the operator choose the first printer while listening without overwriting edits', async () => {
     const facet = facetWith([]);
     const { promise: passEnds, resolve: endPass } = Promise.withResolvers<void>();
     facet.discover.mockImplementation(async function* () {
@@ -281,6 +289,7 @@ describe('MachinesSettings', () => {
 
     fireEvent.click(find);
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Workshop X1C X1C · 192.168.0.112' }));
     await waitFor(() => {
       expect(bindingField('Address')).toHaveValue('192.168.0.112');
     });
@@ -294,6 +303,52 @@ describe('MachinesSettings', () => {
       expect(find).toBeEnabled();
     });
     expect(screen.getByRole('status')).toHaveTextContent('');
+  });
+
+  it('should bind Mini through its provider without a later scan replacing its identity or typed code', async () => {
+    const facet = facetWith([]);
+    facet.listProviders.mockResolvedValue([x1cProvider, bambuA1MiniMachine(), simulatorProvider]);
+    const mini: MachineCandidate = {
+      ...savedCandidate,
+      id: 'bambu-a1-mini:0300EA652800550',
+      name: 'Mini',
+      endpoint: { address: '192.0.2.145', interface: 'udp4' },
+      claimedIdentity: { model: 'A1 mini', serial: '0300EA652800550' },
+      credential: undefined,
+    };
+    facet.discover.mockImplementation(async function* ({ providerId }) {
+      yield { type: 'found', candidate: providerId === 'bambu-a1-mini' ? mini : savedCandidate };
+    });
+    state.facet = facet;
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Find on network' })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Find on network' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Mini A1 mini · 192.0.2.145' }));
+    expect(screen.getByRole('combobox', { name: 'Printer model' })).toHaveValue('bambu-a1-mini');
+    await screen.findByRole('textbox', { name: 'Input for Name' });
+    expect(document.querySelector('form form')).toBeNull();
+    fireEvent.change(bindingField('Name'), { target: { value: 'My Mini' } });
+    const accessCode = screen.getByLabelText('Access code');
+    fireEvent.change(accessCode, { target: { value: '12345678' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Find on network' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Find on network' })).toBeEnabled();
+    });
+    expect(bindingField('Name')).toHaveValue('My Mini');
+    expect(accessCode).toHaveValue('12345678');
+    fireEvent.submit(screen.getByRole('form', { name: 'Connect a Bambu Lab printer' }));
+    await waitFor(() => {
+      expect(facet.beginBinding).toHaveBeenCalledWith({ candidate: mini, name: 'My Mini' });
+    });
+    expect(facet.discover).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        providerId: 'bambu-a1-mini',
+        configuration: { logicalId: 'My Mini', address: '192.0.2.145', serial: '0300EA652800550' },
+      }),
+    );
+    expect(accessCode).toHaveValue('');
   });
 
   it('should list bound machines as one line each, marking the simulator, and explain a missing facet', async () => {
@@ -387,11 +442,16 @@ describe('MachinesSettings', () => {
       await waitFor(() => {
         expect(find).toBeEnabled();
       });
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: `${heard.name} ${heard.claimedIdentity.model} · ${heard.endpoint.address}`,
+        }),
+      );
       await screen.findByRole('textbox', { name: 'Input for Name' });
       return facet;
     };
     const submit = (): void => {
-      fireEvent.submit(screen.getByRole('form', { name: 'Bind a Bambu Lab X1C' }));
+      fireEvent.submit(screen.getByRole('form', { name: 'Connect a Bambu Lab printer' }));
     };
 
     it('should bind a printer whose code is saved without asking for one', async () => {
@@ -401,8 +461,9 @@ describe('MachinesSettings', () => {
       expect(code).toHaveTextContent('Saved in your Keychain');
       /* The only thing named "Access code" is that line: no field asks for the code. */
       expect(screen.getByLabelText('Access code')).toBe(code);
-      expect(bindingField('Serial (optional)')).toHaveValue('00M1');
-      expect(screen.getByRole('button', { name: 'Bind' })).toHaveFocus();
+      fireEvent.click(screen.getByRole('button', { name: 'Printer details' }));
+      expect(await screen.findByRole('textbox', { name: /^Input for Serial/u })).toHaveValue('00M1');
+      expect(screen.getByRole('button', { name: 'Bind' })).toBeEnabled();
 
       submit();
 
@@ -421,6 +482,10 @@ describe('MachinesSettings', () => {
       const facet = facetWith([]);
       state.facet = facet;
       renderSettings();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Enter address' })).toBeEnabled();
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Enter address' }));
       const bind = screen.getByRole('button', { name: 'Bind' });
       await waitFor(() => {
         expect(bind).toBeEnabled();
@@ -463,7 +528,7 @@ describe('MachinesSettings', () => {
         address: '192.168.0.112',
         accessCode: '87654321',
       });
-      expect(screen.getByLabelText('Access code')).toHaveValue('');
+      expect(accessCode).toHaveValue('');
     });
 
     it("should explain a changed certificate from the shell's refusal and ask for the code again", async () => {

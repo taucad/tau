@@ -3,6 +3,14 @@ import { appendHostObservationCopies, observeHostCopy, ProtocolError } from '#ho
 import type { HostBytes, HostCopyObservations } from '#host-types.js';
 
 const decoder = new TextDecoder('utf-8', { fatal: true });
+const candidateControlPrefix = new TextEncoder().encode('{"_tauNativeExactClusterCandidateV1":');
+
+function isPrivateCandidateControl(request: HostBytes): boolean {
+  return (
+    request.length >= candidateControlPrefix.length &&
+    candidateControlPrefix.every((byte, index) => request[index] === byte)
+  );
+}
 
 /** Input accepted by the compiled Emscripten module. @public */
 export type WasmInput =
@@ -60,6 +68,11 @@ type MixedWasmModule = {
   _geospec_engine_native_subject_handle(engine: number, request: number, requestLength: number): number;
   _geospec_engine_native_release_subject(engine: number, request: number, requestLength: number): number;
   _geospec_engine_native_process_request(engine: number, request: number, requestLength: number): number;
+  _geospec_engine_native_exact_cluster_candidate_control(
+    engine: number,
+    request: number,
+    requestLength: number,
+  ): number;
   _geospec_engine_native_canonical_plan(engine: number, request: number, requestLength: number): number;
   _geospec_engine_native_evaluate_plan(engine: number, plan: number, planLength: number): number;
   _geospec_engine_native_evaluate_claim(engine: number, request: number, requestLength: number): number;
@@ -437,9 +450,11 @@ export class MixedWasmBinding {
   readonly #module: MixedWasmModule;
   readonly #copies = { exact: true, inputCopies: 0n, inputBytes: 0n, outputCopies: 0n, outputBytes: 0n };
   #engine: number;
+  readonly #privateCandidateControls: boolean;
 
   public constructor(execution?: WasmExecution) {
     this.#module = initializedModule(execution);
+    this.#privateCandidateControls = execution?.variant !== 'mt';
     this.#engine =
       execution?.variant === 'mt'
         ? (this.#module._geospec_engine_native_engine_new_with_execution_permits?.(execution.permits) ?? 0)
@@ -592,7 +607,9 @@ export class MixedWasmBinding {
    */
   public processRequest(request: HostBytes): HostBytes {
     return withInput(this.#module, { bytes: request, copies: this.#copies }, (pointer, length) =>
-      this.#module._geospec_engine_native_process_request(this.engine(), pointer, length),
+      this.#privateCandidateControls && isPrivateCandidateControl(request)
+        ? this.#module._geospec_engine_native_exact_cluster_candidate_control(this.engine(), pointer, length)
+        : this.#module._geospec_engine_native_process_request(this.engine(), pointer, length),
     );
   }
 

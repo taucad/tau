@@ -222,6 +222,47 @@ const arraysEqual = (left: Float32Array | undefined, right: Float32Array | undef
   (left?.length === right?.length && left?.every((value, index) => value === right?.[index]) === true);
 
 /**
+ * Validate component identities once for both binary and JSON output.
+ *
+ * @param json - Emitted glTF objects and their component references.
+ */
+const validateComponentIds = (json: GltfJson): void => {
+  const names = new Set([
+    ...json.nodes.map((node) => node.name),
+    ...json.meshes.map((mesh) => mesh.name),
+    ...json.materials.map((material) => material.name),
+    ...(json.images?.map((image) => image.name) ?? []),
+    ...(json.textures?.map((texture) => texture.name) ?? []),
+    ...(json.samplers?.map((sampler) => sampler.name) ?? []),
+  ]);
+  const owners = new Map<string, number>();
+  for (const [nodeIndex, node] of json.nodes.entries()) {
+    // Primitive extras reference components; surface and edge references may repeat the node's ID.
+    const ids = new Set([
+      node.extras?.['tauComponentId'],
+      ...json.meshes[node.mesh]!.primitives.map((primitive) => primitive.extras?.['tauComponentId']),
+    ]);
+    for (const id of ids) {
+      if (id === undefined) {
+        continue;
+      }
+      // Tau's existing ASCII namespace is provisional: glTF 2.1 has not fixed its UID character set.
+      if (typeof id !== 'string' || id.length === 0 || /[^\w:-]/.test(id)) {
+        throw new TypeError(`Invalid tauComponentId at node ${nodeIndex}: expected ASCII letters, digits, _, : or -`);
+      }
+      const owner = owners.get(id);
+      if (owner !== undefined) {
+        throw new TypeError(`Duplicate tauComponentId ${id} at nodes ${owner} and ${nodeIndex}`);
+      }
+      if (names.has(id)) {
+        throw new TypeError(`tauComponentId ${id} at node ${nodeIndex} collides with a glTF name`);
+      }
+      owners.set(id, nodeIndex);
+    }
+  }
+};
+
+/**
  * The indices a manifold node's primitive contributes to the shared render stream.
  *
  * The manifold extension needs one contiguous index buffer covering every primitive, so a
@@ -705,6 +746,8 @@ function buildGltf(input: GlbInput): GltfLayout {
     json.extensionsRequired = [...new Set([...(json.extensionsRequired ?? []), 'EXT_texture_webp'])];
   }
 
+  validateComponentIds(json);
+
   return {
     json,
     binByteLength: totalBinSize,
@@ -728,6 +771,7 @@ function buildGltf(input: GlbInput): GltfLayout {
  *
  * @param input - scene description with nodes, primitives, and materials
  * @returns the GLB binary as a Uint8Array
+ * @throws {TypeError} If component IDs contain unsupported characters, span multiple nodes or collide with names.
  *
  * @public
  */
@@ -780,6 +824,7 @@ export function writeGlb(input: GlbInput): Uint8Array<ArrayBuffer> {
  *
  * @param input - scene description with nodes, primitives, and materials
  * @returns the glTF JSON as a UTF-8 encoded Uint8Array
+ * @throws {TypeError} If component IDs contain unsupported characters, span multiple nodes or collide with names.
  *
  * @public
  */

@@ -1,5 +1,5 @@
 /* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- The CAD canvas needs focus for scoped viewer shortcuts; a button role would misrepresent a drawing surface. */
-import { memo, useEffect, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { FileEntry } from '@taucad/types';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { Evaluation, Rendering, RuntimeDocument } from '@taucad/runtime';
@@ -10,6 +10,9 @@ import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
 import { RuntimeErrorOverlay } from '#components/model-viewer.js';
 import type { ModelComponentActionMenuData } from '#components/geometry/cad/model-component-action-menu.js';
 import { ViewerModelComponentActionMenu } from '#components/geometry/cad/viewer-model-component-action-menu.js';
+import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
+import { canonicalPartPreviews, sourceGlbDigest } from '#services/part-thumbnail-visual.js';
+import type { PartThumbnailState } from '#services/part-thumbnail.service.js';
 import type { ModelComponentSecondaryPointerTarget } from '#components/geometry/graphics/three/react/gltf-mesh.js';
 import { FileSelector } from '#components/files/file-selector.js';
 import { Button } from '@taucad/ui/components/button';
@@ -59,6 +62,8 @@ import type {
   ViewerSecondaryGesturePoint,
   ViewerSecondaryGestureState,
 } from '#routes/w.$workspace.$project/chat-viewer-secondary-gesture.js';
+
+const emptyViewerPreviewSnapshot: ReadonlyMap<string, PartThumbnailState> = new Map();
 
 const componentNameBadgeRightEdgeThresholdPx = 220;
 /** Within this distance of the bottom controls' top edge the badge flips above the pointer. */
@@ -365,13 +370,15 @@ export const ChatViewer = memo(function ({
       }
       graphicsActor?.send({ type: 'cancelCurrentMeasurement' });
 
-      void viewCommands.edit(viewId, (current) => ({
-        ...(current ?? newViewRecord(path)),
-        entryPath: path,
-        camera: { kind: 'preset', preset: 'isometric' },
-        section: { active: false, cuts: [] },
-        measurements: [],
-      }));
+      if (profile === 'editor') {
+        void viewCommands.edit(viewId, (current) => ({
+          ...(current ?? newViewRecord(path)),
+          entryPath: path,
+          camera: { kind: 'preset', preset: 'isometric' },
+          section: { active: false, cuts: [] },
+          measurements: [],
+        }));
+      }
       setViewEntryPath(viewId, path);
 
       // Update Dockview panel params so the component re-renders with new entryPath
@@ -390,6 +397,7 @@ export const ChatViewer = memo(function ({
       setViewEntryPath,
       viewCommands,
       viewRecord,
+      profile,
     ],
   );
 
@@ -608,6 +616,23 @@ const ViewerContent = memo(function ({
   const [viewerActionMenu, setViewerActionMenu] = useState<ViewerSecondaryGestureMenu | undefined>(undefined);
   const secondaryGestureRef = useRef<ViewerSecondaryGestureState>(idleViewerSecondaryGestureState);
   const modelInteractionUnitId = useMemo(() => deriveModelInteractionUnitId({ sourceFile: entryPath }), [entryPath]);
+  const thumbnails = useOptionalPartThumbnailService(modelInteractionUnitId);
+  const previewSourceDigests = useRef(new WeakMap<Uint8Array<ArrayBuffer>, Promise<string>>());
+  const [previewRetryRevision, setPreviewRetryRevision] = useState(0);
+  const manualPreviewRetry = useRef<string | undefined>(undefined);
+  const retryPreview = useCallback(() => {
+    manualPreviewRetry.current = viewerActionMenu?.target.componentId;
+    setPreviewRetryRevision((value) => value + 1);
+  }, [viewerActionMenu]);
+  const subscribePreviews = useCallback(
+    (listener: () => void) => thumbnails?.subscribe(listener) ?? (() => undefined),
+    [thumbnails],
+  );
+  const getPreviewSnapshot = useCallback(() => thumbnails?.snapshot() ?? emptyViewerPreviewSnapshot, [thumbnails]);
+  const previews = useSyncExternalStore(subscribePreviews, getPreviewSnapshot, getPreviewSnapshot);
+  const presentedArtifact = useGraphicsSelector((state) => state.context.artifact);
+  const presentedArtifactKey = useGraphicsSelector((state) => state.context.artifactKey);
+  const presentedKey = useGraphicsSelector((state) => state.context.gltfPresentation.presentedKey);
   const componentNameForPointer = useModelInteractionSelector((state) => {
     const unit = getModelInteractionUnitState(state.context, modelInteractionUnitId);
     const { hoveredComponentId } = unit;
@@ -650,6 +675,104 @@ const ViewerContent = memo(function ({
       opacity: unit.opacityByComponentId[viewerActionMenu.target.componentId] ?? 1,
     };
   });
+  const viewerPart =
+    viewerActionMenuData?.node.kind === 'part' && viewerActionMenuData.node.primitiveRefs?.length
+      ? viewerActionMenuData.node
+      : undefined;
+  useEffect(() => {
+    if (!thumbnails) {
+      return;
+    }
+    thumbnails.announcePresentedSource(presentedKey);
+    if (
+      !viewerActionMenu ||
+      !viewerPart ||
+      presentedArtifact?.mimeType !== 'model/gltf-binary' ||
+      presentedArtifactKey !== presentedKey
+    ) {
+      thumbnails.releaseOwner('viewer');
+      return;
+    }
+    let active = true;
+    const { content } = presentedArtifact;
+    const requestedPart = { id: viewerPart.id, primitives: viewerPart.primitiveRefs! };
+    if (content.byteLength > 64 * 1024 * 1024) {
+      thumbnails.failPreparationForOwner(
+        'viewer',
+        [requestedPart],
+        new RangeError('Part thumbnail source exceeds 64 MiB'),
+      );
+      return;
+    }
+    const manualPartId = manualPreviewRetry.current;
+    manualPreviewRetry.current = undefined;
+    let sourceDigest = previewSourceDigests.current.get(content);
+    if (!sourceDigest) {
+      sourceDigest = sourceGlbDigest(content);
+      previewSourceDigests.current.set(content, sourceDigest);
+    }
+    const prepare = async (): Promise<void> => {
+      try {
+        const [hash, prepared] = await Promise.all([
+          sourceDigest,
+          canonicalPartPreviews(content, [requestedPart.primitives]),
+        ]);
+        if (active) {
+          thumbnails.requestForOwner(
+            'viewer',
+            {
+              sourcePath: entryPath,
+              geometryHash: hash,
+              content,
+              renderContent: prepared.renderContent,
+            },
+            [{ ...requestedPart, visualKey: prepared.previews[0]?.key ?? prepared.visualKey }],
+            manualPartId ? { manualPartId } : undefined,
+          );
+        }
+      } catch (error) {
+        if (active) {
+          if (previewSourceDigests.current.get(content) === sourceDigest) {
+            previewSourceDigests.current.delete(content);
+          }
+          thumbnails.failPreparationForOwner('viewer', [requestedPart], error);
+        }
+      }
+    };
+    void prepare();
+    return () => {
+      active = false;
+    };
+  }, [
+    entryPath,
+    presentedArtifact,
+    presentedArtifactKey,
+    presentedKey,
+    previewRetryRevision,
+    thumbnails,
+    viewerActionMenu,
+    viewerPart,
+  ]);
+  useEffect(() => () => thumbnails?.releaseOwner('viewer'), [thumbnails]);
+  const viewerMenuWithPreview = viewerActionMenuData
+    ? {
+        ...viewerActionMenuData,
+        preview: previews.get(viewerActionMenuData.node.id),
+        onRetryPreview: retryPreview,
+        onPreviewDecodeError: () => {
+          const state = previews.get(viewerActionMenuData.node.id);
+          if (state?.bytes) {
+            thumbnails?.failDecode(viewerActionMenuData.node.id, state.bytes);
+          }
+        },
+        onPreviewDecoded: () => {
+          const state = previews.get(viewerActionMenuData.node.id);
+          if (state?.bytes) {
+            thumbnails?.markDecoded(viewerActionMenuData.node.id, state.bytes);
+          }
+        },
+      }
+    : undefined;
 
   // Pointer moves arrive at display rate, including throughout a camera orbit.
   // The hover badge is placed from custom properties written straight to the
@@ -774,7 +897,7 @@ const ViewerContent = memo(function ({
       ref={viewerLayoutRef}
       data-testid='chat-viewer-layout'
       data-viewer-frame
-      className='group/viewer @container/viewer relative flex h-full flex-col'
+      className='group/viewer fullscreen:bg-background @container/viewer relative flex h-full flex-col'
       onKeyDown={(event) => {
         if (
           event.altKey ||
@@ -888,7 +1011,7 @@ const ViewerContent = memo(function ({
       <ViewerModelComponentActionMenu
         isOpen={viewerActionMenu !== undefined}
         point={viewerActionMenu?.point}
-        data={viewerActionMenuData}
+        data={viewerMenuWithPreview}
         onOpenChange={handleViewerActionMenuOpenChange}
       />
 

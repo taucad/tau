@@ -35,6 +35,10 @@ export default defineBuild({
     WASM_BIGINT: true,
     ALLOW_MEMORY_GROWTH: true,
     INITIAL_MEMORY: '100MB',
+    // STEP spline edge healing exceeds Emscripten's 64 KiB default stack.
+    // Match the maintained Replicad stack and trap exhaustion before heap corruption.
+    STACK_SIZE: 8_388_608,
+    STACK_OVERFLOW_CHECK: 2,
     MAXIMUM_MEMORY: '4GB',
     // Emsdk 6.0.5 migration (opencascade.js 7734d9d): -sEXPORT_EXCEPTION_HANDLING_HELPERS
     // is replaced by exporting the three exception helpers directly, and the

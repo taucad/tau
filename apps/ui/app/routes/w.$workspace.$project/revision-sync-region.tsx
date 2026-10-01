@@ -104,6 +104,11 @@ export type RevisionSyncRegionProps = {
   // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors the persisted project manifest field `syncLargeExports`.
   readonly syncLargeExports: boolean;
   readonly onSyncLargeExportsChange: (enabled: boolean) => void;
+  /** Device-local, per-project consent. Never read from tau.json. */
+  readonly isSyncGeoSpecCandidates?: boolean;
+  readonly onSyncGeoSpecCandidatesChange?: (enabled: boolean) => void;
+  /** Desktop cannot enforce the browser candidate transfer ceiling. */
+  readonly isGeoSpecCandidateSharingUnavailable?: boolean;
   /**
    * Whether this account may back a project up at all (N4).
    *
@@ -465,6 +470,9 @@ export function RevisionSyncRegion({
   syncChats,
   onSyncChatsChange,
   syncLargeExports,
+  isSyncGeoSpecCandidates = false,
+  onSyncGeoSpecCandidatesChange,
+  isGeoSpecCandidateSharingUnavailable = false,
   onSyncLargeExportsChange,
   canSyncFiles = true,
   onUpgrade,
@@ -893,6 +901,19 @@ export function RevisionSyncRegion({
                               Sync exports
                             </DropdownMenuSwitchItem>
                           </>
+                        ) : null}
+                        {remote.kind !== 'none' && canManage && onSyncGeoSpecCandidatesChange ? (
+                          <DropdownMenuSwitchItem
+                            isChecked={isSyncGeoSpecCandidates}
+                            onIsCheckedChange={onSyncGeoSpecCandidatesChange}
+                          >
+                            Share derived GeoSpec geometry candidates separately from project files (this device)
+                          </DropdownMenuSwitchItem>
+                        ) : null}
+                        {remote.kind !== 'none' && canManage && isGeoSpecCandidateSharingUnavailable ? (
+                          <DropdownMenuLabel>
+                            GeoSpec candidate sharing is available in the browser only.
+                          </DropdownMenuLabel>
                         ) : null}
                         {canManage ? (
                           <>

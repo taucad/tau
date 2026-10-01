@@ -45,6 +45,8 @@
 (* changes vendor configuration only, so it stutters at this grain; a lend *)
 (* queued during that probe refines Acquire and starts after its answer.    *)
 (***************************************************************************)
+(* A deliberate stopped turn continues only after Prompt was issued and the same vendor session restores.
+   The implementation persists acpPromptedRequestId at settlement; fresh fallback has no continuation prompt. *)
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Keys, Runs, Limit, MaxProcs, ONE_RUN,

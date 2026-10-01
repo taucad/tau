@@ -1,3 +1,4 @@
+/* oxlint-disable typescript/no-unsafe-assignment -- Vitest asymmetric matchers are typed as any. */
 // @vitest-environment node
 import { createHash } from 'node:crypto';
 
@@ -233,6 +234,38 @@ describe('PicoGK kernel', () => {
     // The mirror reuses its own walk per operation id.
     expect(value.mirror.sync.mock.calls.map((call): unknown => call[2])).toEqual([1, 1, 1]);
     expect(requestedMethods(value.session.request)).toEqual(['resolve', 'analyze', 'build']);
+  });
+
+  it('preserves worker warnings and shared mechanism warnings alongside valid geometry', async () => {
+    const value = context();
+    value.session.request.mockResolvedValueOnce({
+      ...buildResult(),
+      warnings: [
+        {
+          message: 'Invalid authored mechanism; corrected properties can be retried',
+          code: 'CS_TAU_MECHANISM',
+          type: 'validation',
+          severity: 'warning',
+        },
+      ],
+      mechanism: { schemaVersion: 2 },
+    });
+    const result = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value);
+    expect(result.handle.glb).toBeInstanceOf(Uint8Array);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'INVALID_ANNOTATION',
+          severity: 'warning',
+          details: { producer: { kernelId: 'picogk' }, workerCode: 'CS_TAU_MECHANISM', workerType: 'validation' },
+        }),
+        expect.objectContaining({
+          code: 'INVALID_ANNOTATION',
+          severity: 'warning',
+          details: expect.objectContaining({ mechanism: expect.any(Object) }),
+        }),
+      ]),
+    );
   });
 
   it('returns parameters, canonical inline geometry, immutable handles, and GLB exports', async () => {

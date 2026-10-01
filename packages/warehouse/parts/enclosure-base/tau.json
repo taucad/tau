@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_YTXH0JhzAUdNWY_L6rKrV",
+  "name": "Enclosure base",
+  "description": "Uniform-wall open electronics enclosure base; external dimensions and wall are editable.",
+  "tags": [
+    "Enclosures",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

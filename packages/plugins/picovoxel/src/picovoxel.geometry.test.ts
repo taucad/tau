@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { transformNormalArray, transformVertexArray } from '@taucad/geometry-core';
-import type { GeometryOutputTransformOptions } from '@taucad/geometry-core';
+import type { GeometryOutputTransformOptions, TauCadTopologyRoot } from '@taucad/geometry-core';
 import { glbToDocument, readGltfNamingSummary } from '@taucad/runtime-testing';
 
 import { dropZeroAreaTriangles, picovoxelToGlb } from '#picovoxel.geometry.js';
@@ -167,6 +167,17 @@ describe('picovoxelToGlb', () => {
     expect(summary.materialNames).toEqual(['']);
   });
 
+  it('should preserve duplicate Unicode labels and leave every decoded geometry attribute unchanged', async () => {
+    const raw = { shapes: [createWeldedShape(8), createWeldedShape(10)] };
+    const named = { shapes: raw.shapes.map((shape) => ({ ...shape, name: '蓋 / Mesh 🧩' })) };
+    const bytes = picovoxelToGlb(named);
+    const summary = await readGltfNamingSummary(bytes);
+    expect(summary.nodeNames).toEqual(['蓋 / Mesh 🧩', '蓋 / Mesh 🧩']);
+    expect(summary.meshNames).toEqual(summary.nodeNames);
+    expect(summary.sceneNames).toEqual(['']);
+    expect(await readPrimitives(bytes)).toEqual(await readPrimitives(picovoxelToGlb(raw)));
+  });
+
   it('should write the canonical empty scene for an empty handle', async () => {
     const document = await glbToDocument(picovoxelToGlb({ shapes: [] }));
 
@@ -258,4 +269,51 @@ describe('dropZeroAreaTriangles (D36)', () => {
 
     expect(await normalsOf([...square, ...zeroArea])).toEqual(await normalsOf(square));
   });
+});
+
+it('should preserve canonical empty bytes with requested topology and drop invalid annotations without a diagnostic sink', async () => {
+  expect(picovoxelToGlb({ shapes: [] }, { includeTopology: true })).toEqual(picovoxelToGlb({ shapes: [] }));
+  const shape: PicovoxelShapeSnapshot = {
+    name: 'Base',
+    authoredName: 'Base',
+    vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+    triangles: new Uint32Array([0, 1, 2]),
+    lane: 'exact',
+  };
+  const document = await glbToDocument(picovoxelToGlb({ shapes: [shape], mechanism: 42 }, { includeTopology: true }));
+  expect(document.getRoot().listMeshes()[0]!.listPrimitives()[0]!.getIndices()!.getArray()).toEqual(
+    new Uint32Array([0, 1, 2]),
+  );
+});
+
+it('should preserve empty-scene bytes while reporting an annotation without any returned shapes', () => {
+  const warnings = vi.fn();
+  const bytes = picovoxelToGlb({ shapes: [], mechanism: 42 }, { includeTopology: true, onMechanismIssues: warnings });
+  expect(bytes).toEqual(picovoxelToGlb({ shapes: [] }));
+  expect(warnings).toHaveBeenCalledWith([expect.objectContaining({ severity: 'warning', code: 'INVALID_ANNOTATION' })]);
+});
+
+it('should bind reordered outputs by authored names while retaining unrelated geometry', async () => {
+  const handle = {
+    shapes: ['Lid', 'Unrelated', 'Base'].map((name) => ({ ...createWeldedShape(8), name, authoredName: name })),
+    mechanism: {
+      schemaVersion: 1,
+      units: { length: 'mm', angle: 'deg' },
+      root: 'base',
+      links: { base: { shapes: ['Base'] }, lid: { shapes: ['Lid'] } },
+      joints: { hinge: { type: 'revolute', parent: 'base', child: 'lid', origin: [0, 0, 0], axis: [0, 0, 1] } },
+    },
+  };
+  const document = await glbToDocument(picovoxelToGlb(handle, { includeTopology: true }));
+  const payload = document.getRoot().getExtension<TauCadTopologyRoot>('TAU_cad_topology')!.getPayload();
+  expect(payload['components']).toHaveLength(3);
+  expect(payload['mechanism']).toMatchObject({
+    links: { base: { components: ['component:node-2'] }, lid: { components: ['component:node-0'] } },
+  });
+  expect(
+    document
+      .getRoot()
+      .listNodes()
+      .map((node) => node.getExtras()['tauComponentId']),
+  ).toEqual(['component:node-0', 'component:node-1', 'component:node-2']);
 });

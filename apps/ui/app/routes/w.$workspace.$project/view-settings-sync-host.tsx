@@ -5,6 +5,7 @@ import type { WorkbenchView } from '@taucad/workbench';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
+import type { ViewRecordPatch } from '#workbench-records/view-store.js';
 import { digestBytes } from '#utils/crypto.utils.js';
 import type { ActorRefFrom } from 'xstate';
 import { useProject } from '#hooks/use-project.js';
@@ -65,21 +66,32 @@ function ViewSettingsSyncEntry({
   } = useProject();
   const { parameterFiles, subscribeWorkbenchRecord } = useFileManager();
   const root = `/projects/${projectId}`;
-  const [notice, setNotice] = useState<{ code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string }>();
+  const [notice, setNotice] = useState<{
+    code: 'INVALID_RECORD' | 'NEWER_RECORD';
+    message: string;
+  }>();
   const [ioError, setIoError] = useState<string>();
   const [, recordTick] = useState(0);
   const recordGenerationRef = useRef(0);
+  const [localRecordReceipt, setLocalRecordReceipt] = useState<{
+    record: WorkbenchView;
+    patch: ViewRecordPatch;
+  }>();
   const recordPath = workbenchPaths.view(viewId);
   // oxlint-disable-next-line react/refs -- The store invokes these callbacks after render.
   const store = useMemo(
     () =>
+      // oxlint-disable-next-line react/refs -- Store callbacks read generation after render, not during construction.
       createWorkbenchViewStore({
         root,
         viewId,
         files: parameterFiles,
         editDebounce: 500,
-        onChange: (state) => {
+        onChange: (state, _source, locallyAuthored) => {
           recordGenerationRef.current++;
+          setLocalRecordReceipt(
+            state.record && locallyAuthored ? { record: state.record, patch: locallyAuthored } : undefined,
+          );
           setAppliedWorkbenchRevision(recordPath, undefined);
           recordTick((value) => value + 1);
           if (state.refusal) {
@@ -170,6 +182,7 @@ function ViewSettingsSyncEntry({
     cadRef,
     editorRef,
     record,
+    recordLocalPatch: localRecordReceipt && localRecordReceipt.record === record ? localRecordReceipt.patch : undefined,
     writeRecord,
     onRecordApplied,
     recordReady: store.ready() && store.snapshot().refusal === undefined,
@@ -185,7 +198,11 @@ function ViewSettingsSyncEntry({
               type='button'
               onClick={() => {
                 const replacement =
-                  record ?? workbenchRecords.view.schema.parse({ version: 1, entryPath: entryPath ?? null });
+                  record ??
+                  workbenchRecords.view.schema.parse({
+                    version: 1,
+                    entryPath: entryPath ?? null,
+                  });
                 void store.reset(replacement);
               }}
             >

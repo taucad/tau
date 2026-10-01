@@ -23,7 +23,7 @@ import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { latestAcpSessionData } from '#services/agent-host-event-projection.js';
-import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 
 /**
  * Main chat textarea: one composer on every device (C11) — a phone gets the
@@ -202,7 +202,6 @@ export const ChatTextarea = memo(function ({
   /**
    * Resolve the per-view graphics actor whose pane currently shows `entryPath`.
    * Falls back to the main entry's pane when no specific entry is requested,
-   * and finally to the first registered view as a last resort.
    */
   const resolveGraphicsRefForEntry = useCallback(
     (entryPath: string | undefined): ActorRefFrom<typeof graphicsMachine> | undefined => {
@@ -210,19 +209,8 @@ export const ChatTextarea = memo(function ({
       if (!currentProjectContext) {
         return undefined;
       }
-      const { viewGraphics, viewRecords, mainEntryPath: mainEntry } = currentProjectContext;
-      const target = entryPath ?? mainEntry;
-
-      for (const [viewId, gRef] of viewGraphics) {
-        if (viewRecords.get(viewId)?.entryPath === target) {
-          return gRef;
-        }
-      }
-
-      if (entryPath === undefined) {
-        return viewGraphics.values().next().value;
-      }
-      return undefined;
+      const { viewGraphics, viewEntryPaths, mainEntryPath: mainEntry } = currentProjectContext;
+      return findEntryGraphics(viewGraphics, viewEntryPaths, entryPath ?? mainEntry);
     },
     [],
   );

@@ -340,3 +340,19 @@ describe('gateRows invocations', () => {
     expect(gateRows(open, rows.slice(5))).toMatchObject({ ok: false, code: 'INVOCATION_UNRESOLVED' });
   });
 });
+
+describe('intentional cancellation retention', () => {
+  it('should reopen a committed USER_STOPPED cancellation and retire its marker', () => {
+    const rows = term([
+      life('admitted'),
+      life('running'),
+      committed,
+      life('cancelled', { detail: { code: 'USER_STOPPED', message: 'Stopped.' } }),
+      settled('stop'),
+      life('running'),
+    ]);
+    const ledger = foldChatLedger(emptyChatLedger, rows);
+    expect(ledger.runs['run-1']).toMatchObject({ attempt: 2, lifecycle: 'running', appendState: 'open' });
+    expect(ledger.runs['run-1']?.failure).toBeUndefined();
+  });
+});

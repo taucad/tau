@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_u_e4rESStCH2yIUtF3DoT",
+  "name": "Socket set screw",
+  "description": "Socket set screw with editable millimetre dimensions and a deliberately symbolic thread.",
+  "tags": [
+    "Fasteners",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

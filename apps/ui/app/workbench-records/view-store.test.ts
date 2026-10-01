@@ -6,6 +6,7 @@ import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
+import type { ViewRecordPatch, ViewRecordState } from '#workbench-records/view-store.js';
 
 const encoder = new TextEncoder();
 const seed = (): WorkbenchView => workbenchRecords.view.schema.parse({ version: 1, entryPath: 'a.ts' });
@@ -72,6 +73,44 @@ const makeStore = (data: ReturnType<typeof memory>) =>
   });
 
 describe('workbench view checked store', () => {
+  it('classifies a watch of in-flight local write bytes as a local acknowledgement', async () => {
+    const data = memory();
+    const acknowledgement = Promise.withResolvers<void>();
+    const onChange = vi.fn<(state: ViewRecordState, source: 'read' | 'write', patch?: ViewRecordPatch) => void>();
+    const writeFileChecked = vi.fn(async ({ data: text }: { data: string }): Promise<CheckedFileWriteResult> => {
+      const content = encoder.encode(text);
+      data.setBytes(content);
+      await acknowledgement.promise;
+      return { status: 'applied', content };
+    });
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-abcd1234',
+      files: { ...data.files, writeFileChecked },
+      onChange,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    await store.read();
+    const edit = store.edit({
+      ...seed(),
+      name: 'Local',
+      camera: { kind: 'look', direction: [0, -1, 0] },
+    });
+    await vi.waitFor(() => {
+      expect(writeFileChecked).toHaveBeenCalledOnce();
+    });
+    await store.read();
+    expect(onChange.mock.lastCall?.[0].record?.name).toBe('Local');
+    expect(onChange.mock.lastCall?.[1]).toBe('write');
+    expect(onChange.mock.lastCall?.[2]?.camera).toEqual({ kind: 'look', direction: [0, -1, 0] });
+    acknowledgement.resolve();
+    expect(await edit).toBe(true);
+    expect(onChange).toHaveBeenCalledTimes(2);
+    store.dispose();
+  });
+
   it('persists a selected kernel view and its options through a stale checked-write conflict', async () => {
     const data = memory();
     const store = makeStore(data);
@@ -241,6 +280,33 @@ describe('workbench view checked store', () => {
     expect(result.status).toBe('current');
     if (result.status === 'current') {
       expect(result.record.kernelViews).toEqual([{ id: 'pcb', options: { layer: 'bottom' } }]);
+    }
+    store.dispose();
+  });
+
+  it('removes a saved constructor option without reading its inherited replacement', async () => {
+    const data = memory();
+    const base = workbenchRecords.view.schema.parse({
+      ...seed(),
+      kernelViews: [
+        {
+          id: 'schematic',
+          options: Object.fromEntries<string | number>([
+            ['constructor', 3],
+            ['sheet', 'main'],
+          ]),
+        },
+      ],
+    });
+    expect(base.kernelViews?.[0]?.options).toHaveProperty('constructor', 3);
+    data.set(base);
+    const store = makeStore(data);
+    await store.read();
+    expect(await store.edit({ ...base, kernelViews: [{ id: 'schematic', options: { sheet: 'main' } }] })).toBe(true);
+    const result = workbenchRecords.view.read(data.get()!);
+    expect(result.status).toBe('current');
+    if (result.status === 'current') {
+      expect(result.record.kernelViews).toEqual([{ id: 'schematic', options: { sheet: 'main' } }]);
     }
     store.dispose();
   });

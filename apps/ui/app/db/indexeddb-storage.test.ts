@@ -1,7 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import -- side-effect import polyfills IndexedDB for tests
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ProjectManifest } from '@taucad/types';
 import { projectToManifest } from '@taucad/types';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
@@ -492,6 +492,26 @@ describe('IndexedDbStorageProvider', () => {
 
       expect(await provider.trashProject(state.projectId, 10)).toEqual({ ...state, deletedAt: 10 });
       expect(await provider.restoreProject(state.projectId)).toEqual(state);
+    });
+
+    it('keeps GeoSpec candidate consent device-local and default-off', async () => {
+      vi.stubGlobal('navigator', {
+        ...navigator,
+        locks: { request: async (_name: string, work: () => Promise<unknown>) => work() },
+      });
+      const first = new IndexedDbStorageProvider();
+      const state = await freshProject(first);
+      const initial = await first.getProjectLibraryState(state.projectId);
+      expect(initial?.syncGeoSpecCandidates).not.toBe(true);
+
+      await first.setGeoSpecCandidateConsent(state.projectId, true);
+      const reopened = new IndexedDbStorageProvider();
+      const optedIn = await reopened.getProjectLibraryState(state.projectId);
+      expect(optedIn?.syncGeoSpecCandidates).toBe(true);
+      await reopened.setGeoSpecCandidateConsent(state.projectId, false);
+      const optedOut = await first.getProjectLibraryState(state.projectId);
+      expect(optedOut?.syncGeoSpecCandidates).toBe(false);
+      expect(await first.setGeoSpecCandidateConsent('proj_missing', true)).toBeUndefined();
     });
 
     it('returns undefined for field mutations on a missing row', async () => {

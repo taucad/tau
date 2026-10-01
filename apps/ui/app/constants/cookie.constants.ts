@@ -69,6 +69,8 @@ export const cookieName = {
   /* Community */
   // The last selected Community example page size.
   examplePageSize: 'example-page-size',
+  // The last selected Parts page size.
+  partPageSize: 'part-page-size',
 
   /* Console */
   // The last selected log level.

@@ -276,6 +276,8 @@ export type RevisionFetchInput = Readonly<{
    * process to its own transport timeouts (W13 review 2 P36).
    */
   signal?: AbortSignal;
+  /** Maximum aggregate response-body bytes accepted by this fetch. */
+  maximumTransferBytes?: number;
 }>;
 
 /** The remote-tracking refs one fetch wrote. @public */
@@ -599,6 +601,8 @@ export type RevisionPortErrorCode =
   | 'CHECKOUT_CONFLICT'
   | 'ENGINE_FAILED'
   | 'ENGINE_UNAVAILABLE'
+  /** A budgeted fetch exceeded its aggregate response-body ceiling. */
+  | 'FETCH_LIMIT_EXCEEDED'
   | 'INVALID_REPOSITORY'
   | 'INVALID_TRANSPORT'
   /**

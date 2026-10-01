@@ -1,0 +1,4 @@
+@import 'tailwindcss' source(none);
+@import 'tw-animate-css';
+@import '@taucad/ui/styles/tokens.css';
+@source '..';

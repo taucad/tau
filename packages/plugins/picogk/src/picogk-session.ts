@@ -92,6 +92,8 @@ export class PicogkSession {
       parseResponse,
       requestTimeout: options.requestTimeout,
       maxArtifactBytes: options.maxArtifactBytes,
+      // Full assembly descriptors include per-component PBR metadata; measured up to 1.85 MB.
+      maxProtocolLineBytes: 4 * 1024 * 1024,
       logger: options.logger,
       sessionName: 'PicoGK C#',
       executableName: 'PicoGK C# worker',

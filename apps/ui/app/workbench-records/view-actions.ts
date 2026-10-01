@@ -44,6 +44,28 @@ export async function editViewFile(
   }
 }
 
+/** Recreate a saved seed only while absent; a concurrent valid view keeps all its settings. */
+export async function ensureViewFile(
+  input: Readonly<{
+    root: string;
+    viewId: string;
+    files: ViewFiles;
+    seed: WorkbenchView;
+    eligible: () => boolean;
+    onError: (error: unknown) => void;
+  }>,
+): Promise<boolean> {
+  const store = createWorkbenchViewStore({ ...input, onChange: () => undefined });
+  try {
+    if (!(await store.read()) || store.snapshot().refusal) {
+      return false;
+    }
+    return await store.ensure(input.seed, input.eligible);
+  } finally {
+    store.dispose();
+  }
+}
+
 /** A person-closing a viewer deletes exactly the view bytes last observed. */
 export async function deleteViewFile(
   input: Readonly<{
@@ -87,7 +109,7 @@ export function useWorkbenchViewCommands(): Readonly<{
   remove: (viewId: string) => Promise<boolean>;
 }> {
   const { parameterFiles, workbenchFiles } = useFileManager();
-  const { projectId } = useProject();
+  const { projectId, profile } = useProject();
   const root = `/projects/${projectId}`;
   const files = useMemo(() => ({ ...parameterFiles, ...workbenchFiles }), [parameterFiles, workbenchFiles]);
   const onError = (error: unknown): void => {
@@ -95,9 +117,12 @@ export function useWorkbenchViewCommands(): Readonly<{
   };
   const edit = useCallback(
     async (viewId: string, change: (current: WorkbenchView | undefined) => WorkbenchView) =>
-      editViewFile({ root, viewId, files, change, onError }),
-    [files, root],
+      profile === 'shared' ? false : editViewFile({ root, viewId, files, change, onError }),
+    [files, root, profile],
   );
-  const remove = useCallback(async (viewId: string) => deleteViewFile({ root, viewId, files, onError }), [files, root]);
+  const remove = useCallback(
+    async (viewId: string) => (profile === 'shared' ? false : deleteViewFile({ root, viewId, files, onError })),
+    [files, root, profile],
+  );
   return useMemo(() => ({ edit, remove }), [edit, remove]);
 }

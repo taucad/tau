@@ -45,6 +45,7 @@
 #include <BVH_PairDistance.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
@@ -119,12 +120,14 @@
 #include <XCAFDoc_ShapeTool.hxx>
 #include <XSControl_TransferReader.hxx>
 #include <XSControl_WorkSession.hxx>
+#include <gp_Ax2.hxx>
 #include <gp_Cone.hxx>
 #include <gp_Cylinder.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
+#include <gp_Vec.hxx>
 
 struct GeoSpecStepOptions {
   bool mesh = true;
@@ -159,6 +162,7 @@ struct GeoSpecNativeCylinderEvidence {
   double axisMin;
   double axisMax;
   bool reversed;
+  GeoSpecNativeVec3 direction;
 };
 
 struct WallSolidValidation {
@@ -297,20 +301,55 @@ static std::string geospecAxisName(const gp_Dir& direction) {
   return "z";
 }
 
-static double geospecAxisValue(const GeoSpecNativeVec3& value, const std::string& axis) {
-  if (axis == "x") return value.x;
-  if (axis == "y") return value.y;
-  return value.z;
-}
-
-static bool geospecCylinderTouchesBothExtents(
+static bool geospecCylinderHasThroughPassage(
   const GeoSpecNativeCylinderEvidence& cylinder,
+  const TopoDS_Shape& shape,
   const GeoSpecNativeVec3& boxMin,
   const GeoSpecNativeVec3& boxMax
 ) {
-  const double tolerance = 0.1;
-  return cylinder.axisMin <= geospecAxisValue(boxMin, cylinder.axis) + tolerance &&
-    cylinder.axisMax >= geospecAxisValue(boxMax, cylinder.axis) - tolerance;
+  // A countersink, chamfer or relief interrupts cylindrical faces without
+  // closing the passage. Prove clearance at the nominal radius, so a
+  // counterbore above a narrower through hole remains a blind feature.
+  const gp_Pnt center(cylinder.center.x, cylinder.center.y, cylinder.center.z);
+  const gp_Vec direction(cylinder.direction.x, cylinder.direction.y, cylinder.direction.z);
+  const gp_Pnt minimum(boxMin.x, boxMin.y, boxMin.z);
+  const gp_Pnt maximum(boxMax.x, boxMax.y, boxMax.z);
+  const double span = minimum.Distance(maximum) + 1.0;
+  try {
+    const double clearanceRadius = cylinder.radius - 1e-7;
+    if (clearanceRadius <= 0.0) return false;
+    // A point strictly inside material on the bore axis certifies obstruction.
+    // This rejects ordinary blind holes without a whole-shape Boolean. A clear
+    // sampled axis proves nothing: counterbores and missed obstructions still
+    // take the full nominal-radius clearance test below.
+    const gp_Pnt boxCenter(
+      (boxMin.x + boxMax.x) * 0.5,
+      (boxMin.y + boxMax.y) * 0.5,
+      (boxMin.z + boxMax.z) * 0.5
+    );
+    const gp_Pnt axisMidpoint = center.Translated(direction * gp_Vec(center, boxCenter).Dot(direction));
+    try {
+      for (TopExp_Explorer explorer(shape, TopAbs_SOLID); explorer.More(); explorer.Next()) {
+        BRepClass3d_SolidClassifier classifier(TopoDS::Solid(explorer.Current()));
+        for (int station = -8; station <= 8; station++) {
+          classifier.Perform(axisMidpoint.Translated(direction * (span * station / 16.0)), 1e-7);
+          if (classifier.State() == TopAbs_IN) return false;
+        }
+      }
+    } catch (...) {
+      // Inconclusive classification still requires the exact clearance test.
+    }
+    BRepPrimAPI_MakeCylinder probe(
+      gp_Ax2(center.Translated(direction * -span), gp_Dir(direction)), clearanceRadius, span * 2.0
+    );
+    BRepAlgoAPI_Common common(probe.Shape(), shape);
+    if (!common.IsDone()) return false;
+    GProp_GProps properties;
+    BRepGProp::VolumeProperties(common.Shape(), properties);
+    return std::abs(properties.Mass()) <= 1e-7;
+  } catch (...) {
+    return false;
+  }
 }
 
 static int geospecCountShapes(const TopoDS_Shape& shape, TopAbs_ShapeEnum kind) {
@@ -1356,7 +1395,8 @@ static void geospecComputeBoundingBox(
   GeoSpecNativeVec3& boxMax
 ) {
   Bnd_Box box;
-  BRepBndLib::Add(shape, box);
+  // Measurement evidence must not inherit tessellation deflection or shape-tolerance padding.
+  BRepBndLib::AddOptimal(shape, box, false, false);
   double xmin = 0.0;
   double ymin = 0.0;
   double zmin = 0.0;
@@ -1528,7 +1568,7 @@ static std::string geospecFacetFaceFeaturesJson(const TopoDS_Shape& shape) {
       gp_Cylinder cylinder = surface.Cylinder();
       const bool reversed = face.Orientation() == TopAbs_REVERSED;
       Bnd_Box faceBox;
-      BRepBndLib::Add(face, faceBox);
+      BRepBndLib::AddOptimal(face, faceBox, false, false);
       double fxmin = 0.0;
       double fymin = 0.0;
       double fzmin = 0.0;
@@ -1537,13 +1577,19 @@ static std::string geospecFacetFaceFeaturesJson(const TopoDS_Shape& shape) {
       double fzmax = 0.0;
       faceBox.Get(fxmin, fymin, fzmin, fxmax, fymax, fzmax);
       const std::string axisName = geospecAxisName(cylinder.Axis().Direction());
+      // A trimmed cylindrical face's area centroid lies off its axis. Report
+      // the axis point at that axial station, including split STEP faces.
+      const gp_Vec axisDirection(cylinder.Axis().Direction());
+      const double axisStation = gp_Vec(cylinder.Location(), faceCenter).Dot(axisDirection);
+      const gp_Pnt axisCenter = cylinder.Location().Translated(axisDirection * axisStation);
       GeoSpecNativeCylinderEvidence evidence{
         cylinder.Radius(),
         axisName,
-        geospecPointToVec3(faceCenter),
+        geospecPointToVec3(axisCenter),
         axisName == "x" ? fxmin : axisName == "y" ? fymin : fzmin,
         axisName == "x" ? fxmax : axisName == "y" ? fymax : fzmax,
         reversed,
+        geospecDirToVec3(cylinder.Axis().Direction()),
       };
       cylinders.push_back(evidence);
       if (reversed) {
@@ -1578,7 +1624,7 @@ static std::string geospecFacetFaceFeaturesJson(const TopoDS_Shape& shape) {
   for (std::size_t index = 0; index < holes.size(); index++) {
     if (index > 0) json << ",";
     json << "{\"diameter\":" << (holes[index].radius * 2.0)
-      << ",\"through\":" << (geospecCylinderTouchesBothExtents(holes[index], boxMin, boxMax) ? "true" : "false")
+      << ",\"through\":" << (geospecCylinderHasThroughPassage(holes[index], shape, boxMin, boxMax) ? "true" : "false")
       << ",\"axis\":\"" << holes[index].axis << "\",\"center\":";
     geospecAppendVec3(json, holes[index].center);
     json << ",\"axisRange\":{\"min\":" << holes[index].axisMin << ",\"max\":" << holes[index].axisMax << "}}";
@@ -2065,14 +2111,8 @@ public:
         geospecXdeAppendPoint(json, faceProperties.CentreOfMass());
 
         Bnd_Box box;
-        // Triangulation-independent bounds (useTriangulation=false): the
-        // eager architecture computed face facts on never-tessellated XDE
-        // shapes, so selector/feature evidence saw analytic boxes. The mesh
-        // facet now tessellates the shared TShapes, and BRepBndLib prefers
-        // triangulation when present - which shifted derived revolved-chamfer
-        // spans on 7 parity fixtures. Pinning the analytic path keeps face
-        // facts identical regardless of which facets ran first.
-        BRepBndLib::Add(face, box, false);
+        // Exact analytic measurement bounds, independent of mesh facet evaluation order.
+        BRepBndLib::AddOptimal(face, box, false, false);
         double xmin = 0.0, ymin = 0.0, zmin = 0.0, xmax = 0.0, ymax = 0.0, zmax = 0.0;
         if (!box.IsVoid()) {
           box.Get(xmin, ymin, zmin, xmax, ymax, zmax);

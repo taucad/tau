@@ -33,7 +33,8 @@ const runtime = defineRuntime({ plugins: [picovoxel()] });
 ```
 
 Picovoxel source files export `default main(pico, params)` and return a `Mesh`, `Voxels`, or a flat
-non-empty array of those values. Tau owns the selected session lifecycle:
+array of those values, or `{ shape, name?, material? }` descriptors. A model envelope supplies
+`{ shapes, images?, textures?, samplers? }`; `[]` is an empty scene. Tau owns the selected session lifecycle:
 
 ```typescript
 import type { Pico } from 'picovoxel';
@@ -45,6 +46,120 @@ export default function main(pico: Pico, params = defaultParams) {
 }
 ```
 
+### Part names
+
+Name each independently delivered part at the return boundary. Geometry operations still use raw
+`Mesh`/`Voxels` values; the descriptor is display metadata.
+
+```typescript
+import type { Pico } from 'picovoxel';
+import type { PicovoxelResult } from '@taucad/picovoxel';
+
+export default function main(pico: Pico): PicovoxelResult {
+  const housing = pico.createVoxels({ shape: 'sphere', radius: 10 });
+  const pins = [0, 1, 2].map((index) => ({
+    shape: pico.createVoxels({
+      shape: 'sphere',
+      center: [20 + index * 8, 0, 0],
+      radius: 2,
+    }),
+    name: `Pin ${index + 1}`,
+  }));
+  return [{ shape: housing, name: 'Housing / 蓋' }, ...pins];
+}
+```
+
+Raw values retain `Shape N` names by their one-based output position. Descriptor names are trimmed;
+blank or omitted names use the same fallback. Duplicate labels and Unicode are preserved. Rename
+or reorder descriptors deliberately: labels follow their parts, while viewer IDs remain addresses
+within each payload. Naming does not create hierarchy, stable identity or assembly occurrences.
+Nested arrays, `children`, invalid shapes and non-string names fail with an indexed diagnostic.
+
+Wrap the final geometry after transforms, booleans or cloning. In multiple files, helpers can return
+raw geometry or descriptors; import `PicovoxelResult` with `import type` only. No runtime naming
+helper is required. Both preview and exact export execute the same author code; avoid lane-dependent
+names. Cached/restored snapshots retain labels. GLB node and mesh names match viewer labels; STL
+has no part-label field, so per-part filenames are sanitized and deduplicated independently. Direct
+upstream `Mesh.toGlb()` calls bypass Tau's descriptor handling.
+
+### Materials and textures
+
+Part descriptors accept standard glTF materials. `Material`, `Image`, `Resources`,
+`PicovoxelPart`, `PicovoxelModel` and `PicovoxelResult` are type-only exports from the package root.
+Return shared indexed resources on a model envelope:
+Omitted `material` retains the legacy CAD appearance; explicit `material: {}` uses
+standard glTF defaults. Author changes before return apply; later mutations cannot
+change the captured snapshot.
+
+```typescript
+import type { Pico } from 'picovoxel';
+import type { PicovoxelModel } from '@taucad/picovoxel';
+
+export function mappedHousing(pico: Pico, png: Uint8Array<ArrayBuffer>): PicovoxelModel {
+  return {
+    images: [{ name: 'Finish', mimeType: 'image/png', data: png }],
+    textures: [{ source: 0 }],
+    shapes: [
+      {
+        shape: pico.createVoxels({ shape: 'sphere', radius: 10 }),
+        name: 'Housing',
+        material: {
+          pbrMetallicRoughness: {
+            metallicFactor: 0.8,
+            roughnessFactor: 0.35,
+            baseColorTexture: { index: 0 },
+          },
+          extensions: { KHR_materials_clearcoat: { clearcoatFactor: 0.7 } },
+        },
+      },
+    ],
+  };
+}
+```
+
+All 17 standard map slots and 11 physical material extensions are supported, including
+normal, clearcoat, transmission/volume, specular, sheen, iridescence and anisotropy.
+Resources use encoded PNG/JPEG/WebP bytes; WebP textures reference images through
+`EXT_texture_webp.source`. Texture info accepts UV0 and `KHR_texture_transform`.
+Materials and image bytes are deeply snapshotted before the session is disposed.
+
+Color factors are linear. Texture/anisotropy rotations are radians; volume thickness and
+attenuation distance are metres; iridescence thickness is nanometres. Geometry stays in
+millimetres. Invalid factors, missing resource indexes, invalid samplers and unsupported
+UV sets produce authoring diagnostics. See the [material authoring reference](agent/materials-reference.md)
+for the complete slot table and a mapped example.
+
+The adapter creates normalized six-chart box UV0 on final returned geometry, and derives
+tangents from those UVs while retaining source smooth normals and ordered triangles.
+Render vertices may split at seams; this mapping does not promise matching texture phase
+between independently tessellated fast and exact geometry.
+
+Fast previews retain materials. Exact GLB and **single-file JSON glTF** preserve names,
+materials and embedded image bytes. STL preserves geometry only. Upstream `Mesh.toGlb()`
+bypasses Tau's material/resources path.
+
+### Mechanisms
+
+Alongside `main`, optionally export a plain `mechanism` value or a synchronous or asynchronous
+`mechanism(params)` function. It receives the same resolved parameters as `main`. Import
+`MechanismSource` and `LinkSource` from `@taucad/kinematics` with `import type`; their optional
+string-name generic constrains link bindings to a shared `as const` palette also used for geometry
+labels, for example `MechanismSource<'Base' | 'Carriage'>`.
+
+Bind links to unique, explicitly authored part names. Blank, omitted, generated-only or ambiguous
+names cannot bind a mechanism. Invalid metadata produces warnings while valid geometry remains
+available; inspect the issues and fix the mechanism before relying on motion. Unnamed and
+material-only outputs keep their existing behavior.
+
+Preview includes mechanism topology and uses the shared viewer joint, clip, reset and playback
+controls. Fast preview and exact replay capture an owned JSON snapshot before disposing the
+PicoVoxel session; cache restore preserves that snapshot. Default GLB/glTF exports are static.
+Opt in with `content: { includeTopology: true }` to carry Tau mechanism metadata; STL has no
+motion metadata. This is Tau topology, not standard glTF animation channels.
+
+See the [mechanism authoring reference](agent/kinematics-reference.md) for a complete model,
+all seven joint families, couplings, clips, units and frame conventions.
+
 ### Lanes
 
 Every build runs in one of two lanes. The viewer renders in the **fast** lane (render option
@@ -53,7 +168,7 @@ Every build runs in one of two lanes. The viewer renders in the **fast** lane (r
 serial build, so exact output is identical in every host.
 
 - STL: an explicit `lane: 'fast'` export writes a `LANE=fast` STL header.
-- GLB: a fast-lane GLB export is refused with a typed `REPRESENTATION_UNSUPPORTED` issue.
+- GLB/glTF: a fast-lane export is refused with a typed `REPRESENTATION_UNSUPPORTED` issue.
 - An exact build that reads fast-lane data (a `LANE=fast` STL or `.vdb`, or a `fastRenorm: true`
   offset) is refused with a typed `REPRESENTATION_UNSUPPORTED` issue naming the remedy.
 - Exactly-zero-area triangles are dropped from every snapshot; area, volume and every other triangle
@@ -112,11 +227,15 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 
 ## API
 
-| Export            | Kind            | Use                                                                           |
-| ----------------- | --------------- | ----------------------------------------------------------------------------- |
-| `picovoxel`       | toolkit factory | package-named authoring factory; presets select capabilities                  |
-| `plugin`          | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key |
-| `picovoxelKernel` | kernel factory  | direct `kernels` composition, with options                                    |
+| Export                           | Kind            | Use                                                                           |
+| -------------------------------- | --------------- | ----------------------------------------------------------------------------- |
+| `picovoxel`                      | toolkit factory | package-named authoring factory; presets select capabilities                  |
+| `plugin`                         | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key |
+| `PicovoxelResult`                | type            | raw parts, descriptors, flat lists or shared-resource model envelopes         |
+| `PicovoxelPart`                  | type            | delivered shape, optional name and material                                   |
+| `PicovoxelModel`                 | type            | flat shapes with indexed images, textures and samplers                        |
+| `Material`, `Image`, `Resources` | types           | shared glTF authoring contracts                                               |
+| `picovoxelKernel`                | kernel factory  | direct `kernels` composition, with options                                    |
 
 One preset, `default`, selecting `kernels.default`.
 

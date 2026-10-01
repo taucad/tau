@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
@@ -17,7 +18,10 @@ internal sealed record ExtractedComponent(
     float Roughness,
     float[] Positions,
     float[] Normals,
-    uint[] Indices);
+    uint[] Indices,
+    JsonElement? Material = null,
+    float[]? TexCoords = null,
+    float[]? Tangents = null);
 
 internal sealed record ModelTimings(
     double EntryPointInvoke,
@@ -33,7 +37,8 @@ internal sealed record ModelExecutionResult(
     bool RecycleAfterResponse,
     ModelTimings Timings,
     JsonElement? Mechanism,
-    IReadOnlyList<Issue> Warnings);
+    IReadOnlyList<Issue> Warnings,
+    MaterialResources? Resources = null);
 
 internal static class ModelRunner
 {
@@ -190,36 +195,156 @@ internal static class ModelRunner
         }
     }
 
-    internal static float[] VertexNormals(float[] positions, uint[] indices)
+    // One normal per smooth connected triangle fan. Sharp edges need duplicate render vertices;
+    // triangle coordinates and winding stay unchanged. Thirty degrees separates hex/chamfer faces
+    // while keeping finely tessellated round surfaces smooth.
+    internal static float[] VertexNormals(ref float[] positions, ref uint[] indices)
+        => VertexNormals(ref positions, ref indices, out _);
+
+    internal static float[] VertexNormals(ref float[] positions, ref uint[] indices, out int[] sources)
     {
-        var normals = new float[positions.Length];
-        for (var index = 0; index < indices.Length; index += 3)
+        var vertexCount = positions.Length / 3;
+        var creaseCosine = MathF.Cos(MathF.PI / 6);
+        var faces = new Vector3[indices.Length / 3];
+        var directions = new Vector3[faces.Length];
+        var edges = new ulong[indices.Length];
+        var corners = new int[indices.Length];
+        var parents = new int[indices.Length];
+        Array.Fill(parents, -1);
+        for (var triangle = 0; triangle < indices.Length; triangle += 3)
         {
-            var a = checked((int)indices[index]) * 3;
-            var b = checked((int)indices[index + 1]) * 3;
-            var c = checked((int)indices[index + 2]) * 3;
-            var ab = new System.Numerics.Vector3(positions[b] - positions[a], positions[b + 1] - positions[a + 1], positions[b + 2] - positions[a + 2]);
-            var ac = new System.Numerics.Vector3(positions[c] - positions[a], positions[c + 1] - positions[a + 1], positions[c + 2] - positions[a + 2]);
-            var normal = System.Numerics.Vector3.Cross(ab, ac);
-            foreach (var vertex in new[] { a, b, c })
+            var a = checked((int)indices[triangle]) * 3;
+            var b = checked((int)indices[triangle + 1]) * 3;
+            var c = checked((int)indices[triangle + 2]) * 3;
+            var ab = new Vector3(positions[b] - positions[a], positions[b + 1] - positions[a + 1], positions[b + 2] - positions[a + 2]);
+            var ac = new Vector3(positions[c] - positions[a], positions[c + 1] - positions[a + 1], positions[c + 2] - positions[a + 2]);
+            var face = Vector3.Cross(ab, ac);
+            faces[triangle / 3] = face;
+            directions[triangle / 3] = face.LengthSquared() > 0 ? Vector3.Normalize(face) : Vector3.Zero;
+            for (var corner = triangle; corner < triangle + 3; corner++)
             {
-                normals[vertex] += normal.X;
-                normals[vertex + 1] += normal.Y;
-                normals[vertex + 2] += normal.Z;
+                var first = indices[corner];
+                var second = indices[NextCorner(corner)];
+                edges[corner] = first == second ? ulong.MaxValue : ((ulong)Math.Min(first, second) << 32) | Math.Max(first, second);
+                corners[corner] = corner;
             }
         }
-        for (var index = 0; index < normals.Length; index += 3)
+
+        // Compact edge adjacency: O(T log T) sorting, with no scan of a vertex's entire fan.
+        Array.Sort(edges, corners);
+        for (var start = 0; start < edges.Length;)
         {
-            var normal = System.Numerics.Vector3.Normalize(new(normals[index], normals[index + 1], normals[index + 2]));
-            if (!float.IsFinite(normal.X))
+            var end = start + 1;
+            while (end < edges.Length && edges[end] == edges[start]) end++;
+            // Boundary, collapsed and nonmanifold edges are shading boundaries. In particular,
+            // do not join an arbitrary pair before discovering a third incident triangle.
+            if (end - start == 2 && edges[start] != ulong.MaxValue)
             {
-                normal = System.Numerics.Vector3.UnitZ;
+                var first = corners[start];
+                var second = corners[start + 1];
+                if (Vector3.Dot(directions[first / 3], directions[second / 3]) >= creaseCosine)
+                {
+                    var firstEnd = NextCorner(first);
+                    var secondEnd = NextCorner(second);
+                    if (indices[first] == indices[second])
+                    {
+                        Join(first, second);
+                        Join(firstEnd, secondEnd);
+                    }
+                    else
+                    {
+                        Join(first, secondEnd);
+                        Join(firstEnd, second);
+                    }
+                }
             }
-            normals[index] = normal.X;
-            normals[index + 1] = normal.Y;
-            normals[index + 2] = normal.Z;
+            start = end;
+        }
+
+        // Reuse the sorted corner buffer as root -> render vertex storage.
+        Array.Fill(corners, -1);
+        var used = new bool[vertexCount];
+        var duplicates = new List<int>();
+        var remapped = new uint[indices.Length];
+        for (var corner = 0; corner < indices.Length; corner++)
+        {
+            var root = Find(corner);
+            if (corners[root] < 0)
+            {
+                var source = checked((int)indices[corner]);
+                if (!used[source])
+                {
+                    corners[root] = source;
+                    used[source] = true;
+                }
+                else
+                {
+                    corners[root] = checked(vertexCount + duplicates.Count);
+                    duplicates.Add(source);
+                }
+            }
+            remapped[corner] = checked((uint)corners[root]);
+        }
+        sources = new int[checked(vertexCount + duplicates.Count)];
+        for (var vertex = 0; vertex < vertexCount; vertex++) sources[vertex] = vertex;
+        if (duplicates.Count > 0)
+        {
+            var expanded = new float[checked(sources.Length * 3)];
+            positions.CopyTo(expanded, 0);
+            for (var duplicate = 0; duplicate < duplicates.Count; duplicate++)
+            {
+                var target = vertexCount + duplicate;
+                var source = duplicates[duplicate];
+                sources[target] = source;
+                Array.Copy(positions, source * 3, expanded, target * 3, 3);
+            }
+            positions = expanded;
+        }
+        indices = remapped;
+        var normals = new float[positions.Length];
+        for (var corner = 0; corner < indices.Length; corner++)
+        {
+            var offset = checked((int)indices[corner]) * 3;
+            var face = faces[corner / 3];
+            normals[offset] += face.X;
+            normals[offset + 1] += face.Y;
+            normals[offset + 2] += face.Z;
+        }
+        for (var vertex = 0; vertex < sources.Length; vertex++)
+        {
+            var offset = vertex * 3;
+            var normal = Vector3.Normalize(new Vector3(normals[offset], normals[offset + 1], normals[offset + 2]));
+            if (!float.IsFinite(normal.X)) normal = Vector3.UnitZ;
+            normals[offset] = normal.X;
+            normals[offset + 1] = normal.Y;
+            normals[offset + 2] = normal.Z;
         }
         return normals;
+
+        static int NextCorner(int corner) => corner / 3 * 3 + (corner + 1) % 3;
+
+        int Find(int corner)
+        {
+            var root = corner;
+            while (parents[root] >= 0) root = parents[root];
+            while (corner != root)
+            {
+                var next = parents[corner];
+                parents[corner] = root;
+                corner = next;
+            }
+            return root;
+        }
+
+        void Join(int first, int second)
+        {
+            first = Find(first);
+            second = Find(second);
+            if (first == second) return;
+            if (parents[first] > parents[second]) (first, second) = (second, first);
+            parents[first] += parents[second];
+            parents[second] = first;
+        }
     }
 
     private static WorkerException RuntimeError(string message) =>

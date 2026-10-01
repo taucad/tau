@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_TxhhNWuKJ_GZXmplOMfgk",
+  "name": "Hubbed pipe flange",
+  "description": "Generic fitting with a deliberately modeled flow passage, wall and end interfaces; plugs and blind flanges intentionally close the passage.",
+  "tags": [
+    "Fluid fittings",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

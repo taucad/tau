@@ -565,10 +565,20 @@ const composeProjectHost = async (
   });
   const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
   const geoSpecEngine = provide.geoSpecEngine ?? 'legacy';
+  const revisions = provide.revisionsPort === undefined ? undefined : createPortRevisionsClient(provide.revisionsPort);
+  opened(() => revisions?.close());
   const geoSpecClient = createGeoSpecWorkerRpcClient({
     openFileSystemBridge: () => createFileSystemBridgePort(agentView),
     runtimeConfig,
     geoSpecEngine,
+    ...(geoSpecEngine !== 'native' || revisions === undefined
+      ? {}
+      : {
+          candidateSync: {
+            fetch: async () => revisions.fetchGeoSpecCandidates(),
+            publish: async (candidate: Uint8Array<ArrayBuffer>) => revisions.publishGeoSpecCandidate(candidate),
+          },
+        }),
   });
   opened(async () => geoSpecClient.close());
   const runtimeRpc = createRuntimeRpcClients({ runtimeClient, imageService });
@@ -608,8 +618,6 @@ const composeProjectHost = async (
     mapRuntimeError: (error) => toRpcError(error),
     parameterActorFor,
   });
-  const revisions = provide.revisionsPort === undefined ? undefined : createPortRevisionsClient(provide.revisionsPort);
-  opened(() => revisions?.close());
   /* The registry over one filesystem: the project's own, or an attempt's checkout its placement granted (W8 G09). */
   const toolRegistryOver = (provider: FileSystemProvider): ToolRegistry => {
     const view = composeView(

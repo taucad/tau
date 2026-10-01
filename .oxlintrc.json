@@ -1016,6 +1016,11 @@
   },
   "overrides": [
     {
+      // Generated standalone CAD projects must keep relative imports when copied outside this workspace.
+      "files": ["packages/warehouse/parts/**/*.ts"],
+      "rules": { "no-restricted-imports": "off" }
+    },
+    {
       // The compiler reports a real redeclaration (ts(2451)); the core rule only misreads a
       // type and a same-named value (`type Placement` + `const Placement`). Mirrors
       // typescript-eslint's `eslint-recommended`.

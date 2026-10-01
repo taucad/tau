@@ -4,7 +4,7 @@ This subtree renders CAD geometry and coordinates viewport interaction. Geometry
 
 ## Rendering Rules
 
-- Consume `resolvedGraphicsBackend`. Public interactive viewers resolve to WebGL; WebGPU remains an internal validation path.
+- Resolve viewers through `resolveViewerGraphicsBackend`. WebGL is the default; the `webGpu` experimental flag opts into WebGPU when supported.
 - Create renderers through `graphics/three/renderer.ts`. Key `ThreeCanvasInstance` by backend so a backend change recreates renderer-owned state.
 - Keep synchronous base capability checks separate from exact asynchronous diagnostics. Do not advertise a capability from a heuristic that the renderer has not verified.
 - Preserve reversed-depth transparent sorting for the WebGPU viewport. Keep highlight and ghost materials explicit about depth writes.

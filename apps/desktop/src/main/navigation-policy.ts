@@ -156,7 +156,7 @@ export const contentSecurityPolicy = (connectOrigins: readonly string[]): string
 /**
  * Permissions the app is allowed to hold.
  *
- * Deny-by-default, with one grant. `persistent-storage` covers exactly two
+ * Deny-by-default, with explicit grants. `persistent-storage` covers exactly two
  * stores, and neither is project data: the bundled-types cache the file-manager
  * worker mounts at `/node_modules` on OPFS
  * (`apps/ui/app/machines/file-manager.worker.ts`), and IndexedDB `tau-db`
@@ -179,12 +179,22 @@ export const contentSecurityPolicy = (connectOrigins: readonly string[]): string
  * reachable surface. Clipboard *read* is a different permission and stays
  * refused: nothing in the app reads the clipboard.
  *
+ * `fullscreen` lets the shared viewer toolbar use the native Fullscreen API
+ * on its existing viewer element. Both session handlers consult this grant;
+ * denying it makes `requestFullscreen()` fail in the packaged app. Chromium
+ * still requires a user gesture and owns Escape to exit. This does not grant
+ * `automatic-fullscreen`, pointer lock or keyboard lock.
+ *
  * Everything else (camera, microphone, geolocation, notifications, clipboard
  * read, background sync, …) is refused: nothing in the app asks for one, so a
  * request is either a dependency doing something unexpected or a document that
  * should not have loaded.
  */
-export const grantedPermissions: ReadonlySet<string> = new Set(['persistent-storage', 'clipboard-sanitized-write']);
+export const grantedPermissions: ReadonlySet<string> = new Set([
+  'persistent-storage',
+  'clipboard-sanitized-write',
+  'fullscreen',
+]);
 
 /**
  * Whether one permission request or check may be granted.

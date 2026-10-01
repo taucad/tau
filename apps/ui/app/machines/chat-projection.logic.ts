@@ -154,7 +154,10 @@ const applyFailureRow = (failure: ChatProjection['failure'], row: unknown): Chat
   if (!isRecord(row) || row['type'] !== 'run.lifecycle' || typeof row['runId'] !== 'string') {
     return failure;
   }
-  if (row['state'] === 'failed') {
+  if (
+    row['state'] === 'failed' ||
+    (row['state'] === 'cancelled' && isRecord(row['detail']) && row['detail']['code'] === 'USER_STOPPED')
+  ) {
     return { runId: row['runId'], text: runFailureText(row['detail']) };
   }
   return failure?.runId === row['runId'] ? undefined : failure;
@@ -478,13 +481,17 @@ const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> =
       const stream = new ReadableStream<UIMessageChunk>({
         start(controller) {
           for (const chunk of view.chunks) {
+            // The ledger owns run failure; only malformed SDK reconstruction should reject this transcript.
+            if (chunk.type === 'error') {
+              continue;
+            }
             controller.enqueue(chunk);
           }
           controller.close();
         },
       });
       let message: MyUIMessage | undefined;
-      for await (const next of readUIMessageStream<MyUIMessage>({ stream })) {
+      for await (const next of readUIMessageStream<MyUIMessage>({ stream, terminateOnError: true })) {
         message = next;
       }
       return message;

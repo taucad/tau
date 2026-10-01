@@ -12,12 +12,12 @@ import type { RuntimeContentInput, TelemetryEntry } from '@taucad/runtime/types'
 import type { ParameterManifest } from '@taucad/parameters';
 import type { ExportResult, Rendering } from '@taucad/runtime';
 
-import { registerTauGltfExtensions } from '@taucad/geometry-core';
+import { registerTauGltfExtensions, readMechanismExport } from '@taucad/geometry-core';
 import type { TauCadTopologyPayload, TauCadTopologyRoot } from '@taucad/geometry-core';
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
 import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
 import { evaluatePose, resolveMechanismComponents, sampleAnimation } from '@taucad/kinematics';
-import { offersFor, readMechanismExport, replicadKernel } from '#replicad.kernel.js';
+import { offersFor, replicadKernel } from '#replicad.kernel.js';
 import { normalizeRenderShapes } from '#utils/render-output.js';
 import type { NativeHandleEntry } from '#interface-resolution.js';
 import {
@@ -4546,7 +4546,12 @@ describe('mechanism export', () => {
       },
       couplings: undefined,
     };
-    const { mechanism, issues } = await readMechanismExport({ mechanism: () => authored }, {}, formatUnreachable);
+    const { mechanism, issues } = await readMechanismExport({
+      module: { mechanism: () => authored },
+      parameters: {},
+      kernelId: 'replicad',
+      formatError: formatUnreachable,
+    });
     // The build cache stores the handle snapshot with msgpack, which writes `undefined` as nil.
     const restored = msgpackDecode(msgpackEncode({ shapes: [], mechanism })) as { mechanism: unknown };
     const componentIds = Object.fromEntries([
@@ -4567,7 +4572,12 @@ describe('mechanism export', () => {
 
     const outcomes = await Promise.all(
       [{ schemaVersion: 1n }, cyclic].map(async (value) =>
-        readMechanismExport({ mechanism: value }, {}, formatUnreachable),
+        readMechanismExport({
+          module: { mechanism: value },
+          parameters: {},
+          kernelId: 'replicad',
+          formatError: formatUnreachable,
+        }),
       ),
     );
 

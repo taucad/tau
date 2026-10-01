@@ -129,11 +129,17 @@ export function Parameters({
   /* The term invalidates every field, so the search box paints first and the row pass follows as
    * interruptible work that later keystrokes coalesce. */
   const deferredFilterTerm = useDeferredValue(activeFilterTerm);
+  const authority = parameterEdit.kind === 'authoritative' ? parameterEdit.commit : undefined;
+  const disclosure = useMemo(
+    () => ({ allExpanded, authority, choices: new Map<string, boolean>() }),
+    [allExpanded, authority],
+  );
   const formContext = useMemo<RJSFContext>(
     () => ({
       idPrefix: rjsfIdPrefix,
       rootPresentation: presentation,
       allExpanded,
+      disclosure,
       searchTerm: deferredFilterTerm,
       resetSingleParameter,
       defaultParameters,
@@ -152,6 +158,7 @@ export function Parameters({
     }),
     [
       allExpanded,
+      disclosure,
       deferredFilterTerm,
       resetSingleParameter,
       defaultParameters,
@@ -216,6 +223,7 @@ export function Parameters({
             </div>
           ) : null}
           <Form<Record<string, unknown>, RJSFSchema, RJSFContext>
+            tagName={presentation === 'embedded' ? 'div' : 'form'}
             validator={rjsfValidator}
             templates={templates}
             schema={jsonSchema}

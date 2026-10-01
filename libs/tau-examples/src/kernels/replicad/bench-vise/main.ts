@@ -1,3 +1,4 @@
+import type { MechanismSource } from '@taucad/kinematics';
 import {
   draw,
   drawPolysides,
@@ -85,7 +86,7 @@ function socketScrew(
   return shaft.fuse(head).cut(socket);
 }
 
-export default function main(input = defaultParams): ShapeConfig[] {
+function resolveParams(input: Partial<typeof defaultParams>) {
   const p = { ...defaultParams, ...input };
   for (const [key, lo, hi] of [
     ['opening', 0, 100],
@@ -97,6 +98,13 @@ export default function main(input = defaultParams): ShapeConfig[] {
       throw new Error(`${key} must be finite and in [${lo}, ${hi}] mm`);
     }
   }
+  return p;
+}
+
+export default function main(
+  input: Partial<typeof defaultParams> = defaultParams,
+): ShapeConfig[] {
+  const p = resolveParams(input);
   const g = p.opening,
     w = p.jawWidth,
     bodyWidth = Math.max(125, w);
@@ -219,7 +227,7 @@ export default function main(input = defaultParams): ShapeConfig[] {
   add('Spindle', steel, () => {
     const threaded = thread(171)
       .rotate(90, [0, 0, 0], [0, 1, 0])
-      .rotate(g * 90, [0, 0, 0], [1, 0, 0])
+      .rotate((g * 90) % 360, [0, 0, 0], [1, 0, 0])
       .translate([g - 171, 0, 50]);
     return threaded
       .fuseAll([xCylinder(10, g, 62), xCylinder(17, g, 3)])
@@ -295,4 +303,105 @@ export default function main(input = defaultParams): ShapeConfig[] {
     throw new Error(`Unknown component: ${p.component}`);
   }
   return parts;
+}
+
+/** The 4mm lead spindle drives jaw travel; the captive handle slides in its clocked hub. */
+export function mechanism(
+  parameters: Partial<typeof defaultParams> = {},
+): MechanismSource | undefined {
+  const p = resolveParams(parameters);
+  if (p.component !== 'Assembly') {
+    return undefined;
+  }
+  const angle = (90 * (p.opening - 55) * Math.PI) / 180;
+  return {
+    schemaVersion: 1,
+    units: { length: 'mm', angle: 'deg' },
+    root: 'frame',
+    links: {
+      frame: {
+        shapes: [
+          'Frame',
+          'Fixed jaw',
+          'Bush left',
+          'Bush right',
+          'Drive nut',
+          'Fixed jaw screw left',
+          'Fixed jaw screw right',
+          'Nut screw lower',
+          'Nut screw upper',
+        ],
+      },
+      carriage: {
+        shapes: [
+          'Carriage',
+          'Moving jaw',
+          'Guide left',
+          'Guide right',
+          'Rear thrust washer',
+          'Front thrust washer',
+          'Moving jaw screw left',
+          'Moving jaw screw right',
+        ],
+      },
+      spindle: { shapes: ['Spindle', 'Handle hub', 'Hub pin'] },
+      handle: { shapes: ['Tommy bar'] },
+    },
+    joints: {
+      travel: {
+        type: 'prismatic',
+        name: 'Jaw opening',
+        parent: 'frame',
+        child: 'carriage',
+        origin: [p.opening, 0, 50],
+        axis: [1, 0, 0],
+        limits: { lower: -p.opening, upper: 100 - p.opening },
+      },
+      spindle: {
+        type: 'revolute',
+        name: 'Spindle (4mm lead)',
+        parent: 'carriage',
+        child: 'spindle',
+        origin: [p.opening, 0, 50],
+        axis: [1, 0, 0],
+        limits: { lower: -90 * p.opening, upper: 90 * (100 - p.opening) },
+      },
+      handle: {
+        type: 'prismatic',
+        name: 'Sliding handle',
+        parent: 'spindle',
+        child: 'handle',
+        origin: [
+          p.opening + 69,
+          p.handleOffset * Math.cos(angle),
+          50 + p.handleOffset * Math.sin(angle),
+        ],
+        axis: [0, Math.cos(angle), Math.sin(angle)],
+        limits: { lower: -60 - p.handleOffset, upper: 60 - p.handleOffset },
+      },
+    },
+    couplings: [{ driver: 'spindle', follower: 'travel', ratio: 1 / 90 }],
+    animations: [
+      {
+        id: 'open-close',
+        name: 'Open and close jaws',
+        duration: 8,
+        loop: 'pingPong',
+        keyframes: [
+          { time: 0, coordinates: { spindle: -90 * p.opening } },
+          { time: 8, coordinates: { spindle: 90 * (100 - p.opening) } },
+        ],
+      },
+      {
+        id: 'handle-slide',
+        name: 'Slide captive handle',
+        duration: 3,
+        loop: 'pingPong',
+        keyframes: [
+          { time: 0, coordinates: { handle: -60 - p.handleOffset } },
+          { time: 3, coordinates: { handle: 60 - p.handleOffset } },
+        ],
+      },
+    ],
+  };
 }

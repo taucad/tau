@@ -22,4 +22,5 @@ export const picogkOptionsSchema = z.object({
 /** Direct export formats implemented by the PicoGK kernel. @public */
 export const picogkExportSchemas = {
   glb: gltfExportConventionSchema,
+  gltf: gltfExportConventionSchema,
 } as const satisfies Record<string, z.ZodType>;

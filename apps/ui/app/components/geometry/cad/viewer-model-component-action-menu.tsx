@@ -46,7 +46,7 @@ export function ViewerModelComponentActionMenu({
           collisionPadding={8}
           className={cn(
             menuContentVariants(),
-            'max-h-[min(24rem,calc(100vh-1rem))] w-auto min-w-56 overflow-x-hidden overflow-y-auto',
+            'max-h-[min(24rem,calc(100vh-1rem))] w-auto min-w-56 overflow-x-hidden overflow-y-auto [&>*]:shrink-0',
           )}
           onOpenAutoFocus={(event) => {
             // Only a pointer opens this menu, so it takes focus itself, as Radix menus do, instead of

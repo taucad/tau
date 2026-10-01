@@ -344,13 +344,14 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
                 <Badge variant='secondary'>{roleLabel(person.role)}</Badge>
               ) : (
                 <Select
+                  size='sm'
                   value={person.role}
                   disabled={busy}
                   onValueChange={(value) => {
                     changeRole.mutate({ email: person.email, role: value === 'read' ? 'read' : 'write' });
                   }}
                 >
-                  <SelectTrigger size='sm' className='w-28' aria-label={`Role for ${person.email}`}>
+                  <SelectTrigger className='w-28' aria-label={`Role for ${person.email}`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

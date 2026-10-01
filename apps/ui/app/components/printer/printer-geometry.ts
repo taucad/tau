@@ -5,7 +5,7 @@
  * corner at layer zero is the origin, +X runs right, +Y runs toward the back
  * and +Z is up. World Z = 0 is the nozzle plane; a plate that travels on Z
  * descends below it as layers grow, while a bed-slinger or gantry machine
- * keeps the plate still and lifts the head instead.
+ * lifts the head instead; a bed-slinger also moves the plate along Y.
  *
  * @module
  */
@@ -29,6 +29,8 @@ export type PrinterPanel = Readonly<{
 
 /** Scene dimensions for one machine. */
 export type PrinterGeometry = Readonly<{
+  /** Model identity selects only matching pre-rendered hardware assets. */
+  model: string | undefined;
   buildVolume: readonly [number, number, number];
   /** Whether the plate descends with the print or the head rises above a fixed plate. */
   motion: 'plate-descends' | 'head-rises';
@@ -81,6 +83,7 @@ const chuteSize = [30, 24, 40] as const;
 /** Derive every scene dimension from the manifest geometry. */
 export const derivePrinterGeometry = (manifest: PrinterManifest): PrinterGeometry => {
   const { buildVolume, enclosure, kinematics, bedMotion, toolheadHome, materialSystemMount } = manifest.geometry;
+  const sheetThickness = manifest.identity.model === 'a1-mini' ? 0.55 : 0.65;
   const build = [buildVolume.x, buildVolume.y, buildVolume.z] as const;
   const outer = [enclosure.outer.x, enclosure.outer.y, enclosure.outer.z] as const;
   const motion = bedMotion === 'z' ? 'plate-descends' : 'head-rises';
@@ -135,18 +138,29 @@ export const derivePrinterGeometry = (manifest: PrinterManifest): PrinterGeometr
   ];
   const railLength = build[1] + railInset * 2;
   const rails: PrinterBox[] =
-    kinematics === 'delta'
-      ? [0, 1, 2].map((index) => {
-          const angle = (index / 3) * Math.PI * 2;
-          return {
-            center: [centerX + Math.cos(angle) * (halfX - railSize), centerY + Math.sin(angle) * (halfY - railSize), 0],
-            size: [railSize, railSize, chamberHeight],
-          };
-        })
-      : [
-          { center: [-railInset, centerY, beamZ], size: [railSize, railLength, railSize] },
-          { center: [build[0] + railInset, centerY, beamZ], size: [railSize, railLength, railSize] },
-        ];
+    kinematics === 'cartesian-bedslinger'
+      ? (manifest.identity.model === 'a1-mini' ? [build[0] + railInset] : [-railInset, build[0] + railInset]).map(
+          (x) => ({
+            center: [x, centerY, (build[2] + beamZ) / 2],
+            size: [railSize, railSize, build[2] + beamZ],
+          }),
+        )
+      : kinematics === 'delta'
+        ? [0, 1, 2].map((index) => {
+            const angle = (index / 3) * Math.PI * 2;
+            return {
+              center: [
+                centerX + Math.cos(angle) * (halfX - railSize),
+                centerY + Math.sin(angle) * (halfY - railSize),
+                0,
+              ],
+              size: [railSize, railSize, chamberHeight],
+            };
+          })
+        : [
+            { center: [-railInset, centerY, beamZ], size: [railSize, railLength, railSize] },
+            { center: [build[0] + railInset, centerY, beamZ], size: [railSize, railLength, railSize] },
+          ];
   const materialUnit =
     materialSystemMount === 'top' && manifest.materialSystem.slotsPerUnit > 0
       ? ((): NonNullable<PrinterGeometry['materialUnit']> => {
@@ -168,9 +182,10 @@ export const derivePrinterGeometry = (manifest: PrinterManifest): PrinterGeometr
         })()
       : undefined;
   return {
+    model: manifest.identity.model,
     buildVolume: build,
     motion,
-    plate: { center: [centerX, centerY, -plateThickness / 2], size: [build[0], build[1], plateThickness] },
+    plate: { center: [centerX, centerY, -sheetThickness / 2], size: [build[0], build[1], sheetThickness] },
     envelope: {
       center: [centerX, centerY, motion === 'plate-descends' ? -build[2] / 2 : build[2] / 2],
       size: build,
@@ -180,7 +195,7 @@ export const derivePrinterGeometry = (manifest: PrinterManifest): PrinterGeometr
       size: [outer[0], outer[1], chamberFloor - enclosureFloor],
     },
     enclosure: enclosureBox,
-    panels,
+    panels: manifest.geometry.enclosure.enclosed ? panels : [],
     gantry: {
       kind: kinematics,
       beamZ,
@@ -272,6 +287,15 @@ export const framedPartBox = (
 /** Plate group Z offset in world space for the print height reached so far. */
 export const plateOffsetForHeight = (geometry: Pick<PrinterGeometry, 'motion'>, height: number): number =>
   geometry.motion === 'plate-descends' ? -height : 0;
+
+/**
+ * Bed translation for Y motion: the head stays over the bed centre in world space.
+ * @param geometry - The machine dimensions and kinematics.
+ * @param y - Toolpath Y in the bed frame.
+ * @returns Bed Y offset in millimetres; zero for a fixed-Y bed.
+ */
+export const plateOffsetForY = (geometry: Pick<PrinterGeometry, 'gantry' | 'buildVolume'>, y: number): number =>
+  geometry.gantry.kind === 'cartesian-bedslinger' ? geometry.buildVolume[1] / 2 - y : 0;
 
 /** Toolhead Z in world space for the print height reached so far. */
 export const toolheadLiftForHeight = (geometry: Pick<PrinterGeometry, 'motion'>, height: number): number =>

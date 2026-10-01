@@ -52,7 +52,7 @@ import type {
   PlaybackStore,
 } from '#components/printer/printer-playback.js';
 import { loadPrinterProgram } from '#components/printer/printer-program.js';
-import { defaultPrinterPlate, printerPlateById, x1cPlates } from '#components/printer/printer-plates.js';
+import { defaultPrinterPlate, printerPlatesForModel } from '#components/printer/printer-plates.js';
 import type { PrinterPlateId, PrinterPlateModel } from '#components/printer/printer-plates.js';
 import { PrinterScene } from '#components/printer/printer-scene.js';
 import {
@@ -83,6 +83,7 @@ type ProgramResource =
       kind: 'ready';
       program: ToolpathProgram;
       slicedPlate: PrinterPlateModel | undefined;
+      recordedBedType: string | undefined;
       filamentColors: readonly string[];
       digest: string | undefined;
     }>
@@ -121,7 +122,11 @@ export function PrinterViewer({ name, kind, revision, readAll, renderPane }: Pri
 function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterViewerProps, 'revision'>): ReactNode {
   const [resource, setResource] = useState<ProgramResource>({ kind: 'loading' });
   const [frameRequest, setFrameRequest] = useState(0);
+  const [isHousingVisible, setIsHousingVisible] = useState(true);
   const [isWholePrinter, setIsWholePrinter] = useState(false);
+  const live = usePrinterLive(resource.kind === 'ready' ? resource.digest : undefined);
+  const model = live?.manifest?.identity.model;
+  const plates = printerPlatesForModel(model);
   const [plateChoice, setPlateChoice] = useState<PrinterPlateId | 'as-sliced'>('as-sliced');
   const requestFrame = useCallback((): void => {
     setFrameRequest((count) => count + 1);
@@ -131,21 +136,24 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
     // A different scene is framed afresh, whatever the person did to the last one.
     setFrameRequest((count) => count + 1);
   }, []);
-  const handlePlate = useCallback((value: string): void => {
-    setPlateChoice(x1cPlates.find(({ id }) => id === value)?.id ?? 'as-sliced');
-  }, []);
+  const handlePlate = useCallback(
+    (value: string): void => {
+      setPlateChoice(plates.find(({ id }) => id === value)?.id ?? 'as-sliced');
+    },
+    [plates],
+  );
 
   useEffect(() => {
     let active = true;
     const load = async (): Promise<void> => {
       try {
         const bytes = await readAll();
-        const { program, slicedPlate, filamentColors } = loadPrinterProgram(bytes, kind);
+        const { program, slicedPlate, filamentColors, recordedBedType } = loadPrinterProgram(bytes, kind);
         // The print request ledger names artifacts by digest; Live mode follows a run only from its own bytes.
         // WebCrypto needs a secure context: without one (a LAN address over http) Live mode stays off.
         const digest = await digestBytes(bytes).catch(() => undefined);
         if (active) {
-          setResource({ kind: 'ready', program, slicedPlate, filamentColors, digest });
+          setResource({ kind: 'ready', program, slicedPlate, filamentColors, recordedBedType, digest });
         }
       } catch (error) {
         if (active) {
@@ -187,8 +195,12 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
       ),
     });
   }
-  const slicedPlate = resource.slicedPlate ?? defaultPrinterPlate;
-  const plate = plateChoice === 'as-sliced' ? slicedPlate : printerPlateById(plateChoice);
+  const slicedPlate =
+    plates.find(({ id }) => id === resource.slicedPlate?.id) ??
+    plates.find(({ id }) => id === 'textured-pei') ??
+    defaultPrinterPlate;
+  const plate =
+    plateChoice === 'as-sliced' ? slicedPlate : (plates.find(({ id }) => id === plateChoice) ?? slicedPlate);
   return renderPane({
     actions: (
       <DropdownMenu modal={false}>
@@ -205,15 +217,22 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
           <DropdownMenuCheckboxItem checked={isWholePrinter} onCheckedChange={handleWholePrinter}>
             Show the whole printer
           </DropdownMenuCheckboxItem>
+          {isWholePrinter && (model === 'x1c' || model === undefined) ? (
+            <DropdownMenuCheckboxItem checked={isHousingVisible} onCheckedChange={setIsHousingVisible}>
+              Show enclosure
+            </DropdownMenuCheckboxItem>
+          ) : null}
           <DropdownMenuSeparator />
           <DropdownMenuLabel>Build plate</DropdownMenuLabel>
           <DropdownMenuRadioGroup aria-label='Build plate' value={plateChoice} onValueChange={handlePlate}>
             <DropdownMenuRadioItem value='as-sliced'>
               {resource.slicedPlate
-                ? `As sliced (${resource.slicedPlate.label})`
-                : `As sliced (not recorded; ${defaultPrinterPlate.label})`}
+                ? `As sliced (${resource.slicedPlate.label}${plates.some(({ id }) => id === resource.slicedPlate?.id) ? '' : '; unavailable on this printer'})`
+                : resource.recordedBedType
+                  ? `As sliced (${resource.recordedBedType}; unsupported)`
+                  : `As sliced (not recorded; ${slicedPlate.label})`}
             </DropdownMenuRadioItem>
-            {x1cPlates.map((candidate) => (
+            {plates.map((candidate) => (
               <DropdownMenuRadioItem key={candidate.id} value={candidate.id}>
                 {candidate.label}
               </DropdownMenuRadioItem>
@@ -227,9 +246,19 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
         name={name}
         program={resource.program}
         slicedFilamentColors={resource.filamentColors}
-        digest={resource.digest}
+        live={live}
         frameRequest={frameRequest}
         isWholePrinter={isWholePrinter}
+        isHousingVisible={isHousingVisible}
+        plateNotice={
+          plateChoice === 'as-sliced' &&
+          resource.slicedPlate &&
+          !plates.some(({ id }) => id === resource.slicedPlate?.id)
+            ? `Recorded ${resource.slicedPlate.label} is unavailable on this printer. Previewing ${plate.label}.`
+            : plateChoice === 'as-sliced' && resource.recordedBedType && !resource.slicedPlate
+              ? `Recorded ${resource.recordedBedType} is unsupported. Previewing ${plate.label}.`
+              : undefined
+        }
         plate={plate}
       />
     ),
@@ -347,24 +376,28 @@ function PrinterSimulation({
   name,
   program,
   slicedFilamentColors,
-  digest,
+  live,
   frameRequest,
   isWholePrinter,
+  isHousingVisible,
+  plateNotice,
   plate,
 }: Readonly<{
   name: string;
   program: ToolpathProgram;
   /** The colours the file was sliced with, in filament order, which the model's own colours set. */
   slicedFilamentColors: readonly string[];
-  digest: string | undefined;
+  live: PrinterLiveState | undefined;
   frameRequest: number;
   isWholePrinter: boolean;
+  isHousingVisible: boolean;
+  plateNotice: string | undefined;
   plate: PrinterPlateModel;
 }>): React.JSX.Element {
   const isReducedMotion = useSyncExternalStore(subscribeMotion, getMotion, serverMotion);
   const { theme } = useTheme();
-  const live = usePrinterLive(digest);
   const hintId = useId();
+  const [assetStatus, setAssetStatus] = useState<string>();
   const [sceneError, setSceneError] = useState<string>();
   const { manifest, geometry } = usePrinterGeometry(live);
   // One cursor per loaded program; the parent remounts this tree when the file changes. It opens on
@@ -446,6 +479,8 @@ function PrinterSimulation({
               liveNozzleTarget={live?.nozzleTarget}
               frameRequest={frameRequest}
               isWholePrinter={isWholePrinter}
+              isHousingVisible={isHousingVisible}
+              onAssetStatus={setAssetStatus}
               plate={plate}
               grouping={grouping}
               hiddenGroups={hiddenGroups}
@@ -457,6 +492,15 @@ function PrinterSimulation({
             <p className='max-w-md text-center text-sm text-muted-foreground'>{sceneError}</p>
           </div>
         )}
+        {(plateNotice ?? assetStatus) ? (
+          <p
+            role='status'
+            aria-label='Build plate preview'
+            className='absolute bottom-2 left-2 rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground'
+          >
+            {plateNotice ?? assetStatus}
+          </p>
+        ) : null}
         <p id={hintId} className='sr-only'>
           Space plays or pauses. Left and right arrows step one segment.
         </p>

@@ -40,6 +40,7 @@ export type StorageProvider = {
   getProjectLibraryState(projectId: string): Promise<ProjectLibraryState | undefined>;
   getProjectLibraryStates(projectIds?: readonly string[]): Promise<ProjectLibraryState[]>;
   touchProjectActivity(projectId: string, activityAt?: number): Promise<ProjectLibraryState | undefined>;
+  setGeoSpecCandidateConsent(projectId: string, enabled: boolean): Promise<ProjectLibraryState | undefined>;
   trashProject(projectId: string, deletedAt?: number): Promise<ProjectLibraryState | undefined>;
   restoreProject(projectId: string): Promise<ProjectLibraryState | undefined>;
   deleteProjectLibraryState(projectId: string): Promise<void>;
@@ -117,6 +118,8 @@ export type ChatStorage = {
   getAllChats(options?: { includeDeleted?: boolean }): Promise<Chat[]>;
   getChatsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]>;
   deleteChat(chatId: string): Promise<void>;
+  /** Irreversibly remove an archived chat from discovery, retaining its sync tombstone. */
+  purgeChat(chatId: string): Promise<void>;
   /** Write one chat record as given, for replaying a project creation. */
   putChatRecord(chat: Chat): Promise<void>;
 };

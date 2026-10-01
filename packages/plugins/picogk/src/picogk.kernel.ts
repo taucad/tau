@@ -1,4 +1,4 @@
-import { transformGltfExportBytes } from '@taucad/geometry-core';
+import { createNodeIo, transformGltfExportBytes } from '@taucad/geometry-core';
 import { createWorkspaceMirror } from '@taucad/native-process-core';
 import {
   asBuffer,
@@ -8,7 +8,7 @@ import {
   defineKernel,
 } from '@taucad/runtime/kernel';
 import type { KernelIssue } from '@taucad/runtime/kernel';
-import { createExportFile } from '@taucad/runtime/types';
+import { createExportFile, lookupMimeType } from '@taucad/runtime/types';
 
 import { picogkArtifactToGlb } from '#picogk-mesh.js';
 import { picogkAnalysisSchema, picogkBuildSchema, picogkResolveSchema } from '#picogk.protocol.js';
@@ -56,7 +56,7 @@ export const picogkKernel = defineKernel({
   id: 'picogk',
   extensions: ['cs'],
   name: 'PicogkKernel',
-  version: '2.5.0+dotnet10.roslyn5.9.host3.protocol6.mechanism1',
+  version: '2.5.2+dotnet10.roslyn5.9.host4.protocol7.material1.mechanism1',
   optionsSchema: picogkOptionsSchema,
   // D2: `cancel` stops an in-flight build at the model's next viewer call and keeps the worker warm.
   cancellation: 'cooperative',
@@ -67,6 +67,12 @@ export const picogkKernel = defineKernel({
       mimeType: 'model/gltf-binary',
       extension: 'glb',
       optionsSchema: picogkExportSchemas.glb,
+    },
+    gltf: {
+      title: 'glTF JSON',
+      mimeType: 'model/gltf+json',
+      extension: 'gltf',
+      optionsSchema: picogkExportSchemas.gltf,
     },
   },
 
@@ -211,6 +217,21 @@ export const picogkKernel = defineKernel({
         ...input.options,
         preserveMeshTopology: true,
       });
+      if (input.exportId === 'gltf') {
+        const io = await createNodeIo();
+        const document = await io.readBinary(bytes);
+        const output = await io.writeJSON(document);
+        return {
+          files: [
+            createExportFile('gltf', 'model.gltf', asBuffer(new TextEncoder().encode(JSON.stringify(output.json)))),
+            ...Object.entries(output.resources).map(([name, resource]) => ({
+              name,
+              bytes: asBuffer(resource),
+              mimeType: lookupMimeType(name.slice(name.lastIndexOf('.') + 1)),
+            })),
+          ],
+        };
+      }
       return { files: [createExportFile('glb', 'model.glb', asBuffer(bytes))] };
     } catch (error) {
       throw new PicogkKernelError(issuesFrom(error));

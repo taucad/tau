@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { geometryCache } from '@taucad/middleware';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { esbuild } from '@taucad/esbuild';
 import { picovoxel } from '@taucad/picovoxel';
 import type { PicovoxelOptionsInput } from '@taucad/picovoxel';
@@ -13,10 +15,15 @@ import { Worker as NodeWorker } from 'node:worker_threads';
 import { asKnownArtifact, createRuntimeClient } from '@taucad/runtime';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
-import { createNodeClient } from '@taucad/runtime/node';
+import { createNodeClient, createSqliteComputeEngine, fromSqlite } from '@taucad/runtime/node';
 import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { extractGltfFromExportResult, glbToDocument, validateGlbData } from '@taucad/runtime-testing';
+import {
+  extractGltfFromExportResult,
+  glbToDocument,
+  readGltfNamingSummary,
+  validateGlbData,
+} from '@taucad/runtime-testing';
 import { kernelConfigurations } from '@taucad/types/constants';
 
 const createRuntime = (wasm?: PicovoxelOptionsInput['wasm']) =>
@@ -108,6 +115,93 @@ afterEach(async () => {
 });
 
 describe('PicoVoxel packaged runtime', () => {
+  it.each(['serial', 'auto'] as const)(
+    'should restore named multi-file parts in a fresh %s host and invalidate a helper rename',
+    async (wasm) => {
+      const projectPath = await writeProject();
+      const hostState = await mkdtemp(join(tmpdir(), 'tau-picovoxel-compute-'));
+      temporaryDirectories.push(hostState);
+      const helper = (name: string) => `
+      import type { Pico } from 'picovoxel';
+      export const makeSphere = (pico: Pico, radius: number) => ({
+        shape: pico.createVoxels({ shape: 'sphere', radius }).clone().offset({ distance: 0.5 }),
+        name: ${JSON.stringify(name)},
+      });
+    `;
+      await writeFile(
+        join(projectPath, 'main.ts'),
+        `
+      import type { Pico } from 'picovoxel';
+      import type { PicovoxelResult } from '@taucad/picovoxel';
+      import { makeSphere } from './lib/widget.js';
+      export const defaultParams = { voxelSize: 1 };
+      export default function main(pico: Pico): PicovoxelResult {
+        const part = makeSphere(pico, 4);
+        return [part, { ...part, name: 'Mesh' }, part.shape];
+      }
+    `,
+      );
+      const run = async () => {
+        const engine = createSqliteComputeEngine({ directory: hostState });
+        const client = createRuntimeClient({
+          transport: inProcessTransport({
+            runtime: defineRuntime({
+              plugins: [picovoxel({ kernels: { default: { wasm } } }), esbuild()],
+              middleware: [geometryCache()],
+            }),
+            fileSystem: fromNodeFs(projectPath),
+            compute: { mode: 'durable', store: fromSqlite({ store: engine, workspace: projectPath }) },
+          }),
+        });
+        try {
+          const preview = await client.render({ source: { path: 'main.ts' } });
+          if (preview.superseded || !preview.geometry.success || preview.geometry.data.format !== 'gltf') {
+            throw new Error('Preview failed');
+          }
+          const glb = extractGltfFromExportResult(await client.export('glb'));
+          if (!glb) {
+            throw new Error('Exact GLB export failed');
+          }
+          const stl = await client.export('stl');
+          if (!stl.success) {
+            throw new Error('STL export failed');
+          }
+          await client.shutdown({ drain: true });
+          const control = await engine.control({ workspace: projectPath });
+          const { entries } = await control.inspect({});
+          return { preview: preview.geometry.data.content, glb, stl: stl.data, entries };
+        } finally {
+          try {
+            await client.shutdown({ drain: true });
+          } finally {
+            await engine.dispose();
+          }
+        }
+      };
+      await writeFile(join(projectPath, 'lib/widget.ts'), helper('Housing / 蓋'));
+      const before = await run();
+      const restored = await run();
+      expect(restored).toEqual(before);
+      expect(before.entries).toBeGreaterThan(0);
+      for (const bytes of [before.preview, before.glb, restored.preview, restored.glb]) {
+        // oxlint-disable-next-line no-await-in-loop -- each restored artifact is checked separately
+        const summary = await readGltfNamingSummary(bytes);
+        expect(summary.nodeNames).toEqual(['Housing / 蓋', 'Mesh', 'Shape 3']);
+        expect(summary.meshNames).toEqual(summary.nodeNames);
+      }
+      expect(before.stl.map((file) => file.name)).toEqual(['Housing _ 蓋.stl', 'Mesh.stl', 'Shape 3.stl']);
+      await writeFile(join(projectPath, 'lib/widget.ts'), helper('Renamed 蓋'));
+      const renamed = await run();
+      expect(renamed.entries).toBeGreaterThan(before.entries);
+      const renamedPreview = await readGltfNamingSummary(renamed.preview);
+      const renamedGlb = await readGltfNamingSummary(renamed.glb);
+      expect(renamedPreview.nodeNames).toEqual(['Renamed 蓋', 'Mesh', 'Shape 3']);
+      expect(renamedGlb.nodeNames).toEqual(['Renamed 蓋', 'Mesh', 'Shape 3']);
+      expect(renamed.stl.map((file) => file.bytes)).toEqual(before.stl.map((file) => file.bytes));
+    },
+    120_000,
+  );
+
   it('should keep the fast viewer render within the lane tolerance of the exact export (DP1)', async () => {
     const voxelSize = 0.5;
     const projectPath = await writeModel(`

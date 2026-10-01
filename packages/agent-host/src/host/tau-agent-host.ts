@@ -1577,7 +1577,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         kind: 'tau',
         turnId: entry?.turnId ?? latestTurnId(history, runId),
         /* The tail already answers the turn: the attempt ends with no call. */
-        mode: !reminder && !answered && history.at(-1)?.role === 'assistant' ? 'complete' : 'continue',
+        mode:
+          entry?.failure?.code !== 'USER_STOPPED' && !reminder && !answered && history.at(-1)?.role === 'assistant'
+            ? 'complete'
+            : 'continue',
         /* `running` first, so the command's cursor is the reopening row (ChatRunSlot.tla resume; W7.r1). */
         intent: [running, ...recovery],
       };
@@ -1845,7 +1848,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const messages = await log.messages();
     const entry = ledger.runs[runId];
     /* This run's own assistant diagnostic first, then its lifecycle record (F1). */
-    const failure = transportFailureOfRun({ events, messages, runId }) ?? entry?.failure;
+    const failure =
+      entry?.failure?.code === 'USER_STOPPED'
+        ? entry.failure
+        : (transportFailureOfRun({ events, messages, runId }) ?? entry?.failure);
     return {
       chatId,
       runId,

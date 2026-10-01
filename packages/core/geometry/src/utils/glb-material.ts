@@ -111,7 +111,13 @@ function fail(path: string, requirement: string): never {
   throw new TypeError(`${path} ${requirement}`);
 }
 
-/** Validate the supported material vocabulary before JSON encoding, retaining opaque extension data. @internal */
+/**
+ * Validate the supported material vocabulary before JSON encoding, retaining opaque extension data.
+ * @param material - Authored standard glTF material to validate.
+ * @param attributes - Available texture resources, UV sets and tangent frame evidence.
+ * @throws TypeError when a factor, texture reference or required coordinate attribute is invalid.
+ * @public
+ */
 export function validateGlbMaterial(
   material: GlbMaterial,
   { textureCount, texCoordCount, hasTangents }: { textureCount: number; texCoordCount: number; hasTangents: boolean },

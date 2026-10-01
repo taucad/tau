@@ -8,7 +8,7 @@
  */
 import { canonicalJson } from '#log/canonical-json.js';
 import { classifyLogRow, historyRowTypes } from '#log/event-schema.js';
-import { isResumableRunFailure } from '#log/resumable.js';
+import { isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
 import operationTable from '#log/run-operation.legality.json' with { type: 'json' };
 import settlementTable from '#log/run-settlement.legality.json' with { type: 'json' };
@@ -63,6 +63,8 @@ export type RunEntry = Readonly<{
   appendState: 'unadmitted' | 'open' | 'terminal' | 'settled';
   /** The run's user turn is durable. */
   committed: boolean;
+  /** The external prompt was issued for this run before its intentional Stop. */
+  externalPrompted?: boolean;
   failure?: LedgerRunFailure;
   /** Attempt 1's placement of record (D9). */
   placement?: TurnPlacement;
@@ -202,6 +204,7 @@ const attemptEnded = (entry: RunEntry): boolean =>
 const reopenable = (entry: RunEntry): boolean =>
   attemptEnded(entry) &&
   ((entry.lifecycle === 'failed' && isResumableRunFailure(entry.failure)) ||
+    isUserStoppedRun(entry) ||
     (entry.lifecycle === 'paused' && Object.keys(entry.pendingInterrupts).length === 0));
 
 /**
@@ -317,7 +320,7 @@ const createFold = (ledger: ChatLedger) => {
     }
   };
 
-  const noteTurn = (entry: EntryDraft, message: ProviderMessage): void => {
+  const noteTurn = (entry: EntryDraft, message: ProviderMessage, runId: string): void => {
     if (message.role !== 'user') {
       return;
     }
@@ -325,6 +328,8 @@ const createFold = (ledger: ChatLedger) => {
     if (kind === 'external-agent') {
       entry.kind = 'external';
       entry.committed = true;
+      const prompted = message.metadata?.tauInternal?.['acpPromptedRequestId'];
+      entry.externalPrompted = typeof prompted === 'string' && prompted.startsWith(`${runId}:`);
     }
     if (entry.turnId === undefined && kind !== 'interrupt-recovery') {
       entry.turnId = message.id;
@@ -353,7 +358,7 @@ const createFold = (ledger: ChatLedger) => {
       draft.anomalies.push({ kind: 'order', row: key });
     }
     entry.lifecycle = event.state;
-    if (event.state !== 'failed') {
+    if (event.state !== 'failed' && event.state !== 'cancelled') {
       drop(entry, 'failure');
     } else if (event.detail?.code === undefined) {
       drop(entry, 'failure');
@@ -470,8 +475,8 @@ const createFold = (ledger: ChatLedger) => {
       case 'message.appended':
       case 'message.envelope-replaced': {
         const message = event.type === 'message.appended' ? event.message : event.replacement;
-        if (message.role === 'user' && event.type === 'message.appended') {
-          noteTurn(entryOf(event.runId), message);
+        if (message.role === 'user') {
+          noteTurn(entryOf(event.runId), message, event.runId);
           return;
         }
         const binding = message.metadata?.tauInternal;
@@ -499,7 +504,7 @@ const createFold = (ledger: ChatLedger) => {
       case 'turn.history-projection-committed': {
         const entry = entryOf(event.runId);
         entry.committed = true;
-        noteTurn(entry, event.message);
+        noteTurn(entry, event.message, event.runId);
         break;
       }
       default: {

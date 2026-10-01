@@ -96,7 +96,7 @@ describe('ChatToolError parsed errors', () => {
     expect(labelWrapper?.tagName).toBe('SPAN');
 
     const description = screen.getByText('web visit');
-    expect(description).toHaveClass('text-foreground/50');
+    expect(description).toHaveClass('text-muted-foreground');
     expect(description.className).not.toContain('font-mono');
 
     expect(labelWrapper?.textContent).toBe('Attempted web visit');

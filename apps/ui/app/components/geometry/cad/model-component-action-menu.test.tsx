@@ -150,6 +150,33 @@ function renderViewerModelComponentActionMenu({
 }
 
 describe('model component action menu', () => {
+  it('offers retry only for a failed Explorer preview', async () => {
+    const node = createNode();
+    const retry = vi.fn();
+    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
+    render(
+      <ModelComponentActionDropdown
+        manifest={createManifest(node)}
+        node={node}
+        graphicsRef={graphicsRef}
+        unitId={unitId}
+        source='explorer'
+        isFocused={false}
+        isIsolated={false}
+        hasHiddenComponents={false}
+        hasOpacityOverrides={false}
+        opacity={1}
+        actionButtonClassName=''
+        preview={{ status: 'failed' }}
+        onRetryPreview={retry}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Retry preview' }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
   it.each(['explorer', 'viewer'] as const)(
     'should expose source material factors as read-only text in the %s menu',
     async (source) => {
@@ -182,14 +209,17 @@ describe('model component action menu', () => {
       }
 
       // The menu opens on its part: a collapsed row with the name and a swatch; the factors wait inside.
-      const partRow = screen.getByRole('menuitem', { name: 'Planetary housing' });
+      const partRow = screen.getByRole('menuitem', { name: /Planetary housing/ });
       expect(screen.getByRole('menu')).toHaveTextContent(/^Planetary housing/);
       expect(partRow).toHaveAttribute('aria-expanded', 'false');
       expect(partRow.querySelector('[data-slot="material-swatch"]')).toBeInTheDocument();
-      expect(screen.queryByRole('group', { name: 'Material for Planetary housing' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Inspection for Planetary housing' })).not.toBeInTheDocument();
       await user.click(partRow);
       expect(partRow).toHaveAttribute('aria-expanded', 'true');
-      const summary = within(screen.getByRole('group', { name: 'Material for Planetary housing' }));
+      const summary = within(screen.getByRole('group', { name: 'Inspection for Planetary housing' }));
+      expect(summary.getAllByText('Not measured')).toHaveLength(2);
+      expect(summary.getByText('Volume not measured yet.')).toBeVisible();
+      await user.click(summary.getByRole('menuitem', { name: 'Rendering' }));
       expect(summary.getByText(carrierBaseColor)).toBeVisible();
       expect(summary.getByText('0.65')).toBeVisible();
       expect(summary.getByText('0.32')).toBeVisible();
@@ -212,8 +242,10 @@ describe('model component action menu', () => {
       },
     });
 
-    await userEvent.setup().click(screen.getByRole('menuitem', { name: 'Planetary housing' }));
-    const summary = within(screen.getByRole('group', { name: 'Material for Planetary housing' }));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('menuitem', { name: /Planetary housing/ }));
+    const summary = within(screen.getByRole('group', { name: 'Inspection for Planetary housing' }));
+    await user.click(summary.getByRole('menuitem', { name: 'Rendering' }));
     expect(summary.getByText('Mixed: 0.2, 0.8')).toBeVisible();
     expect(summary.getByText('1 (includes glTF default)')).toBeVisible();
     expect(summary.getByText('#ffffff (includes glTF default)')).toBeVisible();
@@ -230,8 +262,10 @@ describe('model component action menu', () => {
       },
     });
 
-    await userEvent.setup().click(screen.getByRole('menuitem', { name: 'Planetary housing' }));
-    const summary = within(screen.getByRole('group', { name: 'Material for Planetary housing' }));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('menuitem', { name: /Planetary housing/ }));
+    const summary = within(screen.getByRole('group', { name: 'Inspection for Planetary housing' }));
+    await user.click(summary.getByRole('menuitem', { name: 'Rendering' }));
     expect(summary.getByText('Mixed: #ffffff (glTF default), Unavailable')).toBeVisible();
     expect(summary.getAllByText('Mixed: 1 (glTF default), Unavailable, Not used (unlit)')).toHaveLength(2);
   });

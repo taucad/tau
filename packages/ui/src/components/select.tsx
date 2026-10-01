@@ -3,7 +3,11 @@ import { Select as SelectPrimitive } from 'radix-ui';
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from 'lucide-react';
 import { cn } from '#utils/cn.js';
 import { menuItemVariants, menuLabelVariants, menuSeparatorVariants } from '#components/menu.variants.js';
-import { popoverSurfaceVariants } from '#components/popover.variants.js';
+import { selectControlVariants, selectContentVariants } from '#components/select.variants.js';
+import type { SelectSize } from '#components/select.variants.js';
+import { useFullscreenElement } from '#hooks/use-fullscreen-element.js';
+
+const SelectSizeContext = React.createContext<SelectSize>('default');
 
 /**
  * Owns the selected value, open state, and keyboard interaction for a select.
@@ -17,8 +21,17 @@ import { popoverSurfaceVariants } from '#components/popover.variants.js';
  * createElement(Select, { value: 'metric' });
  * ```
  */
-function Select({ ...properties }: React.ComponentProps<typeof SelectPrimitive.Root>): React.JSX.Element {
-  return <SelectPrimitive.Root data-slot='select' {...properties} />;
+function Select({
+  size = 'default',
+  ...properties
+}: React.ComponentProps<typeof SelectPrimitive.Root> & {
+  readonly size?: SelectSize;
+}): React.JSX.Element {
+  return (
+    <SelectSizeContext.Provider value={size}>
+      <SelectPrimitive.Root data-slot='select' {...properties} />
+    </SelectSizeContext.Provider>
+  );
 }
 
 /**
@@ -40,7 +53,7 @@ function SelectGroup({
   return (
     <SelectPrimitive.Group
       data-slot='select-group'
-      className={cn('flex scroll-my-1 flex-col gap-0.5 p-1', className)}
+      className={cn('flex scroll-my-1 flex-col gap-0.5', className)}
       {...properties}
     />
   );
@@ -69,27 +82,22 @@ function SelectValue({ ...properties }: React.ComponentProps<typeof SelectPrimit
  * @example <caption>Render a small select trigger.</caption>
  * ```typescript
  * import { createElement } from 'react';
- * import { SelectTrigger } from '@taucad/ui/components/select';
+ * import { Select, SelectTrigger } from '@taucad/ui/components/select';
  *
- * createElement(SelectTrigger, { size: 'sm' });
+ * createElement(Select, { size: 'sm' }, createElement(SelectTrigger));
  * ```
  */
 function SelectTrigger({
   className,
-  size = 'default',
   children,
   ...properties
-}: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
-  readonly size?: 'sm' | 'default';
-}): React.JSX.Element {
+}: React.ComponentProps<typeof SelectPrimitive.Trigger>): React.JSX.Element {
+  const size = React.useContext(SelectSizeContext);
   return (
     <SelectPrimitive.Trigger
       data-slot='select-trigger'
       data-size={size}
-      className={cn(
-        "flex w-fit items-center justify-between gap-1.5 rounded-md border border-input bg-transparent py-2 pr-2 pl-2.5 text-sm whitespace-nowrap transition-colors outline-none select-none focus-visible:focus-outline disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive data-[placeholder]:text-muted-foreground data-[size=default]:h-9 data-[size=sm]:h-7 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 dark:bg-input/30 dark:hover:bg-input/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
-        className,
-      )}
+      className={cn(selectControlVariants({ size, part: 'trigger' }), className)}
       {...properties}
     >
       {children}
@@ -119,18 +127,13 @@ function SelectContent({
   align = 'center',
   ...properties
 }: React.ComponentProps<typeof SelectPrimitive.Content>): React.JSX.Element {
+  const fullscreenElement = useFullscreenElement();
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal container={fullscreenElement}>
       <SelectPrimitive.Content
         data-slot='select-content'
         data-align-trigger={position === 'item-aligned'}
-        className={cn(
-          popoverSurfaceVariants({ appearance: 'picker' }),
-          'relative z-50 max-h-(--radix-select-content-available-height) min-w-36 origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto duration-100 data-[align-trigger=true]:w-[calc(100%+0.25rem)] data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95',
-          position === 'popper' &&
-            'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1',
-          className,
-        )}
+        className={cn(selectContentVariants({ position }), className)}
         position={position}
         align={align}
         {...properties}
@@ -139,7 +142,7 @@ function SelectContent({
         <SelectPrimitive.Viewport
           data-position={position}
           className={cn(
-            'flex flex-col gap-0.5 p-1',
+            'flex flex-col gap-0.5 p-(--select-gutter)',
             position === 'popper' &&
               'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)] scroll-my-1',
           )}
@@ -190,17 +193,14 @@ function SelectItem({
   children,
   ...properties
 }: React.ComponentProps<typeof SelectPrimitive.Item>): React.JSX.Element {
+  const size = React.useContext(SelectSizeContext);
   return (
     <SelectPrimitive.Item
       data-slot='select-item'
-      className={cn(
-        menuItemVariants(),
-        'w-full pr-8 text-sm *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2',
-        className,
-      )}
+      className={cn(menuItemVariants(), selectControlVariants({ size, part: 'item' }), className)}
       {...properties}
     >
-      <span className='pointer-events-none absolute right-2 flex size-4 items-center justify-center'>
+      <span className='pointer-events-none col-start-2 row-start-1 flex size-4 items-center justify-center'>
         <SelectPrimitive.ItemIndicator>
           <CheckIcon className='pointer-events-none size-4' />
         </SelectPrimitive.ItemIndicator>

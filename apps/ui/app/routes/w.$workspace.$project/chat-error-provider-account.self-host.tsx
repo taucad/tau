@@ -1,12 +1,11 @@
-import { memo, useState } from 'react';
+import { memo } from 'react';
 import type React from 'react';
-import { ChevronRight, ExternalLink, RefreshCcw, Repeat, Wallet } from 'lucide-react';
+import { ExternalLink, RefreshCcw, Repeat, Wallet } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
-import { cn } from '@taucad/ui/utils/cn';
 import { useChatActions } from '#hooks/use-chat.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
+import { ChatErrorDetails } from '#routes/w.$workspace.$project/chat-error-details.js';
 
 type ProviderEntry = {
   readonly name: string;
@@ -54,7 +53,7 @@ type ChatErrorProviderAccountProps = {
  *
  * The operator owns that account, so the provider's billing page is the
  * resolving action and comes first; the provider's own sentence and codes stay
- * behind Details, where only someone who can act on them looks.
+ * in Tau Debug, while billing guidance stays visible.
  *
  * @param properties - Card class, the provider message and the refusal details.
  * @returns The notice.
@@ -65,7 +64,6 @@ export const ChatErrorProviderAccount = memo(function ({
   details,
 }: ChatErrorProviderAccountProps): React.JSX.Element {
   const { regenerate } = useChatActions();
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const { name, billing } = providerEntryFrom(details);
   const providerCode = text(details?.['providerCode']);
   const title = `${name} has no credit left`;
@@ -79,11 +77,10 @@ export const ChatErrorProviderAccount = memo(function ({
       className={className}
       title={title}
       description={`This server's ${name} key is out of credit, so Tau could not run this turn. Add credit ${billing === undefined ? `with ${name}` : `on ${billing.host}`}, then try again.`}
-      actionsRowFrom='sm'
       actions={
         <>
           {billing === undefined ? null : (
-            <Button asChild variant='outline' size='sm'>
+            <Button asChild variant='outline' size='xs'>
               <a href={billing.href} target='_blank' rel='noreferrer noopener'>
                 <ExternalLink className='size-3.5' />
                 Open {name} billing
@@ -93,7 +90,7 @@ export const ChatErrorProviderAccount = memo(function ({
           {/* The composer's picker is the owner, opened here as the credits card opens it. */}
           <ChatModelSelector popoverProperties={{ align: 'end' }}>
             {() => (
-              <Button variant='outline' size='sm'>
+              <Button variant='outline' size='xs'>
                 <Repeat className='size-3.5' />
                 Switch model
               </Button>
@@ -101,7 +98,7 @@ export const ChatErrorProviderAccount = memo(function ({
           </ChatModelSelector>
           <Button
             variant='outline'
-            size='sm'
+            size='xs'
             onClick={() => {
               regenerate();
             }}
@@ -112,14 +109,8 @@ export const ChatErrorProviderAccount = memo(function ({
         </>
       }
     >
-      <Collapsible open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <CollapsibleTrigger asChild>
-          <Button variant='ghost' size='xs' className='-ml-1 text-muted-foreground'>
-            <ChevronRight className={cn('size-3 transition-transform', isDetailsOpen && 'rotate-90')} />
-            Details
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className='space-y-1 pt-1 text-xs text-muted-foreground'>
+      <ChatErrorDetails>
+        <div className='space-y-1 pt-1'>
           {description === undefined ? null : <p className='break-words text-foreground'>{description}</p>}
           <dl className='grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono'>
             <dt>provider</dt>
@@ -131,8 +122,8 @@ export const ChatErrorProviderAccount = memo(function ({
               </>
             )}
           </dl>
-        </CollapsibleContent>
-      </Collapsible>
+        </div>
+      </ChatErrorDetails>
     </ChatErrorCard>
   );
 });

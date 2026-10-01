@@ -77,6 +77,29 @@ function shape(node: ViewerNode | WorkbenchLaneNode): Record<string, unknown> {
 }
 
 describe('workbench Dockview converters', () => {
+  it('restores utility tab labels and file names with their display case', () => {
+    const layout = toDockview(
+      'workbench',
+      {
+        kind: 'group',
+        tabs: [
+          { kind: 'pane', pane: 'model' },
+          { kind: 'pane', pane: 'parameters' },
+          { kind: 'pane', pane: 'kernel' },
+          { kind: 'file', path: 'models/MainPart.ts' },
+        ],
+      },
+      { dimensions: { width: 800, height: 500 }, files: { 'models/MainPart.ts': { paneId: 'pane-main' } } },
+    );
+
+    expect(mount(layout).panels).toMatchObject({
+      'workbench:model': { title: 'Model' },
+      'workbench:parameters': { title: 'Parameters' },
+      'workbench:kernel': { title: 'Telemetry' },
+      'pane-main': { title: 'MainPart.ts' },
+    });
+  });
+
   it.each([
     { width: 1200, height: 800 },
     { width: 520, height: 1080 },

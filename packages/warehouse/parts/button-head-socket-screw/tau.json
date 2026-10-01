@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_YnlYhrslLpFSCovZ1-Hil",
+  "name": "Button-head socket screw",
+  "description": "Button-head socket screw with editable millimetre dimensions and a deliberately symbolic thread.",
+  "tags": [
+    "Fasteners",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

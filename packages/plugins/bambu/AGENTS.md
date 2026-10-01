@@ -16,7 +16,7 @@ Bambu Lab Developer LAN machine plugin
 - `src/index.ts`
 - `src/bambu.plugin.ts`
 - `src/bambu.machine.ts`
-- `src/bambu.plate.ts` (`./plate`: pre-rendered X1C plate and hotend GLBs in `src/assets`, from `models/x1c`)
+- `src/bambu.plate.ts` (`./plate`: pre-rendered X1C and A1 mini plate/hotend GLBs in `src/assets`, from `models/{x1c,a1-mini}`)
 - `package.json`
 - `project.json`
 
@@ -31,7 +31,7 @@ pnpm nx typecheck bambu
 pnpm nx build bambu
 pnpm nx pkgcheck bambu
 pnpm nx size bambu
-pnpm nx run bambu:render-plates   # after editing models/x1c; the unit tests fail until re-rendered
+pnpm nx run bambu:render-plates   # after editing either model family; the unit tests fail until re-rendered
 ```
 
 ## Local maintenance

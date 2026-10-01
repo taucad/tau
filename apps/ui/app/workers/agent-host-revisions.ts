@@ -12,7 +12,12 @@ import type {
 type RevisionStatus = Extract<WorkerRevisionResponse, { type: 'status' }>['status'];
 
 /** A revisions client over one revision port, and the close that lets the root go. @internal */
-export type PortRevisionsClient = RpcRevisionsClient & Readonly<{ close: () => void }>;
+export type PortRevisionsClient = RpcRevisionsClient &
+  Readonly<{
+    fetchGeoSpecCandidates: () => Promise<ReadonlyArray<Uint8Array<ArrayBuffer>>>;
+    publishGeoSpecCandidate: (candidate: Uint8Array<ArrayBuffer>) => Promise<'updated' | 'upToDate' | 'rejected'>;
+    close: () => void;
+  }>;
 
 /**
  * Serve `log`, `diff` and `describe` over a revision port.
@@ -66,6 +71,14 @@ export const createPortRevisionsClient = (port: MessagePort): PortRevisionsClien
   };
 
   return {
+    fetchGeoSpecCandidates: async () => {
+      const result = await ask({ command: 'fetchGeoSpecCandidates' }, 'geoSpecCandidates');
+      return result.candidates;
+    },
+    publishGeoSpecCandidate: async (candidate) => {
+      const result = await ask({ command: 'publishGeoSpecCandidate', candidate }, 'geoSpecCandidatePublication');
+      return result.status;
+    },
     log: async (request) => {
       const { rows } = await ask(
         {

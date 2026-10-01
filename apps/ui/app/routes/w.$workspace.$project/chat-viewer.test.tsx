@@ -888,7 +888,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     expect(mockProjectSend).toHaveBeenCalledWith({ type: 'createGeometryUnit', entryPath: 'bracket.scad' });
     expect(mockPanelApi.updateParameters).toHaveBeenCalledWith({ entryPath: 'bracket.scad' });
-    expect(mockPanelApi.setTitle).toHaveBeenCalledWith('Isometric · bracket.scad');
+    expect(mockPanelApi.setTitle).toHaveBeenCalledWith('bracket.scad');
   });
 
   it('keeps a viewer on a user-selected file when the synced main file changes', () => {
@@ -943,6 +943,13 @@ describe('ChatViewer reopen-renderer overlay', () => {
       entryPath: helperEntryPath,
       operationTimeout: 30_000,
     });
+  });
+
+  it('should switch a shared preview file without writing an editor view record', () => {
+    render(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} profile='shared' />);
+    fireEvent.click(screen.getByTestId('file-selector'));
+    expect(mockPanelApi.updateParameters).toHaveBeenCalledWith({ entryPath: 'other.scad' });
+    expect(mockViewActions.edit).not.toHaveBeenCalled();
   });
 
   it('should clear the camera pose, every cut and every measurement when the pane switches files', () => {

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_wagZCtLVdKlC0tCpYBGRf",
+  "name": "Slotted spring pin",
+  "description": "Hollow cylindrical spring pin with a full-length open slot.",
+  "tags": [
+    "Pins and retainers",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

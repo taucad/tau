@@ -6,7 +6,7 @@ import { BufferAttribute, BufferGeometry, Group, LineBasicMaterial, LineSegments
 import type { Object3D } from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { Line2NodeMaterial as ThreeLine2NodeMaterial } from 'three/webgpu';
-import { cameraFar, cameraNear, depth, positionView, viewZToReversedPerspectiveDepth } from 'three/tsl';
+import { depth } from 'three/tsl';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import {
   applyFatLineSegments,
@@ -83,10 +83,6 @@ function captureDepthAssign(): { restore: () => void; captured: { node: unknown 
   };
 }
 
-function fingerprint(node: unknown): string {
-  return serialiseStrippedTslGraph((node as { toJSON: () => unknown }).toJSON());
-}
-
 describe('createWebGpuGltfFatLineMaterial TSL snapshots', () => {
   it('keeps the line at geometric depth', () => {
     const material = createWebGpuGltfFatLineMaterial();
@@ -113,7 +109,7 @@ describe('createWebGpuGltfFatLineMaterial TSL snapshots', () => {
     expect(material.constructor).not.toBe(ThreeLine2NodeMaterial);
   });
 
-  it('routes the factory material through Tau setupDepth with exact geometric view Z', () => {
+  it('should keep native sample depth for opaque CAD edges', () => {
     const material = createWebGpuGltfFatLineMaterial();
     const stubBuilder = {
       renderer: { reversedDepthBuffer: true, getMRT: () => null },
@@ -122,14 +118,12 @@ describe('createWebGpuGltfFatLineMaterial TSL snapshots', () => {
 
     const { captured, restore } = captureDepthAssign();
     try {
-      material.setupDepth(stubBuilder);
+      Reflect.apply(material.setupDepth, material, [stubBuilder]);
     } finally {
       restore();
     }
 
-    const expected = viewZToReversedPerspectiveDepth(positionView.z, cameraNear, cameraFar);
-    expect(captured.node).toBeDefined();
-    expect(fingerprint(captured.node)).toBe(fingerprint(expected));
+    expect(captured.node).toBeUndefined();
   });
 
   /**

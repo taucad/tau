@@ -101,7 +101,7 @@ describe('approved record grammar', () => {
           version: 1,
           entries: {
             'bracket.ts': {
-              renderTimeout: 300_000,
+              operationTimeout: 300_000,
               components: { hidden: ['lid'], opacity: [{ id: 'housing', opacity: 0.4 }] },
             },
           },
@@ -158,7 +158,7 @@ describe('approved record grammar', () => {
     ).toBe(true);
     expect(
       entrySettingsSchema.safeParse({
-        renderTimeout: 300_000,
+        operationTimeout: 300_000,
         components: { hidden: ['lid'], opacity: [{ id: 'housing', opacity: 0.4 }] },
       }).success,
     ).toBe(true);
@@ -173,7 +173,7 @@ describe('approved record grammar', () => {
         version: 1,
         entries: {
           'bracket.ts': {
-            renderTimeout: 300_000,
+            operationTimeout: 300_000,
             components: { hidden: ['lid'], opacity: [{ id: 'housing', opacity: 0.4 }] },
           },
         },
@@ -308,7 +308,7 @@ describe('approved record grammar', () => {
     };
     roundTrip(workbenchRecords.layout, layout);
     roundTrip(workbenchRecords.view, view);
-    roundTrip(workbenchRecords.entries, { version: 1, entries: { 'bracket.ts': { renderTimeout: 0 } } });
+    roundTrip(workbenchRecords.entries, { version: 1, entries: { 'bracket.ts': { operationTimeout: 0 } } });
     roundTrip(workbenchRecords.namedLayout, { version: 1, views: [] });
     roundTrip(workbenchRecords.device, {
       version: 1,
@@ -380,7 +380,7 @@ describe('approved record grammar', () => {
     ).toThrow(RangeError);
     const canonical = workbenchRecords.entries.serialize({
       version: 1,
-      entries: { 'z.ts': { components: { hidden: ['b', 'a'] } }, 'a.ts': { renderTimeout: 1 } },
+      entries: { 'z.ts': { components: { hidden: ['b', 'a'] } }, 'a.ts': { operationTimeout: 1 } },
     });
     expect(canonical.indexOf('"a.ts"')).toBeLessThan(canonical.indexOf('"z.ts"'));
     expect(canonical.indexOf('"components"')).toBeLessThan(canonical.indexOf('"version"'));

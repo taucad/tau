@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
-import { ChevronRight, Pencil, Square, Trash2 } from 'lucide-react';
+import { Pencil, Square, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { useChats } from '#hooks/use-chats.js';
@@ -11,6 +11,7 @@ import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-naviga
 import { projectChatIdFromSearch, projectChatUrl, projectUrl } from '#utils/project-url.utils.js';
 import { compareChatsByRecency, getChatRecencyAt } from '#utils/chat-recency.utils.js';
 import { StatusMark } from '#components/nav/status-mark.js';
+import { sidebarDisclosureButtonClass } from '#components/nav/sidebar-disclosure.styles.js';
 import {
   SidebarFailureRow,
   SidebarRowActions,
@@ -25,7 +26,6 @@ import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { selectChatFacts, useChatSidebarStatus, useSidebarCommands } from '#hooks/use-sidebar-status.js';
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { Button } from '@taucad/ui/components/button';
 import { toast } from '#components/ui/sonner.js';
 
 const chatsPerPage = 5;
@@ -47,31 +47,26 @@ export function ProjectChatList({
   readonly isProjectActive: boolean;
   readonly isExpanded?: boolean;
 }): React.ReactNode {
-  const { chats: allChats, isLoading, error } = useChatRecords(project.id, { includeDeleted: true });
-  const { updateChatName, deleteChat, restoreChat } = useChats(project.id, { enabled: false });
+  const { chats: allChats, isLoading, error } = useChatRecords(project.id);
+  const { updateChatName, deleteChat } = useChats(project.id, { enabled: false });
+  const chats = useMemo(
+    () => allChats.filter((chat) => chat.deletedAt === undefined && chat.purgedAt === undefined),
+    [allChats],
+  );
   const store = useChatSessionStore();
   useEffect(() => {
-    const releases = allChats.map((chat) => store.observe(chat.id, project.id));
+    const releases = chats.map((chat) => store.observe(chat.id, project.id));
     return () => {
       for (const release of releases) {
         release();
       }
     };
-  }, [allChats, project.id, store]);
+  }, [chats, project.id, store]);
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const [visibleCount, setVisibleCount] = useState(chatsPerPage);
   const [editingChatId, setEditingChatId] = useState<string | undefined>();
-  const [isTrashOpen, setIsTrashOpen] = useState(false);
-  const chats = useMemo(() => allChats.filter((chat) => chat.deletedAt === undefined), [allChats]);
-  const trashedChats = useMemo(
-    () =>
-      allChats
-        .filter((chat) => chat.deletedAt !== undefined)
-        .sort((left, right) => (right.deletedAt ?? 0) - (left.deletedAt ?? 0)),
-    [allChats],
-  );
   const sortedChats = useMemo(() => sortProjectChats(chats), [chats]);
   const visibleChats = sortedChats.slice(0, visibleCount);
   /* A29: the label appears only when both groups do — a list that is all from
@@ -108,20 +103,6 @@ export function ProjectChatList({
     await navigate(nextChatId ? projectChatUrl(project.slugs, nextChatId) : projectUrl(project.slugs), {
       replace: true,
     });
-  };
-
-  const handleRestore = async (chat: ChatRecord): Promise<void> => {
-    try {
-      const restored = await restoreChat(chat.id);
-      if (!restored) {
-        toast.error(`Could not restore ${chat.name}`);
-        return;
-      }
-      toast.success(`Restored ${chat.name}`);
-    } catch (error) {
-      toast.error(`Could not restore ${chat.name}`);
-      console.error('Error restoring chat:', error);
-    }
   };
 
   return (
@@ -183,7 +164,7 @@ export function ProjectChatList({
         <SidebarMenuSubItem>
           <SidebarMenuButton
             type='button'
-            className='pr-1.5 pl-[30px] text-muted-foreground/55 hover:bg-transparent hover:text-muted-foreground/90 active:bg-transparent active:text-muted-foreground/90 dark:hover:bg-transparent'
+            className={sidebarDisclosureButtonClass}
             onClick={() => {
               setVisibleCount((count) => count + chatsPerPage);
             }}
@@ -192,40 +173,6 @@ export function ProjectChatList({
           </SidebarMenuButton>
         </SidebarMenuSubItem>
       ) : null}
-      {trashedChats.length > 0 ? (
-        <SidebarMenuSubItem>
-          <SidebarMenuButton
-            type='button'
-            className='gap-1.5 pl-7.5 text-muted-foreground'
-            aria-expanded={isTrashOpen}
-            onClick={() => {
-              setIsTrashOpen((open) => !open);
-            }}
-          >
-            <ChevronRight aria-hidden className={isTrashOpen ? 'size-3 rotate-90' : 'size-3'} />
-            Chat Trash ({trashedChats.length})
-          </SidebarMenuButton>
-        </SidebarMenuSubItem>
-      ) : null}
-      {isTrashOpen
-        ? trashedChats.map((chat) => (
-            <SidebarMenuSubItem key={chat.id}>
-              <div className='flex min-h-7 items-center gap-1 pl-7.5 text-sm'>
-                <span className='min-w-0 flex-1 truncate text-muted-foreground'>{chat.name}</span>
-                <Button
-                  variant='ghost'
-                  size='xs'
-                  aria-label={`Restore ${chat.name}`}
-                  onClick={() => {
-                    void handleRestore(chat);
-                  }}
-                >
-                  Restore
-                </Button>
-              </div>
-            </SidebarMenuSubItem>
-          ))
-        : null}
     </SidebarMenuSub>
   );
 }

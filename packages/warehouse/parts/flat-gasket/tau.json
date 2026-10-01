@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_k9XPfh3IT092cfnX1qzH-",
+  "name": "Flat gasket",
+  "description": "Rectangular sealing blank with an open window and four mounting holes.",
+  "tags": [
+    "Seals",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

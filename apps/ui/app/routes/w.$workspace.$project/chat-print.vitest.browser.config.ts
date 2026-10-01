@@ -17,7 +17,10 @@ export default defineConfig({
     fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] },
   },
   test: {
-    include: ['app/routes/w.$workspace.$project/chat-print.browser.test.tsx'],
+    include: [
+      'app/routes/w.$workspace.$project/chat-print.browser.test.tsx',
+      'app/components/select-alignment.browser.test.tsx',
+    ],
     fileParallelism: false,
     browser: {
       enabled: true,

@@ -1160,7 +1160,6 @@ export const ViewerDockview = memo(function ({
       }
 
       let panelEntryPath = (panel.params as ViewerPanelParameters | undefined)?.entryPath;
-      setViewEntryPath(panelViewId, panelEntryPath ?? null);
 
       // If the panel was created without an entry path (project was still loading),
       // assign the main entry path now that the project is ready.
@@ -1176,6 +1175,8 @@ export const ViewerDockview = memo(function ({
           }));
         }
       }
+
+      setViewEntryPath(panelViewId, panelEntryPath ?? null);
 
       if (panelEntryPath && admittedGeometry.current.get(panelViewId) !== panelEntryPath) {
         admittedGeometry.current.set(panelViewId, panelEntryPath);

@@ -13,7 +13,7 @@ import type {
   RJSFSchema,
 } from '@rjsf/utils';
 import { ChevronDown, Info, SearchX, Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { projectParameterField } from '@taucad/parameters';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -26,6 +26,8 @@ import { nestedActionVariants } from '@taucad/ui/components/nested-action.varian
 import { formatDisplayLabel } from '#utils/string.utils.js';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { HighlightText } from '#components/highlight-text.js';
+import { PaneVirtualList } from '#components/panes/pane-virtual-list.js';
+import { paneFieldGroupSpacingClassName } from '#components/panes/pane-spacing.styles.js';
 import { ParameterGroupCard } from '#components/geometry/parameters/parameter-group-card.js';
 import {
   FieldLabelContext,
@@ -41,11 +43,7 @@ import {
 import { hasCustomValue } from '#utils/object.utils.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { InlineCode } from '#components/code/code-block.js';
-import {
-  emptyRjsfLayoutContext,
-  rjsfLayoutContext,
-  useRjsfLayoutContext,
-} from '#components/geometry/parameters/rjsf-context.js';
+import { rjsfLayoutContext, useRjsfLayoutContext } from '#components/geometry/parameters/rjsf-context.js';
 import { toInstancePointer, useRenderedFieldPath } from '#components/geometry/parameters/rjsf-field-path.js';
 import type { RJSFContext, RjsfLayoutContextValue } from '#components/geometry/parameters/rjsf-context.js';
 
@@ -77,12 +75,37 @@ const ArrayItemRemoveAction = ({ action }: { readonly action: RjsfLayoutContextV
   );
 };
 
+function useParameterDisclosure(formContext: RJSFContext, id: string) {
+  const { arrayDisclosure } = useRjsfLayoutContext();
+  const path = useRenderedFieldPath()?.path;
+  const disclosureKey =
+    arrayDisclosure && path
+      ? `${arrayDisclosure.key}/${JSON.stringify(path.slice(arrayDisclosure.parentDepth + 1))}`
+      : id;
+  const [isOpen, setLocalOpen] = useState(
+    () => formContext.disclosure?.choices.get(disclosureKey) ?? formContext.allExpanded,
+  );
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Follow the owner's explicit Expand/Collapse all generation.
+    setLocalOpen(formContext.disclosure?.choices.get(disclosureKey) ?? formContext.allExpanded);
+  }, [formContext.allExpanded, formContext.disclosure, disclosureKey]);
+  const setIsOpen = useCallback(
+    (next: boolean) => {
+      formContext.disclosure?.choices.set(disclosureKey, next);
+      setLocalOpen(next);
+    },
+    [formContext.disclosure, disclosureKey],
+  );
+  return [isOpen, setIsOpen] as const;
+}
+
 function CompositeFieldTemplate({
   children,
   formData,
   label,
   schema,
   formContext,
+  id,
   action,
 }: {
   readonly children: React.ReactNode;
@@ -90,21 +113,18 @@ function CompositeFieldTemplate({
   readonly label: string;
   readonly schema: RJSFSchema;
   readonly formContext: RJSFContext;
+  readonly id: string;
   readonly action?: RjsfLayoutContextValue['arrayItemAction'];
 }): React.ReactNode {
   'use no memo';
 
   const union = getDiscriminatedUnionInfo(schema);
-  const [isOpen, setIsOpen] = useState<boolean | undefined>(() => formContext.allExpanded);
+  const { arrayDisclosure } = useRjsfLayoutContext();
+  const [isOpen, setIsOpen] = useParameterDisclosure(formContext, id);
   const selectedBranchContext = useMemo(
-    () => ({ embeddedDiscriminator: union?.discriminator }),
-    [union?.discriminator],
+    () => ({ embeddedDiscriminator: union?.discriminator, arrayDisclosure }),
+    [union?.discriminator, arrayDisclosure],
   );
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- The `use no memo` boundary preserves synchronous RJSF expansion updates.
-    setIsOpen(formContext.allExpanded);
-  }, [formContext.allExpanded]);
 
   useEffect(() => {
     if (formContext.searchTerm.trim().length > 0) {
@@ -132,7 +152,7 @@ function CompositeFieldTemplate({
       title={prettyTitle}
       searchTerm={formContext.searchTerm}
       trailing={<span className='shrink-0 text-xs text-muted-foreground tabular-nums'>({propertyCount})</span>}
-      isOpen={isOpen ?? false}
+      isOpen={isOpen}
       headerActions={<ArrayItemRemoveAction action={action} />}
       bodyClassName='grid grid-cols-[minmax(0,40%)_minmax(0,1fr)] items-center [&>.panel]:contents [&>.panel>.field-group]:col-span-2 [&>.panel>.form-group]:col-start-2 [&>.panel>.form-group]:row-start-1 [&>.panel>.form-group]:flex [&>.panel>.form-group]:justify-end [&>.panel>.form-group]:py-1.5 [&>.panel>.form-group]:pr-2.5'
       onOpenChange={setIsOpen}
@@ -153,6 +173,8 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   const layoutContext = useRjsfLayoutContext();
   const renderedField = useRenderedFieldPath();
   const fieldPath = renderedField?.path;
+  const ancestorMatches =
+    fieldPath?.slice(0, -1).some((segment) => formContext.shouldShowField(formatDisplayLabel(segment))) ?? false;
   const instancePointer = fieldPath === undefined ? undefined : toInstancePointer(fieldPath);
   const { parameterManifest, parameterGroup } = formContext;
   /* Every field template re-renders on each filter keystroke; the projection depends on none of it.
@@ -171,13 +193,14 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
 
   const discriminatedUnion = getDiscriminatedUnionInfo(schema);
   if (discriminatedUnion) {
-    if (formContext.searchTerm && !isSchemaMatchingSearch(schema, formContext.searchTerm, label)) {
+    if (formContext.searchTerm && !ancestorMatches && !isSchemaMatchingSearch(schema, formContext.searchTerm, label)) {
       return null;
     }
 
     return (
-      <div data-slot='field-group' className='field-group group/field-group [&+.field-group]:mt-2'>
+      <div data-slot='field-group' className={cn('field-group group/field-group', paneFieldGroupSpacingClassName)}>
         <CompositeFieldTemplate
+          id={id}
           formData={formData}
           label={label}
           schema={schema}
@@ -194,12 +217,17 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     const isRoot = id === formContext.idPrefix;
 
     // If we're searching and this object/array has no matching nested properties, don't render it
-    if (!isRoot && formContext.searchTerm && !isSchemaMatchingSearch(schema, formContext.searchTerm, label)) {
+    if (
+      !isRoot &&
+      formContext.searchTerm &&
+      !ancestorMatches &&
+      !isSchemaMatchingSearch(schema, formContext.searchTerm, label)
+    ) {
       return null;
     }
 
     return (
-      <div data-slot='field-group' className='field-group group/field-group [&+.field-group]:mt-2'>
+      <div data-slot='field-group' className={cn('field-group group/field-group', paneFieldGroupSpacingClassName)}>
         {children}
       </div>
     );
@@ -215,26 +243,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     const labelMatches = formContext.shouldShowField(prettyLabel);
     const descriptionMatches = descriptionText && formContext.shouldShowField(descriptionText);
 
-    // If field doesn't match, check if it's inside a matching parent group
-    // by checking the parent group names in the ID path
-    let isInMatchingGroup = false;
-    if (!labelMatches && !descriptionMatches) {
-      // Parse the ID to extract parent group names (e.g., ///root///handrails///colors///post)
-      const idParts = fieldPath ?? [];
-      for (let i = 0; i < idParts.length - 1; i++) {
-        const parentSegment = idParts[i];
-        if (parentSegment) {
-          const parentName = formatDisplayLabel(parentSegment);
-          // oxlint-disable-next-line max-depth -- consider refactoring.
-          if (formContext.shouldShowField(parentName)) {
-            isInMatchingGroup = true;
-            break;
-          }
-        }
-      }
-    }
-
-    const shouldShow = labelMatches || descriptionMatches || isInMatchingGroup;
+    const shouldShow = labelMatches || descriptionMatches || ancestorMatches;
 
     if (!shouldShow) {
       return null;
@@ -337,14 +346,13 @@ function ObjectFieldTemplate(
 
   const { formContext } = registry;
   const layoutContext = useRjsfLayoutContext();
+  const descendantLayout = useMemo<RjsfLayoutContextValue>(
+    () => ({ arrayDisclosure: layoutContext.arrayDisclosure }),
+    [layoutContext.arrayDisclosure],
+  );
 
-  const [isOpen, setIsOpen] = useState<boolean | undefined>(() => formContext.allExpanded);
+  const [isOpen, setIsOpen] = useParameterDisclosure(formContext, idSchema.$id);
   const isRoot = idSchema.$id === formContext.idPrefix;
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- The `use no memo` boundary preserves synchronous RJSF expansion updates.
-    setIsOpen(formContext.allExpanded);
-  }, [formContext.allExpanded]);
 
   // Check if the group should be visible by checking:
   // 1. If the group title itself matches the search term, OR
@@ -356,7 +364,10 @@ function ObjectFieldTemplate(
   const hasMatchingNestedProperties = isSchemaMatchingSearch(schema, formContext.searchTerm);
 
   // Show the group if either the title matches OR any nested properties match
-  const shouldShowGroup = groupTitleMatches || hasMatchingNestedProperties;
+  const groupPath = useRenderedFieldPath()?.path;
+  const ancestorMatches =
+    groupPath?.some((segment) => formContext.shouldShowField(formatDisplayLabel(segment))) ?? false;
+  const shouldShowGroup = groupTitleMatches || hasMatchingNestedProperties || ancestorMatches;
 
   // Force group open when there's an active search and this group has matches
   useEffect(() => {
@@ -371,7 +382,12 @@ function ObjectFieldTemplate(
     if (formContext.rootPresentation === 'embedded') {
       return (
         <div data-slot='embedded-form-root' className='properties p-2 empty:hidden'>
-          {properties.map((element) => element.content)}
+          <ParameterPropertyList
+            properties={properties}
+            schema={schema}
+            searchTerm={formContext.searchTerm}
+            title={prettyTitle}
+          />
         </div>
       );
     }
@@ -387,7 +403,12 @@ function ObjectFieldTemplate(
           data-slot='parameter-catalog'
           className='properties m-2 overflow-hidden rounded-md border border-border bg-card p-1 empty:hidden'
         >
-          {properties.map((element) => element.content)}
+          <ParameterPropertyList
+            properties={properties}
+            schema={schema}
+            searchTerm={formContext.searchTerm}
+            title={prettyTitle}
+          />
         </div>
       </div>
     );
@@ -401,7 +422,12 @@ function ObjectFieldTemplate(
     return (
       <>
         {description ? <div className='px-2.5 py-1.5 text-xs text-muted-foreground'>{description}</div> : null}
-        {properties.map((element) => element.content)}
+        <ParameterPropertyList
+          properties={properties}
+          schema={schema}
+          searchTerm={formContext.searchTerm}
+          title={prettyTitle}
+        />
       </>
     );
   }
@@ -444,13 +470,18 @@ function ObjectFieldTemplate(
           {countDisplay}
         </span>
       }
-      isOpen={isOpen ?? false}
+      isOpen={isOpen}
       headerActions={<ArrayItemRemoveAction action={layoutContext.arrayItemAction} />}
       onOpenChange={setIsOpen}
     >
-      <rjsfLayoutContext.Provider value={emptyRjsfLayoutContext}>
+      <rjsfLayoutContext.Provider value={descendantLayout}>
         {description ? <div className='px-2.5 py-1.5 text-xs text-muted-foreground'>{description}</div> : null}
-        {properties.map((element) => element.content)}
+        <ParameterPropertyList
+          properties={properties}
+          schema={schema}
+          searchTerm={formContext.searchTerm}
+          title={prettyTitle}
+        />
       </rjsfLayoutContext.Provider>
     </ParameterGroupCard>
   );
@@ -464,12 +495,7 @@ function ArrayFieldTemplate(
   const { title, items, canAdd, onAddClick, registry, schema } = props;
   const { formContext } = registry;
 
-  const [isOpen, setIsOpen] = useState<boolean | undefined>(() => formContext.allExpanded);
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- The `use no memo` boundary preserves synchronous RJSF expansion updates.
-    setIsOpen(formContext.allExpanded);
-  }, [formContext.allExpanded]);
+  const [isOpen, setIsOpen] = useParameterDisclosure(formContext, props.idSchema.$id);
 
   // Check if the array should be visible by checking:
   // 1. If the array title itself matches the search term, OR
@@ -477,7 +503,10 @@ function ArrayFieldTemplate(
   const prettyTitle = formatDisplayLabel(title);
 
   // Check if the schema or its title matches the search
-  const shouldShowArray = isSchemaMatchingSearch(schema, formContext.searchTerm, title);
+  const arrayPath = useRenderedFieldPath()?.path;
+  const ancestorMatches =
+    arrayPath?.some((segment) => formContext.shouldShowField(formatDisplayLabel(segment))) ?? false;
+  const shouldShowArray = isSchemaMatchingSearch(schema, formContext.searchTerm, title) || ancestorMatches;
 
   // Force array open when there's an active search and this array has matches
   useEffect(() => {
@@ -518,9 +547,7 @@ function ArrayFieldTemplate(
       </CollapsibleTrigger>
 
       <CollapsibleContent data-slot='parameter-group-content' className='border-t border-border/70 px-2.5 py-1'>
-        {items.map((item) => (
-          <ScopedArrayFieldItem key={item.key} item={item} title={prettyTitle} />
-        ))}
+        <ParameterArrayList items={items} title={prettyTitle} />
         {canAdd ? (
           <Button type='button' variant='outline' size='sm' className='my-1.5' onClick={onAddClick}>
             Add item ({prettyTitle})
@@ -531,6 +558,83 @@ function ArrayFieldTemplate(
   );
 }
 
+type ParameterProperty = ObjectFieldTemplateProps<
+  Record<string, unknown>,
+  RJSFSchema,
+  RJSFContext
+>['properties'][number];
+type ParameterArrayItem = ArrayFieldTemplateItemType<Record<string, unknown>, RJSFSchema, RJSFContext>;
+const propertyKey = (property: ParameterProperty): string => property.name;
+const arrayItemKey = (item: ParameterArrayItem): string => item.key;
+const renderProperty = (_index: number, property: ParameterProperty): React.ReactNode => property.content;
+
+const ParameterPropertyList = memo(function ParameterPropertyList({
+  properties,
+  schema,
+  searchTerm,
+  title,
+}: {
+  readonly properties: ParameterProperty[];
+  readonly schema: RJSFSchema;
+  readonly searchTerm: string;
+  readonly title: string;
+}): React.JSX.Element {
+  const fieldPath = useRenderedFieldPath()?.path;
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const ancestorMatches =
+    title.toLowerCase().includes(normalizedSearch) ||
+    (fieldPath?.some((segment) => formatDisplayLabel(segment).toLowerCase().includes(normalizedSearch)) ?? false);
+  const visible = useMemo(
+    () =>
+      properties.filter((property) => {
+        if (property.hidden) {
+          return false;
+        }
+        if (!searchTerm.trim() || ancestorMatches) {
+          return true;
+        }
+        const child = schema.properties?.[property.name];
+        return typeof child === 'object' && isSchemaMatchingSearch(child, searchTerm, property.name);
+      }),
+    [properties, schema, searchTerm, ancestorMatches],
+  );
+  if (visible.length <= 20) {
+    return <>{visible.map((property) => property.content)}</>;
+  }
+  return (
+    <div className='field-group col-span-2'>
+      <PaneVirtualList
+        data={visible}
+        getItemKey={propertyKey}
+        itemContent={renderProperty}
+        ariaLabel={`Parameters: ${title || 'Model'}`}
+      />
+    </div>
+  );
+});
+
+const ParameterArrayList = memo(function ParameterArrayList({
+  items,
+  title,
+}: {
+  readonly items: ParameterArrayItem[];
+  readonly title: string;
+}): React.JSX.Element {
+  const renderItem = useCallback(
+    (_index: number, item: ParameterArrayItem) => <ScopedArrayFieldItem item={item} title={title} />,
+    [title],
+  );
+  return (
+    <PaneVirtualList
+      data={items}
+      getItemKey={arrayItemKey}
+      itemContent={renderItem}
+      itemSpacing={items.some((item) => isObjectLikeSchema(item.schema)) ? 'groups' : undefined}
+      ariaLabel={`Items: ${title}`}
+    />
+  );
+});
+
 function ScopedArrayFieldItem({
   item,
   title,
@@ -539,9 +643,11 @@ function ScopedArrayFieldItem({
   readonly title: string;
 }): React.ReactNode {
   const { key, ...itemProps } = item;
+  const parentDepth = useRenderedFieldPath()?.path.length ?? 0;
   const layoutContext = useMemo<RjsfLayoutContextValue>(
     () => ({
       objectArrayItem: isObjectLikeSchema(item.schema),
+      arrayDisclosure: { key, parentDepth },
       arrayItemAction: item.hasRemove
         ? {
             label: `Remove ${title} ${item.index + 1}`,
@@ -549,7 +655,7 @@ function ScopedArrayFieldItem({
           }
         : undefined,
     }),
-    [item, title],
+    [item, key, parentDepth, title],
   );
 
   return (

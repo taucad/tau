@@ -142,6 +142,12 @@ describe('PublicationTopbar', () => {
       expect(screen.getByRole('link', { name: 'Examples' })).toHaveAttribute('href', '/community#replicad.birdhouse');
     });
 
+    it('should lead a warehouse part back to the Parts catalog', () => {
+      renderAt('/s/builtin~warehouse.hex-nut');
+      expect(screen.getByRole('link', { name: 'Parts' })).toHaveAttribute('href', '/parts#warehouse.hex-nut');
+      expect(screen.queryByRole('link', { name: 'Examples' })).not.toBeInTheDocument();
+    });
+
     it('should offer no gallery exit for a share that is not an example', () => {
       renderAt('/s/github-gist~0123456789abcdef');
 

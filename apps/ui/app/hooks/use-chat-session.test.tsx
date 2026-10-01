@@ -243,6 +243,21 @@ describe('useChatSession', () => {
     expect(result.current?.draftActorRef).toBeDefined();
   });
 
+  it('should not expose the previous project session during a project switch', () => {
+    const seen: Array<{ projectId: string; chatId: string | undefined }> = [];
+    const { result, rerender } = renderHook(
+      ({ chatId, projectId }) => {
+        const session = useChatSession(chatId, projectId);
+        seen.push({ projectId, chatId: session?.chatId });
+        return session;
+      },
+      { wrapper: createWrapper(), initialProps: { chatId: 'chat_a', projectId: 'proj_a' } },
+    );
+    rerender({ chatId: 'chat_b', projectId: 'proj_b' });
+    expect(result.current?.chatId).toBe('chat_b');
+    expect(seen).not.toContainEqual({ projectId: 'proj_b', chatId: 'chat_a' });
+  });
+
   it('survives strict-mode-style mount/unmount/mount cycles without losing the session', () => {
     let storeRef: ChatSessionStore | undefined;
     function ProbeStore() {

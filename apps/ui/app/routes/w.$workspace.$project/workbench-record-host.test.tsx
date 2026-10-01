@@ -1,4 +1,5 @@
 /* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
+/* oxlint-disable typescript/no-confusing-void-expression -- Testing Library and adapter callbacks assert observable state. */
 // @vitest-environment jsdom
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,11 +16,17 @@ vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown }, selector: (state: unknown) => unknown) =>
     selector(actor.getSnapshot()),
 }));
-vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => fileManager }));
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useFileManager: () => fileManager,
+}));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => project }));
-vi.mock('./project-workspace-context.js', () => ({ useProjectWorkspace: () => workspace }));
+vi.mock('./project-workspace-context.js', () => ({
+  useProjectWorkspace: () => workspace,
+}));
 vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
-vi.mock('#hooks/use-flush-on-close.js', () => ({ useFlushOnClose: () => undefined }));
+vi.mock('#hooks/use-flush-on-close.js', () => ({
+  useFlushOnClose: () => undefined,
+}));
 
 const encoder = new TextEncoder();
 const first = (): WorkbenchLayout => ({
@@ -35,7 +42,11 @@ const second = (): WorkbenchLayout => ({
 });
 
 const viewSeed = (): WorkbenchView =>
-  workbenchRecords.view.schema.parse({ version: 1, entryPath: 'models/other.ts', name: 'Other' });
+  workbenchRecords.view.schema.parse({
+    version: 1,
+    entryPath: 'models/other.ts',
+    name: 'Other',
+  });
 
 function mount(
   options: {
@@ -47,6 +58,8 @@ function mount(
     failInitialRead?: boolean;
     initialServiceMissing?: boolean;
     branchScenario?: boolean;
+    pendingLayoutAck?: Promise<void>;
+    onLayoutWriteStarted?: () => void;
   } = {},
 ) {
   let bytes: Uint8Array<ArrayBuffer> | undefined = encoder.encode(
@@ -60,7 +73,9 @@ function mount(
   let firstFileRead = true;
   let controller: WorkbenchLayoutController | undefined;
   let previousLayout = options.previous;
+  const editorListeners = new Set<() => void>();
   let desktopLayout = { chatOpen: true, workbenchOpen: true };
+  let { pendingLayoutAck } = options;
   const writes = vi.fn(
     async ({
       path,
@@ -69,7 +84,9 @@ function mount(
     }: {
       path: string;
       data: string;
-      preconditions: ReadonlyArray<{ expected: Uint8Array<ArrayBuffer> | null }>;
+      preconditions: ReadonlyArray<{
+        expected: Uint8Array<ArrayBuffer> | null;
+      }>;
     }) => {
       const current = path.endsWith(workbenchPaths.layout) ? bytes : viewBytes;
       const expected = preconditions[0]?.expected;
@@ -84,6 +101,12 @@ function mount(
       const next = encoder.encode(data);
       if (path.endsWith(workbenchPaths.layout)) {
         bytes = next;
+        const gate = pendingLayoutAck;
+        pendingLayoutAck = undefined;
+        if (gate) {
+          options.onLayoutWriteStarted?.();
+          await gate;
+        }
       } else {
         viewBytes = next;
       }
@@ -93,6 +116,9 @@ function mount(
   const send = vi.fn((event: { type: string; layout?: PreviousWorkbenchLayout; panelState?: unknown }) => {
     if (event.type === 'setPreviousLayout') {
       previousLayout = event.layout;
+      for (const listener of editorListeners) {
+        listener();
+      }
     }
     if (
       event.type === 'setPanelState' &&
@@ -105,7 +131,9 @@ function mount(
   });
   const makeService = () => ({ subscribe: () => () => undefined });
   const fileManagerState = {
-    fileManagerRef: { getSnapshot: () => ({ context: { rootDirectory: selectedRoot } }) },
+    fileManagerRef: {
+      getSnapshot: () => ({ context: { rootDirectory: selectedRoot } }),
+    },
     parameterFiles: {
       exists: async (path: string) => {
         if (path.endsWith(workbenchPaths.layout)) {
@@ -153,7 +181,17 @@ function mount(
   });
   project = {
     projectId: 'p',
-    editorRef: { send, getSnapshot: () => ({ context: { previousLayout, panelState: { desktopLayout } } }) },
+    editorRef: {
+      subscribe: (listener: (state: unknown) => void) => {
+        const notify = () => listener({ context: { previousLayout, panelState: { desktopLayout } } });
+        editorListeners.add(notify);
+        return { unsubscribe: () => editorListeners.delete(notify) };
+      },
+      send,
+      getSnapshot: () => ({
+        context: { previousLayout, panelState: { desktopLayout } },
+      }),
+    },
     viewRecords: options.viewExists === false ? new Map() : new Map([['v-abcd1234', viewSeed()]]),
     registerWorkbenchRecordProducer: () => () => undefined,
     setAppliedWorkbenchRevision,
@@ -210,6 +248,12 @@ function mount(
     get previous() {
       return previousLayout;
     },
+    changePrevious: (next: PreviousWorkbenchLayout | undefined) => {
+      previousLayout = next;
+      for (const listener of editorListeners) {
+        listener();
+      }
+    },
     writes,
     send,
     applied,
@@ -218,6 +262,66 @@ function mount(
 }
 
 describe('live workbench record host', () => {
+  it('should refresh restore availability without changing the layout digest and reject a stale target', async () => {
+    const host = mount();
+    await waitFor(() => expect(host.controller.snapshot()).toBeDefined());
+    const before = host.controller.snapshot()!;
+    expect(before.restoreUnavailable).toBe('No previous layout is saved.');
+    const changed = vi.fn();
+    const unsubscribe = host.controller.subscribe(changed);
+    act(() => host.changePrevious({ layout: second(), views: { 'v-abcd1234': viewSeed() } }));
+    const ready = host.controller.snapshot()!;
+    expect(ready.layoutDigest).toBe(before.layoutDigest);
+    expect(ready.restoreUnavailable).toBeUndefined();
+    expect(changed).toHaveBeenCalled();
+    act(() => host.changePrevious({ layout: first(), views: {} }));
+    expect(host.controller.snapshot()?.restoreUnavailable).toContain('has no saved record');
+    expect(
+      await act(async () =>
+        host.controller.restorePreviousArrangement({
+          layoutDigest: ready.layoutDigest,
+          target: ready.restoreTarget!,
+          eligible: () => true,
+        }),
+      ),
+    ).toBe(false);
+    expect(host.writes).not.toHaveBeenCalled();
+    unsubscribe();
+    host.unmount();
+  });
+
+  it('should admit one restore across callers and retain existing view settings', async () => {
+    const gate = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const host = mount({
+      layout: second(),
+      previous: { layout: first(), views: { 'v-abcd1234': { ...viewSeed(), name: 'Old' } } },
+      pendingLayoutAck: gate.promise,
+      onLayoutWriteStarted: () => started.resolve(),
+    });
+    await waitFor(() => expect(host.controller.snapshot()).toBeDefined());
+    const expected = {
+      layoutDigest: host.controller.snapshot()!.layoutDigest,
+      target: host.controller.snapshot()!.restoreTarget!,
+      eligible: () => true,
+    };
+    let saving: Promise<boolean>;
+    await act(async () => {
+      saving = host.controller.restorePreviousArrangement(expected);
+      await started.promise;
+    });
+    expect(host.controller.snapshot()?.restoring).toBe(true);
+    expect(await host.controller.restorePreviousArrangement(expected)).toBe(false);
+    await act(async () => {
+      gate.resolve();
+      expect(await saving!).toBe(true);
+    });
+    expect(host.writes).toHaveBeenCalledOnce();
+    expect(workbenchRecords.view.read(host.viewBytes!)).toMatchObject({ status: 'current', record: viewSeed() });
+    expect(screen.getByRole('status')).toHaveTextContent('Restore written.');
+    host.unmount();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -237,7 +341,12 @@ describe('live workbench record host', () => {
     expect(host.writes).not.toHaveBeenCalled();
     act(() => {
       host.controller.personWorkbenchChanged((node) =>
-        node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }] } : node,
+        node.kind === 'group'
+          ? {
+              ...node,
+              tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }],
+            }
+          : node,
       );
     });
     await waitFor(
@@ -270,7 +379,10 @@ describe('live workbench record host', () => {
       });
     });
     expect(host.writes).not.toHaveBeenCalled();
-    expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({ status: 'current', record: authored });
+    expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({
+      status: 'current',
+      record: authored,
+    });
     host.unmount();
   });
 
@@ -280,7 +392,12 @@ describe('live workbench record host', () => {
     const host = mount({ layout: authored, initialRead: gate.promise });
     act(() => {
       host.controller.personWorkbenchChanged((node) =>
-        node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }] } : node,
+        node.kind === 'group'
+          ? {
+              ...node,
+              tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }],
+            }
+          : node,
       );
       host.controller.personWorkbenchChanged((node) =>
         node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'details' }] } : node,
@@ -306,7 +423,11 @@ describe('live workbench record host', () => {
 
   it('retries an initial IO failure when the service arrives before applying an explicit pane request', async () => {
     const authored = second();
-    const host = mount({ layout: authored, failInitialRead: true, initialServiceMissing: true });
+    const host = mount({
+      layout: authored,
+      failInitialRead: true,
+      initialServiceMissing: true,
+    });
     await waitFor(() => {
       expect(screen.getByRole('status').textContent).toContain('offline');
     });
@@ -315,7 +436,12 @@ describe('live workbench record host', () => {
     });
     act(() => {
       host.controller.personWorkbenchChanged((node) =>
-        node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }] } : node,
+        node.kind === 'group'
+          ? {
+              ...node,
+              tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }],
+            }
+          : node,
       );
     });
     await waitFor(
@@ -339,10 +465,19 @@ describe('live workbench record host', () => {
     async (order) => {
       const gate = Promise.withResolvers<void>();
       const authored = second();
-      const host = mount({ layout: authored, pendingFirstRead: gate.promise, initialServiceMissing: true });
+      const host = mount({
+        layout: authored,
+        pendingFirstRead: gate.promise,
+        initialServiceMissing: true,
+      });
       act(() => {
         host.controller.personWorkbenchChanged((node) =>
-          node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }] } : node,
+          node.kind === 'group'
+            ? {
+                ...node,
+                tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }],
+              }
+            : node,
         );
       });
       act(() => {
@@ -405,7 +540,12 @@ describe('live workbench record host', () => {
     });
     act(() => {
       host.controller.personWorkbenchChanged((node) =>
-        node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }] } : node,
+        node.kind === 'group'
+          ? {
+              ...node,
+              tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }],
+            }
+          : node,
       );
       host.controller.personWorkbenchChanged((node) =>
         node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'details' }] } : node,
@@ -455,6 +595,101 @@ describe('live workbench record host', () => {
     expect(thirdAnnouncement).not.toBe(secondAnnouncement);
     await host.set(encoder.encode(workbenchRecords.layout.serialize(first())));
     expect(screen.getByRole('status').firstChild).toBe(thirdAnnouncement);
+    host.unmount();
+  });
+
+  it('should leave the viewer adapter untouched when only the workbench lane changes', async () => {
+    const host = mount();
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
+    const viewer = vi.fn((_node, applied: () => void) => applied());
+    const workbench = vi.fn((_node, applied: () => void) => applied());
+    act(() => {
+      host.controller.registerViewer(viewer);
+      host.controller.registerWorkbench(workbench);
+    });
+    viewer.mockClear();
+    workbench.mockClear();
+    await host.set(encoder.encode(workbenchRecords.layout.serialize(second())));
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(second()));
+    expect(viewer).not.toHaveBeenCalled();
+    expect(workbench).toHaveBeenCalledOnce();
+    expect(host.applied.get(workbenchPaths.layout)).toBe(host.controller.snapshot()?.layoutDigest);
+    host.unmount();
+  });
+
+  it('should not replay a watched local layout write over a newer live pane edit before acknowledgement', async () => {
+    const started = Promise.withResolvers<void>();
+    const ack = Promise.withResolvers<void>();
+    const host = mount({
+      pendingLayoutAck: ack.promise,
+      onLayoutWriteStarted: started.resolve,
+    });
+    try {
+      await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
+      const apply = vi.fn((_node, applied: () => void) => applied());
+      act(() => {
+        host.controller.registerViewer(apply);
+        host.controller.registerWorkbench(apply);
+      });
+      const a: WorkbenchLayout['workbench'] = {
+        kind: 'group',
+        tabs: [{ kind: 'pane', pane: 'revisions' }],
+      };
+      const b: WorkbenchLayout['workbench'] = {
+        kind: 'group',
+        tabs: [{ kind: 'pane', pane: 'details' }],
+      };
+      act(() => host.controller.personWorkbenchChanged(a));
+      await started.promise;
+      act(() => host.controller.personWorkbenchChanged(() => b));
+      apply.mockClear();
+      await host.setLive(host.bytes!);
+      await waitFor(() => expect(host.controller.snapshot()?.layout.workbench).toEqual(a));
+      expect(apply).not.toHaveBeenCalledWith(a, expect.any(Function));
+    } finally {
+      ack.resolve();
+      host.unmount();
+    }
+  });
+
+  it('should keep a newer live viewer edit when a foreign lane change retains the old viewer tree', async () => {
+    const host = mount();
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    const viewer = vi.fn((_node, applied: () => void) => {
+      applied();
+    });
+    const workbench = vi.fn((_node, applied: () => void) => {
+      applied();
+    });
+    act(() => {
+      host.controller.registerViewer(viewer);
+      host.controller.registerWorkbench(workbench);
+    });
+    const edited: WorkbenchLayout['viewer'] = { kind: 'group', tabs: [] };
+    act(() => {
+      host.controller.personViewerChanged(edited);
+    });
+    viewer.mockClear();
+    await host.setLive(
+      encoder.encode(
+        workbenchRecords.layout.serialize({
+          ...first(),
+          lanes: { chat: false, workbench: true },
+        }),
+      ),
+    );
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout.lanes.chat).toBe(false);
+    });
+    expect(viewer).not.toHaveBeenCalled();
+    expect(host.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'setPanelState',
+        panelState: { desktopLayout: { chatOpen: false, workbenchOpen: true } },
+      }),
+    );
     host.unmount();
   });
 
@@ -532,8 +767,19 @@ describe('live workbench record host', () => {
       type: 'setPreviousLayout',
       layout: { layout: first(), views: { 'v-abcd1234': viewSeed() } },
     });
-    expect(await act(async () => host.controller.restorePreviousArrangement())).toBe(true);
-    expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({ status: 'current', record: first() });
+    expect(
+      await act(async () =>
+        host.controller.restorePreviousArrangement({
+          layoutDigest: host.controller.snapshot()!.layoutDigest,
+          target: host.controller.snapshot()!.restoreTarget!,
+          eligible: () => true,
+        }),
+      ),
+    ).toBe(true);
+    expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({
+      status: 'current',
+      record: first(),
+    });
     expect(host.writes).toHaveBeenCalledTimes(1);
     unsubscribe();
     unsubViewer();
@@ -572,7 +818,10 @@ describe('live workbench record host', () => {
       expect(host.controller.snapshot()?.layout).toEqual(first());
     });
     host.deleteView();
-    const closed: WorkbenchLayout = { ...first(), viewer: { kind: 'group', tabs: [] } };
+    const closed: WorkbenchLayout = {
+      ...first(),
+      viewer: { kind: 'group', tabs: [] },
+    };
     await host.set(encoder.encode(workbenchRecords.layout.serialize(closed)));
     await waitFor(() => {
       expect(host.previous?.layout).toEqual(first());
@@ -580,7 +829,15 @@ describe('live workbench record host', () => {
     expect(host.viewBytes).toBeUndefined();
     expect(host.writes).not.toHaveBeenCalled();
     expect(host.previous?.views['v-abcd1234']?.entryPath).toBe('models/other.ts');
-    expect(await act(async () => host.controller.restorePreviousArrangement())).toBe(true);
+    expect(
+      await act(async () =>
+        host.controller.restorePreviousArrangement({
+          layoutDigest: host.controller.snapshot()!.layoutDigest,
+          target: host.controller.snapshot()!.restoreTarget!,
+          eligible: () => true,
+        }),
+      ),
+    ).toBe(true);
     expect(workbenchRecords.view.read(host.viewBytes!)).toMatchObject({
       status: 'current',
       record: { entryPath: 'models/other.ts' },
@@ -590,7 +847,10 @@ describe('live workbench record host', () => {
   });
 
   it('restores a prior non-main view after device-row reload without choosing another entry', async () => {
-    const closed: WorkbenchLayout = { ...first(), viewer: { kind: 'group', tabs: [] } };
+    const closed: WorkbenchLayout = {
+      ...first(),
+      viewer: { kind: 'group', tabs: [] },
+    };
     const host = mount({
       layout: closed,
       previous: { layout: first(), views: { 'v-abcd1234': viewSeed() } },
@@ -599,7 +859,15 @@ describe('live workbench record host', () => {
     await waitFor(() => {
       expect(host.controller.snapshot()?.layout).toEqual(closed);
     });
-    expect(await act(async () => host.controller.restorePreviousArrangement())).toBe(true);
+    expect(
+      await act(async () =>
+        host.controller.restorePreviousArrangement({
+          layoutDigest: host.controller.snapshot()!.layoutDigest,
+          target: host.controller.snapshot()!.restoreTarget!,
+          eligible: () => true,
+        }),
+      ),
+    ).toBe(true);
     expect(workbenchRecords.view.read(host.viewBytes!)).toMatchObject({
       status: 'current',
       record: { entryPath: 'models/other.ts' },

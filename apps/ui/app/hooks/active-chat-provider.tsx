@@ -42,7 +42,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type { Chat } from '@ai-sdk/react';
-import { isResumableRunFailure } from '@taucad/agent-host';
+import { isResumableRunFailure, isUserStoppedRun } from '@taucad/agent-host';
 import { createAsyncLogic } from 'xstate';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
 import type { ActorRefFrom } from 'xstate';
@@ -391,8 +391,9 @@ export function HomeNewProjectComposerProvider({
 /**
  * Session-backed provider. Acquires the live `ChatSession` for `chatId` in its
  * own project from the app-shell `ChatSessionStore`, then populates the unified
- * composer contract from chat-row + cookie sources. It renders nothing until the
- * acquisition has committed, so consumers below it can call
+ * composer contract from chat-row + cookie sources. Cold starts wait for acquisition;
+ * same-project switches keep the previous session until the destination is prepared, so panes
+ * stay mounted and consumers below it can call
  * {@link useActiveChatSession} freely.
  */
 export function ActiveChatProvider({
@@ -409,8 +410,10 @@ export function ActiveChatProvider({
     return undefined;
   }
   return (
-    <ActiveChatSessionProvider chatId={chatId} session={session}>
-      {children}
+    <ActiveChatSessionProvider chatId={session.chatId} session={session}>
+      <div className='contents' inert={session.chatId !== chatId}>
+        {children}
+      </div>
     </ActiveChatSessionProvider>
   );
 }
@@ -755,8 +758,7 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
   const canResume = (current = projection): boolean => {
     const run = current !== undefined && selectCaughtUp(current) ? selectCurrentRun(current) : undefined;
     return (
-      run?.lifecycle === 'failed' &&
-      isResumableRunFailure(run.failure) &&
+      (isUserStoppedRun(run) || (run?.lifecycle === 'failed' && isResumableRunFailure(run.failure))) &&
       turn === undefined &&
       persistence.matches({ requestLifecycle: 'idle', chatLoading: 'idle' }) &&
       !persistence.context.isLoadingChat &&
@@ -768,8 +770,7 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
     const current = store.getProjection(chatId);
     const run = current !== undefined && selectCaughtUp(current) ? selectCurrentRun(current) : undefined;
     if (
-      run?.lifecycle !== 'failed' ||
-      !isResumableRunFailure(run.failure) ||
+      !(isUserStoppedRun(run) || (run?.lifecycle === 'failed' && isResumableRunFailure(run.failure))) ||
       session.stateActorRef.getSnapshot().context.turn !== undefined ||
       !session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle', chatLoading: 'idle' })
     ) {

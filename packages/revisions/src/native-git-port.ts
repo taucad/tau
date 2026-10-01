@@ -1449,6 +1449,12 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * @returns The remote-tracking refs this store now holds.
      */
     fetch: async (input: RevisionFetchInput): Promise<RevisionFetchResult> => {
+      if (input.maximumTransferBytes !== undefined) {
+        if (!Number.isSafeInteger(input.maximumTransferBytes) || input.maximumTransferBytes <= 0) {
+          throw new RangeError('maximumTransferBytes must be a positive safe integer.');
+        }
+        throw new RevisionPortError('UNSUPPORTED_OPERATION', 'This Git host cannot enforce a fetch byte limit.');
+      }
       guardTransportValue(input.remote, 'remote');
       const advertised = input.refs === undefined ? await listRemoteReferences(input.remote) : undefined;
       const wanted =

@@ -412,7 +412,7 @@ export const ChatTextareaDesktop = memo(function ({
         ref={containerReference}
         className={cn(
           'group/chat-textarea @container',
-          'relative flex w-full flex-col border bg-background',
+          'relative flex w-full flex-col border bg-background pt-3 pb-2',
           radius,
           'cursor-text overflow-hidden',
           'shadow-md',
@@ -437,14 +437,13 @@ export const ChatTextareaDesktop = memo(function ({
         {/* Editor */}
         <div
           className={cn(
-            'max-h-48 min-h-12 min-w-0 overflow-y-auto overscroll-contain',
+            'max-h-48 min-w-0 overflow-y-auto overscroll-contain',
             mode === 'main' && 'max-h-[min(12rem,30cqh)]',
           )}
           onClick={handleEditorAreaClick}
         >
           <ChatEditor
             editor={editor}
-            className='pt-2'
             contextSuggestionState={chatEditor.contextSuggestionState}
             slashCommandState={chatEditor.slashCommandState}
             contextKeydownRef={chatEditor.contextKeydownRef}
@@ -623,7 +622,7 @@ export const ChatTextareaBar = memo(function ({
   );
 
   return (
-    <div ref={barRef} data-slot='composer-bar' className='group/bar flex items-center justify-between gap-2 px-2 pb-2'>
+    <div ref={barRef} data-slot='composer-bar' className='group/bar flex items-center justify-between gap-2 px-2'>
       <div data-slot='composer-left' className='flex shrink-0 flex-row items-center gap-0.5'>
         <ChatAddMenu
           enableContextActions={enableContextActions}

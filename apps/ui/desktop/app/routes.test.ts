@@ -6,6 +6,12 @@ import { describe, expect, it, vi } from 'vitest';
 const { default: routes } = await import('./routes.js');
 
 describe('desktop route manifest', () => {
+  it('should serve the same Parts catalog route in the desktop app', () => {
+    expect(routes.find((entry) => entry.path === 'parts')).toEqual(
+      expect.objectContaining({ file: '../../app/routes/parts/route.tsx' }),
+    );
+  });
+
   it('should omit the artifact-dependent GeoSpec lab from production builds', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     try {

@@ -950,31 +950,8 @@ fn step_component_clusters(
                     return Ok((completed.clusters, completed.labels));
                 }
             }
-            let occurrences = subject
-                .source_occurrence_structure()
-                .map_err(backend_refusal)?
-                .unwrap_or_default();
-            let leaves = crate::analysis::interference::leaf_components(&occurrences);
-            if leaves.is_empty() && !occurrences.is_empty() {
-                // Every leaf is faceless: no body and no component (ruling 32).
-                return Ok((Vec::new(), Vec::new()));
-            }
-            let identities = crate::analysis::interference::component_labels(subject)
-                .map_err(backend_refusal)?;
-            let refusal = |error: ExactError, labels: &[String]| match error {
-                ExactError::Backend(error) => backend_refusal(error),
-                ExactError::Budget { exceeded, pair } => {
-                    component_budget_refusal(exceeded, pair, labels)
-                }
-            };
-            let bodies = ask_traced(budget, None, ChargeStage::BodySetup, trace, |charge| {
-                brep.component_bodies(&leaves, charge)
-            })
-            .map_err(|error| refusal(error, &[]))?;
-            let labels = body_labels(bodies.bodies(), &identities);
-            let clusters =
-                exact_clusters_traced(bodies.as_ref(), &labels, tolerance_mm, budget, trace)
-                    .map_err(|error| refusal(error, &labels))?;
+            let (clusters, labels) =
+                cold_step_clusters(subject, brep, tolerance_mm, budget, trace)?;
             cold_built.set(true);
             Ok((clusters, labels))
         },
@@ -984,6 +961,39 @@ fn step_component_clusters(
         completed_clusters::publish_if_cold(store, &address, &result, cold_built.get());
     }
     Ok(result)
+}
+
+/// Cold STEP geometry path shared with the private candidate verifier. It
+/// deliberately cannot read a resident or host evidence cache.
+pub(crate) fn cold_step_clusters(
+    subject: &Subject,
+    brep: &dyn crate::backend::brep::BrepSubject,
+    tolerance_mm: f64,
+    budget: &crate::budget::Budget,
+    trace: &mut crate::analysis::mesh::exact::ChargeTrace,
+) -> Result<(Vec<ClusterReport>, Vec<String>), Evaluation> {
+    let occurrences = subject
+        .source_occurrence_structure()
+        .map_err(backend_refusal)?
+        .unwrap_or_default();
+    let leaves = crate::analysis::interference::leaf_components(&occurrences);
+    if leaves.is_empty() && !occurrences.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let identities =
+        crate::analysis::interference::component_labels(subject).map_err(backend_refusal)?;
+    let refusal = |error: ExactError, labels: &[String]| match error {
+        ExactError::Backend(error) => backend_refusal(error),
+        ExactError::Budget { exceeded, pair } => component_budget_refusal(exceeded, pair, labels),
+    };
+    let bodies = ask_traced(budget, None, ChargeStage::BodySetup, trace, |charge| {
+        brep.component_bodies(&leaves, charge)
+    })
+    .map_err(|error| refusal(error, &[]))?;
+    let labels = body_labels(bodies.bodies(), &identities);
+    let clusters = exact_clusters_traced(bodies.as_ref(), &labels, tolerance_mm, budget, trace)
+        .map_err(|error| refusal(error, &labels))?;
+    Ok((clusters, labels))
 }
 
 fn component_budget_refusal(

@@ -14,8 +14,8 @@ export const panelMinSizeChat = 280;
 /** Minimum width for the Viewer/center panel (main 3D CAD visualization area) */
 export const panelMinSizeViewer = 416;
 
-/** Minimum width for the mixed file/utility Workbench lane. */
-export const panelMinSizeWorkbench = 360;
+/** Minimum width for the mixed file/utility Workbench lane at narrow desktop widths. */
+export const panelMinSizeWorkbench = 320;
 
 /** Mobile drawer snap points for the projects interface */
 export const mobileDrawerSnapPoints: Array<number | string> = [0.7, 1];

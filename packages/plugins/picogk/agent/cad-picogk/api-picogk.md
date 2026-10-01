@@ -671,6 +671,7 @@ IViewerBackend
   void SetGroupVisible(int nGroupID, bool bVisible)
 
   void SetGroupMaterial(int nGroupID, ColorFloat clr, float fMetallic, float fRoughness)
+  void SetGroupMaterial(int groupId, Material material)
 
   void SetGroupMatrix(int nGroupID, Matrix4x4 mat)
 

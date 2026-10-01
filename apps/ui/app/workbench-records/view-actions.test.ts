@@ -1,18 +1,25 @@
 /* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 /* oxlint-disable eslint/no-await-in-loop -- Interleaving cases intentionally run in sequence. */
+import { mock } from 'vitest-mock-extended';
 import { describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { workbenchRecords } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
-import { deleteViewFile, editViewFile, useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
+import {
+  deleteViewFile,
+  editViewFile,
+  ensureViewFile,
+  useWorkbenchViewCommands,
+} from '#workbench-records/view-actions.js';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 
 const encoder = new TextEncoder();
 const base = () => workbenchRecords.view.schema.parse({ version: 1, entryPath: 'a.ts' });
 const path = '/projects/p/.tau/workbench/views/v-abcd1234.json';
 let fileManager: unknown;
+let projectProfile: 'editor' | 'shared' = 'editor';
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => fileManager }));
-vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', profile: projectProfile }) }));
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown }, select: (snapshot: unknown) => unknown) =>
     select(actor.getSnapshot()),
@@ -90,6 +97,49 @@ describe('view panel record commands', () => {
     expect(await deleteViewFile({ root: '/projects/p', viewId: 'v-abcd1234', files, onError })).toBe(true);
     expect(bytes).toBeNull();
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('should preserve a foreign view recreated while Restore is creating a missing seed', async () => {
+    let bytes: Uint8Array<ArrayBuffer> | null = null;
+    const gate = Promise.withResolvers<void>();
+    const foreign = { ...base(), name: 'Foreign camera settings', fieldOfView: 40 };
+    const files = {
+      exists: async () => bytes !== null,
+      readFile: async () => bytes!,
+      deleteFileChecked: vi.fn(),
+      writeFileChecked: vi.fn(
+        async ({
+          data,
+          preconditions,
+        }: {
+          data: string;
+          preconditions: ReadonlyArray<{ expected: Uint8Array<ArrayBuffer> | null }>;
+        }): Promise<CheckedFileWriteResult> => {
+          await gate.promise;
+          if (preconditions[0]!.expected === null && bytes !== null) {
+            return { status: 'conflict', conflicts: [{ path, actual: bytes }] };
+          }
+          bytes = encoder.encode(data);
+          return { status: 'applied', content: bytes };
+        },
+      ),
+    };
+    const creating = ensureViewFile({
+      root: '/projects/p',
+      viewId: 'v-abcd1234',
+      files,
+      seed: base(),
+      eligible: () => true,
+      onError: vi.fn(),
+    });
+    await vi.waitFor(() => {
+      expect(files.writeFileChecked).toHaveBeenCalledOnce();
+    });
+    bytes = encoder.encode(workbenchRecords.view.serialize(foreign));
+    gate.resolve();
+    expect(await creating).toBe(true);
+    expect(workbenchRecords.view.read(bytes)).toMatchObject({ status: 'current', record: foreign });
+    expect(files.writeFileChecked).toHaveBeenCalledOnce();
   });
 
   it('treats an already deleted view as an idempotent close without a write', async () => {
@@ -222,4 +272,29 @@ describe('view panel record commands', () => {
     old.dispose();
     fresh.dispose();
   });
+});
+
+it('should refuse durable view commands in a shared preview before any filesystem access', async () => {
+  const files = mock<Parameters<typeof editViewFile>[0]['files']>();
+  files.exists.mockResolvedValue(false);
+  const client = {
+    exists: files.exists,
+    readFile: files.readFile,
+    writeFileChecked: files.writeFileChecked,
+    deleteFileChecked: files.deleteFileChecked,
+  };
+  fileManager = { parameterFiles: client, workbenchFiles: client };
+  projectProfile = 'shared';
+  const { result, unmount } = renderHook(() => useWorkbenchViewCommands());
+  try {
+    expect(await result.current.edit('v-1234abcd', () => base())).toBe(false);
+    expect(await result.current.remove('v-1234abcd')).toBe(false);
+    expect(files.exists).not.toHaveBeenCalled();
+    expect(files.readFile).not.toHaveBeenCalled();
+    expect(files.writeFileChecked).not.toHaveBeenCalled();
+    expect(files.deleteFileChecked).not.toHaveBeenCalled();
+  } finally {
+    unmount();
+    projectProfile = 'editor';
+  }
 });

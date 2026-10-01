@@ -311,6 +311,10 @@ const objectStoreWorker = {
     return storage.touchProjectActivity(projectId, activityAt);
   },
 
+  async setGeoSpecCandidateConsent(projectId: string, enabled: boolean): Promise<ProjectLibraryState | undefined> {
+    return storage.setGeoSpecCandidateConsent(projectId, enabled);
+  },
+
   async trashProject(projectId: string, deletedAt?: number): Promise<ProjectLibraryState | undefined> {
     return storage.trashProject(projectId, deletedAt);
   },

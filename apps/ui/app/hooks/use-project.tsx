@@ -1,5 +1,6 @@
 /* oxlint-disable typescript/no-restricted-types -- Workbench record entry paths are nullable by schema. */
 /* oxlint-disable eslint/no-await-in-loop -- Producer flushes must finish in owner order before project close. */
+import { findEntryGraphics } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import type { ReactNode } from 'react';
 import {
   createContext,
@@ -56,6 +57,7 @@ import { toast } from 'sonner';
 import type { EntryPathChange } from '#workbench-records/entries-store.js';
 
 type ProjectContextType = {
+  readonly profile: 'editor' | 'shared';
   projectId: string;
   projectRef: ActorRefFrom<typeof projectMachine>;
   editorRef: ActorRefFrom<typeof editorMachine>;
@@ -895,6 +897,7 @@ export function ProjectProvider({
   const value = useMemo<ProjectContextType>(() => {
     return {
       projectId,
+      profile,
       projectRef: actorRef,
       editorRef,
       viewGraphics,
@@ -931,6 +934,7 @@ export function ProjectProvider({
     };
   }, [
     projectId,
+    profile,
     actorRef,
     editorRef,
     viewGraphics,
@@ -971,8 +975,7 @@ export function ProjectProvider({
 
 /**
  * Find the graphics actor for the viewer panel displaying the main entry path.
- * Falls back to the first available graphics actor from viewGraphics.
- * Returns undefined when no viewGraphics exist (e.g. before any viewer panel mounts).
+ * Returns undefined when the main entry has no live viewer.
  * Used by external consumers (headless capture, RPC handlers, parameters) that are NOT inside a GraphicsProvider.
  */
 export function useMainGraphics(): ActorRefFrom<typeof graphicsMachine> | undefined {
@@ -981,22 +984,7 @@ export function useMainGraphics(): ActorRefFrom<typeof graphicsMachine> | undefi
     throw new Error('useMainGraphics must be used within a ProjectProvider');
   }
 
-  const { viewGraphics, viewRecords, mainEntryPath } = context;
-
-  // Find a viewer panel showing mainEntryPath
-  for (const [viewId, graphicsRef] of viewGraphics) {
-    if (viewRecords.get(viewId)?.entryPath === mainEntryPath) {
-      return graphicsRef;
-    }
-  }
-
-  // Fallback: return the first available graphics actor from viewGraphics
-  const firstViewGraphics = viewGraphics.values().next().value;
-  if (firstViewGraphics) {
-    return firstViewGraphics;
-  }
-
-  return undefined;
+  return findEntryGraphics(context.viewGraphics, context.viewEntryPaths, context.mainEntryPath);
 }
 
 /**

@@ -22,6 +22,7 @@ type Patch = Readonly<{
   path: string;
   fields: Partial<Pick<Entry, 'operationTimeout'>> & { components?: Partial<Components> };
 }>;
+export type EntryRecordPatch = Patch;
 export type EntryPathChange = Readonly<
   { type: 'rename'; oldPath: string; newPath: string } | { type: 'delete'; path: string }
 >;
@@ -79,7 +80,7 @@ export function createWorkbenchEntriesStore(
   input: Readonly<{
     root: string;
     files: Files;
-    onChange: (state: EntriesState, source: 'read' | 'write') => void;
+    onChange: (state: EntriesState, source: 'read' | 'write', locallyAuthored: EntryRecordPatch | undefined) => void;
     onError: (error: unknown) => void;
     /** Milliseconds. */
     editDebounce?: number;
@@ -110,6 +111,7 @@ export function createWorkbenchEntriesStore(
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let retryDelay = 250;
   let editTimer: ReturnType<typeof setTimeout> | undefined;
+  const inFlightWriteBytes = new Set<{ bytes: Uint8Array<ArrayBuffer>; patch: EntryRecordPatch | undefined }>();
   const queuedEdits = new Map<
     string,
     { next: Entry; patch: Patch; sequence: number; resolve: Array<(saved: boolean) => void> }
@@ -126,7 +128,12 @@ export function createWorkbenchEntriesStore(
         : {}),
     },
   });
-  const publish = (bytes: Uint8Array<ArrayBuffer> | null, source: 'read' | 'write', notify = false): void => {
+  const publish = (
+    bytes: Uint8Array<ArrayBuffer> | null,
+    source: 'read' | 'write',
+    notify = false,
+    locallyAuthored?: EntryRecordPatch,
+  ): void => {
     if (observed && sameBytes(bytes, state.bytes) && !notify) {
       return;
     }
@@ -140,7 +147,7 @@ export function createWorkbenchEntriesStore(
           ? { record: parsed.record, bytes, refusal: undefined }
           : { ...state, bytes, refusal: { code: parsed.code, message: parsed.message } };
     }
-    input.onChange(state, source);
+    input.onChange(state, source, locallyAuthored);
     if (source === 'read' && state.record && editSequence === settledSequence && deferred.size === 0) {
       intended.clear();
       for (const [path, entry] of Object.entries(state.record.entries)) {
@@ -158,7 +165,8 @@ export function createWorkbenchEntriesStore(
       if (current === generation && !isDisposed()) {
         const recovered = readError;
         readError = false;
-        publish(bytes, 'read', notify || recovered);
+        const ownWrite = bytes && [...inFlightWriteBytes].find((written) => sameBytes(written.bytes, bytes));
+        publish(bytes, ownWrite ? 'write' : 'read', notify || recovered, ownWrite?.patch);
       }
       return observed;
     } catch (error) {
@@ -204,21 +212,30 @@ export function createWorkbenchEntriesStore(
       }
       try {
         const generationAtWrite = generation;
-        const result = await input.files.writeFileChecked({
-          path: filePath,
-          data: workbenchRecords.entries.serialize(merged),
-          preconditions: [{ path: filePath, expected: reset ? expectedReset : state.bytes }],
-        });
+        const data = workbenchRecords.entries.serialize(merged);
+        const attempted = { bytes: new TextEncoder().encode(data), patch: (reset ?? pathChange) ? undefined : patch };
+        inFlightWriteBytes.add(attempted);
+        let result: CheckedFileWriteResult;
+        try {
+          result = await input.files.writeFileChecked({
+            path: filePath,
+            data,
+            preconditions: [{ path: filePath, expected: reset ? expectedReset : state.bytes }],
+          });
+        } finally {
+          inFlightWriteBytes.delete(attempted);
+        }
         if (result.status !== 'conflict') {
           if (generation === generationAtWrite) {
             generation++;
-            publish(result.content, 'write');
+            publish(result.content, 'write', false, attempted.patch);
           } else {
             const refresh = ++generation;
             try {
               const latest = (await input.files.exists(filePath)) ? await input.files.readFile(filePath) : null;
               if (refresh === generation) {
-                publish(latest, sameBytes(latest, result.content) ? 'write' : 'read');
+                const ownWrite = sameBytes(latest, result.content);
+                publish(latest, ownWrite ? 'write' : 'read', false, ownWrite ? attempted.patch : undefined);
               }
             } catch (error) {
               input.onError(error);

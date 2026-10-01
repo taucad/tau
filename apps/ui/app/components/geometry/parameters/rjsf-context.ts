@@ -69,6 +69,8 @@ export type RJSFContext = {
   rootPresentation: 'catalog' | 'embedded';
   searchTerm: string;
   allExpanded: boolean;
+  /** Disclosure choices survive virtual row remounts; replaced when Expand/Collapse all changes. */
+  disclosure?: { readonly choices: Map<string, boolean> };
   resetSingleParameter: (input: RjsfFieldResetInput) => void;
   shouldShowField: (prettyLabel: string) => boolean;
   defaultParameters?: Record<string, unknown>;
@@ -86,6 +88,8 @@ export type RjsfLayoutContextValue = {
     readonly onRemove: () => void;
   };
   readonly objectArrayItem?: boolean;
+  /** RJSF array identity and parent depth keep disclosure choices attached through removal/reorder. */
+  readonly arrayDisclosure?: { readonly key: string; readonly parentDepth: number };
 };
 
 export const emptyRjsfLayoutContext: RjsfLayoutContextValue = {};

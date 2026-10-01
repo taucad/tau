@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_EZrzk7IL5NQFwwdSRQAlp",
+  "name": "Retaining-groove shaft",
+  "description": "Turned shaft with two circumferential retention grooves.",
+  "tags": [
+    "Shafts and bushings",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

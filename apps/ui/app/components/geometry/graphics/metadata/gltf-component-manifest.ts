@@ -50,6 +50,10 @@ type GltfNode = {
   mesh?: number;
   name?: string;
   children?: number[];
+  matrix?: number[];
+  translation?: number[];
+  rotation?: number[];
+  scale?: number[];
   extras?: JsonObject;
 };
 
@@ -75,7 +79,12 @@ type GltfMaterial = {
     baseColorFactor?: number[];
     metallicFactor?: number;
     roughnessFactor?: number;
+    baseColorTexture?: unknown;
+    metallicRoughnessTexture?: unknown;
   };
+  normalTexture?: unknown;
+  occlusionTexture?: unknown;
+  emissiveTexture?: unknown;
   extensions?: Record<string, JsonObject>;
 };
 
@@ -533,6 +542,28 @@ function readMaterialFactor(value: number | undefined): number | 'unavailable' |
   return isFiniteNumber(value) && value >= 0 && value <= 1 ? value : 'unavailable';
 }
 
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getSourceMaterialDescriptors(
+  material: GltfMaterial,
+): Pick<SurfaceMaterial, 'name' | 'textures' | 'extensions'> {
+  const factors = material.pbrMetallicRoughness;
+  const textures = {
+    ...(isJsonObject(factors?.baseColorTexture) ? { baseColor: factors.baseColorTexture } : {}),
+    ...(isJsonObject(factors?.metallicRoughnessTexture) ? { metallicRoughness: factors.metallicRoughnessTexture } : {}),
+    ...(isJsonObject(material.normalTexture) ? { normal: material.normalTexture } : {}),
+    ...(isJsonObject(material.occlusionTexture) ? { occlusion: material.occlusionTexture } : {}),
+    ...(isJsonObject(material.emissiveTexture) ? { emissive: material.emissiveTexture } : {}),
+  };
+  return {
+    ...(typeof material.name === 'string' && material.name.length > 0 ? { name: material.name } : {}),
+    ...(Object.keys(textures).length > 0 ? { textures } : {}),
+    ...(isJsonObject(material.extensions) ? { extensions: material.extensions } : {}),
+  };
+}
+
 function getSurfaceMaterial(json: GltfJson, materialIndex: number | undefined): SurfaceMaterial {
   if (materialIndex === undefined) {
     return {};
@@ -551,6 +582,7 @@ function getSurfaceMaterial(json: GltfJson, materialIndex: number | undefined): 
         : 'unavailable';
   return {
     materialIndex,
+    ...getSourceMaterialDescriptors(material),
     ...(color === undefined ? {} : { color }),
     ...(factors?.metallicFactor === undefined ? {} : { metalness: readMaterialFactor(factors.metallicFactor) }),
     ...(factors?.roughnessFactor === undefined ? {} : { roughness: readMaterialFactor(factors.roughnessFactor) }),

@@ -18,6 +18,7 @@ import { useViewCameraSession } from '#hooks/use-graphics.js';
 import { lengthUnits, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import { viewCameraOrientation } from '#workbench-records/projection.js';
+import type { ViewRecordPatch } from '#workbench-records/view-store.js';
 
 /** Milliseconds. Quiet period after the last camera emission or section-cut change before the pose is persisted. */
 const poseSettle = 250;
@@ -52,8 +53,19 @@ const activeCameraRecord = (record: WorkbenchView): WorkbenchView => {
 /** A cut's values without its id, which is made anew at every load. */
 const toPersistedSectionCut = (cut: SectionCut): PersistedSectionCut =>
   cut.kind === 'plane'
-    ? { kind: 'plane', plane: cut.plane, offset: cut.offset, isFlipped: cut.isFlipped }
-    : { kind: 'revolution', axis: cut.axis, origin: cut.origin, start: cut.start, sweep: cut.sweep };
+    ? {
+        kind: 'plane',
+        plane: cut.plane,
+        offset: cut.offset,
+        isFlipped: cut.isFlipped,
+      }
+    : {
+        kind: 'revolution',
+        axis: cut.axis,
+        origin: cut.origin,
+        start: cut.start,
+        sweep: cut.sweep,
+      };
 
 /**
  * Synchronises a view's persistable settings from its live graphics and camera owners
@@ -78,6 +90,7 @@ export function useViewSettingsSync({
   graphicsRef,
   editorRef,
   record,
+  recordLocalPatch,
   recordReady,
   writeRecord,
   onRecordApplied,
@@ -89,6 +102,8 @@ export function useViewSettingsSync({
   cadRef: ActorRefFrom<typeof cadMachine> | undefined;
   editorRef: ActorRefFrom<typeof editorMachine>;
   record: WorkbenchView | undefined;
+  /** Exact live-owner fields acknowledged by this checked record write. */
+  recordLocalPatch?: ViewRecordPatch;
   recordReady: boolean;
   writeRecord: (next: WorkbenchView) => Promise<boolean>;
   onRecordApplied?: (record: WorkbenchView) => void;
@@ -129,7 +144,11 @@ export function useViewSettingsSync({
 
   useEffect(() => {
     if (editorRef.getSnapshot().context.graphicsBackendPreferences[viewId] !== graphicsBackendPreference) {
-      editorRef.send({ type: 'setGraphicsBackendPreference', viewId, preference: graphicsBackendPreference });
+      editorRef.send({
+        type: 'setGraphicsBackendPreference',
+        viewId,
+        preference: graphicsBackendPreference,
+      });
     }
   }, [editorRef, graphicsBackendPreference, viewId]);
 
@@ -166,29 +185,58 @@ export function useViewSettingsSync({
     ] as const;
     for (const [ownerKey, recordKey, type] of visibility) {
       if (
-        (!previous || previous.display[recordKey] !== record.display[recordKey]) &&
+        (!previous ||
+          (recordLocalPatch?.display?.[recordKey] === undefined &&
+            previous.display[recordKey] !== record.display[recordKey])) &&
         context[ownerKey] !== record.display[recordKey]
       ) {
         graphicsRef.send({ type, payload: record.display[recordKey] });
       }
     }
-    if ((!previous || previous.upDirection !== record.upDirection) && context.upDirection !== record.upDirection) {
+    if (
+      (!previous || (recordLocalPatch?.upDirection === undefined && previous.upDirection !== record.upDirection)) &&
+      context.upDirection !== record.upDirection
+    ) {
       graphicsRef.send({ type: 'setUpDirection', payload: record.upDirection });
     }
     if (
-      (!previous || previous.grid.unit !== record.grid.unit) &&
+      (!previous || (recordLocalPatch?.grid?.unit === undefined && previous.grid.unit !== record.grid.unit)) &&
       context.displayUnits.length.symbol !== record.grid.unit
     ) {
-      graphicsRef.send({ type: 'setGridUnit', payload: { unit: record.grid.unit } });
+      graphicsRef.send({
+        type: 'setGridUnit',
+        payload: { unit: record.grid.unit },
+      });
+    }
+    if (
+      session &&
+      (!previous || (recordLocalPatch?.fieldOfView === undefined && previous.fieldOfView !== record.fieldOfView))
+    ) {
+      session.rig.actorRef.send({
+        type: 'setVerticalFieldOfView',
+        verticalFieldOfView: record.fieldOfView,
+      });
+    }
+    const selected = cameraRecord.selectedKernelView;
+    const selectedPatch =
+      selected && recordLocalPatch?.kernelViews && Object.hasOwn(recordLocalPatch.kernelViews, selected)
+        ? recordLocalPatch.kernelViews[selected]
+        : undefined;
+    const localCameraReceipt = selected
+      ? selectedPatch !== null && selectedPatch !== undefined && Object.hasOwn(selectedPatch, 'camera')
+      : recordLocalPatch?.camera !== undefined;
+    const selectedChanged = previous?.selectedKernelView !== cameraRecord.selectedKernelView;
+    if (previous && localCameraReceipt && !selectedChanged) {
+      pendingCameraRecordRef.current = undefined;
+      cameraAdoptionPendingRef.current = false;
     }
     const needsCamera =
       Boolean(session) &&
       (!previous ||
-        !sameRecordField(previous.camera, cameraRecord.camera) ||
-        previous.selectedKernelView !== cameraRecord.selectedKernelView ||
-        previous.fieldOfView !== record.fieldOfView ||
+        selectedChanged ||
+        (!localCameraReceipt && !sameRecordField(previous.camera, cameraRecord.camera)) ||
         Boolean(pendingCameraRecordRef.current));
-    if (needsCamera) {
+    if (needsCamera && (!localCameraReceipt || !previous || selectedChanged)) {
       if (session && !session.framing.initialized) {
         // oxlint-disable-next-line react/immutability -- The session framing record is mutable actor-owned state, not React state.
         session.framing.pendingView = cameraRecord.camera.kind === 'pose' ? cameraRecord.camera : undefined;
@@ -198,8 +246,18 @@ export function useViewSettingsSync({
       pendingCameraRecordRef.current = cameraRecord;
       cameraAdoptionPendingRef.current = true;
     }
-    if (!previous || !sameRecordField(previous.section, record.section) || pendingSectionRecordRef.current) {
-      pendingSectionRecordRef.current = record;
+    if (previous && recordLocalPatch?.section !== undefined) {
+      pendingSectionRecordRef.current = undefined;
+      sectionAdoptionPendingRef.current = false;
+    }
+    if (
+      !previous ||
+      (recordLocalPatch?.section === undefined && !sameRecordField(previous.section, record.section)) ||
+      pendingSectionRecordRef.current
+    ) {
+      if (recordLocalPatch?.section === undefined || !previous) {
+        pendingSectionRecordRef.current = record;
+      }
       sectionAdoptionPendingRef.current = true;
       const apply = (): void => {
         const wait = poseSettle - (Date.now() - lastSectionEmissionRef.current);
@@ -209,7 +267,10 @@ export function useViewSettingsSync({
         }
         const latest = pendingSectionRecordRef.current;
         if (latest) {
-          graphicsRef.send({ type: 'adoptSectionView', section: latest.section });
+          graphicsRef.send({
+            type: 'adoptSectionView',
+            section: latest.section,
+          });
         }
         pendingSectionRecordRef.current = undefined;
         sectionAdoptionPendingRef.current = false;
@@ -217,8 +278,14 @@ export function useViewSettingsSync({
       };
       apply();
     }
-    if (!previous || !sameRecordField(previous.measurements, record.measurements)) {
-      graphicsRef.send({ type: 'adoptPinnedMeasurements', measurements: record.measurements });
+    if (
+      !previous ||
+      (recordLocalPatch?.measurements === undefined && !sameRecordField(previous.measurements, record.measurements))
+    ) {
+      graphicsRef.send({
+        type: 'adoptPinnedMeasurements',
+        measurements: record.measurements,
+      });
     }
     if (!session || !needsCamera) {
       acknowledge();
@@ -241,13 +308,17 @@ export function useViewSettingsSync({
         return;
       }
       const current = actor.getSnapshot().context.view;
-      actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: latest.fieldOfView });
       if (latest.camera.kind === 'pose') {
         actor.send({ type: 'setView', ...latest.camera });
         adoptedPoseRef.current = latest.camera;
       } else {
         const orientation = viewCameraOrientation(latest)!;
-        actor.send({ type: 'setView', target: current.target, ...orientation, verticalSpan: current.verticalSpan });
+        actor.send({
+          type: 'setView',
+          target: current.target,
+          ...orientation,
+          verticalSpan: current.verticalSpan,
+        });
         actor.send({ type: 'frame', margin: 0.1 });
         adoptedPoseRef.current = actor.getSnapshot().context.view;
       }
@@ -265,7 +336,7 @@ export function useViewSettingsSync({
         clearTimeout(sectionTimer);
       }
     };
-  }, [graphicsRef, onRecordApplied, record, session]);
+  }, [graphicsRef, onRecordApplied, record, recordLocalPatch, session]);
 
   // Rebuilt only when the measurements themselves change, so the shallow
   // comparison below can bail out on an unchanged settings object.
@@ -327,11 +398,15 @@ export function useViewSettingsSync({
         if (includePose && firstFrameView && !cameraViewEqual(firstFrameView, next) && firstFrameReceiptRef.current) {
           firstFrameReceiptRef.current.consumed = true;
         }
-        // Reuse the previous reference for an unchanged pose so the shallow
-        // comparison below still recognises "nothing to write".
+        // A setting-only write must not consume the pending pose. The settle callback
+        // will compare it against the last pose included in a camera write.
         return {
           cameraFovAngle,
-          cameraView: previous?.cameraView && cameraViewEqual(previous.cameraView, next) ? previous.cameraView : next,
+          cameraView: includePose
+            ? previous?.cameraView && cameraViewEqual(previous.cameraView, next)
+              ? previous.cameraView
+              : next
+            : previous?.cameraView,
         };
       })();
 

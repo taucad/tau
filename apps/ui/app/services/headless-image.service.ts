@@ -58,6 +58,8 @@ export type HeadlessImageJob = HeadlessGlbImageJob | HeadlessSvgImageJob;
 export type HeadlessImageBackend = {
   readonly createImageClient: () => Promise<ImageClient>;
   readonly isGpuAvailable?: () => boolean | Promise<boolean>;
+  /** Automatic previews may be deferred on a software adapter that stalls the viewport. */
+  readonly isAutomaticGpuAvailable?: () => boolean | Promise<boolean>;
   readonly renderSvg?: (
     content: string,
     format: 'png' | 'webp',
@@ -82,6 +84,7 @@ type QueuedJob = {
 
 export const headlessImageFailureCodeSchema = z.enum([
   'adapter-unavailable',
+  'cold-start-deferred',
   'device-lost',
   'driver-unsupported',
   'gpu',
@@ -141,6 +144,8 @@ const captureCacheKey = (job: HeadlessImageJob): string | undefined =>
 const failedAutomaticIdentityLimit = 100;
 const maxQueuedExplicitJobs = 16;
 const maxQueuedExplicitBytes = 64 * 1024 * 1024;
+const maxQueuedAutomaticJobs = 8;
+const maxQueuedAutomaticBytes = 64 * 1024 * 1024;
 
 const hasExplicitQueueCapacity = (
   queue: readonly QueuedJob[],
@@ -168,16 +173,36 @@ const hasExplicitQueueCapacity = (
   return jobs <= maxQueuedExplicitJobs && bytes <= maxQueuedExplicitBytes;
 };
 
+const hasAutomaticQueueCapacity = (queue: readonly QueuedJob[], incoming: HeadlessImageJob): boolean => {
+  const buffers = new Set<ArrayBuffer>();
+  let jobs = 0;
+  let bytes = 0;
+  for (const job of [...queue.map((entry) => entry.job), incoming]) {
+    if (job.kind !== 'automatic-thumbnail') {
+      continue;
+    }
+    jobs += 1;
+    if (job.sourceFormat === 'svg') {
+      bytes += job.content.length * 2;
+    } else if (!buffers.has(job.content.buffer)) {
+      buffers.add(job.content.buffer);
+      bytes += job.content.buffer.byteLength;
+    }
+  }
+  return jobs <= maxQueuedAutomaticJobs && bytes <= maxQueuedAutomaticBytes;
+};
+
 /**
  * App-owned, lazy image export client shared by thumbnails and agent captures.
- * It serializes GPU work, coalesces queued automatic jobs by project, and
- * retains its owner-scoped image worker until disposal.
+ * It serializes GPU work, bounds queued automatic and explicit jobs, coalesces
+ * automatic jobs by project, and retains its image worker until disposal.
  */
 export class HeadlessImageService {
   // oxlint-disable-next-line typescript/parameter-properties -- UI uses erasableSyntaxOnly, which forbids TypeScript parameter properties.
   private readonly dependencies: HeadlessImageServiceDependencies;
   private readonly backend: HeadlessImageBackend;
   private imageClient: ImageClient | undefined;
+  private successfulGlbRender = false;
   private queue: QueuedJob[] = [];
   private activeJob: QueuedJob | undefined;
   private running = false;
@@ -194,6 +219,10 @@ export class HeadlessImageService {
       createImageClient: dependencies.createImageClient ?? headlessImageBackend.createImageClient,
       isGpuAvailable:
         'isGpuAvailable' in dependencies ? dependencies.isGpuAvailable : headlessImageBackend.isGpuAvailable,
+      isAutomaticGpuAvailable:
+        'isAutomaticGpuAvailable' in dependencies
+          ? dependencies.isAutomaticGpuAvailable
+          : headlessImageBackend.isAutomaticGpuAvailable,
       renderSvg: 'renderSvg' in dependencies ? dependencies.renderSvg : headlessImageBackend.renderSvg,
     };
   }
@@ -203,6 +232,32 @@ export class HeadlessImageService {
     job.signal?.throwIfAborted();
     if (this.disposed) {
       throw new Error('HeadlessImageService is disposed');
+    }
+    const automaticGpuAvailable =
+      job.kind === 'automatic-thumbnail' && job.sourceFormat === 'glb' && this.backend.isAutomaticGpuAvailable
+        ? await this.backend.isAutomaticGpuAvailable()
+        : true;
+    job.signal?.throwIfAborted();
+    // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- dispose() can run while adapter admission awaits.
+    if (this.disposed) {
+      throw new Error('HeadlessImageService is disposed');
+    }
+    if (!automaticGpuAvailable) {
+      throw new HeadlessImageError(
+        'driver-unsupported',
+        'Automatic part previews are deferred on this software WebGPU adapter.',
+      );
+    }
+    if (
+      job.kind === 'automatic-thumbnail' &&
+      job.sourceFormat === 'glb' &&
+      job.exportOptions.mode === 'batch' &&
+      !this.successfulGlbRender
+    ) {
+      throw new HeadlessImageError(
+        'cold-start-deferred',
+        'Automatic part previews are deferred until the image worker is ready. Retry a part to render it now.',
+      );
     }
     if (job.kind === 'automatic-thumbnail' && this.failedAutomaticIdentities.has(job.identity)) {
       return undefined;
@@ -224,6 +279,19 @@ export class HeadlessImageService {
       !hasExplicitQueueCapacity(this.queue, job, this.activeJob)
     ) {
       throw new RangeError('Headless image queue is full (16 explicit jobs or 64 MiB of queued source data)');
+    }
+    const queueForAutomaticAdmission =
+      job.kind === 'automatic-thumbnail' && job.projectId
+        ? this.queue.filter(
+            (entry) => entry.job.kind !== 'automatic-thumbnail' || entry.job.projectId !== job.projectId,
+          )
+        : this.queue;
+    if (
+      job.kind === 'automatic-thumbnail' &&
+      (this.running || this.queue.length > 0) &&
+      !hasAutomaticQueueCapacity(queueForAutomaticAdmission, job)
+    ) {
+      return undefined;
     }
     return new Promise((resolve, reject) => {
       const settleResolve = (queued: QueuedJob, files: ExportFile[] | undefined): void => {
@@ -443,6 +511,9 @@ export class HeadlessImageService {
     if (!result.success) {
       throw issueToError(result.issues[0]);
     }
+    if (job.sourceFormat === 'glb') {
+      this.successfulGlbRender = true;
+    }
     return result.data;
   }
 
@@ -493,5 +564,6 @@ export class HeadlessImageService {
     this.unsubscribeTelemetry = undefined;
     this.imageClient?.terminate();
     this.imageClient = undefined;
+    this.successfulGlbRender = false;
   }
 }

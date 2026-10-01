@@ -54,7 +54,7 @@ export const ChatErrorProviderAccount = memo(function ({
           {/* Other suppliers keep working, so switching comes before retrying. */}
           <ChatModelSelector popoverProperties={{ align: 'end' }}>
             {() => (
-              <Button variant='outline' size='sm'>
+              <Button variant='outline' size='xs'>
                 <Repeat className='size-3.5' />
                 Switch model
               </Button>
@@ -62,7 +62,7 @@ export const ChatErrorProviderAccount = memo(function ({
           </ChatModelSelector>
           <Button
             variant='outline'
-            size='sm'
+            size='xs'
             onClick={() => {
               regenerate();
             }}

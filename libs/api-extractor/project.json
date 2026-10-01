@@ -110,7 +110,14 @@
         "cwd": "libs/api-extractor"
       },
       "cache": true,
-      "inputs": ["{projectRoot}/src/extract-picovoxel-types.ts", "{workspaceRoot}/pnpm-lock.yaml", "sharedGlobals"],
+      "inputs": [
+        "{projectRoot}/src/extract-picovoxel-types.ts",
+        "{workspaceRoot}/packages/plugins/picovoxel/src/model.ts",
+        "{workspaceRoot}/packages/core/geometry/src/utils/glb-material.ts",
+        "{workspaceRoot}/libs/types/src/types/json-value.types.ts",
+        "{workspaceRoot}/pnpm-lock.yaml",
+        "sharedGlobals"
+      ],
       "outputs": ["{projectRoot}/src/generated/picovoxel"]
     },
     "generate-bundles": {
@@ -128,6 +135,7 @@
         "{projectRoot}/src/generated/**/*",
         "{workspaceRoot}/packages/plugins/*/agent/*.md",
         "{workspaceRoot}/packages/geospec/agent/doctrine.md",
+        "{workspaceRoot}/packages/workbench/agent/doctrine.md",
         "{workspaceRoot}/pnpm-lock.yaml",
         "sharedGlobals"
       ],
@@ -143,6 +151,10 @@
         "{workspaceRoot}/packages/plugins/zoo/agent/cad-zoo",
         "{workspaceRoot}/packages/plugins/tscircuit/agent/cad-tscircuit",
         "{workspaceRoot}/packages/geospec/agent/geospec-authoring",
+        "{workspaceRoot}/packages/workbench/agent/workbench",
+        "{workspaceRoot}/packages/workbench/agent/resources.js",
+        "{workspaceRoot}/packages/workbench/agent/resources.d.ts",
+        "{workspaceRoot}/packages/workbench/agent/skills.json",
         "{workspaceRoot}/packages/plugins/*/agent/resources.js",
         "{workspaceRoot}/packages/plugins/*/agent/resources.d.ts",
         "{workspaceRoot}/packages/plugins/*/agent/skills.json",

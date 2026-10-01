@@ -39,7 +39,7 @@ describe('@taucad/api-extractor runtime subpaths', () => {
       }
     }
     expect(Object.keys(packages).sort()).toEqual(
-      ['libcascade', 'replicad', '@jscad/modeling', 'manifold-3d', 'picovoxel'].sort(),
+      ['libcascade', 'replicad', '@jscad/modeling', 'manifold-3d', 'picovoxel', '@taucad/picovoxel'].sort(),
     );
 
     const jscadPackage = packages['@jscad/modeling'];

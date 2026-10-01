@@ -8,9 +8,26 @@ use crate::{
     runtime::EngineConfig,
     subject::{Subject, SubjectFormat},
 };
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{cell::RefCell, rc::Rc};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExactCandidateEnvelope {
+    #[serde(rename = "_tauNativeExactClusterCandidateV1")]
+    control: ExactCandidateControl,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ExactCandidateControl {
+    operation: String,
+    subject_hash: String,
+    tolerance_mm: f64,
+    candidate: Option<serde_json::Value>,
+}
 
 use crate::codec::{decode, encode, Json};
 use crate::mesh::Mesh;
@@ -244,6 +261,131 @@ impl Default for Engine {
 }
 
 impl Engine {
+    /// ST-only private candidate control reached solely through the WASM
+    /// binding's reserved processRequest dispatch. Never a GeoSpec method.
+    pub fn process_exact_cluster_candidate_control(
+        &self,
+        input: &[u8],
+    ) -> Result<Vec<u8>, ProtocolError> {
+        if input.len() > crate::cache::exact_clusters::MAX_CANDIDATE_BYTES + 1024
+            || crate::canonicalize(input)?.as_slice() != input
+        {
+            return Err(ProtocolError::new(
+                ErrorKind::InvalidRequest,
+                "Invalid private candidate control bytes.",
+            ));
+        }
+        let envelope: ExactCandidateEnvelope = serde_json::from_slice(input).map_err(|_| {
+            ProtocolError::new(
+                ErrorKind::InvalidRequest,
+                "Invalid private candidate control.",
+            )
+        })?;
+        let control = envelope.control;
+        if !control.tolerance_mm.is_finite() || control.tolerance_mm < 0.0 {
+            return Err(ProtocolError::new(
+                ErrorKind::InvalidRequest,
+                "Invalid exact-cluster tolerance.",
+            ));
+        }
+        let subject = self
+            .subjects
+            .get(&crate::subject::subject_cache_key(
+                "geospec-subject-v1",
+                &control.subject_hash,
+            ))
+            .filter(|subject| subject.format == SubjectFormat::Step);
+        let response = match control.operation.as_str() {
+            "export" if control.candidate.is_none() => {
+                let candidate = subject
+                    .and_then(|subject| {
+                        subject
+                            .completed_exact_clusters(control.tolerance_mm)
+                            .and_then(|fact| {
+                                crate::cache::exact_clusters::export_candidate(
+                                    subject,
+                                    control.tolerance_mm,
+                                    fact,
+                                )
+                            })
+                    })
+                    .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+                serde_json::json!({"schema":"geospec-exact-cluster-control-result-v1","candidate":candidate})
+            }
+            "compare" => {
+                let candidate = control.candidate.ok_or_else(|| {
+                    ProtocolError::new(
+                        ErrorKind::InvalidRequest,
+                        "Compare requires candidate bytes.",
+                    )
+                })?;
+                let bytes =
+                    crate::canonicalize(&serde_json::to_vec(&candidate).map_err(|_| {
+                        ProtocolError::new(ErrorKind::InvalidRequest, "Invalid candidate JSON.")
+                    })?)?;
+                let mut units = 0_u64;
+                let mut matched = false;
+                if let Some(subject) = subject {
+                    if crate::cache::exact_clusters::candidate_identity_matches(
+                        subject,
+                        control.tolerance_mm,
+                        &bytes,
+                    ) {
+                        if let Some(local) = subject.completed_exact_clusters(control.tolerance_mm)
+                        {
+                            matched = crate::cache::exact_clusters::matches_candidate(
+                                subject,
+                                control.tolerance_mm,
+                                &bytes,
+                                local,
+                            );
+                        } else if let Some(brep) = subject.brep.as_deref() {
+                            let budget = crate::budget::Budget::new(8_000_000);
+                            let mut trace = crate::analysis::mesh::exact::ChargeTrace::default();
+                            let cold = crate::matchers::mesh::cold_step_clusters(
+                                subject,
+                                brep,
+                                control.tolerance_mm,
+                                &budget,
+                                &mut trace,
+                            );
+                            units = budget.used();
+                            if let Ok((clusters, labels)) = cold {
+                                let local = crate::analysis::batch::ExactClusters {
+                                    clusters,
+                                    labels,
+                                    units,
+                                    trace: trace.steps,
+                                    trace_complete: trace.complete,
+                                    stage_calls: trace.stage_calls,
+                                    stage_units: trace.stage_units,
+                                };
+                                matched = crate::cache::exact_clusters::matches_candidate(
+                                    subject,
+                                    control.tolerance_mm,
+                                    &bytes,
+                                    &local,
+                                );
+                            }
+                        }
+                    }
+                }
+                serde_json::json!({"schema":"geospec-exact-cluster-control-result-v1","matched":matched,"recomputedUnits":units.to_string()})
+            }
+            _ => {
+                return Err(ProtocolError::new(
+                    ErrorKind::InvalidRequest,
+                    "Unsupported private candidate operation.",
+                ))
+            }
+        };
+        crate::canonicalize(&serde_json::to_vec(&response).map_err(|_| {
+            ProtocolError::new(
+                ErrorKind::InvalidRequest,
+                "Candidate response encoding failed.",
+            )
+        })?)
+    }
     /// Owned non-mutating cumulative diagnostics, separate from canonical results.
     pub fn observations(&self) -> Vec<u8> {
         encode(&self.observations.snapshot()).expect("fixed observation document encodes")
@@ -314,8 +456,20 @@ impl Engine {
         cache: crate::cache::SharedOverlapEvidenceCache,
         producer_identity: crate::cache::ProducerIdentity,
     ) -> Self {
-        let mut engine = Self::with_backends(config, brep, csg);
+        let mut engine =
+            Self::with_backends_and_producer_identity(config, brep, csg, producer_identity);
         engine.overlap_cache = Some(cache);
+        engine
+    }
+
+    /// Associates an authenticated build identity without enabling host cache I/O.
+    pub fn with_backends_and_producer_identity(
+        config: EngineConfig,
+        brep: Box<dyn BrepConnector>,
+        csg: Box<dyn CsgConnector>,
+        producer_identity: crate::cache::ProducerIdentity,
+    ) -> Self {
+        let mut engine = Self::with_backends(config, brep, csg);
         engine.producer_identity = Some(Rc::new(producer_identity));
         engine
     }

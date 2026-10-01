@@ -18,3 +18,8 @@ export function useHeadlessImageService(): HeadlessImageService {
   }
   return service;
 }
+
+/** Preview-only consumers may render outside the image provider in embedded hosts. */
+export function useOptionalHeadlessImageService(): HeadlessImageService | undefined {
+  return useContext(HeadlessImageContext);
+}

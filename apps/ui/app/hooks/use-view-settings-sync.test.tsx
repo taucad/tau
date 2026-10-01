@@ -9,6 +9,7 @@ import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import { GraphicsProvider } from '#hooks/use-graphics.js';
 import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
+import type { ViewRecordPatch } from '#workbench-records/view-store.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -19,7 +20,9 @@ import { getViewCameraSession } from '#services/graphics-camera-registry.js';
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
 import { Box3, Vector3 } from 'three';
 
-vi.mock('@react-three/fiber', () => ({ useThree: () => ({ size: { width: 800, height: 600 } }) }));
+vi.mock('@react-three/fiber', () => ({
+  useThree: () => ({ size: { width: 800, height: 600 } }),
+}));
 
 const initial = (): WorkbenchView =>
   workbenchRecords.view.schema.parse({
@@ -33,6 +36,7 @@ function Harness({
   cadRef,
   editorRef,
   record,
+  recordLocalPatch,
   writeRecord,
   onRecordApplied,
 }: {
@@ -40,6 +44,7 @@ function Harness({
   readonly cadRef?: ActorRefFrom<typeof cadMachine>;
   readonly editorRef: ActorRefFrom<typeof editorMachine>;
   readonly record: WorkbenchView;
+  readonly recordLocalPatch?: ViewRecordPatch;
   readonly writeRecord: (record: WorkbenchView) => Promise<boolean>;
   readonly onRecordApplied?: (record: WorkbenchView) => void;
 }): React.JSX.Element {
@@ -50,6 +55,7 @@ function Harness({
     cadRef,
     editorRef,
     record,
+    recordLocalPatch,
     recordReady: true,
     writeRecord,
     onRecordApplied,
@@ -100,8 +106,8 @@ const cad = () => {
 const editor = () =>
   mock<ActorRefFrom<typeof editorMachine>>({
     send: vi.fn(),
-    // oxlint-disable-next-line typescript/consistent-type-assertions -- Only the selected context field is used by this actor fixture.
     getSnapshot: () =>
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- Only the selected context field is used by this actor fixture.
       ({ context: { graphicsBackendPreferences: {} } }) as ReturnType<
         ActorRefFrom<typeof editorMachine>['getSnapshot']
       >,
@@ -110,11 +116,17 @@ const editor = () =>
 describe('view record owner synchronization', () => {
   it.each([
     { instruction: 'look', camera: { kind: 'look', direction: [0, -1, 0] } },
-    { instruction: 'front preset', camera: { kind: 'preset', preset: 'front' } },
+    {
+      instruction: 'front preset',
+      camera: { kind: 'preset', preset: 'front' },
+    },
   ] as const)('keeps a $instruction instruction through the first real geometry frame', async ({ camera }) => {
     const graphicsRef = graphics();
     const editorRef = editor();
-    const record = workbenchRecords.view.schema.parse({ ...initial(), camera });
+    const record = workbenchRecords.view.schema.parse({
+      ...initial(),
+      camera,
+    });
     const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
     const bounds = new Box3(new Vector3(-2, -2, -2), new Vector3(2, 2, 2));
     function Frame({ radius }: { readonly radius: number }): React.JSX.Element {
@@ -141,7 +153,10 @@ describe('view record owner synchronization', () => {
   });
   it.each([
     { instruction: 'look', camera: { kind: 'look', direction: [0, -1, 0] } },
-    { instruction: 'front preset', camera: { kind: 'preset', preset: 'front' } },
+    {
+      instruction: 'front preset',
+      camera: { kind: 'preset', preset: 'front' },
+    },
   ] as const)(
     'does not persist the first glTF frame over an adopted $instruction but persists a later orbit',
     async ({ camera }) => {
@@ -151,7 +166,10 @@ describe('view record owner synchronization', () => {
         expect(cadRef.getSnapshot().value).not.toBe('connecting');
       });
       const editorRef = editor();
-      const record = workbenchRecords.view.schema.parse({ ...initial(), camera });
+      const record = workbenchRecords.view.schema.parse({
+        ...initial(),
+        camera,
+      });
       const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
       const bounds = new Box3(new Vector3(-2, -2, -2), new Vector3(2, 2, 2));
       function Frame({ radius }: { readonly radius: number }): React.JSX.Element {
@@ -186,7 +204,7 @@ describe('view record owner synchronization', () => {
         fixture.emitRendered(fixture.rendering);
       });
       await waitFor(() => {
-        const rendering = cadRef.getSnapshot().context.rendering;
+        const { rendering } = cadRef.getSnapshot().context;
         expect(rendering?.success ? rendering.artifact.mimeType : undefined).toBe('model/gltf-binary');
       });
       view.rerender(draw(4));
@@ -264,11 +282,22 @@ describe('view record owner synchronization', () => {
       expect(onRecordApplied).toHaveBeenCalledWith(base);
     });
     onRecordApplied.mockClear();
-    act(() => rig.send({ type: 'setView', target: [0, 0, 0], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 5 }));
+    act(() =>
+      rig.send({
+        type: 'setView',
+        target: [0, 0, 0],
+        direction: [1, 0, 0],
+        up: [0, 0, 1],
+        verticalSpan: 5,
+      }),
+    );
     const changed = workbenchRecords.view.schema.parse({
       ...base,
       camera: { kind: 'preset', preset: 'front' },
-      section: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: false }] },
+      section: {
+        active: true,
+        cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: false }],
+      },
     });
     rerender(draw(changed));
     expect(onRecordApplied).not.toHaveBeenCalledWith(changed);
@@ -288,8 +317,19 @@ describe('view record owner synchronization', () => {
       camera: { kind: 'preset', preset: 'front' },
       display: { ...initial().display, grid: false },
       grid: { unit: 'in' },
-      section: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: false }] },
-      measurements: [{ id: 'm1', frameId: 'tau:root', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
+      section: {
+        active: true,
+        cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: false }],
+      },
+      measurements: [
+        {
+          id: 'm1',
+          frameId: 'tau:root',
+          startPoint: [0, 0, 0],
+          endPoint: [1, 0, 0],
+          distance: 1,
+        },
+      ],
     });
     render(
       <GraphicsProvider graphicsRef={graphicsRef}>
@@ -365,7 +405,10 @@ describe('view record owner synchronization', () => {
     const graphicsRef = graphics();
     const editorRef = editor();
     const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
-    const front = workbenchRecords.view.schema.parse({ ...initial(), camera: { kind: 'preset', preset: 'front' } });
+    const front = workbenchRecords.view.schema.parse({
+      ...initial(),
+      camera: { kind: 'preset', preset: 'front' },
+    });
     const renderHarness = (record: WorkbenchView) => (
       <GraphicsProvider graphicsRef={graphicsRef}>
         <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={record} writeRecord={writeRecord} />
@@ -374,13 +417,243 @@ describe('view record owner synchronization', () => {
     const { rerender, unmount } = render(renderHarness(front));
     const rig = getViewCameraSession(graphicsRef)!.rig.actorRef;
     await waitFor(() => expect(rig.getSnapshot().context.view.direction).toEqual([0, -1, 0]));
-    act(() => rig.send({ type: 'setView', target: [0, 0, 0], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 5 }));
+    act(() =>
+      rig.send({
+        type: 'setView',
+        target: [0, 0, 0],
+        direction: [1, 0, 0],
+        up: [0, 0, 1],
+        verticalSpan: 5,
+      }),
+    );
     rerender(renderHarness({ ...front, grid: { unit: 'in' } }));
     expect(rig.getSnapshot().context.view.direction).toEqual([1, 0, 0]);
     await new Promise((resolve) => {
       setTimeout(resolve, 300);
     });
     expect(rig.getSnapshot().context.view.direction).toEqual([1, 0, 0]);
+    unmount();
+    graphicsRef.stop();
+  });
+
+  it('should keep the latest camera pose when an earlier local pose write echoes from the record', async () => {
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const record = initial();
+    const draw = (next: WorkbenchView, recordLocalPatch?: ViewRecordPatch) => (
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <Harness
+          graphicsRef={graphicsRef}
+          editorRef={editorRef}
+          record={next}
+          recordLocalPatch={recordLocalPatch}
+          writeRecord={writeRecord}
+        />
+      </GraphicsProvider>
+    );
+    const { rerender, unmount } = render(draw(record));
+    const session = getViewCameraSession(graphicsRef)!;
+    const rig = session.rig.actorRef;
+    session.framing.initialized = true;
+    await waitFor(() => expect(rig.getSnapshot().context.view.direction[1]).toBeLessThan(-0.6));
+    act(() =>
+      rig.send({
+        type: 'setView',
+        target: [0, 0, 0],
+        direction: [1, 0, 0],
+        up: [0, 0, 1],
+        verticalSpan: 4,
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        writeRecord.mock.calls.some(([next]) => next.camera.kind === 'pose' && next.camera.verticalSpan === 4),
+      ).toBe(true),
+    );
+    const echoed = writeRecord.mock.calls.find(
+      ([next]) => next.camera.kind === 'pose' && next.camera.verticalSpan === 4,
+    )![0];
+    act(() =>
+      rig.send({
+        type: 'setView',
+        target: [0, 0, 0],
+        direction: [1, 0, 0],
+        up: [0, 0, 1],
+        verticalSpan: 2,
+      }),
+    );
+    rerender(draw({ ...echoed }, { camera: echoed.camera }));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 350);
+    });
+    expect(rig.getSnapshot().context.view.verticalSpan).toBe(2);
+    unmount();
+    graphicsRef.stop();
+  });
+
+  it('persists the settled pose after the same camera gesture changes field of view', async () => {
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const record = initial();
+    const { unmount } = render(
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={record} writeRecord={writeRecord} />
+      </GraphicsProvider>,
+    );
+    const session = getViewCameraSession(graphicsRef)!;
+    const rig = session.rig.actorRef;
+    session.framing.initialized = true;
+    await waitFor(() => expect(rig.getSnapshot().context.view.direction[1]).toBeLessThan(-0.6));
+    act(() => {
+      rig.send({
+        type: 'setView',
+        target: [1, 2, 3],
+        direction: [1, 0, 0],
+        up: [0, 0, 1],
+        verticalSpan: 4,
+      });
+      rig.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 38 });
+    });
+    await waitFor(() => expect(writeRecord.mock.calls.some(([next]) => next.fieldOfView === 38)).toBe(true));
+    await waitFor(
+      () =>
+        expect(
+          writeRecord.mock.calls.some(
+            ([next]) => next.camera.kind === 'pose' && next.camera.verticalSpan === 4 && next.fieldOfView === 38,
+          ),
+        ).toBe(true),
+      { timeout: 1000 },
+    );
+    unmount();
+    graphicsRef.stop();
+  });
+
+  it('should keep newer live fields on a local receipt while applying unrelated foreign fields', async () => {
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const base = initial();
+    const draw = (record: WorkbenchView, recordLocalPatch?: ViewRecordPatch) => (
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <Harness
+          graphicsRef={graphicsRef}
+          editorRef={editorRef}
+          record={record}
+          recordLocalPatch={recordLocalPatch}
+          writeRecord={writeRecord}
+        />
+      </GraphicsProvider>
+    );
+    const { rerender, unmount } = render(draw(base));
+    const rig = getViewCameraSession(graphicsRef)!.rig.actorRef;
+    const cut = {
+      kind: 'plane',
+      plane: 'xz',
+      offset: 2,
+      isFlipped: false,
+    } as const;
+    const section = { active: true, cuts: [cut] };
+    act(() => {
+      graphicsRef.send({ type: 'setSurfaceVisibility', payload: false });
+      graphicsRef.send({ type: 'setGridUnit', payload: { unit: 'ft' } });
+      graphicsRef.send({ type: 'adoptSectionView', section });
+      rig.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 45 });
+    });
+    act(() => {
+      graphicsRef.send({ type: 'setSurfaceVisibility', payload: true });
+      graphicsRef.send({ type: 'setGridUnit', payload: { unit: 'cm' } });
+      graphicsRef.send({
+        type: 'adoptSectionView',
+        section: { active: false, cuts: [] },
+      });
+      rig.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 30 });
+    });
+    const receipt = workbenchRecords.view.schema.parse({
+      ...base,
+      camera: { kind: 'preset', preset: 'front' },
+      fieldOfView: 45,
+      display: { ...base.display, surfaces: false, lines: false },
+      grid: { unit: 'ft' },
+      section,
+    });
+    rerender(
+      draw(receipt, {
+        display: { surfaces: false },
+        grid: { unit: 'ft' },
+        fieldOfView: 45,
+        section,
+      }),
+    );
+    await waitFor(() => expect(rig.getSnapshot().context.view.direction).toEqual([0, -1, 0]));
+    expect(graphicsRef.getSnapshot().context.enableSurfaces).toBe(true);
+    expect(graphicsRef.getSnapshot().context.enableLines).toBe(false);
+    expect(graphicsRef.getSnapshot().context.displayUnits.length.symbol).toBe('cm');
+    expect(graphicsRef.getSnapshot().context.isSectionViewActive).toBe(false);
+    expect(rig.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(30);
+    unmount();
+    graphicsRef.stop();
+  });
+
+  it('should cancel pending foreign camera and section adoption when a newer local receipt owns those fields', async () => {
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const base = initial();
+    const draw = (record: WorkbenchView, recordLocalPatch?: ViewRecordPatch) => (
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <Harness
+          graphicsRef={graphicsRef}
+          editorRef={editorRef}
+          record={record}
+          recordLocalPatch={recordLocalPatch}
+          writeRecord={writeRecord}
+        />
+      </GraphicsProvider>
+    );
+    const { rerender, unmount } = render(draw(base));
+    const rig = getViewCameraSession(graphicsRef)!.rig.actorRef;
+    act(() => {
+      rig.send({
+        type: 'setView',
+        target: [0, 0, 0],
+        direction: [1, 0, 0],
+        up: [0, 0, 1],
+        verticalSpan: 2,
+      });
+      graphicsRef.send({ type: 'setSectionViewActive', payload: true });
+      graphicsRef.send({ type: 'setSectionViewActive', payload: false });
+    });
+    const foreign = workbenchRecords.view.schema.parse({
+      ...base,
+      camera: { kind: 'preset', preset: 'front' },
+      section: {
+        active: true,
+        cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: false }],
+      },
+    });
+    rerender(draw(foreign));
+    const { view } = rig.getSnapshot().context;
+    const local = workbenchRecords.view.schema.parse({
+      ...foreign,
+      camera: {
+        kind: 'pose',
+        frameId: view.frameId,
+        target: view.target,
+        direction: view.direction,
+        up: view.up,
+        verticalSpan: view.verticalSpan,
+        perspectiveZoom: view.perspectiveZoom,
+      },
+      section: { active: false, cuts: [] },
+    });
+    rerender(draw(local, { camera: local.camera, section: local.section }));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 350);
+    });
+    expect(rig.getSnapshot().context.view.direction).toEqual([1, 0, 0]);
+    expect(graphicsRef.getSnapshot().context.isSectionViewActive).toBe(false);
     unmount();
     graphicsRef.stop();
   });
@@ -398,8 +671,19 @@ describe('view record owner synchronization', () => {
     const { rerender, unmount } = render(draw(initialRecord));
     const rig = getViewCameraSession(graphicsRef)!.rig.actorRef;
     await waitFor(() => expect(rig.getSnapshot().context.view.direction[1]).toBeLessThan(-0.6));
-    act(() => rig.send({ type: 'setView', target: [0, 0, 0], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 5 }));
-    const front: WorkbenchView = { ...initialRecord, camera: { kind: 'preset', preset: 'front' } };
+    act(() =>
+      rig.send({
+        type: 'setView',
+        target: [0, 0, 0],
+        direction: [1, 0, 0],
+        up: [0, 0, 1],
+        verticalSpan: 5,
+      }),
+    );
+    const front: WorkbenchView = {
+      ...initialRecord,
+      camera: { kind: 'preset', preset: 'front' },
+    };
     rerender(draw(front));
     expect(rig.getSnapshot().context.view.direction).toEqual([1, 0, 0]);
     rerender(draw({ ...front, grid: { unit: 'in' } }));

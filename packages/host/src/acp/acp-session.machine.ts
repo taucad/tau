@@ -603,6 +603,7 @@ export const sessionRecordOf = (context: AcpSessionContext, lent: AcpLend): Json
   const { limit } = context;
   return {
     acpSessionId: context.acpSessionId ?? '',
+    acpPromptedRequestId: context.promptedRequestId ?? null,
     cwd: context.cwd,
     ...(context.mode === undefined ? {} : { mode: context.mode }),
     ...(model === undefined ? {} : { model }),
@@ -767,6 +768,7 @@ const lend = (lent: AcpLend) =>
       lent,
       outcome: undefined,
       configured: none,
+      promptedRequestId: undefined,
       permissions: none,
       report: undefined,
       answered: undefined,
@@ -926,6 +928,7 @@ const configureOrPrompt = (context: AcpBusyContext, enq: Enqueue, patch: Partial
     target: 'prompting',
     context: {
       ...patch,
+      promptedRequestId: next.lent.requestId,
       ...ask(next, enq, { method: 'session/prompt', params: { sessionId: next.acpSessionId ?? '', prompt: blocks } }),
     },
   } as const;

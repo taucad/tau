@@ -15,6 +15,7 @@ import {
   formatNodeSelector,
   formatPrimitiveSelector,
   uniqueComponentId,
+  toMechanismKernelIssue,
 } from '@taucad/geometry-core';
 import type {
   GeometryOutputTransformOptions,
@@ -27,7 +28,7 @@ import type {
   TauCadTopologyPayload,
 } from '@taucad/geometry-core';
 import { resolveMechanismComponents, transformMechanism } from '@taucad/kinematics';
-import type { Issue, Mechanism, TransformMechanismInput } from '@taucad/kinematics';
+import type { Mechanism, TransformMechanismInput } from '@taucad/kinematics';
 import { normalizeColor } from '#utils/normalize-color.js';
 
 import type { GeometryReplicad } from '#replicad.types.js';
@@ -71,21 +72,6 @@ type ConvertMechanismOptions = {
 const zUpToYup: NonNullable<TransformMechanismInput['matrix']> = [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];
 
 /**
- * Report a mechanism problem as a kernel warning; `details.mechanism` carries the kinematics issue.
- *
- * @internal
- * @param issue - Kinematics-style issue with a JSON pointer into the authored mechanism.
- * @returns The kernel issue the editor and the Kinematics pane read.
- */
-export const toMechanismKernelIssue = (issue: Issue): KernelIssue => ({
-  code: issue.code.startsWith('UNKNOWN_') ? 'INVALID_REFERENCE' : 'INVALID_ANNOTATION',
-  severity: 'warning',
-  type: 'kernel',
-  message: `Mechanism${issue.path && ` ${issue.path}`}: ${issue.message} ${issue.recovery}`,
-  details: { producer: { kernelId: 'replicad' }, mechanism: issue },
-});
-
-/**
  * Resolve the author's mechanism source against the component ids this glTF assigns, and express
  * it in the same frame and length unit as the vertices.
  *
@@ -111,7 +97,7 @@ function convertMechanism({
         })
       : resolved;
   if (outcome.status === 'invalid') {
-    onIssues?.(outcome.issues.map((issue) => toMechanismKernelIssue(issue)));
+    onIssues?.(outcome.issues.map((issue) => toMechanismKernelIssue({ issue, kernelId: 'replicad' })));
     return undefined;
   }
   return outcome.mechanism;

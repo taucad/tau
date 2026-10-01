@@ -87,20 +87,10 @@ export function readGraphicsBackendQueryOverride(): GraphicsBackendPreference | 
   return raw !== null && graphicsBackendQueryValues.includes(raw) ? (raw as GraphicsBackendPreference) : undefined;
 }
 
-/**
- * Merge machine-resolved backend with an optional URL override.
- *
- * When a valid query override is present it wins for the lifetime of the page.
- */
-export function mergeGraphicsBackendWithQueryOverride(
-  machineResolved: ResolvedGraphicsBackend,
-  _preference: GraphicsBackendPreference,
-  gpuAvailable: boolean,
-): ResolvedGraphicsBackend {
-  const override = readGraphicsBackendQueryOverride();
-  if (override === undefined) {
-    return machineResolved;
-  }
-
-  return resolveGraphicsBackendPreference(override, gpuAvailable);
+/** Resolve the experimental viewer flag, with the internal URL override taking precedence. */
+export function resolveViewerGraphicsBackend(webGpuEnabled: boolean, gpuAvailable: boolean): ResolvedGraphicsBackend {
+  return resolveGraphicsBackendPreference(
+    readGraphicsBackendQueryOverride() ?? (webGpuEnabled ? 'webgpu' : 'webgl'),
+    gpuAvailable,
+  );
 }

@@ -4,7 +4,15 @@ import { render, screen } from '@testing-library/react';
 import { interpolate, wcagContrast } from 'culori';
 import type { Color } from 'culori';
 import { describe, expect, it } from 'vitest';
-import { Button } from '#components/button.js';
+import { Button, buttonVariants } from '#components/button.js';
+import { Badge } from '#components/badge.js';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from '#components/alert-dialog.js';
 
 /*
  * The jsdom environment neither compiles Tailwind nor resolves `var()`, and this package has no
@@ -79,5 +87,49 @@ describe('Button default variant focus ring', () => {
     for (const stop of stops) {
       expect(wcagContrast(ring, stop), `${ring} on ${JSON.stringify(stop)}`).toBeGreaterThanOrEqual(3);
     }
+  });
+});
+
+describe('destructive controls', () => {
+  it('should remove inherited primary sheen and use the shared focus color', () => {
+    expect(block('@utility destructive-action')).toMatchObject({
+      '--focus-outline-color': 'var(--destructive-foreground)',
+      'background-image': 'none',
+    });
+  });
+
+  it('should share a quiet red surface and foreground across buttons and badges', () => {
+    render(
+      <>
+        <Button variant='destructive'>Delete all</Button>
+        <Badge variant='destructive'>Failed</Badge>
+      </>,
+    );
+
+    for (const control of [screen.getByRole('button', { name: 'Delete all' }), screen.getByText('Failed')]) {
+      expect(control).toHaveClass('bg-destructive-surface', 'text-destructive-foreground');
+      expect(control).not.toHaveClass('bg-destructive', 'text-white');
+    }
+    expect(screen.getByRole('button', { name: 'Delete all' })).toHaveClass('hover:bg-destructive-hover');
+    expect(screen.getByText('Failed')).toHaveClass('[a&]:hover:bg-destructive-hover');
+  });
+
+  it('should preserve the destructive treatment when a confirmation composes primary button classes', () => {
+    render(
+      <AlertDialog open>
+        <AlertDialogContent>
+          <AlertDialogTitle>Delete permanently?</AlertDialogTitle>
+          <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+          <AlertDialogAction className={buttonVariants({ variant: 'destructive' })}>Delete</AlertDialogAction>
+        </AlertDialogContent>
+      </AlertDialog>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Delete' })).toHaveClass(
+      'destructive-action',
+      'bg-destructive-surface',
+      'text-destructive-foreground',
+      'focus-visible:focus-outline',
+    );
   });
 });

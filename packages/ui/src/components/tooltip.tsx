@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Tooltip as TooltipPrimitive } from 'radix-ui';
 import { cn } from '#utils/cn.js';
 import { popoverSurfaceVariants } from '#components/popover.variants.js';
+import { useFullscreenElement } from '#hooks/use-fullscreen-element.js';
 
 /**
  * Configure timing for descendants implementing the APG tooltip pattern.
@@ -93,8 +94,9 @@ function TooltipContent({
   children,
   ...properties
 }: React.ComponentProps<typeof TooltipPrimitive.Content>): React.JSX.Element {
+  const fullscreenElement = useFullscreenElement();
   return (
-    <TooltipPrimitive.Portal>
+    <TooltipPrimitive.Portal container={fullscreenElement}>
       <TooltipPrimitive.Content
         data-slot='tooltip-content'
         sideOffset={sideOffset}

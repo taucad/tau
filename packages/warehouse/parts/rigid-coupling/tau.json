@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_JKDbgIL4T8A6m1aslpx9K",
+  "name": "Rigid shaft coupling",
+  "description": "Through-bored coupling with two independently placed radial set-screw holes.",
+  "tags": [
+    "Shafts and bushings",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

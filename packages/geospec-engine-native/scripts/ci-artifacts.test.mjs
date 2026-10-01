@@ -142,6 +142,22 @@ void test('cache key follows source and selected toolchain without generated out
   assert.match(deliveryCacheKey(root), /^[0-9a-f]{64}$/u, 'empty wrapper disables the override');
 });
 
+void test('cached preparation target uses verified ensure-delivery on source changes', () => {
+  /** @type {unknown} */
+  const rawProject = JSON.parse(readFileSync(resolve(import.meta.dirname, '../project.json'), 'utf8'));
+  const project =
+    /** @type {{targets: Record<string, {cache?: boolean, inputs?: unknown[], options?: {command?: string}} >}} */ (
+      rawProject
+    );
+  const target = project.targets['prepare-geospec-ci-artifacts'];
+  assert.ok(target);
+  assert.equal(target.cache, true);
+  assert.deepEqual(target.inputs, [
+    { runtime: 'node packages/geospec-engine-native/scripts/ci-artifacts.mjs cache-key' },
+  ]);
+  assert.equal(target.options?.command, 'node packages/geospec-engine-native/scripts/ci-artifacts.mjs ensure-delivery');
+});
+
 void test('explicit delivery cache remains the exact selected path', (context) => {
   const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
   mkdirSync(scratch, { recursive: true });
@@ -267,6 +283,11 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     CXXFLAGS_wasm32_unknown_emscripten:
       '-msimd128 -frtti -fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=1 -sSUPPORT_LONGJMP=wasm',
     GEOSPEC_WASM_SIMD_PROFILE: 'simd128-v1',
+    GEOSPEC_PRODUCER_ROUTE: 'nx-build-mixed-st-release-v1',
+    GEOSPEC_PRODUCER_CARGO_CWD: producer,
+    GEOSPEC_PRODUCER_MANIFEST: join(producer, 'packages/geospec-engine-native/bindings/emscripten/Cargo.toml'),
+    GEOSPEC_MIXED_INPUTS: join(mixedCache, 'mixed-inputs-simd128.json'),
+    GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256: '',
   };
   /** @type {(bytes: import('node:crypto').BinaryLike) => string} */
   const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -584,6 +605,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       }
       if (target === 'build-wasm' && !omitReceipt) {
         assert.ok(typeof options.env.GEOSPEC_MIXED_INPUTS === 'string');
+        buildEnvironment.GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256 = digest(readFileSync(options.env.GEOSPEC_MIXED_INPUTS));
         const artifacts = ['geospec_engine_native.mjs', 'geospec_engine_native.wasm'].map((name) => {
           const path = join(producer, mixedPath, name);
           const bytes = `inert fixture ${name}`;
@@ -702,6 +724,18 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     assert.deepEqual(delivery.assemblyRun, delivery.run);
     const inventoryFile = join(producer, transportPath, 'inventory.json');
     assert.equal(inventory.schema, 'geospec-ci-artifacts-v3');
+    for (const field of ['run', 'assemblyRun']) {
+      put(
+        inventoryFile,
+        JSON.stringify({ ...inventory, delivery: { ...delivery, [field]: { id: 'producer-A', attempt: 1 } } }),
+      );
+      assert.throws(
+        () => verifyDelivery(producer),
+        /Delivery lacks producer workflow provenance/,
+        `malformed ${field} must not be accepted as a recorded workflow`,
+      );
+      put(inventoryFile, JSON.stringify(inventory));
+    }
     const relinkRecord = delivery.archives[2];
     assert.ok(relinkRecord);
     const relinkPath = join(producer, relinkRecord.path);
@@ -740,7 +774,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     put(coordinatorFile, 'future coordinator edit');
     assert.throws(() => verifyArtifacts(producer), /source inputs differ/);
     put(coordinatorFile, coordinatorBytes);
-    const originalDelivery = /** @type {{archives: {path: string}[]}} */ (inventory.delivery);
+    const originalDelivery = /** @type {{archives: {path: string, sha256: string}[]}} */ (inventory.delivery);
     const oldArchives = originalDelivery.archives.map((archive) => fileRecordForTest(join(producer, archive.path)));
     revision = 'b'.repeat(40);
     for (const path of sourceOnlyPaths) {
@@ -771,8 +805,12 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       [...builtTargets, 'assemble-package'],
       'source-only edit runs assembly without a compiler',
     );
-    const renewedDelivery = /** @type {{archives: {path: string}[]}} */ (renewed.delivery);
+    const renewedDelivery = /** @type {{archives: {path: string, sha256: string}[]}} */ (renewed.delivery);
     assert.notDeepEqual(renewedDelivery.archives, originalDelivery.archives);
+    assert.ok(
+      renewedDelivery.archives.every((archive, index) => archive.sha256 !== originalDelivery.archives[index]?.sha256),
+      'all three source-kit archives must refresh',
+    );
     assert.deepEqual(ensureDelivery(producer), renewed, 'warm v3 delivery reuses its selected trio');
     assert.deepEqual(targets, [...builtTargets, 'assemble-package']);
     const relink = renewedDelivery.archives[2];
@@ -787,6 +825,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     for (const [index, archive] of originalDelivery.archives.entries()) {
       assert.deepEqual(fileRecordForTest(join(producer, archive.path)), oldArchives[index], 'old trio is immutable');
     }
+    let priorArchives = renewedDelivery.archives;
     for (const [index, path] of sourceOnlyPaths.entries()) {
       put(join(producer, path), `second source-only edit ${path}`);
       assert.deepEqual(verifyArtifacts(producer).artifacts, inventory.artifacts);
@@ -795,8 +834,21 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       process.env['GITHUB_RUN_ATTEMPT'] = '3';
       const second = withProducerMarker(producer, () => ensureDelivery(producer), { pgid: process.pid });
       assert.deepEqual(second.artifacts, inventory.artifacts);
+      assert.deepEqual(
+        second.producerSource,
+        inventory.producerSource,
+        'source-only relinks retain original producer source',
+      );
       assert.deepEqual(second.delivery.run, inventory.delivery.run, 'source-only relinks never relabel the product');
       assert.deepEqual(second.delivery.assemblyRun, { id: 'assembly-C', attempt: '3' });
+      const { archives } = /** @type {{archives: {path: string, sha256: string}[]}} */ (second.delivery);
+      const previousArchives = priorArchives;
+      assert.equal(archives.length, 3, 'source-kit delivery retains the complete archive trio');
+      assert.ok(
+        archives.every((archive, archiveIndex) => archive.sha256 !== previousArchives[archiveIndex]?.sha256),
+        `all three archives renew after source-only edit ${path}`,
+      );
+      priorArchives = archives;
       assert.deepEqual(targets, [...builtTargets, ...Array.from({ length: index + 2 }, () => 'assemble-package')]);
     }
     for (const [path, value] of [
@@ -999,7 +1051,9 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     return /** @type {Record<string, unknown>} */ (value);
   };
   const validInputs = transportedRecord('mixed-inputs.json');
-  const validReceipt = transportedRecord('mixed-build-receipt.json');
+  const validReceipt = /** @type {{buildEnvironment: Record<string, string>} & Record<string, unknown>} */ (
+    transportedRecord('mixed-build-receipt.json')
+  );
   const validCommands = readFileSync(join(consumer, transportPath, 'mixed-commands.json'), 'utf8');
   // Recompute all transport joins so each failure checks actual build selection, not a stale hash.
   for (const selection of [
@@ -1035,6 +1089,16 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       receiptChanges: { buildEnvironment: { ...buildEnvironment, CXXFLAGS_wasm32_unknown_emscripten: '-fexceptions' } },
       message: /compile environment differs/,
     },
+    {
+      receiptChanges: { buildEnvironment: { ...buildEnvironment, GEOSPEC_PRODUCER_ROUTE: 'mixed-mt-unverified' } },
+      message: /compile environment differs/,
+    },
+    {
+      receiptChanges: {
+        buildEnvironment: { ...buildEnvironment, GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256: '0'.repeat(64) },
+      },
+      message: /compile environment differs/,
+    },
     { inputChanges: { occtPrefix: join(mixedCache, 'occt-mixed/install') }, message: /isolated fixed-SIMD prefix/ },
     { inputChanges: { cache: join(mixedCache, 'mixed-build') }, message: /isolated fixed-SIMD prefix/ },
     { commands: validCommands.replace('"-msimd128",', ''), message: /link profile\/output differs/ },
@@ -1050,7 +1114,16 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       ...selection,
     };
     const inputs = JSON.stringify({ ...validInputs, ...inputChanges });
-    const receipt = JSON.stringify({ ...validReceipt, ...receiptChanges, manifestSha256: digest(inputs) });
+    const receipt = JSON.stringify({
+      ...validReceipt,
+      ...receiptChanges,
+      manifestSha256: digest(inputs),
+      buildEnvironment: {
+        ...validReceipt.buildEnvironment,
+        GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256: digest(inputs),
+        ...receiptChanges.buildEnvironment,
+      },
+    });
     const changedInventory = { ...inventory };
     for (const [key, name, bytes] of [
       ['mixedInputs', 'mixed-inputs.json', inputs],

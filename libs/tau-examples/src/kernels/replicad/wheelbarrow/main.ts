@@ -1,3 +1,4 @@
+import type { MechanismSource } from '@taucad/kinematics';
 import {
   draw,
   drawCircle,
@@ -41,7 +42,7 @@ function revolve(profile: Drawing): Shape3D {
   return profile.sketchOnPlane('XY').revolve([0, 1, 0], { origin: [0, 0, 0] });
 }
 
-export default function main(params = defaultParams): ShapeConfig[] {
+function resolveParams(params: Partial<typeof defaultParams>) {
   const p = { ...defaultParams, ...params };
   if (
     !Number.isFinite(p.trayWidth) ||
@@ -53,6 +54,13 @@ export default function main(params = defaultParams): ShapeConfig[] {
   ) {
     throw new Error('Tray width must be 600–780 mm and tray depth 240–360 mm.');
   }
+  return p;
+}
+
+export default function main(
+  params: Partial<typeof defaultParams> = defaultParams,
+): ShapeConfig[] {
+  const p = resolveParams(params);
   const parts: ShapeConfig[] = [];
   const add = (
     name: string,
@@ -237,4 +245,57 @@ export default function main(params = defaultParams): ShapeConfig[] {
   return p.part === 'assembly'
     ? parts
     : parts.filter((part) => part.name === p.part);
+}
+
+/** Only the rim and tire roll; the axle, spacers and chassis remain fixed. */
+export function mechanism(
+  parameters: Partial<typeof defaultParams> = {},
+): MechanismSource | undefined {
+  const p = resolveParams(parameters);
+  if (p.part !== 'assembly') {
+    return undefined;
+  }
+  return {
+    schemaVersion: 1,
+    units: { length: 'mm', angle: 'deg' },
+    root: 'frame',
+    links: {
+      frame: {
+        shapes: [
+          'Tray',
+          'Chassis',
+          'Axle',
+          'Right spacer',
+          'Left spacer',
+          'Right nut',
+          'Left nut',
+          'Right grip',
+          'Left grip',
+        ],
+      },
+      wheel: { shapes: ['Tire', 'Wheel rim'] },
+    },
+    joints: {
+      wheel: {
+        type: 'revolute',
+        name: 'Wheel',
+        parent: 'frame',
+        child: 'wheel',
+        origin: [-540, 0, 190],
+        axis: [0, 1, 0],
+      },
+    },
+    animations: [
+      {
+        id: 'wheel-roll',
+        name: 'Roll wheel',
+        duration: 4,
+        loop: 'repeat',
+        keyframes: [
+          { time: 0, coordinates: { wheel: 0 } },
+          { time: 4, coordinates: { wheel: 360 } },
+        ],
+      },
+    ],
+  };
 }

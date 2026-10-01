@@ -471,6 +471,11 @@ const checkReceipt = (root, inventory) => {
       CXXFLAGS_wasm32_unknown_emscripten:
         '-msimd128 -frtti -fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=1 -sSUPPORT_LONGJMP=wasm',
       GEOSPEC_WASM_SIMD_PROFILE: 'simd128-v1',
+      GEOSPEC_PRODUCER_ROUTE: 'nx-build-mixed-st-release-v1',
+      GEOSPEC_PRODUCER_CARGO_CWD: sourceRoot,
+      GEOSPEC_PRODUCER_MANIFEST: posix.join(sourceRoot, packagePath, 'bindings/emscripten/Cargo.toml'),
+      GEOSPEC_MIXED_INPUTS: posix.join(inputs.preparationCache, 'mixed-inputs-simd128.json'),
+      GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256: manifestSha256,
     },
     'Mixed receipt compile environment differs from fixed-SIMD selection.',
   );

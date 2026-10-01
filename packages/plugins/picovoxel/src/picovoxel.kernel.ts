@@ -3,7 +3,7 @@
  *
  * Dual path (blueprint D5/D6): the viewer renders in the `'fast'` lane on the host's artifact, and
  * every export replays the model in the `'exact'` lane on the serial L0 artifact through the
- * runtime's native-build replay. `exportGeometry` stays a pure function of its handle.
+ * runtime's native-build replay. `write` stays a pure function of its handle.
  */
 
 import type {
@@ -17,7 +17,8 @@ import type {
   Voxels,
 } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
-import { createExportFile } from '@taucad/runtime/types';
+import { createExportFile, kernelIssueCodeValues } from '@taucad/runtime/types';
+import { z } from 'zod';
 import type { KernelIssue, KernelIssueCode } from '@taucad/runtime/types';
 import {
   asBuffer,
@@ -42,9 +43,15 @@ import {
   toVmEntryPath,
 } from '@taucad/runtime/kernel';
 import type { KernelServices, RuntimeLogger } from '@taucad/runtime/kernel';
-import { resolveShapeName } from '@taucad/geometry-core';
+import {
+  readMechanismExport,
+  resolveShapeName,
+  validateGlbMaterial,
+  validateGlbResources,
+} from '@taucad/geometry-core';
+import type { GlbMaterial, GlbResources } from '@taucad/geometry-core';
 
-import { dropZeroAreaTriangles, picovoxelToGlb } from '#picovoxel.geometry.js';
+import { dropZeroAreaTriangles, picovoxelToGlb, picovoxelToGltf } from '#picovoxel.geometry.js';
 import type { PicovoxelNativeHandle, PicovoxelShapeSnapshot } from '#picovoxel.geometry.js';
 import {
   multiUnavailableReason,
@@ -74,8 +81,8 @@ const picovoxelBuild = {
   scripts: 'e19aa9a77efb2c44cb0aa359ba7e3b64d2a022dbf98b2a4abf0126122aac9d7c',
 } as const;
 
-/** Kernel version: 1.2 stores snapshot mesh arrays as codec-stable bytes. */
-const kernelVersion = `1.2.0+picovoxel.${picovoxelBuild.version}.serial-${picovoxelBuild.serial.slice(0, 12)}.multi-${picovoxelBuild.multi.slice(0, 12)}.scripts-${picovoxelBuild.scripts.slice(0, 12)}`;
+/** Kernel version: mechanism/name-evidence handle semantics plus the PicoVoxel build it runs. */
+const kernelVersion = `1.4.0+picovoxel.${picovoxelBuild.version}.serial-${picovoxelBuild.serial.slice(0, 12)}.multi-${picovoxelBuild.multi.slice(0, 12)}.scripts-${picovoxelBuild.scripts.slice(0, 12)}`;
 
 /**
  * Explicit URLs of the assets each artifact loads (D20): the WebAssembly binary and, for the
@@ -93,6 +100,26 @@ const picovoxelAssets = {
 
 const kernelId = 'picovoxel';
 const defaultVoxelSize = 0.5;
+
+type PicovoxelSerializedHandle = Omit<PicovoxelNativeHandle, 'shapes'> & {
+  shapes: Array<
+    Omit<PicovoxelShapeSnapshot, 'vertices' | 'triangles'> & {
+      vertices: Uint8Array<ArrayBuffer>;
+      triangles: Uint8Array<ArrayBuffer>;
+    }
+  >;
+};
+
+// Match the runtime cache's loose issue envelope while retaining source-map and producer evidence.
+const mechanismIssuesSchema = z.array(
+  z
+    .object({
+      message: z.string(),
+      code: z.enum(kernelIssueCodeValues),
+      severity: z.literal('warning'),
+    })
+    .loose(),
+);
 
 /**
  * Native memory above which a render logs a warning.
@@ -525,24 +552,43 @@ const restoredWords = (value: unknown, index: number, field: 'vertices' | 'trian
  * triangles are dropped here, once, so the viewer and every export see the same mesh (D36).
  *
  * @param mesh - A mesh `main()` returned, or one derived from returned voxels.
- * @param index - Zero-based shape index.
+ * @param part - Resolved display name and zero-based output index.
  * @param sessionLane - The session's resolved lane, used when a mesh carries no lane.
  * @returns The durable snapshot.
  */
-const snapshotMesh = (mesh: Mesh, index: number, sessionLane: PicovoxelLane): PicovoxelShapeSnapshot => {
-  const name = resolveShapeName({ index, source: 'generated' });
+const snapshotMesh = (
+  mesh: Mesh,
+  part: Readonly<{ index: number; name: string }>,
+  sessionLane: PicovoxelLane,
+): PicovoxelShapeSnapshot => {
+  const { name, index } = part;
+  const label = `${name} (output ${index + 1})`;
   const vertices = ownedFloat32(mesh.vertices);
   const triangles = ownedUint32(mesh.triangles);
+  const kept = validateMeshArrays({ vertices, triangles, label });
+  const meshLane: unknown = mesh.lane;
+  return { name, vertices, triangles: kept, lane: isLane(meshLane) ? meshLane : sessionLane };
+};
+
+const validateMeshArrays = ({
+  vertices,
+  triangles,
+  label,
+}: {
+  vertices: Float32Array<ArrayBuffer>;
+  triangles: Uint32Array<ArrayBuffer>;
+  label: string;
+}): Uint32Array<ArrayBuffer> => {
   if (vertices.length === 0 || triangles.length === 0) {
-    throw new TypeError(`PicoVoxel ${name} is empty. Return [] for an empty scene.`);
+    throw new TypeError(`PicoVoxel ${label} is empty. Return [] for an empty scene.`);
   }
   if (vertices.length % 3 !== 0 || triangles.length % 3 !== 0) {
-    throw new TypeError(`PicoVoxel ${name} must contain vertex and triangle triples.`);
+    throw new TypeError(`PicoVoxel ${label} must contain vertex and triangle triples.`);
   }
   // oxlint-disable-next-line typescript/prefer-for-of, unicorn-js/no-for-loop -- indexed scans; `for…of` over a typed array was measured 10x slower (picogk-mesh.ts).
   for (let offset = 0; offset < vertices.length; offset++) {
     if (!Number.isFinite(vertices[offset]!)) {
-      throw new TypeError(`PicoVoxel ${name} contains a non-finite vertex coordinate.`);
+      throw new TypeError(`PicoVoxel ${label} contains a non-finite vertex coordinate.`);
     }
   }
   const vertexCount = vertices.length / 3;
@@ -550,21 +596,90 @@ const snapshotMesh = (mesh: Mesh, index: number, sessionLane: PicovoxelLane): Pi
   for (let offset = 0; offset < triangles.length; offset++) {
     if (triangles[offset]! >= vertexCount) {
       throw new TypeError(
-        `PicoVoxel ${name} triangle index ${triangles[offset]} is outside its ${vertexCount} vertices.`,
+        `PicoVoxel ${label} triangle index ${triangles[offset]} is outside its ${vertexCount} vertices.`,
       );
     }
   }
   const kept = dropZeroAreaTriangles(vertices, triangles);
   if (kept.length === 0) {
     // Checked after the D36 filter: a shape of zero-area triangles only is empty, not an index-less mesh.
-    throw new TypeError(`PicoVoxel ${name} is empty: every triangle has zero area. Return [] for an empty scene.`);
+    throw new TypeError(`PicoVoxel ${label} is empty: every triangle has zero area. Return [] for an empty scene.`);
   }
-  const meshLane: unknown = mesh.lane;
-  return { name, vertices, triangles: kept, lane: isLane(meshLane) ? meshLane : sessionLane };
+  return kept;
 };
 
 const describeValue = (value: unknown): string =>
   value === null ? 'null' : Array.isArray(value) ? 'an array' : typeof value;
+
+/**
+ * Own plain material metadata, omitting undefined object properties before the cache codec.
+ * @param value - Material or resource metadata.
+ * @returns Deeply owned JSON data.
+ */
+const snapshotJson = (value: unknown): unknown => {
+  // oxlint-disable-next-line unicorn/prefer-structured-clone -- MessagePack restores undefined as null; JSON omission preserves optional fields.
+  const snapshot: unknown = JSON.parse(
+    JSON.stringify(value, (_key, child: unknown) => {
+      if (
+        (typeof child === 'number' && !Number.isFinite(child)) ||
+        ['bigint', 'function', 'symbol'].includes(typeof child)
+      ) {
+        throw new TypeError('Material properties, extras and extensions must contain finite JSON values.');
+      }
+      return child;
+    }),
+  );
+  return snapshot;
+};
+
+const snapshotResources = (value: unknown): GlbResources => {
+  try {
+    validateGlbResources(value);
+    const snapshot: unknown = {
+      ...(value.images
+        ? {
+            images: value.images.map((image) => ({
+              mimeType: image.mimeType,
+              data: new Uint8Array(image.data),
+              ...(image.name === undefined ? {} : { name: image.name }),
+            })),
+          }
+        : {}),
+      ...(value.textures ? { textures: snapshotJson(value.textures) } : {}),
+      ...(value.samplers ? { samplers: snapshotJson(value.samplers) } : {}),
+    };
+    validateGlbResources(snapshot);
+    return snapshot;
+  } catch (error) {
+    throw new TypeError(`PicoVoxel model resources: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
+  }
+};
+
+const snapshotMaterial = (value: unknown, label: string, textureCount: number): GlbMaterial | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    if (!isRecordObject(value)) {
+      throw new TypeError('material must be an object.');
+    }
+    const material: GlbMaterial = value;
+    // The mapper generates UV0 and tangents for every mapped/anisotropic material.
+    validateGlbMaterial(material, { textureCount, texCoordCount: 1, hasTangents: true });
+    const snapshot = snapshotJson(material);
+    if (!isRecordObject(snapshot)) {
+      throw new TypeError('material must be an object.');
+    }
+    validateGlbMaterial(snapshot, { textureCount, texCoordCount: 1, hasTangents: true });
+    return snapshot;
+  } catch (error) {
+    throw new TypeError(`PicoVoxel ${label}: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
+  }
+};
 
 /**
  * Normalize `main()`'s result. `[]` is an empty scene (the geospec empty-scene convention).
@@ -574,24 +689,95 @@ const describeValue = (value: unknown): string =>
  * @returns The durable native handle.
  */
 const normalizeResult = (result: unknown, sessionLane: PicovoxelLane): PicovoxelNativeHandle => {
-  const values = Array.isArray(result) ? result : [result];
+  const model = isRecordObject(result) && 'shapes' in result ? result : undefined;
+  const modelShapes = model?.['shapes'];
+  if (model && !Array.isArray(modelShapes)) {
+    throw new TypeError('PicoVoxel model.shapes must be a flat array of Mesh, Voxels or part descriptors.');
+  }
+  const resources = model ? snapshotResources(model) : {};
+  const values: readonly unknown[] = Array.isArray(modelShapes)
+    ? modelShapes
+    : Array.isArray(result)
+      ? result
+      : [result];
   const shapes = values.map((value: unknown, index) => {
-    if (isMesh(value)) {
-      return snapshotMesh(value, index, sessionLane);
-    }
-    if (isVoxels(value)) {
-      if (value.isEmpty) {
+    let shape = value;
+    let name: string | undefined;
+    let authoredMaterial: unknown;
+    if (isRecordObject(value) && !isMesh(value) && !isVoxels(value)) {
+      if ('children' in value) {
         throw new TypeError(
-          `PicoVoxel ${resolveShapeName({ index, source: 'generated' })} is an empty Voxels field. Return [] for an empty scene.`,
+          `PicoVoxel main() result ${index + 1} cannot contain children. Return a flat array of parts.`,
         );
       }
-      return snapshotMesh(value.toMesh(), index, sessionLane);
+      if (value['name'] !== undefined && typeof value['name'] !== 'string') {
+        throw new TypeError(
+          `PicoVoxel main() result ${index + 1} name must be a string. Omit it for a generated name.`,
+        );
+      }
+      ({ name, shape } = value);
+      authoredMaterial = value['material'];
+    }
+    const trimmedName = name?.trim();
+    const authoredName = trimmedName?.length ? trimmedName : undefined;
+    const part = { index, name: resolveShapeName({ index, name, source: 'authored' }) };
+    const material = snapshotMaterial(
+      authoredMaterial,
+      `${part.name} (output ${index + 1})`,
+      resources.textures?.length ?? 0,
+    );
+    const appearance = {
+      ...(material === undefined ? {} : { material }),
+      ...(authoredName === undefined ? {} : { authoredName }),
+    };
+    if (isMesh(shape)) {
+      return { ...snapshotMesh(shape, part, sessionLane), ...appearance };
+    }
+    if (isVoxels(shape)) {
+      if (shape.isEmpty) {
+        throw new TypeError(
+          `PicoVoxel ${part.name} (output ${index + 1}) is an empty Voxels field. Return [] for an empty scene.`,
+        );
+      }
+      return { ...snapshotMesh(shape.toMesh(), part, sessionLane), ...appearance };
     }
     throw new TypeError(
-      `PicoVoxel main() result ${index + 1} must be Mesh or Voxels; received ${describeValue(value)}.`,
+      `PicoVoxel main() result ${index + 1} must be Mesh, Voxels or { shape: Mesh | Voxels, name?: string, material?: Material }; received ${describeValue(shape)}.`,
     );
   });
-  return { shapes };
+  return { shapes, ...resources };
+};
+
+/**
+ * Safe export basenames are independent of display labels and payload-local identity.
+ * @param shapes - Delivered part snapshots in output order.
+ * @returns One safe unique filename per part.
+ */
+const stlFilenames = (shapes: readonly PicovoxelShapeSnapshot[]): string[] => {
+  const used = new Set<string>();
+  const encoder = new TextEncoder();
+  return shapes.map(({ name }, index) => {
+    // Replace path syntax and control characters; preserve safe Unicode in the actual filename.
+    // oxlint-disable-next-line no-control-regex -- export filename trust boundary
+    let stem = name.replaceAll(/[\u0000-\u001F\u007F-\u009F<>:"/\\|?*]/gu, '_').replace(/[. ]+$/u, '');
+    if (/^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³]) *(?:\.|$)/iu.test(stem)) {
+      stem = `_${stem}`;
+    }
+    let truncated = '';
+    for (const point of stem) {
+      if (encoder.encode(truncated + point).length > 120) {
+        break;
+      }
+      truncated += point;
+    }
+    stem = truncated.replace(/[. ]+$/u, '') || resolveShapeName({ index });
+    let candidate = stem;
+    for (let suffix = 2; used.has(candidate.normalize('NFC').toLowerCase()); suffix++) {
+      candidate = `${stem} ${suffix}`;
+    }
+    used.add(candidate.normalize('NFC').toLowerCase());
+    return `${candidate}.stl`;
+  });
 };
 
 // =============================================================================
@@ -690,7 +876,7 @@ const multiUnavailableIssue = (reason: string): KernelIssue => ({
 
 const laneExportRefusal = (): KernelIssue => ({
   message:
-    "PicoVoxel refuses a fast-lane GLB export: GLB has no slot to record the lane, so fast geometry would pass for exact. Export with lane: 'exact' (the default), or export STL, which is stamped LANE=fast.",
+    "PicoVoxel refuses a fast-lane GLB or glTF export: these formats have no slot to record the lane, so fast geometry would pass for exact. Export with lane: 'exact' (the default), or export STL, which is stamped LANE=fast.",
   code: 'REPRESENTATION_UNSUPPORTED',
   type: 'runtime',
   severity: 'error',
@@ -804,7 +990,7 @@ export const picovoxelKernel = defineKernel({
   version: kernelVersion,
   optionsSchema: picovoxelOptionsSchema,
   evaluateOptionsSchema: picovoxelRenderSchema,
-  views: { model: { title: 'Model', mimeType: 'model/gltf-binary', content: ['includeEdges'] } },
+  views: { model: { title: 'Model', mimeType: 'model/gltf-binary', content: ['includeEdges', 'includeTopology'] } },
   // D21: every PicoVoxel call checks for a newer render first, so a superseded build stops between
   // native operations instead of running to completion.
   cancellation: 'cooperative',
@@ -814,7 +1000,14 @@ export const picovoxelKernel = defineKernel({
       mimeType: 'model/gltf-binary',
       extension: 'glb',
       optionsSchema: picovoxelExportSchemas.glb,
-      content: ['includeEdges'],
+      content: ['includeEdges', 'includeTopology'],
+    },
+    gltf: {
+      title: 'glTF JSON',
+      mimeType: 'model/gltf+json',
+      extension: 'gltf',
+      optionsSchema: picovoxelExportSchemas.gltf,
+      content: ['includeEdges', 'includeTopology'],
     },
     stl: { title: 'STL', mimeType: 'model/stl', extension: 'stl', optionsSchema: picovoxelExportSchemas.stl },
   },
@@ -891,7 +1084,9 @@ export const picovoxelKernel = defineKernel({
       }
     }
 
-    const build = async (sessionArtifact: PicovoxelArtifact): Promise<PicovoxelNativeHandle> => {
+    const build = async (
+      sessionArtifact: PicovoxelArtifact,
+    ): Promise<{ handle: PicovoxelNativeHandle; issues: KernelIssue[] }> => {
       let pico: Pico | undefined;
       let recycleReason: string | undefined;
       try {
@@ -905,8 +1100,29 @@ export const picovoxelKernel = defineKernel({
         );
         const result = await runMain(module, withAbortChecks(pico), parameters);
         const nativeHandle = normalizeResult(result, lane);
+        const { mechanism, issues } = await readMechanismExport({
+          module,
+          parameters,
+          kernelId,
+          formatError: (error) => {
+            if (isRenderAborted(error)) {
+              throw error;
+            }
+            if (isTrap(error)) {
+              recycleReason = 'the mechanism trapped';
+            }
+            return buildIssue(error, { ...issueContext, session: { lane, artifact: sessionArtifact } });
+          },
+        });
         logSessionMemory(runtime.logger, pico, sessionArtifact);
-        return nativeHandle;
+        return {
+          handle: {
+            ...nativeHandle,
+            ...(mechanism === undefined ? {} : { mechanism }),
+            ...(issues.length > 0 ? { mechanismIssues: issues } : {}),
+          },
+          issues,
+        };
       } catch (error) {
         if (isTrap(error)) {
           recycleReason = 'the build trapped';
@@ -939,7 +1155,7 @@ export const picovoxelKernel = defineKernel({
 
     buildCalls = 0;
     try {
-      return { handle: await build(artifact) };
+      return await build(artifact);
     } catch (error) {
       if (artifact !== 'multi' || !isPicoError(error) || !serialRetryCodes.has(error.code)) {
         return fail(error, artifact);
@@ -949,15 +1165,25 @@ export const picovoxelKernel = defineKernel({
       runtime.logger.warn(warning.message, { data: { picoCode: error.code } });
       buildCalls = 0;
       try {
-        return { handle: await build('serial'), issues: [warning] };
+        const result = await build('serial');
+        return { ...result, issues: [...result.issues, warning] };
       } catch (retryError) {
         return fail(retryError, 'serial', [warning]);
       }
     }
   },
 
-  async render({ handle }) {
-    return { content: picovoxelToGlb(handle) };
+  async render({ handle, content }) {
+    let issues: KernelIssue[] = [];
+    return {
+      content: picovoxelToGlb(handle, {
+        includeTopology: content?.includeTopology === true,
+        onMechanismIssues: (warnings) => {
+          issues = warnings;
+        },
+      }),
+      issues,
+    };
   },
 
   async onDispose(context) {
@@ -973,13 +1199,14 @@ export const picovoxelKernel = defineKernel({
     releaseRender(undefined, context.authorResources);
   },
 
-  serializeHandle({ handle }) {
+  serializeHandle({ handle }): PicovoxelSerializedHandle {
+    // MessagePack retains Uint8Array but restores other typed arrays as raw bytes.
     return {
-      shapes: handle.shapes.map(({ name, vertices, triangles, lane }) => ({
-        name,
-        vertices: snapshotBytes(vertices),
-        triangles: snapshotBytes(triangles),
-        lane,
+      ...handle,
+      shapes: handle.shapes.map((shape) => ({
+        ...shape,
+        vertices: snapshotBytes(shape.vertices),
+        triangles: snapshotBytes(shape.triangles),
       })),
     };
   },
@@ -988,7 +1215,15 @@ export const picovoxelKernel = defineKernel({
     if (!isRecordObject(serialized) || !Array.isArray(serialized.shapes)) {
       throw new TypeError('Invalid PicoVoxel serialized handle: expected a shapes array.');
     }
+    const resources = snapshotResources(serialized);
     return {
+      ...resources,
+      ...(serialized.mechanism === undefined ? {} : { mechanism: snapshotJson(serialized.mechanism) }),
+      ...(serialized.mechanismIssues === undefined
+        ? {}
+        : {
+            mechanismIssues: mechanismIssuesSchema.parse(snapshotJson(serialized.mechanismIssues)),
+          }),
       shapes: serialized.shapes.map((value: unknown, index): PicovoxelShapeSnapshot => {
         if (
           !isRecordObject(value) ||
@@ -998,14 +1233,40 @@ export const picovoxelKernel = defineKernel({
           !isLane(value['lane'])
         ) {
           throw new TypeError(
-            `Invalid PicoVoxel serialized shape ${index}: expected name, Uint8Array mesh bytes and an exact/fast lane.`,
+            `Invalid PicoVoxel serialized shape ${index}: expected name, Uint8Array vertex/triangle bytes and an exact/fast lane.`,
           );
         }
+        const name = resolveShapeName({ index, name: value['name'], source: 'authored' });
+        const authoredName: unknown = value['authoredName'];
+        if (
+          authoredName !== undefined &&
+          (typeof authoredName !== 'string' || !authoredName.trim() || authoredName.trim() !== name)
+        ) {
+          throw new TypeError(
+            `Invalid PicoVoxel serialized shape ${index}: authoredName must match its nonblank display name.`,
+          );
+        }
+        // MessagePack byte views need not be four-byte aligned; own them before interpreting scalars.
+        const vertices = new Float32Array(restoredWords(value['vertices'], index, 'vertices'));
+        const triangles = new Uint32Array(restoredWords(value['triangles'], index, 'triangles'));
+        if (value['vertices'].byteLength % 12 !== 0 || value['triangles'].byteLength % 12 !== 0) {
+          throw new TypeError(
+            `Invalid PicoVoxel serialized shape ${index}: vertex/triangle bytes must contain scalar triples.`,
+          );
+        }
+        const kept = validateMeshArrays({ vertices, triangles, label: `${name} (output ${index + 1})` });
+        const material = snapshotMaterial(
+          value['material'],
+          `${name} (output ${index + 1})`,
+          resources.textures?.length ?? 0,
+        );
         return {
-          name: value['name'],
-          vertices: new Float32Array(restoredWords(value['vertices'], index, 'vertices')),
-          triangles: new Uint32Array(restoredWords(value['triangles'], index, 'triangles')),
+          name,
+          vertices,
+          triangles: kept,
           lane: value['lane'],
+          ...(authoredName === undefined ? {} : { authoredName: name }),
+          ...(material === undefined ? {} : { material }),
         };
       }),
     };
@@ -1014,28 +1275,38 @@ export const picovoxelKernel = defineKernel({
   async write(input, _runtime, context) {
     const { shapes } = input.handle;
     switch (input.exportId) {
-      case 'glb': {
+      case 'glb':
+      case 'gltf': {
         // Checked against the handle too: fast provenance never passes for exact, whatever was asked.
         if (input.options.lane === 'fast' || shapes.some((shape) => shape.lane === 'fast')) {
           throw new PicovoxelBuildError([laneExportRefusal()]);
         }
-        const bytes = picovoxelToGlb(input.handle, {
+        let issues: KernelIssue[] = [];
+        const bytes = (input.exportId === 'gltf' ? picovoxelToGltf : picovoxelToGlb)(input.handle, {
           coordinateSystem: input.options.coordinateSystem,
           unit: input.options.unit,
+          includeTopology: input.content?.includeTopology === true,
+          onMechanismIssues: (warnings) => {
+            issues = warnings;
+          },
         });
-        return { files: [createExportFile('glb', 'model.glb', asBuffer(bytes))] };
+        return {
+          files: [createExportFile(input.exportId, `model.${input.exportId}`, asBuffer(bytes))],
+          issues: [...(input.handle.mechanismIssues ?? []), ...issues],
+        };
       }
       case 'stl': {
         if (shapes.length === 0) {
           throw new PicovoxelBuildError([noShapesIssue()]);
         }
         const { unit, scale, offset, lane } = input.options;
+        const filenames = stlFilenames(shapes);
         return {
           files: nonemptyExportFiles(
-            shapes.map((shape) =>
+            shapes.map((shape, index) =>
               createExportFile(
                 'stl',
-                `${shape.name}.stl`,
+                filenames[index]!,
                 // An explicit fast export is the consent: the header carries LANE=fast, as does any shape
                 // with fast provenance. An exact export of an exact handle never stamps.
                 // `acceptLane` is PicoVoxel's own form of that consent (rider R2).
@@ -1052,6 +1323,7 @@ export const picovoxelKernel = defineKernel({
               ),
             ),
           ),
+          issues: [...(input.handle.mechanismIssues ?? [])],
         };
       }
       default: {

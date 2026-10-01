@@ -30,6 +30,9 @@ describe('menu variants', () => {
 
     expect(classes).toEqual(
       expect.arrayContaining([
+        'text-menu-destructive-foreground',
+        '[&_svg]:text-menu-destructive-foreground!',
+        'data-disabled:[&_svg]:text-muted-foreground/50!',
         'hover:bg-menu-highlight-destructive',
         'hover:text-menu-destructive-foreground',
         'hover:[&_svg]:text-menu-destructive-foreground!',

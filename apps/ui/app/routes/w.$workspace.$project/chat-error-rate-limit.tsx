@@ -58,7 +58,7 @@ export const ChatErrorRateLimit = memo(function ({
       actions={
         <Button
           variant='outline'
-          size='sm'
+          size='xs'
           onClick={() => {
             // A resumable wait interrupted a turn the host still holds whole, so
             // this re-issues the one refused call; anything else dispatches the

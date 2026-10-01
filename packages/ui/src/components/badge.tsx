@@ -23,7 +23,8 @@ const badgeVariants = cva(
       variant: {
         default: 'border-transparent primary-action',
         secondary: 'border-transparent bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90',
-        destructive: 'border-transparent bg-destructive text-white [a&]:hover:bg-destructive/90 dark:bg-destructive/70',
+        destructive:
+          'border-transparent bg-destructive-surface text-destructive-foreground [a&]:hover:bg-destructive-hover',
         outline: 'text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground',
       },
     },

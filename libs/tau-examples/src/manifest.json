@@ -720,6 +720,31 @@
     "kind": "model",
     "geometry": "3d",
     "kernel": "picovoxel",
+    "name": "lead-screw-stage",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "material-sensor",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
     "name": "mesh-painter",
     "mainFile": "main.ts",
     "files": [
@@ -1069,6 +1094,7 @@
       "assemblies/motor-module.ts",
       "assemblies/propulsion.ts",
       "lib/airframe-geometry.ts",
+      "lib/kinematics.ts",
       "lib/naca-math.ts",
       "lib/naca.ts",
       "main.geospec.ts",
@@ -1325,6 +1351,7 @@
     "mainFile": "main.ts",
     "files": [
       "DESIGN.md",
+      "kinematics.geospec.ts",
       "main.geospec.ts",
       "main.ts",
       "tau.json"

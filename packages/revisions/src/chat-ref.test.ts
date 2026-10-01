@@ -472,6 +472,26 @@ describe.each([
     };
   };
 
+  it.runIf(enabled)('converges independent permanent deletions without resurrecting the chat', async () => {
+    const id = `purged_${_engine}`;
+    const { target, project } = await twoSidedRecord(id, {
+      base: { id, name: 'Chat', createdAt: 1, updatedAt: 10, deletedAt: 5 },
+      incoming: { id, name: 'Chat', createdAt: 1, updatedAt: 20, deletedAt: 5, purgedAt: 20 },
+      local: { id, name: 'Chat', createdAt: 1, updatedAt: 18, deletedAt: 5, purgedAt: 18 },
+    });
+    await expect(project()).resolves.toEqual([id]);
+    expect(JSON.parse((await readChatFile(target, 'chat.json', id)) ?? '{}')).toStrictEqual({
+      id,
+      name: 'Chat',
+      createdAt: 1,
+      updatedAt: 20,
+      deletedAt: 5,
+      purgedAt: 18,
+    });
+    await expect(project()).resolves.toEqual([]);
+    expect(JSON.parse((await readChatFile(target, 'chat.json', id)) ?? '{}')).toHaveProperty('purgedAt', 18);
+  });
+
   it.runIf(enabled)('merges timestamps both devices moved and writes the other device’s log (CH1 a)', async () => {
     const id = `timestamps_${_engine}`;
     const { target, project } = await twoSidedRecord(id, {

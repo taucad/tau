@@ -13,6 +13,7 @@ import { ChevronDown, CircleAlert, CopyMinus, CopyPlus, OctagonAlert, Pause, Pla
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { DockviewPanelApi, PaneviewApi, PaneviewPanelApi } from 'dockview-react';
+import { PaneVirtualList } from '#components/panes/pane-virtual-list.js';
 import { PaneviewReact } from 'dockview-react';
 import { convert, createQuantity, quantityKinds } from '@taucad/units/quantity';
 import type { DegreeOfFreedom, Mechanism } from '@taucad/kinematics';
@@ -61,7 +62,7 @@ import {
   getKinematicsStructure,
 } from '#utils/kinematics-structure.utils.js';
 import type { KinematicsStructure } from '#utils/kinematics-structure.utils.js';
-import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import { WorkspaceLanesContext } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 type GraphicsRef = ActorRefFrom<typeof graphicsMachine>;
@@ -312,15 +313,12 @@ const JointRow = memo(function JointRow({
   label,
   relation,
   componentIds,
-  revealRequestId,
 }: {
   readonly dof: DegreeOfFreedom;
   readonly label: string;
   /** A follower's short relation to its group's driver. */
   readonly relation?: string;
   readonly componentIds: readonly string[];
-  /** Set when "Show kinematics" asked for this row: it scrolls into view and takes focus, once per request. */
-  readonly revealRequestId?: number;
 }): React.JSX.Element {
   const { kinematicsRef, unitId, mechanism, dofs, term, partNames } = useUnitContext();
   const isDriver = dof.role === 'driver';
@@ -338,7 +336,6 @@ const JointRow = memo(function JointRow({
     unitSelector(unitId, (unit) => unit.playback.status === 'playing'),
   );
   const pointerHandlers = usePointerHandlers(componentIds);
-  const rootRef = useRef<HTMLDivElement>(null);
   const scrubStart = useRef<number | undefined>(undefined);
   const display = displayByKind[dof.kind];
   const factor = getDisplayFactors(mechanism)[dof.kind];
@@ -362,45 +359,8 @@ const JointRow = memo(function JointRow({
     }
   };
 
-  useEffect(() => {
-    if (revealRequestId === undefined) {
-      return;
-    }
-    let isCancelled = false;
-    // Wait for the groups the reveal opened to finish sliding open: mid-animation the row's offset is stale.
-    // Only the pane's scroller moves, never the page around it.
-    const frame = requestAnimationFrame(() => {
-      const row = rootRef.current;
-      const scroller = row?.closest<HTMLElement>('[data-slot=kinematics-unit-scroller]');
-      if (!row || !scroller) {
-        return;
-      }
-      const opening = scroller
-        .getAnimations({ subtree: true })
-        .filter((animation) => animation.effect instanceof KeyframeEffect && animation.effect.target?.contains(row));
-      // async-iife: bootstrap — a frame callback cannot await; the cancellation flag makes a late settle a no-op.
-      void (async () => {
-        await Promise.allSettled(opening.map(async (animation) => animation.finished));
-        if (isCancelled) {
-          return;
-        }
-        const offset = row.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-        scroller.scrollTo({
-          top: scroller.scrollTop + offset - (scroller.clientHeight - row.offsetHeight) / 2,
-          behavior: 'smooth',
-        });
-        row.querySelector<HTMLElement>('[role=spinbutton]')?.focus({ preventScroll: true });
-      })();
-    });
-    return () => {
-      isCancelled = true;
-      cancelAnimationFrame(frame);
-    };
-  }, [revealRequestId]);
-
   return (
     <div
-      ref={rootRef}
       data-slot='kinematics-joint'
       data-driver-control={isDriver || undefined}
       className='@container/parameter mx-1 my-0.5 flex flex-col gap-0.5 rounded-md px-1.5 py-1 transition-colors duration-150 focus-within:bg-accent/50 hover:bg-accent/50 motion-reduce:transition-none'
@@ -505,7 +465,7 @@ function DriverGroup({
   readonly revealed: Readonly<{ dofId: string; requestId: number }> | undefined;
 }): React.JSX.Element | undefined {
   const context = useUnitContext();
-  const { mechanism, dofs, structure, term } = context;
+  const { mechanism, structure, term } = context;
   const title = dofLabel(driver, mechanism);
   const driverComponents = structure.componentsByDriver.get(driver.id) ?? [];
   const followerComponents = useMemo(
@@ -545,12 +505,7 @@ function DriverGroup({
           }));
         }}
       >
-        <JointRow
-          dof={driver}
-          label={quantityLabel(driver)}
-          componentIds={driverComponents}
-          revealRequestId={revealed?.dofId === driver.id ? revealed.requestId : undefined}
-        />
+        <JointRow dof={driver} label={quantityLabel(driver)} componentIds={driverComponents} />
         <ParameterGroupCard
           isSubgroup
           title='Followers'
@@ -569,16 +524,7 @@ function DriverGroup({
             }));
           }}
         >
-          {shown.map((dof) => (
-            <JointRow
-              key={dof.id}
-              dof={dof}
-              label={dofLabel(dof, mechanism)}
-              relation={describeRelation(dof, driver.id, { dofs, mechanism })}
-              componentIds={structure.componentsByJoint.get(dof.jointId) ?? []}
-              revealRequestId={revealed?.dofId === dof.id ? revealed.requestId : undefined}
-            />
-          ))}
+          <FollowerList followers={shown} driverId={driver.id} revealed={revealed} />
           {isPaged ? (
             <Button
               variant='ghost'
@@ -598,6 +544,46 @@ function DriverGroup({
         </ParameterGroupCard>
       </ParameterGroupCard>
     </div>
+  );
+}
+
+const dofKey = (dof: DegreeOfFreedom): string => dof.id;
+
+function FollowerList({
+  followers,
+  driverId,
+  revealed,
+}: {
+  readonly followers: readonly DegreeOfFreedom[];
+  readonly driverId: string;
+  readonly revealed: Readonly<{ dofId: string; requestId: number }> | undefined;
+}): React.JSX.Element {
+  const { mechanism, dofs, structure } = useUnitContext();
+  const renderItem = useCallback(
+    (_index: number, dof: DegreeOfFreedom) => (
+      <JointRow
+        dof={dof}
+        label={dofLabel(dof, mechanism)}
+        relation={describeRelation(dof, driverId, { dofs, mechanism })}
+        componentIds={structure.componentsByJoint.get(dof.jointId) ?? []}
+      />
+    ),
+    [dofs, driverId, mechanism, structure],
+  );
+  const reveal = useMemo(
+    () => (revealed ? { key: revealed.dofId, requestId: revealed.requestId } : undefined),
+    [revealed],
+  );
+  return (
+    <PaneVirtualList
+      data={followers}
+      getItemKey={dofKey}
+      itemContent={renderItem}
+      ariaLabel={`Followers of ${dofLabel(dofs.find((dof) => dof.id === driverId)!, mechanism)}`}
+      reveal={reveal}
+      focusSelector='[role=spinbutton]'
+      scrollParentSelector='[data-slot=kinematics-unit-scroller]'
+    />
   );
 }
 
@@ -907,6 +893,44 @@ function KinematicsJointList({
     },
     [entryPath, onDisclosureChange],
   );
+  const drivers = useMemo(
+    () =>
+      structure.drivers.filter(
+        (driver) =>
+          matchesTerm(term, searchTexts(driver, context)) ||
+          (structure.followersByDriver.get(driver.id) ?? []).some((dof) =>
+            matchesTerm(term, searchTexts(dof, context)),
+          ),
+      ),
+    [context, structure, term],
+  );
+  const renderDriver = useCallback(
+    (_index: number, driver: DegreeOfFreedom) => {
+      const followers = structure.followersByDriver.get(driver.id) ?? [];
+      return followers.length > 0 ? (
+        <DriverGroup
+          driver={driver}
+          followers={followers}
+          disclosure={disclosure}
+          revealed={revealed}
+          onDisclosureChange={updateDisclosure}
+        />
+      ) : (
+        <JointRow
+          dof={driver}
+          label={dofLabel(driver, mechanism)}
+          componentIds={structure.componentsByJoint.get(driver.jointId) ?? []}
+        />
+      );
+    },
+    [disclosure, mechanism, revealed, structure, updateDisclosure],
+  );
+  const reveal = useMemo(() => {
+    const dof = dofs.find((candidate) => candidate.id === revealed?.dofId);
+    return dof && revealed
+      ? { key: getKinematicsRootDriver(dof, dofs), requestId: revealed.requestId, shouldFocus: dof.role !== 'follower' }
+      : undefined;
+  }, [dofs, revealed]);
   if (dofs.length === 0) {
     return (
       <p className='px-2.5 py-2 text-sm text-muted-foreground'>
@@ -914,38 +938,21 @@ function KinematicsJointList({
       </p>
     );
   }
-  if (term !== '' && !dofs.some((dof) => matchesTerm(term, searchTexts(dof, context)))) {
+  if (drivers.length === 0) {
     return <p className='px-2.5 py-2 text-sm text-muted-foreground'>No matching joints or parts</p>;
   }
   return (
-    <section aria-label='Drivers' className='flex flex-col gap-1.5 px-1.5 pt-2'>
-      {structure.drivers.map((driver) => {
-        const followers = structure.followersByDriver.get(driver.id) ?? [];
-        if (followers.length > 0) {
-          return (
-            <DriverGroup
-              key={driver.id}
-              driver={driver}
-              followers={followers}
-              disclosure={disclosure}
-              revealed={revealed}
-              onDisclosureChange={updateDisclosure}
-            />
-          );
-        }
-        if (!matchesTerm(term, searchTexts(driver, context))) {
-          return null;
-        }
-        return (
-          <JointRow
-            key={driver.id}
-            dof={driver}
-            label={dofLabel(driver, mechanism)}
-            componentIds={structure.componentsByJoint.get(driver.jointId) ?? []}
-            revealRequestId={revealed?.dofId === driver.id ? revealed.requestId : undefined}
-          />
-        );
-      })}
+    <section aria-label='Drivers' className='px-1.5 pt-2'>
+      <PaneVirtualList
+        data={drivers}
+        getItemKey={dofKey}
+        itemContent={renderDriver}
+        itemSpacing='groups'
+        ariaLabel='Joints and drivers'
+        reveal={reveal}
+        focusSelector='[role=spinbutton]'
+        scrollParentSelector='[data-slot=kinematics-unit-scroller]'
+      />
     </section>
   );
 }
@@ -1140,8 +1147,8 @@ type KinematicsPanelParams = {
 function KinematicsPanel({ params }: { readonly params: KinematicsPanelParams }): React.JSX.Element {
   if (params.graphicsRef === undefined) {
     return (
-      <div className={cn('min-h-full', paneviewAttachedBodyClassName)}>
-        <PanelEmptyState icon={Rotate3d} title='Open renderer to pose this model' className='min-h-16 break-all' />
+      <div className={cn('h-full', paneviewAttachedBodyClassName)}>
+        <PanelEmptyState icon={Rotate3d} title='Open renderer to pose this model' />
       </div>
     );
   }
@@ -1351,7 +1358,7 @@ function KinematicsContent({
   readonly isShown: boolean;
   readonly reveal: KinematicsReveal | undefined;
 }): React.JSX.Element {
-  const { geometryUnits, mainEntryPath, viewGraphics, viewRecords, projectRef } = useProject();
+  const { geometryUnits, mainEntryPath, viewGraphics, viewRecords, viewEntryPaths, projectRef } = useProject();
   const entryPaths = useMemo(
     () => listGeometryEntryPaths(geometryUnits, viewRecords, mainEntryPath),
     [geometryUnits, mainEntryPath, viewRecords],
@@ -1375,10 +1382,10 @@ function KinematicsContent({
   const entries = useMemo(
     () =>
       entryPaths.map((entryPath): KinematicsEntry => {
-        const graphicsRef = [...viewGraphics].find(([viewId]) => viewRecords.get(viewId)?.entryPath === entryPath)?.[1];
+        const graphicsRef = findEntryGraphics(viewGraphics, viewEntryPaths, entryPath);
         return [entryPath, geometryUnits.get(entryPath), graphicsRef];
       }),
-    [entryPaths, geometryUnits, viewGraphics, viewRecords],
+    [entryPaths, geometryUnits, viewGraphics, viewEntryPaths],
   );
 
   if (entries.length === 0) {

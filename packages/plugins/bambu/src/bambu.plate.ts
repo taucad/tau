@@ -1,8 +1,8 @@
 /**
- * Pre-rendered models of the Bambu Lab X1-Carbon build plates and hotend tip.
+ * Pre-rendered Bambu Lab X1-Carbon and A1 mini build plates and hotend tips.
  *
  * Each model is a binary glTF rendered by Tau's Replicad pipeline from the
- * clean-room sources in `packages/plugins/bambu/models/x1c`. The GLBs follow
+ * independently authored sources in `packages/plugins/bambu/models`. The GLBs follow
  * glTF: Y-up, metres. Their source frame (the "plate frame") is millimetres,
  * X right, Y toward the rear, Z up, with the origin at the printable area's
  * front-left corner and Z = 0 on the plate's print surface. Map a loaded GLB
@@ -41,7 +41,7 @@ export type BambuModelAsset = Readonly<{
 }>;
 
 /**
- * One X1C build plate.
+ * One model-specific Bambu build plate.
  *
  * The source frame is the plate frame: millimetres, X right, Y toward the
  * rear, Z up; origin at the printable area's front-left corner; Z = 0 on the
@@ -52,7 +52,7 @@ export type BambuModelAsset = Readonly<{
 export type BambuPlateModel = BambuModelAsset &
   Readonly<{
     id: BambuPlateId;
-    printer: 'x1c';
+    printer: 'x1c' | 'a1-mini';
     /** Bambu Studio's name for the plate. */
     label: string;
     /**
@@ -65,7 +65,7 @@ export type BambuPlateModel = BambuModelAsset &
   }>;
 
 /**
- * The X1C hotend tip: silicone sock and nozzle.
+ * A model-specific hotend tip: silicone sock and nozzle.
  *
  * Source frame: millimetres, X right, Y toward the rear, Z up, with the
  * nozzle tip's flat at the origin, so placing the model at a toolpath point
@@ -74,7 +74,7 @@ export type BambuPlateModel = BambuModelAsset &
  */
 export type BambuHotendModel = BambuModelAsset &
   Readonly<{
-    printer: 'x1c';
+    printer: 'x1c' | 'a1-mini';
     label: string;
     /** Nozzle tip in the source frame. */
     tip: readonly [x: number, y: number, z: number];
@@ -123,7 +123,7 @@ export const bambuX1cPlates: readonly BambuPlateModel[] = [
     model: new URL('assets/x1c-high-temperature.glb', import.meta.url),
     modelAxes: 'gltf-y-up',
     modelUnitScale: 1000,
-    bounds: plateBounds(0.675),
+    bounds: plateBounds(0.85),
   },
   {
     id: 'textured-pei',
@@ -137,6 +137,43 @@ export const bambuX1cPlates: readonly BambuPlateModel[] = [
     bounds: plateBounds(0.65),
   },
 ];
+
+/** The two A1 mini plates, in manifest order, in the same printable frame as X1C. @public */
+export const bambuA1MiniPlates: readonly BambuPlateModel[] = [
+  {
+    id: 'high-temperature',
+    printer: 'a1-mini',
+    label: 'Smooth PEI Plate',
+    bedTypeNames: ['High Temp Plate', 'Smooth PEI Plate', 'hot_plate', 'high-temperature'],
+    surface: { color: '#282A2E', finish: 'matte' },
+    model: new URL('assets/a1-mini-high-temperature.glb', import.meta.url),
+    modelAxes: 'gltf-y-up',
+    modelUnitScale: 1000,
+    bounds: { min: [-2, -9.132, -0.75], max: [182, 187.999, 0.04] },
+  },
+  {
+    id: 'textured-pei',
+    printer: 'a1-mini',
+    label: 'Textured PEI Plate',
+    bedTypeNames: ['Textured PEI Plate', 'textured_plate', 'textured-pei'],
+    surface: { color: '#C4A168', finish: 'textured' },
+    model: new URL('assets/a1-mini-textured-pei.glb', import.meta.url),
+    modelAxes: 'gltf-y-up',
+    modelUnitScale: 1000,
+    bounds: { min: [-2, -9.132, -0.55], max: [182, 187.999, 0.04] },
+  },
+];
+
+/** A1 mini installed silicone sock and stainless nozzle; dimensions from service imagery. @public */
+export const bambuA1MiniHotend: BambuHotendModel = {
+  printer: 'a1-mini',
+  label: 'A1 mini hotend',
+  model: new URL('assets/a1-mini-hotend.glb', import.meta.url),
+  modelAxes: 'gltf-y-up',
+  modelUnitScale: 1000,
+  bounds: { min: [-8, -7.02, 0], max: [7, 7, 24] },
+  tip: [0, 0, 0],
+};
 
 /** The X1C hotend tip the printer viewer draws at the extruding nozzle. @public */
 export const bambuX1cHotend: BambuHotendModel = {
@@ -164,6 +201,8 @@ export const bambuX1cHotend: BambuHotendModel = {
  * ```
  */
 export const bambuPlateForBedType = (name: string): BambuPlateModel | undefined => {
-  const trimmed = name.trim();
-  return bambuX1cPlates.find((plate) => plate.bedTypeNames.includes(trimmed));
+  const trimmed = name.trim().toLowerCase();
+  return [...bambuX1cPlates, ...bambuA1MiniPlates].find((plate) =>
+    plate.bedTypeNames.some((candidate) => candidate.toLowerCase() === trimmed),
+  );
 };

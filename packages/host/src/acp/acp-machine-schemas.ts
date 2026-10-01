@@ -82,6 +82,8 @@ export const childContextSchema = z.object({
   /* The session the record names until the restore ladder answers; then the one this child prompts. */
   acpSessionId: z.string().optional(),
   contextLost: z.boolean(),
+  /** Request whose prompt was dispatched; cleared for every new lend. */
+  promptedRequestId: z.string().optional(),
   /* The first lend after the open still owes the opening record. */
   fresh: z.boolean(),
   configOptions: json<readonly SessionConfigOption[] | undefined>(),

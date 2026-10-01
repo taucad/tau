@@ -1,7 +1,7 @@
 /* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 /* oxlint-disable eslint/no-await-in-loop -- Checked conflicts retry sequentially. */
 /* oxlint-disable promise/prefer-await-to-then -- Per-file pending writes must serialize callbacks. */
-/* oxlint-disable eslint/max-params -- The checked writer carries next value, patch, Reset mode, and reviewed bytes. */
+/* oxlint-disable eslint/max-params -- The checked writer carries edits, Reset bytes, and an optional restore guard. */
 /* oxlint-disable typescript/prefer-optional-chain -- Explicit null checks preserve absent-byte semantics. */
 import type { ViewerNode, WorkbenchLaneNode, WorkbenchLayout, WorkbenchTab } from '@taucad/workbench';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
@@ -13,13 +13,19 @@ export type WorkbenchLayoutSnapshot = Readonly<{
   layout: WorkbenchLayout;
   refused: ReadonlyArray<Readonly<{ tab: WorkbenchTab; reason: 'debug-only' }>>;
   layoutDigest: `sha256:${string}` | 'missing';
+  /** Fingerprint of the existing device rollback slot, not call-specific history. */
+  restoreTarget?: string;
+  restoreUnavailable?: string;
+  restoring?: boolean;
 }>;
 
 /** Project-scoped page commands. Restore writes the saved projection as an authoritative record edit. */
 export type WorkbenchLayoutController = Readonly<{
   snapshot: () => WorkbenchLayoutSnapshot | undefined;
   subscribe: (listener: () => void) => () => void;
-  restorePreviousArrangement: () => Promise<boolean>;
+  restorePreviousArrangement: (
+    expected: Readonly<{ layoutDigest: string; target: string; eligible: () => boolean }>,
+  ) => Promise<boolean>;
   registerViewer: (apply: (node: ViewerNode, applied: () => void) => void) => () => void;
   registerWorkbench: (apply: (node: WorkbenchLaneNode, applied: () => void) => void) => () => void;
   personViewerChanged: (node: ViewerNode) => void;
@@ -32,7 +38,10 @@ type LayoutFiles = Readonly<{
   writeFileChecked: (input: {
     path: string;
     data: string;
-    preconditions: ReadonlyArray<{ path: string; expected: Uint8Array<ArrayBuffer> | null }>;
+    preconditions: ReadonlyArray<{
+      path: string;
+      expected: Uint8Array<ArrayBuffer> | null;
+    }>;
   }) => Promise<CheckedFileWriteResult>;
 }>;
 
@@ -42,13 +51,15 @@ type LayoutState = Readonly<{
   refusal: { code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string } | undefined;
   digest: `sha256:${string}` | 'missing';
 }>;
+export type WorkbenchLayoutPatch = Partial<Pick<WorkbenchLayout, 'viewer' | 'workbench'>> &
+  Readonly<{ lanes?: Partial<WorkbenchLayout['lanes']> }>;
 
 /** One tab's checked layout writer. Reads always precede the first person edit. */
 export function createWorkbenchLayoutStore(
   input: Readonly<{
     root: string;
     files: LayoutFiles;
-    onChange: (state: LayoutState, source: 'read' | 'write') => void;
+    onChange: (state: LayoutState, source: 'read' | 'write', locallyAuthored?: WorkbenchLayoutPatch) => void;
     onError: (error: unknown) => void;
     /** Milliseconds. */
     editDebounce?: number;
@@ -56,6 +67,7 @@ export function createWorkbenchLayoutStore(
 ): Readonly<{
   read: (notify?: boolean) => Promise<boolean>;
   edit: (next: WorkbenchLayout) => Promise<boolean>;
+  restore: (next: WorkbenchLayout, expectedDigest: string, eligible: () => boolean) => Promise<boolean>;
   reset: (next: WorkbenchLayout) => Promise<boolean>;
   flush: () => Promise<boolean>;
   dispose: () => void;
@@ -64,7 +76,12 @@ export function createWorkbenchLayoutStore(
   intendedLayout: () => WorkbenchLayout | undefined;
 }> {
   const path = `${input.root}/${workbenchPaths.layout}`;
-  let state: LayoutState = { layout: undefined, bytes: null, refusal: undefined, digest: 'missing' };
+  let state: LayoutState = {
+    layout: undefined,
+    bytes: null,
+    refusal: undefined,
+    digest: 'missing',
+  };
   let observed = false;
   let readGeneration = 0;
   let readError = false;
@@ -78,8 +95,17 @@ export function createWorkbenchLayoutStore(
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let retryDelay = 250;
   let editTimer: ReturnType<typeof setTimeout> | undefined;
+  const inFlightWriteBytes = new Set<{
+    bytes: Uint8Array<ArrayBuffer>;
+    patch: WorkbenchLayoutPatch | undefined;
+  }>();
   let queuedEdit:
-    | { next: WorkbenchLayout; patch: LayoutPatch; sequence: number; resolve: Array<(saved: boolean) => void> }
+    | {
+        next: WorkbenchLayout;
+        patch: LayoutPatch;
+        sequence: number;
+        resolve: Array<(saved: boolean) => void>;
+      }
     | undefined;
   const sameBytes = (left: Uint8Array<ArrayBuffer> | null, right: Uint8Array<ArrayBuffer> | null): boolean =>
     left === right ||
@@ -89,6 +115,7 @@ export function createWorkbenchLayoutStore(
     source: 'read' | 'write',
     expectedGeneration = readGeneration,
     notify = false,
+    locallyAuthored?: WorkbenchLayoutPatch,
   ): Promise<void> => {
     if (observed && sameBytes(bytes, state.bytes) && !notify) {
       return;
@@ -106,9 +133,14 @@ export function createWorkbenchLayoutStore(
       state =
         result.status === 'current'
           ? { layout: result.record, bytes, refusal: undefined, digest }
-          : { ...state, bytes, refusal: { code: result.code, message: result.message }, digest };
+          : {
+              ...state,
+              bytes,
+              refusal: { code: result.code, message: result.message },
+              digest,
+            };
     }
-    input.onChange(state, source);
+    input.onChange(state, source, locallyAuthored);
     if (source === 'read' && state.layout && editSequence === settledSequence && !deferred) {
       intended = state.layout;
     }
@@ -123,7 +155,8 @@ export function createWorkbenchLayoutStore(
       if (generation === readGeneration && !isDisposed()) {
         const recovered = readError;
         readError = false;
-        await publish(bytes, 'read', generation, notify || recovered);
+        const ownWrite = bytes && [...inFlightWriteBytes].find((written) => sameBytes(written.bytes, bytes));
+        await publish(bytes, ownWrite ? 'write' : 'read', generation, notify || recovered, ownWrite?.patch);
       }
       return observed;
     } catch (error) {
@@ -134,8 +167,7 @@ export function createWorkbenchLayoutStore(
       return false;
     }
   };
-  type LayoutPatch = Partial<Pick<WorkbenchLayout, 'viewer' | 'workbench'>> &
-    Readonly<{ lanes?: Partial<WorkbenchLayout['lanes']> }>;
+  type LayoutPatch = WorkbenchLayoutPatch;
   const combine = (earlier: LayoutPatch | undefined, later: LayoutPatch): LayoutPatch => ({
     ...earlier,
     ...later,
@@ -158,6 +190,7 @@ export function createWorkbenchLayoutStore(
     patch: LayoutPatch | undefined,
     reset: boolean,
     resetBytes?: Uint8Array<ArrayBuffer> | null,
+    eligible?: () => boolean,
   ): Promise<'saved' | 'retry' | 'blocked'> => {
     if (!observed && !(await read())) {
       return 'retry';
@@ -177,7 +210,10 @@ export function createWorkbenchLayoutStore(
     ) {
       return 'saved';
     }
-    for (let attempt = 0; attempt < (reset ? 1 : 3); attempt++) {
+    for (let attempt = 0; attempt < (reset || eligible ? 1 : 3); attempt++) {
+      if (isDisposed() || (eligible && !eligible())) {
+        return 'blocked';
+      }
       if (state.refusal && (!reset || state.refusal.code === 'NEWER_RECORD')) {
         return 'blocked';
       }
@@ -187,24 +223,49 @@ export function createWorkbenchLayoutStore(
             ...next,
             ...state.layout,
             ...editPatch,
-            lanes: { ...next.lanes, ...state.layout?.lanes, ...editPatch.lanes },
+            lanes: {
+              ...next.lanes,
+              ...state.layout?.lanes,
+              ...editPatch.lanes,
+            },
             version: 1,
           };
       const data = workbenchRecords.layout.serialize(merged);
       const expected = reset ? (resetBytes ?? null) : state.bytes;
       const generationAtWrite = readGeneration;
       try {
-        const result = await input.files.writeFileChecked({ path, data, preconditions: [{ path, expected }] });
+        const attempted = {
+          bytes: new TextEncoder().encode(data),
+          patch: reset ? undefined : editPatch,
+        };
+        inFlightWriteBytes.add(attempted);
+        let result: CheckedFileWriteResult;
+        try {
+          result = await input.files.writeFileChecked({
+            path,
+            data,
+            preconditions: [{ path, expected }],
+          });
+        } finally {
+          inFlightWriteBytes.delete(attempted);
+        }
         if (result.status !== 'conflict') {
           if (readGeneration === generationAtWrite) {
             readGeneration++;
-            await publish(result.content, 'write');
+            await publish(result.content, 'write', readGeneration, false, attempted.patch);
           } else {
             const refresh = ++readGeneration;
             try {
               const latest = (await input.files.exists(path)) ? await input.files.readFile(path) : null;
               if (refresh === readGeneration) {
-                await publish(latest, sameBytes(latest, result.content) ? 'write' : 'read', refresh);
+                const ownWrite = sameBytes(latest, result.content);
+                await publish(
+                  latest,
+                  ownWrite ? 'write' : 'read',
+                  refresh,
+                  false,
+                  ownWrite ? attempted.patch : undefined,
+                );
               }
             } catch (error) {
               input.onError(error);
@@ -216,7 +277,7 @@ export function createWorkbenchLayoutStore(
         if (!(await read())) {
           return 'retry';
         }
-        if (reset) {
+        if (reset || eligible) {
           return 'blocked';
         }
       } catch (error) {
@@ -295,7 +356,12 @@ export function createWorkbenchLayoutStore(
       }
       return new Promise<boolean>((resolve) => {
         queuedEdit = queuedEdit
-          ? { next, patch: combine(queuedEdit.patch, patch), sequence, resolve: [...queuedEdit.resolve, resolve] }
+          ? {
+              next,
+              patch: combine(queuedEdit.patch, patch),
+              sequence,
+              resolve: [...queuedEdit.resolve, resolve],
+            }
           : { next, patch, sequence, resolve: [resolve] };
         if (editTimer) {
           clearTimeout(editTimer);
@@ -304,6 +370,34 @@ export function createWorkbenchLayoutStore(
           void drainEdit();
         }, input.editDebounce);
       });
+    },
+    restore: async (next, expectedDigest, eligible) => {
+      const sequence = editSequence;
+      const canRestore = (): boolean =>
+        !disposed &&
+        !readError &&
+        !state.refusal &&
+        state.digest === expectedDigest &&
+        editSequence === sequence &&
+        editSequence === settledSequence &&
+        !queuedEdit &&
+        !deferred &&
+        eligible();
+      if (!canRestore()) {
+        return false;
+      }
+      const result = pending.then(async () => {
+        if (!(await read()) || !canRestore()) {
+          return false;
+        }
+        const status = await write(next, diff(next, state.layout), false, undefined, canRestore);
+        if (status === 'saved' && editSequence === sequence) {
+          intended = state.layout;
+        }
+        return status === 'saved';
+      });
+      pending = result;
+      return result;
     },
     reset: async (next) => {
       if (state.refusal?.code !== 'INVALID_RECORD') {

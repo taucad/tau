@@ -97,6 +97,54 @@ const writeStandInProduct = async (directory: string, module: Record<string, unk
 };
 
 describe('mixed WASM input', () => {
+  /* eslint-disable @typescript-eslint/naming-convention -- Stand-ins use exact exported C symbol names. */
+  it('should route only ST private candidate controls to the reserved ABI', async () => {
+    const module = {
+      ...standInMtModule(),
+      _geospec_engine_native_engine_new: () => 1,
+      _geospec_engine_native_process_request: vi.fn((_: number, pointer: number, length: number) =>
+        module._geospec_engine_native_canonicalize(pointer, length),
+      ),
+      _geospec_engine_native_exact_cluster_candidate_control: vi.fn((_: number, pointer: number, length: number) =>
+        module._geospec_engine_native_canonicalize(pointer, length),
+      ),
+    };
+    createModule.mockResolvedValueOnce(module);
+    const loader = await import('./mixed-wasm-loader');
+    await loader.initializeMixedWasm();
+    const binding = new loader.MixedWasmBinding();
+    const control = new TextEncoder().encode('{"_tauNativeExactClusterCandidateV1":{"operation":"export"}}');
+    expect([...binding.processRequest(control)]).toEqual([...control]);
+    expect(module._geospec_engine_native_exact_cluster_candidate_control).toHaveBeenCalledTimes(1);
+    const ordinary = new TextEncoder().encode('{"method":"negotiate"}');
+    expect([...binding.processRequest(ordinary)]).toEqual([...ordinary]);
+    expect(module._geospec_engine_native_process_request).toHaveBeenCalledTimes(1);
+  });
+
+  it('should leave a private candidate control on the ordinary MT refusal path', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'geospec-mt-candidate-refusal-'));
+    try {
+      const module = {
+        ...standInMtModule(),
+        _geospec_engine_native_process_request: vi.fn((_: number, pointer: number, length: number) =>
+          module._geospec_engine_native_canonicalize(pointer, length),
+        ),
+        _geospec_engine_native_exact_cluster_candidate_control: vi.fn(),
+      };
+      const receipt = await writeStandInProduct(directory, module);
+      const loader = await import('./mixed-wasm-loader');
+      await loader.initializeMixedWasm(undefined, { variant: 'mt', permits: 1, receipt });
+      const binding = new loader.MixedWasmBinding({ variant: 'mt', permits: 1, receipt });
+      const control = new TextEncoder().encode('{"_tauNativeExactClusterCandidateV1":{}}');
+      expect([...binding.processRequest(control)]).toEqual([...control]);
+      expect(module._geospec_engine_native_process_request).toHaveBeenCalledTimes(1);
+      expect(module._geospec_engine_native_exact_cluster_candidate_control).not.toHaveBeenCalled();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+  /* eslint-enable @typescript-eslint/naming-convention -- Resume ordinary property naming. */
+
   it('should borrow supplied ArrayBuffer bytes without detaching or copying them', async () => {
     const source = Uint8Array.from([0, 97, 255]).buffer;
     const { initializeMixedWasm } = await import('./mixed-wasm-loader');

@@ -5,9 +5,10 @@ import {
   resolveShapeName,
   srgbTupleToLinear,
   transformVectorArrayChecked,
+  validateGlbResources,
   writeGlb,
 } from '@taucad/geometry-core';
-import type { GlbNode, TauCadTopologyComponent, TauCadTopologyPayload } from '@taucad/geometry-core';
+import type { GlbNode, GlbResources, TauCadTopologyComponent, TauCadTopologyPayload } from '@taucad/geometry-core';
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
 import { resolveMechanismComponents, transformMechanism } from '@taucad/kinematics';
 import type { Issue } from '@taucad/kinematics';
@@ -17,7 +18,10 @@ import type { PicogkBuild } from '#picogk.protocol.js';
 
 const scalarBytes = 4;
 type PicogkComponent = PicogkBuild['components'][number];
-type PicogkMeshArtifact = Pick<PicogkBuild, 'artifactPath' | 'byteLength' | 'sha256' | 'components' | 'mechanism'>;
+type PicogkMeshArtifact = Pick<
+  PicogkBuild,
+  'artifactPath' | 'byteLength' | 'sha256' | 'components' | 'mechanism' | 'images' | 'textures' | 'samplers'
+>;
 
 const sourceToGltf = [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1] as const;
 
@@ -80,6 +84,8 @@ const recordRanges = (component: PicogkComponent, occupied: Array<readonly [numb
     [component.positionOffset, component.positionOffset + component.positionCount * scalarBytes],
     [component.normalOffset, component.normalOffset + component.normalCount * scalarBytes],
     [component.indexOffset, component.indexOffset + component.indexCount * scalarBytes],
+    [component.texCoordOffset ?? 0, (component.texCoordOffset ?? 0) + (component.texCoordCount ?? 0) * scalarBytes],
+    [component.tangentOffset ?? 0, (component.tangentOffset ?? 0) + (component.tangentCount ?? 0) * scalarBytes],
   ];
   for (const range of ranges) {
     if (range[0] === range[1]) {
@@ -144,7 +150,11 @@ const assertArtifactIntegrity = (bytes: Uint8Array<ArrayBuffer>, result: PicogkM
 const componentsToGlb = (
   bytes: Uint8Array<ArrayBuffer>,
   components: readonly PicogkComponent[],
-  options: { mechanismSource?: unknown; onIssues?: (issues: KernelIssue[]) => void },
+  options: {
+    mechanismSource?: unknown;
+    resources: Pick<PicogkMeshArtifact, 'images' | 'textures' | 'samplers'>;
+    onIssues?: (issues: KernelIssue[]) => void;
+  },
 ): Uint8Array<ArrayBuffer> => {
   const nodes: GlbNode[] = [];
   const topologyComponents: TauCadTopologyComponent[] = [];
@@ -183,6 +193,27 @@ const componentsToGlb = (
     const positions = toGlbVectors(sourcePositions, 'position', name);
     const normals = sourceNormals ? toGlbVectors(sourceNormals, 'direction', name) : undefined;
     assertIndexRange(sourceIndices, sourcePositions.length / 3, name);
+    const texCoordCount = component.texCoordCount ?? 0;
+    const tangentCount = component.tangentCount ?? 0;
+    if (
+      (!isTriangle && (texCoordCount > 0 || tangentCount > 0)) ||
+      (texCoordCount > 0 && texCoordCount !== (sourcePositions.length / 3) * 2) ||
+      (tangentCount > 0 && tangentCount !== (sourcePositions.length / 3) * 4)
+    ) {
+      throw new Error(`PicoGK component "${name}" has invalid material attribute counts.`);
+    }
+    const texCoords = texCoordCount > 0 ? viewFloat32(bytes, component.texCoordOffset ?? 0, texCoordCount) : undefined;
+    const sourceTangents =
+      tangentCount > 0 ? viewFloat32(bytes, component.tangentOffset ?? 0, tangentCount) : undefined;
+    const tangents = sourceTangents ? new Float32Array(sourceTangents.length) : undefined;
+    if (sourceTangents && tangents) {
+      for (let index = 0; index < sourceTangents.length; index += 4) {
+        tangents[index] = sourceTangents[index]!;
+        tangents[index + 1] = sourceTangents[index + 2]!;
+        tangents[index + 2] = -sourceTangents[index + 1]!;
+        tangents[index + 3] = sourceTangents[index + 3]!;
+      }
+    }
     const displayColor = component.color;
     const materialColor = srgbTupleToLinear(displayColor);
     nodes.push({
@@ -195,7 +226,9 @@ const componentsToGlb = (
           ...(normals ? { normals } : {}),
           // The writer copies from this view into the GLB buffer, so no copy is made here.
           indices: sourceIndices,
-          material: {
+          ...(texCoords ? { texCoords: [texCoords] } : {}),
+          ...(tangents ? { tangents } : {}),
+          material: component.material ?? {
             doubleSided: false,
             pbrMetallicRoughness: {
               baseColorFactor: materialColor,
@@ -235,8 +268,26 @@ const componentsToGlb = (
     ...(mechanism ? { mechanism } : {}),
   };
   const topologyData = new TextEncoder().encode(JSON.stringify(topology));
+  const resources: GlbResources = {
+    images: (options.resources.images ?? []).map((image) => {
+      const end = image.offset + image.byteLength;
+      if (end > bytes.byteLength || occupiedRanges.some(([start, stop]) => image.offset < stop && start < end)) {
+        throw new Error('PicoGK worker returned an invalid image artifact range.');
+      }
+      occupiedRanges.push([image.offset, end]);
+      return {
+        data: bytes.slice(image.offset, end),
+        mimeType: image.mimeType,
+        ...(image.name ? { name: image.name } : {}),
+      };
+    }),
+    textures: options.resources.textures ?? undefined,
+    samplers: options.resources.samplers ?? undefined,
+  };
+  validateGlbResources(resources);
   return writeGlb({
     nodes,
+    ...resources,
     extensionsUsed: [tauCadTopologyExtension],
     extraBufferViews: [{ key: 'topology', data: topologyData }],
     extensions: (bufferViews) => {
@@ -253,9 +304,9 @@ const componentsToGlb = (
 
 /**
  * Validate and adapt one worker scene artifact into Tau's canonical GLB topology substrate.
- * @param bytes Confined artifact bytes read from the worker.
- * @param result Validated artifact descriptor returned by the worker.
- * @param onIssues Receives mechanism metadata warnings without discarding geometry.
+ * @param bytes - Confined artifact bytes read from the worker.
+ * @param result - Validated artifact descriptor returned by the worker.
+ * @param onIssues - Receives mechanism metadata warnings without discarding geometry.
  * @returns A canonical inline GLB with mesh-only Tau topology.
  */
 export const picogkArtifactToGlb = (
@@ -264,5 +315,5 @@ export const picogkArtifactToGlb = (
   onIssues?: (issues: KernelIssue[]) => void,
 ): Uint8Array<ArrayBuffer> => {
   assertArtifactIntegrity(bytes, result);
-  return componentsToGlb(bytes, result.components, { mechanismSource: result.mechanism, onIssues });
+  return componentsToGlb(bytes, result.components, { mechanismSource: result.mechanism, resources: result, onIssues });
 };

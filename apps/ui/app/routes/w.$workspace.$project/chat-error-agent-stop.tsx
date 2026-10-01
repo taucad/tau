@@ -1,27 +1,16 @@
 import { memo, useEffect, useState } from 'react';
 import type React from 'react';
 import type { LucideIcon } from 'lucide-react';
-import {
-  ChevronRight,
-  CircleAlert,
-  Clock,
-  Gauge,
-  MessageSquarePlus,
-  Play,
-  RefreshCcw,
-  Repeat,
-  Timer,
-} from 'lucide-react';
+import { CircleAlert, Clock, Gauge, MessageSquarePlus, Play, RefreshCcw, Repeat, Timer } from 'lucide-react';
 import type { ExternalAgentStop } from '@taucad/agent-host/wire';
 import { Button } from '@taucad/ui/components/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
-import { cn } from '@taucad/ui/utils/cn';
 import { useChatActions } from '#hooks/use-chat.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { ChatExecutionSelector, useChatAgentSelection } from '#components/chat/chat-execution-selector.js';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.js';
 import { ChatErrorCard, turnSavedSentence } from '#routes/w.$workspace.$project/chat-error-card.js';
+import { ChatErrorDetails } from '#routes/w.$workspace.$project/chat-error-details.js';
 
 type StopNotice = {
   readonly icon: LucideIcon;
@@ -203,7 +192,6 @@ export const ChatErrorAgentStop = memo(function ({
   } = useChatComposer();
   const { isOffered: isAgentSelectorOffered } = useChatAgentSelection();
   const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   /** When the reported limit refreshes. Milliseconds. */
   const resetAt = stop.resetsAt === undefined ? undefined : stop.resetsAt * 1000;
   /* Ruling Q8: the card owns this clock. One timer, armed for the reset the
@@ -234,7 +222,7 @@ export const ChatErrorAgentStop = memo(function ({
     primary === 'retry' ? (
       <Button
         variant='outline'
-        size='sm'
+        size='xs'
         onClick={() => {
           regenerate();
         }}
@@ -245,7 +233,7 @@ export const ChatErrorAgentStop = memo(function ({
     ) : primary === 'resume' ? (
       <Button
         variant='outline'
-        size='sm'
+        size='xs'
         disabled={heldUntil !== undefined}
         onClick={() => {
           continueChat();
@@ -257,7 +245,7 @@ export const ChatErrorAgentStop = memo(function ({
     ) : primary === 'new-chat' ? (
       <Button
         variant='outline'
-        size='sm'
+        size='xs'
         disabled={!canOpenNewChat}
         onClick={() => {
           void openNewChat({ activeExecution: execution });
@@ -273,7 +261,7 @@ export const ChatErrorAgentStop = memo(function ({
      * opens the model picker. */
     <ChatExecutionSelector popoverProperties={{ align: 'end' }}>
       {() => (
-        <Button variant='outline' size='sm'>
+        <Button variant='outline' size='xs'>
           <Repeat className='size-3.5' />
           Switch agent
         </Button>
@@ -326,19 +314,9 @@ export const ChatErrorAgentStop = memo(function ({
       actions={actions}
     >
       {stop.diagnostics === undefined ? null : (
-        <Collapsible open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-          <CollapsibleTrigger asChild>
-            <Button variant='ghost' size='xs' className='-ml-1 text-muted-foreground'>
-              <ChevronRight className={cn('size-3 transition-transform', isDetailsOpen && 'rotate-90')} />
-              Details
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <pre className='mt-1 max-h-40 overflow-auto rounded-sm bg-muted p-2 font-mono text-xs whitespace-pre-wrap text-muted-foreground'>
-              {stop.diagnostics}
-            </pre>
-          </CollapsibleContent>
-        </Collapsible>
+        <ChatErrorDetails>
+          <pre className='mt-1 rounded-sm bg-muted p-2 font-mono whitespace-pre-wrap'>{stop.diagnostics}</pre>
+        </ChatErrorDetails>
       )}
     </ChatErrorCard>
   );

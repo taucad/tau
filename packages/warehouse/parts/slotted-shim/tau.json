@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_0VmxulgvyXn7ORx9iE9xf",
+  "name": "Slotted shim",
+  "description": "Slotted shim with a modeled opening and editable section dimensions.",
+  "tags": [
+    "Washers and spacers",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

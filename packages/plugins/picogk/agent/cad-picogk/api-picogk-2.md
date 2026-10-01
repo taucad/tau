@@ -1,6 +1,6 @@
 # PicoGK — PicoGK (2)
 
-27 top-level symbols. Signatures are verbatim csharp.
+37 top-level symbols. Signatures are verbatim csharp.
 
 // The Library object encapsulates an instance of a PicoGK library configuration
 Library
@@ -183,6 +183,227 @@ LogProgress
 
   // Cleanup (just reports that the task is finished)
   public void Dispose()
+
+// Typed Material appearance
+Material
+
+  Name: string?
+
+  Color: ColorFloat
+
+  Metallic: float
+
+  Roughness: float
+
+  ColorTexture: MaterialTexture?
+
+  MetallicRoughnessTexture: MaterialTexture?
+
+  NormalTexture: MaterialTexture?
+
+  NormalScale: float
+
+  OcclusionTexture: MaterialTexture?
+
+  OcclusionStrength: float
+
+  Emissive: ColorFloat
+
+  EmissiveStrength: float
+
+  EmissiveTexture: MaterialTexture?
+
+  AlphaMode: MaterialAlphaMode?
+
+  AlphaCutoff: float
+
+  DoubleSided: bool
+
+  Unlit: bool
+
+  Ior: float?
+
+  Dispersion: float?
+
+  Anisotropy: MaterialAnisotropy?
+
+  Clearcoat: MaterialClearcoat?
+
+  Iridescence: MaterialIridescence?
+
+  Sheen: MaterialSheen?
+
+  Specular: MaterialSpecular?
+
+  Transmission: MaterialTransmission?
+
+  Volume: MaterialVolume?
+
+// Typed MaterialAlphaMode appearance
+MaterialAlphaMode
+
+  Opaque: Opaque
+
+  Mask: Mask
+
+  Blend: Blend
+
+// Typed MaterialAnisotropy appearance
+MaterialAnisotropy
+
+  Strength: float
+
+  Rotation: float
+
+  Texture: MaterialTexture?
+
+// Typed MaterialClearcoat appearance
+MaterialClearcoat
+
+  Factor: float
+
+  Roughness: float
+
+  Texture: MaterialTexture?
+
+  RoughnessTexture: MaterialTexture?
+
+  NormalTexture: MaterialTexture?
+
+  NormalScale: float
+
+// Typed MaterialImage appearance
+MaterialImage
+
+  Data: byte[]
+
+  Format: MaterialImageFormat
+
+  Name: string?
+
+// Typed MaterialImageFormat appearance
+MaterialImageFormat
+
+  Png: Png
+
+  Jpeg: Jpeg
+
+  WebP: WebP
+
+// Typed MaterialIridescence appearance
+MaterialIridescence
+
+  Factor: float
+
+  Ior: float
+
+  ThicknessMinimum: float
+
+  ThicknessMaximum: float
+
+  Texture: MaterialTexture?
+
+  ThicknessTexture: MaterialTexture?
+
+// Typed MaterialMagFilter appearance
+MaterialMagFilter
+
+  Nearest: Nearest
+
+  Linear: Linear
+
+// Typed MaterialMinFilter appearance
+MaterialMinFilter
+
+  Nearest: Nearest
+
+  Linear: Linear
+
+  NearestMipmapNearest: NearestMipmapNearest
+
+  LinearMipmapNearest: LinearMipmapNearest
+
+  NearestMipmapLinear: NearestMipmapLinear
+
+  LinearMipmapLinear: LinearMipmapLinear
+
+// Typed MaterialSampler appearance
+MaterialSampler
+
+  WrapS: MaterialWrap
+
+  WrapT: MaterialWrap
+
+  MagFilter: MaterialMagFilter?
+
+  MinFilter: MaterialMinFilter?
+
+// Typed MaterialSheen appearance
+MaterialSheen
+
+  Color: ColorFloat
+
+  Roughness: float
+
+  ColorTexture: MaterialTexture?
+
+  RoughnessTexture: MaterialTexture?
+
+// Typed MaterialSpecular appearance
+MaterialSpecular
+
+  Factor: float
+
+  Color: ColorFloat
+
+  Texture: MaterialTexture?
+
+  ColorTexture: MaterialTexture?
+
+// Typed MaterialTexture appearance
+MaterialTexture
+
+  Image: MaterialImage
+
+  Sampler: MaterialSampler?
+
+  Transform: MaterialTextureTransform?
+
+// Typed MaterialTextureTransform appearance
+MaterialTextureTransform
+
+  Offset: Vector2
+
+  Scale: Vector2
+
+  Rotation: float
+
+// Typed MaterialTransmission appearance
+MaterialTransmission
+
+  Factor: float
+
+  Texture: MaterialTexture?
+
+// Typed MaterialVolume appearance
+MaterialVolume
+
+  Thickness: float
+
+  AttenuationDistance: float?
+
+  AttenuationColor: ColorFloat
+
+  ThicknessTexture: MaterialTexture?
+
+// Typed MaterialWrap appearance
+MaterialWrap
+
+  ClampToEdge: ClampToEdge
+
+  MirroredRepeat: MirroredRepeat
+
+  Repeat: Repeat
 
 // A triangle mesh
 Mesh
@@ -618,99 +839,3 @@ ScalarFieldHandle
   Value: nint
 
   public ScalarFieldHandle(nint Value)
-
-SdfVisualizer
-
-  // Create a color image which encodes the signed distance values contained in the ScalarField
-  public static ImageColor imgEncodeFromSdf(ScalarField oField, float fBackgroundValue, int nSlice, ColorFloat? _clrBackground = null, ColorFloat? _clrSurface = null, ColorFloat? _clrInside = null, ColorFloat? _clrOutside = null, ColorFloat? _clrDefect = null)
-  //   oField: Scalar field to visualize
-  //   fBackgroundValue: Background value, usually 3.0f
-  //   nSlice: Slice to visualize
-  //   _clrBackground: Color used for background value voxels
-  //   _clrSurface: Color used for surface value voxels
-  //   _clrInside: Color used for the voxels on the inside
-  //   _clrOutside: Color used for the voxels on the outside
-  //   _clrDefect: Color used for defective voxels
-
-  // Checks if the scalar field slice contains a defective voxel
-  public static bool bDoesSliceContainDefect(ScalarField oField, int nSlice)
-  //   oField: Field to analyze
-  //   nSlice: Slice to analyze
-
-  // Saves a stack of TGA files, visualizing the signed distance field contained in the ScalarField
-  public static bool bVisualizeSdfSlicesAsTgaStack(ScalarField oField, float fBackgroundValue, string strPath, string strFilePrefix = "Sdf_", bool bOnlyDefective = false, ColorFloat? _clrBackground = null, ColorFloat? _clrSurface = null, ColorFloat? _clrInside = null, ColorFloat? _clrOutside = null, ColorFloat? _clrDefect = null)
-  //   oField: Scalar SDF to visualize (you can build one from if a Voxels object if needed
-  //   fBackgroundValue: Background value (usually 3.0f)
-  //   strPath: Path to write the image stack to
-  //   strFilePrefix: File prefix to use, before slice number is appended
-  //   bOnlyDefective: Write only frames that contain defective values (such as NaN, Infinity)
-  //   _clrBackground: Color used for background value voxels
-  //   _clrSurface: Color used for surface value voxels
-  //   _clrInside: Color used for the voxels on the inside
-  //   _clrOutside: Color used for the voxels on the outside
-  //   _clrDefect: Color used for defective voxels
-
-SliceViz
-
-  // The number of slices in this voxel field
-  nSliceCount: int
-
-  public SliceViz(Viewer oViewer, Voxels vox, Voxels.ESliceAxis eAxis = Z)
-
-  // Visualize the slice in the viewer using a normalized parameter from 0..1
-  public void Visualize(float fNormalized)
-  public void Visualize(int nSlice)
-
-  // Dispose the object (IDispose)
-  public void Dispose()
-
-// This class allows you to split progress reporting into multiple subtasks
-SplitProgress
-
-  // Create a new SplitProgress object
-  public SplitProgress(IProgress xProgress, int nSubTasks)
-  //   xProgress: Progress reporting interface to use
-  //   nSubTasks: Number of subtasks, each with their independet 0..1 progress
-
-  // Report progress from 0..1 - this function automatically scales the value to reflect the current subtask
-  public void Progress(float f)
-
-  // Allow you to use ++ to count up to the next subtask
-  public static SplitProgress operator ++(SplitProgress pc)
-
-SurfaceNormalFieldExtractor
-
-  public static VectorField oExtract(Voxels vox, float fSurfaceThresholdVx = 0.5, Vector3? vecDirectionFilter = null, float fDirectionFilterTolerance = 0, Vector3? vecScaleBy = null)
-
-  protected SurfaceNormalFieldExtractor(Voxels voxSource, VectorField oDestination, float fSurfaceThresholdVx, Vector3 vecDirFilter, float fDirTolerance, Vector3 vecScaleBy)
-
-  protected void Run()
-
-  public void InformActiveValue(in Vector3 vecPosition, float fValue)
-
-Text
-
-  oDefaultTypeface: SKTypeface
-
-  public static ImageRgba32 imgRenderText(string strText, int nFontHeight, int nPadding = 10, ColorFloat? _clrBackground = null, ColorFloat? _clrText = null, SKTypeface? _oTypeface = null)
-
-TgaIo
-
-  public static void SaveTga(string strFilename, in Image img)
-  public static void SaveTga(in BinaryWriter oWriter, in Image img)
-
-  public static void GetFileInfo(string strFilename, out Image.EType eType, out int nWidth, out int nHeight)
-  public static void GetFileInfo(in BinaryReader oReader, out Image.EType eType, out int nWidth, out int nHeight)
-
-  public static void LoadTga(string strFilename, out Image img)
-  public static void LoadTga(in BinaryReader oReader, out Image img)
-
-Triangle
-
-  A: int
-
-  B: int
-
-  C: int
-
-  public Triangle(int a, int b, int c)

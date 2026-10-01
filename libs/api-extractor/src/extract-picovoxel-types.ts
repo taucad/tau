@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import type { BundledTypesPackageMap } from '#bundled-types.types.js';
 
 /**
@@ -33,6 +34,38 @@ type PicovoxelManifest = Readonly<{
 
 /** The installed package root, found through picovoxel's exported `./package.json` (blueprint D13). */
 const packageRoot = (): string => dirname(fileURLToPath(import.meta.resolve('picovoxel/package.json')));
+
+/** Real type-only dependencies of the author model; runtime host declarations stay outside Monaco. */
+const authorDeclarations = (): Readonly<Record<string, string>> => {
+  const root = join(import.meta.dirname, '../../..');
+  const sources = {
+    'model.d.ts': 'packages/plugins/picovoxel/src/model.ts',
+    'material.d.ts': 'packages/core/geometry/src/utils/glb-material.ts',
+    'json.d.ts': 'libs/types/src/types/json-value.types.ts',
+    'gltf.d.ts': 'node_modules/@gltf-transform/core/src/types/gltf.ts',
+  };
+  const printer = ts.createPrinter();
+  return Object.fromEntries(
+    Object.entries(sources).map(([name, path]) => {
+      const source = ts.createSourceFile(path, readFileSync(join(root, path), 'utf8'), ts.ScriptTarget.Latest, true);
+      const content = source.statements
+        .filter(
+          (statement) =>
+            ts.isImportDeclaration(statement) ||
+            ts.isExportDeclaration(statement) ||
+            ts.isTypeAliasDeclaration(statement) ||
+            ts.isInterfaceDeclaration(statement) ||
+            ts.isModuleDeclaration(statement),
+        )
+        .map((statement) => printer.printNode(ts.EmitHint.Unspecified, statement, source))
+        .join('\n')
+        .replaceAll("'@taucad/geometry-core'", "'./material.js'")
+        .replaceAll("'@gltf-transform/core'", "'./gltf.js'")
+        .replaceAll("'@taucad/runtime/types'", "'./json.js'");
+      return [name, content];
+    }),
+  );
+};
 
 /**
  * Each author subpath's declaration entry, relative to `dist/`, read from the installed exports map.
@@ -103,6 +136,16 @@ export const buildPicovoxelTypes = (root = packageRoot()): BundledTypesPackageMa
     throw new Error(`PicoVoxel root declarations are missing from ${root}.`);
   }
   return {
+    '@taucad/picovoxel': {
+      content:
+        "export type { PicovoxelPart, PicovoxelModel, PicovoxelResult, Material, Image, Resources } from './model.js';\n",
+      files: authorDeclarations(),
+      packageJson: {
+        name: '@taucad/picovoxel',
+        types: './index.d.ts',
+        exports: { '.': { types: './index.d.ts' } },
+      },
+    },
     picovoxel: {
       content,
       files,

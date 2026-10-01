@@ -98,9 +98,14 @@ const renderCase = async (visualCase: VisualCase): Promise<string> => {
     }
     const nodeNames = root.listNodes().map((node) => node.getName());
     const meshNames = meshes.map((mesh) => mesh.getName());
+    const authoredNames: Readonly<Record<string, readonly string[]>> = {
+      'hello-world': ['Hello World'],
+      'mesh-trafo': ['Original box', 'Transformed box'],
+    };
+    const expectedNames = authoredNames[visualCase.project] ?? meshes.map((_mesh, index) => `Shape ${index + 1}`);
     if (
       nodeNames.length !== meshes.length ||
-      nodeNames.some((name, index) => name !== `Shape ${index + 1}`) ||
+      nodeNames.some((name, index) => name !== expectedNames[index]) ||
       meshNames.some((name, index) => name !== nodeNames[index])
     ) {
       throw new Error(`invalid node/mesh naming: ${JSON.stringify({ nodeNames, meshNames })}`);

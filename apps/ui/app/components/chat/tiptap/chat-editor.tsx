@@ -75,7 +75,7 @@ export const ChatEditor = memo(function ChatEditor({
         className={cn(
           tiptapTailwindOverrides,
           'w-full min-h-6',
-          'px-3 pb-3 pt-2',
+          'px-3 pb-3',
           'text-sm',
           isLoading && tiptapShimmerOverrides,
           className,

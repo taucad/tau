@@ -19,11 +19,6 @@ import * as target from '#support/external-target.js';
  * Whenever the in-canvas WebGPU path matches one of those, the test fails fast with the captured
  * line attached so reviewers see the validation message directly in the Vitest report.
  *
- * The screenshot-at-three-angles assertion from the audit's R-test plan
- * (`webgpu-grid-{angle}.png`) is parked as `test.fixme` below until the editor exposes a
- * scriptable camera-orbit API — the gizmo currently requires synthetic pointer drags whose
- * deterministic stop-position varies across headless GPUs.
- *
  * A pixel-histogram fallback (`assertCanvasHasNonBackgroundPixels`) supplements the console
  * listener: it samples the rendered canvas via `drawImage`-into-2D and asserts the frame is not
  * dominated by a single solid-background colour. This catches "everything went invisible"
@@ -38,6 +33,7 @@ const webgpuValidationPatterns: readonly RegExp[] = [
   /Vertex buffer slot \d+ required/,
   /Invalid CommandBuffer/,
   /depth-stencil format mismatch/,
+  /gpuvalidationerror|error while parsing wgsl|error while validating shader|uncaptured.*error/i,
 ];
 
 type GraphicsBackend = 'webgl' | 'webgpu';
@@ -46,6 +42,23 @@ type GraphicsTestBridgeWindow = Window & {
   __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<NonNullable<GraphicsTestBridgeWindow['__TAU_SECTION_VIEW_TEST__']>>;
   __TAU_SECTION_VIEW_TEST__?: {
     getGraphicsBackend(): GraphicsBackend;
+    getRendererIdentity(): { api: GraphicsBackend; name: string; frame: number };
+    getViewportCanvas(): HTMLCanvasElement;
+    measureRenderFrames(options?: { gpuTiming?: boolean; orbit?: boolean }): Promise<{
+      submission: number[];
+      completion: number[];
+      gpu: Array<number | undefined>;
+      gpuMethod: string;
+      firstSubmission: number;
+      geometries: number;
+      textures: number;
+      drawCalls: number;
+      triangles: number;
+      revision: string;
+      width: number;
+      height: number;
+      pixelRatio: number;
+    }>;
     isGeometryFramed(): boolean;
     setCamera(camera: {
       position: readonly [number, number, number];
@@ -513,7 +526,14 @@ async function sampleOverlayBrightness(pngBase64: string): Promise<OverlayBright
 async function compareCentreLuminance(
   firstPngBase64: string,
   secondPngBase64: string,
-): Promise<Readonly<{ meanLuminanceDifference: number; differingPixelRatio: number }>> {
+): Promise<
+  Readonly<{
+    meanLuminanceDifference: number;
+    differingPixelRatio: number;
+    firstDarkPixels: number;
+    secondDarkPixels: number;
+  }>
+> {
   return target.evaluate(
     async ({ first, second }) => {
       const read = async (png: string): Promise<ImageData> => {
@@ -536,16 +556,25 @@ async function compareCentreLuminance(
       let total = 0;
       let differing = 0;
       let samples = 0;
+      let firstDarkPixels = 0;
+      let secondDarkPixels = 0;
       for (let y = Math.floor(a.height * 0.25); y < Math.floor(a.height * 0.75); y += 1) {
         for (let x = Math.floor(a.width * 0.25); x < Math.floor(a.width * 0.75); x += 1) {
           const index = (y * a.width + x) * 4;
           const difference = Math.abs(luminanceAt(a, index) - luminanceAt(b, index));
           total += difference;
+          firstDarkPixels += luminanceAt(a, index) < 80 ? 1 : 0;
+          secondDarkPixels += luminanceAt(b, index) < 80 ? 1 : 0;
           differing += difference > 12 ? 1 : 0;
           samples += 1;
         }
       }
-      return { meanLuminanceDifference: total / samples, differingPixelRatio: differing / samples };
+      return {
+        meanLuminanceDifference: total / samples,
+        differingPixelRatio: differing / samples,
+        firstDarkPixels,
+        secondDarkPixels,
+      };
     },
     { first: firstPngBase64, second: secondPngBase64 },
   );
@@ -1358,6 +1387,188 @@ test.describe('Graphics backend regression guard', () => {
     });
   }
 
+  test('WebGPU feature flag defaults off and switches the live viewer in both directions', async () => {
+    await target.navigate('/__e2e/example-fixture?locator=replicad.birdhouse&settings=experimental');
+    await waitForGraphicsViewer();
+    await waitForGraphicsTestBridge();
+    await target.expectGraphicsBackend('webgl');
+    const toggle = selectors.getByRole('switch', { name: 'WebGPU rendering' });
+    await target.expectVisible(toggle);
+    await target.screenshot(selectors.getByRole('dialog', { name: 'Settings' }), 'webgpu-feature-flag.png');
+    await target.click(toggle);
+    await target.expectGraphicsBackend('webgpu');
+    await target.expectGeometryFramed();
+    await target.click(toggle);
+    await target.expectGraphicsBackend('webgl');
+    await target.expectGeometryFramed();
+    await target.keyboardPress('Escape');
+    await assertCanvasHasNonBackgroundPixels(previewCanvasSelector, 'flag switched back to WebGL');
+  });
+
+  test('timed camera motion restores non-default perspective zoom', async () => {
+    await target.navigate('/__e2e/example-fixture?locator=replicad.birdhouse&graphicsBackend=webgpu');
+    await waitForGraphicsViewer();
+    await waitForGraphicsTestBridge();
+    await target.expectGeometryFramed();
+    const result = await target.evaluate(async () => {
+      const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+      const original = bridge.getCamera();
+      bridge.setCamera({ position: original.position, target: original.target, fov: 60, zoom: 2 });
+      const before = bridge.getCamera();
+      await bridge.measureRenderFrames({ orbit: true });
+      return { before, after: bridge.getCamera() };
+    });
+    expect(result.before.zoom).toBe(2);
+    expect(result.after.zoom).toBe(2);
+    for (const axis of [0, 1, 2]) {
+      expect(result.after.position[axis]).toBeCloseTo(result.before.position[axis]!, 9);
+      expect(result.after.target[axis]).toBeCloseTo(result.before.target[axis]!, 9);
+    }
+  });
+
+  for (const fixture of ['replicad.birdhouse', 'replicad.v8-engine'] as const) {
+    for (const scenario of [
+      { id: 'core', dpr: 1, fov: 60, orbit: false, repeats: 3 },
+      { id: 'orthographic', dpr: 1, fov: 0, orbit: false, repeats: 1 },
+      { id: 'orbit', dpr: 1, fov: 60, orbit: true, repeats: 1 },
+      { id: 'dpr2', dpr: 2, fov: 60, orbit: false, repeats: 1 },
+    ]) {
+      test(`records warmed whole-frame benchmark ${fixture} ${scenario.id}`, async () => {
+        await target.commands.uiOpenTarget({ deviceScaleFactor: scenario.dpr });
+        await target.setViewport({ width: 1280, height: 900 });
+        const results = [];
+        const messageStart = await consoleMessageCount();
+        /* oxlint-disable no-await-in-loop -- counterbalanced cases own one renderer at a time. */
+        for (let repetition = 0; repetition < scenario.repeats; repetition++) {
+          const order = repetition % 2 === 0 ? (['webgl', 'webgpu'] as const) : (['webgpu', 'webgl'] as const);
+          for (const backend of order) {
+            const openedAt = performance.now();
+            await target.navigate(`/__e2e/example-fixture?locator=${fixture}&graphicsBackend=${backend}`);
+            expect(await target.evaluate(() => globalThis.devicePixelRatio)).toBe(scenario.dpr);
+            await waitForGraphicsViewer();
+            await waitForGraphicsTestBridge();
+            await target.expectGeometryFramed();
+            const readyMilliseconds = performance.now() - openedAt;
+            const camera =
+              fixture === 'replicad.birdhouse'
+                ? {
+                    position: [0.12857841861747968, -0.12857841861747965, 0.15198383757294057] as const,
+                    target: [0, 0, 0.047] as const,
+                  }
+                : await target.evaluate(() => {
+                    const view = (
+                      globalThis as unknown as GraphicsTestBridgeWindow
+                    ).__TAU_SECTION_VIEW_TEST__!.getCamera();
+                    return { position: view.position, target: view.target };
+                  });
+            for (const postProcessing of [false, true]) {
+              await target.evaluate(
+                ({ enabled, view, configuration }) => {
+                  const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+                  bridge.setPostProcessingEnabled(enabled);
+                  bridge.setCamera({ ...view, fov: 60 });
+                  bridge.setFovAngle(configuration.fov);
+                },
+                {
+                  enabled: postProcessing,
+                  view: camera,
+                  configuration: scenario,
+                },
+              );
+              await target.delay(1500);
+              const frameBeforeIdle = await target.evaluate(
+                () =>
+                  (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getRendererIdentity()
+                    .frame,
+              );
+              await target.delay(500);
+              const idleFrames = await target.evaluate(
+                (before) =>
+                  (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getRendererIdentity()
+                    .frame - before,
+                frameBeforeIdle,
+              );
+              for (const gpuTiming of [false, true]) {
+                const measurements = await target.evaluate(
+                  async (options) => {
+                    const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+                    const frames = await bridge.measureRenderFrames(options);
+                    return {
+                      ...frames,
+                      userAgent: navigator.userAgent,
+                      backend: bridge.getGraphicsBackend(),
+                      renderer: bridge.getRendererIdentity(),
+                      cssWidth: bridge.getViewportCanvas().clientWidth,
+                      cssHeight: bridge.getViewportCanvas().clientHeight,
+                    };
+                  },
+                  { gpuTiming, orbit: scenario.orbit },
+                );
+                expect(measurements.backend).toBe(backend);
+                expect(measurements.pixelRatio).toBe(scenario.dpr);
+                expect(measurements.width).toBe(measurements.cssWidth * scenario.dpr);
+                expect(measurements.height).toBe(measurements.cssHeight * scenario.dpr);
+                expect(idleFrames).toBe(0);
+                expect(measurements.submission).toHaveLength(120);
+                expect(measurements.completion).toHaveLength(120);
+                expect(measurements.drawCalls).toBeGreaterThan(0);
+                expect(measurements.triangles).toBeGreaterThan(0);
+                expect(measurements.completion.every((value) => Number.isFinite(value) && value > 0)).toBe(true);
+                if (gpuTiming && measurements.gpuMethod !== 'unsupported') {
+                  expect(
+                    measurements.gpu.filter((value) => typeof value === 'number' && value > 0).length,
+                  ).toBeGreaterThan(100);
+                  expect(
+                    measurements.gpu.every(
+                      (value) => typeof value !== 'number' || (Number.isFinite(value) && value > 0),
+                    ),
+                  ).toBe(true);
+                }
+                results.push({
+                  repetition,
+                  postProcessing,
+                  gpuTiming,
+                  readyMilliseconds,
+                  idleFrames,
+                  camera,
+                  ...measurements,
+                });
+                await target.writeArtifact(
+                  `benchmark-${fixture}-${scenario.id}.json`,
+                  JSON.stringify(
+                    {
+                      fixture,
+                      scenario,
+                      warmup: 20,
+                      unit: 'milliseconds',
+                      results,
+                    },
+                    null,
+                    2,
+                  ),
+                );
+              }
+              if (repetition === 0) {
+                await target.screenshot(
+                  selectors.getByCss(previewCanvasSelector).first(),
+                  `benchmark-${fixture}-${scenario.id}-${backend}-${postProcessing}.png`,
+                );
+              }
+            }
+          }
+        }
+        /* oxlint-enable no-await-in-loop -- sequential measurements end. */
+        for (const post of [false, true]) {
+          const gl = results.find((row) => row.backend === 'webgl' && row.postProcessing === post)!.triangles;
+          const gpu = results.find((row) => row.backend === 'webgpu' && row.postProcessing === post)!.triangles;
+          expect(gpu / gl, 'whole-scene workload equivalence').toBeGreaterThan(0.95);
+          expect(gpu / gl, 'whole-scene workload equivalence').toBeLessThan(1.05);
+        }
+        expect(await webGpuValidationFailures(messageStart)).toEqual([]);
+      });
+    }
+  }
+
   test('no WebGPU validation errors emit during a Birdhouse preview render', async () => {
     const messageStart = await consoleMessageCount();
 
@@ -1403,14 +1614,22 @@ test.describe('Graphics backend regression guard', () => {
     }
     /* oxlint-enable no-await-in-loop -- sequential captures end. */
 
+    // Dark-pixel counts are retained to expose edge loss that the average-luminance gate can miss.
     // The model's shading matches too. WebGPU once sampled the camera-rotated environment through
     // a flipped PMREM lookup and lit faces from the wrong side (mean 22.8, 42% differing); matched,
     // edge anti-aliasing leaves about 3.7 and 4%. With post-processing on, the backends run
     // different AO, so only the plain render is compared.
     const modelDifference = await compareCentreLuminance(screenshots['webgl']!, screenshots['webgpu']!);
+    expect(modelDifference.firstDarkPixels).toBeGreaterThan(1000);
+    expect(
+      modelDifference.secondDarkPixels / modelDifference.firstDarkPixels,
+      'visible CAD edges must survive surface rendering; whole-image averages hide missing lines',
+    ).toBeGreaterThan(0.75);
+    expect(modelDifference.secondDarkPixels / modelDifference.firstDarkPixels).toBeLessThan(1.6);
     expect(modelDifference.meanLuminanceDifference, JSON.stringify(modelDifference)).toBeLessThan(8);
     expect(modelDifference.differingPixelRatio, JSON.stringify(modelDifference)).toBeLessThan(0.15);
 
+    await target.writeArtifact('graphics-backend-parity.json', JSON.stringify({ samples, modelDifference }, null, 2));
     const reference = samples['webgl']!;
     // The 0.3-opacity grey grid over white bottoms out at 213 when blended in sRGB space; a
     // straight-alpha canvas drew it at 189 and WebGPU's linear blend with AO at 164.

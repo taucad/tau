@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { VirtuosoMockContext } from 'react-virtuoso';
 import userEvent from '@testing-library/user-event';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -38,6 +39,7 @@ vi.mock('#components/geometry/parameters/parameters-number-field.js', async (imp
 const staticRef = <T,>(snapshot: T) => ({ getSnapshot: () => snapshot, subscribe: () => ({ unsubscribe: vi.fn() }) });
 
 const project = vi.hoisted(() => ({
+  viewEntryPaths: new Map<string, string>(),
   geometryUnits: new Map<string, unknown>(),
   viewGraphics: new Map<string, unknown>(),
   editorRef: undefined as unknown,
@@ -193,11 +195,15 @@ function createPanelVisibility(isVisible: boolean) {
   return { panelApi, setVisible };
 }
 
+const mockViewport = { viewportHeight: 180, itemHeight: 80 };
+
 let kinematics: Actor<typeof kinematicsMachine>;
 const unit = () => getKinematicsUnitState(kinematics.getSnapshot().context, unitId);
 
 function renderPane({
+  virtualViewport = false,
   withViewer = true,
+  shared = false,
   withMechanism = true,
   loaded = mechanism,
   entryPath = 'main.ts',
@@ -206,8 +212,10 @@ function renderPane({
   panelApi,
   partNames = {},
 }: {
+  readonly virtualViewport?: boolean;
   readonly withViewer?: boolean;
   readonly withMechanism?: boolean;
+  readonly shared?: boolean;
   readonly loaded?: Mechanism;
   readonly entryPath?: string;
   readonly isBuilding?: boolean;
@@ -235,10 +243,17 @@ function renderPane({
   project.viewGraphics = new Map(
     withViewer ? [['view-1', staticRef({ context: { kinematicsRef: kinematics, modelInteractionRef } })]] : [],
   );
-  project.editorRef = editorRef({ 'view-1': { entryPath } });
+  project.viewEntryPaths = new Map(withViewer ? [['view-1', entryPath]] : []);
+  project.editorRef = editorRef(shared ? {} : { 'view-1': { entryPath } });
   return render(
     <TooltipProvider>
-      <KinematicsPanelBody panelApi={panelApi} />
+      {virtualViewport ? (
+        <VirtuosoMockContext.Provider value={mockViewport}>
+          <KinematicsPanelBody panelApi={panelApi} />
+        </VirtuosoMockContext.Provider>
+      ) : (
+        <KinematicsPanelBody panelApi={panelApi} />
+      )}
     </TooltipProvider>,
   );
 }
@@ -296,6 +311,11 @@ describe('KinematicsPanelBody', () => {
     expect(screen.queryByRole('spinbutton', { name: 'carrier' })).not.toBeInTheDocument();
     // Inside its group the driver's control is labelled by what it sets.
     expect(screen.getByText('Angle')).toBeInTheDocument();
+    const driverRows = within(screen.getByRole('list', { name: 'Joints and drivers' })).getAllByRole('listitem');
+    expect(driverRows[0]).not.toHaveClass('pt-(--pane-group-gap)');
+    for (const row of driverRows.slice(1)) {
+      expect(row).toHaveClass('pt-(--pane-group-gap)');
+    }
 
     await openSunFollowers(user);
     expect(field('carrier')).toBeInTheDocument();
@@ -863,6 +883,7 @@ describe('KinematicsPanelBody', () => {
         ],
       ]);
       project.editorRef = editorRef({ 'view-2': { entryPath: 'main.ts' } });
+      project.viewEntryPaths = new Map([['view-2', 'main.ts']]);
       view.rerender(
         <TooltipProvider>
           <KinematicsPanelBody />
@@ -872,5 +893,84 @@ describe('KinematicsPanelBody', () => {
       expect(getKinematicsUnitState(first.getSnapshot().context, unitId).dragEnabled).toBe(false);
       expect(getKinematicsUnitState(second.getSnapshot().context, unitId).dragEnabled).toBe(true);
     });
+  });
+});
+
+describe('shared preview viewer binding', () => {
+  it('should expose joint controls without editor view records', () => {
+    renderPane({ shared: true });
+    expect(screen.queryByText('Open renderer to pose this model')).not.toBeInTheDocument();
+    expect(field('sun')).toBeInTheDocument();
+  });
+});
+
+describe('large generated kinematics collections', () => {
+  const vanes = Array.from({ length: 1709 }, (_, index) => `vane-${index + 1}`);
+  const largeMechanism = (followers: boolean): Mechanism => ({
+    ...mechanism,
+    links: { ...mechanism.links, ...Object.fromEntries(vanes.map((id) => [id, { components: [`component:${id}`] }])) },
+    joints: {
+      ...mechanism.joints,
+      ...Object.fromEntries(
+        vanes.map((id) => [
+          id,
+          {
+            type: 'revolute',
+            parent: 'base',
+            child: id,
+            origin: [0, 0, 0],
+            axis: [1, 0, 0],
+          },
+        ]),
+      ),
+    },
+    couplings: followers ? vanes.map((id) => ({ driver: 'arm', follower: id, ratio: 1 })) : [],
+  });
+
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(180);
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(1713 * 80);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      top: 0,
+      left: 0,
+      right: 300,
+      bottom: 180,
+      width: 300,
+      height: 180,
+      x: 0,
+      y: 0,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- DOMRect uses the standard toJSON method.
+      toJSON: () => ({}),
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(function (
+      this: HTMLElement,
+      options: number | ScrollToOptions,
+      y?: number,
+    ) {
+      this.scrollTop = typeof options === 'number' ? (y ?? 0) : (options.top ?? 0);
+      fireEvent.scroll(this);
+    });
+  });
+
+  it('should bound driver controls and reveal an offscreen driver', async () => {
+    renderPane({ virtualViewport: true, loaded: largeMechanism(false) });
+    await screen.findByRole('spinbutton', { name: 'sun' });
+    expect(screen.getAllByRole('spinbutton').length).toBeLessThan(30);
+    expect(screen.queryByRole('spinbutton', { name: 'vane-1709' })).toBeNull();
+    requestReveal('component:vane-1709');
+    await waitFor(() => {
+      expect(screen.getByRole('spinbutton', { name: 'vane-1709' })).toHaveFocus();
+    });
+    expect(field('vane-1709').closest('[data-pane-list-key]')).toHaveClass('pt-(--pane-group-gap)');
+  });
+
+  it('should bound expanded followers and reveal an offscreen follower', async () => {
+    renderPane({ virtualViewport: true, loaded: largeMechanism(true) });
+    requestReveal('component:vane-1709');
+    await waitFor(() => {
+      expect(screen.getByRole('spinbutton', { name: 'vane-1709' })).toHaveFocus();
+    });
+    expect(screen.getAllByRole('spinbutton').length).toBeLessThan(30);
+    expect(trigger('Followers of arm')).toHaveAttribute('aria-expanded', 'true');
   });
 });

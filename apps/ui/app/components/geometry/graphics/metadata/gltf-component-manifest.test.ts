@@ -495,8 +495,8 @@ describe('buildGltfComponentManifest', () => {
       colors: ['#ff0000', '#0000ff'],
       materialNames: ['red paint', 'blue paint'],
       materials: [
-        { materialIndex: 0, color: '#ff0000' },
-        { materialIndex: 1, color: '#0000ff' },
+        { materialIndex: 0, name: 'red paint', color: '#ff0000' },
+        { materialIndex: 1, name: 'blue paint', color: '#0000ff' },
       ],
     });
   });
@@ -602,9 +602,69 @@ describe('buildGltfComponentManifest', () => {
     );
 
     expect(manifest.nodesById['component:node-0']?.appearance?.materials).toEqual([
-      { materialIndex: 0, isUnlit: true },
+      { materialIndex: 0, extensions: { [unlitExtension]: {} }, isUnlit: true },
     ]);
     expect(manifest.nodesById['component:node-1']?.appearance?.materials).toBeUndefined();
+  });
+
+  it('should preserve duplicate source names and distinct texture and extension descriptors per material index', () => {
+    const textureTransformExtension = 'KHR_texture_transform';
+    const clearcoatExtension = 'KHR_materials_clearcoat';
+    const transmissionExtension = 'KHR_materials_transmission';
+    const manifest = buildGltfComponentManifest(
+      encodeJson({
+        nodes: [{ name: 'Part', mesh: 0 }],
+        meshes: [{ primitives: [{ material: 0 }, { material: 1 }, { material: 2 }, { material: 3, mode: 0 }] }],
+        materials: [
+          {
+            name: 'woven',
+            pbrMetallicRoughness: {
+              baseColorTexture: {
+                index: 2,
+                texCoord: 1,
+                extensions: { [textureTransformExtension]: { offset: [0.2, 0.3] } },
+              },
+              metallicRoughnessTexture: { index: 3 },
+              metallicFactor: 0.4,
+            },
+            normalTexture: { index: 4, scale: 0.8 },
+            extensions: { [clearcoatExtension]: { clearcoatFactor: 0.7 } },
+          },
+          {
+            name: 'woven',
+            pbrMetallicRoughness: { baseColorTexture: { index: 5 } },
+            occlusionTexture: { index: 6, strength: 0.5 },
+            emissiveTexture: { index: 7 },
+            extensions: { [transmissionExtension]: { transmissionFactor: 0.6 } },
+          },
+          { name: '', pbrMetallicRoughness: { roughnessFactor: 0.9 } },
+          { name: 'point only', emissiveTexture: { index: 8 } },
+        ],
+      }),
+    );
+    const materials = manifest.nodesById['component:node-0']?.appearance?.materials;
+
+    expect(materials).toEqual([
+      {
+        materialIndex: 0,
+        name: 'woven',
+        metalness: 0.4,
+        textures: {
+          baseColor: { index: 2, texCoord: 1, extensions: { [textureTransformExtension]: { offset: [0.2, 0.3] } } },
+          metallicRoughness: { index: 3 },
+          normal: { index: 4, scale: 0.8 },
+        },
+        extensions: { [clearcoatExtension]: { clearcoatFactor: 0.7 } },
+      },
+      {
+        materialIndex: 1,
+        name: 'woven',
+        textures: { baseColor: { index: 5 }, occlusion: { index: 6, strength: 0.5 }, emissive: { index: 7 } },
+        extensions: { [transmissionExtension]: { transmissionFactor: 0.6 } },
+      },
+      { materialIndex: 2, roughness: 0.9 },
+    ]);
+    expect(manifest.nodesById['component:node-0']?.appearance?.materialNames).toEqual(['woven', 'point only']);
   });
 
   it('should create separate fallback components for each named node in a multi-node glTF', () => {

@@ -303,9 +303,9 @@ const verifyPicoGkResource = (): string => {
     manifest.picoGkCommit !== '0e6cf6b6f4993ec16dbcd72d8f27f26b999980f3' ||
     manifest.picoGkArchiveSha256 !== '6e188832832241ce5fad3639e2cab63982e4b392eaea367c49a32aac361f4ca5' ||
     !/^[\da-f]{64}$/u.test(manifest.picoGkHostedPatchSha256) ||
-    manifest.hostApiVersion !== 1 ||
+    manifest.hostApiVersion !== 2 ||
     manifest.protocolVersion !== picoGkWireProtocol ||
-    manifest.sceneArtifactVersion !== 3
+    manifest.sceneArtifactVersion !== 4
   ) {
     throw new Error(`Invalid PicoGK resource manifest for ${target}`);
   }

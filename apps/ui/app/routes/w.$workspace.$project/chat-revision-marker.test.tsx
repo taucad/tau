@@ -27,6 +27,7 @@ const openPanel = vi.hoisted(() => vi.fn());
 const restore = vi.hoisted(() => vi.fn());
 /* The chat's projection of its log, as the store serves it (PV-S9). */
 const chatLog = vi.hoisted(() => ({ projection: undefined as unknown, listeners: new Set<() => void>() }));
+const revisionListeners = vi.hoisted(() => new Set<() => void>());
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatContext: () => ({ activeChatId: 'chat-1' }),
@@ -45,7 +46,14 @@ vi.mock('#hooks/use-revisions.js', () => ({
 vi.mock('#hooks/use-restore-to-point.js', () => ({ useRestoreToPoint: vi.fn() }));
 vi.mock('#hooks/use-revision-status.js', async () => {
   const harness = await import('#hooks/use-revision-status.test-harness.js');
-  return harness.revisionStatusMock();
+  const { useSyncExternalStore } = await import('react');
+  const subscribe = (listener: () => void): (() => void) => {
+    revisionListeners.add(listener);
+    return () => revisionListeners.delete(listener);
+  };
+  const read = (): typeof harness.revisionStatusHarness.status | undefined =>
+    harness.revisionStatusHarness.connected ? harness.revisionStatusHarness.status : undefined;
+  return { ...harness.revisionStatusMock(), useRevisionStatus: () => useSyncExternalStore(subscribe, read, read) };
 });
 vi.mock('#hooks/use-sidebar-status.js', () => ({ useChatSidebarStatus: vi.fn() }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
@@ -137,9 +145,20 @@ const setRun = (state: ChatSidebarStatus['state'] | undefined): void => {
   );
 };
 
+/** Publish the scripted revision projection through the same subscription the marker reads. */
+const refreshRevisionStatus = (): void => {
+  act(() => {
+    for (const listener of revisionListeners) {
+      listener();
+    }
+  });
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   revisionStatusHarness.reset();
+  revisionListeners.clear();
+  revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4', dirty: true };
   chatState.status = 'ready';
   chatState.error = undefined;
   chatState.persistedError = undefined;
@@ -162,6 +181,56 @@ beforeEach(() => {
 });
 
 describe('ChatRevisionMarker', () => {
+  it('should appear only after the placed checkout changes files', () => {
+    setLog(placed());
+    setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, dirty: false };
+    const { container } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, dirty: true };
+    refreshRevisionStatus();
+    expect(screen.getByRole('status').textContent).toBe('Starting from Rev 4');
+
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, dirty: false, headRevisionId: 'rev-5' };
+    setLog([...placed(), lifecycleRow(3, 'completed')]);
+    expect(screen.getByRole('status').textContent).toBe('Saving revision');
+    setRevisions({ revisions: [revision()] });
+    setLog([...placed(), lifecycleRow(3, 'completed'), settlementRow(4, { revisionId: 'rev-5' })]);
+    expect(screen.getByRole('status').textContent).toBe('Rev 5 saved');
+  });
+
+  it('should keep a no-change request hidden through completion and settlement', () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, dirty: false };
+    setLog(placed());
+    const { container } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    expect(container.firstChild).toBeNull();
+    setLog([...placed(), lifecycleRow(3, 'completed')]);
+    expect(container.firstChild).toBeNull();
+    setLog([...placed(), lifecycleRow(3, 'completed'), settlementRow(4, {})]);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('should not attribute another checkout or pre-turn edits to the request', () => {
+    setLog(placed());
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, checkoutId: 'other', dirty: true };
+    const { container } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    expect(container.firstChild).toBeNull();
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, checkoutId: 'live', headRevisionId: 'rev-3' };
+    refreshRevisionStatus();
+    expect(container.firstChild).toBeNull();
+    revisionStatusHarness.connected = false;
+    refreshRevisionStatus();
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('should not attach the latest checkout changes to an earlier request', () => {
+    setLog(placed());
+    const { container } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn={false} />);
+    expect(container.firstChild).toBeNull();
+  });
+
   it('should render nothing for a turn not anchored by a user message', () => {
     setRevisions({ byTurnId: new Map([['a1', revision({ turnId: 'a1' })]]) });
     const { container } = render(<ChatRevisionMarker userMessageId='a1' isLatestTurn />);
@@ -281,12 +350,13 @@ describe('ChatRevisionMarker', () => {
        the graph attaches a card to a turn that has saved nothing yet — on a new
        project that card is the scaffold, minted as Rev 1. */
     setLog(placed('rev-1'));
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-1', dirty: false };
     setRevisions({
       revisions: [revision({ revisionId: 'rev-1', n: 1, turnId: 'u1' })],
       byTurnId: new Map([['u1', revision({ revisionId: 'rev-1', n: 1 })]]),
     });
-    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    expect(screen.getByRole('status').textContent).toBe('Starting from Rev 1');
+    const { container } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    expect(container.firstChild).toBeNull();
   });
 
   it('should hold the last known label while the stream reconnects', () => {

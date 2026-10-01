@@ -14,6 +14,11 @@ export type GeoSpecWorkerRpcClientOptions = {
   openFileSystemBridge: () => FileSystemBridgeConnection;
   runtimeConfig: UiRuntimeConfigInput;
   geoSpecEngine?: 'legacy' | 'native' | undefined;
+  /** Private optional Git candidate route; errors never change authored GeoSpec results. */
+  candidateSync?: Readonly<{
+    fetch: () => Promise<ReadonlyArray<Uint8Array<ArrayBuffer>>>;
+    publish: (candidate: Uint8Array<ArrayBuffer>) => Promise<unknown>;
+  }>;
   createWorker?: CreateGeoSpecWorker;
   /** Milliseconds. */
   runnerTimeout?: number;
@@ -81,6 +86,10 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
   let resolveClose: (() => void) | undefined;
   let initTimeoutId: ReturnType<typeof globalThis.setTimeout> | undefined;
   let closed = false;
+  // ponytail: quarantine an oversized remote for this client session; reopening the project retries.
+  let candidateFetchLimitReached = false;
+  let candidateFetchInFlight: Promise<void> | undefined;
+  let availableCandidates: ReadonlyArray<Uint8Array<ArrayBuffer>> = [];
   const pendingRuns = new Map<string, PendingRun>();
 
   const runnerTimeout = options.runnerTimeout ?? defaultTimeout;
@@ -117,6 +126,14 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     const settledResult = pending.signal?.aborted ? errorResult('GeoSpec request cancelled.') : result;
     clearPendingRun(requestId);
     pending.resolve(settledResult);
+  };
+
+  const publishCandidate = async (candidate: Uint8Array<ArrayBuffer>): Promise<void> => {
+    try {
+      await options.candidateSync?.publish(candidate);
+    } catch {
+      // Optional publication cannot change an authored result.
+    }
   };
 
   const failAllPendingRuns = (message: string): void => {
@@ -183,7 +200,19 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     }
 
     if (message.type === 'result') {
+      const pending = pendingRuns.get(message.requestId);
+      const mayPublish =
+        pending !== undefined &&
+        !closed &&
+        pending.abortTimeoutId === undefined &&
+        !pending.signal?.aborted &&
+        sessionId !== undefined;
       resolveRun(message.requestId, message.result);
+      if (mayPublish && message.result.success) {
+        for (const candidate of message.candidates ?? []) {
+          void publishCandidate(candidate);
+        }
+      }
       return;
     }
 
@@ -261,6 +290,29 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     if (context?.signal?.aborted) {
       return errorResult('GeoSpec request cancelled.');
     }
+    let candidateSharingEnabled = false;
+    if (
+      !closed &&
+      !candidateFetchLimitReached &&
+      candidateFetchInFlight === undefined &&
+      options.geoSpecEngine === 'native' &&
+      options.candidateSync !== undefined
+    ) {
+      const sync = options.candidateSync;
+      const fetchCandidates = async (): Promise<void> => {
+        try {
+          availableCandidates = await sync.fetch();
+          candidateSharingEnabled = true;
+        } catch (error) {
+          if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'FETCH_LIMIT_EXCEEDED') {
+            candidateFetchLimitReached = true;
+          }
+        } finally {
+          candidateFetchInFlight = undefined;
+        }
+      };
+      candidateFetchInFlight = fetchCandidates();
+    }
     let activeSessionId: string;
     try {
       activeSessionId = await ensureInitialized();
@@ -319,6 +371,8 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
           requestId,
           sessionId: activeSessionId,
           args,
+          candidates: candidateSharingEnabled && !closed ? availableCandidates : [],
+          candidateSharingEnabled: candidateSharingEnabled && !closed,
         } satisfies GeoSpecRunnerWorkerRequest);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'GeoSpec worker failed to start a test run.';

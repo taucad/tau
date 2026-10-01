@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_3X_zcVFfUF2IYBFcAAOHq",
+  "name": "D-flat shaft",
+  "description": "Round shaft with one drive flat over its exposed end.",
+  "tags": [
+    "Shafts and bushings",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

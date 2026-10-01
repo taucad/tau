@@ -3,7 +3,7 @@ import type { LoaderFunctionArgs, MetaFunction } from 'react-router';
 import { useLoaderData, useLocation, useParams } from 'react-router';
 import { getActiveGroupValues, parameterEntryPath, parseProjectManifestBytes } from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
-import { findBuiltinExample } from '@taucad/tau-examples/builtin';
+import { findBuiltinProject } from '#lib/builtin-projects.js';
 import { sharePasswordLimits } from '@taucad/share/artifact';
 import { requireParameterRecord } from '@taucad/parameters';
 import type { ShareOpenedArtifact } from '@taucad/share/artifact';
@@ -119,7 +119,7 @@ export const loader = async (arguments_: LoaderFunctionArgs): Promise<unknown> =
   }
   const locator = parseShareSlug(slug);
   if (locator.providerId === 'builtin') {
-    const example = locator.reference ? findBuiltinExample(locator.reference) : undefined;
+    const example = locator.reference ? findBuiltinProject(locator.reference) : undefined;
     if (!example) {
       // oxlint-disable-next-line typescript-eslint/only-throw-error -- route loaders use Response for HTTP status control.
       throw new Response('Not found', { status: 404 });

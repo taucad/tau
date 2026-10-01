@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { esbuild } from '@taucad/esbuild';
 import { geometryCache } from '@taucad/middleware';
-import { createTestRuntimeClient } from '@taucad/runtime-testing';
+import { createTestRuntimeClient, glbToDocument, readGltfNamingSummary } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 import type { CreatePicoOptions, CreatePicoRuntimeOptions } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
@@ -90,7 +90,89 @@ beforeEach(() => {
 });
 
 describe('PicoVoxel dual path through the runtime', () => {
-  it('should render the viewer in the fast lane and retain one exact replay for exports', async () => {
+  it.each(['fast', 'exact'] as const)(
+    'should retain names through cached %s delivery without changing booleans, clones or offsets',
+    async (lane) => {
+      const source = (named: boolean) => `
+      import type { Pico } from 'picovoxel';
+      import type { PicovoxelResult } from '@taucad/picovoxel';
+      export const defaultParams = { voxelSize: 1 };
+      export default function main(pico: Pico): PicovoxelResult {
+        const sphere = pico.createVoxels({ shape: 'sphere', radius: 4 });
+        const bore = pico.createVoxels({ shape: 'sphere', center: [3, 0, 0], radius: 2 });
+        const shape = sphere.subtract(bore).clone().offset({ distance: 0.6 });
+        return ${named ? "[{ shape, name: '蓋 / Mesh' }, { shape: shape.toMesh(), name: '蓋 / Mesh' }]" : '[shape, shape.toMesh()]'};
+      }
+    `;
+      const client = createTestRuntimeClient({
+        runtime: defineRuntime({
+          plugins: [picovoxel({ kernels: { default: { wasm: 'serial' } } }), esbuild()],
+          middleware: [geometryCache()],
+        }),
+      });
+      const attributes = async (bytes: Uint8Array<ArrayBuffer>) => {
+        const document = await glbToDocument(bytes);
+        return document
+          .getRoot()
+          .listMeshes()
+          .map((mesh) =>
+            mesh.listPrimitives().map((primitive) => ({
+              positions: primitive.getAttribute('POSITION')!.getArray(),
+              min: primitive.getAttribute('POSITION')!.getMin([]),
+              max: primitive.getAttribute('POSITION')!.getMax([]),
+              normals: primitive.getAttribute('NORMAL')!.getArray(),
+              indices: primitive.getIndices()!.getArray(),
+            })),
+          );
+      };
+      const opened = [] as Array<ReturnType<typeof client.open>>;
+      const build = async (named: boolean) => {
+        const document = client.open({
+          source: { files: { 'main.ts': source(named) } },
+          evaluateOptions: { lane },
+          watch: false,
+        });
+        opened.push(document);
+        const view = document.view('model');
+        const outcome = await view.rendering();
+        view.close();
+        if (
+          outcome.superseded ||
+          !outcome.rendering.success ||
+          typeof outcome.rendering.artifact.content === 'string'
+        ) {
+          throw new Error('Named render failed');
+        }
+        return { bytes: outcome.rendering.artifact.content, document };
+      };
+      try {
+        const raw = await build(false);
+        const named = await build(true);
+        const again = await build(true);
+        expect(sessions.lanes).toEqual([lane, lane]);
+        expect(again.bytes).toEqual(named.bytes);
+        expect(await attributes(named.bytes)).toEqual(await attributes(raw.bytes));
+        const summary = await readGltfNamingSummary(again.bytes);
+        expect(summary.nodeNames).toEqual(['蓋 / Mesh', '蓋 / Mesh']);
+        expect(summary.meshNames).toEqual(summary.nodeNames);
+        const exported = await again.document.export('glb');
+        expect(exported.success).toBe(true);
+        if (!exported.success) {
+          throw new Error('Exact export failed');
+        }
+        const exportedNames = await readGltfNamingSummary(exported.files[0].bytes);
+        expect(exportedNames.nodeNames).toEqual(summary.nodeNames);
+      } finally {
+        for (const document of opened) {
+          document.close();
+        }
+        await client.shutdown();
+      }
+    },
+    120_000,
+  );
+
+  it('should render the viewer in the fast lane and replay the model exactly for each export', async () => {
     const client = createClient();
     try {
       await render(client);

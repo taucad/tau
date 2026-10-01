@@ -63,6 +63,178 @@ type ProjectFileSystemBridge = Pick<
 type GeoSpecVmFileSystem = GeoSpecWebRunnerOptions['filesystem'];
 
 const workerScope = globalThis as unknown as WorkerScope;
+const candidateEncoder = new TextEncoder();
+const candidateDecoder = new TextDecoder('utf-8', { fatal: true });
+let foreignCandidates: ReadonlyArray<Uint8Array<ArrayBuffer>> = [];
+let locallyEstablishedCandidates: Array<Uint8Array<ArrayBuffer>> = [];
+let candidateSharingEnabled = false;
+
+type ExactClusterSelector = Readonly<{ subjectHash: string; toleranceMm: number }>;
+
+/** The one native fact family this browser candidate route can represent. */
+export const exactClusterSelector = (request: Uint8Array<ArrayBuffer>): ExactClusterSelector | undefined => {
+  try {
+    const input: unknown = JSON.parse(candidateDecoder.decode(request));
+    if (
+      typeof input !== 'object' ||
+      input === null ||
+      !('method' in input) ||
+      input.method !== 'submitClaims' ||
+      !('plan' in input)
+    ) {
+      return undefined;
+    }
+    const { plan } = input;
+    if (
+      typeof plan !== 'object' ||
+      plan === null ||
+      !('subjects' in plan) ||
+      !('claims' in plan) ||
+      !Array.isArray(plan.subjects) ||
+      !Array.isArray(plan.claims)
+    ) {
+      return undefined;
+    }
+    const claim = plan.claims[0] as unknown;
+    if (
+      typeof claim !== 'object' ||
+      claim === null ||
+      !('capability' in claim) ||
+      claim.capability !== 'toHaveConnectedComponents' ||
+      !('payload' in claim)
+    ) {
+      return undefined;
+    }
+    const { payload } = claim;
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      !('kind' in payload) ||
+      payload.kind !== 'connectedComponents'
+    ) {
+      return undefined;
+    }
+    const expected: unknown =
+      'arguments' in payload && Array.isArray(payload.arguments) ? payload.arguments[0] : undefined;
+    if (
+      typeof expected !== 'object' ||
+      expected === null ||
+      !('toleranceMm' in expected) ||
+      typeof expected.toleranceMm !== 'number' ||
+      !Number.isFinite(expected.toleranceMm) ||
+      expected.toleranceMm < 0
+    ) {
+      return undefined;
+    }
+    if (!('subjectSlots' in claim) || !Array.isArray(claim.subjectSlots) || claim.subjectSlots.length !== 1) {
+      return undefined;
+    }
+    const slot: unknown = claim.subjectSlots[0];
+    const subject: unknown = plan.subjects.find(
+      (row: unknown) => typeof row === 'object' && row !== null && 'slot' in row && row.slot === slot,
+    );
+    if (typeof subject !== 'object' || subject === null) {
+      return undefined;
+    }
+    const hash = 'subjectHash' in subject ? subject.subjectHash : undefined;
+    if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/u.test(hash)) {
+      return undefined;
+    }
+    return { subjectHash: hash, toleranceMm: expected.toleranceMm };
+  } catch {
+    return undefined;
+  }
+};
+
+const candidateControl = (
+  input: Readonly<{
+    engine: { processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> };
+    canonicalize: (request: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
+    selector: ExactClusterSelector;
+    operation: 'export' | 'compare';
+    candidate?: unknown;
+  }>,
+): Record<string, unknown> => {
+  const { engine, canonicalize, selector, operation, candidate } = input;
+  const control =
+    candidate === undefined
+      ? { operation, subjectHash: selector.subjectHash, toleranceMm: selector.toleranceMm }
+      : { candidate, operation, subjectHash: selector.subjectHash, toleranceMm: selector.toleranceMm };
+  const bytes = canonicalize(candidateEncoder.encode(JSON.stringify({ _tauNativeExactClusterCandidateV1: control })));
+  const result: unknown = JSON.parse(candidateDecoder.decode(engine.processRequest(bytes)));
+  return typeof result === 'object' && result !== null ? (result as Record<string, unknown>) : {};
+};
+
+/** Local assertion first; private work is conditional and never changes its result. */
+export const withCandidate = <T>(
+  input: Readonly<{
+    request: Uint8Array<ArrayBuffer>;
+    evaluate: () => T;
+    engine: { processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> };
+    canonicalize: (request: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
+    enabled: boolean;
+  }>,
+): T => {
+  const result = input.evaluate();
+  if (!input.enabled || locallyEstablishedCandidates.length > 0) {
+    return result;
+  }
+  const selector = exactClusterSelector(input.request);
+  if (selector === undefined) {
+    return result;
+  }
+  try {
+    const { candidate } = candidateControl({
+      engine: input.engine,
+      canonicalize: input.canonicalize,
+      selector,
+      operation: 'export',
+    });
+    if (
+      typeof candidate === 'object' &&
+      candidate !== null &&
+      'address' in candidate &&
+      typeof candidate.address === 'object' &&
+      candidate.address !== null &&
+      'actionSha256' in candidate.address &&
+      typeof candidate.address.actionSha256 === 'string'
+    ) {
+      const { actionSha256 } = candidate.address;
+      if (locallyEstablishedCandidates.length === 0) {
+        locallyEstablishedCandidates.push(candidateEncoder.encode(JSON.stringify(candidate)));
+      }
+      const matching = foreignCandidates.find((bytes) => {
+        try {
+          const foreign: unknown = JSON.parse(candidateDecoder.decode(bytes));
+          return (
+            typeof foreign === 'object' &&
+            foreign !== null &&
+            'address' in foreign &&
+            typeof foreign.address === 'object' &&
+            foreign.address !== null &&
+            'actionSha256' in foreign.address &&
+            foreign.address.actionSha256 === actionSha256
+          );
+        } catch {
+          return false;
+        }
+      });
+      if (matching !== undefined) {
+        const foreign: unknown = JSON.parse(candidateDecoder.decode(matching));
+        candidateControl({
+          engine: input.engine,
+          canonicalize: input.canonicalize,
+          selector,
+          operation: 'compare',
+          candidate: foreign,
+        });
+      }
+    }
+  } catch {
+    // Optional candidate work cannot change a completed local assertion.
+  }
+  return result;
+};
 
 function createBridgeVmFileSystem(proxy: ProjectFileSystemBridge): GeoSpecVmFileSystem {
   async function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
@@ -231,6 +403,27 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       closeEngine = () => {
         engine.close();
       };
+      const candidateEngine = {
+        ingestSubject: (...args: Parameters<typeof engine.ingestSubject>) => engine.ingestSubject(...args),
+        subjectHandle: (requestBytes: Uint8Array<ArrayBuffer>) => engine.subjectHandle(requestBytes),
+        releaseSubject: (requestBytes: Uint8Array<ArrayBuffer>) => engine.releaseSubject(requestBytes),
+        processRequest: (requestBytes: Uint8Array<ArrayBuffer>) =>
+          withCandidate({
+            request: requestBytes,
+            evaluate: () => engine.processRequest(requestBytes),
+            engine,
+            canonicalize: native.canonicalize,
+            enabled: candidateSharingEnabled,
+          }),
+        evaluateClaim: (requestBytes: Uint8Array<ArrayBuffer>) =>
+          withCandidate({
+            request: requestBytes,
+            evaluate: () => engine.evaluateClaim(requestBytes),
+            engine,
+            canonicalize: native.canonicalize,
+            enabled: candidateSharingEnabled,
+          }),
+      };
       const projectFiles = fileSystem;
       const revisions = new Map<string, SourceRevision>();
       const trackedRuntime = new Proxy(runtimeClient, {
@@ -264,7 +457,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       runner = createNativeGeoSpecRunner({
         filesystem: createBridgeVmFileSystem(fileSystem),
         // PERF-OUTPUT-01: the product selects the bounded success evidence (ruling 13).
-        nativeAssertions: { engine, evidenceProfile: 'bounded' },
+        nativeAssertions: { engine: candidateEngine, evidenceProfile: 'bounded' },
         model: {
           runtime: trackedRuntime,
           readSource: async (source) => {
@@ -325,6 +518,9 @@ const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promi
   // A new run gets a fresh chance at the runtime; a boot failure only latches
   // for the rest of the run that observed it.
   activeSession.resetFatalModelLoadError?.();
+  foreignCandidates = request.candidates ?? [];
+  candidateSharingEnabled = request.candidateSharingEnabled === true;
+  locallyEstablishedCandidates = [];
 
   try {
     const output = await runGeoSpecTests({
@@ -337,9 +533,13 @@ const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promi
       type: 'result',
       requestId: request.requestId,
       result: { success: true, ...output },
+      candidates: locallyEstablishedCandidates,
     });
   } catch (error) {
     postError(request.requestId, error instanceof Error ? error.message : 'GeoSpec worker failed to run tests.');
+  } finally {
+    foreignCandidates = [];
+    locallyEstablishedCandidates = [];
   }
 };
 

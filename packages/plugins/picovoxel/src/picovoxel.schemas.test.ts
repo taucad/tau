@@ -94,6 +94,7 @@ describe('lane schemas', () => {
 
   it('should export exact by default in every native format', () => {
     expect(picovoxelExportSchemas.glb.parse({})).toMatchObject({ lane: 'exact' });
+    expect(picovoxelExportSchemas.gltf.parse({})).toEqual(picovoxelExportSchemas.glb.parse({}));
     expect(picovoxelExportSchemas.stl.parse({})).toEqual({ lane: 'exact', unit: 'mm', scale: 1, offset: [0, 0, 0] });
   });
 

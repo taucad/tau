@@ -62,7 +62,7 @@ type EdgeRun = Readonly<{ text: string; minX: number; height: number; maxY: numb
  * Plate-name glyph band along the left edge of the PEI plates (§3: x≈6.4–11.6, cap ≈5 mm; the full
  * name runs ≈106 mm from y≈18 behind the rear edge).
  *
- * The brand word is omitted (trademark), so each name starts where its first remaining word stood
+ * The brand word is independently typeset in Geist, so each name starts where its first remaining word stood
  * and keeps that word's length, both taken from Geist's advance widths.
  */
 const peiEdgeName = { minX: 5.9, height: 5.2 };
@@ -226,14 +226,14 @@ const plates: Readonly<Record<PlateId, PlateSpec>> = {
     edgeText: [],
   },
   /*
-   * Current "Bambu Smooth PEI Plate" generation: 0.125 mm PEI sheet on 0.05 mm
-   * adhesive over 0.5 mm steel (§0), black fine matte #282A2E (§2); the sheet
+   * Double-sided "Bambu Smooth PEI Plate" visualization: two 0.125 mm PEI sheets
+   * plus estimated 0.05 mm adhesive on each side of 0.5 mm steel (§0), black fine matte #282A2E (§2); the sheet
    * stops at the body so the tab shows steel. Grey ink on black (§3).
    */
   'high-temperature': {
     surfaceThickness: 0.175,
     steelThickness,
-    undersideThickness: 0,
+    undersideThickness: 0.175,
     surfaceCoversTab: false,
     surfaceColor: '#282A2E',
     roughness: 0.7,
@@ -244,16 +244,14 @@ const plates: Readonly<Record<PlateId, PlateSpec>> = {
     placementIcons: true,
     codes: [currentCode],
     hairline: currentHairline,
-    edgeText: [{ text: 'Smooth PEI Plate', ...peiEdgeName, maxY: bodyMax - 50.5, length: 73.5 }],
+    edgeText: [{ text: 'Bambu Smooth PEI Plate', ...peiEdgeName, maxY: bodyMax - 18, length: 106 }],
   },
   /*
    * Current gold generation: 0.075 mm PEI powder on both faces of 0.5 mm steel
    * (§0), #C4A168 (§2), light-grey #CECECE ink and band (§3).
    *
-   * ponytail: the centre outline logo of the gen-2 render is deliberately
-   * omitted (trademark; §3 "Centre logo" makes it optional), as is the small
-   * brand mark at the band's left end. The powder texture is a material
-   * `finish`, not geometry (§2 "Textured PEI Plate").
+   * The center outline is independently reconstructed; placement is approximate.
+   * Powder grain is supplied by the viewer's physical material, not BRep facets.
    */
   'textured-pei': {
     surfaceThickness: 0.075,
@@ -269,7 +267,7 @@ const plates: Readonly<Record<PlateId, PlateSpec>> = {
     placementIcons: true,
     codes: [currentCode],
     hairline: currentHairline,
-    edgeText: [{ text: 'Textured PEI Plate', ...peiEdgeName, maxY: bodyMax - 49.1, length: 74.9 }],
+    edgeText: [{ text: 'Bambu Textured PEI Plate', ...peiEdgeName, maxY: bodyMax - 18, length: 106 }],
   },
 };
 
@@ -387,7 +385,44 @@ export default function main(params = defaultParams): ModelShape[] {
     minY: hairlineSpec.centerY - hairlineSpec.width / 2,
     maxY: hairlineSpec.centerY + hairlineSpec.width / 2,
   });
-  const ink = [hairline, ...spec.edgeText.map((run) => drawEdgeRun(run)), ...(spec.ink?.() ?? [])];
+  const centerBrand =
+    params.plate === 'textured-pei'
+      ? [
+          [
+            [91, 174],
+            [125, 174],
+            [125, 130],
+            [91, 113],
+          ],
+          [
+            [131, 174],
+            [165, 174],
+            [165, 130],
+            [131, 143],
+          ],
+          [
+            [91, 107],
+            [125, 124],
+            [125, 75],
+            [91, 75],
+          ],
+          [
+            [131, 137],
+            [165, 124],
+            [165, 75],
+            [131, 75],
+          ],
+        ].map((points) => {
+          const [first, ...rest] = points;
+          const pen = draw(first as [number, number]);
+          for (const point of rest) {
+            pen.lineTo(point as [number, number]);
+          }
+          const outline = pen.close();
+          return outline.cut(outline.offset(-0.5));
+        })
+      : [];
+  const ink = [...centerBrand, hairline, ...spec.edgeText.map((run) => drawEdgeRun(run)), ...(spec.ink?.() ?? [])];
 
   const shapes: ModelShape[] = [
     {

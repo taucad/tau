@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import type { GlbMaterial, GlbResources } from '@taucad/geometry-core';
 
-export const picogkProtocolVersion = 6;
+export const picogkProtocolVersion = 7;
 
 export const picogkIssueSchema = z.object({
   message: z.string(),
@@ -79,6 +80,13 @@ const picogkComponentBase = {
   ]),
   metallic: z.number().min(0).max(1),
   roughness: z.number().min(0).max(1),
+  material: z
+    .custom<GlbMaterial>((value) => value !== null && typeof value === 'object' && !Array.isArray(value))
+    .optional(),
+  texCoordOffset: z.number().int().nonnegative().optional(),
+  texCoordCount: z.number().int().nonnegative().optional(),
+  tangentOffset: z.number().int().nonnegative().optional(),
+  tangentCount: z.number().int().nonnegative().optional(),
   positionOffset: z.number().int().nonnegative(),
   positionCount: z.number().int().positive(),
   normalOffset: z.number().int().nonnegative(),
@@ -104,6 +112,18 @@ export const picogkBuildSchema = z.object({
   byteLength: z.number().int().nonnegative(),
   sha256: z.string().regex(/^[\da-f]{64}$/iu),
   components: z.array(picogkComponentSchema),
+  images: z
+    .array(
+      z.object({
+        offset: z.number().int().nonnegative(),
+        byteLength: z.number().int().positive(),
+        mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+        name: z.string().nullable().optional(),
+      }),
+    )
+    .nullish(),
+  textures: z.custom<NonNullable<GlbResources['textures']>>((value) => Array.isArray(value)).nullish(),
+  samplers: z.custom<NonNullable<GlbResources['samplers']>>((value) => Array.isArray(value)).nullish(),
   mechanism: z.unknown().optional(),
   warnings: z.array(picogkIssueSchema).optional(),
   recycleAfterResponse: z.boolean(),

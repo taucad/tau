@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_vx4dNSPZuZY0PZzslfamS",
+  "name": "Involute spur gear",
+  "description": "Metric-module, 20-degree involute transmission geometry with real teeth and a declared datum. Tooth profiles are reused from Tau’s planetary gear design.",
+  "tags": [
+    "Gears and transmission",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

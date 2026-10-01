@@ -41,24 +41,34 @@ export const ChatErrorTooLong = memo(function ({
           {resumable ? <p>Resume to continue without losing your work.</p> : null}
         </>
       }
-      actionsRowFrom='sm'
       actions={
         <>
           {resumable ? (
-            <Button size='sm' onClick={continueChat}>
+            <Button
+              size='xs'
+              onClick={() => {
+                continueChat();
+              }}
+            >
               <Play className='size-3.5' />
               Resume
             </Button>
           ) : null}
           {resumable ? (
-            <Button variant='outline' size='sm' onClick={regenerate}>
+            <Button
+              variant='outline'
+              size='xs'
+              onClick={() => {
+                regenerate();
+              }}
+            >
               <RefreshCcw className='size-3.5' />
               Try again
             </Button>
           ) : null}
           <Button
             variant='outline'
-            size='sm'
+            size='xs'
             disabled={!canOpenNewChat}
             onClick={() => {
               void openNewChat({ activeExecution: execution });

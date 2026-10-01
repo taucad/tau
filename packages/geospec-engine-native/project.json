@@ -763,7 +763,7 @@
         "{workspaceRoot}/out/artifacts/geospec-native-engine/ci"
       ],
       "options": {
-        "command": "node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare",
+        "command": "node packages/geospec-engine-native/scripts/ci-artifacts.mjs ensure-delivery",
         "forwardAllArgs": false
       }
     },

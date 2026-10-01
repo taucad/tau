@@ -314,8 +314,14 @@ const recoveryUnknown = (events: readonly AgentLogEvent[]): boolean =>
   events.some((event) => event.type === 'run.lifecycle' && event.detail?.code === 'EXTERNAL_AGENT_RECOVERY_UNKNOWN');
 
 /** One run's own last lifecycle record, in a chat that holds several runs. */
-const stopOf = (events: readonly AgentLogEvent[], runId: string): AgentLogEvent | undefined =>
-  events.findLast((event) => event.runId === runId && event.type === 'run.lifecycle');
+const stopOf = (
+  events: readonly AgentLogEvent[],
+  runId: string,
+): Extract<AgentLogEvent, { type: 'run.lifecycle' }> | undefined =>
+  events.findLast(
+    (event): event is Extract<AgentLogEvent, { type: 'run.lifecycle' }> =>
+      event.runId === runId && event.type === 'run.lifecycle',
+  );
 
 const textOfMessage = (message: ProviderMessage | undefined): string => {
   const { content } = message ?? {};
@@ -909,9 +915,39 @@ describe('the external agent run kind', () => {
      * which is what a user who cancelled and rephrased expects. */
     expect(sent(frames, 'session/close')).toBe(0);
     expect(sent(frames, 'session/cancel')).toBe(1);
+    expect(stopOf(await readLog(workspaceRoot, chatId), runId)).toMatchObject({
+      state: 'cancelled',
+      detail: { code: 'USER_STOPPED' },
+    });
+    await launcher.execute({ type: 'resume', commandId: 'cmd-resume-stopped', payload: { chatId, runId } });
+    await until(async () => sent(frames, 'session/prompt') === 2, 'the stopped turn continuation');
+    const prompts = frames.filter(
+      ({ direction, frame }) => direction === 'client->agent' && frame.includes('"method":"session/prompt"'),
+    );
+    expect(prompts[1]?.frame).toContain('Continue from where you stopped.');
+    await until(async () => {
+      const pending = await launcher.pendingInterrupts(runId);
+      return pending.length > 0;
+    }, 'a fresh continuation approval');
+    const [resumedPermission] = await launcher.pendingInterrupts(runId);
+    await launcher.execute({
+      type: 'resolve-interrupt',
+      commandId: 'approve-resumed',
+      payload: { chatId, runId, interruptId: resumedPermission?.interruptId ?? '', outcome: 'approved' },
+    });
+    await until(
+      async () => stopOf(await readLog(workspaceRoot, chatId), runId)?.state === 'completed',
+      'the resumed turn completes',
+      { dump: async () => readLog(workspaceRoot, chatId) },
+    );
+    await until(async () => {
+      const admitted = await launcher.host.waitForAdmission(chatId);
+      return admitted === undefined;
+    }, 'the resumed chat to be free');
+    expect(sent(frames, 'session/new')).toBe(1);
     await runTurn(harness, { chatId, runId: 'run-external-rephrased', text: 'second noask' });
     expect(sent(frames, 'session/new')).toBe(1);
-    expect(sent(frames, 'session/prompt')).toBe(2);
+    expect(sent(frames, 'session/prompt')).toBe(3);
     /* The cancel belonged to the first prompt; the rephrased turn completes. */
     expect(stopOf(await readLog(workspaceRoot, chatId), 'run-external-rephrased')).toMatchObject({
       state: 'completed',

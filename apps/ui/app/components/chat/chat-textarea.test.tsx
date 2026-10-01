@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
     geometryUnits: new Map([['main.ts', cadRef]]),
     viewSettings,
     viewRecords: new Map(Object.entries(viewSettings)),
+    viewEntryPaths: new Map([['view', 'main.ts']]),
     graphicsRef: { id: 'graphics' },
     handleAddImage: vi.fn(),
     onScreenshotAction: undefined as ((item: ContextSuggestionItem) => void) | undefined,
@@ -74,6 +75,7 @@ vi.mock('#hooks/use-project.js', () => ({
     geometryUnits: mocks.geometryUnits,
     viewGraphics: new Map([['view', mocks.graphicsRef]]),
     viewRecords: mocks.viewRecords,
+    viewEntryPaths: mocks.viewEntryPaths,
     editorRef: { getSnapshot: () => ({ context: { viewSettings: mocks.viewSettings } }) },
     projectRef,
   }),
@@ -126,6 +128,7 @@ describe('ChatTextarea screenshots', () => {
     mocks.geometryUnits.delete('other.ts');
     delete mocks.viewSettings['parked'];
     mocks.viewRecords.delete('parked');
+    mocks.viewEntryPaths.set('view', 'main.ts');
   });
 
   it('should say when a screenshot it adds leaves a section cut out', async () => {
@@ -141,6 +144,12 @@ describe('ChatTextarea screenshots', () => {
     await captureCurrentView([]);
 
     expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it('should not capture the graphics of an unrelated entry as the main view', async () => {
+    mocks.viewEntryPaths.set('view', 'other.ts');
+    await captureCurrentView([]);
+    expect(captureCadImages).toHaveBeenCalledWith(expect.objectContaining({ graphicsRef: undefined }));
   });
 
   it('discovers a restored parked entry and captures only after claiming its actor', async () => {

@@ -10,7 +10,7 @@ const glb = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
 const files = (bytes = new Uint8Array([1, 2, 3])): ExportFile[] => [
   { name: 'thumbnail.webp', mimeType: 'image/webp', bytes },
 ];
-const thumbnailJob = (identity: string): HeadlessImageJob => ({
+const thumbnailJob = (identity: string): WebpGlbJob => ({
   kind: 'automatic-thumbnail',
   identity,
   projectId: 'project-1',
@@ -40,6 +40,7 @@ const createFixture = (dependencies: HeadlessImageServiceDependencies = {}) => {
   const service = new HeadlessImageService({
     createImageClient: vi.fn().mockResolvedValue(imageClient),
     isGpuAvailable: () => true,
+    isAutomaticGpuAvailable: () => true,
     ...dependencies,
   });
   activeServices.add(service);
@@ -64,6 +65,27 @@ describe('HeadlessImageService', () => {
       files: [{ name: 'render.glb', bytes: glb, mimeType: 'model/gltf-binary' }],
       options: { width: 16, height: 16 },
     });
+  });
+
+  it('defers only cold automatic part batches and lets one explicit retry warm the shared worker', async () => {
+    const { imageClient, service } = createFixture();
+    vi.mocked(imageClient.transcode).mockRejectedValueOnce(new Error('Invalid GLB'));
+    const partBatch = {
+      ...thumbnailJob('cold-part'),
+      exportOptions: { mode: 'batch' as const, width: 256, height: 256, views: [] },
+    };
+    await expect(service.export(partBatch)).rejects.toMatchObject({ code: 'cold-start-deferred' });
+    expect(imageClient.connect).not.toHaveBeenCalled();
+    expect(imageClient.transcode).not.toHaveBeenCalled();
+
+    await expect(service.export({ ...partBatch, kind: 'manual-thumbnail' })).rejects.toThrow('Invalid GLB');
+    expect(imageClient.connect).toHaveBeenCalledOnce();
+    await expect(service.export(partBatch)).rejects.toMatchObject({ code: 'cold-start-deferred' });
+    expect(imageClient.transcode).toHaveBeenCalledOnce();
+
+    await expect(service.export({ ...partBatch, kind: 'manual-thumbnail' })).resolves.toEqual(files());
+    await expect(service.export({ ...partBatch, identity: 'warm-part' })).resolves.toEqual(files());
+    expect(imageClient.transcode).toHaveBeenCalledTimes(3);
   });
 
   it('transcodes settled GLB bytes without a kernel render or filesystem', async () => {
@@ -162,6 +184,37 @@ describe('HeadlessImageService', () => {
     gate.resolve();
     await expect(Promise.all([active, ...accepted])).resolves.toHaveLength(17);
     expect(imageClient.transcode).toHaveBeenCalledTimes(17);
+  });
+
+  it('should bound automatic queued source bytes while allowing same-project replacement', async () => {
+    const { imageClient, service } = createFixture();
+    const gate = Promise.withResolvers<void>();
+    vi.mocked(imageClient.transcode).mockImplementationOnce(async () => {
+      await gate.promise;
+      return { success: true, data: files(), issues: [] };
+    });
+    const active = service.export(captureJob('active'));
+    await vi.waitFor(() => {
+      expect(imageClient.transcode).toHaveBeenCalledOnce();
+    });
+    const first = service.export({
+      ...thumbnailJob('first'),
+      content: new Uint8Array(33 * 1024 * 1024),
+    });
+    const overflow = service.export({
+      ...thumbnailJob('overflow'),
+      projectId: 'other-project',
+      content: new Uint8Array(33 * 1024 * 1024),
+    });
+    await expect(overflow).resolves.toBeUndefined();
+    const replacement = service.export({
+      ...thumbnailJob('replacement'),
+      content: new Uint8Array(32 * 1024 * 1024),
+    });
+    await expect(first).resolves.toBeUndefined();
+    gate.resolve();
+    await expect(Promise.all([active, replacement])).resolves.toHaveLength(2);
+    expect(imageClient.transcode).toHaveBeenCalledTimes(2);
   });
 
   it('rejects pre-aborted and queued work without starting or poisoning sibling jobs', async () => {
@@ -495,7 +548,8 @@ describe('HeadlessImageService', () => {
   it('selects direct SVG WebP rendering with the exact thumbnail options', async () => {
     const webp: ExportFile = { name: 'render.webp', mimeType: 'image/webp', bytes: new Uint8Array([1, 2, 3]) };
     const renderSvg = vi.fn(async () => webp);
-    const { imageClient, service } = createFixture({ renderSvg });
+    const automaticGpuProbe = vi.fn(() => false);
+    const { imageClient, service } = createFixture({ renderSvg, isAutomaticGpuAvailable: automaticGpuProbe });
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"/>';
     const exportOptions = { width: 768, height: 576, quality: 0.9 };
 
@@ -512,6 +566,7 @@ describe('HeadlessImageService', () => {
       }),
     ).resolves.toEqual([webp]);
     expect(renderSvg).toHaveBeenCalledWith(svg, 'webp', exportOptions);
+    expect(automaticGpuProbe).not.toHaveBeenCalled();
     expect(imageClient.transcode).not.toHaveBeenCalled();
   });
 
@@ -563,6 +618,29 @@ describe('HeadlessImageService', () => {
     const result = service.export(captureJob('missing-gpu'));
     await expect(result).rejects.toBeInstanceOf(HeadlessImageError);
     await expect(result).rejects.toMatchObject({ code: 'adapter-unavailable' });
+  });
+
+  it('defers automatic previews on a software adapter without starting native rendering, while manual retry remains available', async () => {
+    const { imageClient, service } = createFixture({ isAutomaticGpuAvailable: () => false });
+    await expect(service.export(captureJob('software-preview', { kind: 'automatic-thumbnail' }))).rejects.toMatchObject(
+      {
+        code: 'driver-unsupported',
+      },
+    );
+    expect(imageClient.transcode).not.toHaveBeenCalled();
+    await expect(service.export(captureJob('software-retry', { kind: 'manual-thumbnail' }))).resolves.toEqual(files());
+    expect(imageClient.transcode).toHaveBeenCalledOnce();
+  });
+
+  it('does not enqueue an automatic preview when disposal wins during adapter admission', async () => {
+    const probe = Promise.withResolvers<boolean>();
+    const createImageClient = vi.fn();
+    const service = new HeadlessImageService({ createImageClient, isAutomaticGpuAvailable: () => probe.promise });
+    const pending = service.export(captureJob('late-adapter', { kind: 'automatic-thumbnail' }));
+    service.dispose();
+    probe.resolve(true);
+    await expect(pending).rejects.toThrow('disposed');
+    expect(createImageClient).not.toHaveBeenCalled();
   });
 
   it.each([

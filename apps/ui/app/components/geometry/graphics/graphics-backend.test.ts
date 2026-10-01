@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readGraphicsBackendQueryOverride } from '#components/geometry/graphics/graphics-backend.js';
+import {
+  readGraphicsBackendQueryOverride,
+  resolveViewerGraphicsBackend,
+} from '#components/geometry/graphics/graphics-backend.js';
 
 const withSearch = (search: string): void => {
   vi.stubGlobal('window', { location: { search } });
@@ -24,5 +27,25 @@ describe('readGraphicsBackendQueryOverride', () => {
 
   it('is undefined without a window', () => {
     expect(readGraphicsBackendQueryOverride()).toBeUndefined();
+  });
+});
+
+describe('resolveViewerGraphicsBackend', () => {
+  it('should keep WebGL as the default and enable WebGPU only with an adapter', () => {
+    withSearch('');
+    expect(resolveViewerGraphicsBackend(false, true)).toBe('webgl');
+    expect(resolveViewerGraphicsBackend(true, true)).toBe('webgpu');
+    expect(resolveViewerGraphicsBackend(true, false)).toBe('webgl');
+    expect(resolveViewerGraphicsBackend(false, false)).toBe('webgl');
+  });
+
+  it('should preserve the internal query override independently of the flag', () => {
+    withSearch('?graphicsBackend=webgl');
+    expect(resolveViewerGraphicsBackend(true, true)).toBe('webgl');
+    withSearch('?graphicsBackend=webgpu');
+    expect(resolveViewerGraphicsBackend(false, true)).toBe('webgpu');
+    expect(resolveViewerGraphicsBackend(false, false)).toBe('webgl');
+    withSearch('?graphicsBackend=invalid');
+    expect(resolveViewerGraphicsBackend(true, true)).toBe('webgpu');
   });
 });

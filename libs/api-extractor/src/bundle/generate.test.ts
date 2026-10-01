@@ -70,6 +70,38 @@ describe('generateBundles', () => {
     expect(digest(Buffer.from(shipped))).toBe('e2475599326840f9e87825fb3ff7bad555576cc20cbf71a7a9b69296382834ae');
   });
 
+  it('should expose all PicoVoxel Tau authoring types through the shipped reference index', () => {
+    const agent = join(scratch, 'packages/plugins/picovoxel/agent');
+    const [bundle] = readManifest(agent).bundles;
+    expect(bundle?.files).toContain('tau-api-index.md');
+    const directory = join(agent, 'cad-picovoxel');
+    expect(readFileSync(join(directory, 'SKILL.md'), 'utf8')).toContain('tau-api-index.md');
+    const index = readFileSync(join(directory, 'tau-api-index.md'), 'utf8');
+    for (const name of ['PicovoxelPart', 'PicovoxelModel', 'PicovoxelResult', 'Material', 'Image', 'Resources']) {
+      expect(index).toContain(`${name} (`);
+    }
+  });
+
+  it('should ship PicoVoxel motion guidance and share the name vocabulary with Replicad', () => {
+    const agent = join(scratch, 'packages/plugins/picovoxel/agent');
+    const [bundle] = readManifest(agent).bundles;
+    expect(bundle?.description).toContain('mechanisms');
+    expect(bundle?.files).toContain('kinematics-reference.md');
+    const body = readFileSync(join(agent, 'cad-picovoxel/SKILL.md'), 'utf8');
+    expect(body).toContain('kinematics-reference.md');
+    for (const kernel of ['picovoxel', 'replicad']) {
+      const reference = readFileSync(
+        join(scratch, `packages/plugins/${kernel}/agent/cad-${kernel}/kinematics-reference.md`),
+        'utf8',
+      );
+      expect(reference).toContain('MechanismSource<ShapeName>');
+      expect(reference).toContain('LinkSource<ShapeName>');
+    }
+    const reference = readFileSync(join(agent, 'cad-picovoxel/kinematics-reference.md'), 'utf8');
+    expect(reference).toContain('includeTopology: true');
+    expect(reference).toContain('STL carries no mechanism');
+  });
+
   it.each(bundleOwners.map((owner) => [owner.slug, owner.packageDirectory] as const))(
     '%s is committed exactly as it regenerates',
     (_slug, packageDirectory) => {

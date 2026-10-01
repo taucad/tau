@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_pVM47V2zGWugrE3sqi2aB",
+  "name": "Carriage bolt",
+  "description": "Carriage bolt with editable millimetre dimensions and a deliberately symbolic thread.",
+  "tags": [
+    "Fasteners",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

@@ -18,7 +18,14 @@ internal sealed record ComponentRange(
     long NormalOffset,
     int NormalCount,
     long IndexOffset,
-    int IndexCount);
+    int IndexCount,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? Material = null,
+    long TexCoordOffset = 0,
+    int TexCoordCount = 0,
+    long TangentOffset = 0,
+    int TangentCount = 0);
+
+internal sealed record ImageRange(long Offset, int ByteLength, string MimeType, string? Name);
 
 internal sealed record BuildResult(
     string ArtifactPath,
@@ -29,7 +36,10 @@ internal sealed record BuildResult(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<Issue>? Warnings,
     bool RecycleAfterResponse,
     WorkerTimings Timings,
-    WorkerMetrics Metrics);
+    WorkerMetrics Metrics,
+    IReadOnlyList<ImageRange>? Images = null,
+    IReadOnlyList<Dictionary<string, object?>>? Textures = null,
+    IReadOnlyList<Dictionary<string, object?>>? Samplers = null);
 
 internal sealed record WorkerTimings(
     bool CompileCacheHit,
@@ -58,7 +68,7 @@ internal static class MeshArtifactWriter
         WorkerDiagnostics diagnostics)
     {
         var write = Stopwatch.StartNew();
-        var artifact = WriteComponents(artifactRoot, execution.Components);
+        var artifact = WriteComponents(artifactRoot, execution.Components, execution.Resources);
         var result = new BuildResult(
             artifact.Path,
             artifact.ByteLength,
@@ -68,7 +78,8 @@ internal static class MeshArtifactWriter
             execution.Warnings.Count == 0 ? null : execution.Warnings,
             execution.RecycleAfterResponse,
             diagnostics.Timings,
-            diagnostics.Metrics);
+            diagnostics.Metrics,
+            artifact.Images, execution.Resources?.Textures, execution.Resources?.Samplers);
         write.Stop();
         return result with
         {
@@ -76,13 +87,14 @@ internal static class MeshArtifactWriter
         };
     }
 
-    private static (string Path, long ByteLength, string Sha256, IReadOnlyList<ComponentRange> Components) WriteComponents(
+    private static (string Path, long ByteLength, string Sha256, IReadOnlyList<ComponentRange> Components, IReadOnlyList<ImageRange> Images) WriteComponents(
         string artifactRoot,
-        IReadOnlyList<ExtractedComponent> components)
+        IReadOnlyList<ExtractedComponent> components, MaterialResources? resources)
     {
         Directory.CreateDirectory(artifactRoot);
         var path = Path.Combine(artifactRoot, $"{Guid.NewGuid():N}.tau-mesh");
         var ranges = new List<ComponentRange>(components.Count);
+        var images = new List<ImageRange>();
         long byteLength;
         /* W31/D24: the artifact is hashed in the pass that makes it durable. Reading the file back to
          * hash it was a second full pass over every mesh. The scalars are written as whole spans —
@@ -99,6 +111,10 @@ internal static class MeshArtifactWriter
                 Append(stream, digest, MemoryMarshal.AsBytes<float>(component.Normals));
                 var indexOffset = stream.Position;
                 Append(stream, digest, MemoryMarshal.AsBytes<uint>(component.Indices));
+                var texCoordOffset = stream.Position;
+                Append(stream, digest, MemoryMarshal.AsBytes<float>(component.TexCoords ?? []));
+                var tangentOffset = stream.Position;
+                Append(stream, digest, MemoryMarshal.AsBytes<float>(component.Tangents ?? []));
                 ranges.Add(new ComponentRange(
                     component.Id,
                     component.Kind,
@@ -111,11 +127,19 @@ internal static class MeshArtifactWriter
                     normalOffset,
                     component.Normals.Length,
                     indexOffset,
-                    component.Indices.Length));
+                    component.Indices.Length,
+                    component.Material,
+                    texCoordOffset, component.TexCoords?.Length ?? 0,
+                    tangentOffset, component.Tangents?.Length ?? 0));
+            }
+            foreach (var image in resources?.Images ?? [])
+            {
+                images.Add(new ImageRange(stream.Position, image.Data.Length, image.MimeType, image.Name));
+                Append(stream, digest, image.Data);
             }
             byteLength = stream.Position;
         }
-        return (path, byteLength, Convert.ToHexString(digest.GetHashAndReset()).ToLowerInvariant(), ranges);
+        return (path, byteLength, Convert.ToHexString(digest.GetHashAndReset()).ToLowerInvariant(), ranges, images);
     }
 
     private static void Append(Stream stream, IncrementalHash digest, ReadOnlySpan<byte> bytes)

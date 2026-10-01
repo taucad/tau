@@ -39,6 +39,35 @@ materials = load_script('generate-delivery-materials')
 
 
 class DeploymentTargetTest(unittest.TestCase):
+    def test_should_verify_relocated_mixed_sources_without_relabeling_external_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'consumer'
+            package = root / 'packages/geospec-engine-native'
+            source = package / 'rust/src/lib.rs'
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b'original producer source')
+            external = Path(temporary) / 'tool.bin'
+            external.write_bytes(b'original tool')
+            producer_root = Path(temporary) / 'producer'
+            recorded_source = producer_root / 'packages/geospec-engine-native/rust/src/lib.rs'
+            closure = {'sourceRoot': str(producer_root), 'inputs': [
+                {'path': str(recorded_source), 'sha256': materials.digest(source)},
+                {'path': str(external), 'sha256': materials.digest(external)},
+            ]}
+            with patch.object(materials, 'ROOT', root), patch.object(materials, 'PACKAGE', package):
+                self.assertEqual(materials.current_mixed_source(closure, recorded_source), source)
+                self.assertEqual(materials.current_mixed_source(closure, external), external)
+                self.assertEqual(len(materials.verify_mixed_source_inputs(closure)), 2)
+                source.write_bytes(b'changed source')
+                with self.assertRaisesRegex(ValueError, 'Mixed input changed'):
+                    materials.verify_mixed_source_inputs(closure)
+                source.write_bytes(b'original producer source')
+                (source.parent / 'new.rs').write_bytes(b'new source')
+                with self.assertRaisesRegex(ValueError, 'Mixed source files added'):
+                    materials.verify_mixed_source_inputs(closure)
+                with self.assertRaisesRegex(ValueError, 'Noncanonical mixed input path'):
+                    materials.current_mixed_source(closure, str(recorded_source.parent / '../src/lib.rs'))
+
     def test_should_carry_job_limits_and_owned_git_ceilings_through_env_i(self):
         tools = {name: f'/recorded/{name}/bin/{name}'
                  for name in ['node', 'python3', 'cmake', 'ninja', 'git', 'rustup', 'xcrun', 'bash']}
@@ -74,7 +103,20 @@ class DeploymentTargetTest(unittest.TestCase):
                         .startswith('-msimd128 '))
         self.assertIn('occt-mixed-simd128', simd_recipe['rebuildMixedPrefix'])
         self.assertIn('occt-mixed-simd128/install', simd_recipe['prepare'])
-        recipe = simd_recipe
+        with tempfile.TemporaryDirectory() as temporary:
+            inputs = Path(temporary) / 'transport-mixed-inputs.json'
+            inputs.write_text('{"schema":"geospec-mixed-build-inputs-v3"}')
+            mixed['paths'] = {'inputs': inputs}
+            with patch.object(Path, 'read_text', return_value='# mocked Emscripten config\n'):
+                recipe = materials.mixed_producer_recipe(mixed)
+            recorded = recipe['recordedEnvironment']
+            self.assertEqual(recorded['GEOSPEC_PRODUCER_ROUTE'], 'nx-build-mixed-st-release-v1')
+            self.assertEqual(recorded['GEOSPEC_MIXED_INPUTS'],
+                             '/recorded/prep/mixed-inputs-simd128.json')
+            self.assertNotEqual(recorded['GEOSPEC_MIXED_INPUTS'], str(inputs))
+            self.assertEqual(recorded['GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256'], materials.digest(inputs))
+            self.assertEqual(recorded['GEOSPEC_PRODUCER_CARGO_CWD'], str(materials.ROOT))
+            self.assertNotIn('nx-build-mixed-st-release-v1', recipe['buildAndLink'])
         exported = {name: '/owned path/' + name for name in recipe['requiredExportedVariables']}
         exported['GEOSPEC_SOURCE_ROOT'] = str(SCRIPTS)
         ceiling = ':'.join(exported[name] for name in
@@ -91,6 +133,8 @@ class DeploymentTargetTest(unittest.TestCase):
                     for name in ['GEOSPEC_OCCT_JOBS', 'EMCC_CORES', 'CARGO_BUILD_JOBS', 'BINARYEN_CORES']:
                         self.assertEqual(inner[name], jobs or '2')
                     self.assertEqual(inner['GIT_CEILING_DIRECTORIES'], ceiling)
+                    if key == 'buildAndLink':
+                        self.assertEqual(inner['GEOSPEC_PRODUCER_ROUTE'], 'mixed-relink-unverified')
 
     def contract(self, kind):
         context = {

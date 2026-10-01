@@ -19,6 +19,8 @@ import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-l
 const continueChat = vi.fn();
 const regenerate = vi.fn();
 const resumableFailureOverrides = vi.hoisted(() => new Set<string>());
+const debug = vi.hoisted(() => ({ enabled: false }));
+vi.mock('#flags/use-feature.js', () => ({ useFeature: () => debug.enabled }));
 
 const googleInvalidArgumentBody = [
   {
@@ -90,8 +92,46 @@ const persisted = (error: ChatErrorPayload): void => {
 
 describe('ChatError', () => {
   beforeEach(() => {
+    debug.enabled = false;
     resumableFailureOverrides.clear();
     vi.clearAllMocks();
+  });
+
+  it('offers compact Resume for a committed intentional Stop from the caught-up log', async () => {
+    const projection = createActor(chatProjectionLogic).start();
+    projection.send({
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        cursor: 0,
+        nextCursor: 4,
+        endCursor: 4,
+        events: [
+          lifecycleRow(0, 'admitted'),
+          lifecycleRow(1, 'running'),
+          logRow(2, {
+            type: 'turn.history-projection-committed',
+            retainedMessageIds: [],
+            message: { id: 'user_1', role: 'user', content: 'Work' },
+            context: { version: 1, systemPrompt: '', initialMessages: [], postCompactionMessages: [] },
+          }),
+          logRow(3, {
+            type: 'run.lifecycle',
+            state: 'cancelled',
+            detail: { code: 'USER_STOPPED', message: 'Stopped.' },
+          }),
+        ],
+      },
+    });
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({ projection: projection.getSnapshot().context, attachmentStatus: 'attached' } as CombinedChatState),
+    );
+    render(<ChatErrorBanner />);
+    expect(screen.getByText('You stopped this turn')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).not.toHaveBeenCalled();
+    projection.stop();
   });
 
   it('retires an untyped legacy connection card only after the current host log catches up', () => {
@@ -288,7 +328,8 @@ describe('ChatError', () => {
 
   /* The masked in-stream failure arrives on an HTTP 200, so its category reads
    * `generic`; only the code says the turn survived it (S1, S2, S7, S10). */
-  it('should present a coded model-call failure as a paused turn with the provider words', async () => {
+  it('should keep a lost connection concise and disclose the provider words only in Tau Debug', async () => {
+    debug.enabled = true;
     const user = userEvent.setup();
     persisted({
       category: errorCategory.generic,
@@ -301,16 +342,17 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('Tau paused this turn')).toBeInTheDocument();
+    expect(screen.getByText('Connection lost')).toBeInTheDocument();
     expect(
-      screen.getByText('server_error: The server had an error while processing your request.'),
-    ).toBeInTheDocument();
+      screen.queryByText('server_error: The server had an error while processing your request.'),
+    ).not.toBeInTheDocument();
     expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/iu })).not.toBeInTheDocument();
     expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Details' }));
+    await user.click(screen.getByRole('button', { name: 'Debug details' }));
     expect(screen.getByTestId('code-viewer')).toHaveTextContent('NETWORK_ERROR');
+    expect(screen.getByTestId('code-viewer')).toHaveTextContent('server_error: The server had an error');
 
     await user.click(screen.getByRole('button', { name: 'Resume' }));
     expect(continueChat).toHaveBeenCalledTimes(1);
@@ -411,7 +453,8 @@ describe('ChatError', () => {
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['New chat']);
   });
 
-  it('should keep the host compaction sentence reachable in Details', async () => {
+  it('should keep the host compaction sentence reachable in Tau Debug', async () => {
+    debug.enabled = true;
     const user = userEvent.setup();
     const hostSentence = 'Model invocation attempt-overflow has no durable result; it will not be sent again.';
     resumableFailureOverrides.add('SUMMARY_REQUIRED');
@@ -425,7 +468,7 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    await user.click(screen.getByRole('button', { name: 'Details' }));
+    await user.click(screen.getByRole('button', { name: 'Debug details' }));
     expect(screen.getByTestId('code-viewer')).toHaveTextContent(hostSentence);
   });
 
@@ -505,7 +548,12 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('Tau paused this turn')).toBeInTheDocument();
+    expect(screen.getByText('Chat paused')).toBeInTheDocument();
+    expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
+    expect(
+      screen.queryByText('The host executing this run is gone. Resume the turn to continue it.'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /details/iu })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/iu })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Resume' }));
@@ -661,6 +709,40 @@ describe('ChatError', () => {
     expect(screen.getByText('codex stopped unexpectedly: Internal error')).toBeInTheDocument();
   });
 
+  it('should use the shared recovery card for generic failures without exposing a diagnostic action', () => {
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'The model could not finish this turn.',
+      raw: '{"internal":"generic-trace"}',
+    });
+
+    const { container } = render(<ChatErrorBanner />);
+
+    expect(container.querySelector('[data-slot="chat-error-card"]')).toHaveTextContent(
+      'The model could not finish this turn.',
+    );
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+    expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
+  });
+
+  it('should disclose generic diagnostics only after Tau Debug is enabled and opened', async () => {
+    debug.enabled = true;
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'The model could not finish this turn.',
+      raw: '{"internal":"generic-trace"}',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Debug details' }));
+    expect(screen.getByTestId('code-viewer')).toHaveTextContent('generic-trace');
+  });
+
   it('renders the network banner for a dropped request', () => {
     const networkError: ChatErrorPayload = {
       category: errorCategory.network,
@@ -777,9 +859,8 @@ describe('ChatError', () => {
       ),
     });
 
-    expect(
-      screen.getByText('Tau paused this turn: 13 more credits needed for openai-gpt-6-astra.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('13 more credits needed for openai-gpt-6-astra.')).toBeInTheDocument();
+    expect(screen.getByText('Add credits, then send your message.')).toBeInTheDocument();
   });
 
   /* The useSyncExternalStore contract requires a cached snapshot. Parsing inside the selector
@@ -822,8 +903,7 @@ describe('ChatError', () => {
 
   /* The funded boundary's own 402 copy is credit-denominated and reaches the
    * banner verbatim — the chat never restates a charge in dollars (B4 R2). */
-  it('should render a credit error as warning Resume UI outside the tool-error fallback', async () => {
-    const user = userEvent.setup();
+  it('should keep an unretained credit refusal in the funding and send flow', async () => {
     const creditMessage = 'Insufficient Tau credit for this model request.';
     const creditError: ChatErrorPayload = {
       category: errorCategory.credits,
@@ -854,9 +934,8 @@ describe('ChatError', () => {
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /resume/i }));
-
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
+    expect(continueChat).not.toHaveBeenCalled();
     expect(regenerate).not.toHaveBeenCalled();
   });
 

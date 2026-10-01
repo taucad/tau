@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_yMMc6BydMMDj1lXUIWJ3I",
+  "name": "DIN-rail style mounting clip",
+  "description": "Channel clip with inward retention lips; dimensions are generic and require qualification against the selected rail.",
+  "tags": [
+    "Cable hardware",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

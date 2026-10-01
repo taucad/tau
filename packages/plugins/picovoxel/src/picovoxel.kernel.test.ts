@@ -6,6 +6,8 @@ import type * as IsolationModule from '@taucad/runtime/cross-origin-isolation';
 import type { IsolationStatus } from '@taucad/runtime/cross-origin-isolation';
 import type * as KernelModule from '@taucad/runtime/kernel';
 import type { KernelIssue } from '@taucad/runtime/types';
+import { createNodeIo } from '@taucad/geometry-core';
+import type { TauCadTopologyRoot } from '@taucad/geometry-core';
 import { createMockKernelRuntime, expectKernelProjectionOrder, glbToDocument } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { CreatePicoOptions, CreatePicoRuntimeOptions, Mesh, Pico, PicoRuntime, Voxels } from 'picovoxel';
@@ -225,7 +227,7 @@ describe('picovoxel kernel', () => {
   describe('identity', () => {
     it('should key the kernel version on the PicoVoxel version, both artifact digests and its scripts', () => {
       expect(definition.version).toMatch(
-        /^1\.2\.0\+picovoxel\.[\w.-]+\.serial-[\da-f]{12}\.multi-[\da-f]{12}\.scripts-[\da-f]{12}$/,
+        /^1\.4\.0\+picovoxel\.[\w.-]+\.serial-[\da-f]{12}\.multi-[\da-f]{12}\.scripts-[\da-f]{12}$/,
       );
     });
 
@@ -366,6 +368,97 @@ describe('picovoxel kernel', () => {
   });
 
   describe('results', () => {
+    it('should reject a malformed model envelope before capturing its parts', async () => {
+      const issues = await buildIssues(evaluate({ module: { default: () => ({ shapes: {} }) } }));
+
+      expect(issues[0]!.message).toContain('model.shapes must be a flat array');
+    });
+
+    it.each([null, [], 42])('should reject non-object material %j with its part context', async (material) => {
+      const issues = await buildIssues(
+        evaluate({ module: { default: (pico: Pico) => ({ shape: helloCube(pico), name: 'Pin', material }) } }),
+      );
+
+      expect(issues[0]!.message).toContain('Pin (output 1): material must be an object.');
+    });
+
+    it.each([Number.NaN, Number.POSITIVE_INFINITY, 1n, Symbol('metadata'), () => 1])(
+      'should reject unsupported material metadata %# before taking a cache snapshot',
+      async (value) => {
+        const issues = await buildIssues(
+          evaluate({
+            module: { default: (pico: Pico) => ({ shape: helloCube(pico), material: { extras: { value } } }) },
+          }),
+        );
+
+        expect(issues[0]!.message).toContain('Shape 1 (output 1):');
+        expect(issues[0]!.message).toContain('must contain finite JSON values.');
+      },
+    );
+
+    it('should retain context when user-authored metadata getters throw non-errors', async () => {
+      const materialIssues = await buildIssues(
+        evaluate({
+          module: {
+            default: (pico: Pico) => ({
+              shape: helloCube(pico),
+              material: {
+                get extras() {
+                  // oxlint-disable-next-line typescript/only-throw-error -- User-authored getters can throw non-errors; preserve their diagnostic context.
+                  throw 'material getter failed';
+                },
+              },
+            }),
+          },
+        }),
+      );
+      expect(materialIssues[0]!.message).toContain('Shape 1 (output 1): material getter failed');
+
+      const resourceIssues = await buildIssues(
+        evaluate({
+          module: {
+            default: () => ({
+              shapes: [],
+              get images() {
+                // oxlint-disable-next-line typescript/only-throw-error -- User-authored getters can throw non-errors; preserve their diagnostic context.
+                throw 'resource getter failed';
+              },
+            }),
+          },
+        }),
+      );
+      expect(resourceIssues[0]!.message).toContain('model resources: resource getter failed');
+    });
+
+    it('should preserve authored labels for mixed descriptors and raw parts after session disposal', async () => {
+      const { result } = await evaluate({
+        module: {
+          default: (pico: Pico) => {
+            const mesh = helloCube(pico);
+            return [
+              { shape: mesh, name: '  Housing / 蓋 🧩  ' },
+              { shape: pico.createVoxels({ shape: 'sphere', radius: 2 }), name: 'Mesh' },
+              mesh,
+              { shape: mesh, name: 'Housing / 蓋 🧩' },
+              { shape: mesh, name: '  ' },
+              { shape: mesh },
+            ];
+          },
+        },
+      });
+      expect(result.handle.shapes.map(({ name }) => name)).toEqual([
+        'Housing / 蓋 🧩',
+        'Mesh',
+        'Shape 3',
+        'Housing / 蓋 🧩',
+        'Shape 5',
+        'Shape 6',
+      ]);
+      expect(result.handle.shapes[0]!.vertices).toEqual(result.handle.shapes[2]!.vertices);
+      expect(result.handle.shapes[0]!.triangles).toEqual(result.handle.shapes[2]!.triangles);
+      expect(() => sessions.created[0]!.pico.memory).toThrow('disposed');
+    });
+
     it('should keep a returned mesh and flat arrays of meshes and voxels as numbered shapes', async () => {
       const { result } = await evaluate({
         module: { default: (pico: Pico) => [helloCube(pico), pico.createVoxels({ shape: 'sphere', radius: 2 })] },
@@ -373,6 +466,61 @@ describe('picovoxel kernel', () => {
 
       expect(result.handle.shapes.map(({ name }) => name)).toEqual(['Shape 1', 'Shape 2']);
       expect([...result.handle.shapes[0]!.triangles.subarray(0, 3)]).toEqual([0, 2, 1]);
+    });
+
+    it('should accept a single named part and retain generated-looking authored labels', async () => {
+      for (const name of ['Geometry', 'Shape_0']) {
+        // oxlint-disable-next-line no-await-in-loop -- builds share the recorded session list
+        const { result } = await evaluate({
+          module: { default: (pico: Pico) => ({ shape: helloCube(pico), name }) },
+        });
+        expect(result.handle.shapes.map((shape) => shape.name)).toEqual([name]);
+      }
+    });
+
+    it.each([
+      [42, 'name must be a string'],
+      [null, 'name must be a string'],
+      [false, 'name must be a string'],
+    ])('should reject descriptor name %j and release the session', async (name, message) => {
+      const issues = await buildIssues(
+        evaluate({
+          module: {
+            default: (pico: Pico) => [helloCube(pico), { shape: helloCube(pico), name }],
+          },
+        }),
+      );
+      expect(issues[0]).toMatchObject({ code: 'RUNTIME', message: expect.stringContaining(`result 2 ${message}`) });
+      expect(() => sessions.created[0]!.pico.allocated).toThrow(expect.objectContaining({ code: 'PICO_DISPOSED' }));
+    });
+
+    it.each([
+      [{ shape: null }, 'received null'],
+      [{ name: 'Missing' }, 'received undefined'],
+      [{ shape: [] }, 'received an array'],
+      [{ shape: { shape: null, name: 'Nested' } }, 'received object'],
+      [{ children: [] }, 'cannot contain children. Return a flat array of parts'],
+    ])('should reject malformed descriptor %j', async (value, message) => {
+      const issues = await buildIssues(evaluate({ module: { default: () => [value] } }));
+      expect(issues[0]).toMatchObject({ code: 'RUNTIME', message: expect.stringContaining(message) });
+      expect(issues[0]!.message).toContain('result 1');
+    });
+
+    it('should identify the failing duplicate by label and output index', async () => {
+      const issues = await buildIssues(
+        evaluate({
+          module: {
+            default: (pico: Pico) => [
+              { shape: helloCube(pico), name: 'Pin' },
+              { shape: pico.createVoxels({ shape: 'empty' }), name: 'Pin' },
+            ],
+          },
+        }),
+      );
+      expect(issues[0]).toMatchObject({
+        code: 'RUNTIME',
+        message: 'PicoVoxel Pin (output 2) is an empty Voxels field. Return [] for an empty scene.',
+      });
     });
 
     it('should drop exactly-zero-area triangles once, for the viewer and every export (D36)', async () => {
@@ -400,7 +548,7 @@ describe('picovoxel kernel', () => {
       );
 
       expect(issues[0]!.message).toBe(
-        'PicoVoxel Shape 1 is empty: every triangle has zero area. Return [] for an empty scene.',
+        'PicoVoxel Shape 1 (output 1) is empty: every triangle has zero area. Return [] for an empty scene.',
       );
     });
 
@@ -417,16 +565,19 @@ describe('picovoxel kernel', () => {
     });
 
     it.each([
-      [{ default: () => 42 }, 'PicoVoxel main() result 1 must be Mesh or Voxels; received number.'],
+      [
+        { default: () => 42 },
+        'PicoVoxel main() result 1 must be Mesh, Voxels or { shape: Mesh | Voxels, name?: string, material?: Material }; received number.',
+      ],
       [{ default: () => null }, 'received null.'],
       [{ default: () => [[]] }, 'received an array.'],
       [
         { default: (pico: Pico) => pico.createVoxels({ shape: 'empty' }) },
-        'PicoVoxel Shape 1 is an empty Voxels field.',
+        'PicoVoxel Shape 1 (output 1) is an empty Voxels field.',
       ],
       [
         { default: (pico: Pico) => pico.createMesh({ vertices: [], triangles: [] }) },
-        'PicoVoxel Shape 1 is empty. Return [] for an empty scene.',
+        'PicoVoxel Shape 1 (output 1) is empty. Return [] for an empty scene.',
       ],
       [{ main: () => [] }, 'PicoVoxel source must default-export a main(pico, params) function.'],
     ])('should refuse an invalid result %#', async (module, message) => {
@@ -1232,7 +1383,7 @@ describe('picovoxel kernel', () => {
   describe('export', () => {
     const exportFrom = async (
       module: MainModule,
-      input: { exportId: 'glb' | 'stl'; options?: Record<string, unknown>; lane?: 'fast' | 'exact' },
+      input: { exportId: 'glb' | 'gltf' | 'stl'; options?: Record<string, unknown>; lane?: 'fast' | 'exact' },
     ) => {
       const { runtime, context, result } = await evaluate({ module, lane: input.lane ?? 'exact' });
       const options = { ...definition.exports[input.exportId].optionsSchema.parse(input.options ?? {}) };
@@ -1252,6 +1403,64 @@ describe('picovoxel kernel', () => {
       expect(stlHeader(file.bytes)).toBe('PicoGK UNITS=mm');
       expect(file.bytes.byteLength).toBe(84 + 12 * 50);
       expect(new DataView(file.bytes.buffer).getUint32(80, true)).toBe(12);
+    });
+
+    it('should make safe unique STL filenames without changing labels or STL geometry', async () => {
+      const names = [
+        '../Housing',
+        'A/B',
+        String.raw`a\b`,
+        'A_B 2',
+        'CON.txt',
+        'lpt²',
+        'aux',
+        '... ',
+        'NUL',
+        '蓋 🧩',
+        'é',
+        'e\u0301',
+        'x'.repeat(121),
+        'x'.repeat(120),
+        '🧩'.repeat(31),
+        'control\u0000<>:"|?*',
+        'NUL .txt',
+        'CONIN$',
+        'conout$.log',
+      ];
+      const result = await exportFrom(
+        {
+          default: (pico: Pico) => {
+            const shape = helloCube(pico);
+            return names.map((name) => ({ shape, name }));
+          },
+        },
+        { exportId: 'stl' },
+      );
+      expect(result.files.map((file) => file.name)).toEqual([
+        '.._Housing.stl',
+        'A_B.stl',
+        'a_b 2.stl',
+        'A_B 2 2.stl',
+        '_CON.txt.stl',
+        '_lpt².stl',
+        '_aux.stl',
+        'Shape 8.stl',
+        '_NUL.stl',
+        '蓋 🧩.stl',
+        'é.stl',
+        'e\u0301 2.stl',
+        `${'x'.repeat(120)}.stl`,
+        `${'x'.repeat(120)} 2.stl`,
+        `${'🧩'.repeat(30)}.stl`,
+        'control________.stl',
+        '_NUL .txt.stl',
+        '_CONIN$.stl',
+        '_conout$.log.stl',
+      ]);
+      const raw = await exportFrom({ default: helloCube }, { exportId: 'stl' });
+      for (const file of result.files) {
+        expect(file.bytes).toEqual(raw.files[0].bytes);
+      }
     });
 
     it('should honour STL units, scale and offset', async () => {
@@ -1397,6 +1606,37 @@ describe('picovoxel kernel', () => {
       expect(definition.deserializeHandle!({ serialized: snapshot }, runtime, context)).toEqual(result.handle);
     });
 
+    it('should preserve authored and legacy snapshot labels and repair blank restored names', async () => {
+      const { runtime, context, result } = await evaluate({ module: { default: helloCube } });
+      const snapshot = definition.serializeHandle!({ handle: result.handle }, runtime, context);
+      const nativeHandle = definition.deserializeHandle!(
+        {
+          serialized: {
+            shapes: ['  蓋 / Lid  ', 'Mesh', 'Shape 1', ''].map((name) => ({
+              ...snapshot.shapes[0]!,
+              name,
+            })),
+          },
+        },
+        runtime,
+        context,
+      );
+      expect(nativeHandle.shapes.map(({ name }) => name)).toEqual(['蓋 / Lid', 'Mesh', 'Shape 1', 'Shape 4']);
+      const exported = await definition.write!(
+        { exportId: 'glb', handle: nativeHandle, options: definition.exports.glb.optionsSchema.parse({}) },
+        runtime,
+        context,
+      );
+      // The cube has exact provenance in either session lane.
+      const document = await glbToDocument(exported.files[0].bytes);
+      expect(
+        document
+          .getRoot()
+          .listNodes()
+          .map((node) => node.getName()),
+      ).toEqual(['蓋 / Lid', 'Mesh', 'Shape 1', 'Shape 4']);
+    });
+
     it.each([
       [undefined, 'expected a shapes array.'],
       [{ shapes: {} }, 'expected a shapes array.'],
@@ -1412,9 +1652,199 @@ describe('picovoxel kernel', () => {
     ])('should refuse the malformed snapshot %j', async (snapshot, message) => {
       const { runtime, context } = await evaluate({ module: { default: () => [] } });
 
-      expect(() => {
-        Reflect.apply(definition.deserializeHandle!, undefined, [{ serialized: snapshot }, runtime, context]);
-      }).toThrow(message);
+      expect(() =>
+        definition.deserializeHandle!(
+          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Deliberately malformed cache bytes exercise restoration's trust boundary.
+          {
+            serialized: snapshot as Parameters<NonNullable<typeof definition.deserializeHandle>>[0]['serialized'],
+          },
+          runtime,
+          context,
+        ),
+      ).toThrow(message);
     });
   });
+});
+
+describe('PicoVoxel mechanism snapshots and binding', () => {
+  const hinge = (base = 'Base', lid = 'Lid') => ({
+    schemaVersion: 1,
+    units: { length: 'mm', angle: 'deg' },
+    root: 'base',
+    links: { base: { shapes: [base] }, lid: { shapes: [lid] } },
+    joints: { hinge: { type: 'revolute', parent: 'base', child: 'lid', origin: [2, 3, 4], axis: [1, 0, 0] } },
+  });
+  const readTopology = async (bytes: Uint8Array<ArrayBuffer>) => {
+    const io = await createNodeIo();
+    const document = await io.readBinary(bytes);
+    return document.getRoot().getExtension<TauCadTopologyRoot>('TAU_cad_topology')?.getPayload();
+  };
+  it.each([
+    { label: 'generated', name: undefined, reference: 'Shape 1', valid: false },
+    { label: 'blank', name: ' ', reference: 'Shape 1', valid: false },
+    { label: 'authored fallback-looking', name: 'Shape 1', reference: 'Shape 1', valid: true },
+    { label: 'trimmed Unicode', name: '  蓋 / Lid  ', reference: '蓋 / Lid', valid: true },
+  ] as const)('should bind $label labels only with explicit name evidence', async ({ name, reference, valid }) => {
+    const { runtime, context, result } = await evaluate({
+      module: {
+        default: (pico: Pico) => [
+          { shape: helloCube(pico), ...(name === undefined ? {} : { name }) },
+          { shape: helloCube(pico), name: 'Lid' },
+        ],
+        mechanism: hinge(reference),
+      },
+    });
+    try {
+      const snapshot = structuredClone(definition.serializeHandle!({ handle: result.handle }, runtime, context));
+      const restored = definition.deserializeHandle!({ serialized: snapshot }, runtime, context);
+      expect(restored).toEqual(result.handle);
+      expect(restored.mechanism).not.toBe(result.handle.mechanism);
+      const meshed = await definition.render!(
+        { handle: restored, view: 'model', options: {}, content: { includeTopology: true } },
+        runtime,
+        context,
+      );
+      if (typeof meshed.content === 'string') {
+        throw new TypeError('Expected binary topology view');
+      }
+      const payload = await readTopology(meshed.content);
+      expect(payload?.['components']).toHaveLength(2);
+      if (valid) {
+        expect(payload?.['mechanism']).toMatchObject({ links: { base: { components: ['component:node-0'] } } });
+        expect(meshed.issues).toEqual([]);
+      } else {
+        expect(payload?.['mechanism']).toBeUndefined();
+        expect(meshed.issues).toMatchObject([{ code: 'INVALID_REFERENCE', severity: 'warning' }]);
+      }
+    } finally {
+      await definition.onDispose!(context);
+    }
+  });
+
+  it.each([true, false])(
+    'should preserve duplicate parts and reject only an ambiguous referenced name (%s)',
+    async (referenced) => {
+      const { runtime, context, result } = await evaluate({
+        module: {
+          default: (pico: Pico) =>
+            ['Base', 'Lid', 'Duplicate', 'Duplicate'].map((name) => ({ shape: helloCube(pico), name })),
+          mechanism: hinge('Base', referenced ? 'Duplicate' : 'Lid'),
+        },
+      });
+      try {
+        const meshed = await definition.render!(
+          { handle: result.handle, view: 'model', options: {}, content: { includeTopology: true } },
+          runtime,
+          context,
+        );
+        if (typeof meshed.content === 'string') {
+          throw new TypeError('Expected binary topology view');
+        }
+        const payload = await readTopology(meshed.content);
+        expect(payload?.['components']).toHaveLength(4);
+        expect(result.handle.shapes.map(({ name }) => name)).toEqual(['Base', 'Lid', 'Duplicate', 'Duplicate']);
+        if (referenced) {
+          expect(payload?.['mechanism']).toBeUndefined();
+          expect(meshed.issues).toMatchObject([
+            {
+              message: expect.stringContaining('More than one returned shape'),
+              details: { mechanism: { recovery: 'Give each referenced part a distinct authored name.' } },
+            },
+          ]);
+        } else {
+          expect(payload?.['mechanism']).toBeDefined();
+          expect(meshed.issues).toEqual([]);
+        }
+      } finally {
+        await definition.onDispose!(context);
+      }
+    },
+  );
+
+  it.each([42, '', 'Wrong'])('should refuse forged authored name evidence %j', async (authoredName) => {
+    const { runtime, context, result } = await evaluate({ module: { default: helloCube } });
+    try {
+      const snapshot = definition.serializeHandle!({ handle: result.handle }, runtime, context);
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- Deliberately corrupted cache payload exercises the restoration trust boundary.
+      const corrupted = { ...snapshot, shapes: [{ ...snapshot.shapes[0]!, authoredName }] } as typeof snapshot;
+      expect(() => definition.deserializeHandle!({ serialized: corrupted }, runtime, context)).toThrow(
+        'authoredName must match',
+      );
+    } finally {
+      await definition.onDispose!(context);
+    }
+  });
+
+  it('should own reader warnings across snapshots and emit them once per preview and export', async () => {
+    const { runtime, context, result } = await evaluate({
+      module: { default: helloCube, mechanism: { invalid: 1n } },
+      lane: 'exact',
+    });
+    try {
+      expect(result.issues).toHaveLength(1);
+      const snapshot = definition.serializeHandle!({ handle: result.handle }, runtime, context);
+      const restored = definition.deserializeHandle!({ serialized: snapshot }, runtime, context);
+      expect(restored.mechanismIssues).toEqual(result.issues);
+      expect(restored.mechanismIssues).not.toBe(result.issues);
+      const mesh = await definition.render!(
+        { handle: restored, view: 'model', options: {}, content: { includeTopology: true } },
+        runtime,
+        context,
+      );
+      expect(mesh.issues).toEqual([]);
+      const inputs: ExportInput[] = [
+        { exportId: 'glb', handle: restored, options: definition.exports.glb.optionsSchema.parse({}) },
+        { exportId: 'gltf', handle: restored, options: definition.exports.gltf.optionsSchema.parse({}) },
+        { exportId: 'stl', handle: restored, options: definition.exports.stl.optionsSchema.parse({}) },
+      ];
+      for (const input of inputs) {
+        // oxlint-disable-next-line no-await-in-loop -- Exports share one kernel context.
+        const exported = await definition.write!(input, runtime, context);
+        expect(exported.issues).toEqual(result.issues);
+      }
+      for (const mechanismIssues of [
+        {},
+        [{ code: 'RUNTIME', message: 'bad', severity: 'error' }],
+        [{ code: 'invented', message: 'bad', severity: 'warning' }],
+      ]) {
+        // oxlint-disable-next-line typescript/consistent-type-assertions -- Deliberately corrupted cache payload exercises warning-envelope validation.
+        const corrupted = { ...snapshot, mechanismIssues } as typeof snapshot;
+        expect(() => definition.deserializeHandle!({ serialized: corrupted }, runtime, context)).toThrow();
+      }
+    } finally {
+      await definition.onDispose!(context);
+    }
+  });
+});
+
+it('should recycle a mechanism trap and propagate mechanism cancellation after freeing the session', async () => {
+  const runtime = createRuntime({
+    default: helloCube,
+    mechanism: () => {
+      throw new WebAssembly.RuntimeError('mechanism trap');
+    },
+  });
+  const context = await initialize({ wasm: 'serial' }, runtime);
+  try {
+    const result = await definition.evaluate(
+      { entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } },
+      runtime,
+      context,
+    );
+    expect(result.issues).toMatchObject([{ severity: 'warning', message: expect.stringContaining('mechanism trap') }]);
+    expect(context.runtimes.size).toBe(0);
+    expect(() => sessions.created[0]!.pico.memory).toThrow(/already been disposed/);
+    const aborted = createRuntime({
+      default: helloCube,
+      mechanism: () => {
+        throw renderAborted();
+      },
+    });
+    await expect(
+      definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } }, aborted, context),
+    ).rejects.toMatchObject({ name: 'RenderAbortedError' });
+    expect(() => sessions.created[1]!.pico.memory).toThrow(/already been disposed/);
+  } finally {
+    await definition.onDispose!(context);
+  }
 });

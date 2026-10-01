@@ -21,6 +21,8 @@ use crate::{
 const FAMILY: &str = "native-exact-step-clusters-v1";
 const CODEC: &str = "geospec-exact-clusters-json-v1";
 const MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
+// Leaves room for the private control wrapper under the core codec's 16 MiB limit.
+pub(crate) const MAX_CANDIDATE_BYTES: usize = 15 * 1024 * 1024;
 const MAX_ITEMS: usize = 65_536;
 const MAX_STEPS: usize = 4 * 1024 * 1024 / std::mem::size_of::<ChargeStep>();
 
@@ -46,6 +48,24 @@ struct Action<'a> {
 struct Producer<'a> {
     core: &'a str,
     brep: &'a str,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct Candidate {
+    schema: String,
+    action: serde_json::Value,
+    address: CandidateAddress,
+    payload: serde_json::Value,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct CandidateAddress {
+    action_sha256: String,
+    family: String,
+    codec: String,
+    producer_profile_sha256: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -116,6 +136,10 @@ pub(crate) fn replay(
 }
 
 pub(crate) fn address(subject: &Subject, tolerance: f64) -> Option<EvidenceAddress> {
+    action_and_address(subject, tolerance).map(|(_, address)| address)
+}
+
+fn action_and_address(subject: &Subject, tolerance: f64) -> Option<(Vec<u8>, EvidenceAddress)> {
     let producer = subject.producer_identity.as_ref()?;
     if producer.core.is_empty()
         || producer.brep.is_empty()
@@ -154,12 +178,89 @@ pub(crate) fn address(subject: &Subject, tolerance: f64) -> Option<EvidenceAddre
     };
     let action_bytes = crate::canonicalize(&serde_json::to_vec(&action).ok()?).ok()?;
     let producer_bytes = crate::canonicalize(&serde_json::to_vec(&action.producer).ok()?).ok()?;
-    Some(EvidenceAddress {
+    let address = EvidenceAddress {
         action_sha256: sha256_hex(&action_bytes),
         family: FAMILY,
         codec: CODEC,
         producer_profile_sha256: sha256_hex(&producer_bytes),
-    })
+    };
+    Some((action_bytes, address))
+}
+
+/// Optional interchange bytes only for a completed, locally retained fact.
+pub(crate) fn export_candidate(
+    subject: &Subject,
+    tolerance: f64,
+    value: &ExactClusters,
+) -> Option<Vec<u8>> {
+    let (action_bytes, address) = action_and_address(subject, tolerance)?;
+    let payload_bytes = payload_bytes(&address, value)?;
+    let candidate = Candidate {
+        schema: "geospec-exact-cluster-candidate-v1".into(),
+        action: serde_json::from_slice(&action_bytes).ok()?,
+        address: CandidateAddress {
+            action_sha256: address.action_sha256,
+            family: FAMILY.into(),
+            codec: CODEC.into(),
+            producer_profile_sha256: address.producer_profile_sha256,
+        },
+        payload: serde_json::from_slice(&payload_bytes).ok()?,
+    };
+    let bytes = crate::canonicalize(&serde_json::to_vec(&candidate).ok()?).ok()?;
+    (bytes.len() <= MAX_CANDIDATE_BYTES).then_some(bytes)
+}
+
+/// Foreign bytes have no authority: the caller supplies a freshly recomputed
+/// local fact, and only exact canonical payload equality can match.
+pub(crate) fn matches_candidate(
+    subject: &Subject,
+    tolerance: f64,
+    bytes: &[u8],
+    locally_built: &ExactClusters,
+) -> bool {
+    let Some((candidate, address)) = validated_candidate(subject, tolerance, bytes) else {
+        return false;
+    };
+    let Ok(foreign_bytes) =
+        crate::canonicalize(&serde_json::to_vec(&candidate.payload).unwrap_or_default())
+    else {
+        return false;
+    };
+    if foreign_bytes.len() > MAX_PAYLOAD_BYTES {
+        return false;
+    }
+    let Some(local_bytes) = payload_bytes(&address, locally_built) else {
+        return false;
+    };
+    foreign_bytes == local_bytes
+}
+
+pub(crate) fn candidate_identity_matches(subject: &Subject, tolerance: f64, bytes: &[u8]) -> bool {
+    validated_candidate(subject, tolerance, bytes).is_some()
+}
+
+fn validated_candidate(
+    subject: &Subject,
+    tolerance: f64,
+    bytes: &[u8],
+) -> Option<(Candidate, EvidenceAddress)> {
+    if bytes.len() > MAX_CANDIDATE_BYTES || crate::canonicalize(bytes).ok()?.as_slice() != bytes {
+        return None;
+    }
+    let candidate: Candidate = serde_json::from_slice(bytes).ok()?;
+    if candidate.schema != "geospec-exact-cluster-candidate-v1" {
+        return None;
+    }
+    let (action_bytes, address) = action_and_address(subject, tolerance)?;
+    if crate::canonicalize(&serde_json::to_vec(&candidate.action).ok()?).ok()? != action_bytes
+        || candidate.address.action_sha256 != address.action_sha256
+        || candidate.address.family != FAMILY
+        || candidate.address.codec != CODEC
+        || candidate.address.producer_profile_sha256 != address.producer_profile_sha256
+    {
+        return None;
+    }
+    Some((candidate, address))
 }
 
 pub(crate) fn load(
@@ -251,14 +352,22 @@ pub(crate) fn publish_if_cold(
     value: &ExactClusters,
     cold_built: bool,
 ) {
-    if !cold_built
-        || !value.trace_complete
+    if !cold_built {
+        return;
+    }
+    if let Some(bytes) = payload_bytes(address, value) {
+        store.publish(address, &bytes);
+    }
+}
+
+fn payload_bytes(address: &EvidenceAddress, value: &ExactClusters) -> Option<Vec<u8>> {
+    if !value.trace_complete
         || value.trace.len() > MAX_STEPS
         || value.labels.len() > MAX_ITEMS
         || value.clusters.len() > MAX_ITEMS
         || payload_upper_bound(value).is_none_or(|bytes| bytes > MAX_PAYLOAD_BYTES)
     {
-        return;
+        return None;
     }
     let payload = Payload {
         schema: "geospec-completed-fact-v1".into(),
@@ -280,16 +389,11 @@ pub(crate) fn publish_if_cold(
         stage_calls: value.stage_calls.map(|value| value.to_string()),
         stage_units: value.stage_units.map(|value| value.to_string()),
     };
-    let Ok(bytes) = serde_json::to_vec(&payload) else {
-        return;
-    };
-    let Ok(bytes) = crate::canonicalize(&bytes) else {
-        return;
-    };
+    let bytes = crate::canonicalize(&serde_json::to_vec(&payload).ok()?).ok()?;
     if bytes.len() > MAX_PAYLOAD_BYTES {
-        return;
+        return None;
     }
-    store.publish(address, &bytes);
+    Some(bytes)
 }
 
 /// Conservative JSON byte bound before any label, primitive or trace clone.
@@ -480,6 +584,10 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     use super::*;
+    use crate::{
+        backend::brep::BrepIdentityProfile, cache::ProducerIdentity, identity::SubjectIdentity,
+        subject::SubjectFormat,
+    };
 
     #[derive(Default)]
     struct MemoryStore {
@@ -556,6 +664,69 @@ mod tests {
             stage_calls: [1, 0, 0, 1, 0, 0],
             stage_units: [1, 0, 0, 2, 0, 0],
         }
+    }
+
+    fn subject(primary: &[u8], brep_profile: &str) -> Subject {
+        let identity = SubjectIdentity::step(
+            primary,
+            "millimetre",
+            1.0,
+            BrepIdentityProfile {
+                ingest_profile: "candidate-test",
+                backend_profile: "candidate-test",
+            },
+            None,
+        )
+        .unwrap();
+        let mut subject = Subject::new(
+            identity.primary_hash().into(),
+            SubjectFormat::Step,
+            "mm".into(),
+        );
+        subject.semantic_identity.set(identity).unwrap();
+        subject.producer_identity = Some(std::rc::Rc::new(ProducerIdentity {
+            core: "core-v1".into(),
+            csg: "csg-v1".into(),
+            brep: brep_profile.into(),
+        }));
+        subject
+    }
+
+    #[test]
+    fn candidate_requires_exact_local_action_payload_and_tolerance() {
+        let local_subject = subject(b"step-a", "brep-v1");
+        let local = completed();
+        let bytes = export_candidate(&local_subject, 0.01, &local).unwrap();
+        assert!(candidate_identity_matches(&local_subject, 0.01, &bytes));
+        assert!(matches_candidate(&local_subject, 0.01, &bytes, &local));
+        assert!(!candidate_identity_matches(&local_subject, 0.02, &bytes));
+        assert!(!candidate_identity_matches(
+            &subject(b"step-b", "brep-v1"),
+            0.01,
+            &bytes
+        ));
+        assert!(!candidate_identity_matches(
+            &subject(b"step-a", "brep-v2"),
+            0.01,
+            &bytes
+        ));
+
+        let mut altered = local;
+        altered.trace[1].units += 1;
+        assert!(!matches_candidate(&local_subject, 0.01, &bytes, &altered));
+        let mut envelope: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        envelope["payload"]["units"] = serde_json::json!("4");
+        let tampered = crate::canonicalize(&serde_json::to_vec(&envelope).unwrap()).unwrap();
+        assert!(candidate_identity_matches(&local_subject, 0.01, &tampered));
+        assert!(!matches_candidate(
+            &local_subject,
+            0.01,
+            &tampered,
+            &completed()
+        ));
+        envelope["address"]["actionSha256"] = serde_json::json!("00".repeat(32));
+        let tampered = crate::canonicalize(&serde_json::to_vec(&envelope).unwrap()).unwrap();
+        assert!(!candidate_identity_matches(&local_subject, 0.01, &tampered));
     }
 
     #[test]

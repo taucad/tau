@@ -35,9 +35,28 @@ fn compare(actual: Result<Vec<u8>, ProtocolError>, expected: &Value, id: &str) -
     match actual {
         Ok(actual) => {
             let decoded = serde_json::from_slice::<Value>(&actual).ok();
-            let expected_bytes = expected["expectedUtf8"]
-                .as_str()
-                .map(|s| s.replace("geospec-st-logical-requests-v3", CURRENT_NUMERIC_PROFILE));
+            let expected_bytes = expected["expectedUtf8"].as_str().map(|s| {
+                let current = s.replace("geospec-st-logical-requests-v3", CURRENT_NUMERIC_PROFILE);
+                if id != "a1/raw/initialize" {
+                    return current;
+                }
+                let mut response: Value =
+                    serde_json::from_str(&current).expect("frozen initialize response");
+                let Some(capabilities) = response["result"]["capabilities"].as_array_mut() else {
+                    return current;
+                };
+                assert_eq!(capabilities.last().unwrap()["name"], "queryPmi");
+                capabilities.push(json!({
+                    "name": "minimumDistance",
+                    "implementation": "implemented",
+                    "profile": "geospec-minimum-distance-v1",
+                    "qualification": "unqualified",
+                    "registryVersion": 5,
+                    "scope": "declared-subject-profile",
+                }));
+                String::from_utf8(canonicalize(&serde_json::to_vec(&response).unwrap()).unwrap())
+                    .expect("canonical initialize UTF-8")
+            });
             let expected_json = expected_bytes
                 .as_deref()
                 .and_then(|s| serde_json::from_str::<Value>(s).ok());

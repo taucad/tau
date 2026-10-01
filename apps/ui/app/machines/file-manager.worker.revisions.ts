@@ -79,6 +79,9 @@ import { createFileSystemBridgePort } from '@taucad/fs-bridge';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import { createTurnPlacementPort } from '@taucad/revisions/turn-placement';
 import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
+import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
+import { isDesktopTarget } from '#lib/build-target.js';
+import { fetchGeoSpecCandidates, publishGeoSpecCandidate } from '#lib/geospec-candidate-git.js';
 
 /**
  * The versioned paths one content-change event touches inside this project.
@@ -154,6 +157,9 @@ export type WorkerRevisionCommand =
      with and sent its frame first; `remote.machine` re-validates (D3). */
   | Readonly<{ command: 'authorizeRemote' }>
   | Readonly<{ command: 'syncNow' }>
+  /** Separate, consent-gated candidate artifact route; never authored sync. */
+  | Readonly<{ command: 'fetchGeoSpecCandidates' }>
+  | Readonly<{ command: 'publishGeoSpecCandidate'; candidate: Uint8Array<ArrayBuffer> }>
   | Readonly<{ command: 'recordsChanged' }>
   /*
    * The Publish dialog's three verbs (S32, W8).
@@ -392,6 +398,9 @@ export const createCheckoutRoutes = (options: {
 
 /** One project's revision root, as the worker's port protocol drives it. @public */
 export type WorkerProjectRevisions = Readonly<{
+  /** Private candidate artifact operations; each rereads device-local consent. */
+  fetchGeoSpecCandidates: () => Promise<ReadonlyArray<Uint8Array<ArrayBuffer>>>;
+  publishGeoSpecCandidate: (candidate: Uint8Array<ArrayBuffer>) => Promise<'updated' | 'upToDate' | 'rejected'>;
   /** Every verb: fire-and-forget into the tree. */
   send: (command: WorkerRevisionCommand) => void;
   /**
@@ -470,6 +479,8 @@ export type WorkerProjectRevisions = Readonly<{
 export type WorkerProjectRevisionsOptions = Readonly<{
   projectId: string;
   port: RevisionPort;
+  /** A task-scoped transport with its own abort signal, sharing this project's rooted Git store. */
+  candidatePort?: (signal: AbortSignal) => RevisionPort;
   /**
    * Offers the last push again under `keepalive`, for `pagehide` (W13).
    *
@@ -626,6 +637,29 @@ export const createRemoteAttention = (): RemoteAttention => {
  */
 export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOptions): WorkerProjectRevisions => {
   const { projectId } = options;
+  const candidateStorage = new IndexedDbStorageProvider();
+  const candidateConsent = async (): Promise<boolean> => {
+    const state = await candidateStorage.getProjectLibraryState(projectId);
+    return state?.syncGeoSpecCandidates === true;
+  };
+  const candidateRemote = async (publishing: boolean): Promise<string> => {
+    if (isDesktopTarget()) {
+      throw new Error('GeoSpec candidate sharing is available in the browser only.');
+    }
+    if (
+      published.remote.kind === 'none' ||
+      published.remote.phase !== 'connected' ||
+      (publishing && published.remote.fetchOnly)
+    ) {
+      throw new Error('This project has no writable connected Git remote for GeoSpec candidates.');
+    }
+    const remotes = await options.port.listRemotes();
+    const configured = remotes.find((remote) => remote.url === published.remote.url);
+    if (configured === undefined) {
+      throw new Error('The connected Git remote is unavailable.');
+    }
+    return configured.name;
+  };
   /* The page's latest answer, read per mint so signing in or turning anonymity
    * on changes the next revision and rewrites none of the recorded ones. */
   let person: RevisionUserActor | undefined;
@@ -1122,6 +1156,55 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   };
 
   return {
+    fetchGeoSpecCandidates: async () => {
+      if (options.candidatePort === undefined) {
+        throw new Error('This host has no bounded candidate transport.');
+      }
+      const controller = new AbortController();
+      const candidateTimeout = setTimeout(() => {
+        controller.abort();
+      }, 15_000);
+      try {
+        return await fetchGeoSpecCandidates({
+          projectId,
+          port: options.candidatePort(controller.signal),
+          filesystem: await options.filesystem(`/projects/${projectId}`),
+          remote: await candidateRemote(false),
+          readConsent: candidateConsent,
+          signal: controller.signal,
+          abort: () => {
+            controller.abort();
+          },
+        });
+      } finally {
+        clearTimeout(candidateTimeout);
+      }
+    },
+    publishGeoSpecCandidate: async (candidate) => {
+      if (options.candidatePort === undefined) {
+        throw new Error('This host has no bounded candidate transport.');
+      }
+      const controller = new AbortController();
+      const candidateTimeout = setTimeout(() => {
+        controller.abort();
+      }, 15_000);
+      try {
+        return await publishGeoSpecCandidate({
+          projectId,
+          port: options.candidatePort(controller.signal),
+          filesystem: await options.filesystem(`/projects/${projectId}`),
+          remote: await candidateRemote(true),
+          candidate,
+          readConsent: candidateConsent,
+          signal: controller.signal,
+          abort: () => {
+            controller.abort();
+          },
+        });
+      } finally {
+        clearTimeout(candidateTimeout);
+      }
+    },
     send: (command) => {
       switch (command.command) {
         /* The root invokes `restore` as a child and forwards none of its five
@@ -1323,6 +1406,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         case 'recordEditorConflict': {
           break;
         }
+        case 'fetchGeoSpecCandidates':
+        case 'publishGeoSpecCandidate': {
+          break;
+        }
         default: {
           const { command: verb, ...input } = command;
           actor.send({ type: verb, ...input } as Parameters<typeof actor.send>[0]);
@@ -1500,6 +1587,8 @@ export type WorkerRevisionResult =
   | Readonly<{ kind: 'divergence'; divergence: RevisionDivergence }>
   | Readonly<{ kind: 'diff'; entries: readonly RevisionDiffEntry[] }>
   | Readonly<{ kind: 'comparison'; comparison: RevisionFileComparison }>
+  | Readonly<{ kind: 'geoSpecCandidates'; candidates: ReadonlyArray<Uint8Array<ArrayBuffer>> }>
+  | Readonly<{ kind: 'geoSpecCandidatePublication'; status: 'updated' | 'upToDate' | 'rejected' }>
   /** `tag` answers with the named version; `deleteTag` answers with nothing. */
   | Readonly<{ kind: 'tag'; tag: RevisionTag | undefined }>
   /**
@@ -1543,6 +1632,12 @@ export type WorkerRevisionResponse =
 
 /** What the registry needs from the worker it runs in. @public */
 export type WorkerRevisionRegistryOptions = Readonly<{
+  /** Browser-only scoped candidate transport; absent on native/host-served roots. */
+  createCandidatePort?: (
+    projectId: string,
+    credential: () => GitRemoteCredential | undefined,
+    signal: AbortSignal,
+  ) => RevisionPort;
   /**
    * Build the port for one project; the worker owns the rooted provider it reads.
    *
@@ -1705,6 +1800,14 @@ const answerOf = (
         })
         .then((comparison) => ({ kind: 'comparison', comparison }) as const);
     }
+    case 'fetchGeoSpecCandidates': {
+      return tree.fetchGeoSpecCandidates().then((candidates) => ({ kind: 'geoSpecCandidates', candidates }) as const);
+    }
+    case 'publishGeoSpecCandidate': {
+      return tree
+        .publishGeoSpecCandidate(request.candidate)
+        .then((status) => ({ kind: 'geoSpecCandidatePublication', status }) as const);
+    }
     /* A question now (C16): the `hidden` unload registrant must be able to wait
      * for the close cut before `pagehide` offers a pack. An uncorrelated frame
      * takes the same path and its answer is simply dropped. */
@@ -1766,6 +1869,11 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         projectId,
         attention,
         port: await options.createPort(projectId, () => credential),
+        ...(options.createCandidatePort === undefined
+          ? {}
+          : {
+              candidatePort: (signal: AbortSignal) => options.createCandidatePort!(projectId, () => credential, signal),
+            }),
         filesystem: options.filesystem,
         observe: options.observe,
         ...(options.completeChanges === undefined ? {} : { completeChanges: options.completeChanges }),

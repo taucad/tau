@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import ts from 'typescript';
 import { afterEach, describe, expect, it } from 'vitest';
 import picovoxelBundle from '#generated/picovoxel/picovoxel.bundled.json' with { type: 'json' };
 import { buildPicovoxelTypes, collectDeclarationGraph, picovoxelAuthorSubpaths } from '#extract-picovoxel-types.js';
@@ -92,7 +93,9 @@ describe('collectDeclarationGraph', () => {
   });
 
   it('should refuse an import that climbs out of the declaration directory', () => {
-    const directory = createFiles({ 'index.d.ts': 'import { X } from "../outside.js";' });
+    const directory = createFiles({
+      'index.d.ts': 'import { X } from "../outside.js";',
+    });
 
     expect(() => collectDeclarationGraph(directory, ['index.d.ts'])).toThrow(
       'index.d.ts imports ../outside.js from outside the declaration directory.',
@@ -153,4 +156,112 @@ describe('buildPicovoxelTypes', () => {
       ).toBe(true);
     }
   });
+});
+
+/** Type-check one authored module against the bundle, exactly as the editor mounts it. */
+const checkAuthoredModule = (source: string): readonly string[] => {
+  const bundle = picovoxelBundle;
+  const files = new Map<string, string>([['/project/main.ts', source]]);
+  for (const [packageName, entry] of Object.entries(bundle)) {
+    files.set(`/node_modules/${packageName}/index.d.ts`, entry.content);
+    for (const [path, content] of Object.entries(entry.files)) {
+      files.set(`/node_modules/${packageName}/${path}`, content);
+    }
+    files.set(`/node_modules/${packageName}/package.json`, JSON.stringify({ name: packageName, types: 'index.d.ts' }));
+  }
+  const options: ts.CompilerOptions = {
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    noEmit: true,
+    strict: true,
+    target: ts.ScriptTarget.ES2022,
+    types: [],
+    lib: ['lib.esnext.d.ts', 'lib.dom.d.ts'],
+  };
+  const host = ts.createCompilerHost(options);
+  host.fileExists = (path) => files.has(path);
+  host.readFile = (path) => files.get(path);
+  host.getSourceFile = (path, languageVersion) => {
+    const text = files.get(path) ?? (path.includes('/lib.') ? readFileSync(path, 'utf8') : undefined);
+    return text === undefined ? undefined : ts.createSourceFile(path, text, languageVersion);
+  };
+  host.getDefaultLibLocation = () => ts.getDefaultLibFilePath(options).replace(/\/[^/]+$/u, '');
+  host.getCurrentDirectory = () => '/project';
+  host.directoryExists = (path) => [...files.keys()].some((file) => file.startsWith(`${path}/`));
+  const program = ts.createProgram(['/project/main.ts'], options, host);
+  return ts
+    .getPreEmitDiagnostics(program)
+    .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));
+};
+
+describe('PicoVoxel authored result types', () => {
+  it('should compile shared mapped materials and model resources without host declarations', () => {
+    expect(
+      checkAuthoredModule(`
+      import type { Pico } from 'picovoxel';
+      import type { Material, Image, Resources, PicovoxelPart, PicovoxelModel, PicovoxelResult } from '@taucad/picovoxel';
+      const image: Image = { mimeType: 'image/png', data: new Uint8Array([1]) };
+      const resources: Resources = { images: [image], textures: [{ source: 0 }], samplers: [{ wrapS: 10497 }] };
+      const material: Material = {
+        pbrMetallicRoughness: { baseColorFactor: [0.5, 0.3, 0.1, 1], baseColorTexture: { index: 0 } },
+        normalTexture: { index: 0, scale: 0.6 }, extras: { finish: { inspected: true } },
+        extensions: { KHR_materials_anisotropy: { anisotropyStrength: 0.7, anisotropyTexture: { index: 0 } },
+          KHR_materials_volume: { thicknessFactor: 0.003, attenuationColor: [1, 0.9, 0.8] } }
+      };
+      export default function main(pico: Pico): PicovoxelResult {
+        const part: PicovoxelPart = { shape: pico.createVoxels({ shape: 'sphere', radius: 2 }), material };
+        const model: PicovoxelModel = { shapes: [part], ...resources };
+        return model;
+      }
+    `),
+    ).toEqual([]);
+    const bundle = picovoxelBundle;
+    expect(Object.keys(bundle)).toEqual(['@taucad/picovoxel', 'picovoxel']);
+    const declarations = Object.values(bundle['@taucad/picovoxel'].files).join('\n');
+    expect(declarations).not.toMatch(/@taucad\/runtime|@taucad\/geometry-core|@gltf-transform\/core/u);
+    expect(declarations).not.toMatch(/defineRuntime|createNodeClient|KernelContext/u);
+  }, 20_000);
+
+  it('should reject invalid material and resource shapes through the editor mount', () => {
+    const errors = checkAuthoredModule(`
+      import type { Material, Image, PicovoxelModel } from '@taucad/picovoxel';
+      const material: Material = { pbrMetallicRoughness: { metallicFactor: 'metal' } };
+      const image: Image = { mimeType: 'image/svg+xml', data: new Uint8Array([1]) };
+      const model: PicovoxelModel = { shapes: [], textures: [{ source: 'image.png' }] };
+      void [material, image, model];
+    `);
+    expect(errors).toHaveLength(3);
+    expect(errors.join('\n')).toContain("Type 'string' is not assignable to type 'number'");
+    expect(errors.join('\n')).toContain('image/svg+xml');
+  }, 20_000);
+
+  it('should compile raw, named, readonly and repeated parts through the editor mount', () => {
+    expect(
+      checkAuthoredModule(`
+      import type { Pico } from 'picovoxel';
+      import type { PicovoxelResult } from '@taucad/picovoxel';
+      export default function main(pico: Pico): PicovoxelResult {
+        const shape = pico.createVoxels({ shape: 'sphere', radius: 2 });
+        return [shape, { shape: shape.toMesh(), name: '蓋' }, { shape, name: '蓋' }] as const;
+      }
+    `),
+    ).toEqual([]);
+  }, 20_000);
+
+  it('should reject malformed names, nested parts and plugin value imports through the editor mount', () => {
+    const errors = checkAuthoredModule(`
+      import type { Voxels } from 'picovoxel';
+      import type { PicovoxelResult } from '@taucad/picovoxel';
+      import { picovoxel } from '@taucad/picovoxel';
+      declare const shape: Voxels;
+      const named: PicovoxelResult = { shape, name: 42 };
+      const nested: PicovoxelResult = [[shape]];
+      const assembly: PicovoxelResult = { shape, children: [shape] };
+      void [named, nested, assembly, picovoxel];
+    `);
+    expect(errors).toHaveLength(4);
+    expect(errors.join('\n')).toContain("has no exported member 'picovoxel'");
+    expect(errors.join('\n')).toContain("Type 'number' is not assignable to type 'string'");
+    expect(errors.join('\n')).toContain("'children' does not exist");
+  }, 20_000);
 });

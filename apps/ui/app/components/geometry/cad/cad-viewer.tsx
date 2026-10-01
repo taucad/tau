@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo } from 'react';
 import type { CanvasProps } from '@react-three/fiber';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { Artifact } from '@taucad/runtime';
@@ -9,8 +9,9 @@ import type { ThreeViewerProperties } from '#components/geometry/graphics/three/
 import { SvgViewer } from '#components/geometry/graphics/svg/svg-viewer.js';
 import { WebglErrorBoundary } from '#components/geometry/cad/webgl-error-boundary.js';
 import { WebglErrorFallback } from '#components/geometry/cad/webgl-fallback.js';
+import { useFeature } from '#flags/use-feature.js';
 import { useGraphicsSelector } from '#hooks/use-graphics.js';
-import { mergeGraphicsBackendWithQueryOverride } from '#components/geometry/graphics/graphics-backend.js';
+import { resolveViewerGraphicsBackend } from '#components/geometry/graphics/graphics-backend.js';
 
 type CadViewerCanvasEventProperties = Pick<CanvasProps, 'eventSource' | 'eventPrefix'>;
 
@@ -38,15 +39,11 @@ export const CadViewer = memo(
     onModelComponentSecondaryPointerCandidate,
     ...properties
   }: CadViewerProperties): React.JSX.Element => {
-    const machineResolvedBackend = useGraphicsSelector((state) => state.context.resolvedGraphicsBackend);
+    const webGpuEnabled = useFeature('webGpu');
     const gpuAvailable = useGraphicsSelector((state) => state.context.webGpuAvailable);
-    const graphicsPreference = useGraphicsSelector((state) => state.context.graphicsBackendPreference);
     const requestedGltfRevision = useGraphicsSelector((state) => state.context.gltfPresentation.requestedRevision);
 
-    const graphicsBackendEffective = useMemo(
-      () => mergeGraphicsBackendWithQueryOverride(machineResolvedBackend, graphicsPreference, gpuAvailable),
-      [gpuAvailable, graphicsPreference, machineResolvedBackend],
-    );
+    const graphicsBackendEffective = resolveViewerGraphicsBackend(webGpuEnabled, gpuAvailable);
 
     const known = artifact === undefined ? undefined : asKnownArtifact(artifact);
     if (known?.mimeType === 'image/svg+xml') {

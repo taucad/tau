@@ -78,6 +78,14 @@ vi.mock('#hooks/use-skills-catalog.js', () => ({
   useSkillsCatalog: () => mockSkillsCatalog,
 }));
 
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+  useWorkbenchLayoutController: () => ({
+    snapshot: () => undefined,
+    subscribe: () => () => undefined,
+    restorePreviousArrangement: async () => false,
+  }),
+}));
+
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ appliedWorkbenchRevisions: new Map(), appliedEntryRevisions: new Map() }),
 }));
@@ -362,7 +370,7 @@ describe('ChatMessage column wrapper layout', () => {
     expect(planning.className).toBe('');
   });
 
-  it('should cap collapsed long user bubbles at max-h-58.5 for parity with focused ChatTextarea, without nested Virtuoso scroll', () => {
+  it('should cap collapsed long user bubbles at max-h-60.5 for parity with focused ChatTextarea, without nested Virtuoso scroll', () => {
     const longText = Array.from({ length: 12 }, (_, i) => `line ${i}`).join('\n');
     setMessages([userMessage('msg-1', longText)]);
 
@@ -374,7 +382,7 @@ describe('ChatMessage column wrapper layout', () => {
       throw new Error('inner bubble not found');
     }
 
-    expect(innerBubble.className).toContain('max-h-58.5');
+    expect(innerBubble.className).toContain('max-h-60.5');
     expect(innerBubble.className).toContain('overflow-hidden');
     expect(innerBubble.querySelector('[data-testid="virtuoso-scroller"]')).toBeNull();
 
@@ -685,7 +693,7 @@ describe('ChatMessage ACP session state', () => {
 
 describe('ChatMessage external Tau MCP porcelain', () => {
   it.each(['direct', 'qualified MCP'] as const)(
-    'keeps the %s arrangement card and Restore visible at rest',
+    'should keep the %s arrangement standalone and its routine details collapsed',
     (carrier) => {
       const digest: `sha256:${string}` = `sha256:${'a'.repeat(64)}`;
       const arrangement: Extract<ToolInvocation<typeof toolName.arrangeWorkbench>, { state: 'output-available' }> = {
@@ -724,11 +732,83 @@ describe('ChatMessage external Tau MCP porcelain', () => {
       render(<ChatMessage messageId={message.id} />);
 
       expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-summary', 'Read files');
-      expect(screen.getByText('Arranged:')).toBeVisible();
-      expect(screen.getByRole('status')).toHaveTextContent('Written · shown when the project opens');
-      const restore = screen.getByRole('button', { name: 'Restore' });
-      restore.focus();
-      expect(restore).toHaveFocus();
+      expect(screen.getByText('Arranged')).toBeVisible();
+      expect(screen.getByRole('status')).toHaveTextContent('Written');
+      expect(screen.queryByRole('button', { name: 'Restore previous layout' })).toBeNull();
+      const header = screen.getByRole('button', { name: /Arranged 1 view/u });
+      expect(header).toHaveAttribute('aria-expanded', 'false');
+      fireEvent.click(header);
+      expect(screen.getByRole('button', { name: 'Restore previous layout' })).toBeDisabled();
+    },
+  );
+
+  it.each(['direct', 'qualified MCP'] as const)(
+    'should expose %s interruption/denial and treat preliminary MCP output as running',
+    (carrier) => {
+      const call = { toolCallId: 'arrange-running', input: {}, state: 'input-available' } as const;
+      let message: MyUIMessage = {
+        id: `states-${carrier}`,
+        role: 'assistant',
+        parts: [
+          carrier === 'direct'
+            ? { type: 'tool-arrange_workbench', ...call }
+            : {
+                type: 'dynamic-tool',
+                toolName: 'arrange_workbench',
+                ...call,
+                state: 'output-available',
+                output: {},
+                preliminary: true,
+                toolMetadata: { tau: { nativeName: 'arrange_workbench', presentation: 'tau-mcp' } },
+              },
+        ],
+      };
+      setMessages([message]);
+      const rendered = render(<ChatMessage messageId={message.id} />);
+      expect(screen.getByRole('button', { name: 'Arranging workbench' })).toBeVisible();
+      message = {
+        ...message,
+        parts: [
+          carrier === 'direct'
+            ? {
+                type: 'tool-arrange_workbench',
+                ...call,
+                state: 'output-denied',
+                approval: { id: 'decision', approved: false },
+              }
+            : {
+                type: 'dynamic-tool',
+                toolName: 'arrange_workbench',
+                ...call,
+                state: 'output-denied',
+                approval: { id: 'decision', approved: false },
+                toolMetadata: { tau: { nativeName: 'arrange_workbench', presentation: 'tau-mcp' } },
+              },
+        ],
+      };
+      setMessages([message]);
+      rendered.rerender(<ChatMessage key='denied' messageId={message.id} />);
+      expect(screen.getByRole('button', { name: 'Denied workbench' })).toBeVisible();
+      const errorText = JSON.stringify({ errorCode: 'USER_INTERRUPTED', message: 'Interrupted by operator' });
+      message = {
+        ...message,
+        parts: [
+          carrier === 'direct'
+            ? { type: 'tool-arrange_workbench', ...call, state: 'output-error', errorText }
+            : {
+                type: 'dynamic-tool',
+                toolName: 'arrange_workbench',
+                ...call,
+                state: 'output-error',
+                errorText,
+                toolMetadata: { tau: { nativeName: 'arrange_workbench', presentation: 'tau-mcp' } },
+              },
+        ],
+      };
+      setMessages([message]);
+      rendered.rerender(<ChatMessage key='interrupted' messageId={message.id} />);
+      expect(screen.getByRole('alert')).toHaveTextContent('outcome is unconfirmed');
+      expect(screen.queryByTestId('chat-activity-group')).toBeNull();
     },
   );
 

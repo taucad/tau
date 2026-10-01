@@ -270,6 +270,53 @@ describe('image transcoder', () => {
       ]);
     });
 
+    it('should forward independent part selections in one batch and fit selected bounds natively', async () => {
+      const file = {
+        name: 'part.webp',
+        bytes: new Uint8Array([1]),
+        mimeType: 'image/webp',
+        width: 256,
+        height: 256,
+      } as const;
+      renderImages.mockResolvedValue(
+        timedImages([
+          { id: 'first', file },
+          { id: 'second', file },
+        ]),
+      );
+      const first = [{ nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 }];
+      const second = [{ nodeIndex: 3, meshIndex: 1, primitiveIndex: 0 }];
+
+      const result = await imageDefinition.transcode(
+        {
+          from: 'glb',
+          to: 'webp',
+          files: [glbFile()],
+          options: imageEdgeSchemas.webp.parse({
+            mode: 'batch',
+            width: 256,
+            height: 256,
+            views: [
+              { id: 'first', visiblePrimitives: first, camera: { framing: 'bounds' } },
+              { id: 'second', visiblePrimitives: second },
+            ],
+          }),
+        },
+        runtime,
+        context,
+      );
+
+      expect(result.success).toBe(true);
+      expect(renderImages).toHaveBeenCalledOnce();
+      expect(renderImages.mock.calls[0]?.[1]).toMatchObject({
+        views: [
+          { id: 'first', visiblePrimitives: first, camera: { framing: 'fit' } },
+          { id: 'second', visiblePrimitives: second, camera: { framing: 'fit' } },
+        ],
+      });
+      expect(sceneBoundsMock.read).not.toHaveBeenCalled();
+    });
+
     it('should not read scene bounds for native fit and fixed cameras', async () => {
       const file = {
         name: 'render.webp',

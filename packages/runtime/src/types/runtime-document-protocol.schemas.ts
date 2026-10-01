@@ -21,6 +21,19 @@ import {
   transportHelloPayloadSchema,
 } from '#types/runtime-wire-common.schemas.js';
 
+/**
+ * Keep exact branches while emitting Zod 4.0-compatible declarations for the wire schema.
+ * @param discriminator - Existing wire discriminator key.
+ * @param branches - Exact validated wire variants.
+ * @returns The runtime discriminated parser under the stable union type.
+ */
+const discriminatedWireUnion = <
+  const Branches extends readonly [z.core.$ZodTypeDiscriminable, ...z.core.$ZodTypeDiscriminable[]],
+>(
+  discriminator: string,
+  branches: Branches,
+): z.ZodUnion<Branches> => z.discriminatedUnion(discriminator, branches);
+
 const id = z.string().min(1);
 const intent = z.number().int().min(0);
 const values = z.record(z.string(), z.unknown());
@@ -39,7 +52,7 @@ const rootedFile = z
 const file = z.object({ path: z.string(), filename: id });
 const stage = z.record(rootedFile, z.instanceof(Uint8Array));
 const provenance = { sourceRevision: runtimeSourceRevisionSchema.optional() };
-const binary = z.discriminatedUnion('delivery', [
+const binary = discriminatedWireUnion('delivery', [
   z.object({ delivery: z.literal('inline'), bytes: z.instanceof(Uint8Array) }).strip(),
   z.object({ delivery: z.literal('pooled'), key: id }).strip(),
 ]);
@@ -63,7 +76,7 @@ const viewOffer = z
 const exportOffer = z
   .object({ id, title: z.string(), mimeType: mediaType, extension: id, options: options.optional() })
   .strip();
-const evaluation = z.discriminatedUnion('success', [
+const evaluation = discriminatedWireUnion('success', [
   z
     .object({
       success: z.literal(true),
@@ -77,7 +90,7 @@ const evaluation = z.discriminatedUnion('success', [
     .strip(),
   z.object({ success: z.literal(false), id, transient: z.boolean(), issues, ...provenance }).strip(),
 ]);
-const description = z.discriminatedUnion('success', [
+const description = discriminatedWireUnion('success', [
   z
     .object({
       success: z.literal(true),
@@ -110,7 +123,7 @@ const artifact = z
       .optional(),
   })
   .strip();
-const rendering = z.discriminatedUnion('success', [
+const rendering = discriminatedWireUnion('success', [
   z
     .object({
       success: z.literal(true),
@@ -154,7 +167,7 @@ const exportFiles = z
       });
     }
   });
-const exportResult = z.discriminatedUnion('success', [
+const exportResult = discriminatedWireUnion('success', [
   z
     .object({
       success: z.literal(true),
@@ -193,7 +206,7 @@ const snapshotArgs = z
       .optional(),
   })
   .strip();
-const snapshotResult = z.discriminatedUnion('success', [
+const snapshotResult = discriminatedWireUnion('success', [
   z
     .object({
       success: z.literal(true),
@@ -245,7 +258,7 @@ const transcodeArgs = z
     options: values,
   })
   .strip();
-const transcodeResult = z.discriminatedUnion('success', [
+const transcodeResult = discriminatedWireUnion('success', [
   z
     .object({
       success: z.literal(true),
@@ -335,17 +348,17 @@ export const runtimeDocumentProtocolSchemas = {
     closeView: z.object(subscription).strip(),
     abort: z.object({ operationId: id, reason: z.number().int() }).strip(),
     binaryMaterialised: z.object({ key: id }).strip(),
-    described: z.discriminatedUnion('success', [
+    described: discriminatedWireUnion('success', [
       description.options[0].extend({ ...withIntent, ...evaluationId }),
       description.options[1].extend({ ...withIntent, ...evaluationId }),
     ]),
     evaluating: z.object({ ...withIntent, ...evaluationId, transient: z.boolean() }).strip(),
-    evaluated: z.discriminatedUnion('success', [
+    evaluated: discriminatedWireUnion('success', [
       evaluation.options[0].extend(withIntent),
       evaluation.options[1].extend(withIntent),
     ]),
     rendering: z.object({ ...subscription, ...request, ...evaluationId, intent }).strip(),
-    rendered: z.discriminatedUnion('success', [
+    rendered: discriminatedWireUnion('success', [
       rendering.options[0].extend({ ...subscription, intent }),
       rendering.options[1].extend({ ...subscription, intent }),
     ]),
@@ -359,7 +372,7 @@ export const runtimeDocumentProtocolSchemas = {
         detail: values.optional(),
       })
       .strip(),
-    errorEvent: z.discriminatedUnion('scope', [
+    errorEvent: discriminatedWireUnion('scope', [
       z.object({ scope: z.literal('connection'), error: z.object({ issues }).strip() }).strip(),
       z
         .object({

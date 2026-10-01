@@ -15,7 +15,7 @@ import { remoteTrackingRef } from '#remotes.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RemoteStorageRefusal, RevisionPort, RevisionPushRef, RevisionPushRefResult } from '#revision-port.js';
 import type { SyncRefOutcome } from '#sync.types.js';
-import type { RevisionActorsOptions, RevisionFileSystem } from '#revision-effects.js';
+import type { RevisionActorsOptions, RevisionFileSystem } from '#revision-effects.types.js';
 
 /**
  * The two numbers a storage refusal carries, or `undefined` when it carried none.

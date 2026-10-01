@@ -1043,7 +1043,7 @@ Library.Go(1f, () =>
     }
 
     [Fact]
-    public void BulkReadbackMatchesFallbackAndBoundsCallerBuffers()
+    public void CaptureReadbackPreservesIndicesAndBoundsCallerBuffers()
     {
         using var library = new Library(1f);
         Library.RegisterGlobalLibrary(library);
@@ -1055,8 +1055,7 @@ Library.Go(1f, () =>
             mesh.nAddVertex(new Vector3(4, 5, 6));
             mesh.nAddVertex(new Vector3(7, 8, 9));
             mesh.nAddTriangle(0, 1, 2);
-            var bulk = mesh.TauCopyGeometry(); var fallback = mesh.TauCopyGeometry(false);
-            Assert.Equal(1, (int)typeof(Mesh).GetField("m_tauBulkAvailable", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.GetValue(null)!);
+            var bulk = mesh.TauCopyGeometry(); var fallback = mesh.TauCopyGeometry();
             Assert.Equal(new float[] { 1, 2, 3, 4, 5, 6, 7, 8, 9 }, bulk.Positions);
             Assert.Equal(new uint[] { 0, 1, 2 }, bulk.Indices);
             Assert.Equal(fallback.Positions, bulk.Positions);
@@ -1090,7 +1089,7 @@ Library.Go(1f, () =>
             Assert.Throws<ObjectDisposedException>(() => mesh.nAddTriangle(0, 1, 2));
             using var nonfinite = new Mesh();
             nonfinite.nAddVertex(new Vector3(float.NaN, 0, 0));
-            Assert.Equal("PicoGK readback returned a nonfinite vertex.", Assert.Throws<InvalidOperationException>(() => nonfinite.TauCopyGeometry()).Message);
+            Assert.Equal("PicoGK immutable capture contains invalid geometry or counts.", Assert.Throws<ArgumentException>(() => nonfinite.TauCopyGeometry()).Message);
         }
         finally { Library.UnregisterGlobalLibrary(); }
     }
@@ -1118,7 +1117,7 @@ Library.Go(1f, () =>
             {
                 var geometry = mesh.TauCopyGeometry();
                 Assert.All(geometry.Indices, index => Assert.True(index < geometry.Positions.Length / 3));
-                Assert.Equal(geometry.Indices, mesh.TauCopyGeometry(false).Indices.Take(geometry.Indices.Length));
+                Assert.Equal(geometry.Indices, mesh.TauCopyGeometry().Indices.Take(geometry.Indices.Length));
             }
             await mutation;
             Assert.Same(original.Positions, Assert.Single(backend.Extract().Components).Positions);

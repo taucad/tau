@@ -92,7 +92,7 @@ const expectNativeQuick = async (desktop: DesktopSession, runIndex: number): Pro
         return events
           .slice(runIndex + 1)
           .some(
-            (event) => event.pid === run?.pid && event.kind === 'native-entry' && event.capability === 'watertight',
+            (event) => event.pid === run?.pid && event.kind === 'native-entry' && event.capability === 'toBeWatertight',
           );
       },
       { timeout: 90_000 },
@@ -321,7 +321,9 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
           .slice(slowRunIndex + 1)
           .some(
             (event) =>
-              event.pid === activePid && event.kind === 'native-entry' && event.capability === 'connectedComponents',
+              event.pid === activePid &&
+              event.kind === 'native-entry' &&
+              event.capability === 'toHaveConnectedComponents',
           );
       },
       { timeout: 90_000 },

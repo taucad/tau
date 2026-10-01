@@ -57,10 +57,12 @@
   },
   "dependencies": {
     "cdn-resolve": "catalog:",
-    "es-module-lexer": "catalog:"
+    "es-module-lexer": "catalog:",
+    "semver": "catalog:"
   },
   "devDependencies": {
-    "@taucad/runtime": "workspace:*"
+    "@taucad/runtime": "workspace:*",
+    "@types/semver": "catalog:"
   },
   "taucad": {
     "hostTarget": "browser"

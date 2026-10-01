@@ -5,6 +5,8 @@ import type { BuiltinModule } from '@taucad/runtime/bundler';
 
 import { resolveAssetIntent, splitAssetSpecifier } from '#asset-imports.js';
 import type { BundlerSourceIntent } from '#asset-imports.js';
+import { parsePackageManifest, readManifestLock, readLockedArtifact } from '#package-manifest.js';
+import type { PackageManifestLock } from '#package-manifest.js';
 import { PackageArtifactCache } from '#package-artifact-cache.js';
 import type { BundlerFileSystem, PackageArtifactIdentity } from '#package-artifact-cache.js';
 
@@ -160,6 +162,17 @@ export const createBundlerSourceHost = (options: BundlerSourceHostOptions): Bund
       const dependencies = new Set<string>();
       const unresolvedPaths = new Set<string>();
       let completed = false;
+      let manifestPromise: Promise<PackageManifestLock | undefined> | undefined;
+      const readLock = async (): Promise<PackageManifestLock | undefined> => {
+        if (!(await options.filesystem.exists('package.json'))) {
+          return undefined;
+        }
+        return readManifestLock(parsePackageManifest(await options.filesystem.readFile('package.json', 'utf8')));
+      };
+      const getLock = async (): Promise<PackageManifestLock | undefined> => {
+        manifestPromise ??= readLock();
+        return manifestPromise;
+      };
 
       // oxlint-disable-next-line complexity -- one discriminated resolver is the shared semantic boundary
       const resolve = async (request: BundlerSourceResolveRequest): Promise<BundlerSourceResolution> => {
@@ -208,7 +221,26 @@ export const createBundlerSourceHost = (options: BundlerSourceHostOptions): Bund
           if (builtinName !== undefined) {
             return { kind: 'builtin', id: `builtin:${builtinName}`, name: builtinName, intent: 'script' };
           }
-          const identity = await packageArtifacts.ensure(specifier, signal);
+          const lock = await getLock();
+          let identity: PackageArtifactIdentity;
+          if (lock === undefined) {
+            identity = await packageArtifacts.ensure(specifier, signal);
+          } else {
+            const locked = Object.hasOwn(lock.packages, parsed.name) ? lock.packages[parsed.name] : undefined;
+            if (
+              locked === undefined ||
+              parsedPath !== '' ||
+              (specifier !== parsed.name && specifier !== `${parsed.name}@${locked.registry.version}`)
+            ) {
+              throw new Error(
+                `Import '${specifier}' is not admitted by package.json. Update the dependency lock explicitly.`,
+              );
+            }
+            dependencies.add('package.json');
+            dependencies.add(locked.artifact.cachePath);
+            await readLockedArtifact(options.filesystem, locked.artifact, signal);
+            identity = locked.artifact;
+          }
           return { kind: 'package', id: identity.cachePath, identity, intent: 'script' };
         }
 
@@ -284,7 +316,10 @@ export const createBundlerSourceHost = (options: BundlerSourceHostOptions): Bund
               resolveDirectory,
             };
           }
-          let text = await options.filesystem.readFile(path, 'utf8');
+          let text =
+            resolution.kind === 'package'
+              ? await readLockedArtifact(options.filesystem, resolution.identity, signal)
+              : await options.filesystem.readFile(path, 'utf8');
           if (resolution.kind === 'project' && path === canonicalEntry && resolution.intent === 'script') {
             text = addAutomaticExports(text, autoExportNames);
           }

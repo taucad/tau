@@ -10,6 +10,7 @@ describe('public surface', () => {
       'normalizeAssetImportAttributes',
       'resolveAssetIntent',
       'splitAssetSpecifier',
+      'updatePackageManifest',
     ]);
   });
 });

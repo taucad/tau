@@ -13,7 +13,7 @@ const config: KnipConfig = {
   // fields into `dist/`, so a built tree reports every emitted file and export
   // as unused (~970 phantom issues locally). CI checks out fresh and never
   // builds before the knip job, so this only ever bit local runs.
-  ignore: ['**/dist/**', '**/build/**'],
+  ignore: ['**/dist/**', '**/build/**', 'repos/**', 'docs/research/**', '.claude/**'],
 
   rules: {
     optionalPeerDependencies: 'off',
@@ -28,7 +28,7 @@ const config: KnipConfig = {
   ignoreWorkspaces: ['tools/nx', 'tools/workspace-plugin', 'libs/tau-examples'],
 
   vitest: {
-    config: ['vitest.config.{js,ts}', 'vite.config.{js,ts}'],
+    config: ['vitest*.config.{js,ts,mts}', 'vite.config.{js,ts}'],
   },
 
   ignoreBinaries: ['fly', 'docker-compose'],
@@ -60,9 +60,16 @@ const config: KnipConfig = {
     '.': {
       // The workspace-root scripts Nx targets and build configs run; `pkgcheck.ts`
       // is the only consumer of `@taucad/nx`, `madge`, and `@types/madge`.
-      entry: ['tools/*.ts'],
+      entry: ['tools/*.ts', '{apps,libs,packages,scripts,tools}/**/*.{test,spec,test-d}.{ts,tsx,mts}'],
       project: ['**/*.{ts,tsx,mts}'],
-      ignore: ['.agents/skills/create-repo/templates/**', 'tarballs/**', 'tools/eslint-fixtures/**'],
+      ignore: [
+        '.agents/skills/create-repo/templates/**',
+        '.claude/skills/**',
+        'tarballs/**',
+        'tools/eslint-fixtures/**',
+      ],
+      // Nx invokes the canvas config from the root; it requires a selected private artifact.
+      vite: false,
       ignoreDependencies: [
         'replicad-opencascadejs',
         'libcascade',
@@ -104,6 +111,14 @@ const config: KnipConfig = {
       // type generator behind auto-type-table.
       ignoreDependencies: ['@taucad/*'],
     },
+    'libs/api-extractor': {
+      // Generated declarations are catalog data read from disk by extraction tools.
+      ignore: ['src/generated/**'],
+    },
+    'packages/warehouse': {
+      // CAD programs and assertions are loaded from tau.json and GeoSpec manifests.
+      entry: ['parts/**/main.ts', 'parts/**/main.geospec.ts', 'definitions/**/catalog.ts', 'scripts/*.mts'],
+    },
     'packages/ui': {
       // A design system publishes its whole surface; consumption by the apps in
       // this repo is not what makes a component reachable.
@@ -111,6 +126,9 @@ const config: KnipConfig = {
     },
     scripts: {
       entry: ['src/**/*.{ts,tsx,mts}'],
+      // The canvas config requires a selected private artifact at execution time.
+      // Its source remains an entry; static analysis must not start that config.
+      vite: false,
     },
   },
 };

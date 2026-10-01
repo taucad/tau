@@ -138,8 +138,28 @@ export class MachineSettingsStore {
     entry.loading = (async () => {
       do {
         entry.dirty = false;
-        const service = await this.#ready();
-        const file = await service.readMachineSettings(typeId);
+        // A read reply cannot overtake the captured write/settlement queue.
+        const { queue } = entry;
+        await queue;
+        if (queue !== entry.queue) {
+          entry.dirty = true;
+          continue;
+        }
+        let file: MachineSettingsSnapshot;
+        try {
+          const service = await this.#ready();
+          file = await service.readMachineSettings(typeId);
+        } catch (error) {
+          if (queue === entry.queue) {
+            throw error;
+          }
+          entry.dirty = true;
+          continue;
+        }
+        if (queue !== entry.queue) {
+          entry.dirty = true;
+          continue;
+        }
         const { state } = entry;
         this.#publish(entry, {
           ...state,
@@ -197,27 +217,34 @@ export class MachineSettingsStore {
     if (failure?.result.status !== 'uncertain') {
       return;
     }
-    const service = await this.#ready();
-    const result = await service.machineSettingsSettlement(failure.operationId);
-    await entry.queue;
-    if (entry.state.failure !== failure) {
-      return;
-    }
-    if (result.status === 'saved') {
-      const deferred = entry.deferred.splice(0);
-      this.#publish(entry, {
-        ...entry.state,
-        file: { status: 'current', record: result.record },
-        ...(entry.revision === failure.revision ? { draft: undefined } : {}),
-        failure: undefined,
-        pending: deferred.length,
-      });
-      for (const transition of deferred) {
-        this.#enqueue(entry, transition);
+    const run = entry.queue.then(async () => {
+      if (entry.state.failure !== failure) {
+        return;
       }
-    } else {
-      this.#publish(entry, { ...entry.state, failure: { ...failure, result } });
-    }
+      const service = await this.#ready();
+      const result = await service.machineSettingsSettlement(failure.operationId);
+      if (result.status === 'saved') {
+        // The original receipt may predate an external edit; reuse the root's current snapshot.
+        const file = await service.readMachineSettings(typeId);
+        const deferred = entry.deferred.splice(0);
+        this.#publish(entry, {
+          ...entry.state,
+          file,
+          ...(entry.revision === failure.revision ? { draft: undefined } : {}),
+          failure: undefined,
+          pending: deferred.length,
+        });
+        for (const transition of deferred) {
+          this.#enqueue(entry, transition);
+        }
+      } else {
+        this.#publish(entry, { ...entry.state, failure: { ...failure, result } });
+      }
+    });
+    entry.queue = run.catch((error: unknown) => {
+      this.#readFailure(entry, error);
+    });
+    await run;
   }
   /** Explicitly discard a conflicting draft in favor of the current saved record. */
   public async useLatest(typeId: MachineTypeId): Promise<void> {
@@ -225,7 +252,7 @@ export class MachineSettingsStore {
     if (entry.state.failure?.result.status === 'uncertain') {
       return;
     }
-    await entry.queue;
+    await this.#drain(entry);
     entry.deferred.length = 0;
     this.#publish(entry, {
       ...entry.state,
@@ -237,7 +264,7 @@ export class MachineSettingsStore {
   /** Job preparation waits for captured writes and refuses unresolved saves. */
   public async flush(typeId: MachineTypeId): Promise<void> {
     const entry = this.#entry(typeId);
-    await entry.queue;
+    await this.#drain(entry);
     if (entry.state.failure) {
       throw new Error(entry.state.failure.result.message);
     }
@@ -248,9 +275,18 @@ export class MachineSettingsStore {
       entry.unsubscribe();
       entry.topic.dispose();
     }
-    Promise.allSettled([...this.#entries.values()].map(async (entry) => entry.queue))
+    Promise.allSettled([...this.#entries.values()].map(async (entry) => this.#drain(entry)))
       .then(this.#disposeService)
       .catch(console.error);
+  }
+  async #drain(entry: Entry): Promise<void> {
+    let queue: Promise<void>;
+    do {
+      ({ queue } = entry);
+      await queue;
+      await entry.loading;
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Settlement can append captured edits while the queue is awaited.
+    } while (queue !== entry.queue || entry.loading);
   }
   async #ready(): Promise<MachineSettingsService> {
     this.#opened ??= typeof this.#service === 'function' ? this.#service() : this.#service;
@@ -292,11 +328,13 @@ export class MachineSettingsStore {
   #publish(entry: Entry, state: SettingsProjection): void {
     const started = performance.now();
     try {
-      if (this.#disposed || JSON.stringify(entry.state) === JSON.stringify(state)) {
+      if (JSON.stringify(entry.state) === JSON.stringify(state)) {
         return;
       }
       entry.state = freeze(replaceEqualDeep(entry.state, state));
-      entry.topic.emit();
+      if (!this.#disposed) {
+        entry.topic.emit();
+      }
     } finally {
       performance.clearMeasures('tau.machine-settings.publish');
       performance.measure('tau.machine-settings.publish', { start: started, end: performance.now() });

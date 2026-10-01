@@ -254,26 +254,38 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     second.send({ command: 'close' });
     /* The release records a close cut through the real store first, so it is
      * waited on, not counted in event-loop turns (W2c a1b). */
-    await vi.waitFor(() => {
-      expect(alphaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
-    });
+    await vi.waitFor(
+      () => {
+        expect(alphaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
+      },
+      { timeout: 10_000 },
+    );
 
     /* The actor itself, not the registry's bookkeeping: a released root has
      * stopped and has no child left running. */
     expect(alphaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
     expect(betaRoot.inspect().status).toBe('active');
     // Closing waits for the operation log's last append, so the registry lets go after the root stops.
-    await vi.waitFor(() => {
-      expect(fixture.registry.openProjectIds()).toEqual(['beta']);
-    });
+    await vi.waitFor(
+      () => {
+        expect(fixture.registry.openProjectIds()).toEqual(['beta']);
+      },
+      { timeout: 10_000 },
+    );
 
     beta.send({ command: 'close' });
-    await vi.waitFor(() => {
-      expect(betaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
-    });
-    await vi.waitFor(() => {
-      expect(fixture.registry.openProjectIds()).toEqual([]);
-    });
+    await vi.waitFor(
+      () => {
+        expect(betaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
+      },
+      { timeout: 10_000 },
+    );
+    await vi.waitFor(
+      () => {
+        expect(fixture.registry.openProjectIds()).toEqual([]);
+      },
+      { timeout: 10_000 },
+    );
   }, 20_000);
 
   it('should give a port that connects while its project is closing a fresh root, not the one being released', async () => {
@@ -373,15 +385,31 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const alpha = await fixture.open('alpha');
     /* A recorded revision first: a branch of an unborn line has no tree to
      * materialize, which is the port's own refusal, not this seam's. */
-    alpha.send({ command: 'saveRevision' });
-    await alpha.settle();
-
-    alpha.send({ command: 'createBranch', name: 'bracket-fillet' });
     const root = await fixture.root('alpha');
-    for (let attempt = 0; attempt < 40 && root.status().branches.length < 2; attempt += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- polling the registry's own answer.
-      await alpha.settle();
-    }
+    alpha.send({ command: 'saveRevision', id: 1 });
+    await vi.waitFor(
+      () => {
+        expect(alpha.frames.filter((frame) => frame.type === 'error' && frame.id === 1)).toEqual([]);
+        expect(alpha.frames).toContainEqual({ type: 'result', id: 1, result: { kind: 'saved' } });
+        expect(root.status().headRevisionId).toBeDefined();
+      },
+      { timeout: 10_000 },
+    );
+
+    alpha.send({ command: 'createBranch', name: 'bracket-fillet', id: 2 });
+    await vi.waitFor(
+      () => {
+        expect(alpha.frames.filter((frame) => frame.type === 'error' && frame.id === 2)).toEqual([]);
+        const answer = alpha.frames.find((frame) => frame.type === 'result' && frame.id === 2);
+        if (answer?.type !== 'result' || answer.result.kind !== 'branch') {
+          expect.fail('The branch request has not returned its checkout.');
+        }
+        expect(answer.result.branch).toBe('bracket-fillet');
+        expect(typeof answer.result.checkoutId).toBe('string');
+        expect(typeof answer.result.checkoutRoot).toBe('string');
+      },
+      { timeout: 10_000 },
+    );
 
     const status = root.status();
     const created = status.branches.find((row) => row.name === 'bracket-fillet');

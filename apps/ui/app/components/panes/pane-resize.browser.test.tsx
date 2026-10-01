@@ -271,27 +271,42 @@ describe('native pane resize boundaries', () => {
       const idle = getComputedStyle(sash, '::after');
       expect(idle.width).toBe('48px');
       expect(idle.height).toBe('2px');
+      await commands.resizePointer('move', { x: rect.x + 32, y: rect.y - 32 });
+      await waitFor(() => {
+        expect(getComputedStyle(sash, '::after').opacity).toBe('0');
+      });
       const idleColor = idle.backgroundColor;
       document.documentElement.style.setProperty('--primary', 'red');
       expect(getComputedStyle(sash, '::after').backgroundColor).toBe(idleColor);
-      await userEvent.hover(sash);
+      // The whole divider gap reveals the pill, including points away from its center paint.
+      await commands.resizePointer('move', { x: rect.x + 32, y: rect.y + 1 });
+      await waitFor(() => {
+        expect(getComputedStyle(sash, '::after').opacity).toBe('1');
+      });
       const hoverColor = getComputedStyle(sash, '::after').backgroundColor;
       if (!theme.includes('high-contrast')) {
         expect(hoverColor).not.toBe(idleColor);
       }
+      await commands.resizePointer('move', { x: rect.x + 32, y: rect.y - 32 });
+      await waitFor(() => {
+        expect(getComputedStyle(sash, '::after').opacity).toBe('0');
+      });
       const initial = Number(sash.getAttribute('aria-valuenow'));
       await commands.resizePointer('down', { x: rect.x + rect.width / 2, y: rect.y + 4 });
+      expect(getComputedStyle(sash, '::after').opacity).toBe('1');
       expect(getComputedStyle(sash, '::after').transform).toContain('1.33333');
       await commands.resizePointer('move', { x: rect.x + rect.width / 2, y: rect.y + 36 });
       await waitFor(() => {
         expect(Number(sash.getAttribute('aria-valuenow'))).toBeGreaterThan(initial + 20);
       });
+      expect(getComputedStyle(sash, '::after').opacity).toBe('1');
       await commands.resizePointer('up', { x: 0, y: 0 });
       sash.focus();
       const moved = Number(sash.getAttribute('aria-valuenow'));
       await userEvent.keyboard('{ArrowUp}');
       await waitFor(() => {
         expect(Number(sash.getAttribute('aria-valuenow'))).toBe(moved - 8);
+        expect(getComputedStyle(sash, '::after').opacity).toBe('1');
       });
       await commands.resizeEnvironment(true, true);
       expect(matchMedia('(pointer: coarse)').matches).toBe(true);

@@ -82,10 +82,11 @@ const createProject = async (name: string): Promise<void> => {
   await waitForComposer();
 };
 
-const submitPrompt = async (): Promise<void> => {
-  await target.type(composer, prompt);
+const submitPrompt = async (text = prompt): Promise<void> => {
+  const before = await gatewayRequestCount();
+  await target.type(composer, text);
   await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
-  await target.expectVisible(stopButton(), 30_000);
+  await expect.poll(gatewayRequestCount, { timeout: 30_000 }).toBeGreaterThan(before);
 };
 
 const gatewayRequestCount = async (): Promise<number> => {
@@ -353,7 +354,7 @@ it('accepts the project Runtime mesh', async () => {
           { timeout: 60_000 },
         )
         .toBe(true);
-      await submitPrompt();
+      await submitPrompt('Retry the GeoSpec checks now that the intact WASM asset is available.');
     }
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 180_000);
     requests = await target.readAgentHostGatewayRequests();

@@ -1,4 +1,5 @@
 import { init, parse } from 'es-module-lexer';
+import { parsePackage } from 'cdn-resolve';
 
 import { readPackageResponse } from '#package-response.js';
 import { satisfies, valid, validRange } from 'semver';
@@ -21,6 +22,7 @@ export type LockedPackage = {
   readonly requested: string;
   readonly registry: PackageRegistryResolution;
   readonly artifact: PackageArtifactIdentity;
+  readonly subpaths?: Readonly<Record<string, PackageArtifactIdentity>>;
 };
 
 /** Versioned lock embedded in package.json so selection and manifest commit together. @public */
@@ -38,8 +40,10 @@ export type PackageManifestCommit = (input: {
 /** Explicit project dependency update, independent of bundling or code execution. @public */
 export type UpdatePackageManifestInput = {
   readonly filesystem: BundlerFileSystem;
-  /** Complete desired root dependency set. Subpath imports are not admitted by this slice. */
+  /** Complete desired root dependency set. Subpaths are selected separately through imports. */
   readonly requests: Readonly<Record<string, string>>;
+  /** Additional standard import specifiers, for example react/jsx-runtime. Versions come from requests. */
+  readonly imports?: readonly string[];
   readonly mode: 'install' | 'upgrade';
   /** Exact host Node version used for engine admission, including when preparing browser bundles. */
   readonly nodeVersion: string;
@@ -47,6 +51,10 @@ export type UpdatePackageManifestInput = {
   /** Atomically compare and replace package.json through the owning filesystem authority. */
   readonly commit: PackageManifestCommit;
 };
+
+const validSubpath = (path: string): boolean =>
+  /^[A-Za-z\d_.-]+(?:\/[A-Za-z\d_.-]+)*$/u.test(path) &&
+  path.split('/').every((segment) => segment !== '.' && segment !== '..');
 
 const artifactRoot = 'node_modules/.tau-bundler/artifacts/';
 
@@ -81,6 +89,31 @@ export const parsePackageManifest = (text: string): Record<string, unknown> => {
   return value;
 };
 
+const readSubpaths = (
+  value: unknown,
+  registry: PackageRegistryResolution,
+): Record<string, PackageArtifactIdentity> | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error(`Invalid subpath lock for '${registry.name}'.`);
+  }
+  const subpaths = new Map<string, PackageArtifactIdentity>();
+  for (const [path, artifact] of Object.entries(value)) {
+    if (
+      !validSubpath(path) ||
+      !isArtifact(artifact) ||
+      artifact.exactVersion !== registry.version ||
+      artifact.resolutionMetadata.requestedSpecifier !== `${registry.name}@${registry.version}/${path}`
+    ) {
+      throw new Error(`Invalid subpath lock for '${registry.name}'. Restore a known-good manifest.`);
+    }
+    subpaths.set(path, artifact);
+  }
+  return Object.fromEntries(subpaths);
+};
+
 export const readManifestLock = (manifest: Record<string, unknown>): PackageManifestLock | undefined => {
   const lock = manifest['taucadPackageLock'];
   if (lock === undefined) {
@@ -109,7 +142,13 @@ export const readManifestLock = (manifest: Record<string, unknown>): PackageMani
     ) {
       throw new Error(`Invalid dependency lock for '${name}'. Restore a known-good manifest.`);
     }
-    packages[name] = { requested: entry['requested'], registry: entry['registry'], artifact: entry['artifact'] };
+    const subpaths = readSubpaths(entry['subpaths'], entry['registry']);
+    packages[name] = {
+      ...(subpaths === undefined ? {} : { subpaths }),
+      requested: entry['requested'],
+      registry: entry['registry'],
+      artifact: entry['artifact'],
+    };
   }
   if (Object.keys(packages).length !== Object.keys(manifest['dependencies']).length) {
     throw new Error('package.json dependencies differ from its lock. Use an explicit dependency update.');
@@ -187,6 +226,58 @@ const checkCompatibility = (packages: Readonly<Record<string, LockedPackage>>, n
   }
 };
 
+const retainedSubpaths = (
+  packages: Readonly<Record<string, LockedPackage>>,
+  previous: PackageManifestLock | undefined,
+): string[] => {
+  const specifiers: string[] = [];
+  for (const name of Object.keys(packages)) {
+    const prior =
+      previous !== undefined && Object.hasOwn(previous.packages, name) ? previous.packages[name] : undefined;
+    for (const path of Object.keys(prior?.subpaths ?? {})) {
+      specifiers.push(`${name}/${path}`);
+    }
+  }
+  return specifiers;
+};
+
+const prepareSubpaths = async (input: {
+  readonly packages: Record<string, LockedPackage>;
+  readonly previous: PackageManifestLock | undefined;
+  readonly cache: PackageArtifactCache;
+  readonly filesystem: BundlerFileSystem;
+  readonly imports: readonly string[];
+  readonly mode: 'install' | 'upgrade';
+  readonly signal: AbortSignal;
+}): Promise<void> => {
+  const { packages, previous, cache, filesystem, mode, signal } = input;
+  const specifiers = new Set([...input.imports, ...retainedSubpaths(packages, previous)]);
+  for (const specifier of [...specifiers].sort()) {
+    const parsed = parsePackage(specifier);
+    const path = parsed.path?.replace(/^\//u, '') ?? '';
+    const root = Object.hasOwn(packages, parsed.name) ? packages[parsed.name] : undefined;
+    if (root === undefined || !validSubpath(path) || specifier !== `${parsed.name}/${path}`) {
+      throw new Error(`Import '${specifier}' requires a declared root request and a normalized package subpath.`);
+    }
+    const previousRoot = previous?.packages[parsed.name];
+    const prior =
+      mode === 'install' ? Object.entries(previousRoot?.subpaths ?? {}).find(([key]) => key === path)?.[1] : undefined;
+    // oxlint-disable-next-line no-await-in-loop -- acquire exact subpaths in stable order
+    const artifact = prior ?? (await cache.ensure(`${parsed.name}@${root.registry.version}/${path}`, signal));
+    if (
+      artifact.exactVersion !== root.registry.version ||
+      artifact.resolutionMetadata.requestedSpecifier !== `${parsed.name}@${root.registry.version}/${path}`
+    ) {
+      throw new Error(`Cached subpath '${specifier}' conflicts with the selected registry version.`);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- validate each pinned subpath before publication
+    const code = await readLockedArtifact(filesystem, artifact, signal);
+    // oxlint-disable-next-line no-await-in-loop -- subpaths retain the same closure admission as roots
+    await assertSealed(code, specifier);
+    packages[parsed.name] = { ...root, subpaths: { ...root.subpaths, [path]: artifact } };
+  }
+};
+
 /**
  * Resolve exact public npm versions, acquire sealed CDN artifacts, and atomically commit package.json.
  * Install reuses locked versions offline; upgrade resolves the original requested ranges afresh.
@@ -248,6 +339,7 @@ export const updatePackageManifest = async (input: UpdatePackageManifestInput): 
       await assertSealed(code, name);
       packages[name] = { requested, registry, artifact };
     }
+    await prepareSubpaths({ packages, previous, cache, filesystem, imports: input.imports ?? [], mode, signal });
     checkCompatibility(packages, nodeVersion);
     const lock: PackageManifestLock = { schemaVersion: 1, packages };
     const dependencies = Object.fromEntries(

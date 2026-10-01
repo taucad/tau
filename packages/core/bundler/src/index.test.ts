@@ -7,6 +7,7 @@ describe('public surface', () => {
     expect(Object.keys(bundlerCore).sort()).toEqual([
       'PackageArtifactCache',
       'createBundlerSourceHost',
+      'createPackageManifestCommit',
       'normalizeAssetImportAttributes',
       'resolveAssetIntent',
       'splitAssetSpecifier',

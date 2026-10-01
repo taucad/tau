@@ -43,6 +43,8 @@ const observation = session.complete();
 | -------------------------------- | -------------------------------------------------------------- |
 | `createBundlerSourceHost`        | rooted project, built-in, URL, and package source sessions     |
 | `PackageArtifactCache`           | exact, content-addressed self-contained package artifact cache |
+| `updatePackageManifest`         | resolve, verify and commit exact project package selections    |
+| `createPackageManifestCommit`   | publish through the existing filesystem checked-write authority |
 | `normalizeAssetImportAttributes` | length-preserving normalization for supported asset imports    |
 | `resolveAssetIntent`             | compiler-neutral query/attribute loader intent                 |
 
@@ -54,11 +56,14 @@ registry version, tarball URL/SHA-512 integrity, compatibility requirements, and
 of the CDN code actually consumed. `tau.json` and repository dependencies remain separate.
 
 ```typescript
-import { updatePackageManifest } from '@taucad/bundler-core';
+import { createPackageManifestCommit, updatePackageManifest } from '@taucad/bundler-core';
+
+const commit = createPackageManifestCommit({ authority: rootedFilesystem, signal });
 
 const lock = await updatePackageManifest({
   filesystem,
-  requests: { 'is-number': '^7.0.0' },
+  requests: { 'lodash-es': '^4.17.21' },
+  imports: ['lodash-es/debounce'],
   mode: 'install',
   nodeVersion: '24.0.0',
   signal,
@@ -69,8 +74,9 @@ const lock = await updatePackageManifest({
 The host supplies `filesystem` from its existing rooted filesystem authority and
 `commit({ expected, content })` as an **atomic compare-and-swap of `package.json`**. Compare the
 complete prior text (or absence), then publish the complete replacement in the same host-owned
-transaction/lock. Return `false` on a concurrent edit; throw on a failed write without replacing the
-previous file. Equal content can be a no-op inside that transaction. A separate `readFile` followed
+transaction/lock. Return `false` on a concurrent edit. The provided `createPackageManifestCommit` adapter calls
+`writeFileChecked` on the existing rooted authority. It preserves `known-not-applied` versus
+`potentially-applied` failures; after an uncertain failure, reread the manifest before retrying. Equal content can be a no-op inside that transaction. A separate `readFile` followed
 by `writeFile` is **not** a correct cross-worker commit adapter. Reuse the host's workspace store;
 this package does not create a second store, lock service, or filesystem authority.
 
@@ -81,6 +87,8 @@ reinstalling or upgrading; do not substitute the generated exact `dependencies` 
 the explicitly requested prerelease/tag). A moving tag changes only during an explicit upgrade.
 Ordinary bundling never upgrades the manifest. The source host reads one manifest snapshot per
 session and reports both `package.json` and the locked artifact paths as dependencies.
+Selected subpaths remain admitted on reinstall and upgrade, even when `imports` is omitted;
+removing a root from `requests` removes its subpaths too.
 
 Warm reinstall works offline and checks cached bytes against their locked SHA-256. A missing artifact
 can be restored from its locked URL only if the original digest matches. Changed bytes, an unavailable
@@ -90,12 +98,13 @@ unreferenced cache files after failure, but only the atomic manifest commit acti
 
 ### Admission and limits
 
-- This slice supports scoped/unscoped **root** public npm packages, npm semver ranges, explicit
-  prereleases and dist-tags. npm aliases, private registries, package subpaths, and authenticated
-  registry requests are not admitted.
+- This slice supports scoped/unscoped public npm roots and explicitly selected subpaths, npm
+  semver ranges, prereleases and dist-tags. Add standard subpath imports such as `lodash-es/debounce`
+  to `imports`; they resolve at the root's selected version. npm aliases, private registries and
+  authenticated registry requests are not admitted.
 - Node engine and selected root peer ranges must match. Missing optional peers are permitted;
   incompatible selected optional peers fail. A peer's presence does not admit external imports.
-- Only self-contained ESM bundles are admitted. Static or dynamic imports remaining after CDN
+- Only self-contained ESM bundles are admitted at each selected root/subpath. Static or dynamic imports remaining after CDN
   bundling fail with a transitive-lock diagnostic. Inlined transitive code is frozen by the bundle
   hash; this is **not** an npm dependency-tree lock or a substitute for `pnpm-lock.yaml` when
   installing the generated manifest with pnpm. Unbundled trees and cross-package peer identity
@@ -127,7 +136,8 @@ and refusal to claim a lock for remaining transitive imports. A live anonymous r
 on 2026-10-01 resolved `is-number@^7.0.0` to `7.0.0`: 222 ms cold and 0.39 ms warm in one Node 24
 sample. These are illustrative measurements, not a performance guarantee.
 
-Production integration must supply and test the real host atomic commit adapter, browser-worker
+The Node authority adapter has a real disk/RPC integration test with independent clients.
+Production integration must qualify browser-worker
 network/CORS behavior, cache eviction/restoration, cancellation during actual provider writes, and
 representative UI/runtime packages. The library slice does not wire a Generate UI or TSRX action.
 
@@ -163,3 +173,36 @@ Apache-2.0 — see [LICENSE](./LICENSE).
 - [Source](https://github.com/taucad/tau/tree/main/packages/core/bundler)
 - [Changelog](https://github.com/taucad/tau/blob/main/packages/core/bundler/CHANGELOG.md)
 - [Issues](https://github.com/taucad/tau/issues)
+
+## UI admission checkpoint (2026-10-01)
+
+The current UI runtime composition selects CAD kernels and esbuild; the base contains no TSRX or
+Generate UI kernel. The following proposed UI import shapes were probed against the real anonymous
+registry/CDN without executing downloaded code. Each used a fresh in-memory project/artifact cache,
+one sample, Node 24.19.0, and the environment's existing HTTP proxy. They do not establish browser
+rendering performance or general npm install support.
+
+| Requests and standard imports                           | Result                                                                  |
+| ------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `react@19.2.0`, `react/jsx-runtime`                     | Admitted; both selected artifacts are self-contained                    |
+| `lodash-es@4.17.21`, `lodash-es/debounce`               | Admitted; subpath resolves at the root's exact version                  |
+| `react@19.2.0` + `react-dom@19.2.0`, `react-dom/client` | Refused at react-dom's remaining runtime imports; no manifest committed |
+
+The earlier 222.256 ms cold / 0.391 ms warm observation is **one pair** for `is-number@^7.0.0`
+(resolved 7.0.0, jsDelivr, 547 source characters): cold means an empty in-memory artifact cache,
+warm means the same instance with committed bytes, rehashing and no registry/CDN fetch. Upstream
+CDN/proxy caches were not flushed. This is not a general speedup claim.
+
+The smallest next closure implementation for `react-dom/client` is to record every static ESM edge
+by canonical package/subpath identity, bind React peers to the already selected root artifact, pin
+and verify every remaining module's bytes, and resolve those edges locally in the source host.
+Cycles and converging imports must share one identity; do not bundle a second React copy into each
+entry. Verify hooks/context identity through an actual ReactDOM render, not just a successful
+import. Refuse computed dynamic imports, undeclared runtime edges and incompatible peers until
+they have an explicit admission rule. Keep ordinary installed npm trees and lockfiles pnpm-owned.
+
+`pnpm nx test-browser bundler-core` is a reproducible real IndexedDB/Web Locks authority test.
+Execution in the cloud checkpoint was blocked because Chromium was absent and the Playwright CDN
+download returned HTTP 403 `Domain forbidden`. The browser test is typechecked but not claimed
+as passed. No sandbox, registry credentials or network-access settings were changed. macOS and
+Windows disk-provider crash qualification and live browser CORS remain unverified.

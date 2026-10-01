@@ -229,17 +229,24 @@ export const createBundlerSourceHost = (options: BundlerSourceHostOptions): Bund
             const locked = Object.hasOwn(lock.packages, parsed.name) ? lock.packages[parsed.name] : undefined;
             if (
               locked === undefined ||
-              parsedPath !== '' ||
-              (specifier !== parsed.name && specifier !== `${parsed.name}@${locked.registry.version}`)
+              (specifier !== fullName &&
+                specifier !== `${parsed.name}@${locked.registry.version}${parsedPath === '' ? '' : `/${parsedPath}`}`)
             ) {
               throw new Error(
                 `Import '${specifier}' is not admitted by package.json. Update the dependency lock explicitly.`,
               );
             }
+            const artifact =
+              parsedPath === ''
+                ? locked.artifact
+                : Object.entries(locked.subpaths ?? {}).find(([key]) => key === parsedPath)?.[1];
+            if (artifact === undefined) {
+              throw new Error(`Import '${specifier}' has no locked subpath. Add it to the manifest update imports.`);
+            }
             dependencies.add('package.json');
-            dependencies.add(locked.artifact.cachePath);
-            await readLockedArtifact(options.filesystem, locked.artifact, signal);
-            identity = locked.artifact;
+            dependencies.add(artifact.cachePath);
+            await readLockedArtifact(options.filesystem, artifact, signal);
+            identity = artifact;
           }
           return { kind: 'package', id: identity.cachePath, identity, intent: 'script' };
         }

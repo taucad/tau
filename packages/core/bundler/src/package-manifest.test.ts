@@ -411,3 +411,70 @@ describe('registry and lock recovery', () => {
     await expect(project.update({ example: '^1' })).rejects.toThrow('Invalid dependency lock');
   });
 });
+
+describe('standard package subpaths', () => {
+  it('should pin explicitly requested subpaths to the root version and consume standard import syntax offline', async () => {
+    vi.stubGlobal('fetch', registryFetch(['1.0.0']));
+    const project = harness();
+    const input = {
+      filesystem: project.filesystem,
+      commit: project.commit,
+      requests: { '@scope/example': '^1' },
+      imports: ['@scope/example/feature'],
+      mode: 'install',
+      nodeVersion: '24.0.0',
+      signal: new AbortController().signal,
+    } as const;
+    const lock = await updatePackageManifest(input);
+    expect(lock.packages['@scope/example']?.subpaths?.['feature']?.resolutionMetadata.requestedSpecifier).toBe(
+      '@scope/example@1.0.0/feature',
+    );
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    expect(await updatePackageManifest(input)).toEqual(lock);
+    const { imports: _imports, ...reinstall } = input;
+    expect(await updatePackageManifest(reinstall)).toEqual(lock);
+    const host = createBundlerSourceHost({ filesystem: project.filesystem });
+    try {
+      const session = host.beginSession({ mode: 'bundle', signal: input.signal, entryPath: 'main.ts' });
+      const resolved = await session.resolve({ specifier: '@scope/example/feature' });
+      const source = await session.load(resolved);
+      expect(source.text).toBe('export const value = 42;');
+      await expect(session.resolve({ specifier: '@scope/example/undeclared' })).rejects.toThrow('no locked subpath');
+      await expect(session.resolve({ specifier: '@scope/example/constructor' })).rejects.toThrow('no locked subpath');
+    } finally {
+      host.dispose();
+    }
+    vi.stubGlobal('fetch', registryFetch(['1.0.0', '1.1.0']));
+    const upgraded = await updatePackageManifest({ ...reinstall, mode: 'upgrade' });
+    expect(upgraded.packages['@scope/example']?.subpaths?.['feature']?.resolutionMetadata.requestedSpecifier).toBe(
+      '@scope/example@1.1.0/feature',
+    );
+  });
+
+  it('should reject external peers in a JSX runtime instead of producing independently bundled React singletons', async () => {
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.includes('registry.npmjs.org')) {
+        return Response.json(metadata('react', ['19.2.0']));
+      }
+      return new Response(
+        url.includes('jsx-runtime')
+          ? 'import React from "/react@19.2.0/es2022/react.mjs"; export { React };'
+          : 'export const version = "19.2.0";',
+      );
+    });
+    const project = harness();
+    await expect(
+      updatePackageManifest({
+        filesystem: project.filesystem,
+        commit: project.commit,
+        requests: { react: '^19' },
+        imports: ['react/jsx-runtime'],
+        mode: 'install',
+        nodeVersion: '24.0.0',
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow('runtime imports require a transitive lock');
+    expect(await project.filesystem.exists('package.json')).toBe(false);
+  });
+});

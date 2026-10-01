@@ -370,13 +370,13 @@ const bareManifest = await compileParameterManifest({
   middleware: digest,
 });
 const middlewareDefinition = await resolveRuntimePluginDefinition('middleware', parameterUnits());
-const inferred = await middlewareDefinition.wrapGetParameters(
+const inferred = await middlewareDefinition.wrapDescribe(
   { entryPath: 'main.ts', resolution: { mode: 'default', inferenceLanguage: 'en' } },
-  async () => ({ success: true, data: bareManifest, issues: [] }),
+  async () => ({ success: true, data: { parameters: bareManifest }, issues: [] }),
   { options: { angleDefault: 'deg' } },
 );
 if (!inferred.success) throw new Error('Packed parameter middleware failed to resolve a manifest.');
-const manifest = inferred.data;
+const manifest = inferred.data.parameters;
 if (manifest.bindings['/width']?.unit !== 'mm' || manifest.bindings['/rotationAngle']?.unit !== 'deg') {
   throw new Error(\`Packed parameter middleware returned the wrong units: \${JSON.stringify(manifest.bindings)}\`);
 }
@@ -431,7 +431,11 @@ globalThis.__TAU_PARAMETER_PACK_SMOKE__ = 'committed width=25 and settled';
 console.log(globalThis.__TAU_PARAMETER_PACK_SMOKE__);
 `;
 
-const runBrowserModule = async (modulePath: string, assertPage: (page: Page) => Promise<void>): Promise<void> => {
+const runBrowserModule = async (
+  modulePath: string,
+  assertPage: (page: Page) => Promise<void>,
+  assets: Readonly<Record<string, string>> = {},
+): Promise<void> => {
   const scriptPath = `/${basename(modulePath)}`;
   const server = createServer((request, response) => {
     if (request.url === '/') {
@@ -442,6 +446,11 @@ const runBrowserModule = async (modulePath: string, assertPage: (page: Page) => 
     if (request.url === scriptPath) {
       response.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
       response.end(readFileSync(modulePath));
+      return;
+    }
+    if (request.url !== undefined && Object.hasOwn(assets, request.url)) {
+      response.writeHead(200, { 'content-type': 'application/wasm' });
+      response.end(readFileSync(assets[request.url]!));
       return;
     }
     response.writeHead(404);
@@ -520,47 +529,47 @@ const kernel = defineKernel({
   extensions: ['mock'],
   name: 'PackedReactKernel',
   version: '1.0.0',
-  exportFormats: {},
+  views: { model: { title: 'Model', mimeType: 'image/svg+xml' } },
+  exports: {},
   async initialize() { return {}; },
-  async getDependencies({ entryPath }) { return { resolved: [entryPath], unresolved: [] }; },
-  async getParameters() {
+  async resolve({ entryPath }) { return { resolved: [entryPath], unresolved: [] }; },
+  async describe() {
     return {
       success: true,
       data: {
-        schema: {
-          $schema: 'https://json-structure.org/meta/extended/v0/#',
-          $id: 'urn:taucad:packed-react:parameters',
-          $uses: ['JSONSchemaUnits'],
-          name: 'PackedReactParameters',
-          type: 'object',
+        parameters: {
+          schema: {
+            $schema: 'https://json-structure.org/meta/extended/v0/#',
+            $id: 'urn:taucad:packed-react:parameters',
+            $uses: ['JSONSchemaUnits'],
+            name: 'PackedReactParameters',
+            type: 'object',
+          },
+          defaults: {},
         },
-        defaults: {},
       },
       issues: [],
     };
   },
-  async createGeometry(input, runtime) {
+  async evaluate(input, runtime) {
     const source = await runtime.filesystem.readFile(input.entryPath, 'utf8');
     if (source === 'bad') throw new Error('packed react failure');
-    return {
-      geometry: { format: 'svg', content: \`<svg data-source="\${source}"></svg>\` },
-      nativeHandle: {},
-    };
+    return { handle: { source }, views: ['model'] };
   },
-  async exportGeometry() { return { success: true, data: [], issues: [] }; },
+  async render({ handle }) { return { content: \`<svg data-source="\${handle.source}"></svg>\` }; },
 });
 const runtime = defineRuntime({ kernels: [kernel()] });
 const clientOptions = { transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }) };
 
 const App = () => {
   const [source, setSource] = useState('good-one');
-  const result = useRuntime({ clientOptions, source: { files: { 'main.mock': source } } });
-  const geometry = result.geometry?.format === 'svg' ? result.geometry.content : '';
+  const result = useRuntime({ clientOptions, source: { files: { 'main.mock': source }, entry: 'main.mock' }, view: { id: 'model' } });
+  const geometry = typeof result.artifact?.content === 'string' ? result.artifact.content : '';
   return createElement('main', {},
     createElement('output', {
       id: 'state',
       'data-status': result.status,
-      'data-geometry-status': result.geometryStatus,
+      'data-geometry-status': result.artifactStatus,
       'data-geometry': geometry,
       'data-error': result.error?.message ?? '',
     }),
@@ -717,7 +726,7 @@ circuitDoc.view('/*view*/');
 void circuitDoc.export('/*export*/');
 circuitDoc.view('pcb', { options: { /*selectedViewOptions*/ } });
 strictClient.open({ source: { files: { 'main.tsx': '', 'other.tsx': '' }, entry: '/*entry*/' }, evaluateOptions: { required: 1, transformed: '2' } });
-strictClient.open({ source: { path: 'main.tsx' }, evaluateOptions: { required: 1, transformed: '2', /*evaluateOptions*/ } });
+strictClient.open({ source: { path: 'main.tsx' }, evaluateOptions: { /*evaluateOptions*/ } });
 void strictClient.transcode({ from: '/*routeFrom*/', to: 'txt', files: [], options: { separator: ',' } });
 void strictClient.transcode({ from: 'json', to: '/*routeTo*/', files: [], options: { separator: ',' } });
 `;
@@ -803,13 +812,14 @@ const checkInstalledTypes = (appRoot: string): void => {
 
 /** Exercise Zod 4.0.0 through public runtime admission, not a local schema-only parse. */
 export const installedZodFloorSource = `
+import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createRuntimeClient, defineKernel, defineRuntime, fromMemoryFs } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { z } from 'zod';
 const requireFromRuntime = createRequire(import.meta.resolve('@taucad/runtime'));
-const runtimeZod = requireFromRuntime('zod');
-if (runtimeZod.ZodType !== z.ZodType) throw new Error('Runtime and consumer resolved different Zod instances.');
+const requireFromConsumer = createRequire(import.meta.url);
+if (realpathSync(requireFromRuntime.resolve('zod/package.json')) !== realpathSync(requireFromConsumer.resolve('zod/package.json'))) throw new Error('Runtime and consumer resolved different Zod packages.');
 const version = requireFromRuntime('zod/package.json').version;
 if (version !== '4.0.0') throw new Error('Declared Zod floor was not installed: ' + version);
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
@@ -826,21 +836,21 @@ const kernel = defineKernel({
       z.object({ kind: z.literal('b'), b: z.number() }),
     ]) },
     required: { title: 'Required', mimeType: 'image/svg+xml', optionsSchema: z.object({ scale: z.number() }) },
-    defaulted: { title: 'Defaulted', mimeType: 'image/svg+xml', optionsSchema: z.object({ size: z.string().default('3').transform(Number) }) },
+    defaulted: { title: 'Defaulted', mimeType: 'image/svg+xml', optionsSchema: z.object({ viewSize: z.string().default('3').transform(Number) }) },
     nested: { title: 'Nested', mimeType: 'image/svg+xml', optionsSchema: z.object({ rows: z.tuple([z.object({ known: z.string() })]) }) },
     loose: { title: 'Loose', mimeType: 'image/svg+xml', optionsSchema: z.looseObject({ known: z.string() }) },
     schemaless: { title: 'Schemaless', mimeType: 'image/svg+xml' },
   },
   exports: { data: { title: 'Data', mimeType: 'application/json', extension: 'json', optionsSchema: z.object({ count: z.number() }) } },
   async initialize() { return {}; },
-  async resolve() { return { resolved: [], unresolved: [] }; },
-  async describe() { return { success: false, issues: [] }; },
+  async resolve({ entryPath }) { return { resolved: [entryPath], unresolved: [] }; },
+  async describe() { return { success: true, data: { parameters: { schema: { $schema: 'https://json-structure.org/meta/extended/v0/#', $id: 'urn:taucad:zod-floor', $uses: ['JSONSchemaUnits'], name: 'ZodFloorParameters', type: 'object' }, defaults: {} } }, issues: [] }; },
   async evaluate(input) {
     assert(input.options.required === 1 && input.options.size === 2, 'Evaluate required/default/transform admission changed.');
-    return { handle: {} };
+    return { handle: {}, views: ['defaulted', 'union', 'discriminated', 'required', 'nested', 'loose', 'schemaless'], exports: ['data'] };
   },
   async render(input) {
-    if (input.view === 'defaulted') assert(input.options.size === 3, 'View default/transform admission changed.');
+    if (input.view === 'defaulted') assert(input.options.viewSize === 3, 'View default/transform admission changed.');
     if (input.view === 'loose') assert(input.options.extra === true, 'Loose view option was stripped.');
     return { content: '<svg/>' };
   },
@@ -851,7 +861,7 @@ const kernel = defineKernel({
 });
 const runtime = defineRuntime({ kernels: [kernel()] });
 const client = createRuntimeClient({ transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }) });
-const doc = client.open({ source: { files: { 'main.ts': '' } }, evaluateOptions: { required: 1 } });
+const doc = client.open({ source: { files: { 'main.ts': '' }, entry: 'main.ts' }, evaluateOptions: { required: 1 } });
 const outcome = await doc.evaluation();
 assert(!outcome.superseded && outcome.evaluation.success, 'Zod floor evaluation failed: ' + JSON.stringify(outcome));
 const view = async (id, options, expected) => {
@@ -932,9 +942,18 @@ const runInstalledTscircuit = async (appRoot: string): Promise<void> => {
     [source, '--bundle', '--platform=browser', '--format=esm', '--external:node:*', `--outfile=${bundle}`],
     appRoot,
   );
-  await runBrowserModule(bundle, async (page) => {
-    await page.waitForFunction(() => document.querySelector('#root')?.textContent === 'tscircuit GLB and SVG passed');
-  });
+  const esbuildPackage = createRequire(pathToFileURL(join(appRoot, 'package.json'))).resolve(
+    '@taucad/esbuild/package.json',
+  );
+  const wasmAsset = join(dirname(esbuildPackage), 'dist/vm/wasm/esbuild.wasm');
+  invariant(existsSync(wasmAsset), `Installed esbuild WASM asset is missing: ${wasmAsset}`);
+  await runBrowserModule(
+    bundle,
+    async (page) => {
+      await page.waitForFunction(() => document.querySelector('#root')?.textContent === 'tscircuit GLB and SVG passed');
+    },
+    { '/wasm/esbuild.wasm': wasmAsset },
+  );
   console.log('Packed tscircuit Node and Chromium GLB/SVG render passed.');
 };
 
@@ -996,7 +1015,7 @@ const main = async (): Promise<void> => {
   // pack them and everything they publishably depend on, or the install 404s against the registry.
   const quickStartDirectories =
     requested.includes('packages/runtime') && !requested.includes('packages/plugins/tscircuit')
-      ? publishableClosure(resolved, ['esbuild', 'replicad']).flatMap((name) => {
+      ? publishableClosure(resolved, ['esbuild', 'replicad', 'middleware']).flatMap((name) => {
           const root = projectByName.get(name)?.root;
           return root === undefined || requested.includes(root) ? [] : [root];
         })
@@ -1048,7 +1067,12 @@ const main = async (): Promise<void> => {
         {
           private: true,
           type: 'module',
-          dependencies: { react: '19.2.7', 'react-dom': '19.2.7', zod: '4.0.0' },
+          dependencies: {
+            react: '19.2.7',
+            'react-dom': '19.2.7',
+            zod: '4.0.0',
+            ...(packageDirectories.includes('packages/plugins/middleware') ? { xstate: '6.0.0-alpha.59' } : {}),
+          },
         },
         undefined,
         2,
@@ -1139,7 +1163,9 @@ const main = async (): Promise<void> => {
       if (existsSync(join(appRoot, 'node_modules/@taucad/replicad'))) {
         runRuntimeQuickStart(appRoot, runtimeRoot);
       }
-      await runRuntimeParameterOperation(appRoot);
+      if (existsSync(join(appRoot, 'node_modules/@taucad/middleware'))) {
+        await runRuntimeParameterOperation(appRoot);
+      }
       if (existsSync(join(appRoot, 'node_modules/@taucad/react'))) {
         await runInstalledReactRuntime(appRoot);
       }

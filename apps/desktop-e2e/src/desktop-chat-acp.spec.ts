@@ -1,15 +1,21 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
+import { systemSkillBundles } from '@taucad/skills/resources';
 import {
   getKernelResultOutputSchema,
   rpcSchemasRegistry,
   screenshotOutputSchema,
+  testModelInputSchema,
   testModelOutputSchema,
 } from '@taucad/chat';
 import { afterEach, expect, test } from 'vitest';
+import { z } from 'zod';
 import type { Locator, Page } from 'playwright';
+import type { TestModelOutput } from '@taucad/chat';
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { durableMessages, latestCompletedRun, toolResult } from '#support/acp-evidence.js';
@@ -60,6 +66,142 @@ const cadInspectionPrompt =
 const packaged = process.env['TAU_E2E_ACP_PACKAGED'] === 'true';
 const turbojetSourcePath = process.env['TAU_E2E_ACP_TURBOJET_SOURCE'];
 const nativeTurbojet = process.env['TAU_E2E_TURBOJET_NATIVE'] === 'true';
+
+const authoringCases = [
+  {
+    name: 'naturally authors canonical geometry requirements',
+    kernel: 'OpenSCAD',
+    skill: 'cad-openscad',
+    prompt:
+      'Create a 20 mm cube and write deterministic geometry tests for its intended dimensions. Verify your work and report the result.',
+  },
+  {
+    name: 'explicitly invokes the GeoSpec authoring skill',
+    kernel: 'OpenSCAD',
+    skill: 'cad-openscad',
+    prompt:
+      'Use the geospec-authoring skill to create and verify a 20 mm cube with geometry requirements for its intended dimensions.',
+  },
+  {
+    name: 'repairs geometry without changing authored requirements',
+    kernel: 'OpenSCAD',
+    skill: 'cad-openscad',
+    prompt:
+      'Create a 10 mm cube, but write geometry requirements for the intended 20 mm dimensions with 0.01 mm tolerance. Run the tests and report their failure; leave the cube and requirements unchanged after that run.',
+  },
+  {
+    name: 'composes PicoGK and GeoSpec authoring skills',
+    kernel: 'PicoGK',
+    skill: 'cad-picogk',
+    prompt:
+      'Create a 20 mm cube and write deterministic geometry tests for its intended dimensions. Verify your work and report the result.',
+  },
+  {
+    name: 'does not trigger geometry skills for an unrelated request',
+    kernel: 'OpenSCAD',
+    skill: 'cad-openscad',
+    prompt: 'Reply with the single word pong. Do not create or inspect files or use tools.',
+  },
+] as const;
+
+const authoringDigest = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
+
+/** The original authored requirements, kept as exact bytes across a repair. */
+const authoredRequirements = (projectRoot: string): ReadonlyMap<string, string> =>
+  new Map(
+    readdirSync(projectRoot, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && /\.geospec\.[jt]s$/u.test(entry.name))
+      .map((entry) => {
+        const path = join(entry.parentPath, entry.name);
+        return [relative(projectRoot, path), readFileSync(path, 'utf8')];
+      }),
+  );
+
+/** Join compact results to their exact retained record, never to an older successful call. */
+const authoringResult = (options: { events: string; runId: string; projectRoot: string; profileRoot: string }) => {
+  const messages = durableMessages(options.events).filter((message) => message.runId === options.runId);
+  const output = messages.findLast((message) => message.role === 'tool-output' && message.toolName === 'test_model');
+  const input = messages.find(
+    (message) =>
+      message.role === 'tool-input' && message.toolName === 'test_model' && message.toolCallId === output?.toolCallId,
+  );
+  if (output?.isError !== false || input === undefined || !output.toolCallId) {
+    throw new Error('The selected authoring run has no successful correlated test_model result.');
+  }
+  const compact = testModelOutputSchema.omit({ passes: true }).parse(output.content);
+  const artifact = compact.fullResult;
+  if (artifact === undefined) {
+    throw new Error('Authoring acceptance requires the full retained GeoSpec record.');
+  }
+  const path = artifact.absolutePath ?? join(options.projectRoot, artifact.path);
+  if (
+    ![options.projectRoot, options.profileRoot].some((root) => {
+      const key = relative(root, path);
+      return !isAbsolute(key) && key !== '..' && !key.startsWith('../');
+    })
+  ) {
+    throw new Error('Retained GeoSpec record is outside the disposable authoring roots.');
+  }
+  const bytes = readFileSync(path);
+  expect(bytes.byteLength).toBe(artifact.byteLength);
+  expect(authoringDigest(bytes)).toBe(artifact.sha256);
+  const result = testModelOutputSchema.parse(JSON.parse(bytes.toString('utf8')));
+  expect(compact.accounting).toEqual(result.accounting);
+  expect(compact.runStatus).toBe(result.runStatus);
+  expect(compact.lineageStatus).toBe(result.lineageStatus);
+  return { result, bytes, input, artifact };
+};
+
+/** Read back the publication that this run actually used, with current source descriptor equality. */
+const authoringSkills = (options: {
+  events: string;
+  runId: string;
+  profileRoot: string;
+  required: readonly string[];
+}) => {
+  const manifest = systemSkillBundles.map((bundle) => ({
+    slug: bundle.slug,
+    files: bundle.files.map(({ path, sha256 }) => ({ path, sha256 })),
+  }));
+  const digest = authoringDigest(new TextEncoder().encode(JSON.stringify(manifest)));
+  const publicationRoot = join(options.profileRoot, 'config/acp-skills', digest);
+  const messages = durableMessages(options.events).filter((message) => message.runId === options.runId);
+  const consumed = systemSkillBundles.flatMap((bundle) =>
+    bundle.files.flatMap((file) => {
+      const suffix = `${digest}/.agents/skills/${bundle.slug}/${file.path}`;
+      const input = messages.find(
+        (message) => message.role === 'tool-input' && JSON.stringify(message.content ?? null).includes(suffix),
+      );
+      if (
+        input === undefined ||
+        !messages.some(
+          (message) =>
+            message.role === 'tool-output' && message.toolCallId === input.toolCallId && message.isError === false,
+        )
+      ) {
+        return [];
+      }
+      const source = readFileSync(new URL(file.url));
+      const published = readFileSync(join(publicationRoot, '.agents/skills', bundle.slug, file.path));
+      expect(authoringDigest(source)).toBe(file.sha256);
+      expect(source.byteLength).toBe(file.byteLength);
+      expect(published).toEqual(source);
+      return [
+        {
+          slug: bundle.slug,
+          path: file.path,
+          sha256: file.sha256,
+          byteLength: file.byteLength,
+          toolCallId: input.toolCallId,
+        },
+      ];
+    }),
+  );
+  for (const slug of options.required) {
+    expect(consumed.some((file) => file.slug === slug && file.path === 'SKILL.md')).toBe(true);
+  }
+  return { manifest, digest, publicationRoot, consumed };
+};
 
 if (turbojetSourcePath !== undefined && !existsSync(turbojetSourcePath)) {
   throw new Error(`Requested Turbojet fixture does not exist: ${turbojetSourcePath}`);
@@ -128,6 +270,260 @@ afterEach(async () => {
     seededEmail = undefined;
   }
 });
+
+test.each(authoringCases)('[agent-authoring] $name', async (control) => {
+  expect(codexAvailable, 'Selected real-agent acceptance requires the installed Codex adapter and CLI.').toBe(true);
+  expect(packaged, 'Real-agent teaching acceptance requires an explicitly selected completed package.').toBe(true);
+  const account = tauTestAccount('agent-authoring');
+  seededEmail = account.email;
+  const token = await seedTauTestUser(account);
+  session = await launchDesktopApp({ token, packaged: true });
+  await authenticatePackagedDesktop(session, token);
+  const { page } = session;
+  const profileRoot = dirname(session.homeRoot);
+  try {
+    await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+    await expectSignedIn(page);
+    await selectKernel(page, control.kernel);
+    await connectPickedFolder(session);
+    await openAgentList(page);
+    await page.getByRole('option', { name: /^Codex/u }).click();
+    const advertisedModels = await page.getByRole('option').allTextContents();
+    const advertised = advertisedModels.find((name) => /(?:6[.-]1[- ]Sol|Sol[- ]6[.-]1)/iu.test(name));
+    if (advertised === undefined) {
+      throw new Error('The actual Codex adapter does not advertise Sol6.1; no model substitution is permitted.');
+    }
+    await page.keyboard.press('Escape');
+    expect(await selectAgent(page, 'Codex', advertised)).toMatch(/Runs with your local Codex login/u);
+    const slug = await submitPrompt(page, control.prompt);
+    await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
+    const projectRoot = join(session.pickedDirectory, slug);
+    const chatRoot = join(projectRoot, '.tau/chats', activeChatId(page));
+    const eventsPath = join(chatRoot, 'events.jsonl');
+    await expect
+      .poll(
+        () => {
+          try {
+            return latestCompletedRun(readLog(eventsPath));
+          } catch {
+            return undefined;
+          }
+        },
+        { timeout: 300_000 },
+      )
+      .toBeTruthy();
+    let events = readLog(eventsPath);
+    let runId = latestCompletedRun(events);
+    const chat = JSON.parse(readFileSync(join(chatRoot, 'chat.json'), 'utf8')) as { model?: string };
+    expect(chat.model).toMatch(/6[.-]1[- ]sol/iu);
+    expect(events).toMatch(/"kind":"external-agent"/u);
+    expect(events).toMatch(/"agentId":"codex"/u);
+
+    if (control.name === 'does not trigger geometry skills for an unrelated request') {
+      const messages = durableMessages(events).filter((message) => message.runId === runId);
+      expect(messages.some((message) => message.role === 'tool-input')).toBe(false);
+      expect(events).not.toContain('geospec-authoring/SKILL.md');
+      const directory = await session.capture('agent-authoring-unrelated');
+      writeFileSync(
+        join(directory, 'authoring.json'),
+        JSON.stringify(
+          {
+            advertised,
+            runId,
+            model: chat.model,
+            messages,
+            python: 'Separate pytest host; desktop test_model does not discover Python.',
+          },
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+
+    let requirements = authoredRequirements(projectRoot);
+    expect(requirements.size).toBeGreaterThan(0);
+    const originalRequirements = requirements;
+    const originalRun = runId;
+    let measured = authoringResult({ events, runId, projectRoot, profileRoot });
+    if (control.name === 'repairs geometry without changing authored requirements') {
+      expect(measured.result.runStatus).toBe('failed');
+      expect(measured.result.failures.length).toBeGreaterThan(0);
+      expectCubeRequirements(measured.result, true);
+      await sendPrompt(
+        page,
+        'Repair the model to the intended 20 mm cube. Preserve every existing geometry test, parameter and tolerance exactly; do not hide or filter a failure. Verify and report the corrected result.',
+      );
+      await expect
+        .poll(
+          () => {
+            try {
+              return latestCompletedRun(readLog(eventsPath));
+            } catch {
+              return originalRun;
+            }
+          },
+          { timeout: 300_000 },
+        )
+        .not.toBe(originalRun);
+      events = readLog(eventsPath);
+      runId = latestCompletedRun(events);
+      requirements = authoredRequirements(projectRoot);
+      expect(requirements).toEqual(originalRequirements);
+      measured = authoringResult({ events, runId, projectRoot, profileRoot });
+    }
+    for (const source of requirements.values()) {
+      expect(source).toMatch(/from\s+['"]geospec['"]/u);
+      expect(source).toMatch(/from\s+['"]geospec\/model['"]/u);
+      expect(source).toMatch(/await\s+loadModel\s*\(/u);
+      expect(source).toMatch(/expectGeo\s*\(/u);
+      expect(source).not.toMatch(/loadNativeModel|expectNativeGeo|await\s+expectGeo|\.skip\s*\(/u);
+    }
+    expectCubeRequirements(measured.result, control.name === 'repairs geometry without changing authored requirements');
+    const { result } = measured;
+    const selection = testModelInputSchema.parse(measured.input.content);
+    expect(selection.exclude).toBeUndefined();
+    expect(selection.testNamePattern).toBeUndefined();
+    expect(result.runStatus).toBe('passed');
+    expect(result.lineageStatus).toBe('complete');
+    expect(result.failures).toEqual([]);
+    expect(result.total).toBeGreaterThan(0);
+    expect(result.passed).toBe(result.total);
+    expect(result.accounting).toMatchObject({
+      discovered: result.total,
+      selected: result.total,
+      completed: result.total,
+      passed: result.total,
+      failed: 0,
+      unsupported: 0,
+      inconclusive: 0,
+      skipped: 0,
+      notRun: 0,
+      discoveryComplete: true,
+      cancelled: false,
+      bailed: false,
+      notRunFiles: [],
+    });
+    expect(result.accounting?.completedFiles.toSorted()).toEqual([...requirements.keys()].toSorted());
+    expect(result.lineage?.length).toBeGreaterThan(0);
+    expect(result.lineage?.map((file) => file.file).toSorted()).toEqual([...requirements.keys()].toSorted());
+    expectAuthoringReports(result, projectRoot);
+    const skills = authoringSkills({
+      events,
+      runId: originalRun,
+      profileRoot,
+      required: ['geospec-authoring', control.skill],
+    });
+    const directory = await session.capture(`agent-authoring-${control.kernel}-${originalRun}`);
+    writeFileSync(join(directory, 'full-result.json'), measured.bytes);
+    writeFileSync(
+      join(directory, 'authoring.json'),
+      JSON.stringify(
+        {
+          advertised,
+          model: chat.model,
+          originalRun,
+          runId,
+          skills,
+          requirements: [...requirements].map(([path, source]) => ({
+            path,
+            source,
+            sha256: authoringDigest(new TextEncoder().encode(source)),
+          })),
+          testInput: measured.input,
+          artifact: measured.artifact,
+          python: 'Separate pytest host; desktop test_model does not discover Python.',
+        },
+        null,
+        2,
+      ),
+    );
+  } catch (error) {
+    await session.capture(`agent-authoring-failure-${control.kernel}`);
+    throw error;
+  }
+});
+
+const cubeAxesSchema = z.object({ x: z.number().optional(), y: z.number().optional(), z: z.number().optional() });
+const cubeClaimSchema = z.object({
+  capability: z.literal('toHaveBoundingBox'),
+  payload: z.object({
+    kind: z.literal('boundingBox'),
+    expected: z.object({
+      size: cubeAxesSchema.optional(),
+      min: cubeAxesSchema.optional(),
+      max: cubeAxesSchema.optional(),
+      tolerance: z.number().optional(),
+    }),
+  }),
+});
+
+const cubeDimensionClaims = (result: TestModelOutput, exactRepairTolerance: boolean): Map<string, Set<string>> => {
+  const dimensions = new Map<string, Set<string>>();
+  for (const report of [...result.passes, ...result.failures].flatMap((row) => row.reports ?? [])) {
+    const canonical: unknown = JSON.parse(Buffer.from(report.canonical?.claim ?? []).toString('utf8'));
+    if (!isDeepStrictEqual(canonical, report.claim)) {
+      throw new Error('Canonical claim bytes must equal the retained structured claim.');
+    }
+    const parsed = cubeClaimSchema.safeParse(canonical);
+    if (!parsed.success || report.polarity !== 'positive' || report.loadId === undefined) {
+      continue;
+    }
+    const { expected } = parsed.data.payload;
+    if (exactRepairTolerance && expected.tolerance !== 0.01) {
+      continue;
+    }
+    const axes = dimensions.get(report.loadId) ?? new Set<string>();
+    for (const axis of ['x', 'y', 'z'] as const) {
+      const minimum = expected.min?.[axis];
+      const maximum = expected.max?.[axis];
+      if (
+        expected.size?.[axis] === 20 ||
+        (minimum !== undefined && maximum !== undefined && maximum - minimum === 20)
+      ) {
+        axes.add(axis);
+      }
+    }
+    dimensions.set(report.loadId, axes);
+  }
+  return dimensions;
+};
+
+const expectCubeRequirements = (result: TestModelOutput, exactRepairTolerance: boolean): void => {
+  expect([...cubeDimensionClaims(result, exactRepairTolerance).values()].some((axes) => axes.size === 3)).toBe(true);
+};
+
+const expectAuthoringReports = (result: TestModelOutput, projectRoot: string): void => {
+  const loads = result.lineage?.flatMap(({ lineage }) => lineage.loads) ?? [];
+  expect(loads.length).toBeGreaterThan(0);
+  for (const load of loads) {
+    expect(load.status).toBe('complete');
+    expect(load.evidence?.loadId).toBe(load.loadId);
+    expect(load.evidence?.artifacts.length).toBeGreaterThan(0);
+    expect(load.evidence?.status).toBe('complete');
+    const revision = load.evidence?.sourceRevision;
+    if (revision === undefined) {
+      throw new Error('Code-model authoring acceptance requires the exact measured source revision.');
+    }
+    expect(revision.files[revision.entry]).toMatch(/^sha256:[\da-f]{64}$/u);
+    for (const [path, digest] of Object.entries(revision.files)) {
+      const key = relative(projectRoot, join(projectRoot, path));
+      expect(key.startsWith('../') || isAbsolute(key)).toBe(false);
+      const fullPath = join(projectRoot, path);
+      expect(digest).toBe(existsSync(fullPath) ? `sha256:${authoringDigest(readFileSync(fullPath))}` : 'missing');
+    }
+  }
+  const reports = result.passes.flatMap((row) => row.reports ?? []);
+  expect(reports.length).toBeGreaterThan(0);
+  for (const report of reports) {
+    expect(report.status).toBe('passed');
+    expect(report.polarity).toBe('positive');
+    expect(loads.some((load) => load.loadId === report.loadId)).toBe(true);
+    expect(report.canonical?.claim.length).toBeGreaterThan(0);
+    expect(report.canonical?.plan.length).toBeGreaterThan(0);
+    expect(report.canonical?.result.length).toBeGreaterThan(0);
+  }
+};
 
 test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex row', async () => {
   const account = tauTestAccount('acp');

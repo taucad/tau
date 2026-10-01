@@ -276,6 +276,7 @@ const main = async (): Promise<void> => {
       TAU_E2E_API_URL: apiUrl,
       TAU_E2E_API_CWD: directory,
       TAU_E2E_COMPLETED_ARTIFACT: 'true',
+      TAU_E2E_ACP_PACKAGED: 'true',
       TAU_E2E_COMPOSE_PROJECT: project,
       ...(isolatedCloudGateway
         ? {
@@ -325,6 +326,7 @@ const main = async (): Promise<void> => {
         'src/desktop-geometry-host.spec.ts',
         'src/desktop-chat-replay.spec.ts',
         'src/desktop-chat-in-project.spec.ts',
+        'src/desktop-chat-acp.spec.ts',
         'src/desktop-measurement-exact.spec.ts',
         'src/desktop-thumbnail-lifecycle.spec.ts',
         'src/desktop-native-payload.spec.ts',

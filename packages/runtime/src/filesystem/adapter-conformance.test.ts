@@ -30,7 +30,7 @@ import fs from 'node:fs/promises';
 import { readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -662,8 +662,12 @@ describe.each(rows.filter((row) => runs(row, 'watch')))('$name adapter watch con
       );
 
       await fs.writeFile(path.join(directory, 'watched.txt'), 'two');
-      await settle();
-      expect(events.some((event) => event.type === 'change' && event.path === 'watched.txt')).toBe(true);
+      await vi.waitFor(
+        () => {
+          expect(events.some((event) => event.type === 'change' && event.path === 'watched.txt')).toBe(true);
+        },
+        { timeout: 10_000 },
+      );
 
       events.length = 0;
       await fs.writeFile(path.join(directory, '.tau', 'cache', 'artifact.bin'), 'cached');
@@ -671,8 +675,12 @@ describe.each(rows.filter((row) => runs(row, 'watch')))('$name adapter watch con
       expect(events).toEqual([]);
 
       await fs.rm(path.join(directory, 'watched.txt'));
-      await settle();
-      expect(events.some((event) => event.type === 'delete' && event.path === 'watched.txt')).toBe(true);
+      await vi.waitFor(
+        () => {
+          expect(events.some((event) => event.type === 'delete' && event.path === 'watched.txt')).toBe(true);
+        },
+        { timeout: 10_000 },
+      );
 
       expect(() => {
         unsubscribe();

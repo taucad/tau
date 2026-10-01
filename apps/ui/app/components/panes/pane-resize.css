@@ -1,5 +1,3 @@
-@reference '@taucad/ui/styles/tokens.css';
-
 /* Native targets and allocation stay separate from the neutral resize paint. */
 .pane-resize,
 .section-resize {

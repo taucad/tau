@@ -5,13 +5,9 @@ import type { JsonObject } from '@taucad/agent-host';
 import type { MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
 import { printIntentPath } from '@taucad/slicer';
 import type { PrintIntent } from '@taucad/slicer';
-import { writeBambuContainer } from '@taucad/slicer/container';
+import { writeBambuContainer, slicedFilamentColors } from '@taucad/slicer/container';
 import { sha256Bytes } from '@taucad/utils/hash';
-import {
-  createMachinePrintPlanner,
-  defaultFilamentSlots,
-  slicedFilamentColors,
-} from '#registry/machine-print-planner.js';
+import { createMachinePrintPlanner, defaultFilamentSlots } from '#registry/machine-print-planner.js';
 import type { MachinePrintPlannerDependencies } from '#registry/machine-print-planner.js';
 import type { BambuStudioEngine, PrintIntentFile } from '#registry/print-profiles.js';
 

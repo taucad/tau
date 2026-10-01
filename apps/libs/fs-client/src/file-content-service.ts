@@ -105,7 +105,6 @@ type FileContentServiceInit = {
 
 const defaultMaxEntries = 500;
 const defaultMaxTotalBytes = 128 * 1024 * 1024;
-const defaultMaxSingleFileBytes = 1024 * 1024;
 const defaultOpenSizeBytes = 50 * 1024 * 1024;
 /* The mutation pipeline refuses a checked write whose bytes and expected bytes pass 8 MiB (RV-W5b2 N3). */
 const checkedEditorSaveBytes = 8 * 1024 * 1024;
@@ -235,7 +234,7 @@ export class FileContentService {
     this.cache = new BoundedFileCache({
       maxEntries: init.cacheOptions?.maxEntries ?? defaultMaxEntries,
       maxTotalBytes: init.cacheOptions?.maxTotalBytes ?? defaultMaxTotalBytes,
-      maxSingleFileBytes: init.cacheOptions?.maxSingleFileBytes ?? defaultMaxSingleFileBytes,
+      maxSingleFileBytes: init.cacheOptions?.maxSingleFileBytes ?? this.openSizeBytes,
     });
     this.unsubscribeChannel = [
       init.channel.onFileWritten({
@@ -308,7 +307,7 @@ export class FileContentService {
   /**
    * Resolve file content, returning a discriminated outcome that captures
    * the binary/too-large/orphaned/error decision inside the read pipeline.
-   * Cache hit short-circuits the read and re-uses the cached `text` outcome.
+   * Cache hit short-circuits the read and reuses its existing classification.
    * @param path - Workspace-relative path.
    * @param options - Optional resolve overrides (`forceText`, `sizeLimit`).
    * @returns Latest discriminated {@link FileContentResult} for the path.
@@ -317,7 +316,7 @@ export class FileContentService {
     const cached = this.cache.get(path);
     if (cached !== undefined && !this.shouldRecompute(options)) {
       const existing = this.outcomes.get(path);
-      if (existing?.kind === 'text') {
+      if (existing?.kind === 'text' || existing?.kind === 'binary') {
         return existing;
       }
       const refreshed: FileContentResult = { kind: 'text', content: cached };
@@ -400,7 +399,8 @@ export class FileContentService {
         );
       }
 
-      const data = await this.proxy.readFile(absolutePath);
+      const cached = this.cache.get(key);
+      const data = cached ?? (await this.proxy.readFile(absolutePath));
       if (data.byteLength > limit) {
         throw new FileTooLargeError(
           `File '${key}' (${data.byteLength} bytes) exceeds open-time size limit (${limit} bytes)`,
@@ -1174,7 +1174,7 @@ export class FileContentService {
         : prepared.kind === 'binary'
           ? this.createBinaryOutcome(data, generation, prepared.digest)
           : { kind: 'text', content: data };
-    if (outcome.kind === 'text') {
+    if (outcome.kind === 'text' || outcome.kind === 'binary') {
       this.cache.set(key, data);
     } else {
       this.cache.delete(key);
@@ -1499,7 +1499,7 @@ export class FileContentService {
       if (!this.refreshGuard.isCurrent(path, generation)) {
         return;
       }
-      this.cache.delete(path);
+      this.cache.set(path, data);
       this.publishOutcome(path, outcome);
       return;
     }
@@ -1533,6 +1533,7 @@ export class FileContentService {
     if (!forceText && seemsBinary(data)) {
       const outcome = await this.binaryOutcome(data, generation);
       if (this.refreshGuard.isCurrent(path, generation)) {
+        this.cache.set(path, data);
         return this.publishOutcome(path, outcome);
       }
       return outcome;

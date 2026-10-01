@@ -1,3 +1,4 @@
+import type * as PrinterPreparationModule from '#components/printer/printer-preparation.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -23,6 +24,18 @@ const mocks = vi.hoisted(() => ({
   isReducedMotion: false,
 }));
 
+vi.mock('#components/printer/printer-preparation.js', async () => {
+  const { createPrinterPreparation } = await vi.importActual<typeof PrinterPreparationModule>(
+    '#components/printer/printer-preparation.js',
+  );
+  const { loadPrinterProgram } = await import('#components/printer/printer-program.js');
+  return {
+    printerPreparation: createPrinterPreparation(async ({ bytes, kind, signal }) => {
+      signal.throwIfAborted();
+      return { kind: 'ready', value: loadPrinterProgram(bytes, kind), preparationDuration: 0 };
+    }),
+  };
+});
 vi.mock('#components/printer/printer-scene.js', () => ({ PrinterScene: mocks.scene }));
 vi.mock('#components/printer/use-printer-live.js', () => ({
   usePrinterLive: (digest: string | undefined) => {

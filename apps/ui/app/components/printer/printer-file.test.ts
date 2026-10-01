@@ -45,7 +45,12 @@ describe('readPrinterFile and loadPrinterProgram', () => {
 
   it('should pass text G-code through untouched', () => {
     const bytes = new TextEncoder().encode(fixtureGcode({ layers: 2 }));
-    expect(readPrinterFile(bytes, 'gcode')).toEqual({ gcode: bytes, slicedPlate: undefined, filamentColors: [] });
+    expect(readPrinterFile(bytes, 'gcode')).toEqual({
+      gcode: bytes,
+      slicedPlate: undefined,
+      recordedBedType: undefined,
+      filamentColors: [],
+    });
     expect(loadPrinterProgram(bytes, 'gcode').program.layerTable).toHaveLength(2);
   });
 

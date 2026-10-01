@@ -62,7 +62,7 @@ describe('derivePrinterGeometry', () => {
     expect(mini.plate.size).toEqual([180, 180, 0.55]);
     expect(mini.light).toBeUndefined();
     expect(mini.panels).toHaveLength(0);
-    expect(mini.gantry.rails).toEqual([{ center: [-30, 90, 103], size: [12, 12, 206] }]);
+    expect(mini.gantry.rails).toEqual([{ center: [210, 90, 103], size: [12, 12, 206] }]);
   });
 
   it('should keep the nozzle plane at z = 0 with headroom above and the base below', () => {

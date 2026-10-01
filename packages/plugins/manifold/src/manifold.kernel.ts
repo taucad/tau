@@ -6,7 +6,7 @@
  * Registers manifold-3d modules as built-ins for user code imports.
  */
 
-import { NodeIO } from '@gltf-transform/core';
+import { WebIO } from '@gltf-transform/core';
 import type { BaseGLTFNode } from 'manifold-3d/lib/gltf-node.js';
 
 import { createExportFile } from '@taucad/runtime/types';
@@ -189,7 +189,7 @@ async function createGlbFromManifoldOutput(output: unknown): Promise<Uint8Array<
   if (!isCallable(setupIo)) {
     throw new TypeError('Manifold setupIO export must be callable.');
   }
-  const configuredIo: unknown = setupIo(new NodeIO());
+  const configuredIo: unknown = setupIo(new WebIO());
   if (!isRecordObject(configuredIo) || !isCallable(configuredIo['writeBinary'])) {
     throw new TypeError('Manifold setupIO() must return a glTF IO instance.');
   }

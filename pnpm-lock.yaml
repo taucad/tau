@@ -1680,6 +1680,9 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:libs/utils
+      '@taucad/workbench':
+        specifier: workspace:*
+        version: link:packages/workbench
       '@testing-library/jest-dom':
         specifier: 'catalog:'
         version: 6.6.3

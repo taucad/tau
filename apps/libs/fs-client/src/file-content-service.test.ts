@@ -727,7 +727,7 @@ describe('FileContentService', () => {
         expect(result.head.byteLength).toBe(512);
         expect(result.head[0]).toBe(0x00);
       }
-      expect(service.peek('mystery.dat')).toBeUndefined();
+      expect(service.peek('mystery.dat')?.byteLength).toBe(binaryBytes.byteLength);
     });
 
     it('should produce too-large before binary when bytes exceed the open limit', async () => {
@@ -905,7 +905,7 @@ describe('FileContentService', () => {
         expect(result.size).toBe(2048);
       }
       expect(mockProxy.readFile).not.toHaveBeenCalled();
-      expect(svc.peek('mystery.dat')).toBeUndefined();
+      expect(svc.peek('mystery.dat')).toEqual(binaryBytes);
     });
 
     it('should produce too-large outcome when pool returns oversize ASCII bytes', async () => {
@@ -1240,7 +1240,7 @@ describe('FileContentService', () => {
 
       expect(snapshots).toHaveLength(1);
       expect(snapshots[0]?.kind).toBe('binary');
-      expect(service.peek('asset.bin')).toBeUndefined();
+      expect(service.peek('asset.bin')).toEqual(new Uint8Array([0, 1, 2]));
     });
 
     it('should stop firing onDidChangeOutcome after unsubscribe', async () => {
@@ -1323,6 +1323,29 @@ describe('FileContentService', () => {
   });
 
   describe('readRawBytes', () => {
+    it('should reuse classified binary bytes without another provider read and preserve copy isolation', async () => {
+      const bytes = new Uint8Array(5 * 1024 * 1024);
+      bytes[1] = 1;
+      vi.mocked(proxy.stat).mockResolvedValue({
+        type: 'file',
+        size: bytes.byteLength,
+        mtimeMs: 0,
+        contentKind: 'binary',
+      });
+      vi.mocked(proxy.readFile).mockResolvedValue(bytes);
+      const classified = await service.resolve('preview.png');
+      expect(classified.kind).toBe('binary');
+      const raw = await service.readRawBytes('preview.png');
+      raw[1] = 99;
+      expect(await service.resolve('preview.png')).toBe(classified);
+      const next = await service.readRawBytes('preview.png');
+      expect(next.byteLength).toBe(bytes.byteLength);
+      expect(next[1]).toBe(1);
+      expect(next).not.toBe(raw);
+      expect(proxy.readFile).toHaveBeenCalledTimes(1);
+      expect(proxy.stat).toHaveBeenCalled();
+    });
+
     it('should return owned text bytes without changing text resolution semantics', async () => {
       const bytes = new TextEncoder().encode('hello');
       vi.mocked(proxy.stat).mockResolvedValue({

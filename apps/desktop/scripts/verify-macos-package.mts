@@ -31,8 +31,6 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 
-import { picogkRuntimeManifestSchema } from '@taucad/picogk';
-
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
@@ -46,6 +44,7 @@ const appExecutable = resolve(appPath, 'Contents/MacOS/Tau');
 const brandingRoot = resolve(appPath, 'Contents/Resources/branding');
 const extensionTemporaryRoot = resolve(tmpdir(), 'tau-quick-look');
 const { release, unsigned } = parseMacosPackageMode(process.argv.slice(2));
+const { picogkRuntimeManifestSchema } = await import('@taucad/picogk');
 /** The PicoGK worker protocol, which the prepared resource manifest also records. */
 const picoGkWireProtocol = picogkRuntimeManifestSchema.shape.protocolVersion.value;
 

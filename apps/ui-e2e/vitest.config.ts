@@ -48,7 +48,7 @@ const picovoxelExactPins = (
 
 export default defineConfig({
   root: import.meta.dirname,
-  optimizeDeps: { include: ['axe-core', 'jszip', 'zod'] },
+  optimizeDeps: { include: ['axe-core', 'jszip', 'zod', 'esbuild'] },
   resolve: {
     alias: [
       {

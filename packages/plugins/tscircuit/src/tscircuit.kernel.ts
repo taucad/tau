@@ -11,8 +11,8 @@
  * (charter D3–D6, D10, I1).
  */
 
-import { Primitive } from '@gltf-transform/core';
-import { createNodeIo, detectEdges, normalizeGltfGeometryNames } from '@taucad/geometry-core';
+import { Primitive, WebIO } from '@gltf-transform/core';
+import { allExtensions, detectEdges, normalizeGltfGeometryNames } from '@taucad/geometry-core';
 import type { Document, Root } from '@gltf-transform/core';
 import type { AnyCircuitElement } from 'circuit-json';
 import type { ComponentType } from 'react';
@@ -354,7 +354,7 @@ const applyGlbConvention = async (
   glb: Uint8Array<ArrayBuffer>,
   { coordinateSystem, unit }: GlbConvention,
 ): Promise<Uint8Array<ArrayBuffer>> => {
-  const io = await createNodeIo();
+  const io = new WebIO().registerExtensions(allExtensions);
   const document = await io.readBinary(glb);
   const root = document.getRoot();
   addFeatureEdges(document, root);

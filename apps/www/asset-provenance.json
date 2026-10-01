@@ -1,0 +1,42 @@
+{
+  "baseline": "faecc9ac8f456b7fa5639fc0eb146012e3e499c8",
+  "assemblySource": {
+    "path": "libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts",
+    "bytes": 17755,
+    "sha256": "464caa7c826d12ace762c36cef7e61d279203d446827387192e52181a76b9f64"
+  },
+  "assemblyParts": 34,
+  "illustrationOnly": true,
+  "freshGeospecRun": false,
+  "oldHeroGeometry": {
+    "path": "apps/ui/app/components/geometry/splash/assets/planetary.glb",
+    "bytes": 2806748,
+    "sha256": "68a30867ca9c12e9d6a8f4fe481d86bbd8e212fc01dd6ea1bcb1f8d57ef806da"
+  },
+  "newViews": [
+    {
+      "path": "apps/www/public/assembly.webp",
+      "bytes": 27824,
+      "sha256": "13d0300c138d611ebb0f6f51146728d4b14816d35947f2c8c45aa8b2f432dca6"
+    },
+    {
+      "path": "apps/www/public/exploded.webp",
+      "bytes": 28456,
+      "sha256": "088711198f47113b45a1c777b605c451dd139224bd9def85db498a5dc48985a3"
+    },
+    {
+      "path": "apps/www/public/assembly-640.webp",
+      "bytes": 12296,
+      "sha256": "2589df6b31f22fd0ecd087570f4a104477fdfe54ec3888c157bb06b96cf570fd"
+    },
+    {
+      "path": "apps/www/public/exploded-640.webp",
+      "bytes": 13282,
+      "sha256": "4fb9835165e389f5720cf05e3c62a1bfbf512a1cfb4c3c2cb412bccca401478f"
+    }
+  ],
+  "renderRecipe": "scripts/render-assets.cjs",
+  "responsiveAndSocialRecipe": "scripts/optimize-assets.cjs",
+  "firstPartySourceLicense": "Apache-2.0",
+  "notes": "Views are offline raster renders from authored CAD. No client CAD/WebGL runtime or continuous animation. Comparing asset transfer bytes does not benchmark the old application or prove geometric correctness."
+}

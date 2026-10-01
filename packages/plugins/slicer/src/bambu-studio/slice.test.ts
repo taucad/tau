@@ -381,6 +381,7 @@ describe('sliceWithBambuStudio', () => {
   it('should reject a slice cancelled while it waits behind another without waiting for it', async () => {
     await fake.control({ mode: 'hang' });
     await rm(fake.record, { force: true });
+    await rm(fake.log, { force: true });
     const running = new AbortController();
     const first = sliceWithBambuStudio({ install: fake.install, selection, parts, signal: running.signal });
     await vi.waitFor(async () => access(fake.record), { timeout: 10_000, interval: 25 });
@@ -388,6 +389,21 @@ describe('sliceWithBambuStudio', () => {
     const second = sliceWithBambuStudio({ install: fake.install, selection, parts, signal: waiting.signal });
     waiting.abort();
     await expect(second).rejects.toMatchObject({ name: 'AbortError' });
+    const thirdController = new AbortController();
+    const third = sliceWithBambuStudio({ install: fake.install, selection, parts, signal: thirdController.signal });
+    let thirdSettled = false;
+    // oxlint-disable-next-line promise/prefer-await-to-then -- Observe queued settlement without waiting for the running slice.
+    const observed = third.catch((error: unknown) => {
+      thirdSettled = true;
+      throw error;
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30);
+    });
+    expect(thirdSettled).toBe(false);
+    expect(await readFile(fake.log, 'utf8')).toBe('start\n');
+    thirdController.abort();
+    await expect(observed).rejects.toMatchObject({ name: 'AbortError' });
     running.abort();
     await expect(first).rejects.toMatchObject({ name: 'AbortError' });
   });

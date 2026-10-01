@@ -2,7 +2,7 @@ import { ChevronsDown, Filter, Settings, Terminal, Trash } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
-import { PaneviewReact } from 'dockview-react';
+import { Paneview } from '#components/panes/paneview.js';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { Virtuoso } from 'react-virtuoso';
 import type { LogEntry, LogLevel, LogOrigin } from '@taucad/types';
@@ -310,7 +310,7 @@ const ConsolePaneview = ({
   }, [entryPaths, getPanelParams]);
 
   return (
-    <PaneviewReact
+    <Paneview
       key={paneviewKey}
       className={paneviewAttachedSurfaceStyleOverrides}
       components={paneviewComponents}

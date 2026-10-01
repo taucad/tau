@@ -808,7 +808,7 @@ const runChild = async (options: Options): Promise<void> => {
     };
     const { runPerformanceLabCell } = await import('#experiments/performance-lab/performance-lab-runner.js');
     if (options.condition === 'warm') {
-      await runPerformanceLabCell({ ...input, cache: 'cold' }, modules);
+      await runPerformanceLabCell({ ...input, cache: 'cold' }, modules, 'discard');
     }
     result = await runPerformanceLabCell(input, modules);
   } catch (error) {

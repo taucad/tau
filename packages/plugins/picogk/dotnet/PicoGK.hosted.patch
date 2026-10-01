@@ -400,6 +400,15 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
+@@ -248,7 +249,7 @@
+         /// <returns></returns>
+         public bool bIsEmpty()
+         {
+-            return _bIsEmpty(lib.hThis, hThis);
++            return TauIsEmpty();
+         }
+ 
+         /// <summary>
 @@ -257,7 +258,9 @@
          /// <returns>Number of bytes allocated to this object</returns>
          public long nMemUsage()
@@ -561,7 +570,19 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -812,16 +835,7 @@
+@@ -794,10 +817,7 @@
+         /// <returns></returns>
+         public bool bIsEqual(in Voxels voxOther)
+         {
+-            if (voxOther.lib.hThis != lib.hThis)
+-                throw new PicoGKLibraryMismatchException();
+-
+-            return _bIsEqual(lib.hThis, hThis, voxOther.hThis);
++            return TauIsEqual(voxOther);
+         }
+ 
+         /// <summary>
+@@ -812,16 +832,7 @@
          public void CalculateProperties(    out float fVolumeCubicMM,
                                              out BBox3 oBBox)
          {
@@ -579,7 +600,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -834,8 +848,8 @@
+@@ -834,8 +845,8 @@
          /// <returns>Bounding box of the voxels in real world coordinates</returns>
          public BBox3 oCalculateBoundingBox()
          {
@@ -590,7 +611,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -963,21 +977,9 @@
+@@ -963,21 +974,9 @@
                                          out int nYSize,
                                          out int nZSize)
          {
@@ -615,7 +636,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -990,21 +992,8 @@
+@@ -990,21 +989,8 @@
                                          out int nYSize,
                                          out int nZSize)
          {
@@ -639,7 +660,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
           /// <summary>
-@@ -1066,30 +1055,28 @@
+@@ -1066,30 +1052,28 @@
              {
              case ESliceAxis.Z:
                  nSliceCount = nZSize;
@@ -678,7 +699,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
          /// which is the native narrow band distance encoded in the float image. You
          /// can also speciy black/white, which encodes the inside of the field as black
-@@ -1101,32 +1088,8 @@
+@@ -1101,32 +1085,8 @@
                                      ESliceMode eMode = ESliceMode.SignedDistance,
                                      ESliceAxis eAxis = ESliceAxis.Z)
          {
@@ -713,7 +734,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
  
              switch (eMode)
              {
-@@ -1176,15 +1139,13 @@
+@@ -1176,15 +1136,13 @@
  
          /// <summary>
          /// Returns a signed distance-field-encoded slice of the voxel field
@@ -734,7 +755,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
          /// which is the native narrow band distance encoded in the float image. You
          /// can also speciy black/white, which encodes the inside of the field as black
-@@ -1193,17 +1154,7 @@
+@@ -1193,17 +1151,7 @@
                                                  ref ImageGrayScale img,
                                                  ESliceMode eMode = ESliceMode.SignedDistance)
          {
@@ -1887,6 +1908,46 @@ new file mode 100644
 +            TauCheckedCallbacks.Check(status, null, this);
 +        }
 +        finally { GC.KeepAlive(this); }
++    }
++}
+diff --git a/Library/Queries.cs b/Library/Queries.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/Queries.cs
+@@ -0,0 +1,35 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++namespace PicoGK;
++public partial class Voxels
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_IsEmpty")]
++    private static extern int TauIsEmptyNative(LibHandle library, VoxHandle voxels, out int output);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_IsEqual")]
++    private static extern int TauIsEqualNative(LibHandle library, VoxHandle voxels, VoxHandle other, out int output);
++    private bool TauIsEmpty()
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try
++        {
++            var status = TauIsEmptyNative(lib.hThis, hThis, out var output);
++            TauCheckedCallbacks.Check(status, null, this);
++            return output != 0;
++        }
++        finally { GC.KeepAlive(this); }
++    }
++    private bool TauIsEqual(Voxels other)
++    {
++        ArgumentNullException.ThrowIfNull(other);
++        if (other.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        ObjectDisposedException.ThrowIf(other.m_bDisposed, other);
++        try
++        {
++            var status = TauIsEqualNative(lib.hThis, hThis, other.hThis, out var output);
++            TauCheckedCallbacks.Check(status, null, this);
++            return output != 0;
++        }
++        finally { GC.KeepAlive(this); GC.KeepAlive(other); }
 +    }
 +}
 diff --git a/Library/SliceRead.cs b/Library/SliceRead.cs

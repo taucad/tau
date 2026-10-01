@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { segmentAtTime, toolpathSegmentKinds } from '@taucad/slicer/toolpath';
 import { printerToolpath } from '#components/printer/printer-colors.constants.js';
-import { liftPlateSurface, x1cPlates } from '#components/printer/printer-plates.js';
+import { x1cPlates } from '#components/printer/printer-plates.js';
 import {
   createToolpathPalette,
   createToolpathReveal,
@@ -61,9 +61,9 @@ describe('createToolpathPalette', () => {
       expect.arrayContaining(['cool', 'engineering', 'high-temperature', 'textured-pei']),
     );
     for (const theme of ['light', 'dark'] as const) {
-      const preparation = createToolpathPalette('#ff0000', theme).purge;
       for (const plate of x1cPlates) {
-        const surface = liftPlateSurface(new THREE.Color(plate.color));
+        const preparation = createToolpathPalette('#ff0000', theme, plate.color).purge;
+        const surface = new THREE.Color(plate.color);
         expect(contrast(preparation, surface), `${plate.label}, ${theme}`).toBeGreaterThanOrEqual(3);
       }
     }

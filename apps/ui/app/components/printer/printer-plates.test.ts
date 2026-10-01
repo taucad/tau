@@ -28,6 +28,10 @@ describe('plateForBedType', () => {
     expect(plateForBedType(' cool plate ')?.id).toBe('cool');
   });
 
+  it('should decode the Mini Smooth PEI alias before choosing a machine asset', () => {
+    expect(plateForBedType(' Smooth PEI Plate ')?.id).toBe('high-temperature');
+  });
+
   it('should name no plate for unknown, unspecified or missing bed types', () => {
     expect(plateForBedType('unspecified')).toBeUndefined();
     expect(plateForBedType('supertack_plate')).toBeUndefined();

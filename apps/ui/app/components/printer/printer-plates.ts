@@ -10,12 +10,11 @@
  * @module
  */
 
-import { Color, Matrix4 } from 'three';
+import { Matrix4 } from 'three';
 import { resolveCoordinateTransform } from '@taucad/spatial';
 import { bambuA1MiniHotend, bambuA1MiniPlates, bambuX1cHotend, bambuX1cPlates } from '@taucad/bambu/plate';
 import type { BambuPlateModel } from '@taucad/bambu/plate';
 import { canonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
-import { printerBody } from '#components/printer/printer-colors.constants.js';
 
 /** One Bambu build plate id, as Tau's slicers name it. */
 export type PrinterPlateId = BambuPlateModel['id'];
@@ -32,16 +31,19 @@ export type PrinterPlateModel = Readonly<{
   finish: 'smooth' | 'matte' | 'textured';
   /** Pre-rendered GLB of the plate, authored in Replicad by `@taucad/bambu`. */
   model?: URL;
+  /** Physical source-frame extent, including coating and tabs. */
+  bounds: BambuPlateModel['bounds'];
 }>;
 
 /** Map package descriptors into the viewer's existing surface contract. */
-const viewerPlate = ({ id, label, bedTypeNames, surface, model }: BambuPlateModel): PrinterPlateModel => ({
+const viewerPlate = ({ id, label, bedTypeNames, surface, model, bounds }: BambuPlateModel): PrinterPlateModel => ({
   id,
   label,
   bedTypeNames,
   color: surface.color,
   finish: surface.finish,
   model,
+  bounds,
 });
 
 /** The four X1C plates. */
@@ -56,16 +58,6 @@ export const printerPlatesForModel = (model: string | undefined): readonly Print
 /** Resolve an asset by both plate kind and printer identity. */
 export const printerPlateModelForMachine = (plate: PrinterPlateModel, model: string | undefined): URL | undefined =>
   model === undefined ? undefined : printerPlatesForModel(model).find(({ id }) => id === plate.id)?.model;
-
-/**
- * How far the print surface lifts toward white. The plates' true surfaces are near black, so the
- * first layers and the empty build area vanish against them; the viewer draws them lighter.
- */
-const plateSurfaceLift = 0.3;
-const plateSurfaceLiftTarget = new Color(printerBody.plateSurfaceLift);
-
-/** The print surface's colour as the viewer draws it; `color` is changed in place. */
-export const liftPlateSurface = (color: Color): Color => color.lerp(plateSurfaceLiftTarget, plateSurfaceLift);
 
 /** The X1C hotend tip drawn at the extruding nozzle: its origin is the nozzle tip. */
 export const printerHotendModel: URL = bambuX1cHotend.model;
@@ -96,6 +88,8 @@ export const printerPlateById = (id: PrinterPlateId): PrinterPlateModel =>
 export const plateForBedType = (name: string | undefined): PrinterPlateModel | undefined => {
   const wanted = name?.trim().toLowerCase();
   return wanted
-    ? x1cPlates.find(({ bedTypeNames }) => bedTypeNames.some((candidate) => candidate.toLowerCase() === wanted))
+    ? [...x1cPlates, ...a1MiniPlates].find(({ bedTypeNames }) =>
+        bedTypeNames.some((candidate) => candidate.toLowerCase() === wanted),
+      )
     : undefined;
 };

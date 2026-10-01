@@ -76,7 +76,16 @@ const plate = bambuPlateForBedType('Textured PEI Plate');
 The GLBs are glTF (Y-up, metres). Rotate +90° about X and scale by 1000 to place one in the plate frame: millimetres,
 X right, Y toward the rear, Z up, origin at the printable area's front-left corner, Z = 0 on the print surface. They are
 independently authored models built from public product facts in `models/x1c` and `models/a1-mini`; regenerate them with
-`pnpm nx run bambu:render-plates`. X1C retains its existing unbranded markings. Mini includes an independently drawn outline brand mark and fitted Geist labels from the official product silhouette; no real plate-detection code is simulated. The Mini Textured PEI sheet is 0.55 mm thick (0.4 mm steel plus two 0.075 mm coatings), distinct from the 180 mm printable area. Appearance-derived ink and hotend dimensions are estimates, documented in the research blueprint.
+`pnpm nx run bambu:render-plates`. Both Textured plates include independently reconstructed outline brand marks and fitted Geist labels. Mini Smooth uses the separately qualified dark-ink, blank-center reference. Detection-code footprints remain schematic, not functional codes. The Mini Textured PEI sheet is 0.55 mm thick (0.4 mm steel plus two 0.075 mm coatings), distinct from the 180 mm printable area. Smooth visualizations use two film-covered faces: X1C 0.85 mm and Mini 0.75 mm, including an estimated 0.05 mm adhesive allowance per face. The steel/film choices are visualization assumptions, not manufacturing measurements. Appearance-derived ink and hotend dimensions are estimates, documented in the research blueprint.
+
+The source/hash gate for both families is `models/render.sha256`. The normal Nx command builds the CLI first. For isolated regeneration with an already qualified CLI, use:
+
+```bash
+TAU_RENDER_CLI=/absolute/path/to/packages/cli/dist/bin/tau.mjs \
+node --import @oxc-node/core/register packages/plugins/bambu/scripts/render-plates.mts
+```
+
+This executes the same eight exports and source-hash update; it does not bypass asset freshness checks. The interactive viewer adds instance-owned, 8 mm repeating PEI grain through standard Three.js materials and independently builds the visible mechanical assemblies from vendor imagery. These remain appearance models, not factory CAD.
 
 ## Environment
 

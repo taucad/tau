@@ -123,7 +123,7 @@ export const bambuX1cPlates: readonly BambuPlateModel[] = [
     model: new URL('assets/x1c-high-temperature.glb', import.meta.url),
     modelAxes: 'gltf-y-up',
     modelUnitScale: 1000,
-    bounds: plateBounds(0.675),
+    bounds: plateBounds(0.85),
   },
   {
     id: 'textured-pei',
@@ -171,7 +171,7 @@ export const bambuA1MiniHotend: BambuHotendModel = {
   model: new URL('assets/a1-mini-hotend.glb', import.meta.url),
   modelAxes: 'gltf-y-up',
   modelUnitScale: 1000,
-  bounds: { min: [-8, -7, 0], max: [7, 7.02, 24] },
+  bounds: { min: [-8, -7.02, 0], max: [7, 7, 24] },
   tip: [0, 0, 0],
 };
 
@@ -201,6 +201,8 @@ export const bambuX1cHotend: BambuHotendModel = {
  * ```
  */
 export const bambuPlateForBedType = (name: string): BambuPlateModel | undefined => {
-  const trimmed = name.trim();
-  return bambuX1cPlates.find((plate) => plate.bedTypeNames.includes(trimmed));
+  const trimmed = name.trim().toLowerCase();
+  return [...bambuX1cPlates, ...bambuA1MiniPlates].find((plate) =>
+    plate.bedTypeNames.some((candidate) => candidate.toLowerCase() === trimmed),
+  );
 };

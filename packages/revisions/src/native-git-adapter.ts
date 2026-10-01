@@ -108,18 +108,18 @@ const revisionIdentifierSchema = z.string().refine((value) => {
     return false;
   }
 });
-const revisionSchema = revisionMetadataSchema.safeExtend({
+const revisionSchema = revisionMetadataSchema.extend({
   id: revisionIdentifierSchema,
   parents: z.array(revisionIdentifierSchema).refine((parents) => new Set(parents).size === parents.length),
   tree: z.instanceof(ImmutableRevisionTree),
-  provenance: revisionMetadataSchema.shape.provenance.safeExtend({
+  provenance: revisionMetadataSchema.shape.provenance.extend({
     createdAt: z
       .number()
       .refine(Number.isSafeInteger)
       .refine((value) => value >= 0),
     actorId: z.string().min(1),
   }),
-  summary: revisionMetadataSchema.shape.summary.safeExtend({ generated: z.string().min(1) }),
+  summary: revisionMetadataSchema.shape.summary.extend({ generated: z.string().min(1) }),
 });
 const ownershipRecordSchema = z.object({
   version: z.literal(1),

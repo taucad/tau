@@ -1,7 +1,7 @@
 diff --git a/API/PicoGK.h b/API/PicoGK.h
 --- a/API/PicoGK.h
 +++ b/API/PicoGK.h
-@@ -747,6 +747,74 @@
+@@ -747,6 +747,76 @@
  PICOGK_API void             Viewer_SideBar_Destroy(         PKVIEWER            hThis,
                                                              PKGUI               hSideBar);
  
@@ -68,6 +68,8 @@ diff --git a/API/PicoGK.h b/API/PicoGK.h
 +PICOGK_API int32_t TauScalarField_CountActiveValues(PKINSTANCE, PKSCALARFIELD, int32_t*) TAU_NOEXCEPT;
 +
 +// Private capacity-checked reads. 0: filled/query; +1: insufficient capacity, no writes.
++PICOGK_API int32_t TauVoxels_ProjectZSlice(PKINSTANCE, PKVOXELS, float, float) TAU_NOEXCEPT;
++
 +PICOGK_API int32_t TauVoxels_ReadSlice(PKINSTANCE, PKVOXELS, int32_t, int32_t, float,
 +    float*, uint64_t, TauSliceInfo*) TAU_NOEXCEPT;
 +PICOGK_API int32_t TauScalarField_ReadSlice(PKINSTANCE, PKSCALARFIELD, int32_t, int32_t,
@@ -317,7 +319,7 @@ diff --git a/Source/PicoGKGridState.h b/Source/PicoGKGridState.h
 new file mode 100644
 --- /dev/null
 +++ b/Source/PicoGKGridState.h
-@@ -0,0 +1,241 @@
+@@ -0,0 +1,244 @@
 +// SPDX-License-Identifier: Apache-2.0
 +#ifndef PICOGK_GRID_STATE_H
 +#define PICOGK_GRID_STATE_H
@@ -335,6 +337,9 @@ new file mode 100644
 +    std::atomic<uint64_t> activeBoundsBuilds{0};
 +    std::atomic<uint64_t> activeBoundsHits{0};
 +    std::atomic<uint64_t> sliceValueReads{0};
++    std::atomic<uint64_t> projectionRegions{0};
++    std::atomic<uint64_t> projectionColumns{0};
++    std::atomic<uint64_t> projectionUpdates{0};
 +};
 +struct TauSurfaceGeneration {
 +    uint64_t identity = TauNextGeneration();
@@ -1071,7 +1076,19 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API void Voxels_ProjectZSlice(   PKINSTANCE hLib,
-@@ -742,20 +741,20 @@
+@@ -589,10 +588,7 @@
+                                         float fZStart,
+                                         float fZEnd)
+ {
+-    Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    roLib->m_oVoxels.roGet(hThis)
+-        ->ProjectZSlice(    fZStart,
+-                            fZEnd);
++    (void)TauVoxels_ProjectZSlice(hLib, hThis, fZStart, fZEnd);
+ }
+ 
+ PICOGK_API bool Voxels_bIsEqual(    PKINSTANCE hLib,
+@@ -742,20 +738,20 @@
  PICOGK_API void PolyLine_Destroy(   PKINSTANCE hLib,
                                      PKPOLYLINE hThis)
  {
@@ -1099,7 +1116,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API int32_t PolyLine_nAddVertex( PKINSTANCE hLib,
-@@ -830,20 +829,20 @@
+@@ -830,20 +826,20 @@
  PICOGK_API void VdbFile_Destroy(    PKINSTANCE hLib,
                                      PKVDBFILE hThis)
  {
@@ -1127,7 +1144,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API bool VdbFile_bSaveToFile(    PKINSTANCE hLib,
-@@ -861,7 +860,9 @@
+@@ -861,7 +857,9 @@
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
      
@@ -1138,7 +1155,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
              
      if (!roGrid->isType<FloatGrid>())
          return 0;
-@@ -869,7 +870,7 @@
+@@ -869,7 +867,7 @@
      if (roGrid->getGridClass() != GRID_LEVEL_SET)
          return 0; // not a voxel field
              
@@ -1147,7 +1164,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
                                                              PICOGK_VOXEL_DEFAULTNARROWBAND));
  }
  
-@@ -879,8 +880,8 @@
+@@ -879,8 +877,8 @@
                                          PKVOXELS    hVoxels)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -1158,7 +1175,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
      
  }
  
-@@ -891,7 +892,9 @@
+@@ -891,7 +889,9 @@
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
      
@@ -1169,7 +1186,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
              
      if (!roGrid->isType<FloatGrid>())
          return 0;
-@@ -909,7 +912,7 @@
+@@ -909,7 +909,7 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      return roLib->m_oVdbFiles.roGet(hThis)
@@ -1178,7 +1195,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKVECTORFIELD VdbFile_hGetVectorField(   PKINSTANCE hLib,
-@@ -919,7 +922,9 @@
+@@ -919,7 +919,9 @@
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
      
@@ -1189,7 +1206,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
      
      if (!roGrid->isType<Vec3SGrid>())
          return 0;
-@@ -935,7 +940,7 @@
+@@ -935,7 +937,7 @@
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      
      return roLib->m_oVdbFiles.roGet(hThis)
@@ -1198,7 +1215,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API int32_t VdbFile_nFieldCount( PKINSTANCE hLib,
-@@ -989,20 +994,20 @@
+@@ -989,20 +991,20 @@
  PICOGK_API void ScalarField_Destroy(    PKINSTANCE hLib,
                                          PKSCALARFIELD   hThis)
  {
@@ -1226,7 +1243,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKSCALARFIELD ScalarField_hCreateFromVoxels( PKINSTANCE hLib,
-@@ -1122,13 +1127,11 @@
+@@ -1122,13 +1124,11 @@
  PICOGK_API void VectorField_Destroy(    PKINSTANCE hLib,
                                          PKVECTORFIELD hThis)
  {
@@ -1245,7 +1262,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKVECTORFIELD VectorField_hCreateFromVoxels( PKINSTANCE hLib,
-@@ -1160,8 +1163,10 @@
+@@ -1160,8 +1160,10 @@
  PICOGK_API int64_t VectorField_nMemUsage(   PKINSTANCE hLib,
                                              PKVECTORFIELD hThis)
  {
@@ -1256,7 +1273,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API void VectorField_SetValue(   PKINSTANCE hLib,
-@@ -1212,7 +1217,8 @@
+@@ -1212,7 +1214,8 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oVoxels.roGet(hField);
@@ -1266,7 +1283,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKMETADATA Metadata_hFromScalarField(    PKINSTANCE hLib,
-@@ -1220,7 +1226,7 @@
+@@ -1220,7 +1223,7 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oScalarFields.roGet(hField);
@@ -1275,7 +1292,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKMETADATA Metadata_hFromVectorField(    PKINSTANCE hLib,
-@@ -1228,19 +1234,17 @@
+@@ -1228,19 +1231,17 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oVectorFields.roGet(hField);
@@ -1301,7 +1318,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API int32_t Metadata_nCount( PKINSTANCE hLib,
-@@ -1796,3 +1800,422 @@
+@@ -1796,3 +1797,431 @@
      
      poThis->DestroySideBar(hSideBar);
  }
@@ -1723,6 +1740,15 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
 +        *info = observed;
 +    });
 +    return status ? status : result;
++}
++
++PICOGK_API int32_t TauVoxels_ProjectZSlice(PKINSTANCE library, PKVOXELS voxels,
++    float start, float end) noexcept {
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_oVoxels.roGet(voxels);
++        source->ProjectZSlice(start, end);
++    });
 +}
 diff --git a/Source/PicoGKLibraryMgr.h b/Source/PicoGKLibraryMgr.h
 --- a/Source/PicoGKLibraryMgr.h
@@ -3077,7 +3103,15 @@ diff --git a/Source/PicoGKVdbMeta.h b/Source/PicoGKVdbMeta.h
 diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 --- a/Source/PicoGKVdbVoxels.h
 +++ b/Source/PicoGKVdbVoxels.h
-@@ -50,6 +50,7 @@
+@@ -37,6 +37,7 @@
+ #define PICOGKVDBVOXELS_H_
+ 
+ #include <openvdb/openvdb.h>
++#include <map>
+ #include <openvdb/tools/Composite.h>
+ #include <openvdb/tools/MeshToVolume.h>
+ #include <openvdb/tools/VolumeToMesh.h>
+@@ -50,6 +51,7 @@
  #include <openvdb/tools/LevelSetDilatedMesh.h>
  
  #include "PicoGKMesh.h"
@@ -3085,7 +3119,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
  #include "PicoGKTrace.h"
  
  using namespace openvdb;
-@@ -72,6 +73,7 @@
+@@ -72,6 +74,7 @@
          m_roGrid            = FloatGrid::create(oVoxelSize.fToMM(nNarrowBand));
          m_roGrid->setGridClass(GRID_LEVEL_SET);
          m_roGrid->setTransform(openvdb::math::Transform::createLinearTransform(oVoxelSize));
@@ -3093,7 +3127,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      };
      
      Voxels( FloatGrid::Ptr roGrid,
-@@ -84,11 +86,18 @@
+@@ -84,11 +87,18 @@
          
          m_nSdfNarrowBand    = nNarrowBand;
          m_roGrid            = roGrid;
@@ -3113,7 +3147,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_CopyConstructor);
          
          m_roGrid = deepCopyTypedGrid<FloatGrid>(oSource.m_roGrid);
-@@ -96,6 +105,8 @@
+@@ -96,6 +106,8 @@
          
          assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
          assert(bHasValidPicoGKTransform(m_roGrid));
@@ -3122,7 +3156,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      };
      
      Voxels( VoxelSize oVoxSize,
-@@ -116,6 +127,7 @@
+@@ -116,6 +128,7 @@
          
          assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
          assert(bHasValidPicoGKTransform(m_roGrid));
@@ -3130,7 +3164,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      }
      
      Voxels( VoxelSize oVoxSize,
-@@ -142,6 +154,7 @@
+@@ -142,6 +155,7 @@
          
          assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
          assert(bHasValidPicoGKTransform(m_roGrid));
@@ -3138,7 +3172,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      }
      
      Voxels( VoxelSize oVoxSize,
-@@ -149,8 +162,9 @@
+@@ -149,8 +163,9 @@
              const Mesh& oMesh,
              float fRadius)
      {
@@ -3150,7 +3184,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
                                                                              fRadius,
                                                                              oVoxSize,
                                                                              nNarrowBand);
-@@ -159,24 +173,32 @@
+@@ -159,24 +174,32 @@
          
          assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
          assert(bHasValidPicoGKTransform(m_roGrid));
@@ -3189,7 +3223,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_bIsEmpty);
          
          if (m_roGrid->tree().empty())
-@@ -199,13 +221,16 @@
+@@ -199,13 +222,16 @@
      
      bool bIsEqual(const Voxels& oCompare) const
      {
@@ -3208,7 +3242,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          int32_t iMinX = std::min(   oBBoxThis.min().x(),
                                      oBBoxComp.min().x());
-@@ -244,8 +269,51 @@
+@@ -244,8 +270,51 @@
          return true;
       }
  
@@ -3260,7 +3294,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_BoolAdd);
          
          FloatGrid::Ptr roOperand = deepCopyTypedGrid<FloatGrid>(oOther.m_roGrid);
-@@ -256,6 +324,9 @@
+@@ -256,6 +325,9 @@
  
      void BoolSubtract(const Voxels& oOther)
      {
@@ -3270,7 +3304,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_BoolSubtract);
          
          FloatGrid::Ptr roOperand = deepCopyTypedGrid<FloatGrid>(oOther.m_roGrid);
-@@ -266,6 +337,9 @@
+@@ -266,6 +338,9 @@
  
      void BoolIntersect(const Voxels& oOther)
      {
@@ -3280,7 +3314,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_BoolIntersect);
          
          FloatGrid::Ptr roOperand = deepCopyTypedGrid<FloatGrid>(oOther.m_roGrid);
-@@ -276,6 +350,8 @@
+@@ -276,6 +351,8 @@
      
      void Offset(float fSize)
      {
@@ -3289,7 +3323,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_Offset);
          
          // Create a clean level set with the extended size narrow band
-@@ -292,6 +368,8 @@
+@@ -292,6 +369,8 @@
      void DoubleOffset(  float fSize1,
                          float fSize2)
      {
@@ -3298,7 +3332,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_DoubleOffset);
          
          // Create a clean level set with the extended size narrow band
-@@ -309,6 +387,8 @@
+@@ -309,6 +388,8 @@
      
      void TripleOffset(float fSize)
      {
@@ -3307,7 +3341,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_TripleOffset);
          
          // Create a clean level set with the extended size narrow band
-@@ -331,6 +411,8 @@
+@@ -331,6 +412,8 @@
  
      void RenderMesh(const Mesh& oMesh)
      {
@@ -3316,7 +3350,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_RenderMesh);
          
          FloatGrid::Ptr roVoxelized = roFloatGridFromMesh(   oMesh,
-@@ -342,7 +424,14 @@
+@@ -342,7 +425,14 @@
      
      void RenderLattice(const Lattice& oLattice)
      {
@@ -3331,7 +3365,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          auto oAccess = m_roGrid->getAccessor();
          
-@@ -357,9 +446,30 @@
+@@ -357,9 +447,30 @@
          }
      }
      
@@ -3362,7 +3396,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_RenderImplicit);
          
          auto oAccess = m_roGrid->getAccessor();
-@@ -374,8 +484,14 @@
+@@ -374,8 +485,14 @@
              Vector3 vecSample = oVoxelSize().vecToMM(Coord(x,y,z));
              openvdb::Coord xyz(x,y,z);
              
@@ -3379,7 +3413,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
              
              SetSdValue(&oAccess, xyz, fBackgroundMM(), fValue);
          }
-@@ -387,9 +503,16 @@
+@@ -387,9 +504,16 @@
      {
          PKTRACE(Voxels_IntersectImplicit);
          
@@ -3399,7 +3433,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          BBox3 oBBoxMM;
          oBBoxMM.vecMin.X = oVoxelSize().fToMM(oBBox.min().x());
-@@ -406,16 +529,62 @@
+@@ -406,16 +530,62 @@
          // implict grid, and use our grid just as the mask
          // Not sure if this is really necessary, but the
          // implicit grid is "perfect"
@@ -3465,7 +3499,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
      	std::vector< openvdb::Vec3s > oPoints;
      	std::vector< openvdb::Vec3I > oTriangles;
-@@ -429,33 +598,36 @@
+@@ -429,138 +599,182 @@
                                                           0.0,
                                                           false);
  
@@ -3491,6 +3525,44 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 -        }
 -
 -        return roMesh;
+-    }
+-    
+-    void ProjectZSliceDn(   float fZStart,
+-                            float fZEnd)
+-    {
+-        assert(fZStart > fZEnd);
+-        
+-        int32_t iZStart = oVoxelSize().iToVoxels(fZStart);
+-        int32_t iZEnd   = oVoxelSize().iToVoxels(fZEnd);
+-        CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
+-        
+-        auto oAccess = m_roGrid->getAccessor();
+-        
+-        for(int32_t x = oBBox.min().x(); x <= oBBox.max().x(); x++)
+-        for(int32_t y = oBBox.min().y(); y <= oBBox.max().y(); y++)
+-        for(int32_t z = iZStart; z > iZEnd; z--)
+-        {
+-            
+-            openvdb::Coord xyz(x,y,z);
+-            openvdb::Coord xyzUnder(x,y,z-1);
+-            
+-            float fValue = std::min(    oAccess.getValue(xyzUnder),
+-                                        oAccess.getValue(xyz));
+-            
+-            SetSdValue(&oAccess, xyzUnder, fBackgroundMM(), fValue);
+-        }
+-        
+-        // Close the last slice, and update the background
+-        for(int32_t z = iZEnd; z > iZEnd - (int) (0.5f + m_roGrid->background()); z--)
+-        {
+-            for(int32_t x = oBBox.min().x(); x <= oBBox.max().x(); x++)
+-            for(int32_t y = oBBox.min().y(); y <= oBBox.max().y(); y++)
+-            {
+-                openvdb::Coord xyz(x,y,z);
+-                openvdb::Coord xyzUnder(x,y,z-1);
+-                
+-                float fValue = (oAccess.getValue(xyz) + oAccess.getValue(xyzUnder)) / 2.0f;
+-                SetSdValue(&oAccess, xyz, fBackgroundMM(), fValue);
 +        // Preserve mesher order: original triangles first, then two triangles per quad.
 +        if (oPoints.size() > static_cast<size_t>(INT32_MAX) ||
 +            oTriangles.size() > static_cast<size_t>(INT32_MAX) ||
@@ -3514,35 +3586,214 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 +        }
 +        return Mesh::TauCreateOwned(std::move(vertices), std::move(triangles),
 +            m_tauState->cacheable ? m_tauState->generation->identity : TauNextGeneration());
++    }
++
++    void ProjectZSliceDn(float fZStart, float fZEnd) {
++        if (!(fZStart > fZEnd)) throw std::invalid_argument("invalid downward projection order");
++        ProjectZSlice(fZStart, fZEnd);
++    }
++    void ProjectZSliceUp(float fZStart, float fZEnd) {
++        if (fZStart > fZEnd) throw std::invalid_argument("invalid upward projection order");
++        ProjectZSlice(fZStart, fZEnd);
++    }
++
++    void ProjectZSlice(float fZStart, float fZEnd)
++    {
++        std::lock_guard<std::recursive_mutex> object(m_tauObjectGate);
++        std::lock_guard<std::recursive_mutex> state(m_tauState->gate);
++        const float size = oVoxelSize();
++        const float background = m_roGrid->background();
++        if (!std::isfinite(fZStart) || !std::isfinite(fZEnd) ||
++            !std::isfinite(size) || size <= 0 || !std::isfinite(background) || background <= 0)
++            throw std::invalid_argument("invalid projection coordinates or grid units");
++        const auto coordinate = [&](float value) -> int32_t {
++            const float voxels = oVoxelSize().fToVoxels(value);
++            const double rounded = std::round(static_cast<double>(voxels));
++            if (!std::isfinite(rounded) || rounded < INT32_MIN || rounded > INT32_MAX)
++                throw std::invalid_argument("projection exceeds native coordinate range");
++            return static_cast<int32_t>(rounded);
++        };
++        const int32_t start = coordinate(fZStart), end = coordinate(fZEnd);
++        // Background is millimeters, while this loop limit counts voxel layers.
++        const float band = 0.5f + oVoxelSize().fToVoxels(background);
++        if (!std::isfinite(band) || static_cast<double>(band) > INT32_MAX)
++            throw std::invalid_argument("projection sealing exceeds native coordinate range");
++        const int32_t layers = static_cast<int32_t>(band);
++        const bool down = fZStart > fZEnd;
++        const int64_t far = int64_t(end) + (down ? -int64_t(layers) : int64_t(layers));
++        if (far < INT32_MIN || far > INT32_MAX)
++            throw std::invalid_argument("projection sealing exceeds native coordinate range");
++        const auto bounds = TauActiveBounds(m_roGrid, m_tauState);
++        if (bounds.empty() || (start == end && layers == 0)) return;
++        const int64_t low = down ? far : start, high = down ? start : far;
++        const uint64_t width = uint64_t(int64_t(bounds.max().x()) - bounds.min().x() + 1);
++        const uint64_t height = uint64_t(int64_t(bounds.max().y()) - bounds.min().y() + 1);
++        const uint64_t steps = uint64_t(std::abs(int64_t(start) - end)) + layers;
++        const long double denseWork = static_cast<long double>(width) * height * steps;
++        using Upper = FloatGrid::TreeType::RootNodeType::ChildNodeType;
++        using Lower = Upper::ChildNodeType;
++        using Leaf = Lower::ChildNodeType;
++        bool sparse = denseWork > Upper::NUM_VALUES;
++        if (sparse) {
++            const auto nodes = m_roGrid->tree().nodeCount();
++            const long double scan = static_cast<long double>(nodes[0]) * Leaf::NUM_VALUES +
++                static_cast<long double>(nodes[1]) * Lower::NUM_VALUES +
++                static_cast<long double>(nodes[2]) * Upper::NUM_VALUES + m_roGrid->tree().root().getTableSize();
++            sparse = denseWork > scan;
++        }
++        using Interval = std::pair<int32_t, int32_t>;
++        std::map<int32_t, std::vector<Interval>> columns;
++        uint64_t regions = 0;
++        // Include every active or non-background stored region, including positive off values
++        // and negative inactive interiors. All other columns remain positive background/off.
++        if (sparse) for (auto value = m_roGrid->cbeginValueAll(); value; ++value) {
++            ++regions;
++            if (!value.isValueOn() && *value == background) continue;
++            const auto region = value.getBoundingBox();
++            if (region.max().z() < low || region.min().z() > high) continue;
++            const int32_t x0 = std::max(bounds.min().x(), region.min().x());
++            const int32_t x1 = std::min(bounds.max().x(), region.max().x());
++            const int32_t y0 = std::max(bounds.min().y(), region.min().y());
++            const int32_t y1 = std::min(bounds.max().y(), region.max().y());
++            if (y0 > y1) continue;
++            for (int64_t x = x0; x <= x1; ++x) columns[int32_t(x)].emplace_back(y0, y1);
++        }
++        uint64_t count = 0;
++        for (auto& [x, intervals] : columns) {
++            std::sort(intervals.begin(), intervals.end());
++            size_t used = 0;
++            for (const auto interval : intervals) {
++                if (used && int64_t(interval.first) <= int64_t(intervals[used - 1].second) + 1)
++                    intervals[used - 1].second = std::max(intervals[used - 1].second, interval.second);
++                else intervals[used++] = interval;
+             }
+-        }
+-        
++            intervals.resize(used);
++            for (const auto interval : intervals) {
++                const auto length = uint64_t(int64_t(interval.second) - interval.first + 1);
++                if (count > UINT64_MAX - length) throw std::overflow_error("projection column count overflow");
++                count += length;
++            }
++        }
++        if (!sparse) {
++            if (width > UINT64_MAX / height) throw std::overflow_error("projection column count overflow");
++            count = width * height;
++        }
++        if (count && steps > UINT64_MAX / count) throw std::overflow_error("projection work count overflow");
++        const auto eachColumn = [&](auto visit) {
++            if (sparse) {
++                for (const auto& [x, intervals] : columns)
++                for (const auto interval : intervals)
++                for (int64_t y = interval.first; y <= interval.second; ++y) visit(x, int32_t(y));
++            } else {
++                for (int64_t x = bounds.min().x(); x <= bounds.max().x(); ++x)
++                for (int64_t y = bounds.min().y(); y <= bounds.max().y(); ++y) visit(int32_t(x), int32_t(y));
++            }
++        };
++        if (m_tauState->counters) {
++            m_tauState->counters->projectionRegions += regions;
++            m_tauState->counters->projectionColumns += count;
++        }
++        if (!count) return;
++        TauGridMutation mutation(m_tauState);
++        auto access = m_roGrid->getAccessor();
++        uint64_t updates = 0;
++        eachColumn([&](int32_t x, int32_t y) {
++        for (int64_t z = start; down ? z > end : z < end; z += down ? -1 : 1) {
++            const openvdb::Coord current(x, int32_t(y), int32_t(z));
++            const openvdb::Coord next(x, int32_t(y), int32_t(z + (down ? -1 : 1)));
++            const float value = std::min(access.getValue(next), access.getValue(current));
++            SetSdValue(&access, next, background, value);
++            ++updates;
++        }
++        });
++        // Retain the legacy sequential float sum/division and Z-major sealing order.
++        for (int64_t z = end; down ? z > far : z < far; z += down ? -1 : 1)
++        eachColumn([&](int32_t x, int32_t y) {
++            const openvdb::Coord current(x, int32_t(y), int32_t(z));
++            const openvdb::Coord next(x, int32_t(y), int32_t(z + (down ? -1 : 1)));
++            const float value = (access.getValue(current) + access.getValue(next)) / 2.0f;
++            SetSdValue(&access, current, background, value);
++            ++updates;
++        });
++        if (m_tauState->counters) m_tauState->counters->projectionUpdates += updates;
+         RebuildGrid();
      }
-     
-     void ProjectZSliceDn(   float fZStart,
-                             float fZEnd)
-     {
-+        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
-+        TauGridMutation tauMutation(m_tauState);
-         assert(fZStart > fZEnd);
-         
-         int32_t iZStart = oVoxelSize().iToVoxels(fZStart);
-@@ -498,6 +670,8 @@
-     void ProjectZSliceUp(   float fZStart,
-                             float fZEnd)
-     {
-+        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
-+        TauGridMutation tauMutation(m_tauState);
-         assert(fZStart < fZEnd);
-         
-         int32_t iZStart = oVoxelSize().iToVoxels(fZStart);
-@@ -547,6 +721,8 @@
-     
-     float fCalculateVolume()
-     {
+-    
+-    void ProjectZSliceUp(   float fZStart,
+-                            float fZEnd)
+-    {
+-        assert(fZStart < fZEnd);
+-        
+-        int32_t iZStart = oVoxelSize().iToVoxels(fZStart);
+-        int32_t iZEnd   = oVoxelSize().iToVoxels(fZEnd);
+-        CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
+-        
+-        auto oAccess = m_roGrid->getAccessor();
+-        
+-        for(int32_t x = oBBox.min().x(); x <= oBBox.max().x(); x++)
+-        for(int32_t y = oBBox.min().y(); y <= oBBox.max().y(); y++)
+-        for(int32_t z = iZStart; z < iZEnd; z++)
+-        {
+-            openvdb::Coord xyz(x,y,z);
+-            openvdb::Coord xyzOver(x,y,z+1);
+-            
+-            float fValue = std::min(    oAccess.getValue(xyzOver),
+-                                        oAccess.getValue(xyz));
+-            
+-            SetSdValue(&oAccess, xyzOver, fBackgroundMM(), fValue);
+-        }
+-        
+-        // Close the last slice, and update the background
+-        for(int32_t z = iZEnd; z < iZEnd + (int) (0.5f + m_roGrid->background()); z++)
+-        {
+-            for(int32_t x = oBBox.min().x(); x <= oBBox.max().x(); x++)
+-            for(int32_t y = oBBox.min().y(); y <= oBBox.max().y(); y++)
+-            {
+-                openvdb::Coord xyz(x,y,z);
+-                openvdb::Coord xyzOver(x,y,z+1);
+-                
+-                float fValue = (oAccess.getValue(xyz) + oAccess.getValue(xyzOver)) / 2.0f;
+-                SetSdValue(&oAccess, xyz, fBackgroundMM(), fValue);
+-            }
++
++    float fCalculateVolume()
++    {
 +        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
 +        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
-         PKTRACE(Voxels_fCalculateVolume);
++        PKTRACE(Voxels_fCalculateVolume);
++
++        if (m_roGrid->tree().empty())
++        {
++            return 0.0f;
+         }
          
-         if (m_roGrid->tree().empty())
-@@ -561,6 +737,8 @@
+         RebuildGrid();
+-    }
+-
+-    void ProjectZSlice( float fZStart,
+-                        float fZEnd)
+-    {
+-        if (fZStart > fZEnd)
+-            ProjectZSliceDn(fZStart, fZEnd);
+-        else
+-            ProjectZSliceUp(fZStart, fZEnd);
+-    }
+-    
+-    float fCalculateVolume()
+-    {
+-        PKTRACE(Voxels_fCalculateVolume);
+-        
+-        if (m_roGrid->tree().empty())
+-        {
+-            return 0.0f;
+-        }
+-        
+-        RebuildGrid();
+         
+         return openvdb::tools::levelSetVolume(*m_roGrid, true);
+     }
      
      inline bool bIsInside(Vector3 vecTest)
      {
@@ -3551,7 +3802,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          auto oAccess = m_roGrid->getConstAccessor();
      
          openvdb::Coord xyz( oVoxelSize().iToVoxels(vecTest.X),
-@@ -573,6 +751,8 @@
+@@ -573,6 +787,8 @@
      inline void GetSurfaceNormal(   Vector3 vecPt,
                                      Vector3* pvecNormal)
      {
@@ -3560,7 +3811,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          math::GradStencil oStencil(*m_roGrid);
          Coord xyz = oVoxelSize().xyzToVoxels(vecPt);
      
-@@ -591,9 +771,11 @@
+@@ -591,9 +807,11 @@
      inline bool bFindClosestPointOnSurface( Vector3 vecSearch,
                                              Vector3* pvecSurfacePoint)
      {
@@ -3573,7 +3824,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          oBBox.expand(openvdb::Coord(xyzSearch.X, xyzSearch.Y, xyzSearch.Z));
          // Add the search point to the BBox and expand a little to avoid
          // stopping too soon
-@@ -638,6 +820,8 @@
+@@ -638,6 +856,8 @@
                                      const Vector3& vecDirection,
                                      Vector3* pvecSurfacePoint)
      {
@@ -3582,7 +3833,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          tools::LevelSetRayIntersector oIntersector(*m_roGrid);
          math::Ray<Real> oRay(   Vec3f(  oVoxelSize().fToVoxels(vecSearch.X),
                                          oVoxelSize().fToVoxels(vecSearch.Y),
-@@ -663,6 +847,13 @@
+@@ -663,6 +883,13 @@
          return false;
      }
      
@@ -3596,7 +3847,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      void GetVoxelDimensions(    int32_t* pnXMin,
                                  int32_t* pnYMin,
                                  int32_t* pnZMin,
-@@ -670,7 +861,9 @@
+@@ -670,7 +897,9 @@
                                  int32_t* pnYSize,
                                  int32_t* pnZSize) const
      {
@@ -3607,7 +3858,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          *pnXMin     = oBBox.min().x();
          *pnYMin     = oBBox.min().y();
-@@ -683,7 +876,9 @@
+@@ -683,7 +912,9 @@
      void GetZSlice( int32_t nZSlice,
                      float* pfBuffer)
      {
@@ -3618,7 +3869,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          openvdb::Coord xyz(0, 0, nZSlice + oBBox.min().z());
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -700,7 +895,9 @@
+@@ -700,7 +931,9 @@
      void GetXSlice( int32_t nXSlice,
                      float* pfBuffer)
      {
@@ -3629,7 +3880,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          openvdb::Coord xyz(nXSlice + oBBox.min().x(), 0, 0);
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -717,7 +914,9 @@
+@@ -717,7 +950,9 @@
      void GetYSlice( int32_t nYSlice,
                      float* pfBuffer)
      {
@@ -3640,7 +3891,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          openvdb::Coord xyz(0, nYSlice + oBBox.min().y(), 0);
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -734,7 +933,9 @@
+@@ -734,7 +969,9 @@
      void GetInterpolatedZSlice( float fZSlice,
                                  float* pfBuffer)
      {
@@ -3651,7 +3902,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          auto oAccess = m_roGrid->getConstAccessor();
          
-@@ -750,18 +951,33 @@
+@@ -750,18 +987,33 @@
          }
      }
      
@@ -3688,7 +3939,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      int32_t             m_nSdfNarrowBand;
      
      bool bLevelSetNeedsRebuild() const
-@@ -830,22 +1046,23 @@
+@@ -830,22 +1082,23 @@
                                                  VoxelSize oVoxelSize,
                                                  int32_t nHalfWidth)
      {

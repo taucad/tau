@@ -634,7 +634,14 @@ if (unsigned) {
   const probeBundle = resolve(probeRoot, 'TauQuickLookConverterProbe.app');
   const probeExecutable = resolve(probeBundle, 'Contents/MacOS/TauQuickLookConverterProbe');
   const probeResources = resolve(probeBundle, 'Contents/Resources');
-  const initialSessions = temporarySessions();
+  const probeTemporaryRoot = resolve(probeRoot, 'temporary');
+  const probeSessionRoot = resolve(probeTemporaryRoot, 'tau-quick-look');
+  const assertNoProbeSessions = (): void => {
+    const leaked = existsSync(probeSessionRoot) ? readdirSync(probeSessionRoot) : [];
+    if (leaked.length > 0) {
+      throw new Error(`Unsigned Quick Look converter left temporary sessions behind: ${leaked.join(', ')}`);
+    }
+  };
   try {
     mkdirSync(dirname(probeExecutable), { recursive: true });
     mkdirSync(probeResources, { recursive: true });
@@ -664,7 +671,7 @@ if (unsigned) {
     copyFileSync(resolve(workspaceRoot, 'packages/plugins/brep/src/fixtures/cube.step'), source);
     const preview = resolve(probeRoot, 'preview.usdz');
     const thumbnail = resolve(probeRoot, 'thumbnail.png');
-    run(probeExecutable, [source, 'usdz', preview, 'convert'], 60_000);
+    run(probeExecutable, [source, 'usdz', preview, 'convert', probeTemporaryRoot], 60_000);
     if (
       !readFileSync(preview)
         .subarray(0, 4)
@@ -677,14 +684,14 @@ if (unsigned) {
     if (!previewMembers.split('\n').some((name) => /\.usd[ac]?$/u.test(name))) {
       throw new Error(`The unsigned Quick Look converter USDZ contains no USD member: ${previewMembers}`);
     }
-    run(probeExecutable, [source, 'png', thumbnail, 'convert'], 60_000);
+    run(probeExecutable, [source, 'png', thumbnail, 'convert', probeTemporaryRoot], 60_000);
     assertThumbnailDimensions(thumbnail, 128);
 
     const malformed = resolve(probeRoot, 'malformed.off');
     writeFileSync(malformed, 'OFF\n8 12 0\nnot geometry\n');
     const malformedResult = spawnSync(
       probeExecutable,
-      [malformed, 'png', resolve(probeRoot, 'malformed.png'), 'convert'],
+      [malformed, 'png', resolve(probeRoot, 'malformed.png'), 'convert', probeTemporaryRoot],
       {
         encoding: 'utf8',
         timeout: 60_000,
@@ -699,11 +706,8 @@ if (unsigned) {
         `Malformed input did not produce the expected conversion diagnostic: status=${String(malformedResult.status)} signal=${String(malformedResult.signal)} stderr=${malformedResult.stderr}`,
       );
     }
-    run(probeExecutable, [source, 'png', resolve(probeRoot, 'cancelled.png'), 'cancel'], 10_000);
-    const leaked = [...temporarySessions()].filter((name) => !initialSessions.has(name));
-    if (leaked.length > 0) {
-      throw new Error(`Unsigned Quick Look converter left temporary sessions behind: ${leaked.join(', ')}`);
-    }
+    run(probeExecutable, [source, 'png', resolve(probeRoot, 'cancelled.png'), 'cancel', probeTemporaryRoot], 10_000);
+    assertNoProbeSessions();
   } finally {
     rmSync(probeRoot, { recursive: true, force: true });
   }

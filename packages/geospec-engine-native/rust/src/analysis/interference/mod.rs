@@ -5,7 +5,7 @@
 
 use crate::protocol::WorkCounter;
 use std::{
-    cell::RefCell,
+    cell::{OnceCell, RefCell},
     collections::{BTreeMap, HashMap, VecDeque},
     mem::size_of,
     rc::{Rc, Weak},
@@ -30,7 +30,484 @@ use crate::{
 
 mod cache;
 
+/// Exact scalar route for actual named mesh primitives, never spatial clusters
+/// or the legacy merged Boolean observation. Admission remains in the shared
+/// material owner and may refuse an internally crossing composite operand.
+pub(crate) fn material_overlap(
+    subject: &Subject,
+    left: u32,
+    right: u32,
+    budget: &Budget,
+    pending_bytes: u64,
+) -> Result<num_rational::BigRational, BackendError> {
+    subject.mark_material_demand();
+    use crate::analysis::mesh::material_intersection;
+    let record = subject.mesh_record().ok_or_else(|| BackendError {
+        kind: BackendErrorKind::Unsupported,
+        message: "A mesh material pair requires retained triangle evidence.".into(),
+    })?;
+    charge(
+        budget,
+        (record.positions.len() as u64)
+            .saturating_mul(2)
+            .saturating_add(record.triangles.len() as u64),
+    )?;
+    let owner = subject.overlap_components()?;
+    let PreparedComponents::Ready(prepared) = owner.as_ref() else {
+        return Err(BackendError {
+            kind: BackendErrorKind::Unsupported,
+            message: "Exact material operands need an identifiable primitive partition.".into(),
+        });
+    };
+    if prepared.operand_identity != operand_identity(subject)? {
+        return Err(BackendError {
+            kind: BackendErrorKind::ComputationFailed,
+            message: "Material partition identity differs from its immutable owner.".into(),
+        });
+    }
+    let pair = (left.min(right), left.max(right));
+    let replay = |trace: &crate::analysis::mesh::exact::ChargeTrace| -> Result<(), BackendError> {
+        for step in crate::analysis::mesh::exact::atomic_steps(&trace.steps) {
+            charge(budget, step.units)?;
+        }
+        Ok(())
+    };
+    let held = prepared.material_completed.borrow();
+    let mut operands = held
+        .as_ref()
+        .map_or_else(Vec::new, |value| value.operands.clone());
+    let bytes = subject
+        .retention_limits
+        .max_mesh_bytes
+        .saturating_sub(prepared.retained_bytes)
+        .saturating_sub(pending_bytes);
+    let operand =
+        |id, operands: &mut Vec<_>| material_operand(prepared, id, operands, budget, bytes);
+    let a = operand(pair.0, &mut operands)?;
+    let b = operand(pair.1, &mut operands)?;
+    if let Some(value) = held.as_ref().filter(|value| value.pair == Some(pair)) {
+        replay(&value.trace)?;
+        subject
+            .observations
+            .add(WorkCounter::OverlapResidentHits, 1);
+        return Ok(value.volume.clone());
+    }
+    let regions = held.as_ref().and_then(|value| value.regions.clone());
+    drop(held);
+    let live_other = operands
+        .iter()
+        .filter(|(id, _)| *id != pair.0 && *id != pair.1)
+        .fold(0u64, |sum, (_, value)| {
+            sum.saturating_add(value.allocated_bytes())
+        });
+    let mut trace = crate::analysis::mesh::exact::ChargeTrace::default();
+    let volume = material_intersection::intersection_qualified(
+        &a,
+        &b,
+        budget,
+        bytes.saturating_sub(live_other),
+        &mut trace,
+    )?;
+    subject.observations.add(WorkCounter::OverlapBuilds, 1);
+    if trace.complete && operands.iter().all(|(_, value)| value.trace.complete) {
+        let completed = CompletedMaterial {
+            pair: Some(pair),
+            region_pair: None,
+            volume: volume.clone(),
+            trace,
+            operands,
+            regions,
+        };
+        if prepared
+            .retained_bytes
+            .saturating_add(completed.allocated_bytes())
+            <= subject.retention_limits.max_mesh_bytes
+        {
+            if let Some(resident) = &subject.resident_overlaps {
+                resident.borrow_mut().insert_material(&owner, completed);
+            }
+        }
+    }
+    Ok(volume)
+}
+
+fn material_operand(
+    prepared: &PreparedOverlap,
+    id: u32,
+    operands: &mut Vec<(
+        u32,
+        Rc<crate::analysis::mesh::material_intersection::QualifiedMaterial>,
+    )>,
+    budget: &Budget,
+    bytes: u64,
+) -> Result<Rc<crate::analysis::mesh::material_intersection::QualifiedMaterial>, BackendError> {
+    use crate::analysis::mesh::material_intersection;
+    let replay = |trace: &crate::analysis::mesh::exact::ChargeTrace| -> Result<(), BackendError> {
+        for step in crate::analysis::mesh::exact::atomic_steps(&trace.steps) {
+            charge(budget, step.units)?;
+        }
+        Ok(())
+    };
+    if let Some((_, value)) = operands.iter().find(|(owner, _)| *owner == id) {
+        replay(&value.trace)?;
+        return Ok(Rc::clone(value));
+    }
+    let component = prepared
+        .components
+        .iter()
+        .find(|value| value.id == id)
+        .ok_or_else(|| BackendError {
+            kind: BackendErrorKind::InvalidInput,
+            message: "Selected material primitive is absent.".into(),
+        })?;
+    let mesh = component.mesh.as_deref().ok_or_else(|| BackendError {
+        kind: BackendErrorKind::Unsupported,
+        message: "An exact mesh material operand needs retained f64 triangles.".into(),
+    })?;
+    let live = operands.iter().fold(0u64, |sum, (_, value)| {
+        sum.saturating_add(value.allocated_bytes())
+    });
+    let copy_bytes = (mesh.positions.len() as u64)
+        .saturating_mul(size_of::<[f64; 3]>() as u64)
+        .saturating_add(
+            (mesh.triangles.len() as u64)
+                .saturating_mul((size_of::<[u32; 3]>() + size_of::<u32>()) as u64),
+        )
+        .saturating_add(component.label.len() as u64 + 1024);
+    if live
+        .saturating_add(copy_bytes)
+        .saturating_add(material_intersection::WORKSPACE_BYTES)
+        > bytes
+    {
+        return Err(BackendError {
+            kind: BackendErrorKind::Unsupported,
+            message: "Compact material operand copies exceed the declared analysis byte limit."
+                .into(),
+        });
+    }
+    let record = Rc::new(MeshAnalysisRecord {
+        positions: mesh.positions.clone(),
+        triangles: mesh.triangles.clone(),
+        triangle_primitives: vec![0; mesh.triangles.len()],
+        primitives: vec![Primitive {
+            name: component.label.clone(),
+            vertex_start: 0,
+            vertex_count: mesh.positions.len() as u32,
+        }],
+    });
+    let value = Rc::new(material_intersection::qualify(
+        record,
+        budget,
+        bytes.saturating_sub(live).saturating_sub(copy_bytes),
+    )?);
+    operands.push((id, Rc::clone(&value)));
+    Ok(value)
+}
+
 pub(crate) const DEFAULT_TOLERANCE_MM: f64 = 0.001;
+
+pub(crate) fn region_overlap(
+    subject: &Subject,
+    left: &crate::analysis::mesh::material::MaterialRegion,
+    right: &crate::analysis::mesh::material::MaterialRegion,
+    budget: &Budget,
+    pending_bytes: u64,
+) -> Result<num_rational::BigRational, BackendError> {
+    use crate::analysis::mesh::{exact::ChargeTrace, material_intersection};
+    let owner = subject.overlap_components()?;
+    let PreparedComponents::Ready(prepared) = owner.as_ref() else {
+        return Err(BackendError {
+            kind: BackendErrorKind::Unsupported,
+            message: "Material regions lack a retained primitive partition.".into(),
+        });
+    };
+    let pair = (left.root.min(right.root), left.root.max(right.root));
+    let held = prepared.material_completed.borrow();
+    if let Some(value) = held
+        .as_ref()
+        .filter(|value| value.region_pair == Some(pair))
+    {
+        for step in crate::analysis::mesh::exact::atomic_steps(&value.trace.steps) {
+            charge(budget, step.units)?;
+        }
+        subject
+            .observations
+            .add(WorkCounter::OverlapResidentHits, 1);
+        return Ok(value.volume.clone());
+    }
+    let operands = held
+        .as_ref()
+        .map_or_else(Vec::new, |value| value.operands.clone());
+    let regions = held.as_ref().and_then(|value| value.regions.clone());
+    let included = held.as_ref().map_or(0, |value| {
+        let left_bytes = if value
+            .operands
+            .iter()
+            .any(|(_, operand)| Rc::ptr_eq(operand, &left.operand))
+        {
+            left.operand.allocated_bytes()
+        } else {
+            0
+        };
+        let right_bytes = if !Rc::ptr_eq(&left.operand, &right.operand)
+            && value
+                .operands
+                .iter()
+                .any(|(_, operand)| Rc::ptr_eq(operand, &right.operand))
+        {
+            right.operand.allocated_bytes()
+        } else {
+            0
+        };
+        left_bytes.saturating_add(right_bytes)
+    });
+    drop(held);
+    let bytes = subject
+        .retention_limits
+        .max_mesh_bytes
+        .saturating_sub(subject.demanded_material_bytes())
+        .saturating_sub(pending_bytes)
+        // The integration owner accounts its two operand views. They are
+        // already included in the shared live graph, not additional copies.
+        .saturating_add(included);
+    let mut trace = ChargeTrace::default();
+    let value = material_intersection::intersection_selected(
+        &left.operand,
+        Some(&left.local_triangles),
+        &right.operand,
+        Some(&right.local_triangles),
+        budget,
+        bytes,
+        &mut trace,
+    )?;
+    if trace.complete {
+        let completed = CompletedMaterial {
+            pair: None,
+            region_pair: Some(pair),
+            volume: value.clone(),
+            trace,
+            operands,
+            regions,
+        };
+        if completed
+            .allocated_bytes()
+            .saturating_add(prepared.retained_bytes)
+            <= subject.retention_limits.max_mesh_bytes
+        {
+            if let Some(resident) = &subject.resident_overlaps {
+                resident.borrow_mut().insert_material(&owner, completed);
+            }
+        }
+    }
+    subject.observations.add(WorkCounter::OverlapBuilds, 1);
+    Ok(value)
+}
+
+pub(crate) fn material_regions(
+    subject: &Subject,
+    budget: &Budget,
+) -> Result<Rc<Vec<crate::analysis::mesh::material::MaterialRegion>>, BackendError> {
+    use crate::analysis::mesh::{exact::ChargeTrace, material::MaterialRegion};
+    let record = subject.mesh_record().ok_or_else(|| BackendError {
+        kind: BackendErrorKind::Unsupported,
+        message: "Material regions require retained mesh evidence.".into(),
+    })?;
+    charge(
+        budget,
+        (record.positions.len() as u64)
+            .saturating_mul(2)
+            .saturating_add(record.triangles.len() as u64),
+    )?;
+    let owner = subject.overlap_components()?;
+    let PreparedComponents::Ready(prepared) = owner.as_ref() else {
+        return Err(BackendError {
+            kind: BackendErrorKind::Unsupported,
+            message: "Material regions require authored primitive identities.".into(),
+        });
+    };
+    let held = prepared.material_completed.borrow();
+    if let Some(value) = held.as_ref().filter(|value| value.regions.is_some()) {
+        for component in &prepared.components {
+            let operand = &value
+                .operands
+                .iter()
+                .find(|(id, _)| *id == component.id)
+                .expect("complete region table retains every operand")
+                .1;
+            for step in crate::analysis::mesh::exact::atomic_steps(&operand.trace.steps) {
+                charge(budget, step.units)?;
+            }
+        }
+        charge(budget, record.triangles.len() as u64)?;
+        return Ok(Rc::clone(value.regions.as_ref().expect("checked above")));
+    }
+    let mut operands = held
+        .as_ref()
+        .map_or_else(Vec::new, |value| value.operands.clone());
+    drop(held);
+    let bytes = subject
+        .retention_limits
+        .max_mesh_bytes
+        .saturating_sub(prepared.retained_bytes);
+    // Concurrent mapping and output: worst-case one map entry and one region
+    // per triangle, doubling Vec growth for source/local memberships and the
+    // region table. The 256-byte entry request allowance covers the private
+    // BTree node/key/value metadata; it is not an allocator/RSS assertion.
+    let region_reservation = (record.triangles.len() as u64)
+        .saturating_mul((size_of::<[usize; 8]>() + 2 * size_of::<MaterialRegion>() + 256) as u64)
+        .saturating_add(
+            prepared
+                .components
+                .iter()
+                .map(|component| {
+                    (component.label.len() as u64).saturating_mul(
+                        component
+                            .mesh
+                            .as_ref()
+                            .map_or(0, |mesh| mesh.triangles.len() as u64),
+                    )
+                })
+                .fold(0u64, u64::saturating_add),
+        );
+    if region_reservation > bytes {
+        return Err(BackendError {
+            kind: BackendErrorKind::Unsupported,
+            message: "Material region membership exceeds the declared analysis byte limit.".into(),
+        });
+    }
+    let mut regions = Vec::new();
+    let mut source_by_primitive = BTreeMap::<u32, Vec<usize>>::new();
+    for (index, &id) in record.triangle_primitives.iter().enumerate() {
+        source_by_primitive.entry(id).or_default().push(index);
+    }
+    for component in &prepared.components {
+        let operand = material_operand(
+            prepared,
+            component.id,
+            &mut operands,
+            budget,
+            bytes.saturating_sub(region_reservation),
+        )?;
+        let source = &source_by_primitive[&component.id];
+        for members in &operand.regions {
+            let triangles: Vec<_> = members.iter().map(|&index| source[index]).collect();
+            let mut bounds = Bounds {
+                min: [f64::INFINITY; 3],
+                max: [f64::NEG_INFINITY; 3],
+            };
+            for &index in &triangles {
+                for &vertex in &record.triangles[index] {
+                    let point = record.positions[vertex as usize];
+                    for (axis, &coordinate) in point.iter().enumerate() {
+                        bounds.min[axis] = bounds.min[axis].min(coordinate);
+                        bounds.max[axis] = bounds.max[axis].max(coordinate);
+                    }
+                }
+            }
+            regions.push(MaterialRegion {
+                primitive: component.id,
+                root: triangles[0] as u32,
+                triangles,
+                label: component.label.clone(),
+                bounds,
+                local_triangles: members.clone(),
+                operand: Rc::clone(&operand),
+            });
+        }
+    }
+    charge(budget, record.triangles.len() as u64)?;
+    let regions = Rc::new(regions);
+    let completed = CompletedMaterial {
+        pair: None,
+        region_pair: None,
+        volume: num_rational::BigRational::from_integer(0.into()),
+        trace: ChargeTrace::disabled(),
+        operands,
+        regions: Some(Rc::clone(&regions)),
+    };
+    if completed
+        .operands
+        .iter()
+        .all(|(_, operand)| operand.trace.complete)
+        && prepared
+            .retained_bytes
+            .saturating_add(completed.allocated_bytes())
+            <= subject.retention_limits.max_mesh_bytes
+    {
+        if let Some(resident) = &subject.resident_overlaps {
+            resident.borrow_mut().insert_material(&owner, completed);
+        }
+    }
+    Ok(regions)
+}
+
+pub(crate) fn material_region_live_bytes(
+    subject: &Subject,
+    regions: &Rc<Vec<crate::analysis::mesh::material::MaterialRegion>>,
+) -> Result<u64, BackendError> {
+    let owner = subject.overlap_components()?;
+    let PreparedComponents::Ready(prepared) = owner.as_ref() else {
+        return Ok(0);
+    };
+    let held = prepared.material_completed.borrow();
+    let retained = prepared
+        .retained_bytes
+        .saturating_add(held.as_ref().map_or(0, CompletedMaterial::allocated_bytes));
+    if held
+        .as_ref()
+        .and_then(|value| value.regions.as_ref())
+        .is_some_and(|value| Rc::ptr_eq(value, regions))
+    {
+        return Ok(retained);
+    }
+    Ok(retained
+        .saturating_add(allocation_bytes::<
+            crate::analysis::mesh::material::MaterialRegion,
+        >(regions.capacity()))
+        .saturating_add(
+            regions
+                .iter()
+                .map(|region| {
+                    allocation_bytes::<usize>(region.triangles.capacity())
+                        .saturating_add(allocation_bytes::<usize>(
+                            region.local_triangles.capacity(),
+                        ))
+                        .saturating_add(region.label.capacity() as u64)
+                })
+                .sum::<u64>(),
+        )
+        .saturating_add(
+            regions
+                .iter()
+                .enumerate()
+                .filter(|(index, region)| {
+                    !regions[..*index]
+                        .iter()
+                        .any(|prior| Rc::ptr_eq(&prior.operand, &region.operand))
+                        && held.as_ref().is_none_or(|value| {
+                            !value
+                                .operands
+                                .iter()
+                                .any(|(_, operand)| Rc::ptr_eq(operand, &region.operand))
+                        })
+                })
+                .map(|(_, region)| region.operand.allocated_bytes())
+                .sum::<u64>(),
+        ))
+}
+
+pub(crate) fn material_owned_bytes(owner: &PreparedComponents) -> u64 {
+    match owner {
+        PreparedComponents::Ready(prepared) => prepared.retained_bytes.saturating_add(
+            prepared
+                .material_completed
+                .borrow()
+                .as_ref()
+                .map_or(0, CompletedMaterial::allocated_bytes),
+        ),
+        PreparedComponents::Refused(_) => 0,
+    }
+}
 pub(crate) const TESSELLATION_PROFILE: TessellationProfile = TessellationProfile {
     linear_deflection_mm: 0.01,
     angular_deflection_rad: 15.0_f64.to_radians(),
@@ -160,7 +637,7 @@ pub(crate) fn leaf_components(occurrences: &[OccurrenceFacts]) -> Vec<u32> {
 }
 
 pub(crate) enum PreparedComponents {
-    Ready(PreparedOverlap),
+    Ready(Box<PreparedOverlap>),
     Refused(Vec<Diagnostic>),
 }
 
@@ -169,6 +646,56 @@ pub(crate) struct PreparedOverlap {
     operand_identity: String,
     retained_bytes: u64,
     completed: RefCell<Option<CompletedOverlap>>,
+    // Mutually exclusive completion families share the same resident owner,
+    // LRU and byte ceiling; approximate serialization never reads this value.
+    material_completed: RefCell<Option<CompletedMaterial>>,
+    observation_refusal: OnceCell<Option<Diagnostic>>,
+}
+
+struct CompletedMaterial {
+    pair: Option<(u32, u32)>,
+    region_pair: Option<(u32, u32)>,
+    volume: num_rational::BigRational,
+    trace: crate::analysis::mesh::exact::ChargeTrace,
+    operands: Vec<(
+        u32,
+        Rc<crate::analysis::mesh::material_intersection::QualifiedMaterial>,
+    )>,
+    regions: Option<Rc<Vec<crate::analysis::mesh::material::MaterialRegion>>>,
+}
+impl CompletedMaterial {
+    fn allocated_bytes(&self) -> u64 {
+        // Retained integer limbs are conservatively reserved at the checked
+        // scalar ceiling rather than inferred from reduced significant bits.
+        8192u64
+            .saturating_add(allocation_bytes::<crate::analysis::mesh::exact::ChargeRun>(
+                self.trace.steps.capacity(),
+            ))
+            .saturating_add(allocation_bytes::<(
+                u32,
+                Rc<crate::analysis::mesh::material_intersection::QualifiedMaterial>,
+            )>(self.operands.capacity()))
+            .saturating_add(self.operands.iter().fold(0u64, |sum, (_, value)| {
+                sum.saturating_add(value.allocated_bytes())
+            }))
+            .saturating_add(self.regions.as_ref().map_or(0, |regions| {
+                allocation_bytes::<crate::analysis::mesh::material::MaterialRegion>(
+                    regions.capacity(),
+                )
+                .saturating_add(
+                    regions
+                        .iter()
+                        .map(|region| {
+                            allocation_bytes::<usize>(region.triangles.capacity())
+                                .saturating_add(allocation_bytes::<usize>(
+                                    region.local_triangles.capacity(),
+                                ))
+                                .saturating_add(region.label.capacity() as u64)
+                        })
+                        .sum::<u64>(),
+                )
+            }))
+    }
 }
 
 /// Physical retention only: this ceiling never changes admission or verdicts.
@@ -213,13 +740,18 @@ impl ResidentOverlaps {
         }
     }
 
-    fn insert(&mut self, owner: &Rc<PreparedComponents>, completed: CompletedOverlap) {
+    fn retain(
+        &mut self,
+        owner: &Rc<PreparedComponents>,
+        bytes: u64,
+        store: impl FnOnce(&PreparedOverlap),
+    ) {
         let PreparedComponents::Ready(prepared) = owner.as_ref() else {
             return;
         };
         self.forget(owner);
         *prepared.completed.borrow_mut() = None;
-        let bytes = completed.allocated_bytes();
+        *prepared.material_completed.borrow_mut() = None;
         if bytes > self.max_bytes {
             return;
         }
@@ -232,12 +764,23 @@ impl ResidentOverlaps {
             if let Some(evicted) = evicted.upgrade() {
                 if let PreparedComponents::Ready(value) = evicted.as_ref() {
                     *value.completed.borrow_mut() = None;
+                    *value.material_completed.borrow_mut() = None;
                 }
             }
             retained -= size;
         }
-        *prepared.completed.borrow_mut() = Some(completed);
+        store(prepared);
         self.entries.push_back((Rc::downgrade(owner), bytes));
+    }
+    fn insert(&mut self, owner: &Rc<PreparedComponents>, completed: CompletedOverlap) {
+        self.retain(owner, completed.allocated_bytes(), |prepared| {
+            *prepared.completed.borrow_mut() = Some(completed)
+        });
+    }
+    fn insert_material(&mut self, owner: &Rc<PreparedComponents>, completed: CompletedMaterial) {
+        self.retain(owner, completed.allocated_bytes(), |prepared| {
+            *prepared.material_completed.borrow_mut() = Some(completed)
+        });
     }
 }
 
@@ -323,7 +866,18 @@ fn operand_identity(subject: &Subject) -> Result<String, BackendError> {
 }
 
 pub(crate) fn prepare_components(subject: &Subject) -> Result<PreparedComponents, BackendError> {
-    let mut components = match components(subject)? {
+    let partition = if subject.brep.is_none() {
+        subject
+            .mesh_record()
+            .and_then(material_named_partition)
+            .map_or_else(
+                || components(subject),
+                |value| Ok(Partition::Components(value)),
+            )
+    } else {
+        components(subject)
+    }?;
+    let components = match partition {
         Partition::Components(value) => value,
         Partition::Inconclusive(primitive_count) => {
             let mut diagnostic = Diagnostic::error(
@@ -339,13 +893,6 @@ pub(crate) fn prepare_components(subject: &Subject) -> Result<PreparedComponents
         }
     };
 
-    // Exact STEP leaves carry no mesh; their operands qualify per candidate pair.
-    for component in components.iter_mut().filter(|value| value.mesh.is_some()) {
-        if let Some(diagnostic) = closure_refusal(component) {
-            return Ok(PreparedComponents::Refused(vec![diagnostic]));
-        }
-    }
-
     let operand_identity = operand_identity(subject)?;
     let meshes = components
         .iter()
@@ -353,6 +900,7 @@ pub(crate) fn prepare_components(subject: &Subject) -> Result<PreparedComponents
         .count();
     let bytes = components.iter().fold(
         (size_of::<PreparedComponents>() as u64)
+            .saturating_add(size_of::<PreparedOverlap>() as u64)
             .saturating_add(allocation_bytes::<usize>(2)) // PreparedComponents Rc counters.
             .saturating_add(allocation_bytes::<Component>(components.capacity()))
             .saturating_add(operand_identity.capacity() as u64),
@@ -375,12 +923,14 @@ pub(crate) fn prepare_components(subject: &Subject) -> Result<PreparedComponents
             message: "Component partition exceeds the configured analysis retention limit.".into(),
         });
     }
-    Ok(PreparedComponents::Ready(PreparedOverlap {
+    Ok(PreparedComponents::Ready(Box::new(PreparedOverlap {
         components,
         operand_identity,
         retained_bytes: bytes,
         completed: RefCell::new(None),
-    }))
+        material_completed: RefCell::new(None),
+        observation_refusal: OnceCell::new(),
+    })))
 }
 
 /// C3(a): the closure guard of one mesh component reads the component's own
@@ -475,6 +1025,19 @@ pub(crate) fn analyze_overlap(
             return Ok(Analysis::Refused(diagnostics.clone()))
         }
     };
+
+    // Spatial-weld closure is only the legacy observation's premise. It must
+    // never reject an exact material predicate before its own admission runs.
+    if let Some(diagnostic)=prepared.observation_refusal.get_or_init(||{
+        if prepared.components.len()<2{
+            let mut diagnostic=Diagnostic::error("GEOSPEC_COMPONENT_PARTITION_INCONCLUSIVE","GeoSpec could not partition this subject into two or more components.");
+            diagnostic.suggestion=Some("Name the parts in the source model (one glTF node per part) so component interference has identifiable components.".into());
+            diagnostic.details=Some(Json::object([("primitiveCount",Json::Number(prepared.components.len() as f64))]));
+            Some(diagnostic)
+        }else{prepared.components.iter().cloned().find_map(|mut component|closure_refusal(&mut component))}
+    }){
+        return Ok(Analysis::Refused(vec![diagnostic.clone()]));
+    }
 
     // Subject verifies its semantic identity before returning this owner; bind
     // this partition/profile explicitly before any completed-result lookup.
@@ -1045,8 +1608,13 @@ fn named_identities(record: &MeshAnalysisRecord) -> Option<Vec<ComponentIdentity
 }
 
 fn named_partition(record: &MeshAnalysisRecord) -> Option<Vec<Component>> {
+    let components = material_named_partition(record)?;
+    (components.len() >= 2).then_some(components)
+}
+
+fn material_named_partition(record: &MeshAnalysisRecord) -> Option<Vec<Component>> {
     let identities = named_identities(record)?;
-    if identities.len() < 2 {
+    if identities.is_empty() {
         return None;
     }
     let groups: BTreeMap<_, _> = identities

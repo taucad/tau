@@ -170,7 +170,8 @@ mod exact_candidate_control_tests {
                 units: 3,
                 pair: None,
                 stage: ChargeStage::BodySetup,
-            }],
+            }
+            .into()],
             trace_complete: true,
             stage_calls: [1, 0, 0, 0, 0, 0],
             stage_units: [3, 0, 0, 0, 0, 0],
@@ -437,6 +438,7 @@ pub(crate) struct Subject {
     demand_phase: Cell<u64>,
     facet_demands: [Cell<u64>; FACETS],
     selected_demands: [Cell<u64>; 16],
+    material_transfer_bytes: Cell<u64>,
 }
 
 /// Retained singleton facets whose bytes count toward a phase's demand.
@@ -451,9 +453,11 @@ enum Facet {
     StepMetadata,
     ContinuousWall,
     ContinuousTopology,
+    MeshMaterial,
+    MeshSelector,
 }
 
-const FACETS: usize = Facet::ContinuousTopology as usize + 1;
+const FACETS: usize = Facet::MeshSelector as usize + 1;
 
 /// Only the core retains derived meshes; adapters return an owned transfer.
 struct RetainedTessellation {
@@ -544,6 +548,7 @@ impl Subject {
             demand_phase: Cell::new(0),
             facet_demands: std::array::from_fn(|_| Cell::new(0)),
             selected_demands: std::array::from_fn(|_| Cell::new(0)),
+            material_transfer_bytes: Cell::new(0),
         }
     }
 
@@ -551,6 +556,7 @@ impl Subject {
     /// demands. Phase 0, before any plan, counts every retained facet.
     pub(crate) fn begin_demand_phase(&self) {
         self.demand_phase.set(self.demand_phase.get() + 1);
+        self.material_transfer_bytes.set(0);
     }
 
     fn demand(&self, facet: Facet) {
@@ -756,6 +762,96 @@ impl Subject {
         self.observations.add(WorkCounter::ComponentBuilds, 1);
         let _ = self.overlap_components.set(Rc::clone(&value));
         Ok(value)
+    }
+
+    pub(crate) fn material_regions(
+        &self,
+        budget: &Budget,
+    ) -> Result<Rc<Vec<crate::analysis::mesh::material::MaterialRegion>>, BackendError> {
+        self.mark_material_demand();
+        let regions = crate::analysis::interference::material_regions(self, budget)?;
+        self.material_transfer_bytes
+            .set(self.material_transfer_bytes.get().max(
+                crate::analysis::interference::material_region_live_bytes(self, &regions)?,
+            ));
+        Ok(regions)
+    }
+
+    pub(crate) fn mark_material_demand(&self) {
+        self.demand(Facet::MeshMaterial);
+    }
+
+    pub(crate) fn demanded_material_bytes(&self) -> u64 {
+        let material = if self.demanded(Facet::MeshMaterial) {
+            self.material_transfer_bytes.get().max(
+                self.overlap_components.get().map_or(0, |owner| {
+                    crate::analysis::interference::material_owned_bytes(owner)
+                }),
+            )
+        } else {
+            0
+        };
+        let index = if self.demanded(Facet::MeshSelector) {
+            self.selector_index.get().map_or(0, |index| {
+                crate::analysis::selection::mesh_index_owned_bytes(index)
+            })
+        } else {
+            0
+        };
+        material.saturating_add(index)
+    }
+
+    pub(crate) fn region_boundary_distance(
+        &self,
+        left: &crate::analysis::mesh::material::MaterialRegion,
+        right: &crate::analysis::mesh::material::MaterialRegion,
+        budget: &Budget,
+        pending_bytes: u64,
+    ) -> Result<(num_rational::BigRational, Option<[f64; 3]>), BackendError> {
+        self.mark_material_demand();
+        if self
+            .retention_limits
+            .max_mesh_bytes
+            .saturating_sub(self.demanded_material_bytes())
+            .saturating_sub(pending_bytes)
+            < 640 * 1024
+        {
+            return Err(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "Material boundary workspace exceeds the declared analysis byte limit."
+                    .into(),
+            });
+        }
+        let record = self.mesh_record().ok_or_else(|| BackendError {
+            kind: BackendErrorKind::Unsupported,
+            message: "Material boundary evidence is absent.".into(),
+        })?;
+        crate::analysis::mesh::material::region_boundary_distance(record, left, right, budget)
+    }
+
+    pub(crate) fn region_overlap(
+        &self,
+        left: &crate::analysis::mesh::material::MaterialRegion,
+        right: &crate::analysis::mesh::material::MaterialRegion,
+        budget: &Budget,
+        pending_bytes: u64,
+    ) -> Result<num_rational::BigRational, BackendError> {
+        self.mark_material_demand();
+        if self
+            .retention_limits
+            .max_mesh_bytes
+            .saturating_sub(self.demanded_material_bytes())
+            .saturating_sub(pending_bytes)
+            < crate::analysis::mesh::material_intersection::WORKSPACE_BYTES
+        {
+            return Err(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message:
+                    "Material intersection workspace exceeds the declared analysis byte limit."
+                        .into(),
+            });
+        }
+        crate::analysis::interference::region_overlap(self, left, right, budget, pending_bytes)
     }
 
     #[cfg(test)]
@@ -1301,6 +1397,7 @@ impl Subject {
         let bytes = selected_continuous_owned_bytes(&value);
         let continuous = self.continuous_owned_bytes().saturating_add(bytes);
         let total = continuous
+            .saturating_add(self.demanded_material_bytes())
             .saturating_add(self.demanded_report_bytes())
             .saturating_add(self.f2_owned_bytes())
             .saturating_add(self.circular_bore_owned_bytes())
@@ -1360,6 +1457,7 @@ impl Subject {
             .saturating_add(pending)
             .saturating_add(extra_bytes);
         let total = continuous
+            .saturating_add(self.demanded_material_bytes())
             .saturating_add(self.demanded_report_bytes())
             .saturating_add(self.f2_owned_bytes())
             .saturating_add(self.circular_bore_owned_bytes())
@@ -1448,9 +1546,56 @@ impl Subject {
 
     /// One index for the immutable retained BRep, shared by every prepared claim.
     /// The batch invokes this only after all claim syntax has been validated.
-    pub(crate) fn selector_index(&self) -> Result<Option<Rc<SelectorIndex>>, BackendError> {
+    fn check_mesh_index_capacity(
+        &self,
+        index: &SelectorIndex,
+        live: u64,
+    ) -> Result<(), BackendError> {
+        if live.saturating_add(crate::analysis::selection::mesh_index_owned_bytes(index))
+            > self.retention_limits.max_mesh_bytes
+        {
+            return Err(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "Material selector metadata exceeds the declared analysis byte limit."
+                    .into(),
+            });
+        }
+        Ok(())
+    }
+
+    pub(crate) fn selector_index(
+        &self,
+        budget: &Budget,
+    ) -> Result<Option<Rc<SelectorIndex>>, BackendError> {
         if self.brep.is_none() {
-            return Ok(None);
+            self.demand(Facet::MeshSelector);
+            let regions = self.material_regions(budget)?;
+            crate::analysis::mesh::exact::charge(
+                budget,
+                crate::analysis::selection::mesh_index_units(&regions),
+            )
+            .map_err(|error| BackendError {
+                kind: BackendErrorKind::BudgetExceeded {
+                    limit: error.limit,
+                    used: error.used,
+                },
+                message: "Mesh selector metadata work exceeds the declared budget.".into(),
+            })?;
+            let live = crate::analysis::interference::material_region_live_bytes(self, &regions)?;
+            if let Some(value) = self.selector_index.get() {
+                self.check_mesh_index_capacity(value, live)?;
+                self.observations.add(WorkCounter::DerivedHits, 1);
+                return Ok(Some(Rc::clone(value)));
+            }
+            let value = Rc::new(crate::analysis::selection::build_mesh_index(
+                &regions,
+                budget,
+                self.retention_limits.max_mesh_bytes.saturating_sub(live),
+            )?);
+            self.check_mesh_index_capacity(&value, live)?;
+            self.observations.add(WorkCounter::SelectorBuilds, 1);
+            let _ = self.selector_index.set(Rc::clone(&value));
+            return Ok(Some(value));
         }
         self.cache_identity()?;
         if let Some(value) = self.selector_index.get() {
@@ -1938,8 +2083,33 @@ impl<'a> EvaluationContext<'a> {
         let identity = self.subject().cache_identity().map_err(backend_refusal)?;
         let analysis = self.mesh_analysis()?;
         batch
-            .connected_components(&identity, tolerance_mm, &analysis)
+            .connected_components(
+                &identity,
+                tolerance_mm,
+                &analysis,
+                self.budget,
+                &self.subject().exact_components,
+            )
             .map_err(backend_refusal)
+    }
+
+    pub(crate) fn mesh_component_clusters(
+        &mut self,
+        tolerance_mm: f64,
+    ) -> Result<Vec<ClusterReport>, Evaluation> {
+        let analysis = self.mesh_analysis()?;
+        let bytes = self.subject().retention_limits.max_mesh_bytes;
+        self.exact_clusters(
+            tolerance_mm,
+            |trace| {
+                analysis
+                    .component_clusters_traced(tolerance_mm, self.budget, bytes, trace)
+                    .map(|clusters| (clusters, Vec::new()))
+                    .map_err(backend_refusal)
+            },
+            |error, _, _| Evaluation::budget_exceeded(self.capability, error),
+        )
+        .map(|value| value.clusters.clone())
     }
 
     /// M2 exact STEP clusters through the plan's batch, which retains them on

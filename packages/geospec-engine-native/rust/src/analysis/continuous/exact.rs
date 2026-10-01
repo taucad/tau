@@ -4,7 +4,7 @@ use num_traits::{Signed, ToPrimitive, Zero};
 
 use super::{ContinuousError, ExactScalar, MAX_INTEGER_BITS};
 
-pub(super) fn rational(value: f64) -> Result<BigRational, ContinuousError> {
+pub(crate) fn rational(value: f64) -> Result<BigRational, ContinuousError> {
     if !value.is_finite() {
         return Err(ContinuousError::invalid(
             "Continuous-domain coordinates and thresholds must be finite.",
@@ -44,12 +44,12 @@ pub(super) fn midpoint(
     checked(sum / BigInt::from(2))
 }
 
-pub(super) fn add(left: &BigRational, right: &BigRational) -> Result<BigRational, ContinuousError> {
+pub(crate) fn add(left: &BigRational, right: &BigRational) -> Result<BigRational, ContinuousError> {
     preflight_add(left, right)?;
     checked(left + right)
 }
 
-pub(super) fn subtract(
+pub(crate) fn subtract(
     left: &BigRational,
     right: &BigRational,
 ) -> Result<BigRational, ContinuousError> {
@@ -57,7 +57,7 @@ pub(super) fn subtract(
     checked(left - right)
 }
 
-pub(super) fn multiply(
+pub(crate) fn multiply(
     left: &BigRational,
     right: &BigRational,
 ) -> Result<BigRational, ContinuousError> {
@@ -74,7 +74,7 @@ pub(super) fn checked(value: BigRational) -> Result<BigRational, ContinuousError
     Ok(value)
 }
 
-pub(super) fn divide(
+pub(crate) fn divide(
     left: &BigRational,
     right: &BigRational,
 ) -> Result<BigRational, ContinuousError> {

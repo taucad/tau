@@ -4,8 +4,26 @@
   "sourceRoot": "apps/runtime-e2e/src",
   "projectType": "application",
   "tags": ["scope:shared", "type:e2e"],
-  "implicitDependencies": ["runtime", "tau-examples", "geospec", "geospec-engine"],
+  "implicitDependencies": ["runtime", "tau-examples", "geospec", "geospec-engine", "scripts"],
   "targets": {
+    "test:e2e": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "Check installed public runtime, tscircuit, esbuild and React inference and rendering against the packed browser-only closure."
+      },
+      "cache": false,
+      "inputs": ["default", "^production", "{workspaceRoot}/scripts/src/check-pack-install.ts"],
+      "dependsOn": [
+        {
+          "projects": ["runtime", "tscircuit", "esbuild", "react"],
+          "target": "build"
+        }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node scripts/src/check-pack-install.ts packages/runtime packages/plugins/tscircuit packages/plugins/esbuild packages/react"
+      }
+    },
     "test": {
       "inputs": [
         "default",

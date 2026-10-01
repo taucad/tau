@@ -20,12 +20,16 @@ Array
 
   MaxLength: int
 
+  // System.Array.Initialize (method)
   public void Initialize()
 
+  // System.Array.AsReadOnly (method)
   public static ReadOnlyCollection<T> AsReadOnly<T>(T[] array)
 
+  // System.Array.Resize (method)
   public static void Resize<T>(ref T[]? array, int newSize)
 
+  // System.Array.CreateInstance (method)
   public static Array CreateInstance(Type elementType, int length)
   public static Array CreateInstance(Type elementType, int length1, int length2)
   public static Array CreateInstance(Type elementType, int length1, int length2, int length3)
@@ -33,26 +37,34 @@ Array
   public static Array CreateInstance(Type elementType, int[] lengths, int[] lowerBounds)
   public static Array CreateInstance(Type elementType, params long[] lengths)
 
+  // System.Array.CreateInstanceFromArrayType (method)
   public static Array CreateInstanceFromArrayType(Type arrayType, int length)
   public static Array CreateInstanceFromArrayType(Type arrayType, params int[] lengths)
   public static Array CreateInstanceFromArrayType(Type arrayType, int[] lengths, int[] lowerBounds)
 
+  // System.Array.Copy (method)
   public static void Copy(Array sourceArray, Array destinationArray, long length)
   public static void Copy(Array sourceArray, long sourceIndex, Array destinationArray, long destinationIndex, long length)
   public static void Copy(Array sourceArray, Array destinationArray, int length)
   public static void Copy(Array sourceArray, int sourceIndex, Array destinationArray, int destinationIndex, int length)
 
+  // System.Array.ConstrainedCopy (method)
   public static void ConstrainedCopy(Array sourceArray, int sourceIndex, Array destinationArray, int destinationIndex, int length)
 
+  // System.Array.Clear (method)
   public static void Clear(Array array)
   public static void Clear(Array array, int index, int length)
 
+  // System.Array.GetLength (method)
   public int GetLength(int dimension)
 
+  // System.Array.GetUpperBound (method)
   public int GetUpperBound(int dimension)
 
+  // System.Array.GetLowerBound (method)
   public int GetLowerBound(int dimension)
 
+  // System.Array.GetValue (method)
   public object? GetValue(params int[] indices)
   public object? GetValue(int index)
   public object? GetValue(int index1, int index2)
@@ -62,6 +74,7 @@ Array
   public object? GetValue(long index1, long index2, long index3)
   public object? GetValue(params long[] indices)
 
+  // System.Array.SetValue (method)
   public void SetValue(object? value, int index)
   public void SetValue(object? value, int index1, int index2)
   public void SetValue(object? value, int index1, int index2, int index3)
@@ -71,10 +84,13 @@ Array
   public void SetValue(object? value, long index1, long index2, long index3)
   public void SetValue(object? value, params long[] indices)
 
+  // System.Array.GetLongLength (method)
   public long GetLongLength(int dimension)
 
+  // System.Array.Clone (method)
   public object Clone()
 
+  // System.Array.BinarySearch (method)
   public static int BinarySearch(Array array, object? value)
   public static int BinarySearch(Array array, int index, int length, object? value)
   public static int BinarySearch(Array array, object? value, IComparer? comparer)
@@ -84,34 +100,46 @@ Array
   public static int BinarySearch<T>(T[] array, int index, int length, T value)
   public static int BinarySearch<T>(T[] array, int index, int length, T value, IComparer<T>? comparer)
 
+  // System.Array.ConvertAll (method)
   public static TOutput[] ConvertAll<TInput, TOutput>(TInput[] array, Converter<TInput, TOutput> converter)
 
+  // System.Array.CopyTo (method)
   public void CopyTo(Array array, int index)
   public void CopyTo(Array array, long index)
 
+  // System.Array.Empty (method)
   public static T[] Empty<T>()
 
+  // System.Array.Exists (method)
   public static bool Exists<T>(T[] array, Predicate<T> match)
 
+  // System.Array.Fill (method)
   public static void Fill<T>(T[] array, T value)
   public static void Fill<T>(T[] array, T value, int startIndex, int count)
 
+  // System.Array.Find (method)
   public static T? Find<T>(T[] array, Predicate<T> match)
 
+  // System.Array.FindAll (method)
   public static T[] FindAll<T>(T[] array, Predicate<T> match)
 
+  // System.Array.FindIndex (method)
   public static int FindIndex<T>(T[] array, Predicate<T> match)
   public static int FindIndex<T>(T[] array, int startIndex, Predicate<T> match)
   public static int FindIndex<T>(T[] array, int startIndex, int count, Predicate<T> match)
 
+  // System.Array.FindLast (method)
   public static T? FindLast<T>(T[] array, Predicate<T> match)
 
+  // System.Array.FindLastIndex (method)
   public static int FindLastIndex<T>(T[] array, Predicate<T> match)
   public static int FindLastIndex<T>(T[] array, int startIndex, Predicate<T> match)
   public static int FindLastIndex<T>(T[] array, int startIndex, int count, Predicate<T> match)
 
+  // System.Array.ForEach (method)
   public static void ForEach<T>(T[] array, Action<T> action)
 
+  // System.Array.IndexOf (method)
   public static int IndexOf(Array array, object? value)
   public static int IndexOf(Array array, object? value, int startIndex)
   public static int IndexOf(Array array, object? value, int startIndex, int count)
@@ -119,6 +147,7 @@ Array
   public static int IndexOf<T>(T[] array, T value, int startIndex)
   public static int IndexOf<T>(T[] array, T value, int startIndex, int count)
 
+  // System.Array.LastIndexOf (method)
   public static int LastIndexOf(Array array, object? value)
   public static int LastIndexOf(Array array, object? value, int startIndex)
   public static int LastIndexOf(Array array, object? value, int startIndex, int count)
@@ -126,11 +155,13 @@ Array
   public static int LastIndexOf<T>(T[] array, T value, int startIndex)
   public static int LastIndexOf<T>(T[] array, T value, int startIndex, int count)
 
+  // System.Array.Reverse (method)
   public static void Reverse(Array array)
   public static void Reverse(Array array, int index, int length)
   public static void Reverse<T>(T[] array)
   public static void Reverse<T>(T[] array, int index, int length)
 
+  // System.Array.Sort (method)
   public static void Sort(Array array)
   public static void Sort(Array keys, Array? items)
   public static void Sort(Array array, int index, int length)
@@ -149,8 +180,10 @@ Array
   public static void Sort<TKey, TValue>(TKey[] keys, TValue[]? items, int index, int length, IComparer<TKey>? comparer)
   public static void Sort<T>(T[] array, Comparison<T> comparison)
 
+  // System.Array.TrueForAll (method)
   public static bool TrueForAll<T>(T[] array, Predicate<T> match)
 
+  // System.Array.GetEnumerator (method)
   public IEnumerator GetEnumerator()
 
 Console
@@ -209,48 +242,67 @@ Console
 
   TreatControlCAsInput: bool
 
+  // System.Console.ReadKey (method)
   public static ConsoleKeyInfo ReadKey()
   public static ConsoleKeyInfo ReadKey(bool intercept)
 
+  // System.Console.ResetColor (method)
   public static void ResetColor()
 
+  // System.Console.SetBufferSize (method)
   public static void SetBufferSize(int width, int height)
 
+  // System.Console.SetWindowPosition (method)
   public static void SetWindowPosition(int left, int top)
 
+  // System.Console.SetWindowSize (method)
   public static void SetWindowSize(int width, int height)
 
+  // System.Console.GetCursorPosition (method)
   public static (int Left, int Top) GetCursorPosition()
 
+  // System.Console.Beep (method)
   public static void Beep()
   public static void Beep(int frequency, int duration)
 
+  // System.Console.MoveBufferArea (method)
   public static void MoveBufferArea(int sourceLeft, int sourceTop, int sourceWidth, int sourceHeight, int targetLeft, int targetTop)
   public static void MoveBufferArea(int sourceLeft, int sourceTop, int sourceWidth, int sourceHeight, int targetLeft, int targetTop, char sourceChar, ConsoleColor sourceForeColor, ConsoleColor sourceBackColor)
 
+  // System.Console.Clear (method)
   public static void Clear()
 
+  // System.Console.SetCursorPosition (method)
   public static void SetCursorPosition(int left, int top)
 
+  // System.Console.OpenStandardInput (method)
   public static Stream OpenStandardInput()
   public static Stream OpenStandardInput(int bufferSize)
 
+  // System.Console.OpenStandardOutput (method)
   public static Stream OpenStandardOutput()
   public static Stream OpenStandardOutput(int bufferSize)
 
+  // System.Console.OpenStandardError (method)
   public static Stream OpenStandardError()
   public static Stream OpenStandardError(int bufferSize)
 
+  // System.Console.SetIn (method)
   public static void SetIn(TextReader newIn)
 
+  // System.Console.SetOut (method)
   public static void SetOut(TextWriter newOut)
 
+  // System.Console.SetError (method)
   public static void SetError(TextWriter newError)
 
+  // System.Console.Read (method)
   public static int Read()
 
+  // System.Console.ReadLine (method)
   public static string? ReadLine()
 
+  // System.Console.WriteLine (method)
   public static void WriteLine()
   public static void WriteLine(bool value)
   public static void WriteLine(char value)
@@ -272,6 +324,7 @@ Console
   public static void WriteLine(string format, params object?[]? arg)
   public static void WriteLine(string format, params ReadOnlySpan<object?> arg)
 
+  // System.Console.Write (method)
   public static void Write(string format, object? arg0)
   public static void Write(string format, object? arg0, object? arg1)
   public static void Write(string format, object? arg0, object? arg1, object? arg2)
@@ -296,15 +349,19 @@ Convert
 
   DBNull: object
 
+  // System.Convert.GetTypeCode (method)
   public static TypeCode GetTypeCode(object? value)
 
+  // System.Convert.IsDBNull (method)
   public static bool IsDBNull(object? value)
 
+  // System.Convert.ChangeType (method)
   public static object? ChangeType(object? value, TypeCode typeCode)
   public static object? ChangeType(object? value, TypeCode typeCode, IFormatProvider? provider)
   public static object? ChangeType(object? value, Type conversionType)
   public static object? ChangeType(object? value, Type conversionType, IFormatProvider? provider)
 
+  // System.Convert.ToBoolean (method)
   public static bool ToBoolean(object? value)
   public static bool ToBoolean(object? value, IFormatProvider? provider)
   public static bool ToBoolean(bool value)
@@ -324,6 +381,7 @@ Convert
   public static bool ToBoolean(decimal value)
   public static bool ToBoolean(DateTime value)
 
+  // System.Convert.ToChar (method)
   public static char ToChar(object? value)
   public static char ToChar(object? value, IFormatProvider? provider)
   public static char ToChar(bool value)
@@ -343,6 +401,7 @@ Convert
   public static char ToChar(decimal value)
   public static char ToChar(DateTime value)
 
+  // System.Convert.ToSByte (method)
   public static sbyte ToSByte(object? value)
   public static sbyte ToSByte(object? value, IFormatProvider? provider)
   public static sbyte ToSByte(bool value)
@@ -363,6 +422,7 @@ Convert
   public static sbyte ToSByte(DateTime value)
   public static sbyte ToSByte(string? value, int fromBase)
 
+  // System.Convert.ToByte (method)
   public static byte ToByte(object? value)
   public static byte ToByte(object? value, IFormatProvider? provider)
   public static byte ToByte(bool value)
@@ -383,6 +443,7 @@ Convert
   public static byte ToByte(DateTime value)
   public static byte ToByte(string? value, int fromBase)
 
+  // System.Convert.ToInt16 (method)
   public static short ToInt16(object? value)
   public static short ToInt16(object? value, IFormatProvider? provider)
   public static short ToInt16(bool value)
@@ -403,6 +464,7 @@ Convert
   public static short ToInt16(DateTime value)
   public static short ToInt16(string? value, int fromBase)
 
+  // System.Convert.ToUInt16 (method)
   public static ushort ToUInt16(object? value)
   public static ushort ToUInt16(object? value, IFormatProvider? provider)
   public static ushort ToUInt16(bool value)
@@ -423,6 +485,7 @@ Convert
   public static ushort ToUInt16(DateTime value)
   public static ushort ToUInt16(string? value, int fromBase)
 
+  // System.Convert.ToInt32 (method)
   public static int ToInt32(object? value)
   public static int ToInt32(object? value, IFormatProvider? provider)
   public static int ToInt32(bool value)
@@ -443,6 +506,7 @@ Convert
   public static int ToInt32(DateTime value)
   public static int ToInt32(string? value, int fromBase)
 
+  // System.Convert.ToUInt32 (method)
   public static uint ToUInt32(object? value)
   public static uint ToUInt32(object? value, IFormatProvider? provider)
   public static uint ToUInt32(bool value)
@@ -463,6 +527,7 @@ Convert
   public static uint ToUInt32(DateTime value)
   public static uint ToUInt32(string? value, int fromBase)
 
+  // System.Convert.ToInt64 (method)
   public static long ToInt64(object? value)
   public static long ToInt64(object? value, IFormatProvider? provider)
   public static long ToInt64(bool value)
@@ -483,6 +548,7 @@ Convert
   public static long ToInt64(DateTime value)
   public static long ToInt64(string? value, int fromBase)
 
+  // System.Convert.ToUInt64 (method)
   public static ulong ToUInt64(object? value)
   public static ulong ToUInt64(object? value, IFormatProvider? provider)
   public static ulong ToUInt64(bool value)
@@ -503,6 +569,7 @@ Convert
   public static ulong ToUInt64(DateTime value)
   public static ulong ToUInt64(string? value, int fromBase)
 
+  // System.Convert.ToSingle (method)
   public static float ToSingle(object? value)
   public static float ToSingle(object? value, IFormatProvider? provider)
   public static float ToSingle(sbyte value)
@@ -522,6 +589,7 @@ Convert
   public static float ToSingle(bool value)
   public static float ToSingle(DateTime value)
 
+  // System.Convert.ToDouble (method)
   public static double ToDouble(object? value)
   public static double ToDouble(object? value, IFormatProvider? provider)
   public static double ToDouble(sbyte value)
@@ -541,6 +609,7 @@ Convert
   public static double ToDouble(bool value)
   public static double ToDouble(DateTime value)
 
+  // System.Convert.ToDecimal (method)
   public static decimal ToDecimal(object? value)
   public static decimal ToDecimal(object? value, IFormatProvider? provider)
   public static decimal ToDecimal(sbyte value)
@@ -560,6 +629,7 @@ Convert
   public static decimal ToDecimal(bool value)
   public static decimal ToDecimal(DateTime value)
 
+  // System.Convert.ToDateTime (method)
   public static DateTime ToDateTime(DateTime value)
   public static DateTime ToDateTime(object? value)
   public static DateTime ToDateTime(object? value, IFormatProvider? provider)
@@ -579,6 +649,7 @@ Convert
   public static DateTime ToDateTime(double value)
   public static DateTime ToDateTime(decimal value)
 
+  // System.Convert.ToString (method)
   public static string? ToString(object? value)
   public static string? ToString(object? value, IFormatProvider? provider)
   public static string ToString(bool value)
@@ -616,25 +687,33 @@ Convert
   public static string ToString(int value, int toBase)
   public static string ToString(long value, int toBase)
 
+  // System.Convert.ToBase64String (method)
   public static string ToBase64String(byte[] inArray)
   public static string ToBase64String(byte[] inArray, Base64FormattingOptions options)
   public static string ToBase64String(byte[] inArray, int offset, int length)
   public static string ToBase64String(byte[] inArray, int offset, int length, Base64FormattingOptions options)
   public static string ToBase64String(ReadOnlySpan<byte> bytes, Base64FormattingOptions options = None)
 
+  // System.Convert.ToBase64CharArray (method)
   public static int ToBase64CharArray(byte[] inArray, int offsetIn, int length, char[] outArray, int offsetOut)
   public static int ToBase64CharArray(byte[] inArray, int offsetIn, int length, char[] outArray, int offsetOut, Base64FormattingOptions options)
 
+  // System.Convert.TryToBase64Chars (method)
   public static bool TryToBase64Chars(ReadOnlySpan<byte> bytes, Span<char> chars, out int charsWritten, Base64FormattingOptions options = None)
 
+  // System.Convert.FromBase64String (method)
   public static byte[] FromBase64String(string s)
 
+  // System.Convert.TryFromBase64String (method)
   public static bool TryFromBase64String(string s, Span<byte> bytes, out int bytesWritten)
 
+  // System.Convert.TryFromBase64Chars (method)
   public static bool TryFromBase64Chars(ReadOnlySpan<char> chars, Span<byte> bytes, out int bytesWritten)
 
+  // System.Convert.FromBase64CharArray (method)
   public static byte[] FromBase64CharArray(char[] inArray, int offset, int length)
 
+  // System.Convert.FromHexString (method)
   public static byte[] FromHexString(string s)
   public static byte[] FromHexString(ReadOnlySpan<char> chars)
   public static byte[] FromHexString(ReadOnlySpan<byte> utf8Source)
@@ -642,16 +721,20 @@ Convert
   public static OperationStatus FromHexString(ReadOnlySpan<char> source, Span<byte> destination, out int charsConsumed, out int bytesWritten)
   public static OperationStatus FromHexString(ReadOnlySpan<byte> utf8Source, Span<byte> destination, out int bytesConsumed, out int bytesWritten)
 
+  // System.Convert.ToHexString (method)
   public static string ToHexString(byte[] inArray)
   public static string ToHexString(byte[] inArray, int offset, int length)
   public static string ToHexString(ReadOnlySpan<byte> bytes)
 
+  // System.Convert.TryToHexString (method)
   public static bool TryToHexString(ReadOnlySpan<byte> source, Span<char> destination, out int charsWritten)
   public static bool TryToHexString(ReadOnlySpan<byte> source, Span<byte> utf8Destination, out int bytesWritten)
 
+  // System.Convert.ToHexStringLower (method)
   public static string ToHexStringLower(byte[] inArray)
   public static string ToHexStringLower(byte[] inArray, int offset, int length)
   public static string ToHexStringLower(ReadOnlySpan<byte> bytes)
 
+  // System.Convert.TryToHexStringLower (method)
   public static bool TryToHexStringLower(ReadOnlySpan<byte> source, Span<char> destination, out int charsWritten)
   public static bool TryToHexStringLower(ReadOnlySpan<byte> source, Span<byte> utf8Destination, out int bytesWritten)

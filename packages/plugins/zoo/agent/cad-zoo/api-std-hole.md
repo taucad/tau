@@ -4,10 +4,12 @@
 
 // A hole top with no decoration
 // EXPERIMENTAL
+// std.hole.hole::simple (function)
 hole::simple()
 
 // Cut a straight vertical counterbore at the top of the hole
 // EXPERIMENTAL
+// std.hole.hole::counterbore (function)
 hole::counterbore(
   diameter: number(Length),
   depth: number(Length),
@@ -17,6 +19,7 @@ hole::counterbore(
 
 // Cut an angled countersink at the top of the hole
 // EXPERIMENTAL
+// std.hole.hole::countersink (function)
 hole::countersink(
   diameter: number(Length),
   angle: number(Angle),
@@ -26,6 +29,7 @@ hole::countersink(
 
 // The hole has the given blind depth
 // EXPERIMENTAL
+// std.hole.hole::blind (function)
 hole::blind(
   depth: number(Length),
   diameter: number(Length),
@@ -35,15 +39,18 @@ hole::blind(
 
 // End the hole in an angle, like the end of a drill
 // EXPERIMENTAL
+// std.hole.hole::drill (function)
 hole::drill(pointAngle: number(Angle))
 //   pointAngle: A number
 
 // End the hole flat
 // EXPERIMENTAL
+// std.hole.hole::flat (function)
 hole::flat()
 
 // From the hole's parts (bottom, middle, top), cut the hole into the given solid, at the given 2D position on the given face
 // EXPERIMENTAL
+// std.hole.hole::hole (function)
 hole::hole(
   @solid: Solid,
   face: TaggedFace,
@@ -61,6 +68,7 @@ hole::hole(
 
 // From the hole's parts (bottom, middle, top), cut the hole into the given solid, at each of the given 2D positions on the given face
 // EXPERIMENTAL
+// std.hole.hole::holes (function)
 hole::holes(
   @solid: Solid,
   face: TaggedFace,
@@ -78,6 +86,7 @@ hole::holes(
 
 // Place the given holes in a line
 // EXPERIMENTAL
+// std.hole.hole::holesLinear (function)
 hole::holesLinear(
   @solid: Solid,
   face: TaggedFace,

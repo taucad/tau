@@ -6,6 +6,7 @@
 TopAbs_Orientation
 
   // __init__(self
+  // OCP.OCP.TopAbs.TopAbs_Orientation.__init__ (constructor)
   __init__(self: OCP.OCP.TopAbs.TopAbs_Orientation, value: int) -> None
 
   // name(self
@@ -17,6 +18,7 @@ TopAbs_Orientation
 TopAbs_ShapeEnum
 
   // __init__(self
+  // OCP.OCP.TopAbs.TopAbs_ShapeEnum.__init__ (constructor)
   __init__(self: OCP.OCP.TopAbs.TopAbs_ShapeEnum, value: int) -> None
 
   // name(self

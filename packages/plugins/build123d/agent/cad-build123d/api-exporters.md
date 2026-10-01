@@ -38,6 +38,7 @@ DotLength
 // A base drawing object
 Drawing
 
+  // build123d.exporters.Drawing.__init__ (constructor)
   Drawing(shape: Shape, look_at: VectorLike | None = None, look_from: VectorLike = (1, -1, 1), look_up: VectorLike = (0, 0, 1), with_hidden: bool = True, focus: float | None = None)
 
 // Base class for 2D exporters (DXF, SVG)
@@ -46,6 +47,7 @@ Export2D
 // The ExportDXF class provides functionality for exporting 2D shapes to DXF
 ExportDXF
 
+  // build123d.exporters.ExportDXF.__init__ (constructor)
   ExportDXF(version: str = ezdxf.DXF2013, unit: Unit = Unit.MM, color: ColorIndex | None = None, line_weight: float | None = None, line_type: LineType | None = None)
   //   version: The DXF version to use for the output file
   //   unit: The unit used for the exported DXF
@@ -54,6 +56,7 @@ ExportDXF
   //   line_type: e default line type for shapes
 
   // add_layer
+  // build123d.exporters.ExportDXF.add_layer (method)
   add_layer(name: str, color: ColorIndex | None = None, line_weight: float | None = None, line_type: LineType | None = None) -> Self
   //   name: The name of the layer definition
   //   color: The color index for shapes on this layer
@@ -61,11 +64,13 @@ ExportDXF
   //   line_type: The line type for shapes on this layer
 
   // add_shape
+  // build123d.exporters.ExportDXF.add_shape (method)
   add_shape(shape: Shape | Iterable[Shape], layer: str = '') -> Self
   //   shape: The shape or collection of shapes to be added
   //   layer: The name of the layer where the shape will be added
 
   // write
+  // build123d.exporters.ExportDXF.write (method)
   write(file_name: PathLike | str | bytes | BytesIO, ascii_format: bool = True)
   //   file_name: The file name (including path) where the DXF data will be written
   //   ascii_format: Export the file as ASCII (True) or binary (False) DXF format
@@ -73,6 +78,7 @@ ExportDXF
 // ExportSVG
 ExportSVG
 
+  // build123d.exporters.ExportSVG.__init__ (constructor)
   ExportSVG(unit: Unit = Unit.MM, scale: float = 1, margin: float = 0, fit_to_stroke: bool = True, precision: int = 6, fill_color: ColorIndex | RGB | Color | None = None, line_color: ColorIndex | RGB | Color | None = Export2D.DEFAULT_COLOR_INDEX, line_weight: float = Export2D.DEFAULT_LINE_WEIGHT, line_type: LineType = Export2D.DEFAULT_LINE_TYPE, dot_length: DotLength | float = DotLength.INKSCAPE_COMPAT)
   //   unit: The unit used for the exported SVG
   //   scale: The scaling factor applied to the exported SVG
@@ -86,6 +92,7 @@ ExportSVG
   //   dot_length: The width of rendered dots in a Can be either a DotLength enum or a float value in tenths of an inch
 
   // add_layer
+  // build123d.exporters.ExportSVG.add_layer (method)
   add_layer(name: str, fill_color: ColorIndex | RGB | Color | None = None, line_color: ColorIndex | RGB | Color | None = Export2D.DEFAULT_COLOR_INDEX, line_weight: float = Export2D.DEFAULT_LINE_WEIGHT, line_type: LineType = Export2D.DEFAULT_LINE_TYPE) -> Self
   //   name: The name of the layer
   //   fill_color: The fill color for shapes on this layer
@@ -94,12 +101,14 @@ ExportSVG
   //   line_type: The line type for shapes on this layer
 
   // add_shape
+  // build123d.exporters.ExportSVG.add_shape (method)
   add_shape(shape: Shape | Iterable[Shape], layer: str = '', reverse_wires: bool = False)
   //   shape: The shape or collection of shapes to be added
   //   layer: The name of the layer where the shape(s) will be added
   //   reverse_wires: A boolean indicating whether the wires of the shape(s) should be in reversed direction
 
   // write
+  // build123d.exporters.ExportSVG.write (method)
   write(path: PathLike | str | bytes | BytesIO)
   //   path: The file path where the SVG data will be written
 
@@ -185,10 +194,13 @@ LineType
   ISO_DOUBLE_DASH_TRIPLE_DOT
 
 // Prepare an ANSI line pattern for ezdxf usage
+// build123d.exporters.ansi_pattern (function)
 ansi_pattern(*args)
 
 // Prepare an ISO line pattern for ezdxf usage
+// build123d.exporters.iso_pattern (function)
 iso_pattern(*args)
 
 // Return the multiplicative conversion factor to go from from_unit to to_unit
+// build123d.exporters.unit_conversion_scale (function)
 unit_conversion_scale(from_unit: Unit, to_unit: Unit) -> float

@@ -1,4 +1,4 @@
-# geospec — Classs
+# geospec — Classes
 
 2 top-level symbols. Signatures are verbatim typescript.
 
@@ -8,11 +8,14 @@ GeoSpecModelLoadError: export declare class GeoSpecModelLoadError extends Error
   // Structured diagnostics explaining why model loading failed
   diagnostics: readonly GeometryDiagnostic[]
 
-  constructor
+  // GeoSpecModelLoadError.constructor (constructor)
+  constructor(diagnostics: readonly GeometryDiagnostic[]);
+  //   diagnostics: Geometry diagnostics to expose to callers
 
 // Assertion error thrown by GeoSpec matchers when an expectation does not hold
 GeoSpecAssertionError: export declare class GeoSpecAssertionError extends Error
 
   diagnostics: readonly GeometryDiagnostic[]
 
-  constructor
+  // GeoSpecAssertionError.constructor (constructor)
+  constructor(diagnostics: readonly GeometryDiagnostic[]);

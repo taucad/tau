@@ -3,6 +3,7 @@
 5 top-level symbols. Signatures are verbatim kcl.
 
 // Mirror a sketch
+// std.transform.mirror2d (function)
 mirror2d(
   @sketches: [Sketch; 1+],
   axis: Axis2d | Edge,
@@ -11,6 +12,7 @@ mirror2d(
 //   axis: The axis to reflect around
 
 // Move a solid or a sketch
+// std.transform.translate (function)
 translate(
   @objects: [Solid; 1+] | [Sketch; 1+] | ImportedGeometry,
   x?: number(Length),
@@ -27,6 +29,7 @@ translate(
 //   xyz: If given, interpret this point as 3 distances, along each of [X, Y, Z] and translate by each of them
 
 // Rotate a solid or a sketch
+// std.transform.rotate (function)
 rotate(
   @objects: [Solid; 1+] | [Sketch; 1+] | ImportedGeometry,
   roll?: number(Angle),
@@ -45,6 +48,7 @@ rotate(
 //   global: If true, the transform is applied in global space
 
 // Scale a solid or a sketch
+// std.transform.scale (function)
 scale(
   @objects: [Solid; 1+] | [Sketch; 1+] | ImportedGeometry,
   x?: number(_),

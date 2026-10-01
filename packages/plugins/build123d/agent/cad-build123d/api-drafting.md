@@ -5,6 +5,7 @@
 // Sketch Object
 Arrow
 
+  // build123d.drafting.Arrow.__init__ (constructor)
   Arrow(arrow_size: float, shaft_path: Edge | Wire, shaft_width: float, head_at_start: bool = True, head_type: HeadType = HeadType.CURVED, mode: Mode = Mode.ADD)
   //   arrow_size: arrow head tip to tail length
   //   shaft_path: line describing the shaft shape
@@ -16,6 +17,7 @@ Arrow
 // Sketch Object
 ArrowHead
 
+  // build123d.drafting.ArrowHead.__init__ (constructor)
   ArrowHead(size: float, head_type: HeadType = HeadType.CURVED, rotation: float = 0, mode: Mode = Mode.ADD)
   //   size: tip to tail length
   //   head_type: arrow head shape
@@ -25,6 +27,7 @@ ArrowHead
 // Sketch Object
 DimensionLine
 
+  // build123d.drafting.DimensionLine.__init__ (constructor)
   DimensionLine(path: PathDescriptor, draft: Draft, sketch: Sketch | None = None, label: str | None = None, arrows: tuple[bool, bool] = (True, True), tolerance: float | tuple[float, float] | None = None, label_angle: bool = False, mode: Mode = Mode.ADD)
   //   path: a very general type of input used to describe the path the dimension line will follow
   //   draft: instance of Draft dataclass
@@ -41,6 +44,7 @@ Draft
   // Are metric units being used
   is_metric: bool
 
+  // build123d.drafting.Draft.__init__ (constructor)
   Draft(font_size: float = 5.0, font: str = 'Arial', font_style: FontStyle = FontStyle.REGULAR, head_type: HeadType = HeadType.CURVED, arrow_length: float = 3.0, line_width: float = 0.5, pad_around_text: float = 2.0, unit: Unit = Unit.MM, number_display: NumberDisplay = NumberDisplay.DECIMAL, display_units: bool = True, decimal_precision: int = 2, fractional_precision: int = 64, extension_gap: float = 2.0) -> NoneType
   //   font_size: size of the text in dimension lines and callouts
   //   font: font to use for text
@@ -59,6 +63,7 @@ Draft
 // Sketch Object
 ExtensionLine
 
+  // build123d.drafting.ExtensionLine.__init__ (constructor)
   ExtensionLine(border: PathDescriptor, offset: float, draft: Draft, sketch: Sketch | None = None, label: str | None = None, arrows: tuple[bool, bool] = (True, True), tolerance: float | tuple[float, float] | None = None, label_angle: bool = False, measurement_direction: VectorLike | None = None, mode: Mode = Mode.ADD)
   //   border: a very general type of input defining the object to be dimensioned
   //   offset: a distance to displace the dimension line from the edge of the object
@@ -73,6 +78,7 @@ ExtensionLine
 // Sketch Object
 TechnicalDrawing
 
+  // build123d.drafting.TechnicalDrawing.__init__ (constructor)
   TechnicalDrawing(designed_by: str = 'build123d', design_date: date | None = None, page_size: PageSize = PageSize.A4, title: str = 'Title', sub_title: str = 'Sub Title', drawing_number: str = 'B3D-1', sheet_number: int | None = None, drawing_scale: float = 1.0, nominal_text_size: float = 10.0, line_width: float = 0.5, mode: Mode = Mode.ADD)
   //   designed_by: Defaults to "build123d"
   //   design_date: Defaults to date.today()

@@ -3,6 +3,7 @@
 16 top-level symbols. Signatures are verbatim kcl.
 
 // Create a helix
+// std.helix (function)
 helix(
   revolutions: number(_),
   angleStart: number(Angle),
@@ -21,6 +22,7 @@ helix(
 //   cylinder: Cylinder to create the helix on
 
 // Offset a plane by a distance along its normal
+// std.offsetPlane (function)
 offsetPlane(
   @plane: Plane,
   offset: number(Length),
@@ -29,10 +31,12 @@ offsetPlane(
 //   offset: Distance from the standard plane this new plane will be created at
 
 // Clone a sketch or solid
+// std.clone (function)
 clone(@geometry: Sketch | Solid | ImportedGeometry): Sketch | Solid | ImportedGeometry
 //   @geometry: The sketch, solid, or imported geometry to be cloned
 
 // Asserts that a value is the boolean value true
+// std.assertIs (function)
 assertIs(
   @actual: bool,
   error?: string,
@@ -41,6 +45,7 @@ assertIs(
 //   error: If the value was false, the program will terminate with this error message
 
 // Check a value meets some expected conditions at runtime
+// std.assert (function)
 assert(
   @actual: number,
   isGreaterThan?: number,

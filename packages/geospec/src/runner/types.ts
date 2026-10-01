@@ -505,7 +505,8 @@ export type GeoSpecMatcher = {
    */
   toHaveConnectedComponents(expected: GeoSpecConnectedComponentsExpectation): GeoSpecAssertion;
   /**
-   * Assert that each mesh surface is closed and manifold-like.
+   * Assert closed mesh edge incidence; this does not prove vertex-manifold
+   * validity, embeddedness, a Boolean fuse, or material connectivity.
    */
   toBeWatertight(): GeoSpecAssertion;
   /**

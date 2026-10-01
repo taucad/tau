@@ -1,6 +1,6 @@
 # replicad API index
 
-replicad 0.23.4-beta.2 · 742 symbols · extracted by TypeScript 5.9.3.
+replicad 0.23.4-beta.2 · 756 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature.
 
@@ -123,7 +123,7 @@ sketchRectangle (function) — Creates the `Sketch` of a rectangle in a defined 
 sketchRoundedRectangle (function) — Creates the `Sketch` of a rounded rectangle in a defined…
 supportExtrude (function)
 
-## Classs — `api-classs.md`
+## Classes — `api-classes.md`
 
 _1DShape (class) [13 members]
   _1DShape.repr (property)
@@ -470,7 +470,7 @@ ProjectionCamera (class) [10 members]
   ProjectionCamera.setYAxis (method)
   ProjectionCamera.lookAt (method)
 
-## Classs (2) — `api-classs-2.md`
+## Classes (2) — `api-classes-2.md`
 
 Shape (class) [24 members]
   Shape.constructor (constructor)
@@ -617,12 +617,19 @@ WrappingObj (class) [4 members]
 
 AnyShape (type)
 ChamferRadius (type) — We can defined a chamfer with only a number -…
-Corner (type)
+Corner (type) [3 members]
+  Corner.firstCurve (property)
+  Corner.secondCurve (property)
+  Corner.point (property)
 CubeFace (type)
 CurveType (type)
 FilletRadius (type)
-FilterFcn (type)
-ManifoldBox (type)
+FilterFcn (type) [2 members]
+  FilterFcn.element (property)
+  FilterFcn.normal (property)
+ManifoldBox (type) [2 members]
+  ManifoldBox.min (property)
+  ManifoldBox.max (property)
 ManifoldInstance (type)
 ManifoldMesh (type)
 ManifoldVec3 (type)
@@ -634,7 +641,14 @@ RadiusConfig (type) — A generic way to define radii for fillet or chamfer…
 ScaleMode (type)
 Shape2D (type)
 Shape3D (type)
-ShapeConfig (type)
+ShapeConfig (type) [7 members]
+  ShapeConfig.shape (property)
+  ShapeConfig.color (property)
+  ShapeConfig.alpha (property)
+  ShapeConfig.name (property)
+  ShapeConfig.metalness (property) — PBR metalness factor (0 = dielectric, 1 = metal)
+  ShapeConfig.roughness (property) — PBR roughness factor — threaded to GLTF only (not STEP
+  ShapeConfig.density (property)
 SimplePoint (type)
 SingleFace (type)
 SplineConfig (type)

@@ -1,6 +1,6 @@
 # picovoxel API index
 
-picovoxel 0.1.0-beta.0 · 725 symbols · extracted by TypeScript 5.9.3.
+picovoxel 0.1.0-beta.0 · 964 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature.
 
@@ -317,12 +317,28 @@ ToSvgOptions (interface) [3 members]
 
 ## Types — `api-types.md`
 
-AllocatedCounts (type)
+AllocatedCounts (type) [8 members]
+  AllocatedCounts.voxels (property)
+  AllocatedCounts.meshes (property)
+  AllocatedCounts.lattices (property)
+  AllocatedCounts.polyLines (property)
+  AllocatedCounts.scalarFields (property)
+  AllocatedCounts.vectorFields (property)
+  AllocatedCounts.vdbFiles (property)
+  AllocatedCounts.metadata (property)
 Color (type) — RGBA color, each channel 0..1
-CreateScalarFieldOptions (type)
-CreateVectorFieldOptions (type)
-CreateVoxelsOptions (type)
-GetSliceOptions (type)
+CreateScalarFieldOptions (type) [3 members]
+  CreateScalarFieldOptions.from (property)
+  CreateScalarFieldOptions.value (property)
+  CreateScalarFieldOptions.sdThreshold (property)
+CreateVectorFieldOptions (type) [3 members]
+  CreateVectorFieldOptions.from (property)
+  CreateVectorFieldOptions.value (property)
+  CreateVectorFieldOptions.sdThreshold (property)
+CreateVoxelsOptions (type) [1 members]
+  CreateVoxelsOptions.shape (property)
+GetSliceOptions (type) [1 members]
+  GetSliceOptions.mode (property)
 Mat4 (type) — 4x4 transform, column-major in System.Numerics order (row-vector convention
 MetadataType (type)
 MetadataValue (type)
@@ -336,9 +352,11 @@ StlUnit (type)
 TransformOptions (type)
 VdbFieldType (type)
 Vec3 (type) — A 3D coordinate or direction, `[x, y, z]`, in millimetres…
-Overhang (type) — Normalized overhang severity 0..1 (C# `PicoGK.Numerics.Overhang`)
+Overhang (type) [1 members] — Normalized overhang severity 0..1 (C# `PicoGK.Numerics.Overhang`)
+  Overhang.[overhangBrand] (property)
 Quat (type) — A rotation quaternion as [x, y, z, w] (System.Numerics `Quaternion`…
-Rad (type) — An angle in radians (C# `PicoGK.Numerics.Rad`)
+Rad (type) [1 members] — An angle in radians (C# `PicoGK.Numerics.Rad`)
+  Rad.[radBrand] (property)
 Vec2 (type) — A 2D vector as an immutable tuple (System.Numerics `Vector2` analog)
 CylindricalDirection (type)
 FrameType (type)
@@ -354,7 +372,7 @@ SurfaceRatioFunc (type)
 VertexTransformation (type) — Point-wise vertex transformation applied during construction (C# `fnVertexTransformation`)
 ContourWinding (type)
 
-## Classs — `api-classs.md`
+## Classes — `api-classes.md`
 
 PicoError (class) [2 members]
   PicoError.code (property)
@@ -676,6 +694,9 @@ LatticePipe (class) [10 members] — Round pipe built from lattice beams along a
   LatticePipe.latConstruct (method) — Chained beams along the spine (C# `latConstruct`)
   LatticePipe.spinePoint (method) — Centre-axis position along the pipe (C# `vecGetSpinePoint`)
   LatticePipe.radius (method)
+
+## Classes (2) — `api-classes-2.md`
+
 LineModulation (class) [7 members] — 1D modulation
   LineModulation.constValue (property) — The constant value when built from one (C# public `m_fConstValue`)
   LineModulation.constructor (constructor)
@@ -698,9 +719,6 @@ SurfaceModulation (class) [6 members] — 2D modulation over (phi, lengthRatio) 
   SurfaceModulation.add (method) — Sum of two modulations (C# `operator +`)
   SurfaceModulation.sub (method) — Difference of two modulations (C# `operator -`)
   SurfaceModulation.scale (method) — Scaled modulation (C# `operator *`)
-
-## Classs (2) — `api-classs-2.md`
-
 TangentialControlSpline (class) [3 members] — Cubic-feel connector between two points/frames with tangent control (C# `TangentialControlSpline`)
   TangentialControlSpline.constructor (constructor)
   TangentialControlSpline.betweenFrames (method) — The frame-to-frame form
@@ -726,23 +744,244 @@ slicesToCli (function) — Serialises a slice stack to ASCII CLI bytes
 
 ## Constants — `api-constants.md`
 
-conformalShowcaseShapes (constant) — The three modulated demo shapes conformal arrays showcase (C# `ConformalShowcaseShapes`)
+conformalShowcaseShapes (constant) [3 members] — The three modulated demo shapes conformal arrays showcase (C# `ConformalShowcaseShapes`)
+  conformalShowcaseShapes.box01 (property) — Modulated box, length 100 (C# `oGetBox_01`)
+  conformalShowcaseShapes.lens01 (property) — Height-modulated lens (C# `oGetLens_01`)
+  conformalShowcaseShapes.segment01 (property) — Radius- and phi-range-modulated pipe segment (C# `oGetSegment_01`)
 TWO_PI (constant) — 2π (C# `Rad.TwoPi`)
-cylindrical (constant) — `Cylindrical` factories and conversions
-frame (constant) — `Frame` factories and operations (C# `Frame3d` surface
-mat4 (constant) — `Matrix4x4` operations
-overhang (constant) — `Overhang` factories and accessors
-polar (constant) — `Polar` factories and conversions
-quat (constant) — `Quaternion` operations
-rad (constant) — `Rad` factories, constants and helpers
-scalar (constant) — Fuzzy scalar comparisons (C# `ComparisonExtensions` on `float`)
-spherical (constant) — `Spherical` factories and conversions
-tolerances (constant) — Default tolerances for fuzzy comparisons (C# `PicoGK.Numerics.Tolerances`)
-vec2 (constant) — `Vector2` operations
-vec3 (constant) — `Vector3` operations
-localFrame (constant) — ShapeKernel `LocalFrame` construction helpers over the numerics `Frame`
-meshUtility (constant) — ShapeKernel `MeshUtility` (static class → const object
-sh (constant) — ShapeKernel `Sh` — the headless subset, session-first
-splineOps (constant) — ShapeKernel `SplineOperations` (static class → const object)
-uf (constant) — ShapeKernel `Uf` (the "useful formulas" grab-bag)
-vecOps (constant) — ShapeKernel `VecOperations` (Hungarian prefixes dropped)
+cylindrical (constant) [6 members] — `Cylindrical` factories and conversions
+  cylindrical.create (property) — Validated constructor (C# `Cylindrical(fR, rPhi, fZ)`)
+  cylindrical.fromPolar (property) — From a polar coordinate plus height (C# `Cylindrical(Polar, fZ)`)
+  cylindrical.fromCartesian (property) — From a cartesian point (C# `Cylindrical(Vector3)`)
+  cylindrical.fromSpherical (property) — From a spherical coordinate (C# `Cylindrical(Spherical)`)
+  cylindrical.toCartesian (property) — To cartesian (C# `vecAsCartesian`)
+  cylindrical.lerp (property) — Lerp in cylindrical space
+frame (constant) [25 members] — `Frame` factories and operations (C# `Frame3d` surface
+  frame.world (property) — The world coordinate system (C# `frmWorld`)
+  frame.fromPos (property) — World-aligned axes at a position (C# `frmFromPos` / `Frame3d(vecPos)`)
+  frame.fromZX (property) — From approximate Z and X directions
+  frame.fromMat4 (property) — From a row-vector rigid matrix — rows [X
+  frame.ptToWorld (property) — Local point (2D points lie in the frame's XY plane)…
+  frame.dirToWorld (property) — Local direction → world direction, safe-normalized (C# `vecDirToWorld`)
+  frame.ptFromWorld (property) — World point → local coordinates (C# `vecPtFromWorld`)
+  frame.dirFromWorld (property) — World direction → local direction, safe-normalized (C# `vecDirFromWorld`)
+  frame.compose (property) — Combined transform
+  frame.inverse (property) — The inverse transform — maps world to local (C# `frmInverse`),…
+  frame.movedLocal (property) — Origin moved by a local-space distance (C# `frmMovedLocal`)
+  frame.movedLocalX (property) — Origin moved along local X (C# `frmMovedLocalX`)
+  frame.movedLocalY (property) — Origin moved along local Y (C# `frmMovedLocalY`)
+  frame.movedLocalZ (property) — Origin moved along local Z (C# `frmMovedLocalZ`)
+  frame.movedWorld (property) — Origin moved by a world-space distance (C# `frmMovedWorld`)
+  frame.movedWorldX (property) — Origin moved along world X (C# `frmMovedWorldX`)
+  frame.movedWorldY (property) — Origin moved along world Y (C# `frmMovedWorldY`)
+  frame.movedWorldZ (property) — Origin moved along world Z (C# `frmMovedWorldZ`)
+  frame.rotatedWorld (property) — Rotated about a world-space axis through the frame's origin (C#…
+  frame.repositioned (property) — Same orientation at a new origin (C# `frmRepositioned`)
+  frame.toMat4 (property) — As a row-vector rigid `Mat4` — basis in rows, translation…
+  frame.composeWithScale (property) — Scale-then-frame model matrix for drawing scaled geometry (C# `matComposeWithScale`)
+  frame.asRigid (property) — The transform as rotation quaternion + origin (C# `AsRigid`
+  frame.interpolate (property) — Interpolate two frames
+  frame.equals (property) — Exact component equality (C# `Equals`)
+mat4 (constant) [3 members] — `Matrix4x4` operations
+  mat4.identity (property) — The identity matrix (C# `Matrix4x4.Identity`)
+  mat4.createScale (property) — Scale matrix (C# `Matrix4x4.CreateScale`)
+  mat4.multiply (property) — Matrix product `a·b` (C# `Matrix4x4.operator *`)
+overhang (constant) [11 members] — `Overhang` factories and accessors
+  overhang.none (property) — No overhang — vertical, self-supporting (C# `uNone`)
+  overhang.full (property) — Maximum overhang — horizontal (C# `uFull`)
+  overhang.fromNormalized (property) — From normalized severity 0..1 (C# `uFromNormalized`)
+  overhang.fromPercent (property) — From percent 0..100 (C# `uFromPercent`)
+  overhang.fromRad (property) — From radians 0..π/2 (C# `uFromRad`)
+  overhang.fromDeg (property) — From degrees 0..90 (C# `uFromDeg`)
+  overhang.fromDegFromHorizontal (property) — From degrees measured from the horizontal plane — some 3D-printing…
+  overhang.percent (property) — Severity as percent 0..100 (C# `fPercent`)
+  overhang.rad (property) — Overhang angle in radians 0..π/2 (C# `fRad`)
+  overhang.deg (property) — Overhang angle in degrees 0..90 (C# `fDeg`)
+  overhang.degFromHorizontal (property) — Degrees from horizontal — the inverted vendor convention (C# `fDegFromHorizontal`)
+polar (constant) [4 members] — `Polar` factories and conversions
+  polar.create (property) — Validated constructor (C# `Polar(fR, rPhi)`)
+  polar.fromCartesian (property) — From a 2D cartesian point (C# `Polar(Vector2)`
+  polar.toCartesian (property) — To 2D cartesian (C# `vecAsCartesian`)
+  polar.lerp (property) — Lerp in polar space
+quat (constant) [7 members] — `Quaternion` operations
+  quat.identity (property) — The identity rotation (C# `Quaternion.Identity`)
+  quat.fromAxisAngle (property) — From a rotation axis and angle (C# `Quaternion.CreateFromAxisAngle`)
+  quat.fromMat4 (property) — Extract the rotation from a rigid row-vector matrix (C# `Quaternion.CreateFromRotationMatrix`,…
+  quat.dot (property) — Dot product (C# `Quaternion.Dot`)
+  quat.neg (property) — Component-wise negation — the same rotation, opposite hemisphere
+  quat.slerp (property) — Spherical linear interpolation (C# `Quaternion.Slerp`)
+  quat.transform (property) — Rotate a vector by the quaternion (C# `Vector3.Transform(v, q)`)
+rad (constant) [25 members] — `Rad` factories, constants and helpers
+  rad.zero (property) — 0º (C# `Rad.Zero` / `Rad.Deg0`)
+  rad.full (property) — 360º (C# `Rad.Full` / `Rad.Deg360`)
+  rad.half (property) — 180º (C# `Rad.Half` / `Rad.Deg180`)
+  rad.quarter (property) — 90º (C# `Rad.Quarter` / `Rad.Deg90`)
+  rad.deg45 (property) — 45º (C# `Rad.Deg45`)
+  rad.fromRad (property) — Brand a radians value (C# `rFromRad` / the explicit float→Rad…
+  rad.fromDeg (property) — From degrees (C# `rFromDeg`)
+  rad.fromNormalized (property) — From a normalized 0..1 value mapped to 0..360º, clamped (C#…
+  rad.deg (property) — The angle in degrees (C# `fDeg`)
+  rad.normalizedSigned (property) — Normalize to -π..+π (C# `rNormalizedSigned`
+  rad.normalizedPositive (property) — Normalize to [0, 2π) (C# `rNormalizedPositive`)
+  rad.almostEqual (property) — Fuzzy equality (C# `bAlmostEqual`)
+  rad.almostEqualPeriodic (property) — Fuzzy equality of the normalized angle — 0º == 360º…
+  rad.atan2 (property) — Quadrant-correct angle from +X (C# `rAtan2`)
+  rad.atan (property) — Arc tangent (C# `rAtan`)
+  rad.acos (property) — Arc cosine (C# `rAcos`)
+  rad.acosClamped (property) — Arc cosine of the value clamped to [-1, 1] —…
+  rad.asin (property) — Arc sine (C# `rAsin`)
+  rad.asinClamped (property) — Arc sine of the value clamped to [-1, 1] (C#…
+  rad.add (property)
+  rad.sub (property)
+  rad.scale (property)
+  rad.div (property)
+  rad.ratio (property) — Dimensionless ratio of two angles (C# `Rad / Rad`)
+  rad.neg (property)
+scalar (constant) [4 members] — Fuzzy scalar comparisons (C# `ComparisonExtensions` on `float`)
+  scalar.almostEqual (property) — Fuzzy equality with both an absolute and a relative tolerance…
+  scalar.almostLessOrEqual (property) — `a <= b + tol` (C# `bAlmostLessOrEqual`)
+  scalar.almostMoreOrEqual (property) — `a >= b - tol` (C# `bAlmostMoreOrEqual`)
+  scalar.almostZero (property) — Fuzzy zero test (C# `bAlmostZero`)
+spherical (constant) [5 members] — `Spherical` factories and conversions
+  spherical.create (property) — Validated constructor (C# `Spherical(fR, rPhi, rTheta)`
+  spherical.fromCartesian (property) — From a cartesian point (C# `Spherical(Vector3)`
+  spherical.fromCylindrical (property) — From a cylindrical coordinate (C# `Spherical(Cylindrical)`)
+  spherical.toCartesian (property) — To cartesian (C# `vecAsCartesian`)
+  spherical.lerp (property) — Lerp in spherical space
+tolerances (constant) [4 members] — Default tolerances for fuzzy comparisons (C# `PicoGK.Numerics.Tolerances`)
+  tolerances.def (property) — Default tolerance for fuzzy comparisons (`Tolerances.fDef`)
+  tolerances.defSquared (property) — `Tolerances.fDefSquared` — for squared-distance comparisons
+  tolerances.zero (property) — Value regarded as zero in fuzzy zero checks (`Tolerances.fZero`)
+  tolerances.zeroSquared (property) — `Tolerances.fZeroSquared` — squared variant
+vec2 (constant) [15 members] — `Vector2` operations
+  vec2.zero (property)
+  vec2.add (property)
+  vec2.sub (property)
+  vec2.scale (property)
+  vec2.dot (property)
+  vec2.lengthSquared (property)
+  vec2.length (property)
+  vec2.distanceSquared (property)
+  vec2.lerp (property)
+  vec2.normalized (property) — Unit-length copy
+  vec2.safeNormalized (property) — Unit-length copy, or (0,0) for (almost) zero-length input (C# `vecSafeNormalized`)
+  vec2.asVec3 (property) — Lift to 3D by appending Z (C# `vecAsVector3`)
+  vec2.almostEqual (property) — Fuzzy equality by squared distance (C# `Vector2.bAlmostEqual`)
+  vec2.almostZero (property) — Fuzzy zero-length test (C# `Vector2.bAlmostZero`)
+  vec2.isFinite (property) — All components finite (C# `Vector2.bIsFinite`)
+vec3 (constant) [24 members] — `Vector3` operations
+  vec3.zero (property)
+  vec3.unitX (property)
+  vec3.unitY (property)
+  vec3.unitZ (property)
+  vec3.one (property)
+  vec3.add (property)
+  vec3.sub (property)
+  vec3.neg (property)
+  vec3.scale (property)
+  vec3.dot (property)
+  vec3.cross (property)
+  vec3.lengthSquared (property)
+  vec3.length (property)
+  vec3.distanceSquared (property)
+  vec3.distance (property)
+  vec3.lerp (property)
+  vec3.normalized (property) — Unit-length copy
+  vec3.safeNormalized (property) — Unit-length copy, or (0,0,0) for (almost) zero-length input (C# `vecSafeNormalized`)
+  vec3.stripZ (property) — Drop Z (C# `vecStripZ`)
+  vec3.transformed (property) — Row-vector matrix transform — translation lives in elements 12–14, the…
+  vec3.mirrored (property) — Mirror a point across the plane through `planePoint` with `planeNormal`…
+  vec3.almostEqual (property) — Fuzzy equality by squared distance (C# `Vector3.bAlmostEqual`)
+  vec3.almostZero (property) — Fuzzy zero-length test (C# `Vector3.bAlmostZero`)
+  vec3.isFinite (property) — All components finite (C# `Vector3.bIsFinite`)
+localFrame (constant) [9 members] — ShapeKernel `LocalFrame` construction helpers over the numerics `Frame`
+  localFrame.identity (property) — World-aligned frame at the origin (C# `LocalFrame()`)
+  localFrame.create (property) — World-aligned axes at a position (C# `LocalFrame(vecPos)`)
+  localFrame.at (property) — Same axes as the base frame at a new position…
+  localFrame.createZ (property) — Position + local Z
+  localFrame.createZX (property) — Position + local Z + local X
+  localFrame.translated (property) — Translated frame, axes unchanged (C# `oTranslate` / `oGetTranslatedFrame`)
+  localFrame.rotated (property) — All axes rotated about an axis, position unchanged (C# `oRotate`…
+  localFrame.inverted (property) — Selected axes negated, position unchanged (C# `oGetInvertFrame`
+  localFrame.localY (property) — Y completing Z and X right-handedly (C# `vecGetLocalY`
+meshUtility (constant) [5 members] — ShapeKernel `MeshUtility` (static class → const object
+  meshUtility.meshFromGrid (property) — Mesh from a regular point grid, quad by quad (C#…
+  meshUtility.meshFromQuad (property) — Mesh from one quad (C# `mshFromQuad`)
+  meshUtility.applyTransformation (property) — New mesh with the transformation applied per vertex (C# `mshApplyTransformation`)
+  meshUtility.voxApplyTransformation (property) — Voxels → mesh → per-vertex transform → voxels (C# `voxApplyTransformation`)
+  meshUtility.translateMeshOntoFrame (property) — Mesh re-expressed from the input frame onto the output frame…
+sh (constant) [12 members] — ShapeKernel `Sh` — the headless subset, session-first
+  sh.latFromLine (property) — Beams along a point list (C# `latFromLine`)
+  sh.addLine (property) — Adds a point list to an existing lattice (C# `AddLine`)
+  sh.latFromPoints (property) — Node-only lattice from a point cloud (C# `latFromPoints`)
+  sh.latFromEdges (property) — Beams along multiple point lists (C# `latFromEdges`)
+  sh.latFromPoint (property) — Node-only lattice from one point (C# `latFromPoint`)
+  sh.latFromGrid (property) — Lattice from a grid
+  sh.latFromBeam (property) — One beam, constant radius (C# `latFromBeam`)
+  sh.latFromTaperedBeam (property) — One beam, variable radius (C# `latFromBeam` overload)
+  sh.exportMeshToStl (property) — Binary STL bytes of a mesh (C# `ExportMeshToSTLFile` — bytes,…
+  sh.exportVoxelsToStl (property) — Binary STL bytes of a voxel field via meshing (C#…
+  sh.exportVoxelsToVdb (property) — VDB bytes of a voxel field (C# `ExportVoxelsToVDBFile`)
+  sh.exportVoxelsToCli (property) — CLI slice bytes of a voxel field (C# `ExportVoxelsToCLIFile`)
+splineOps (constant) [22 members] — ShapeKernel `SplineOperations` (static class → const object)
+  splineOps.linearInterpolation (property) — Linearly interpolated points from start to end inclusive (C# `aGetLinearInterpolation`)
+  splineOps.snappedSpline (property) — Each point snapped to the closest surface point of the…
+  splineOps.reparametrizedByCount (property) — Resample to a target count with constant spacing
+  splineOps.reparametrizedBySpacing (property) — Resample to a target spacing (min 10 samples, C# spacing…
+  splineOps.lengthsAtIndices (property) — Cumulative arc length at each index (C# `aGetLengthsAtIndices`)
+  splineOps.averagePointSpacing (property) — Average spacing between consecutive points (C# `fGetAveragePointSpacing`)
+  splineOps.totalLength (property) — Total arc length (C# `fGetTotalLength`)
+  splineOps.splitAt (property) — Split at an index into two non-overlapping lists (C# `aSplitLists`)
+  splineOps.combine (property) — Concatenate lists (C# `aCombineLists`)
+  splineOps.rotatedAroundZ (property) — Every point rotated about the absolute Z axis (C# `aRotateListAroundZ`)
+  splineOps.translated (property) — Every point translated (C# `aTranslateList`)
+  splineOps.scaled (property) — Every point scaled about the origin (C# `aScaleList`)
+  splineOps.nurbsSpline (property) — NURBS smoothing via a degree-2 open BSpline (C# `aGetNURBSpline`)
+  splineOps.overSampled (property) — Linear oversampling with N samples per step (C# `aOverSampleList`)
+  splineOps.subSampled (property) — Every Nth point, end preserved (C# `aSubSampleList`)
+  splineOps.ontoFrame (property) — Every point moved onto a frame's coordinate system (C# `aTranslateListOntoFrame`)
+  splineOps.inFrame (property) — Every point expressed relative to a frame (C# `aExpressListInFrame`)
+  splineOps.rotatedAroundAxis (property) — Every point rotated about an arbitrary axis (C# `aRotateListAroundAxis`)
+  splineOps.average (property) — Average of all positions (C# `vecGetAverage`)
+  splineOps.closestPoint (property) — The list point closest to `start` (C# `vecGetClosestPoint`)
+  splineOps.distanceToClosestPoint (property) — Distance to the closest list point (C# `fGetDistanceToClosestPoint`)
+  splineOps.clusteredPoints (property) — Greedy clustering
+uf (constant) [13 members] — ShapeKernel `Uf` (the "useful formulas" grab-bag)
+  uf.transFixed (property) — BSpline-eased transition between two values at position s in 0..1…
+  uf.vecTransFixed (property) — Component-wise transFixed between two points (C# `vecTransFixed`)
+  uf.transSmooth (property) — tanh-smoothed transition between two values (C# `fTransSmooth`)
+  uf.vecTransSmooth (property) — tanh-smoothed transition between two points (C# `vecTransSmooth`)
+  uf.randomGaussian (property) — Box-Muller gaussian sample (C# `fGetRandomGaussian`)
+  uf.randomLinear (property) — Uniform sample in [min, max) (C# `fGetRandomLinear`)
+  uf.randomBool (property) — Fair coin (C# `bGetRandomBool`)
+  uf.fibonacciCirclePoints (property) — Fibonacci-distributed points in a 2D disc (C# `aGetFibonacciCirlePoints`)
+  uf.fibonacciSpherePoints (property) — Fibonacci-distributed points on a 3D sphere surface (C# `aGetFibonacciSpherePoints`)
+  uf.superShapeRadius (property) — Superformula radius at a polar angle, reference radius 1 (C#…
+  uf.superShapeRadiusPreset (property) — Superformula radius from a preset (C# preset overload)
+  uf.polygonRadius (property) — Regular-polygon radius at a polar angle, inscribed in the unit…
+  uf.polygonRadiusPreset (property) — Regular-polygon radius from a preset (C# preset overload)
+vecOps (constant) [24 members] — ShapeKernel `VecOperations` (Hungarian prefixes dropped)
+  vecOps.cylPoint (property) — Cartesian point from cylindrical coordinates (C# `vecGetCylPoint`)
+  vecOps.sphPoint (property) — Cartesian point from spherical coordinates, theta measured from the XY…
+  vecOps.radius (property) — Planar (XY) radius about the absolute Z axis (C# `fGetRadius`…
+  vecOps.phi (property) — Planar polar angle about the absolute Z axis, radians (C#…
+  vecOps.theta (property) — Elevation angle from the XY plane, radians (C# `fGetTheta`)
+  vecOps.setRadius (property) — Same phi and z, new radius (C# `vecSetRadius`)
+  vecOps.setPhi (property) — Same radius and z, new phi (C# `vecSetPhi`)
+  vecOps.setZ (property) — Same radius and phi, new z (C# `vecSetZ`)
+  vecOps.updateRadius (property) — Radially shifted by deltaRadius (C# `vecUpdateRadius`)
+  vecOps.updatePhi (property) — Turned about the absolute Z axis by deltaPhi (C# `vecUpdatePhi`)
+  vecOps.updateZ (property) — Vertically shifted by deltaZ (C# `vecUpdateZ`)
+  vecOps.planarDir (property) — Normalized planar radial direction from the Z axis to the…
+  vecOps.flipForAlignment (property) — The vector or its negation, whichever aligns better with the…
+  vecOps.checkAlignment (property) — True when the direction points the same way as the…
+  vecOps.rotateAroundZ (property) — Rotate a point about the absolute Z axis through an…
+  vecOps.orthogonalDir (property) — An arbitrary direction orthogonal to the given one (C# `vecGetOrthogonalDir`)
+  vecOps.angleBetween (property) — Minimum angle between two vectors, radians (C# `fGetAngleBetween`)
+  vecOps.signedAngleBetween (property) — Minimum SIGNED angle between two vectors about a reference normal…
+  vecOps.rotateAroundAxis (property) — Rotate a point about an arbitrary axis through an optional…
+  vecOps.directionToAxis (property) — Radial direction from a frame's Z axis to the point,…
+  vecOps.radiusToAxis (property) — Radius from a frame's Z axis to the point (C#…
+  vecOps.phiToAxis (property) — Polar angle about a frame's Z axis to the point…
+  vecOps.cylindricalInterpolation (property) — Cylindrically interpolated point between two points (C# `vecCylindricalInterpolation`)
+  vecOps.sphericalInterpolation (property) — Spherically interpolated point between two points (C# `vecSphericalInterpolation`)

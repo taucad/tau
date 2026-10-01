@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import ts from 'typescript';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { TauSkillsManifest } from '#bundle/bundle.types.js';
@@ -58,6 +59,26 @@ const digest = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').
 /** The `.md` files a rendered body points at. Every one must exist beside it. */
 const referencedFiles = (body: string): readonly string[] =>
   [...body.matchAll(/`([\w.-]+\.md)`/gu)].map(([, file]) => file ?? '');
+
+describe('GeoSpec reference roles', () => {
+  it('should retain canonical authoring and complete public host reference separately', () => {
+    const owner = bundleOwners.find((entry) => entry.slug === 'geospec-authoring');
+    const primary = owner?.corpus?.();
+    const supplemental = owner?.supplementalApi?.corpus();
+    expect(primary?.entries.some((entry) => entry.name === 'expectGeo')).toBe(true);
+    expect(primary?.entries.some((entry) => entry.name === 'loadModel')).toBe(true);
+    expect(primary?.entries.some((entry) => entry.name === 'GeoSpecAssertionClient')).toBe(false);
+    expect(supplemental?.entries.some((entry) => entry.name === 'GeoSpecAssertionClient')).toBe(true);
+    expect(supplemental?.entries.some((entry) => entry.name === 'expectGeo')).toBe(true);
+    expect(owner?.supplementalApi?.prefix).toBe('public');
+    expect(owner?.description).toContain('Python/pytest');
+    const [classEntry] = primary?.entries.filter((entry) => entry.kind === 'class') ?? [];
+    if (classEntry === undefined || owner?.groupBy === undefined) {
+      throw new Error('Expected a public class');
+    }
+    expect(owner.groupBy(classEntry)).toBe('Classes');
+  }, 120_000);
+});
 
 describe('generateBundles', () => {
   beforeAll(async () => {
@@ -257,7 +278,48 @@ describe('every committed bundle', () => {
   it('keeps OpenCascade complete without redistributing upstream prose', () => {
     const corpus = bundleOwners.find(({ slug }) => slug === 'cad-opencascadejs')?.corpus?.();
     expect(corpus?.entries).toHaveLength(5712);
-    expect(corpus?.metadata.totalEntries).toBe(65_053);
+    const entryPoint = join(
+      workspaceRoot,
+      'libs/api-extractor/src/generated/opencascade/modules/libcascade/index.d.ts',
+    );
+    const program = ts.createProgram([entryPoint], {
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      skipLibCheck: true,
+    });
+    const checker = program.getTypeChecker();
+    const source = program.getSourceFile(entryPoint);
+    const moduleSymbol = source === undefined ? undefined : checker.getSymbolAtLocation(source);
+    if (moduleSymbol === undefined) {
+      throw new Error('Expected the shipped OpenCascade declaration module');
+    }
+    const exports = checker.getExportsOfModule(moduleSymbol);
+    // Previously omitted object-alias/value members: both instance addresses
+    // plus the two declared option records, not new roots or overload entries.
+    const memberCounts = [
+      ['OpenCascadeInstance', 5118],
+      ['default', 5118],
+      ['CreateInstanceOptions', 7],
+      ['InitOpenCascadeOptions', 5],
+    ] as const;
+    for (const [name, count] of memberCounts) {
+      const symbol = exports.find((candidate) => candidate.name === name);
+      const exportedDeclaration = symbol?.getDeclarations()?.[0];
+      const declaration =
+        symbol !== undefined &&
+        exportedDeclaration !== undefined &&
+        (ts.isExportSpecifier(exportedDeclaration) || ts.isExportAssignment(exportedDeclaration))
+          ? checker.getAliasedSymbol(symbol).getDeclarations()?.[0]
+          : exportedDeclaration;
+      if (declaration === undefined) {
+        throw new Error(`Expected declaration for ${name}`);
+      }
+      const properties = checker.getTypeAtLocation(declaration).getProperties();
+      const members = corpus?.entries.find((entry) => entry.name === name)?.members;
+      expect(properties).toHaveLength(count);
+      expect(members?.map(({ name }) => name).sort()).toEqual(properties.map(({ name }) => name).sort());
+    }
+    expect(corpus?.metadata.totalEntries).toBe(65_053 + 5118 + 5118 + 7 + 5);
 
     const serialized = JSON.stringify(corpus);
     expect(serialized).not.toContain('"docs"');

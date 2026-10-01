@@ -35,7 +35,7 @@ Use unique `Viewer.Add(geometry, name, nGroupID)` labels, indexed in loops. Grou
 
 For motion, read `kinematics-reference.md`. Keep moving parts separate; call `Viewer.SetMechanism(source)` inside `Library.Go` with lowercase JSON-equivalent data and exact part names. Give each independent motion a clip. Use millimetre/Z-up; Tau converts metadata with the GLB. PicoGK `Animation` does not declare Tau motion.
 
-Fix `get_kernel_result` warnings. Verify named hover, clip direction/travel, followers and Reset; check changed parameters or filtered views. Use GeoSpec for clearance; playback does not prove it.
+Fix `get_kernel_result` warnings. Verify named hover, clip direction/travel, followers and Reset; check changed parameters or filtered views. Use GeoSpec for clearance only with qualified evidence for the full requirement; unavailable evidence remains unsupported. Playback does not prove clearance.
 
 ## Interactive parameters
 

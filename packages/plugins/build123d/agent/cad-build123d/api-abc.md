@@ -15,10 +15,13 @@ Iterable
 Sequence
 
   // S.index(value, [start, [stop]]) -> integer -- return first index of
+  // collections.abc.Sequence.index (method)
   index(value, start = 0, stop = None)
 
   // S.count(value) -> integer -- return number of occurrences of value
+  // collections.abc.Sequence.count (method)
   count(value)
 
 // A decorator indicating abstract methods
+// abc.abstractmethod (function)
 abstractmethod(funcobj)

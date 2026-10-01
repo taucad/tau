@@ -6,9 +6,11 @@
 StlAPI_Writer
 
   // __init__(self
+  // OCP.OCP.StlAPI.StlAPI_Writer.__init__ (constructor)
   __init__(self: OCP.OCP.StlAPI.StlAPI_Writer) -> None
 
   // Write(self
+  // OCP.OCP.StlAPI.StlAPI_Writer.Write (method)
   Write(self: OCP.OCP.StlAPI.StlAPI_Writer, theShape: OCP.OCP.TopoDS.TopoDS_Shape, theFileName: str, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10ea429b0>) -> bool
 
   // Returns the address to the flag defining the mode for writing the file

@@ -114,6 +114,24 @@ describe('renderIndex', () => {
 describe('renderShard', () => {
   const shards = planShards(corpus, { groupBy });
 
+  it('should name anonymous generic callables without rewriting their signatures', () => {
+    const signature = '<T>(value: T): T;';
+    const callable = createApiCorpus(corpus.metadata, [
+      {
+        name: 'identity',
+        kind: 'function',
+        signatures: [{ parameters: [{ name: 'value', optional: false }], text: signature }],
+      },
+    ]);
+    const [shard] = planShards(callable, { groupBy: () => 'Functions' });
+    if (shard === undefined) {
+      throw new Error('Expected one shard');
+    }
+    const rendered = renderShard(shard, callable);
+    expect(rendered).toContain('identity');
+    expect(rendered).toContain(signature);
+  });
+
   it('emits every overload as its own signature line', () => {
     const sketching = shards.find((shard) => shard.title === 'sketching');
     const markdown = renderShard(sketching!, corpus);

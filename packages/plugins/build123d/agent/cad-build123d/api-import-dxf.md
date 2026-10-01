@@ -3,5 +3,6 @@
 1 top-level symbols. Signatures are verbatim python.
 
 // Import shapes from a DXF file
+// build123d.import_dxf.import_dxf (function)
 import_dxf(dxf_file: str | PathLike | TextIO | BinaryIO) -> ShapeList
 //   dxf_file: dxf file path or readable stream

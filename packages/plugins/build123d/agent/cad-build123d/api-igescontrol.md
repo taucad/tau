@@ -6,28 +6,37 @@
 IGESControl_Controller
 
   // __init__(self
+  // OCP.OCP.IGESControl.IGESControl_Controller.__init__ (constructor)
   __init__(self: OCP.OCP.IGESControl.IGESControl_Controller, modefnes: bool = False) -> None
 
   // NewModel(self
+  // OCP.OCP.IGESControl.IGESControl_Controller.NewModel (method)
   NewModel(self: OCP.OCP.IGESControl.IGESControl_Controller) -> OCP.OCP.Interface.Interface_InterfaceModel
 
   // ActorRead(self
+  // OCP.OCP.IGESControl.IGESControl_Controller.ActorRead (method)
   ActorRead(self: OCP.OCP.IGESControl.IGESControl_Controller, model: OCP.OCP.Interface.Interface_InterfaceModel) -> OCP.OCP.Transfer.Transfer_ActorOfTransientProcess
 
   // TransferWriteShape(self
+  // OCP.OCP.IGESControl.IGESControl_Controller.TransferWriteShape (method)
   TransferWriteShape(self: OCP.OCP.IGESControl.IGESControl_Controller, shape: OCP.OCP.TopoDS.TopoDS_Shape, FP: OCP.OCP.Transfer.Transfer_FinderProcess, model: OCP.OCP.Interface.Interface_InterfaceModel, modetrans: int = 0, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f556bf0>) -> OCP.OCP.IFSelect.IFSelect_ReturnStatus
 
   // Customise(self
+  // OCP.OCP.IGESControl.IGESControl_Controller.Customise (method)
   Customise(self: OCP.OCP.IGESControl.IGESControl_Controller, WS: OCP.OCP.XSControl.XSControl_WorkSession) -> tuple[()]
 
   // Init_s() -> bool
+  // OCP.OCP.IGESControl.IGESControl_Controller.Init_s (method)
   Init_s() -> bool
 
   // get_type_name_s() -> str
+  // OCP.OCP.IGESControl.IGESControl_Controller.get_type_name_s (method)
   get_type_name_s() -> str
 
   // get_type_descriptor_s() -> OCP.OCP.Standard.Standard_Type
+  // OCP.OCP.IGESControl.IGESControl_Controller.get_type_descriptor_s (method)
   get_type_descriptor_s() -> OCP.OCP.Standard.Standard_Type
 
   // DynamicType(self
+  // OCP.OCP.IGESControl.IGESControl_Controller.DynamicType (method)
   DynamicType(self: OCP.OCP.IGESControl.IGESControl_Controller) -> OCP.OCP.Standard.Standard_Type

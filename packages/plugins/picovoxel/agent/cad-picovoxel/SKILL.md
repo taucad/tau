@@ -57,12 +57,12 @@ units, UV0 and exports.
 
 ## API reference
 
-All 725 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
+All 964 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
 
 - `api-interfaces.md` — Interfaces
 - `api-types.md` — Types
-- `api-classs.md` — Classs
-- `api-classs-2.md` — Classs (2)
+- `api-classes.md` — Classes
+- `api-classes-2.md` — Classes (2)
 - `api-functions.md` — Functions
 - `api-constants.md` — Constants
 

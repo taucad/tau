@@ -13,7 +13,7 @@ const ThreeWebGpuInspectorBootstrapLazy = lazy(async () => {
 });
 
 /**
- * Three.js r184 {@link Inspector} for WebGPU pipelines: toggled only when `tauDebug` is on in the parent.
+ * Three.js r184 {@link Inspector} for WebGPU pipelines: explicitly enabled through `webGpuInspector`.
  *
  * Must render **inside** an R3F `<Canvas>` (uses `useThree`). Appends the inspector DOM under
  * `document.body` so it is not clipped by viewer layout.

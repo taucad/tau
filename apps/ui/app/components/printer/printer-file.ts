@@ -8,7 +8,8 @@
  * @module
  */
 
-import { readBambuContainer } from '@taucad/slicer/container';
+import { readBambuPreview } from '@taucad/slicer/container';
+import type { BambuContainerProducer } from '@taucad/slicer/container';
 import { plateForBedType } from '#components/printer/printer-plates.js';
 import type { PrinterPlateModel } from '#components/printer/printer-plates.js';
 
@@ -34,6 +35,7 @@ export const printerFileKind = (name: string, head: Uint8Array<ArrayBuffer>): Pr
 /** What the viewer reads out of a printer file. */
 export type PrinterFileContents = Readonly<{
   gcode: Uint8Array<ArrayBuffer>;
+  producer?: BambuContainerProducer;
   /**
    * The X1C plate the file was sliced for: the container's `plate_1.json` when it names one Tau knows,
    * else the G-code's `curr_bed_type`; `undefined` when neither does.
@@ -68,7 +70,7 @@ export const readGcodeSetting = (gcode: Uint8Array<ArrayBuffer>, name: string): 
   return (setting.exec(head) ?? setting.exec(tail))?.[1];
 };
 
-// As `readBambuContainer` reads the setting: an alpha byte some slicers append is dropped, and at most 64 entries.
+// As `readBambuPreview` reads the setting: an alpha byte some slicers append is dropped, and at most 64 entries.
 const filamentColorEntry = /^#([\da-f]{6})(?:[\da-f]{2})?$/iu;
 const maximumFilamentColors = 64;
 
@@ -82,12 +84,13 @@ const filamentColorsOf = (value: string | undefined): readonly string[] => {
 
 /** The G-code bytes of a printer file, the plate it was sliced for and its filament colours. */
 export const readPrinterFile = (bytes: Uint8Array<ArrayBuffer>, kind: PrinterFileKind): PrinterFileContents => {
-  const container = kind === 'container' ? readBambuContainer(bytes) : undefined;
+  const container = kind === 'container' ? readBambuPreview(bytes) : undefined;
   const gcode = container?.gcode ?? bytes;
   const containerBedType = container?.bedType === 'unspecified' ? undefined : container?.bedType;
   const recordedBedType = containerBedType ?? readGcodeSetting(gcode, 'curr_bed_type');
   return {
     gcode,
+    producer: container?.producer,
     recordedBedType,
     slicedPlate: plateForBedType(recordedBedType),
     filamentColors: container?.filamentColors ?? filamentColorsOf(readGcodeSetting(gcode, 'filament_colour')),

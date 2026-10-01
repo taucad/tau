@@ -8,13 +8,9 @@ import { slicingPreferences } from '@taucad/slicer/preferences';
 import type { SlicingPreferences } from '@taucad/slicer/preferences';
 import type { MachineSettingsRecord } from '@taucad/types';
 import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
-import { writeBambuContainer } from '@taucad/slicer/container';
+import { writeBambuContainer, slicedFilamentColors } from '@taucad/slicer/container';
 import { sha256Bytes } from '@taucad/utils/hash';
-import {
-  createMachinePrintPlanner,
-  defaultFilamentSlots,
-  slicedFilamentColors,
-} from '#registry/machine-print-planner.js';
+import { createMachinePrintPlanner, defaultFilamentSlots } from '#registry/machine-print-planner.js';
 import type { MachinePrintPlannerDependencies } from '#registry/machine-print-planner.js';
 import type { BambuStudioEngine, ResolvedMachinePreferences } from '#registry/print-profiles.js';
 

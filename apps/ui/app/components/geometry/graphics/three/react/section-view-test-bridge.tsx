@@ -80,6 +80,8 @@ export type SectionViewTestCameraState = Readonly<{
   actorError?: string;
   projection: 'orthographic' | 'perspective';
   requestedFov: number;
+  requestedPerspectiveZoom: number;
+  bounds: Readonly<{ min: readonly [number, number, number]; max: readonly [number, number, number] }>;
   handoffFov?: number;
   verticalSpan: number;
   position: readonly [number, number, number];
@@ -889,6 +891,8 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
               : undefined,
           projection: camera instanceof THREE.OrthographicCamera ? 'orthographic' : 'perspective',
           requestedFov: cameraView.requestedVerticalFieldOfView,
+          requestedPerspectiveZoom: cameraView.perspectiveZoom,
+          bounds: cameraView.bounds,
           handoffFov: cameraContext.handoffVerticalFieldOfView,
           verticalSpan: cameraView.verticalSpan,
           position: physicalCamera.position,

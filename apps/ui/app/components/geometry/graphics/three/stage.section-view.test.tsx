@@ -53,6 +53,8 @@ describe('SectionViewScene', () => {
         size: { height: 600, left: 0, top: 0, width: 800 },
       });
     });
+    // Resolve the optional module before asserting the frame that certifies an active cut.
+    await import('#components/geometry/graphics/three/react/section-contour-fill.js');
     const inner = new THREE.Group();
     inner.add(new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial()));
     const innerRef = { current: inner };
@@ -93,6 +95,11 @@ describe('SectionViewScene', () => {
         advance(performance.now());
       });
     };
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    });
     frame();
     expect(committed()).toHaveLength(1);
     expect(clipped()).toEqual(committed());

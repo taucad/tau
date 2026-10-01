@@ -291,8 +291,8 @@ const requireColorCentroid = (
 const pointDistance = (first: readonly [number, number], second: readonly [number, number]): number =>
   Math.hypot(first[0] - second[0], first[1] - second[1]);
 
-const vectorAngle = (first: readonly [number, number], second: readonly [number, number]): number =>
-  Math.atan2(second[1] - first[1], second[0] - first[0]);
+const vectorAngle = (first: readonly [number, number], second: readonly [number, number], aspect: number): number =>
+  Math.atan2(second[1] - first[1], (second[0] - first[0]) * aspect);
 
 const angularDistance = (first: number, second: number): number =>
   Math.abs(Math.atan2(Math.sin(first - second), Math.cos(first - second)));
@@ -339,6 +339,9 @@ const openCommandPalette = async (query: string): Promise<void> => {
 };
 
 const openScreenshotMenu = async (): Promise<void> => {
+  if (await target.evaluate(() => innerWidth < 768)) {
+    await target.click(selectors.getByRole('tab', { name: 'Chat', exact: true }));
+  }
   const editor = selectors.getByCss('.tiptap[contenteditable="true"]');
   await target.expectVisible(editor);
   /* A click waits for the editor to hold still: on a phone the chat sheet slides
@@ -384,7 +387,8 @@ test('GLTF toolbar and @ actions use one annotated headless camera path', async 
   await target.expectVisible(selectors.getByRole('button', { name: 'Capture view to chat' }), 60_000);
   await waitForRenderedGeometry('gltf');
 
-  const initialCamera = { position: [0.13, -0.095, 0.075], target: [0, 0, 0.006], fov: 42, zoom: 1 } as const;
+  // Keep all color landmarks inside the narrow desktop viewport even at 1.6x zoom.
+  const initialCamera = { position: [0.208, -0.152, 0.1164], target: [0, 0, 0.006], fov: 42, zoom: 1 } as const;
   await setViewerCamera(initialCamera);
   const viewer = await readViewerEvidence();
   expect(viewer.modelPixels).toBeGreaterThan(100);
@@ -410,6 +414,7 @@ test('GLTF toolbar and @ actions use one annotated headless camera path', async 
   const firstBlue = requireColorCentroid(first, 'blue');
   const zoomedRed = requireColorCentroid(zoomed, 'red');
   const zoomedBlue = requireColorCentroid(zoomed, 'blue');
+  await target.writeArtifact('capture-zoom-evidence.json', JSON.stringify({ first, zoomed, initialCamera }, null, 2));
   expect(pointDistance(zoomedRed, zoomedBlue)).toBeGreaterThan(pointDistance(firstRed, firstBlue) * 1.35);
 
   await clearAttachments();
@@ -420,8 +425,12 @@ test('GLTF toolbar and @ actions use one annotated headless camera path', async 
   expectAnnotated(rolled, 'image/webp', desktopCaptureSize);
   expect(
     angularDistance(
-      vectorAngle(firstRed, firstBlue),
-      vectorAngle(requireColorCentroid(rolled, 'red'), requireColorCentroid(rolled, 'blue')),
+      vectorAngle(firstRed, firstBlue, first.width / first.height),
+      vectorAngle(
+        requireColorCentroid(rolled, 'red'),
+        requireColorCentroid(rolled, 'blue'),
+        rolled.width / rolled.height,
+      ),
     ),
   ).toBeGreaterThan(0.3);
 

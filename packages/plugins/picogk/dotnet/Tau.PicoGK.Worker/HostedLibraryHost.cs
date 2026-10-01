@@ -360,12 +360,13 @@ internal sealed class CaptureViewerBackend : IViewerBackend
 
     internal void Complete()
     {
+        bool close;
         lock (gate)
         {
-            if (completed) return;
+            close = !completed;
             completed = true;
         }
-        commands.CompleteAdding();
+        if (close) commands.CompleteAdding();
         pump.GetAwaiter().GetResult();
         RethrowPumpError();
     }
@@ -374,7 +375,8 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     {
         bool isCompleted;
         lock (gate) isCompleted = completed;
-        if (!isCompleted) Flush();
+        if (isCompleted) Complete();
+        else Flush();
         lock (gate)
         {
             ThrowIfDisposed();
@@ -389,22 +391,28 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         lock (gate)
         {
             if (disposed) return;
-        }
-        Complete();
-        lock (gate)
-        {
             disposed = true;
-            objects.Clear();
-            objectIndex.Clear();
-            componentIdentities.Clear();
-            authoredNames.Clear();
-            materialized.Clear();
-            materials.Clear();
-            groupMatrices.Clear();
-            hiddenGroups.Clear();
-            warnings.Clear();
         }
-        commands.Dispose();
+        try
+        {
+            Complete();
+        }
+        finally
+        {
+            lock (gate)
+            {
+                objects.Clear();
+                objectIndex.Clear();
+                componentIdentities.Clear();
+                authoredNames.Clear();
+                materialized.Clear();
+                materials.Clear();
+                groupMatrices.Clear();
+                hiddenGroups.Clear();
+                warnings.Clear();
+            }
+            commands.Dispose();
+        }
     }
 
     [ExcludeFromCodeCoverage]
@@ -431,10 +439,19 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     {
         lock (gate)
         {
-            foreach (var command in batch)
+            try
             {
-                command.Apply();
-                command.Completion?.Set();
+                foreach (var command in batch) command.Apply();
+            }
+            catch (Exception error)
+            {
+                // Publish before waking waiters, including barriers already removed from the queue.
+                pumpError = ExceptionDispatchInfo.Capture(error);
+                throw;
+            }
+            finally
+            {
+                foreach (var command in batch) command.Completion?.Set();
             }
         }
     }
@@ -459,8 +476,18 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             ThrowIfDisposed();
             if (completed) throw new InvalidOperationException("The PicoGK viewer command pump has completed.");
         }
-        commands.Add(command);
-        RethrowPumpError();
+        try
+        {
+            commands.Add(command);
+        }
+        catch (InvalidOperationException)
+        {
+            // Completion may close admission after the check above. Preserve the capture failure.
+            RethrowPumpError();
+            throw;
+        }
+        // An accepted barrier owns its event until the pump signals it. Flush rethrows after waiting.
+        if (command.Completion is null) RethrowPumpError();
     }
 
     [ExcludeFromCodeCoverage]

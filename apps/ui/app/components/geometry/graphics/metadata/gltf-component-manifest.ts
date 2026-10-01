@@ -12,6 +12,7 @@ import type {
 } from '@taucad/types';
 import { admitMechanism } from '@taucad/kinematics';
 import type { TauCadTopologyComponent } from '@taucad/geometry-core';
+import { Box3, Matrix4, Quaternion, Vector3 } from 'three';
 
 type JsonObject = JSONObject;
 
@@ -272,7 +273,14 @@ export function buildGltfMeasurementFeatures(
   manifest: GeometryComponentManifest,
 ): ReadonlyMap<string, GltfMeasurementFeatures> {
   const { json, bin } = parseGltfBytes(content);
-  const topology = readTopologyPayload(json, bin);
+  return buildMeasurementFeatures(json, readTopologyPayload(json, bin), manifest);
+}
+
+function buildMeasurementFeatures(
+  json: GltfJson,
+  topology: TopologyPayload,
+  manifest: GeometryComponentManifest,
+): ReadonlyMap<string, GltfMeasurementFeatures> {
   const components = new Map(topology.components?.map((component) => [component.id, component]) ?? []);
   const result = new Map<string, GltfMeasurementFeatures>();
 
@@ -367,7 +375,7 @@ function readTopologyPayload(json: GltfJson, bin: Uint8Array<ArrayBuffer>): Topo
   }
 
   const start = bufferView.byteOffset ?? 0;
-  const payloadBytes = bin.slice(start, start + bufferView.byteLength);
+  const payloadBytes = bin.subarray(start, start + bufferView.byteLength);
   return JSON.parse(new TextDecoder().decode(payloadBytes)) as TopologyPayload;
 }
 
@@ -438,11 +446,85 @@ function getAccessorBounds(json: GltfJson, accessorIndex: number | undefined): G
   return { min, max, center, radius };
 }
 
-function getNodeBounds(json: GltfJson, node: GltfNode): GeometryComponentBounds | undefined {
+type GltfBoundsContext = {
+  json: GltfJson;
+  worldMatrices: ReadonlyMap<number, Matrix4>;
+};
+
+function createNodeWorldMatrices(json: GltfJson): ReadonlyMap<number, Matrix4> {
+  const parents = new Map<number, number>();
+  for (const [nodeIndex, node] of (json.nodes ?? []).entries()) {
+    for (const childIndex of node.children ?? []) {
+      if (!parents.has(childIndex)) {
+        parents.set(childIndex, nodeIndex);
+      }
+    }
+  }
+
+  const matrices = new Map<number, Matrix4>();
+  const visiting = new Set<number>();
+  const worldMatrix = (nodeIndex: number): Matrix4 => {
+    const cached = matrices.get(nodeIndex);
+    if (cached) {
+      return cached;
+    }
+    const node = json.nodes?.[nodeIndex];
+    if (!node || visiting.has(nodeIndex)) {
+      return new Matrix4();
+    }
+
+    visiting.add(nodeIndex);
+    const matrix = node.matrix
+      ? new Matrix4().fromArray(node.matrix)
+      : new Matrix4().compose(
+          new Vector3().fromArray(node.translation ?? [0, 0, 0]),
+          new Quaternion().fromArray(node.rotation ?? [0, 0, 0, 1]),
+          new Vector3().fromArray(node.scale ?? [1, 1, 1]),
+        );
+    const parentIndex = parents.get(nodeIndex);
+    if (parentIndex !== undefined) {
+      matrix.premultiply(worldMatrix(parentIndex));
+    }
+    visiting.delete(nodeIndex);
+    matrices.set(nodeIndex, matrix);
+    return matrix;
+  };
+  for (const nodeIndex of (json.nodes ?? []).keys()) {
+    worldMatrix(nodeIndex);
+  }
+  return matrices;
+}
+
+function transformBounds(
+  bounds: GeometryComponentBounds | undefined,
+  matrix: Matrix4 | undefined,
+): GeometryComponentBounds | undefined {
+  if (!bounds || !matrix) {
+    return bounds;
+  }
+  // Box3 transforms all eight corners, including rotated, scaled and sheared AABBs.
+  const box = new Box3(new Vector3(...bounds.min), new Vector3(...bounds.max)).applyMatrix4(matrix);
+  const center = box.getCenter(new Vector3());
+  return {
+    min: [box.min.x, box.min.y, box.min.z],
+    max: [box.max.x, box.max.y, box.max.z],
+    center: [center.x, center.y, center.z],
+    radius: box.getSize(new Vector3()).length() / 2,
+  };
+}
+
+function getNodeBounds(context: GltfBoundsContext, nodeIndex: number): GeometryComponentBounds | undefined {
+  const { json, worldMatrices } = context;
+  const node = json.nodes?.[nodeIndex];
+  if (!node) {
+    return undefined;
+  }
   const mesh = node.mesh === undefined ? undefined : json.meshes?.[node.mesh];
   const primitiveBounds =
     mesh?.primitives
-      ?.map((primitive) => getAccessorBounds(json, primitive.attributes?.['POSITION']))
+      ?.map((primitive) =>
+        transformBounds(getAccessorBounds(json, primitive.attributes?.['POSITION']), worldMatrices.get(nodeIndex)),
+      )
       .filter((bound): bound is GeometryComponentBounds => bound !== undefined) ?? [];
   return combineBounds(primitiveBounds);
 }
@@ -713,21 +795,27 @@ function getPrimitiveReferencesMaterialIndices(
 }
 
 function getPrimitiveReferencesBounds(
-  json: GltfJson,
+  context: GltfBoundsContext,
   primitiveReferences: readonly GeometryComponentPrimitiveRef[],
 ): GeometryComponentBounds | undefined {
   return combineBounds(
     primitiveReferences
-      .map((reference) => getPrimitiveBounds(json, reference.meshIndex, reference.primitiveIndex))
+      .map((reference) =>
+        transformBounds(
+          getPrimitiveBounds(context.json, reference.meshIndex, reference.primitiveIndex),
+          context.worldMatrices.get(reference.nodeIndex),
+        ),
+      )
       .filter((bound): bound is GeometryComponentBounds => bound !== undefined),
   );
 }
 
 function createTopologyComponentManifest(
-  json: GltfJson,
+  context: GltfBoundsContext,
   topologyComponents: readonly TopologyComponent[],
   options: { sourceFile?: string; geometryHash?: string },
 ): GeometryComponentManifest | undefined {
+  const { json } = context;
   const candidates = topologyComponents.filter((component) => typeof component.id === 'string');
   if (candidates.length === 0) {
     return undefined;
@@ -790,7 +878,7 @@ function createTopologyComponentManifest(
       primitiveRefs: primitiveReferences,
       materialIndices,
       appearance: getComponentAppearance(json, materialIndices),
-      bounds: getPrimitiveReferencesBounds(json, primitiveReferences),
+      bounds: getPrimitiveReferencesBounds(context, primitiveReferences),
       capabilities,
       reference:
         options.sourceFile === undefined
@@ -858,6 +946,31 @@ function createRootNode(childIds: string[], capabilities: GeometryComponentCapab
   };
 }
 
+/** Decode the candidate's metadata once for presentation and reuse admission. */
+export function prepareGltfMetadata(
+  content: Uint8Array<ArrayBuffer>,
+  options: { sourceFile?: string; geometryHash?: string } = {},
+): {
+  parsed: ParsedGltf;
+  manifest: GeometryComponentManifest;
+  getMeasurementFeatures: () => ReadonlyMap<string, GltfMeasurementFeatures>;
+} {
+  const parsed = parseGltfBytes(content);
+  const payload = readTopologyPayload(parsed.json, parsed.bin);
+  const componentManifest = buildComponentManifest(parsed.json, payload.components ?? [], options);
+  const mechanism = readMechanism(payload);
+  const manifest = mechanism ? { ...componentManifest, mechanism } : componentManifest;
+  let measurementFeatures: ReadonlyMap<string, GltfMeasurementFeatures> | undefined;
+  return {
+    parsed,
+    manifest,
+    getMeasurementFeatures: () => {
+      measurementFeatures ??= buildMeasurementFeatures(parsed.json, payload, manifest);
+      return measurementFeatures;
+    },
+  };
+}
+
 export function buildGltfComponentManifest(
   content: Uint8Array<ArrayBuffer>,
   options: { sourceFile?: string; geometryHash?: string } = {},
@@ -874,7 +987,8 @@ function buildComponentManifest(
   topologyComponents: readonly TopologyComponent[],
   options: { sourceFile?: string; geometryHash?: string },
 ): GeometryComponentManifest {
-  const topologyManifest = createTopologyComponentManifest(json, topologyComponents, options);
+  const boundsContext = { json, worldMatrices: createNodeWorldMatrices(json) };
+  const topologyManifest = createTopologyComponentManifest(boundsContext, topologyComponents, options);
   if (topologyManifest) {
     return attachComponentSurfaceMaterials(json, topologyManifest);
   }
@@ -940,6 +1054,7 @@ function buildComponentManifest(
       ? { ...createCapabilities(componentHasPreciseTopology), ...topology.capabilities }
       : createCapabilities(componentHasPreciseTopology);
     const path = [...parentPath, name];
+    const ownBounds = getNodeBounds(boundsContext, nodeIndex);
 
     nodeOrder.push(id);
     nodesById[id] = {
@@ -956,7 +1071,7 @@ function buildComponentManifest(
       primitiveRefs: primitiveReferences,
       materialIndices: ownMaterialIndices,
       appearance: getComponentAppearance(json, ownMaterialIndices),
-      bounds: getNodeBounds(json, gltfNode),
+      bounds: ownBounds,
       capabilities,
       reference:
         options.sourceFile === undefined
@@ -986,7 +1101,7 @@ function buildComponentManifest(
       materialIndices,
       appearance: getComponentAppearance(json, materialIndices),
       bounds: combineBounds(
-        [getNodeBounds(json, gltfNode), ...childNodes.map((child) => child.bounds)].filter(
+        [ownBounds, ...childNodes.map((child) => child.bounds)].filter(
           (bounds): bounds is GeometryComponentBounds => bounds !== undefined,
         ),
       ),

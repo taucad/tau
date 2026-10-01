@@ -216,29 +216,6 @@ const isHoverSuppressed = (harness: Harness): boolean =>
 
 const selectedCutId = (harness: Harness): string => harness.actor.getSnapshot().context.selectedSectionCutId ?? '';
 
-// A guard, rather than `instanceof` inline, which would narrow to the class's `any` type arguments.
-const isMaterial = (value: unknown): value is THREE.Material => value instanceof THREE.Material;
-
-/** Counts how many of the materials drawn under `root` have been disposed. */
-const watchMaterialDisposals = (
-  root: THREE.Object3D | undefined,
-): Readonly<{ total: number; disposed: () => number }> => {
-  const materials = new Set<THREE.Material>();
-  root?.traverse((object) => {
-    if ('material' in object && isMaterial(object.material)) {
-      materials.add(object.material);
-    }
-  });
-  let disposed = 0;
-  const countDisposal = (): void => {
-    disposed++;
-  };
-  for (const material of materials) {
-    material.addEventListener('dispose', countDisposal);
-  }
-  return { total: materials.size, disposed: () => disposed };
-};
-
 describe('SectionHandles', () => {
   let harness: Harness | undefined;
 
@@ -632,68 +609,12 @@ describe('SectionHandles', () => {
     });
   });
 
-  describe('warm-up', () => {
-    it('should compile the handles for both cameras and a picker once, and not again for Section or the selection', () => {
-      harness = mountHandles({ planePicker: mock<SectionPlanePicker>() });
-
-      const { calls } = harness.compileAsync.mock;
-      expect(calls).toHaveLength(3);
-      // The handles' own warm-up copy, for each camera; then a picker of the warm-up's own, with its camera.
-      expect(calls[0]?.[0]).toBeInstanceOf(THREE.Group);
-      expect(calls[1]?.[0]).toBe(calls[0]?.[0]);
-      expect([calls[0]?.[1], calls[1]?.[1]]).toEqual([harness.perspectiveCamera, harness.orthographicCamera]);
-      expect(watchMaterialDisposals(calls[0]?.[0]).total).toBeGreaterThan(0);
-      expect(calls[2]?.[0]).toBeInstanceOf(THREE.Scene);
-      expect(calls[2]?.[1]).toBeInstanceOf(THREE.OrthographicCamera);
-
-      harness.send({ type: 'setSectionViewActive', payload: false });
-      harness.send({ type: 'setSectionViewActive', payload: true });
-      harness.send({ type: 'selectSectionCut', payload: undefined });
-      harness.send({ type: 'addSectionCut', payload: { kind: 'revolution', axis: 'z' } });
-
-      expect(harness.compileAsync).toHaveBeenCalledTimes(3);
-    });
-
-    it('should dispose the warm-up only once its compile settles, even when unmounted first', async () => {
-      let settle: () => void = () => undefined;
-      const compiled = new Promise<void>((resolve) => {
-        settle = resolve;
-      });
-      harness = mountHandles({
-        compileAsync: async (scene) => {
-          await compiled;
-          return scene;
-        },
-      });
-      const warmup = watchMaterialDisposals(harness.compileAsync.mock.calls[0]?.[0]);
-
-      cleanup();
-      // A material disposed mid-compile would break WebGL's readiness check.
-      expect(warmup.disposed()).toBe(0);
-
-      settle();
-      await vi.waitFor(() => {
-        expect(warmup.disposed()).toBe(warmup.total);
-      });
-      expect(warmup.total).toBeGreaterThan(0);
-    });
-
-    it('should keep the warm-up alive after its compile settles until the viewer unmounts', async () => {
-      harness = mountHandles();
-      const warmup = watchMaterialDisposals(harness.compileAsync.mock.calls[0]?.[0]);
-
-      // A macrotask drains the warm-up's settle continuation.
-      await act(async () => {
-        await new Promise((resolve) => {
-          setTimeout(resolve, 0);
-        });
-      });
-      // Disposing on settle would release the programs, and the first real frame would compile again.
-      expect(warmup.disposed()).toBe(0);
-
-      cleanup();
-      expect(warmup.disposed()).toBe(warmup.total);
-      expect(warmup.total).toBeGreaterThan(0);
-    });
+  it('should prepare only demanded handles without compiling unused projections or picker copies', () => {
+    harness = mountHandles({ planePicker: mock<SectionPlanePicker>() });
+    harness.send({ type: 'setSectionViewActive', payload: false });
+    harness.send({ type: 'setSectionViewActive', payload: true });
+    harness.send({ type: 'selectSectionCut', payload: undefined });
+    harness.send({ type: 'addSectionCut', payload: { kind: 'revolution', axis: 'z' } });
+    expect(harness.compileAsync).not.toHaveBeenCalled();
   });
 });

@@ -19,6 +19,8 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { projectFiles } from '#components/print/testing/project-files.js';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
+import { summarizeGcodeContainer } from '#components/printer/printer-summary.js';
+import type { SliceSummary } from '#components/printer/printer-summary.js';
 import type * as PrintSummary from '#routes/w.$workspace.$project/chat-print-summary.js';
 import {
   accepted,
@@ -90,12 +92,17 @@ vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => {
   ]);
   return { ...actual, ...fixtures.desktopBridgeMock };
 });
-vi.mock('#routes/w.$workspace.$project/chat-print-summary.js', async (importOriginal) => {
-  const [actual, fixtures] = await Promise.all([
-    importOriginal<typeof PrintSummary>(),
-    import('#routes/w.$workspace.$project/chat-print.fixture.js'),
-  ]);
-  return { ...actual, summarizeGcodeContainer: fixtures.summarizeGcodeContainerMock };
+// Slice UI fixtures deliberately use only a ZIP signature; preserve their existing summary seam.
+vi.mock('#components/printer/printer-preparation.js', async () => {
+  const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
+  return {
+    printerPreparation: {
+      prepare: async ({ signal }: { bytes: Uint8Array<ArrayBuffer>; signal: AbortSignal }) => {
+        signal.throwIfAborted();
+        return { kind: 'refused', summary: fixtures.summarizeGcodeContainerMock(), preparationDuration: 0 };
+      },
+    },
+  };
 });
 
 const renderPane = (client: MachineClient, bridge: PrintApprovalBridge = createBridge().bridge) =>
@@ -252,6 +259,8 @@ beforeEach(() => {
   projectFiles.clear();
   setRestoredPrintEntryPath(undefined);
 });
+
+const signalMatcher: unknown = expect.any(AbortSignal);
 
 describe('Print pane orientation', () => {
   it('lists a restored secondary model without waking its parked CAD unit', async () => {
@@ -505,6 +514,42 @@ describe('Print pane orientation', () => {
 });
 
 describe('Print pane prepare and send', () => {
+  it('should cancel slicing immediately and discard a late successful export before writing or publishing it', async () => {
+    let finish!: () => void;
+    mockExport.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      return {
+        success: true,
+        data: [
+          {
+            name: 'main.gcode.3mf',
+            bytes: new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
+            mimeType: 'application/vnd.bambulab.gcode-3mf',
+          },
+        ],
+        issues: [],
+      };
+    });
+    const user = userEvent.setup();
+    renderPane(createFixture().client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await waitFor(() => {
+      expect(mockExport).toHaveBeenCalledOnce();
+    });
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Cancel slicing' }));
+    expect(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
+    const sent = mockProjectSend.mock.calls.length;
+    finish();
+    await waitFor(() => {
+      expect(mockProjectSend.mock.calls.length).toBeGreaterThan(sent);
+    });
+    expect(mockWriteFiles).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Slice result')).not.toBeInTheDocument();
+  });
+
   it('slices with the chosen preset, previews, confirms once, and starts only through the approved request', async () => {
     const fixture = createFixture();
     const user = userEvent.setup();
@@ -537,6 +582,7 @@ describe('Print pane prepare and send', () => {
     await user.keyboard('{Enter}');
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+        signal: signalMatcher,
         exportOptions: { ...machineSliceOptions, preset: 'fine' },
       });
     });
@@ -665,6 +711,7 @@ describe('Print pane prepare and send', () => {
 
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+        signal: signalMatcher,
         exportOptions: { ...machineSliceOptions, plate: 'cool' },
       });
     });
@@ -701,6 +748,7 @@ describe('Print pane prepare and send', () => {
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice again' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenLastCalledWith('gcode.3mf', {
+        signal: signalMatcher,
         exportOptions: { ...machineSliceOptions, layerHeight: 0.16 },
       });
     });
@@ -990,7 +1038,7 @@ describe('Print pane slice summary', () => {
       plate: 'textured-pei',
     });
 
-    const result = summary.summarizeGcodeContainer(bytes);
+    const result = summarizeGcodeContainer(bytes);
 
     expect(result.bounds).toEqual({ min: [0, 0, 0], max: [148, 148, 50] });
     expect(result.partBounds).toEqual({ min: [108, 108, 0], max: [148, 148, 2] });
@@ -1006,19 +1054,15 @@ describe('Print pane slice summary', () => {
   });
 
   it("should read the colours of lane M's real two-colour Bambu Studio slice in filament order", async () => {
-    const summary = await vi.importActual<typeof PrintSummary>('#routes/w.$workspace.$project/chat-print-summary.js');
     const gcode = readFileSync(
       join(process.cwd(), '../../packages/plugins/slicer/src/__fixtures__/two-colour-cubes.gcode'),
     );
-    const result = summary.summarizeGcodeContainer(
-      writeBambuContainer({ gcode: gcode.toString(), modelName: 'cubes' }),
-    );
+    const result = summarizeGcodeContainer(writeBambuContainer({ gcode: gcode.toString(), modelName: 'cubes' }));
     expect(result.filamentColors).toEqual([red, blue]);
     expect(result.filamentWeightGrams).toBeCloseTo(28.41);
   });
 
   it("should summarize a plate too large to preview from Bambu Studio's header", async () => {
-    const summary = await vi.importActual<typeof PrintSummary>('#routes/w.$workspace.$project/chat-print-summary.js');
     const gcode = readFileSync(
       join(process.cwd(), '../../packages/plugins/slicer/src/__fixtures__/two-colour-cubes.gcode'),
     );
@@ -1026,9 +1070,7 @@ describe('Print pane slice summary', () => {
     vi.mocked(parseGcode).mockImplementationOnce(() => {
       throw new ToolpathParseError('TOOLPATH_SEGMENT_LIMIT', refusal, 2_000_001);
     });
-    expect(
-      summary.summarizeGcodeContainer(writeBambuContainer({ gcode: gcode.toString(), modelName: 'cubes' })),
-    ).toEqual({
+    expect(summarizeGcodeContainer(writeBambuContainer({ gcode: gcode.toString(), modelName: 'cubes' }))).toEqual({
       layers: 50,
       estimatedDuration: 6411,
       isSlicerEstimate: true,
@@ -1447,6 +1489,7 @@ describe('Print pane Bambu Studio mode', () => {
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+        signal: signalMatcher,
         exportOptions: {
           engine: 'bambu-studio',
           bambuStudio: { printer: x1c, process: standard, filaments: [plaMatte], plate: 'textured-pei' },
@@ -1547,6 +1590,7 @@ describe('Print pane Bambu Studio mode', () => {
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+        signal: signalMatcher,
         exportOptions: {
           engine: 'bambu-studio',
           bambuStudio: {
@@ -1709,6 +1753,7 @@ describe('Print pane Bambu Studio mode', () => {
       await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice again' }));
       await waitFor(() => {
         expect(mockExport).toHaveBeenLastCalledWith('gcode.3mf', {
+          signal: signalMatcher,
           exportOptions: {
             engine: 'bambu-studio',
             // In filament order: filament 1 from A3, filament 2 from A1.
@@ -1780,7 +1825,7 @@ describe('Print pane Bambu Studio mode', () => {
    * The 20 mm cube Bambu Studio sliced for the X1C on 2026-09-26: the printer's start routine travels to Y −3 and
    * purges at Y 265, so every nozzle move spans 240 × 268 × 121.5 mm around a centred 19.6 × 19.6 × 20 mm part.
    */
-  const cubeOnX1c: PrintSummary.SliceSummary = {
+  const cubeOnX1c: SliceSummary = {
     ...bambuStudioSliceSummary,
     bounds: { min: [8, -3, 0], max: [248, 265, 121.5] },
     partBounds: { min: [118.2, 118.2, 0], max: [137.8, 137.8, 20] },
@@ -1892,7 +1937,10 @@ describe('Print pane Bambu Studio mode', () => {
     // The reference engine still slices and previews; only Send waits.
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
-      expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', { exportOptions: machineSliceOptions });
+      expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+        signal: signalMatcher,
+        exportOptions: machineSliceOptions,
+      });
     });
     const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
     expect(send).toBeDisabled();
@@ -2040,6 +2088,7 @@ describe('Print pane print settings file', () => {
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+        signal: signalMatcher,
         exportOptions: {
           engine: 'bambu-studio',
           bambuStudio: {
@@ -2146,6 +2195,7 @@ describe('Print pane print settings file', () => {
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+        signal: signalMatcher,
         exportOptions: { ...machineSliceOptions, nozzleDiameter: 0.6, layerHeight: 0.16 },
       });
     });

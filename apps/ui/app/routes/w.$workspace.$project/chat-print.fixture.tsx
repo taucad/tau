@@ -38,7 +38,7 @@ import type { PendingAgentHostApproval } from '#components/chat/chat-approval-ba
 import type { DesktopBambuStudio } from '#filesystem/desktop-bridge.js';
 import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
 import type { SlicedArtifact } from '#routes/w.$workspace.$project/chat-print-prepare.js';
-import type { SliceSummary } from '#routes/w.$workspace.$project/chat-print-summary.js';
+import type { SliceSummary } from '#components/printer/printer-summary.js';
 
 export const timestamp = '2026-09-24T02:00:00.000Z';
 export const later = '2026-09-24T02:00:05.000Z';

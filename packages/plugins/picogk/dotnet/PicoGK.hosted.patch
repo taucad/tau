@@ -386,7 +386,18 @@ diff --git a/Base/VectorField.cs b/Base/VectorField.cs
 diff --git a/Base/Voxels.cs b/Base/Voxels.cs
 --- a/Base/Voxels.cs
 +++ b/Base/Voxels.cs
-@@ -169,9 +169,10 @@
+@@ -160,18 +160,17 @@
+         /// Creates a new voxel field form a mesh
+         /// </summary>
+         /// <param name="msh">The mesh that is rendered into the voxels</param>
+-        public Voxels(in Mesh msh) : this(msh.lib)
+-        {
+-            RenderMesh(msh);
+-        }
++        public Voxels(in Mesh msh) : this(msh?.lib ?? throw new ArgumentNullException(nameof(msh)), msh, 0, false)
++        { }
+ 
+         /// <summary>
          /// Creates a new voxel field from a lattice
          /// </summary>
          /// <param name="lat">The lattice used</param>
@@ -400,7 +411,18 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -248,7 +249,7 @@
+@@ -235,9 +234,7 @@
+                                             Mesh msh,
+                                             float fRadius)
+         {
+-            return new(libSet, _hCreateMeshShell(   libSet.hThis,
+-                                                    msh.hThis,
+-                                                    fRadius));
++            return new(libSet, msh, fRadius, true);
+         }
+ 
+         /// <summary>
+@@ -248,7 +245,7 @@
          /// <returns></returns>
          public bool bIsEmpty()
          {
@@ -409,7 +431,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -257,7 +258,9 @@
+@@ -257,7 +254,9 @@
          /// <returns>Number of bytes allocated to this object</returns>
          public long nMemUsage()
          {
@@ -420,7 +442,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -290,9 +293,7 @@
+@@ -290,9 +289,7 @@
          /// <returns></returns>
          public Voxels voxBoolAdd(in Voxels voxOperand)
          {
@@ -431,7 +453,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -368,9 +369,7 @@
+@@ -368,9 +365,7 @@
          /// <returns></returns>
          public Voxels voxBoolSubtract(in Voxels voxOperand)
          {
@@ -442,7 +464,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -419,9 +418,7 @@
+@@ -419,9 +414,7 @@
          /// <returns></returns>
          public Voxels voxBoolIntersect(in Voxels voxOperand)
          {
@@ -453,17 +475,18 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -660,11 +657,20 @@
+@@ -660,11 +653,20 @@
          {
              if (fOffset < 0)
              {
 -                // Outside remains the same
 -                return voxBoolSubtract(voxOffset(fOffset));
-+                using Voxels inner = voxOffset(fOffset);
-+                return voxBoolSubtract(inner);
-             }
+-            }
 -            
 -            return voxOffset(fOffset).voxBoolSubtract(this);
++                using Voxels inner = voxOffset(fOffset);
++                return voxBoolSubtract(inner);
++            }
 +            Voxels outer = voxOffset(fOffset);
 +            try
 +            {
@@ -478,7 +501,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -688,15 +694,19 @@
+@@ -688,15 +690,19 @@
                  fPosOffsetMM    = fTemp;
              }
  
@@ -506,7 +529,19 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -722,7 +732,7 @@
+@@ -706,10 +712,7 @@
+         /// <param name="msh">The mesh to render (needs to be a closed surface)</param>
+         public void RenderMesh(in Mesh msh)
+         {
+-            if (msh.lib.hThis != lib.hThis)
+-                throw new PicoGKLibraryMismatchException();
+-
+-            _RenderMesh(lib.hThis, hThis, msh.hThis);
++            TauRenderMesh(msh);
+         }
+ 
+         /// <summary>
+@@ -722,7 +725,7 @@
          /// <param name="oBounds">Bounding box in which to render the implicit</param>
          public void RenderImplicit( in IImplicit xImp,
                                      in BBox3 oBounds)
@@ -515,7 +550,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
  
          /// <summary>
          /// Render an implicit signed distance function into the voxels
-@@ -736,7 +746,7 @@
+@@ -736,7 +739,7 @@
          /// </summary>
          /// <param name="xImp">Implicit object with signed distance function</param>
          public void IntersectImplicit(in IImplicit xImp)
@@ -524,7 +559,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
  
  
          /// <summary>
-@@ -759,10 +769,19 @@
+@@ -759,10 +762,19 @@
          /// <param name="lat">The lattice to render</param>
          public void RenderLattice(in Lattice lat)
          {
@@ -546,7 +581,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -773,7 +792,11 @@
+@@ -773,7 +785,11 @@
          /// <param name="fEndZMM">End voxel slice in mm</param>
          public void ProjectZSlice(  float fStartZMM,
                                      float fEndZMM)
@@ -559,7 +594,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
  
          /// <summary>
          /// Makes a copy of the voxel field and applies
-@@ -783,8 +806,8 @@
+@@ -783,8 +799,8 @@
                                          float fEndZMM)
          {
              Voxels vox = new(this);
@@ -570,7 +605,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -794,10 +817,7 @@
+@@ -794,10 +810,7 @@
          /// <returns></returns>
          public bool bIsEqual(in Voxels voxOther)
          {
@@ -582,7 +617,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -812,16 +832,7 @@
+@@ -812,16 +825,7 @@
          public void CalculateProperties(    out float fVolumeCubicMM,
                                              out BBox3 oBBox)
          {
@@ -600,7 +635,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -834,8 +845,8 @@
+@@ -834,8 +838,8 @@
          /// <returns>Bounding box of the voxels in real world coordinates</returns>
          public BBox3 oCalculateBoundingBox()
          {
@@ -611,7 +646,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -963,21 +974,9 @@
+@@ -963,21 +967,9 @@
                                          out int nYSize,
                                          out int nZSize)
          {
@@ -636,7 +671,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -990,21 +989,8 @@
+@@ -990,21 +982,8 @@
                                          out int nYSize,
                                          out int nZSize)
          {
@@ -660,7 +695,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
           /// <summary>
-@@ -1066,30 +1052,28 @@
+@@ -1066,30 +1045,28 @@
              {
              case ESliceAxis.Z:
                  nSliceCount = nZSize;
@@ -699,7 +734,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
          /// which is the native narrow band distance encoded in the float image. You
          /// can also speciy black/white, which encodes the inside of the field as black
-@@ -1101,32 +1085,8 @@
+@@ -1101,32 +1078,8 @@
                                      ESliceMode eMode = ESliceMode.SignedDistance,
                                      ESliceAxis eAxis = ESliceAxis.Z)
          {
@@ -734,7 +769,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
  
              switch (eMode)
              {
-@@ -1176,15 +1136,13 @@
+@@ -1176,15 +1129,13 @@
  
          /// <summary>
          /// Returns a signed distance-field-encoded slice of the voxel field
@@ -755,7 +790,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
          /// which is the native narrow band distance encoded in the float image. You
          /// can also speciy black/white, which encodes the inside of the field as black
-@@ -1193,17 +1151,7 @@
+@@ -1193,17 +1144,7 @@
                                                  ref ImageGrayScale img,
                                                  ESliceMode eMode = ESliceMode.SignedDistance)
          {
@@ -942,7 +977,29 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -392,8 +395,8 @@
+@@ -316,10 +319,6 @@
+                                                             float fRadius1,
+                                                             float fRadius2);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_hCreateMeshShell")]
+-        private static extern VoxHandle _hCreateMeshShell(  LibHandle   hLib,
+-                                                            MshHandle   hMsh,
+-                                                            float fRadius);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_bIsValid")]
+         internal static extern bool _bIsValid(   LibHandle   hLib,
+@@ -373,10 +372,6 @@
+                                                     float       fOffset);
+ 
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_RenderMesh")]
+-        private static extern void _RenderMesh( LibHandle   hLib,
+-                                                VoxHandle   hThis,
+-                                                MshHandle   hMesh);
+ 
+         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+         private delegate float CallbackImplicitDistance(in Vector3 vec);
+@@ -392,8 +387,8 @@
                                                          VoxHandle   hThis,
                                                          CallbackImplicitDistance Callback);
  
@@ -953,7 +1010,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
                                                      VoxHandle   hThis,
                                                      LatHandle   hLattice);
  
-@@ -501,7 +504,7 @@
+@@ -501,7 +496,7 @@
                  m_oMetadata.Dispose();
              }
  
@@ -962,7 +1019,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -578,7 +581,7 @@
+@@ -578,7 +573,7 @@
                  // Nothing to do in this class
              }
  
@@ -971,7 +1028,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
  
              m_bDisposed = true;
          }
-@@ -793,7 +796,10 @@
+@@ -793,7 +788,10 @@
                  // Nothing to do in this class
              }
  
@@ -983,7 +1040,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1075,7 +1081,7 @@
+@@ -1075,7 +1073,7 @@
                  // Nothing to do in this class
              }
  
@@ -992,7 +1049,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1174,11 +1180,11 @@
+@@ -1174,11 +1172,11 @@
  
              if (bDisposing)
              {
@@ -1009,7 +1066,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
          }
  
          bool m_bDisposed = false;
-@@ -1259,11 +1265,10 @@
+@@ -1259,11 +1257,10 @@
  
              if (bDisposing)
              {
@@ -1025,7 +1082,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1383,7 +1388,7 @@
+@@ -1383,7 +1380,7 @@
                  // Nothing to do in this class
              }
  
@@ -1034,7 +1091,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1391,4 +1396,4 @@
+@@ -1391,4 +1388,4 @@
          internal readonly VdbMetaHandle hThis;
          public readonly Library lib;
      }
@@ -1540,6 +1597,59 @@ new file mode 100644
 +
 +        static readonly object m_mtxLibraryHost = new();
 +        static ILibraryHost? m_xLibraryHost;
++    }
++}
+diff --git a/Library/MeshConversion.cs b/Library/MeshConversion.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/MeshConversion.cs
+@@ -0,0 +1,48 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++namespace PicoGK;
++public partial class Voxels
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_CreateFromMesh")]
++    private static extern int TauCreateFromMeshNative(LibHandle library, MshHandle mesh, int shell,
++        float radius, out VoxHandle output, out VdbMetaHandle metadata);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_RenderMesh")]
++    private static extern int TauRenderMeshNative(LibHandle library, VoxHandle voxels, MshHandle mesh);
++
++    private Voxels(Library library, Mesh mesh, float radius, bool shell)
++    {
++        ArgumentNullException.ThrowIfNull(library);
++        ArgumentNullException.ThrowIfNull(mesh);
++        lib = library;
++        if (mesh.lib.hThis != library.hThis) throw new PicoGKLibraryMismatchException();
++        VoxHandle handle = default;
++        VdbMetaHandle metadataHandle = default;
++        FieldMetadata? metadata = null;
++        try
++        {
++            var status = TauCreateFromMeshNative(library.hThis, mesh.hThis, shell ? 1 : 0, radius, out handle, out metadataHandle);
++            TauCheckedCallbacks.Check(status, null, mesh);
++            if (handle.Value == 0 || metadataHandle.Value == IntPtr.Zero)
++                throw new InvalidOperationException("Mesh conversion returned incomplete ownership.");
++            metadata = new FieldMetadata(library, metadataHandle);
++            m_oMetadata = metadata;
++            hThis = handle;
++        }
++        catch
++        {
++            if (metadata is not null) metadata.Dispose();
++            else if (metadataHandle.Value != IntPtr.Zero) TauDestroyCsgMetadata(library.hThis, metadataHandle);
++            if (handle.Value != 0) _Destroy(library.hThis, handle);
++            throw;
++        }
++        finally { GC.KeepAlive(mesh); GC.KeepAlive(library); }
++    }
++    private void TauRenderMesh(Mesh mesh)
++    {
++        ArgumentNullException.ThrowIfNull(mesh);
++        if (mesh.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try { TauCheckedCallbacks.Check(TauRenderMeshNative(lib.hThis, hThis, mesh.hThis), null, mesh); }
++        finally { GC.KeepAlive(this); GC.KeepAlive(mesh); }
 +    }
 +}
 diff --git a/Library/MeshIndexed.cs b/Library/MeshIndexed.cs

@@ -262,7 +262,88 @@ diff --git a/Base/Mesh.cs b/Base/Mesh.cs
 diff --git a/Base/ScalarField.cs b/Base/ScalarField.cs
 --- a/Base/ScalarField.cs
 +++ b/Base/ScalarField.cs
-@@ -261,7 +261,7 @@
+@@ -184,21 +184,9 @@
+                                         out int nYSize,
+                                         out int nZSize)
+         {
+-            nXOrigin    = 0;
+-            nYOrigin    = 0;
+-            nZOrigin    = 0;
+-            nXSize      = 0;
+-            nYSize      = 0;
+-            nZSize      = 0;
+-
+-            _GetVoxelDimensions(    lib.hThis,
+-                                    hThis,
+-                                    ref nXOrigin,
+-                                    ref nYOrigin,
+-                                    ref nZOrigin,
+-                                    ref nXSize,
+-                                    ref nYSize,
+-                                    ref nZSize);
++            var info = TauDimensions();
++            nXOrigin = info.XOrigin; nYOrigin = info.YOrigin; nZOrigin = info.ZOrigin;
++            nXSize = info.XSize; nYSize = info.YSize; nZSize = info.ZSize;
+         }
+ 
+         /// <summary>
+@@ -211,47 +199,23 @@
+                                         out int nYSize,
+                                         out int nZSize)
+         {
+-            int nXOrigin    = 0; // unused in this function
+-            int nYOrigin    = 0; // unused in this function
+-            int nZOrigin    = 0; // unused in this function
+-            nXSize          = 0;
+-            nYSize          = 0;
+-            nZSize          = 0;
+-
+-            _GetVoxelDimensions(    lib.hThis,
+-                                    hThis,
+-                                    ref nXOrigin,
+-                                    ref nYOrigin,
+-                                    ref nZOrigin,
+-                                    ref nXSize,
+-                                    ref nYSize,
+-                                    ref nZSize);
++            var info = TauDimensions();
++            nXSize = info.XSize; nYSize = info.YSize; nZSize = info.ZSize;
+         }
+ 
+         /// <summary>
+         /// Returns a signed distance-field-encoded slice of the voxel field
+-        /// To use it, use GetVoxelDimensions to find out the size of the voxel
+-        /// field in voxel units. Then allocate a new grayscale image to copy
+-        /// the data into, and pass it as a reference. Since GetVoxelDimensions
+-        /// is potentially an "expensive" function, we are putting the burden
+-        /// on you to allocate an image and don't create it for you. You can
+-        /// also re-use the image if you want to save an entire image stack
++        /// Reuses the supplied image when its dimensions match the observed field.
++        /// Otherwise replaces it with an image of the observed dimensions, retaining
++        /// sufficient pixel-array capacity. Only Width * Height pixels belong to
++        /// the returned slice; extra array capacity is not part of the image.
+         /// </summary>
+         /// <param name="nZSlice">Slice to retrieve. 0 is at the bottom.</param>
+-        /// <param name="img">Pre-allocated grayscale image to receive the values</param>
++        /// <param name="img">Reusable grayscale image; resized to receive the observed slice</param>
+         public void GetVoxelSlice(  in int nZSlice,
+                                     ref ImageGrayScale img)
+         {
+-            GCHandle oPinnedArray = GCHandle.Alloc(img.m_afValues, GCHandleType.Pinned);
+-            try
+-            {
+-                IntPtr afBufferPtr = oPinnedArray.AddrOfPinnedObject();
+-                _GetVoxelSlice(lib.hThis, hThis, nZSlice, afBufferPtr);
+-            }
+-            finally
+-            {
+-                oPinnedArray.Free();
+-            }
++            TauFillSlice(nZSlice, ref img);
+         }
+ 
+         /// <summary>
+@@ -261,7 +225,7 @@
          /// <param name="xTraverse">The interface containing the callback</param>
          public void TraverseActive(ITraverseScalarField xTraverse)
          {
@@ -271,7 +352,7 @@ diff --git a/Base/ScalarField.cs b/Base/ScalarField.cs
          }
  
          /// <summary>
-@@ -272,14 +272,14 @@
+@@ -272,14 +236,14 @@
          /// </summary>
          /// <param name="vecPosition">Position to sample</param>
          /// <returns>
@@ -369,12 +450,11 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
              {
 -                // Outside remains the same
 -                return voxBoolSubtract(voxOffset(fOffset));
--            }
--            
--            return voxOffset(fOffset).voxBoolSubtract(this);
 +                using Voxels inner = voxOffset(fOffset);
 +                return voxBoolSubtract(inner);
-+            }
+             }
+-            
+-            return voxOffset(fOffset).voxBoolSubtract(this);
 +            Voxels outer = voxOffset(fOffset);
 +            try
 +            {
@@ -457,6 +537,169 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
+@@ -963,21 +982,9 @@
+                                         out int nYSize,
+                                         out int nZSize)
+         {
+-            nXOrigin    = 0;
+-            nYOrigin    = 0;
+-            nZOrigin    = 0;
+-            nXSize      = 0;
+-            nYSize      = 0;
+-            nZSize      = 0;
+-
+-            _GetVoxelDimensions(    lib.hThis,
+-                                    hThis,
+-                                    ref nXOrigin,
+-                                    ref nYOrigin,
+-                                    ref nZOrigin,
+-                                    ref nXSize,
+-                                    ref nYSize,
+-                                    ref nZSize);
++            var info = TauDimensions();
++            nXOrigin = info.XOrigin; nYOrigin = info.YOrigin; nZOrigin = info.ZOrigin;
++            nXSize = info.XSize; nYSize = info.YSize; nZSize = info.ZSize;
+         }
+ 
+         /// <summary>
+@@ -990,21 +997,8 @@
+                                         out int nYSize,
+                                         out int nZSize)
+         {
+-            int nXOrigin    = 0; // unused in this function
+-            int nYOrigin    = 0; // unused in this function
+-            int nZOrigin    = 0; // unused in this function
+-            nXSize          = 0;
+-            nYSize          = 0;
+-            nZSize          = 0;
+-
+-            _GetVoxelDimensions(    lib.hThis,
+-                                    hThis,
+-                                    ref nXOrigin,
+-                                    ref nYOrigin,
+-                                    ref nZOrigin,
+-                                    ref nXSize,
+-                                    ref nYSize,
+-                                    ref nZSize);
++            var info = TauDimensions();
++            nXSize = info.XSize; nYSize = info.YSize; nZSize = info.ZSize;
+         }
+ 
+          /// <summary>
+@@ -1066,30 +1060,28 @@
+             {
+             case ESliceAxis.Z:
+                 nSliceCount = nZSize;
+-                return new ImageGrayScale(nXSize, nYSize);
++                return TauSliceRead.Allocate(nXSize, nYSize);
+ 
+             case ESliceAxis.Y:
+                 nSliceCount = nYSize;
+-                return new ImageGrayScale(nXSize, nZSize);
++                return TauSliceRead.Allocate(nXSize, nZSize);
+                 
+             case ESliceAxis.X:
+             default:
+                 nSliceCount = nXSize;
+-                return new ImageGrayScale(nYSize, nZSize);
++                return TauSliceRead.Allocate(nYSize, nZSize);
+             }
+         }
+ 
+         /// <summary>
+         /// Returns a slice of the voxel field along the specified axis.
+-        /// To use it, use GetVoxelDimensions to find out the size of the voxel
+-        /// field in voxel units. Then allocate a new grayscale image to copy
+-        /// the data into, and pass it as a reference. Since GetVoxelDimensions
+-        /// is potentially an "expensive" function, we are putting the burden
+-        /// on you to allocate an image and don't create it for you. You can
+-        /// also re-use the image if you want to save an entire image stack
++        /// Reuses the supplied image when its dimensions match the observed field.
++        /// Otherwise replaces it with an image of the observed dimensions, retaining
++        /// sufficient pixel-array capacity. Only Width * Height pixels belong to
++        /// the returned slice; extra array capacity is not part of the image.
+         /// </summary>
+         /// <param name="nSlice">Slice to retrieve. 0 is at the origin.</param>
+-        /// <param name="img">Pre-allocated grayscale image to receive the values</param>
++        /// <param name="img">Reusable grayscale image; resized to receive the observed slice</param>
+         /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
+         /// which is the native narrow band distance encoded in the float image. You
+         /// can also speciy black/white, which encodes the inside of the field as black
+@@ -1101,32 +1093,8 @@
+                                     ESliceMode eMode = ESliceMode.SignedDistance,
+                                     ESliceAxis eAxis = ESliceAxis.Z)
+         {
+-            float fBackground = 0f;
+-            GCHandle oPinnedArray = GCHandle.Alloc(img.m_afValues, GCHandleType.Pinned);
+-            try
+-            {
+-                IntPtr afBufferPtr = oPinnedArray.AddrOfPinnedObject();
+-
+-                switch (eAxis)
+-                {
+-                case ESliceAxis.Z:
+-                    _GetZSlice(lib.hThis, hThis, nSlice, afBufferPtr, ref fBackground);
+-                    break;
+-
+-                case ESliceAxis.Y:
+-                    _GetYSlice(lib.hThis, hThis, nSlice, afBufferPtr, ref fBackground);
+-                    break;
+-
+-                case ESliceAxis.X:
+-                default:
+-                    _GetXSlice(lib.hThis, hThis, nSlice, afBufferPtr, ref fBackground);
+-                    break;
+-                }
+-            }
+-            finally
+-            {
+-                oPinnedArray.Free();
+-            }
++            int mode = eAxis == ESliceAxis.Z ? 2 : eAxis == ESliceAxis.Y ? 1 : 0;
++            float fBackground = TauFillSlice(mode, nSlice, 0, ref img).Background;
+ 
+             switch (eMode)
+             {
+@@ -1176,15 +1144,13 @@
+ 
+         /// <summary>
+         /// Returns a signed distance-field-encoded slice of the voxel field
+-        /// To use it, use GetVoxelDimensions to find out the size of the voxel
+-        /// field in voxel units. Then allocate a new grayscale image to copy
+-        /// the data into, and pass it as a reference. Since GetVoxelDimensions
+-        /// is potentially an "expensive" function, we are putting the burden
+-        /// on you to allocate an image and don't create it for you. You can
+-        /// also re-use the image if you want to save an entire image stack
++        /// Reuses the supplied image when its dimensions match the observed field.
++        /// Otherwise replaces it with an image of the observed dimensions, retaining
++        /// sufficient pixel-array capacity. Only Width * Height pixels belong to
++        /// the returned slice; extra array capacity is not part of the image.
+         /// </summary>
+         /// <param name="fZSlice">Slice to retrieve. 0 is at the bottom.</param>
+-        /// <param name="img">Pre-allocated grayscale image to receive the values</param>
++        /// <param name="img">Reusable grayscale image; resized to receive the observed slice</param>
+         /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
+         /// which is the native narrow band distance encoded in the float image. You
+         /// can also speciy black/white, which encodes the inside of the field as black
+@@ -1193,17 +1159,7 @@
+                                                 ref ImageGrayScale img,
+                                                 ESliceMode eMode = ESliceMode.SignedDistance)
+         {
+-            float fBackground = 0f;
+-            GCHandle oPinnedArray = GCHandle.Alloc(img.m_afValues, GCHandleType.Pinned);
+-            try
+-            {
+-                IntPtr afBufferPtr = oPinnedArray.AddrOfPinnedObject();
+-                _GetInterpolatedZSlice(lib.hThis, hThis, fZSlice, afBufferPtr, ref fBackground);
+-            }
+-            finally
+-            {
+-                oPinnedArray.Free();
+-            }
++            float fBackground = TauFillSlice(3, 0, fZSlice, ref img).Background;
+ 
+             switch (eMode)
+             {
 diff --git a/IO/MeshIo.cs b/IO/MeshIo.cs
 --- a/IO/MeshIo.cs
 +++ b/IO/MeshIo.cs
@@ -1555,6 +1798,144 @@ new file mode 100644
 +{
 +    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_GetOwnedMemory")]
 +    private static extern int TauOwnedMemoryNative(LibHandle library, VoxHandle voxels, out long bytes);
++}
+diff --git a/Library/SliceRead.cs b/Library/SliceRead.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/SliceRead.cs
+@@ -0,0 +1,133 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++namespace PicoGK;
++
++[StructLayout(LayoutKind.Sequential)]
++internal struct TauSliceInfo
++{
++    internal int XOrigin, YOrigin, ZOrigin, XSize, YSize, ZSize, Width, Height;
++    internal float Background;
++    internal ulong Required;
++}
++internal static class TauSliceRead
++{
++    internal static ImageGrayScale Allocate(int width, int height)
++    {
++        var required = (long)width * height;
++        if (width < 0 || height < 0 || required > Array.MaxLength)
++            throw new ArgumentException("PicoGK slice capacity exceeds the managed array range.");
++        return new ImageGrayScale(new TauSliceInfo { Width = width, Height = height }, new float[checked((int)required)]);
++    }
++    internal static TauSliceInfo Fill(object owner, int mode, int slice, float fractionalSlice, ref ImageGrayScale image)
++    {
++        ArgumentNullException.ThrowIfNull(image);
++        var original = image;
++        var values = image.m_afValues;
++        ArgumentNullException.ThrowIfNull(values);
++        while (true)
++        {
++            TauSliceInfo info;
++            int status;
++            var pinned = GCHandle.Alloc(values, GCHandleType.Pinned);
++            try
++            {
++                status = owner switch
++                {
++                    Voxels voxels => voxels.TauReadSlice(mode, slice, fractionalSlice, pinned.AddrOfPinnedObject(), (ulong)values.LongLength, out info),
++                    ScalarField field => field.TauReadSlice(slice, pinned.AddrOfPinnedObject(), (ulong)values.LongLength, out info),
++                    _ => throw new ArgumentException("Unsupported PicoGK slice owner.", nameof(owner))
++                };
++            }
++            finally { pinned.Free(); }
++            if (status == 1)
++            {
++                if (info.Required <= (ulong)values.LongLength || info.Required > (ulong)Array.MaxLength)
++                    throw new ArgumentException("PicoGK slice capacity exceeds the managed array range.");
++                values = new float[checked((int)info.Required)];
++                continue;
++            }
++            TauCheckedCallbacks.Check(status, null, owner);
++            if (info.Width < 0 || info.Height < 0 || info.Required != (ulong)info.Width * (ulong)info.Height ||
++                info.Required > (ulong)values.LongLength)
++                throw new InvalidOperationException("PicoGK returned inconsistent slice dimensions.");
++            if (original.nWidth != info.Width || original.nHeight != info.Height ||
++                !ReferenceEquals(original.m_afValues, values))
++                image = new ImageGrayScale(info, values);
++            return info;
++        }
++    }
++}
++public abstract partial class Image
++{
++    // Internal slice adoption permits an empty image; authored constructors retain their validation.
++    internal Image(TauSliceInfo dimensions)
++    {
++        if (dimensions.Width < 0 || dimensions.Height < 0)
++            throw new ArgumentOutOfRangeException(nameof(dimensions));
++        nWidth = dimensions.Width;
++        nHeight = dimensions.Height;
++        eType = EType.GRAY;
++    }
++}
++public abstract partial class ImageGrayscaleAbstract
++{
++    internal ImageGrayscaleAbstract(TauSliceInfo dimensions) : base(dimensions) { }
++}
++public partial class ImageGrayScale
++{
++    // A coherent read may change dimensions while retaining sufficient caller-owned capacity.
++    internal ImageGrayScale(TauSliceInfo dimensions, float[] values) : base(dimensions)
++    {
++        m_afValues = values;
++    }
++}
++public partial class Voxels
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention=CallingConvention.Cdecl, EntryPoint="TauVoxels_ReadSlice")]
++    private static extern int TauReadSliceNative(LibHandle library, VoxHandle voxels, int mode,
++        int slice, float fractionalSlice, IntPtr buffer, ulong capacity, out TauSliceInfo info);
++    private TauSliceInfo TauDimensions()
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try
++        {
++            var status = TauReadSliceNative(lib.hThis, hThis, -1, 0, 0, IntPtr.Zero, 0, out var info);
++            TauCheckedCallbacks.Check(status, null, this);
++            return info;
++        }
++        finally { GC.KeepAlive(this); }
++    }
++    internal int TauReadSlice(int mode, int slice, float fractionalSlice, IntPtr buffer, ulong capacity, out TauSliceInfo info)
++        => TauReadSliceNative(lib.hThis, hThis, mode, slice, fractionalSlice, buffer, capacity, out info);
++    private TauSliceInfo TauFillSlice(int mode, int slice, float fractionalSlice, ref ImageGrayScale image)
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try { return TauSliceRead.Fill(this, mode, slice, fractionalSlice, ref image); }
++        finally { GC.KeepAlive(this); }
++    }
++}
++public partial class ScalarField
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention=CallingConvention.Cdecl, EntryPoint="TauScalarField_ReadSlice")]
++    private static extern int TauReadSliceNative(LibHandle library, ScalarFieldHandle field, int mode,
++        int slice, IntPtr buffer, ulong capacity, out TauSliceInfo info);
++    private TauSliceInfo TauDimensions()
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try
++        {
++            var status = TauReadSliceNative(lib.hThis, hThis, -1, 0, IntPtr.Zero, 0, out var info);
++            TauCheckedCallbacks.Check(status, null, this);
++            return info;
++        }
++        finally { GC.KeepAlive(this); }
++    }
++    internal int TauReadSlice(int slice, IntPtr buffer, ulong capacity, out TauSliceInfo info)
++        => TauReadSliceNative(lib.hThis, hThis, 2, slice, buffer, capacity, out info);
++    private void TauFillSlice(int slice, ref ImageGrayScale image)
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try { TauSliceRead.Fill(this, 2, slice, 0, ref image); }
++        finally { GC.KeepAlive(this); }
++    }
 +}
 diff --git a/Library/SurfaceNormals.cs b/Library/SurfaceNormals.cs
 new file mode 100644

@@ -473,14 +473,44 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              if (m_bDisposed)
              {
                  return;
-@@ -216,6 +218,7 @@
+@@ -214,8 +216,9 @@
+                 // Nothing to do in this class
+             }
  
-             _Destroy(lib.hThis, hThis);
+-            _Destroy(lib.hThis, hThis);
++            if (lib is not null) _Destroy(lib.hThis, hThis);
              m_bDisposed = true;
 +            }
          }
  
          bool m_bDisposed = false;
+@@ -280,7 +283,7 @@
+                 // Nothing to do in this class
+             }
+ 
+-            _Destroy(lib.hThis, hThis);
++            if (lib is not null) _Destroy(lib.hThis, hThis);
+             m_bDisposed = true;
+         }
+ 
+@@ -501,7 +504,7 @@
+                 m_oMetadata.Dispose();
+             }
+ 
+-            _Destroy(lib.hThis, hThis);
++            if (lib is not null) _Destroy(lib.hThis, hThis);
+             m_bDisposed = true;
+         }
+ 
+@@ -578,7 +581,7 @@
+                 // Nothing to do in this class
+             }
+ 
+-            _Destroy(lib.hThis, hThis);
++            if (lib is not null) _Destroy(lib.hThis, hThis);
+ 
+             m_bDisposed = true;
+         }
 @@ -793,7 +796,10 @@
                  // Nothing to do in this class
              }
@@ -493,7 +523,58 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1391,4 +1397,4 @@
+@@ -1075,7 +1081,7 @@
+                 // Nothing to do in this class
+             }
+ 
+-            _Destroy(lib.hThis, hThis);
++            if (lib is not null) _Destroy(lib.hThis, hThis);
+             m_bDisposed = true;
+         }
+ 
+@@ -1174,11 +1180,11 @@
+ 
+             if (bDisposing)
+             {
+-                // dispose managed state (managed objects).
+-                // Nothing to do in this class
+-            }
+-
+-            _Destroy(lib.hThis, hThis);
++                m_oMetadata?.Dispose();
++            }
++
++            if (lib is not null) _Destroy(lib.hThis, hThis);
++            m_bDisposed = true;
+         }
+ 
+         bool m_bDisposed = false;
+@@ -1259,11 +1265,10 @@
+ 
+             if (bDisposing)
+             {
+-                // dispose managed state (managed objects).
+-                // Nothing to do in this class
+-            }
+-
+-            _Destroy(lib.hThis, hThis);
++                m_oMetadata?.Dispose();
++            }
++
++            if (lib is not null) _Destroy(lib.hThis, hThis);
+             m_bDisposed = true;
+         }
+ 
+@@ -1383,7 +1388,7 @@
+                 // Nothing to do in this class
+             }
+ 
+-            _Destroy(lib.hThis, hThis);
++            if (lib is not null) _Destroy(lib.hThis, hThis);
+             m_bDisposed = true;
+         }
+ 
+@@ -1391,4 +1396,4 @@
          internal readonly VdbMetaHandle hThis;
          public readonly Library lib;
      }

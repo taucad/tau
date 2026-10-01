@@ -555,10 +555,12 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  #include "PicoGK.h"
  
  #include "PicoGKLibraryMgr.h"
-@@ -44,6 +46,13 @@
+@@ -44,6 +46,15 @@
  #include "PicoGKTrace.h"
  
  using namespace PicoGK;
++
++namespace { template<class T> int32_t TauCheckedInvoke(T operation) noexcept; }
 +
 +// All voxel creation/import/copy routes bind counters at native admission.
 +static PKVOXELS TauAddVoxels(const Library::Instance::Ptr& library, Voxels::Ptr value) {
@@ -569,7 +571,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  
  void SafeCopyInfoString(const std::string s, char psz[PKINFOSTRINGLEN])
  {
-@@ -84,55 +93,55 @@
+@@ -84,55 +95,55 @@
  PICOGK_API int64_t Library_nTotalMemUsage(PKINSTANCE hThis)
  {
      PKTRACE(Library_nTotalMemUsage);
@@ -634,6 +636,25 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API int64_t Library_nMeshesAllocated(PKINSTANCE hThis)
+@@ -242,13 +253,11 @@
+ PICOGK_API void Mesh_Destroy(   PKINSTANCE hLib,
+                                 PKMESH hThis)
+ {
+-    // Library may have been cleaned up already, whereas the object
+-    // could still be alive due to delayed gargabe collector
+-    if (Library::oLib().bIsValid(hLib))
+-    {
+-        Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-        roLib->m_oMeshes.bDestroy(hThis);
+-    }
++    // Late finalizers may run after their Library has been removed.
++    (void)TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(hLib);
++        owner->m_oMeshes.bDestroy(hThis);
++    });
+ }
+ 
+ PICOGK_API int64_t Mesh_nMemUsage(  PKINSTANCE hLib,
 @@ -256,8 +265,10 @@
  {
      PKTRACE(Mesh_nMemUsage);
@@ -645,7 +666,24 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API int32_t Mesh_nAddVertex( PKINSTANCE hLib,
-@@ -360,10 +371,12 @@
+@@ -348,22 +359,22 @@
+ PICOGK_API void Lattice_Destroy(    PKINSTANCE hLib,
+                                     PKLATTICE hThis)
+ {
+-    // Library may have been cleaned up already, whereas the object
+-    // could still be alive due to delayed gargabe collector
+-    if (Library::oLib().bIsValid(hLib))
+-    {
+-        Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-        roLib->m_oLattices.bDestroy(hThis);
+-    }
++    // Late finalizers may run after their Library has been removed.
++    (void)TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(hLib);
++        owner->m_oLattices.bDestroy(hThis);
++    });
+ }
+ 
  PICOGK_API int64_t Lattice_nMemUsage(   PKINSTANCE hLib,
                                          PKLATTICE hThis)
  {
@@ -658,7 +696,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API void Lattice_AddSphere(  PKINSTANCE hLib,
-@@ -397,7 +410,7 @@
+@@ -397,7 +408,7 @@
  PICOGK_API PKVOXELS Voxels_hCreate(PKINSTANCE hLib)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -667,7 +705,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
                                                                  PICOGK_VOXEL_DEFAULTNARROWBAND));
  }
  
-@@ -405,7 +418,7 @@
+@@ -405,7 +416,7 @@
                                          PKVOXELS hSource)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -676,7 +714,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKVOXELS Voxels_hCreateSphere(   PKINSTANCE          hLib,
-@@ -413,7 +426,7 @@
+@@ -413,7 +424,7 @@
                                              float               fRadius)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -685,7 +723,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
                                                              PICOGK_VOXEL_DEFAULTNARROWBAND,
                                                              *pvecCenter,
                                                              fRadius));
-@@ -426,7 +439,7 @@
+@@ -426,7 +437,7 @@
                                              float               fRadius2)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -694,7 +732,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
                                                              PICOGK_VOXEL_DEFAULTNARROWBAND,
                                                              *pvecStart,
                                                              *pvecStop,
-@@ -439,7 +452,7 @@
+@@ -439,7 +450,7 @@
                                                  float               fRadius)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -703,7 +741,27 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
                                                              PICOGK_VOXEL_DEFAULTNARROWBAND,
                                                              *roLib->m_oMeshes.roGet(hMesh),
                                                              fRadius));
-@@ -485,8 +498,10 @@
+@@ -462,14 +473,11 @@
+ PICOGK_API void Voxels_Destroy( PKINSTANCE hLib,
+                                 PKVOXELS hThis)
+ {
+-    
+-    // Library may have been cleaned up already, whereas the object
+-    // could still be alive due to delayed gargabe collector
+-    if (Library::oLib().bIsValid(hLib))
+-    {
+-        Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-        roLib->m_oVoxels.bDestroy(hThis);
+-    }
++    // Late finalizers may run after their Library has been removed.
++    (void)TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(hLib);
++        owner->m_oVoxels.bDestroy(hThis);
++    });
+ }
+ 
+ PICOGK_API bool Voxels_bDiagnose(   PKINSTANCE  hLib,
+@@ -485,8 +493,10 @@
  PICOGK_API int64_t Voxels_nMemUsage(    PKINSTANCE hLib,
                                          PKVOXELS hThis)
  {
@@ -714,7 +772,24 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API float Voxels_fVoxelSize( PKINSTANCE  hLib,
-@@ -754,8 +769,10 @@
+@@ -742,20 +752,20 @@
+ PICOGK_API void PolyLine_Destroy(   PKINSTANCE hLib,
+                                     PKPOLYLINE hThis)
+ {
+-    // Library may have been cleaned up already, whereas the object
+-    // could still be alive due to delayed gargabe collector
+-    if (Library::oLib().bIsValid(hLib))
+-    {
+-        Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-        roLib->m_oPolyLines.bDestroy(hThis);
+-    }
++    // Late finalizers may run after their Library has been removed.
++    (void)TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(hLib);
++        owner->m_oPolyLines.bDestroy(hThis);
++    });
+ }
+ 
  PICOGK_API int64_t PolyLine_nMemUsage(  PKINSTANCE hLib,
                                          PKPOLYLINE hThis)
  {
@@ -725,7 +800,24 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API int32_t PolyLine_nAddVertex( PKINSTANCE hLib,
-@@ -842,8 +859,10 @@
+@@ -830,20 +840,20 @@
+ PICOGK_API void VdbFile_Destroy(    PKINSTANCE hLib,
+                                     PKVDBFILE hThis)
+ {
+-    // Library may have been cleaned up already, whereas the object
+-    // could still be alive due to delayed gargabe collector
+-    if (Library::oLib().bIsValid(hLib))
+-    {
+-        Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-        roLib->m_oVdbFiles.bDestroy(hThis);
+-    }
++    // Late finalizers may run after their Library has been removed.
++    (void)TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(hLib);
++        owner->m_oVdbFiles.bDestroy(hThis);
++    });
+ }
+ 
  PICOGK_API int64_t VdbFile_nMemUsage(   PKINSTANCE hLib,
                                          PKVDBFILE hThis)
  {
@@ -736,7 +828,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API bool VdbFile_bSaveToFile(    PKINSTANCE hLib,
-@@ -861,7 +880,9 @@
+@@ -861,7 +871,9 @@
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
      
@@ -747,7 +839,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
              
      if (!roGrid->isType<FloatGrid>())
          return 0;
-@@ -869,7 +890,7 @@
+@@ -869,7 +881,7 @@
      if (roGrid->getGridClass() != GRID_LEVEL_SET)
          return 0; // not a voxel field
              
@@ -756,7 +848,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
                                                              PICOGK_VOXEL_DEFAULTNARROWBAND));
  }
  
-@@ -879,8 +900,8 @@
+@@ -879,8 +891,8 @@
                                          PKVOXELS    hVoxels)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -767,7 +859,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
      
  }
  
-@@ -891,7 +912,9 @@
+@@ -891,7 +903,9 @@
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
      
@@ -778,7 +870,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
              
      if (!roGrid->isType<FloatGrid>())
          return 0;
-@@ -909,7 +932,7 @@
+@@ -909,7 +923,7 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      return roLib->m_oVdbFiles.roGet(hThis)
@@ -787,7 +879,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKVECTORFIELD VdbFile_hGetVectorField(   PKINSTANCE hLib,
-@@ -919,7 +942,9 @@
+@@ -919,7 +933,9 @@
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
      
@@ -798,7 +890,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
      
      if (!roGrid->isType<Vec3SGrid>())
          return 0;
-@@ -935,7 +960,7 @@
+@@ -935,7 +951,7 @@
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      
      return roLib->m_oVdbFiles.roGet(hThis)
@@ -807,7 +899,24 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API int32_t VdbFile_nFieldCount( PKINSTANCE hLib,
-@@ -1001,8 +1026,10 @@
+@@ -989,20 +1005,20 @@
+ PICOGK_API void ScalarField_Destroy(    PKINSTANCE hLib,
+                                         PKSCALARFIELD   hThis)
+ {
+-    // Library may have been cleaned up already, whereas the object
+-    // could still be alive due to delayed gargabe collector
+-    if (Library::oLib().bIsValid(hLib))
+-    {
+-        Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-        roLib->m_oScalarFields.bDestroy(hThis);
+-    }
++    // Late finalizers may run after their Library has been removed.
++    (void)TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(hLib);
++        owner->m_oScalarFields.bDestroy(hThis);
++    });
+ }
+ 
  PICOGK_API int64_t ScalarField_nMemUsage(   PKINSTANCE hLib,
                                              PKSCALARFIELD hThis)
  {
@@ -818,7 +927,26 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKSCALARFIELD ScalarField_hCreateFromVoxels( PKINSTANCE hLib,
-@@ -1160,8 +1187,10 @@
+@@ -1122,13 +1138,11 @@
+ PICOGK_API void VectorField_Destroy(    PKINSTANCE hLib,
+                                         PKVECTORFIELD hThis)
+ {
+-    // Library may have been cleaned up already, whereas the object
+-    // could still be alive due to delayed gargabe collector
+-    if (Library::oLib().bIsValid(hLib))
+-    {
+-        Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-        roLib->m_oVectorFields.bDestroy(hThis);
+-    }
++    // Late finalizers may run after their Library has been removed.
++    (void)TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(hLib);
++        owner->m_oVectorFields.bDestroy(hThis);
++    });
+ }
+ 
+ PICOGK_API PKVECTORFIELD VectorField_hCreateFromVoxels( PKINSTANCE hLib,
+@@ -1160,8 +1174,10 @@
  PICOGK_API int64_t VectorField_nMemUsage(   PKINSTANCE hLib,
                                              PKVECTORFIELD hThis)
  {
@@ -829,7 +957,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API void VectorField_SetValue(   PKINSTANCE hLib,
-@@ -1212,7 +1241,8 @@
+@@ -1212,7 +1228,8 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oVoxels.roGet(hField);
@@ -839,7 +967,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKMETADATA Metadata_hFromScalarField(    PKINSTANCE hLib,
-@@ -1220,7 +1250,7 @@
+@@ -1220,7 +1237,7 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oScalarFields.roGet(hField);
@@ -848,7 +976,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKMETADATA Metadata_hFromVectorField(    PKINSTANCE hLib,
-@@ -1228,7 +1258,7 @@
+@@ -1228,19 +1245,17 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oVectorFields.roGet(hField);
@@ -857,7 +985,24 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API void Metadata_Destroy(   PKINSTANCE hLib,
-@@ -1796,3 +1826,332 @@
+                                     PKMETADATA hThis)
+ {
+-    // Library may have been cleaned up already, whereas the object
+-    // could still be alive due to delayed gargabe collector
+-    if (Library::oLib().bIsValid(hLib))
+-    {
+-        Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-        roLib->m_oVdbMetas.bDestroy(hThis);
+-    }
++    // Late finalizers may run after their Library has been removed.
++    (void)TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(hLib);
++        owner->m_oVdbMetas.bDestroy(hThis);
++    });
+ }
+ 
+ PICOGK_API int32_t Metadata_nCount( PKINSTANCE hLib,
+@@ -1796,3 +1811,332 @@
      
      poThis->DestroySideBar(hSideBar);
  }

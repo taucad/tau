@@ -1016,7 +1016,7 @@ AxisSelector (type) [4 members] — Axis selector resolved from cylindrical/coni
   AxisSelector.of (property)
   AxisSelector.query (property)
   AxisSelector.expect (property)
-BodyQuery (type) [10 members] — Body query predicates over per-occurrence solid aggregates
+BodyQuery (type) [10 members] — Body query predicates over available source facts
   BodyQuery.area (property)
   BodyQuery.near (property)
   BodyQuery.nearestTo (property)
@@ -1027,9 +1027,9 @@ BodyQuery (type) [10 members] — Body query predicates over per-occurrence soli
   BodyQuery.allOf (property)
   BodyQuery.anyOf (property)
   BodyQuery.not (property)
-BodySelector (type) [4 members] — Body selector
+BodySelector (type) [4 members] — Body selector over source-backed solid evidence
   BodySelector.kind (property)
-  BodySelector.of (property)
+  BodySelector.of (property) — STEP occurrence scope, or the exact retained mesh primitive label…
   BodySelector.query (property)
   BodySelector.expect (property)
 CandidateEntity (type) [8 members] — Ranked candidate reported on ambiguous/unmatched resolutions, with the disambiguating facts…

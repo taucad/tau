@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import type { GeoSpecNativeModelEngine } from '#model/native-model-loader.js';
 import type { GeoSpecRuntimeClient } from '#model/types.js';
-import { rawSubjectResidency } from '#model/subject.js';
+import { bindGeoSpecSubject, rawSubjectResidency, resolveGeoSpecSubject } from '#model/subject.js';
+import { createGeoSpecAssertionClient } from '#assertion-client/client.js';
+import type { GeoSpecNativeSubject } from '#engine/client.js';
 
 const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
 
@@ -515,6 +517,155 @@ describe('native model loader freshness', () => {
 });
 
 describe('native model loader carried scopes', () => {
+  const leaseFor = (subject: GeoSpecNativeSubject, engine: GeoSpecNativeModelEngine) => {
+    const facade = bindGeoSpecSubject({
+      client: createGeoSpecAssertionClient({ engine }),
+      engine,
+      identity: subject,
+      isLive: () => true,
+      ensureResident: rawSubjectResidency(subject)!,
+    });
+    const { lease } = resolveGeoSpecSubject(facade);
+    expect(lease).toBeDefined();
+    return lease!;
+  };
+
+  it('should drop only a genuine load lease and retain root and sibling aliases', async () => {
+    const { engine, released } = contentEngine();
+    const loader = createGeoSpecNativeModelLoader({ engine });
+    const bytes = new Uint8Array(800);
+    bytes[0] = 1;
+    try {
+      const root = await loader({ source: bytes, format: 'step' });
+      const child = await loader({ source: bytes, format: 'step' });
+      const sibling = await loader({ source: bytes, format: 'step' });
+      const childLease = leaseFor(child, engine);
+      childLease.dispose();
+      childLease.dispose();
+      expect(released).toEqual([]);
+      rawSubjectResidency(root)!();
+      rawSubjectResidency(sibling)!();
+      leaseFor(root, engine).dispose();
+      expect(released).toEqual([]);
+      leaseFor(sibling, engine).dispose();
+      expect(released).toEqual(['1']);
+      expect(rawSubjectResidency(child)).toThrow(TypeError);
+      bytes[0] = 2;
+      await expect(loader({ source: bytes, format: 'step' })).resolves.toMatchObject({ subjectHash: '2'.repeat(64) });
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+
+  it('should retain another loader and a carried owner when the closed loader drops its last lease', async () => {
+    const { engine, released } = contentEngine();
+    const carried = new Map<string, unknown>();
+    const prior = createGeoSpecNativeModelLoader({ engine, carried });
+    await prior({ source: Uint8Array.of(1), format: 'step' });
+    await prior.releaseAll();
+    const child = createGeoSpecNativeModelLoader({ engine });
+    const sibling = createGeoSpecNativeModelLoader({ engine });
+    try {
+      const childSubject = await child({ source: Uint8Array.of(1), format: 'step' });
+      const siblingSubject = await sibling({ source: Uint8Array.of(1), format: 'step' });
+      leaseFor(childSubject, engine).dispose();
+      await child.releaseAll();
+      rawSubjectResidency(siblingSubject)!();
+      expect(released).toEqual([]);
+      leaseFor(siblingSubject, engine).dispose();
+      expect([...carried.keys()]).toEqual(['1'.repeat(64)]);
+      expect(released).toEqual([]);
+    } finally {
+      await child.releaseAll();
+      await sibling.releaseAll();
+      await prior.releaseAll();
+    }
+    expect(released).toEqual(['1']);
+  });
+
+  it('should keep failed lease cleanup owned for retry without deleting the snapshot', async () => {
+    const { engine, released } = contentEngine();
+    const release = engine.releaseSubject.bind(engine);
+    const failure = new Error('Owned subject release refused.');
+    let refused = true;
+    engine.releaseSubject = (request) => {
+      if (refused) {
+        throw failure;
+      }
+      return release(request);
+    };
+    const loader = createGeoSpecNativeModelLoader({ engine });
+    try {
+      const subject = await loader({ source: Uint8Array.of(1), format: 'step' });
+      const lease = leaseFor(subject, engine);
+      expect(() => {
+        lease.dispose();
+      }).toThrow(failure);
+      expect(released).toEqual([]);
+      refused = false;
+      lease.dispose();
+      lease.dispose();
+      expect(released).toEqual(['1']);
+      expect(rawSubjectResidency(subject)).toThrow(TypeError);
+    } finally {
+      refused = false;
+      await loader.releaseAll();
+    }
+  });
+
+  it('should reserve each coalesced pending admission before its owner can dispose', async () => {
+    const { engine, released } = contentEngine();
+    const exported = Promise.withResolvers<Awaited<ReturnType<GeoSpecRuntimeClient['export']>>>();
+    const started = Promise.withResolvers<void>();
+    const runtime: GeoSpecRuntimeClient = {
+      connect: async () => undefined,
+      terminate: () => undefined,
+      export: vi.fn(async () => {
+        started.resolve();
+        return exported.promise;
+      }),
+    };
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime });
+    try {
+      const options = { file: 'main.ts', code: { 'main.ts': 'model' }, format: 'step' } as const;
+      const first = loader(options);
+      const second = loader(options);
+      await started.promise;
+      exported.resolve({
+        success: true,
+        issues: [],
+        data: [{ name: 'model.step', mimeType: 'application/step', bytes: Uint8Array.of(1) }],
+      });
+      const firstSubject = await first;
+      leaseFor(firstSubject, engine).dispose();
+      const secondSubject = await second;
+      rawSubjectResidency(secondSubject)!();
+      expect(runtime.export).toHaveBeenCalledOnce();
+      expect(released).toEqual([]);
+      leaseFor(secondSubject, engine).dispose();
+      expect(released).toEqual(['1']);
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+
+  it('should leave a new generation intact when an earlier released alias disposes late', async () => {
+    const { engine, released } = contentEngine();
+    const loader = createGeoSpecNativeModelLoader({ engine });
+    const earlier = await loader({ source: Uint8Array.of(1), format: 'step' });
+    const earlierLease = leaseFor(earlier, engine);
+    await loader.releaseAll();
+    try {
+      const current = await loader({ source: Uint8Array.of(1), format: 'step' });
+      earlierLease.dispose();
+      rawSubjectResidency(current)!();
+      expect(rawSubjectResidency(earlier)).toThrow(TypeError);
+      expect(released).toEqual(['1']);
+    } finally {
+      await loader.releaseAll();
+    }
+    expect(released).toEqual(['1', '1']);
+  });
   it.each(['releaseAll', 'count refusal'] as const)(
     'should retain failed carried cleanup for retry after %s',
     async (operation) => {

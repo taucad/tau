@@ -40,6 +40,7 @@
   },
   "dependencies": {
     "@taucad/agent-host": "workspace:*",
+    "@taucad/bambu": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/parameters": "workspace:*",

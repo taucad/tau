@@ -251,6 +251,7 @@ export const refusals = {
   UNKNOWN_REVISION: { owner: 'revisions', retry: 'never' },
   UNSUPPORTED_OPERATION: { owner: 'revisions', retry: 'never' },
   BASE_CUT_FAILED: { owner: 'revisions', retry: 'never' },
+  FETCH_LIMIT_EXCEEDED: { owner: 'revisions', retry: 'never' },
   /** A lost compare-and-swap on the head; the checkout re-reads and retries. */
   CAS_LOST: { owner: 'revisions', retry: 'wait' },
   LEASE_UNAVAILABLE: { owner: 'revisions', retry: 'never' },

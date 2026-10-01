@@ -33,6 +33,7 @@ const baseConfig: UserConfig = {
     'src/configuration/zod.ts',
     'src/jobs/index.ts',
     'src/machines/index.ts',
+    'src/machines/settings.ts',
     'src/host/index.ts',
     'src/host/node.ts',
     'src/types/index.ts',

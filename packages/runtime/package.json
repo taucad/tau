@@ -74,7 +74,8 @@
     "./vite": "./src/vite/index.ts",
     "./nextjs/config": "./src/nextjs/config.ts",
     "./nextjs/browser-node-builtins": "./src/nextjs/browser-node-builtins.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./machine/settings": "./src/machines/settings.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -269,7 +270,12 @@
         "import": "./dist/nextjs/browser-node-builtins.mjs",
         "default": "./dist/nextjs/browser-node-builtins.mjs"
       },
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
+      "./machine/settings": {
+        "types": "./dist/machines/settings.d.mts",
+        "import": "./dist/machines/settings.mjs",
+        "default": "./dist/machines/settings.mjs"
+      }
     },
     "imports": {}
   },

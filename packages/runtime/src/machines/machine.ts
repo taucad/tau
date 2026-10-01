@@ -1,4 +1,5 @@
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
+import type { SettingsSchema, SettingsDefinition } from '#machines/settings.js';
 import type { CacheValue, ContentDigest } from '@taucad/cache-core';
 import type { Quantity } from '@taucad/units/quantity';
 import { z } from 'zod';
@@ -43,6 +44,8 @@ export type MachineProvider<Id extends string = string, QueryName extends string
   manifest: MachineManifest;
   bindingConfiguration: ConfigurationManifestV1;
   submissionConfiguration: ConfigurationManifestV1;
+  /** Optional sparse preferences; observations and approvals never belong here. */
+  settingsConfiguration?: ConfigurationManifestV1;
   queries: Readonly<Record<QueryName, MachineQueryManifest>>;
 }>;
 
@@ -580,6 +583,7 @@ export type MachineProviderDefinition<
   BindingSchema extends StandardSchemaV1,
   SubmissionSchema extends StandardSchemaV1,
   Queries extends QueryMap = Readonly<Record<never, never>>,
+  Settings extends SettingsSchema = SettingsSchema,
 > = Readonly<{
   id: Id;
   name: string;
@@ -591,6 +595,7 @@ export type MachineProviderDefinition<
   manifest: MachineManifest;
   bindingConfiguration: ConfigurationDefinition<BindingSchema>;
   submissionConfiguration: ConfigurationDefinition<SubmissionSchema>;
+  settingsConfiguration?: SettingsDefinition<Settings>;
   queries?: Queries & MachineQueryDefinitions<Queries>;
   discover(
     input: MachineDiscoveryInput<StandardSchemaV1.InferOutput<BindingSchema>>,
@@ -762,6 +767,7 @@ const machineProviderSchema = z.strictObject({
   manifest: machineManifestSchema,
   bindingConfiguration: configurationManifestSchema,
   submissionConfiguration: configurationManifestSchema,
+  settingsConfiguration: configurationManifestSchema.optional(),
   queries: z.record(providerIdentitySchema, z.strictObject({ inputSchema: z.unknown(), resultSchema: z.unknown() })),
 });
 
@@ -776,6 +782,7 @@ const providerKeys = [
   'manifest',
   'bindingConfiguration',
   'submissionConfiguration',
+  'settingsConfiguration',
   'queries',
 ] as const;
 
@@ -791,13 +798,15 @@ const providerWireValue = (value: unknown): Readonly<Record<string, unknown>> =>
     throw new TypeError('INVALID_MACHINE_PROVIDER_DESCRIPTOR');
   }
   return Object.fromEntries(
-    providerKeys.map((key) => {
-      const descriptor = descriptors[key];
-      if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {
-        throw new TypeError('INVALID_MACHINE_PROVIDER_DESCRIPTOR');
-      }
-      return [key, descriptor.value];
-    }),
+    providerKeys
+      .filter((key) => key !== 'settingsConfiguration' || descriptors[key] !== undefined)
+      .map((key) => {
+        const descriptor = descriptors[key];
+        if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {
+          throw new TypeError('INVALID_MACHINE_PROVIDER_DESCRIPTOR');
+        }
+        return [key, descriptor.value];
+      }),
   );
 };
 
@@ -836,8 +845,9 @@ export const defineMachine = <
   BindingSchema extends StandardSchemaV1,
   SubmissionSchema extends StandardSchemaV1,
   const Queries extends QueryMap = Readonly<Record<never, never>>,
+  Settings extends SettingsSchema = SettingsSchema,
 >(
-  definition: MachineProviderDefinition<Id, BindingSchema, SubmissionSchema, Queries>,
+  definition: MachineProviderDefinition<Id, BindingSchema, SubmissionSchema, Queries, Settings>,
 ): MachineProviderFactory<Id, Extract<keyof Queries, string>, typeof definition> => {
   assertDefinition(definition);
   const queries = Object.fromEntries(
@@ -854,6 +864,7 @@ export const defineMachine = <
     manifest: parseMachineManifest(definition.manifest),
     bindingConfiguration: definition.bindingConfiguration.manifest,
     submissionConfiguration: definition.submissionConfiguration.manifest,
+    ...(definition.settingsConfiguration ? { settingsConfiguration: definition.settingsConfiguration.manifest } : {}),
     queries,
   };
   const owned = cloneBoundedJson(descriptor, {

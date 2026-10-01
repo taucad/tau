@@ -2982,6 +2982,9 @@ importers:
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../packages/agent-host
+      '@taucad/bambu':
+        specifier: workspace:*
+        version: link:../../packages/plugins/bambu
       '@taucad/chat':
         specifier: workspace:*
         version: link:../chat
@@ -3071,6 +3074,9 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../packages/filesystem
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../../packages/parameters
       '@taucad/rpc':
         specifier: workspace:*
         version: link:../../packages/rpc

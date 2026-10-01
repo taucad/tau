@@ -42,6 +42,7 @@ import type {
   ToolRegistry,
 } from '@taucad/agent-host';
 import { createMachinePrintPlanner } from '#registry/machine-print-planner.js';
+import type { MachineSettingsService } from '@taucad/types';
 import type { MachinePrintPlannerDependencies } from '#registry/machine-print-planner.js';
 import { createMachineToolRegistry, isMachineToolName } from '#registry/machine-tool-registry.js';
 import { createRuntimeWorkbenchClient } from '#registry/workbench-client.js';
@@ -268,6 +269,7 @@ export type ChatToolRegistryOptions = {
    * offered.
    */
   readonly print?: Pick<MachinePrintPlannerDependencies, 'projectId' | 'readArtifact'> | undefined;
+  readonly machineSettings?: Pick<MachineSettingsService, 'readMachineSettings'> | undefined;
   /** Backs checked semantic parameter reads and operations. */
   readonly parameters?: RpcParameterClient | undefined;
   /** Connected runtime model-file check; filesystem-only hosts can omit it. */
@@ -533,7 +535,7 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
     ? createMachineToolRegistry(machines, {
         projectId: print?.projectId,
         /* The agent's own view, the one its edits to the print intent go through. */
-        fileSystemFor: options.fileSystemFor,
+        machineSettings: options.machineSettings,
         planPrint:
           print === undefined || !servable(rpcForTool[toolName.exportGeometry])
             ? undefined

@@ -38,6 +38,19 @@ import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
 
 /**
+ * Keep exact result branches while emitting a Zod 4.0-compatible union type.
+ * @param discriminator - The wire discriminator.
+ * @param branches - The validated result variants.
+ * @returns The discriminated parser under the stable union type.
+ */
+const discriminatedResultUnion = <
+  const Branches extends readonly [z.core.$ZodTypeDiscriminable, ...z.core.$ZodTypeDiscriminable[]],
+>(
+  discriminator: string,
+  branches: Branches,
+): z.ZodUnion<Branches> => z.discriminatedUnion(discriminator, branches);
+
+/**
  * Current filesystem bridge protocol version.
  *
  * Version 4 requires both checked deletion and head-only directory metadata.
@@ -721,7 +734,7 @@ const projectDiscoveryResultSchema = z.looseObject({
   entries: z.array(projectDiscoveryEntrySchema),
   roots: z.array(projectRootDiscoveryStatusSchema),
 });
-const pendingProjectCommitResultSchema = z.discriminatedUnion('status', [
+const pendingProjectCommitResultSchema = discriminatedResultUnion('status', [
   z.looseObject({ status: z.enum(['committed', 'already-committed', 'unidentifiable-manifest']) }),
   z.looseObject({ status: z.literal('identity-mismatch'), actualProjectId: projectIdSchema }),
 ]);
@@ -730,7 +743,7 @@ const permanentDeleteInputSchema = z.looseObject({
   providerBasePath: projectDirectoryPathSchema,
   scope: storageRootConfigSchema,
 });
-const permanentDeleteResultSchema = z.discriminatedUnion('status', [
+const permanentDeleteResultSchema = discriminatedResultUnion('status', [
   z.looseObject({ status: z.enum(['deleted', 'absent', 'unidentifiable']) }),
   z.looseObject({ status: z.literal('identity-mismatch'), actualProjectId: projectIdSchema }),
 ]);

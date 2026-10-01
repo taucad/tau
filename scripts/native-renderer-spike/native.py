@@ -312,7 +312,7 @@ class Renderer:
     def __init__(self, vertices, ranges, canvas=None):
         setup_started = time.perf_counter()
         self.adapter = wgpu.gpu.request_adapter_sync(
-            power_preference="high-performance"
+            power_preference="high-performance", canvas=canvas
         )
         self.device = self.adapter.request_device_sync()
         self.device_ms = (time.perf_counter() - setup_started) * 1000

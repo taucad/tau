@@ -23,10 +23,10 @@ Tau model files and assert measurable geometry requirements.
 Filter examples:
 - Run one file: { files: ['main.geospec.ts'] }
 - Run one directory subtree: { files: ['lib'] }
-- Skip one known failing check: { testNamePattern: '^(?!.*no meshing interference).*' }
-- Skip slow files: { exclude: ['**/*.slow.geospec.ts'] }
+- Select a named requirement: { testNamePattern: 'intended envelope' }
+- Exclude an explicitly out-of-scope fixture: { exclude: ['**/fixtures/**'] }
 
-Returns compact pass/fail rows tagged by targetFile, plus \`sourceRevisions\` — one per model the run loaded. Empty failures with total > 0 means all selected tests passed. ${sourceRevisionRule}
+Returns compact rows tagged by targetFile, plus \`sourceRevisions\` for loaded models. Check \`runStatus\`, \`accounting\`, discovery completion and \`lineageStatus\`; empty failures alone do not qualify a run. Unsupported, inconclusive, skipped and not-run requirements are not passes. Filters qualify only the selected scope, never excluded requirements. Read the retained \`fullResult\` when compact details are omitted. ${sourceRevisionRule}
 
 When NOT to use:
 - NOT as a substitute for \`get_kernel_result\` when you only need compile status; \`test_model\` measures geometry against requirements.`,

@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { readFile } from 'node:fs/promises';
+import { WebIO } from '@gltf-transform/core';
 import { createNodeIo } from '@taucad/geometry-core';
 import { esbuildBundler } from '@taucad/esbuild';
 import { middleware } from '@taucad/middleware';
@@ -557,6 +558,25 @@ describe('TscircuitKernel', () => {
           );
         `,
       });
+
+      const result = await render(client, 'main.tsx');
+      validateGlbData(expectGlb(result));
+      expect(result.success && result.issues).toContainEqual(expectNetworkWarning(url));
+      expect(globalThis.fetch).toBe(fetchGuard);
+    });
+
+    it('keeps the offline trap active while the browser IO reads converted GLB bytes', async () => {
+      const url = 'https://example.invalid/external-texture.png';
+      const { readBinary } = WebIO.prototype;
+      vi.spyOn(WebIO.prototype, 'readBinary').mockImplementation(async function (this: WebIO, bytes) {
+        try {
+          await globalThis.fetch(url);
+        } catch {
+          // Simulate an optional external resource that WebIO cannot fetch offline.
+        }
+        return readBinary.call(this, bytes);
+      });
+      const client = createClient({ 'main.tsx': fixtureBoard });
 
       const result = await render(client, 'main.tsx');
       validateGlbData(expectGlb(result));

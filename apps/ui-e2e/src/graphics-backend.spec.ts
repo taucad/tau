@@ -1475,7 +1475,15 @@ test.describe('Graphics backend regression guard', () => {
                   configuration: scenario,
                 },
               );
-              await target.delay(1500);
+              // Wait for actual demand-loop rest; a fixed delay is insufficient under slow hardware or contention.
+              await target.waitFor(async () => {
+                const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+                const before = bridge.getRendererIdentity().frame;
+                await new Promise<void>((resolve) => {
+                  setTimeout(resolve, 500);
+                });
+                return bridge.getRendererIdentity().frame === before;
+              });
               const frameBeforeIdle = await target.evaluate(
                 () =>
                   (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getRendererIdentity()

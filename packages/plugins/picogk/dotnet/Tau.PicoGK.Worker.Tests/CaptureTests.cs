@@ -57,6 +57,9 @@ public sealed partial class WorkerTests
             Assert.Equal(new uint[] { 0, 1 }, captured.Indices);
             backend.Add(line, 0);
             Assert.Equal(9, Assert.Single(backend.Extract().Components).Positions.Length);
+            backend.Add(line, 0);
+            Assert.Equal(9, Assert.Single(backend.Extract().Components).Positions.Length);
+            Assert.Equal(2, backend.GeometryCopies);
         }
         finally { Library.UnregisterGlobalLibrary(); }
     }

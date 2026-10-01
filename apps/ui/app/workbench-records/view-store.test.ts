@@ -72,6 +72,179 @@ const makeStore = (data: ReturnType<typeof memory>) =>
   });
 
 describe('workbench view checked store', () => {
+  it('persists a selected kernel view and its options through a stale checked-write conflict', async () => {
+    const data = memory();
+    const store = makeStore(data);
+    await store.read();
+    data.set({ ...seed(), name: 'Foreign' });
+    const next = workbenchRecords.view.schema.parse({
+      ...seed(),
+      selectedKernelView: 'schematic',
+      kernelViews: [{ id: 'schematic', options: { sheet: 'power' } }],
+    });
+    expect(await store.edit(next)).toBe(true);
+    expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
+      status: 'current',
+      record: {
+        name: 'Foreign',
+        selectedKernelView: 'schematic',
+        kernelViews: [{ id: 'schematic', options: { sheet: 'power' } }],
+      },
+    });
+  });
+
+  it('merges independent projection options and camera changes from two checked writers', async () => {
+    const data = memory();
+    const base = workbenchRecords.view.schema.parse({
+      ...seed(),
+      kernelViews: [
+        { id: 'schematic', options: { sheet: 'main', labels: true }, camera: { kind: 'preset', preset: 'front' } },
+        { id: 'pcb', options: { layer: 'top' } },
+      ],
+    });
+    data.set(base);
+    const first = makeStore(data);
+    const second = makeStore(data);
+    await Promise.all([first.read(), second.read()]);
+    const release = data.delay();
+    const optionsWrite = first.edit({
+      ...base,
+      kernelViews: [
+        { id: 'schematic', options: { sheet: 'power', labels: true }, camera: { kind: 'preset', preset: 'front' } },
+        { id: 'pcb', options: { layer: 'top' } },
+      ],
+    });
+    const cameraWrite = second.edit({
+      ...base,
+      kernelViews: [
+        {
+          id: 'schematic',
+          options: { sheet: 'main', labels: false },
+          authoredInstance: 'sheet:power',
+          camera: { kind: 'preset', preset: 'right' },
+        },
+        { id: 'pcb', options: { layer: 'bottom' } },
+      ],
+    });
+    await Promise.resolve();
+    release();
+    expect(await Promise.all([optionsWrite, cameraWrite])).toEqual([true, true]);
+    expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
+      status: 'current',
+      record: {
+        kernelViews: [
+          {
+            id: 'schematic',
+            options: { sheet: 'power', labels: false },
+            authoredInstance: 'sheet:power',
+            camera: { kind: 'preset', preset: 'right' },
+          },
+          { id: 'pcb', options: { layer: 'bottom' } },
+        ],
+      },
+    });
+  });
+
+  it('clears a saved projection choice without discarding a foreign projection', async () => {
+    const data = memory();
+    const base = workbenchRecords.view.schema.parse({
+      ...seed(),
+      selectedKernelView: 'schematic',
+      kernelViews: [{ id: 'schematic', options: { sheet: 'main', labels: true } }],
+    });
+    data.set(base);
+    const store = makeStore(data);
+    await store.read();
+    data.set({
+      ...base,
+      kernelViews: [...base.kernelViews!, { id: 'pcb', options: { layer: 'top' } }],
+    });
+    expect(await store.edit({ ...base, selectedKernelView: undefined, kernelViews: undefined })).toBe(true);
+    const result = workbenchRecords.view.read(data.get()!);
+    expect(result.status).toBe('current');
+    if (result.status === 'current') {
+      expect(result.record.selectedKernelView).toBeUndefined();
+      expect(result.record.kernelViews).toEqual([{ id: 'pcb', options: { layer: 'top' } }]);
+    }
+  });
+
+  it('replaces a removed projection on a queued re-add without restoring its old options or camera', async () => {
+    const data = memory();
+    const base = workbenchRecords.view.schema.parse({
+      ...seed(),
+      kernelViews: [
+        { id: 'schematic', options: { sheet: 'main', labels: true }, camera: { kind: 'preset', preset: 'front' } },
+      ],
+    });
+    data.set(base);
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-abcd1234',
+      files: data.files,
+      editDebounce: 500,
+      onChange: () => undefined,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    await store.read();
+    const removed = store.edit({ ...base, kernelViews: [] });
+    const replaced = store.edit({ ...base, kernelViews: [{ id: 'schematic', options: { sheet: 'power' } }] });
+    expect(await store.flush()).toBe(true);
+    expect(await Promise.all([removed, replaced])).toEqual([true, true]);
+    const result = workbenchRecords.view.read(data.get()!);
+    expect(result.status).toBe('current');
+    if (result.status === 'current') {
+      expect(result.record.kernelViews).toEqual([{ id: 'schematic', options: { sheet: 'power' } }]);
+    }
+    store.dispose();
+  });
+
+  it('persists a kernel view whose valid id is __proto__', async () => {
+    const data = memory();
+    const store = makeStore(data);
+    await store.read();
+    expect(await store.edit({ ...seed(), kernelViews: [{ id: '__proto__', options: { sheet: 'power' } }] })).toBe(true);
+    const result = workbenchRecords.view.read(data.get()!);
+    expect(result.status).toBe('current');
+    if (result.status === 'current') {
+      expect(result.record.kernelViews).toEqual([{ id: '__proto__', options: { sheet: 'power' } }]);
+    }
+  });
+
+  it('keeps a queued __proto__ removal when a later edit changes another projection', async () => {
+    const data = memory();
+    const base = workbenchRecords.view.schema.parse({
+      ...seed(),
+      kernelViews: [
+        { id: '__proto__', options: { sheet: 'main' } },
+        { id: 'pcb', options: { layer: 'top' } },
+      ],
+    });
+    data.set(base);
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-abcd1234',
+      files: data.files,
+      editDebounce: 500,
+      onChange: () => undefined,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    await store.read();
+    const removed = store.edit({ ...base, kernelViews: [{ id: 'pcb', options: { layer: 'top' } }] });
+    const changed = store.edit({ ...base, kernelViews: [{ id: 'pcb', options: { layer: 'bottom' } }] });
+    expect(await store.flush()).toBe(true);
+    expect(await Promise.all([removed, changed])).toEqual([true, true]);
+    const result = workbenchRecords.view.read(data.get()!);
+    expect(result.status).toBe('current');
+    if (result.status === 'current') {
+      expect(result.record.kernelViews).toEqual([{ id: 'pcb', options: { layer: 'bottom' } }]);
+    }
+    store.dispose();
+  });
+
   it('ignores a superseded read failure and republishes unchanged bytes after a current error', async () => {
     const data = memory();
     let stale = Promise.withResolvers<void>();

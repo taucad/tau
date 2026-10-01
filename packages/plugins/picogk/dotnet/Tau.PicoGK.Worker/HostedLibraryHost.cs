@@ -163,6 +163,8 @@ internal sealed record GeometrySnapshot(string Kind, float[] Positions, uint[] I
     internal long ByteLength => checked(((long)Positions.Length + Indices.Length) * sizeof(uint));
 }
 
+internal readonly record struct GeometryPublication(GeometrySnapshot Geometry, Matrix4x4 SourceMatrix, bool IsPlaced, BBox3 SourceBounds);
+
 /// <summary>
 /// Applies hosted viewer calls on a bounded pump. One drained batch is one native-style poll update;
 /// bounded enqueueing provides producer backpressure instead of retaining an unbounded scene history.
@@ -387,7 +389,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             var bounds = new BBox3();
             foreach (var item in objects.Where(item => !hiddenGroups.Contains(item.Group)))
             {
-                IncludeTransformed(bounds: ref bounds, BoundsOf(item.Geometry), MatrixFor(item));
+                IncludeTransformed(bounds: ref bounds, item.SourceBounds, MatrixFor(item));
             }
             return bounds;
         }
@@ -570,17 +572,17 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     {
         _ = CheckAdmission();
         // Allocate the command before retaining arrays; an allocation failure cannot orphan them.
-        GeometrySnapshot? snapshot = null;
-        var command = new ViewerCommand(() => AddObject(identity, name, group, snapshot!))
+        GeometryPublication publication = default;
+        var command = new ViewerCommand(() => AddObject(identity, name, group, publication))
         {
-            Release = () => ReleaseGeometry(snapshot!),
+            Release = () => ReleaseGeometry(publication.Geometry),
         };
         // Both callbacks become reachable only after this owned capture completes.
-        snapshot = SnapshotGeometry(identity);
+        publication = SnapshotGeometry(identity);
         Enqueue(command);
     }
 
-    private void AddObject(object identity, string? name, int group, GeometrySnapshot snapshot)
+    private void AddObject(object identity, string? name, int group, GeometryPublication publication)
     {
         ArgumentNullException.ThrowIfNull(identity);
         if (!componentIdentities.TryGetValue(identity, out var componentIdentity))
@@ -601,8 +603,11 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             componentIdentity.Id,
             group,
             authoredNames.TryGetValue(identity, out var authored) ? authored.Value : null,
-            snapshot,
-            Matrix4x4.Identity);
+            publication.Geometry,
+            Matrix4x4.Identity,
+            publication.SourceMatrix,
+            publication.IsPlaced,
+            publication.SourceBounds);
         if (objectIndex.TryGetValue(identity, out var existing))
         {
             objects.Remove(existing);
@@ -610,7 +615,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             materialized.Remove(identity);
             ReleaseGeometry(existing.Geometry);
         }
-        lock (geometryGate) snapshot.Owners++;
+        lock (geometryGate) publication.Geometry.Owners++;
         objects.Add(item);
         objectIndex.Add(identity, item);
     }
@@ -632,7 +637,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         materialized.Remove(identity);
     }
 
-    private GeometrySnapshot SnapshotGeometry(object source)
+    private GeometryPublication SnapshotGeometry(object source)
     {
         ArgumentNullException.ThrowIfNull(source);
         var construction = Stopwatch.StartNew();
@@ -645,14 +650,15 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         };
         construction.Stop();
         var kind = source is PolyLine ? "lines" : "triangles";
-        var key = (capture.Library, kind, capture.Generation);
+        var placement = source is PolyLine ? (TauMeshPlacement?)null : Mesh.TauReadPlacement(capture);
+        var key = (capture.Library, kind, placement?.PrototypeGeneration ?? capture.Generation);
         lock (geometryGate)
         {
             if (source is Voxels) meshConstruction += construction.Elapsed.TotalMilliseconds;
             if (geometry.TryGetValue(key, out var existing))
             {
                 existing.Owners++;
-                return existing;
+                return new(existing, placement?.Matrix ?? Matrix4x4.Identity, placement?.IsPlaced ?? false, placement?.Bounds ?? BoundsOf(existing));
             }
             var bytes = checked(((long)capture.PositionCount + capture.IndexCount) * sizeof(uint));
             if (bytes > MaximumOwnedGeometryBytes - geometryBytes)
@@ -661,7 +667,8 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             var extraction = Stopwatch.StartNew();
             var positions = new float[capture.PositionCount];
             var indices = new uint[capture.IndexCount];
-            capture.Copy(positions, indices);
+            if (placement is null) capture.Copy(positions, indices);
+            else Mesh.TauCopyPrototype(capture, positions, indices);
             extraction.Stop();
             meshExtraction += extraction.Elapsed.TotalMilliseconds;
             var snapshot = new GeometrySnapshot(kind, positions, indices, source is PolyLine ? capture.Color : (ColorFloat?)null)
@@ -672,7 +679,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             geometry.Add(key, snapshot);
             geometryBytes += bytes;
             geometryCopies++;
-            return snapshot;
+            return new(snapshot, placement?.Matrix ?? Matrix4x4.Identity, placement?.IsPlaced ?? false, placement?.Bounds ?? BoundsOf(snapshot));
         }
     }
 
@@ -703,7 +710,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             var materialJson = authored is null ? (JsonElement?)null : MaterialCapture.Project(authored, resources);
             if (!materialized.TryGetValue(item.Identity, out var cached) || cached.Matrix != matrix)
             {
-                var positions = TransformPositions(item.Geometry.Positions, matrix);
+                var positions = TransformPositions(item.Geometry.Positions, matrix, item.SourceMatrix, item.IsPlaced);
                 var indices = item.Geometry.Indices;
                 var normals = Array.Empty<float>();
                 var sources = Array.Empty<int>();
@@ -725,6 +732,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                 if (cached.TexturedComponent is null)
                 {
                     var modelPositions = RemapVectors(item.Geometry.Positions, cached.Sources);
+                    if (item.IsPlaced) modelPositions = TransformPositions(modelPositions, item.SourceMatrix);
                     var coordinates = SurfaceCoordinates.Project(modelPositions, component.Indices);
                     var normals = RemapVectors(component.Normals, coordinates.Sources);
                     var (texCoords, tangents) = SurfaceCoordinates.Expand(coordinates, normals, matrix);
@@ -762,12 +770,15 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         return output;
     }
 
-    private static float[] TransformPositions(float[] source, Matrix4x4 matrix)
+    private static float[] TransformPositions(float[] source, Matrix4x4 matrix, Matrix4x4 sourceMatrix = default, bool isPlaced = false)
     {
         var positions = new float[source.Length];
         for (var index = 0; index < source.Length / 3; index++)
         {
-            WriteVector(positions, index, Vector3.Transform(new Vector3(source[index * 3], source[index * 3 + 1], source[index * 3 + 2]), matrix));
+            var point = new Vector3(source[index * 3], source[index * 3 + 1], source[index * 3 + 2]);
+            // Preserve the source transform's float rounding before applying viewer/group placement.
+            if (isPlaced) point = Vector3.Transform(point, sourceMatrix);
+            WriteVector(positions, index, Vector3.Transform(point, matrix));
         }
         return positions;
     }
@@ -823,7 +834,10 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         int Group,
         string? Name,
         GeometrySnapshot Geometry,
-        Matrix4x4 Matrix);
+        Matrix4x4 Matrix,
+        Matrix4x4 SourceMatrix,
+        bool IsPlaced,
+        BBox3 SourceBounds);
     private sealed record MaterializedComponent(Matrix4x4 Matrix, ExtractedComponent Component, int[] Sources, ExtractedComponent? TexturedComponent = null);
     private sealed record Material(ColorFloat Color, float Metallic, float Roughness, global::PicoGK.Material? Authored = null);
 }

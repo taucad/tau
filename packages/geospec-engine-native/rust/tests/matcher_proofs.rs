@@ -708,14 +708,11 @@ fn claim(id: &str, capability: &str, payload: Value, polarity: &str, budget: u64
 }
 
 #[test]
-fn sampled_gltf_interference_and_required_pairs_refuse_before_geometry() {
+fn qualified_gltf_interference_and_required_pairs_keep_exact_material_semantics() {
     let (mut engine, intersections, _, _) = engine();
     let (subject_hash, _) = ingest_gltf(&mut engine);
-    let unsupported = json!([{
-        "code": "GEOSPEC_EVIDENCE_UNSUPPORTED",
-        "severity": "error",
-        "message": "This selected component pair has no bounded complete-material noninterference certificate."
-    }]);
+    // Historical v5 refused this selected existing capability at87..180;
+    // those tiny budgets now remain typed incomplete, not geometric answers.
     for polarity in ["positive", "negative"] {
         for budget in [87, 88, 179, 180] {
             let response = claims(
@@ -734,13 +731,105 @@ fn sampled_gltf_interference_and_required_pairs_refuse_before_geometry() {
             );
             assert_eq!(
                 response["result"]["numericProfile"],
-                include_str!("fixtures/current-profile-v5/numeric-profile.txt")
+                include_str!("fixtures/current-profile-v6/numeric-profile.txt").trim_ascii_end()
             );
             let result = &response["result"]["results"][0];
             assert_eq!(result["status"], "refused");
-            assert_eq!(result["diagnostics"], unsupported);
+            assert_eq!(result["diagnostics"][0]["code"], "MATCHER_TIMEOUT");
         }
     }
+    let payload = |maximum| json!({"kind":"componentInterference","expected":{"pairs":[{"left":"A#0","right":"B#0"}],"allowances":[{"left":"A#0","right":"B#0","maxVolume":maximum,"reason":"independent half-cube overlap control"}]}});
+    let charged = || {
+        serde_json::from_slice::<Value>(&engine.observations()).unwrap()["logical"]["chargedUnits"]
+            .as_str()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap()
+    };
+    let before = charged();
+    let cold = claims(
+        &engine,
+        &subject_hash,
+        vec![claim(
+            "exact-half",
+            "toHaveNoComponentInterference",
+            payload(0.5),
+            "positive",
+            8_000_000,
+        )],
+    );
+    let result = &cold["result"]["results"][0];
+    assert_eq!(result["status"], "passed");
+    assert_eq!(
+        result["evidence"]["measured"]["pairs"][0]["intersectionNumerator"],
+        "1"
+    );
+    assert_eq!(
+        result["evidence"]["measured"]["pairs"][0]["intersectionDenominator"],
+        "2"
+    );
+    let units = charged() - before;
+    let physical =
+        || serde_json::from_slice::<Value>(&engine.observations()).unwrap()["physical"].clone();
+    let builds = physical()["overlapBuilds"].clone();
+    let hits = physical()["overlapResidentHits"]
+        .as_str()
+        .unwrap()
+        .parse::<u64>()
+        .unwrap();
+    for polarity in ["positive", "negative"] {
+        let response = claims(
+            &engine,
+            &subject_hash,
+            vec![claim(
+                "below-limit",
+                "toHaveNoComponentInterference",
+                payload(0.5),
+                polarity,
+                units - 1,
+            )],
+        );
+        assert_eq!(response["result"]["results"][0]["status"], "refused");
+        assert_eq!(
+            response["result"]["results"][0]["diagnostics"][0]["code"],
+            "MATCHER_TIMEOUT"
+        );
+    }
+    for (maximum, polarity, status) in [
+        (0.5, "positive", "passed"),
+        (0.5, "negative", "failed"),
+        (0.5f64.next_down(), "positive", "failed"),
+        (0.5f64.next_down(), "negative", "passed"),
+        (0.5f64.next_up(), "positive", "passed"),
+    ] {
+        let before = charged();
+        let response = claims(
+            &engine,
+            &subject_hash,
+            vec![claim(
+                "exact-limit",
+                "toHaveNoComponentInterference",
+                payload(maximum),
+                polarity,
+                units,
+            )],
+        );
+        assert_eq!(response["result"]["results"][0]["status"], status);
+        assert_eq!(charged() - before, units);
+        assert_eq!(
+            physical()["overlapBuilds"],
+            builds,
+            "warm complete facts must not repeat exact integral geometry"
+        );
+    }
+    assert!(
+        physical()["overlapResidentHits"]
+            .as_str()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap()
+            >= hits + 5
+    );
     let required = claims(
         &engine,
         &subject_hash,

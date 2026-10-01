@@ -1138,7 +1138,7 @@ fn mismatch_diagnostics_retain_source_details_and_inventory() {
     assert_eq!(
         outcome.diagnostics[0].suggestion.as_deref(),
         Some(
-            "Check the declared normal/offset against the exported frame, or widen the tolerance."
+            "Correct the model or exported frame to match the declared normal and offset; preserve the authored tolerance."
         )
     );
     assert_eq!(

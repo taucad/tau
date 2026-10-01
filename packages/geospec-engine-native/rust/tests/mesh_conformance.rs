@@ -7,7 +7,103 @@ const FIXTURES: &str = include_str!("fixtures/mesh-entry.json");
 const CURRENT: &str = include_str!("fixtures/current-profile-01/plan-corpus.json");
 const CURRENT_SHA256: &str = "eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d";
 const CURRENT_NUMERIC_PROFILE: &str =
-    include_str!("fixtures/current-profile-v5/numeric-profile.txt");
+    include_str!("fixtures/current-profile-v6/numeric-profile.txt").trim_ascii_end();
+const MATERIAL: &str = include_str!("../../conformance/material-v6.json");
+const MATERIAL_SHA256: &str = "39cd70e7c50eb981fbd5b3b94cfb289658801728a2a87d160388f35f691d6a39";
+
+#[test]
+fn material_v6_portable_controls_bind_independent_inputs_and_full_cold_warm_results() {
+    assert_eq!(sha256_hex(MATERIAL), MATERIAL_SHA256);
+    let corpus: Value = serde_json::from_str(MATERIAL).unwrap();
+    assert_eq!(
+        corpus["authority"]["numericProfile"],
+        CURRENT_NUMERIC_PROFILE
+    );
+    assert_eq!(corpus["authority"]["id"], "material-v6-01");
+    let meshes = corpus["meshes"].as_array().unwrap();
+    let records = corpus["records"].as_array().unwrap();
+    assert_eq!(meshes.len(), 20);
+    assert_eq!(records.len(), 46);
+    for record in records {
+        let id = string(record, "id");
+        let mut engine = Engine::new();
+        for admission in record["ingest"].as_array().unwrap() {
+            let mesh = meshes.iter().find(|mesh| mesh["id"] == *admission).unwrap();
+            assert_eq!(mesh["admission"], "subject");
+            assert!(mesh.get("meshHex").is_none());
+            let primary = bytes(string(mesh, "primaryHex"));
+            assert_eq!(
+                primary.len() as u64,
+                mesh["primaryByteLength"].as_u64().unwrap()
+            );
+            assert_eq!(sha256_hex(&primary), mesh["primarySha256"]);
+            let request = string(mesh, "requestUtf8").as_bytes();
+            assert_eq!(sha256_hex(request), mesh["requestSha256"]);
+            let resources = mesh["resources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|resource| {
+                    let raw = bytes(string(resource, "hex"));
+                    assert_eq!(raw.len() as u64, resource["byteLength"].as_u64().unwrap());
+                    assert_eq!(sha256_hex(&raw), resource["sha256"]);
+                    raw
+                })
+                .collect();
+            let response = engine.ingest_subject(request, &primary, resources).unwrap();
+            assert_eq!(
+                response,
+                string(mesh, "expectedUtf8").as_bytes(),
+                "{id}: ingress"
+            );
+        }
+        let request = string(record, "inputUtf8").as_bytes();
+        assert_eq!(sha256_hex(request), record["inputSha256"]);
+        let expected = string(record, "expectedUtf8").as_bytes();
+        for state in ["cold", "warm"] {
+            let actual = engine.process_request(request).unwrap();
+            assert_eq!(actual, expected, "{id}: {state} complete canonical result");
+        }
+    }
+}
+fn project_material_repair(id: &str, text: &str) -> String {
+    let ids = [
+        "a2/raw/all-axis-failure-order",
+        "plan/a2/all-axis-failure-order/evaluate",
+        "a2/raw/tolerance-outside",
+        "plan/a2/tolerance-outside/evaluate",
+        "a2/raw/default-tolerance-outside",
+        "plan/a2/default-tolerance-outside/evaluate",
+        "a2/raw/zero-tolerance",
+        "plan/a2/zero-tolerance/evaluate",
+    ];
+    if !ids.contains(&id) {
+        return text.into();
+    }
+    let old = "Correct the model dimensions, or widen the declared bounding-box tolerance.";
+    let approved = "Correct the model dimensions to match the declared bounds; preserve the authored tolerance.";
+    let parsed: Value = serde_json::from_str(text).unwrap();
+    let results = if id.starts_with("plan/") {
+        &parsed["results"]
+    } else {
+        &parsed["result"]["results"]
+    };
+    let matches = results
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|row| row["diagnostics"].as_array().unwrap())
+        .filter(|row| row["code"] == "GEOSPEC_BOUNDING_BOX_MISMATCH" && row["suggestion"] == old)
+        .count();
+    let old_literal = serde_json::to_string(old).unwrap();
+    assert_eq!(matches, 1, "{id}: exact diagnostic");
+    assert_eq!(
+        text.matches(&old_literal).count(),
+        1,
+        "{id}: unique raw literal"
+    );
+    text.replace(&old_literal, &serde_json::to_string(approved).unwrap())
+}
 
 fn fixtures() -> Value {
     serde_json::from_str(FIXTURES).expect("frozen fixture JSON")
@@ -62,7 +158,7 @@ fn assert_outcome(result: Result<Vec<u8>, ProtocolError>, expected: &Value, name
     if let Some(bytes) = expected["expectedUtf8"].as_str() {
         assert_response(
             result.unwrap_or_else(|error| panic!("{name}: {error}")),
-            bytes,
+            &project_material_repair(string(expected, "id"), bytes),
             name,
         );
     } else {

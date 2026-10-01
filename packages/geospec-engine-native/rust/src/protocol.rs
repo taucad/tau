@@ -1,6 +1,6 @@
 // v5 keeps the v4 prototype/SIMD arithmetic and qualifies evidence by demand.
 // Source-metadata verdicts no longer depend on unrelated report/mesh failures.
-pub(crate) const NUMERIC_PROFILE: &str = "geospec-demand-v5";
+pub(crate) const NUMERIC_PROFILE: &str = "geospec-demand-v6";
 
 use crate::{
     backend::{brep::BrepConnector, csg::CsgConnector},
@@ -1063,6 +1063,27 @@ mod batch_tests {
             .subjects
             .insert(retained.cache_identity().unwrap(), Rc::clone(&retained));
         (engine, retained)
+    }
+
+    #[test]
+    fn rejects_historical_numeric_identity_before_populating_current_analysis() {
+        let hash = "0".repeat(64);
+        let (engine, retained) = fixture(&hash);
+        let request = json!({"method":"submitClaims","requestId":"identity","protocolVersion":3,"registryVersion":5,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"part","contentHash":hash}],"claims":[{"claimId":"bounds","capability":"toHaveBoundingBox","subjectSlots":["part"],"polarity":"positive","workUnitBudget":100,"payload":{"kind":"boundingBox","expected":{"size":{"x":3}}}}]}});
+        let current = engine
+            .canonical_plan(&serde_json::to_vec(&request).unwrap())
+            .unwrap();
+        let mut historical: Value = serde_json::from_slice(&current).unwrap();
+        assert_eq!(historical["numericProfile"], NUMERIC_PROFILE);
+        historical["numericProfile"] = json!(include_str!(
+            "../tests/fixtures/current-profile-v5/numeric-profile.txt"
+        ));
+        let old = crate::canonicalize(&serde_json::to_vec(&historical).unwrap()).unwrap();
+        assert_ne!(crate::sha256_hex(&old), crate::sha256_hex(&current));
+        assert!(engine.evaluate_plan(&old).is_err());
+        assert!(!retained.mesh_analysis_is_cached());
+        assert!(engine.evaluate_plan(&current).is_ok());
+        assert!(retained.mesh_analysis_is_cached());
     }
 
     #[test]

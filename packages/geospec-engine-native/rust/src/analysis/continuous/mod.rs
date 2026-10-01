@@ -8,7 +8,7 @@ mod box_interference;
 mod clearance;
 mod cylindrical_band;
 mod domain;
-mod exact;
+pub(crate) mod exact;
 mod finite_contact;
 pub(crate) use finite_contact::{
     finite_contact, FiniteContactRequest, FINITE_CONTACT_OUTPUT_BYTES,

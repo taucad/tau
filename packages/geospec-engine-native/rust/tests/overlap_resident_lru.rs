@@ -46,12 +46,14 @@ fn completed() -> CompletedOverlap {
 }
 
 fn owner() -> Rc<PreparedComponents> {
-    Rc::new(PreparedComponents::Ready(PreparedOverlap {
+    Rc::new(PreparedComponents::Ready(Box::new(PreparedOverlap {
         components: Vec::new(),
         operand_identity: String::new(),
         retained_bytes: 0,
         completed: RefCell::new(None),
-    }))
+        material_completed: RefCell::new(None),
+        observation_refusal: std::cell::OnceCell::new(),
+    })))
 }
 
 fn cell(owner: &PreparedComponents) -> &RefCell<Option<CompletedOverlap>> {
@@ -71,6 +73,46 @@ fn allocated(owners: &[Rc<PreparedComponents>]) -> u64 {
                 .map_or(0, CompletedOverlap::allocated_bytes)
         })
         .sum()
+}
+
+#[test]
+fn exact_material_and_observation_share_one_lru_and_exclusive_cells() {
+    let material = || CompletedMaterial {
+        pair: Some((0, 1)),
+        region_pair: None,
+        volume: num_rational::BigRational::from_integer(0.into()),
+        trace: crate::analysis::mesh::exact::ChargeTrace::disabled(),
+        operands: Vec::new(),
+        regions: None,
+    };
+    let bytes = material()
+        .allocated_bytes()
+        .max(completed().allocated_bytes());
+    let mut resident = ResidentOverlaps::new(bytes);
+    let owners = [owner(), owner()];
+    resident.insert(&owners[0], completed());
+    resident.insert_material(&owners[0], material());
+    let PreparedComponents::Ready(first) = owners[0].as_ref() else {
+        unreachable!()
+    };
+    assert!(first.completed.borrow().is_none());
+    assert!(first.material_completed.borrow().is_some());
+    assert_eq!(resident.entries.len(), 1);
+    resident.insert(&owners[1], completed());
+    assert!(first.material_completed.borrow().is_none());
+    assert!(first.completed.borrow().is_none());
+    assert_eq!(resident.entries.len(), 1);
+    resident.insert_material(&owners[1], material());
+    assert!(cell(&owners[1]).borrow().is_none());
+    let PreparedComponents::Ready(second) = owners[1].as_ref() else {
+        unreachable!()
+    };
+    assert!(second.material_completed.borrow().is_some());
+    assert!(resident.entries.iter().map(|(_, bytes)| bytes).sum::<u64>() <= resident.max_bytes);
+    let mut tiny = ResidentOverlaps::new(material().allocated_bytes() - 1);
+    tiny.insert_material(&owners[0], material());
+    assert!(first.material_completed.borrow().is_none());
+    assert!(tiny.entries.is_empty());
 }
 
 #[test]

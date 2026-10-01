@@ -697,6 +697,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     {
         var components = new List<ExtractedComponent>();
         var names = new HashSet<string>(StringComparer.Ordinal);
+        var projectedMaterials = new Dictionary<global::PicoGK.Material, JsonElement>(ReferenceEqualityComparer.Instance);
         foreach (var item in objects.Where(item => !hiddenGroups.Contains(item.Group)))
         {
             if (item.Geometry.Positions.Length == 0 || item.Geometry.Indices.Length == 0) continue;
@@ -707,7 +708,16 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             var authored = material.Authored;
             if (item.Geometry.Kind == "lines" && authored is not null && MaterialCapture.NeedsCoordinates(authored))
                 throw MaterialCapture.Invalid($"group {item.Group}", "cannot apply texture maps or anisotropy to a PolyLine; use a surface mesh");
-            var materialJson = authored is null ? (JsonElement?)null : MaterialCapture.Project(authored, resources);
+            JsonElement? materialJson = null;
+            if (authored is not null)
+            {
+                if (!projectedMaterials.TryGetValue(authored, out var projected))
+                {
+                    projected = MaterialCapture.Project(authored, resources);
+                    projectedMaterials.Add(authored, projected);
+                }
+                materialJson = projected;
+            }
             if (!materialized.TryGetValue(item.Identity, out var cached) || cached.Matrix != matrix)
             {
                 var positions = TransformPositions(item.Geometry.Positions, matrix, item.SourceMatrix, item.IsPlaced);

@@ -537,7 +537,31 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -963,21 +982,9 @@
+@@ -773,7 +792,11 @@
+         /// <param name="fEndZMM">End voxel slice in mm</param>
+         public void ProjectZSlice(  float fStartZMM,
+                                     float fEndZMM)
+-            => _ProjectZSlice(lib.hThis, hThis, fStartZMM, fEndZMM);
++        {
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            try { TauCheckedCallbacks.Check(TauProjectZSliceNative(lib.hThis, hThis, fStartZMM, fEndZMM), null, this); }
++            finally { GC.KeepAlive(this); }
++        }
+ 
+         /// <summary>
+         /// Makes a copy of the voxel field and applies
+@@ -783,8 +806,8 @@
+                                         float fEndZMM)
+         {
+             Voxels vox = new(this);
+-            vox.ProjectZSlice(fStartZMM, fEndZMM);
+-            return vox;    
++            try { vox.ProjectZSlice(fStartZMM, fEndZMM); return vox; }
++            catch { vox.Dispose(); throw; }
+         }
+ 
+         /// <summary>
+@@ -963,21 +986,9 @@
                                          out int nYSize,
                                          out int nZSize)
          {
@@ -562,7 +586,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -990,21 +997,8 @@
+@@ -990,21 +1001,8 @@
                                          out int nYSize,
                                          out int nZSize)
          {
@@ -586,7 +610,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
           /// <summary>
-@@ -1066,30 +1060,28 @@
+@@ -1066,30 +1064,28 @@
              {
              case ESliceAxis.Z:
                  nSliceCount = nZSize;
@@ -625,7 +649,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
          /// which is the native narrow band distance encoded in the float image. You
          /// can also speciy black/white, which encodes the inside of the field as black
-@@ -1101,32 +1093,8 @@
+@@ -1101,32 +1097,8 @@
                                      ESliceMode eMode = ESliceMode.SignedDistance,
                                      ESliceAxis eAxis = ESliceAxis.Z)
          {
@@ -660,7 +684,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
  
              switch (eMode)
              {
-@@ -1176,15 +1144,13 @@
+@@ -1176,15 +1148,13 @@
  
          /// <summary>
          /// Returns a signed distance-field-encoded slice of the voxel field
@@ -681,7 +705,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
          /// which is the native narrow band distance encoded in the float image. You
          /// can also speciy black/white, which encodes the inside of the field as black
-@@ -1193,17 +1159,7 @@
+@@ -1193,17 +1163,7 @@
                                                  ref ImageGrayScale img,
                                                  ESliceMode eMode = ESliceMode.SignedDistance)
          {
@@ -1798,6 +1822,19 @@ new file mode 100644
 +{
 +    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_GetOwnedMemory")]
 +    private static extern int TauOwnedMemoryNative(LibHandle library, VoxHandle voxels, out long bytes);
++}
+diff --git a/Library/Projection.cs b/Library/Projection.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/Projection.cs
+@@ -0,0 +1,8 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++namespace PicoGK;
++public partial class Voxels
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_ProjectZSlice")]
++    private static extern int TauProjectZSliceNative(LibHandle library, VoxHandle voxels, float start, float end);
 +}
 diff --git a/Library/SliceRead.cs b/Library/SliceRead.cs
 new file mode 100644

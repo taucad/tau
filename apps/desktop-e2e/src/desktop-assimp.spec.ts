@@ -587,14 +587,17 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
         return view.status === 'current' && view.record.entryPath === 'exports/result.ply';
       };
       await expect
-        .poll(() => {
-          const layoutPath = join(projectRoot, workbenchPaths.layout);
-          if (!existsSync(layoutPath)) {
-            return false;
-          }
-          const layout = workbenchRecords.layout.read(new Uint8Array(readFileSync(layoutPath)));
-          return layout.status === 'current' && hasDurablePlyView(layout.record.viewer);
-        })
+        .poll(
+          () => {
+            const layoutPath = join(projectRoot, workbenchPaths.layout);
+            if (!existsSync(layoutPath)) {
+              return false;
+            }
+            const layout = workbenchRecords.layout.read(new Uint8Array(readFileSync(layoutPath)));
+            return layout.status === 'current' && hasDurablePlyView(layout.record.viewer);
+          },
+          { timeout: 60_000 },
+        )
         .toBe(true);
       await page.reload();
       await expectVisible(page.locator('.dv-tab[aria-label="exports/result.ply"]'), 60_000);

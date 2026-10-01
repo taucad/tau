@@ -4206,3 +4206,15 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
              oTriangles.push_back(openvdb::Vec3I(    (unsigned int) t.A,
                                                      (unsigned int) t.B,
                                                      (unsigned int) t.C));
+@@ -911,6 +1223,11 @@
+                             float fBackground,
+                             float fValue)
+     {
++        // Installed off setter skips exact off/background tiles without activating them first.
++        if (fBackground > 0 && fValue >= fBackground) {
++            poAccess->setValueOff(xyz, fBackground);
++            return;
++        }
+         poAccess->setValue(xyz, std::clamp( fValue,
+                                             -fBackground,
+                                             fBackground));

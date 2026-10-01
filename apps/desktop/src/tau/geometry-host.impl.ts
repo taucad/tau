@@ -16,7 +16,10 @@ type RunFrame = Readonly<{
   generation: number;
   requestId: number;
   kind: 'measurement' | 'suite' | 'performance';
-  input: MeasurementRequest | Readonly<{ type: 'run'; options: GeoSpecRunnerRunOptions }> | Readonly<{ type: 'run'; id: number; input: unknown }>;
+  input:
+    | MeasurementRequest
+    | Readonly<{ type: 'run'; options: GeoSpecRunnerRunOptions }>
+    | Readonly<{ type: 'run'; id: number; input: unknown }>;
   root?: string;
   engine?: 'native' | 'legacy';
   runtimeConfig?: Readonly<{ tauApiUrl: string; tauWebSocketUrl: string }>;
@@ -27,16 +30,18 @@ export type GeometryHostOptions = {
   readonly post: Reply;
   readonly measure: (input: MeasurementRequest) => Promise<unknown>;
   readonly performance: (input: unknown) => Promise<unknown>;
-  readonly createRunner: (input: Readonly<{
-    root: string;
-    engine: 'native' | 'legacy';
-    runtimePort: UtilityPort;
-    runtimeConfig: Readonly<{ tauApiUrl: string; tauWebSocketUrl: string }>;
-  }>) => Promise<HostGeoSpecRunner>;
+  readonly createRunner: (
+    input: Readonly<{
+      root: string;
+      engine: 'native' | 'legacy';
+      runtimePort: UtilityPort;
+      runtimeConfig: Readonly<{ tauApiUrl: string; tauWebSocketUrl: string }>;
+    }>,
+  ) => Promise<HostGeoSpecRunner>;
 };
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
-  value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 
 /** Admit one main-validated task, forwarding lifecycle and generation labels. */
 export const createGeometryHost = (options: GeometryHostOptions): Readonly<{ handle(message: Message): void }> => {
@@ -45,21 +50,34 @@ export const createGeometryHost = (options: GeometryHostOptions): Readonly<{ han
     const frame = record(message.data);
     if (frame?.['type'] === 'geometry-cancel') {
       const running = active;
-      if (running !== undefined && running.generation === frame['generation'] && running.requestId === frame['requestId']) {
+      if (
+        running !== undefined &&
+        running.generation === frame['generation'] &&
+        running.requestId === frame['requestId']
+      ) {
         running.cancelled = true;
         running.runner?.abort('The geometry requester cancelled.');
       }
       return;
     }
-    if (frame?.['type'] !== 'geometry-run' || !Number.isSafeInteger(frame['generation']) ||
-      !Number.isSafeInteger(frame['requestId']) || active !== undefined) {
+    if (
+      frame?.['type'] !== 'geometry-run' ||
+      !Number.isSafeInteger(frame['generation']) ||
+      !Number.isSafeInteger(frame['requestId']) ||
+      active !== undefined
+    ) {
       for (const port of message.ports) {
         port.close();
       }
       return;
     }
     const run = frame as RunFrame;
-    const current = { generation: run.generation, requestId: run.requestId, cancelled: false, runner: undefined as HostGeoSpecRunner | undefined };
+    const current = {
+      generation: run.generation,
+      requestId: run.requestId,
+      cancelled: false,
+      runner: undefined as HostGeoSpecRunner | undefined,
+    };
     active = current;
     const execute = async (): Promise<void> => {
       let value: unknown;
@@ -74,12 +92,24 @@ export const createGeometryHost = (options: GeometryHostOptions): Readonly<{ han
           if (!runtimePort || !run.root || !run.runtimeConfig || !run.engine || !('options' in run.input)) {
             throw new Error('The geometry suite has no authorized Runtime port or valid run options.');
           }
-          current.runner = await options.createRunner({ root: run.root, engine: run.engine, runtimePort, runtimeConfig: run.runtimeConfig });
-          const unsubscribers = ([
-            'run-start', 'file-start', 'file-complete', 'run-complete', 'forensic', 'abort', 'close',
-          ] as const).map((type) => current.runner!.on(type, (event) => {
-            options.post({ type: 'geometry-event', generation: current.generation, requestId: current.requestId, event });
-          }));
+          current.runner = await options.createRunner({
+            root: run.root,
+            engine: run.engine,
+            runtimePort,
+            runtimeConfig: run.runtimeConfig,
+          });
+          const unsubscribers = (
+            ['run-start', 'file-start', 'file-complete', 'run-complete', 'forensic', 'abort', 'close'] as const
+          ).map((type) =>
+            current.runner!.on(type, (event) => {
+              options.post({
+                type: 'geometry-event',
+                generation: current.generation,
+                requestId: current.requestId,
+                event,
+              });
+            }),
+          );
           try {
             if (current.cancelled) {
               current.runner.abort('The geometry requester cancelled.');
@@ -95,11 +125,23 @@ export const createGeometryHost = (options: GeometryHostOptions): Readonly<{ han
           }
         }
       } catch (error) {
-        value = run.kind === 'measurement'
-          ? { id: (run.input as MeasurementRequest).id, result: { status: 'interrupted', code: 'engine-error', message: error instanceof Error ? error.message : String(error) } }
-          : run.kind === 'performance'
-            ? { id: (run.input as { id: number }).id, type: 'error', message: error instanceof Error ? error.message : String(error) }
-          : { type: 'error', message: error instanceof Error ? error.message : String(error) };
+        value =
+          run.kind === 'measurement'
+            ? {
+                id: (run.input as MeasurementRequest).id,
+                result: {
+                  status: 'interrupted',
+                  code: 'engine-error',
+                  message: error instanceof Error ? error.message : String(error),
+                },
+              }
+            : run.kind === 'performance'
+              ? {
+                  id: (run.input as { id: number }).id,
+                  type: 'error',
+                  message: error instanceof Error ? error.message : String(error),
+                }
+              : { type: 'error', message: error instanceof Error ? error.message : String(error) };
       } finally {
         for (const port of message.ports) {
           port.close();

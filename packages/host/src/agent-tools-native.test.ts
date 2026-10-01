@@ -18,7 +18,9 @@ const native = vi.hoisted(() => {
           close();
         }),
         evaluateClaim: vi.fn(() => ({
-          canonicalClaim: new Uint8Array(), canonicalPlan: new Uint8Array(), canonicalResult: new Uint8Array(),
+          canonicalClaim: new Uint8Array(),
+          canonicalPlan: new Uint8Array(),
+          canonicalResult: new Uint8Array(),
         })),
         processRequest: vi.fn(() => new Uint8Array()),
         ingestSubject: vi.fn(() => new Uint8Array()),

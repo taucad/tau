@@ -71,10 +71,7 @@ export type MinimumDistanceQuery = {
   readonly capability: 'minimumDistance';
   readonly subject: GeoSpecNativeSubject;
   readonly payload: {
-    readonly pair: readonly [
-      { readonly occurrencePath: string },
-      { readonly occurrencePath: string },
-    ];
+    readonly pair: readonly [{ readonly occurrencePath: string }, { readonly occurrencePath: string }];
   };
 };
 
@@ -94,8 +91,16 @@ export type MinimumDistanceFact = {
 /** Geometry refusal and infrastructure interruption never masquerade as facts. @public */
 export type MinimumDistanceResult =
   | { readonly status: 'complete'; readonly fact: MinimumDistanceFact }
-  | { readonly status: 'refused'; readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit'; readonly message: string }
-  | { readonly status: 'interrupted'; readonly code: 'cancelled' | 'executor-exited' | 'deadline' | 'engine-error'; readonly message: string };
+  | {
+      readonly status: 'refused';
+      readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit';
+      readonly message: string;
+    }
+  | {
+      readonly status: 'interrupted';
+      readonly code: 'cancelled' | 'executor-exited' | 'deadline' | 'engine-error';
+      readonly message: string;
+    };
 
 /**
  * One positive-only ancillary query. analyzeMesh/analyzeBrep use null payloads;
@@ -126,7 +131,10 @@ export type GeoSpecAssertionClientOptions = {
   readonly workUnitLimit?: number;
 };
 
-const minimumDistanceFact = (value: JSONValue | undefined, query: MinimumDistanceQuery): MinimumDistanceFact | undefined => {
+const minimumDistanceFact = (
+  value: JSONValue | undefined,
+  query: MinimumDistanceQuery,
+): MinimumDistanceFact | undefined => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
   }
@@ -136,40 +144,70 @@ const minimumDistanceFact = (value: JSONValue | undefined, query: MinimumDistanc
   }
   const { distance, points, occurrences, subjectHash } = fact;
   const finitePoint = (point: JSONValue): point is [number, number, number] =>
-    Array.isArray(point) && point.length === 3 && point.every((coordinate) => typeof coordinate === 'number' && Number.isFinite(coordinate));
+    Array.isArray(point) &&
+    point.length === 3 &&
+    point.every((coordinate) => typeof coordinate === 'number' && Number.isFinite(coordinate));
   if (
     value['profile'] !== 'geospec-minimum-distance-v1' ||
-    fact['source'] !== 'ap242' || fact['assurance'] !== 'exact-brep' || fact['unit'] !== 'mm' ||
-    fact['coordinateSystem'] !== 'z-up' || fact['algorithmProfile'] !== 'geospec-minimum-distance-v1' ||
-    typeof subjectHash !== 'string' || !/^[0-9a-f]{64}$/u.test(subjectHash) ||
+    fact['source'] !== 'ap242' ||
+    fact['assurance'] !== 'exact-brep' ||
+    fact['unit'] !== 'mm' ||
+    fact['coordinateSystem'] !== 'z-up' ||
+    fact['algorithmProfile'] !== 'geospec-minimum-distance-v1' ||
+    typeof subjectHash !== 'string' ||
+    !/^[0-9a-f]{64}$/u.test(subjectHash) ||
     subjectHash !== (query.subject.subjectHash ?? query.subject.contentHash) ||
-    typeof distance !== 'number' || !Number.isFinite(distance) || distance < 0 ||
-    !Array.isArray(occurrences) || occurrences.length !== 2 ||
+    typeof distance !== 'number' ||
+    !Number.isFinite(distance) ||
+    distance < 0 ||
+    !Array.isArray(occurrences) ||
+    occurrences.length !== 2 ||
     occurrences[0] !== query.payload.pair[0].occurrencePath ||
     occurrences[1] !== query.payload.pair[1].occurrencePath ||
-    !Array.isArray(points) || points.length !== 2 || !finitePoint(points[0]!) || !finitePoint(points[1]!)
+    !Array.isArray(points) ||
+    points.length !== 2 ||
+    !finitePoint(points[0]!) ||
+    !finitePoint(points[1]!)
   ) {
     return undefined;
   }
   return {
-    source: 'ap242', assurance: 'exact-brep', unit: 'mm', coordinateSystem: 'z-up',
-    subjectHash, algorithmProfile: 'geospec-minimum-distance-v1',
+    source: 'ap242',
+    assurance: 'exact-brep',
+    unit: 'mm',
+    coordinateSystem: 'z-up',
+    subjectHash,
+    algorithmProfile: 'geospec-minimum-distance-v1',
     occurrences: [occurrences[0], occurrences[1]],
-    distance, points: [points[0], points[1]],
+    distance,
+    points: [points[0], points[1]],
   };
 };
 
-const minimumDistanceOutcome = (report: GeoSpecCanonicalClaimReport, query: MinimumDistanceQuery): MinimumDistanceResult => {
+const minimumDistanceOutcome = (
+  report: GeoSpecCanonicalClaimReport,
+  query: MinimumDistanceQuery,
+): MinimumDistanceResult => {
   if (report.status === 'passed') {
     const fact = minimumDistanceFact(report.evidence, query);
     return fact === undefined
       ? { status: 'interrupted', code: 'engine-error', message: 'Native minimum returned malformed evidence.' }
       : { status: 'complete', fact };
   }
-  const diagnostic = report.diagnostics.find((value) => value !== null && typeof value === 'object' && !Array.isArray(value));
-  const code = diagnostic !== null && typeof diagnostic === 'object' && !Array.isArray(diagnostic) ? diagnostic['code'] : undefined;
-  const message = diagnostic !== null && typeof diagnostic === 'object' && !Array.isArray(diagnostic) && typeof diagnostic['message'] === 'string'
-    ? diagnostic['message'] : 'Native minimum is unavailable.';
+  const diagnostic = report.diagnostics.find(
+    (value) => value !== null && typeof value === 'object' && !Array.isArray(value),
+  );
+  const code =
+    diagnostic !== null && typeof diagnostic === 'object' && !Array.isArray(diagnostic)
+      ? diagnostic['code']
+      : undefined;
+  const message =
+    diagnostic !== null &&
+    typeof diagnostic === 'object' &&
+    !Array.isArray(diagnostic) &&
+    typeof diagnostic['message'] === 'string'
+      ? diagnostic['message']
+      : 'Native minimum is unavailable.';
   if (code === 'GEOSPEC_INVALID_SELECTION') {
     return { status: 'refused', code: 'invalid-selection', message };
   }
@@ -329,26 +367,48 @@ export const createGeoSpecAssertionClient = (options: GeoSpecAssertionClientOpti
 
   async function query(query: MinimumDistanceQuery): Promise<MinimumDistanceResult>;
   async function query(query: GeoSpecQueryOptions): Promise<GeoSpecCanonicalClaimReport>;
-  async function query(query: MinimumDistanceQuery | GeoSpecQueryOptions): Promise<MinimumDistanceResult | GeoSpecCanonicalClaimReport> {
-    const claimId = 'claimId' in query ? query.claimId ?? `geospec-claim-${++sequence}` : `geospec-claim-${++sequence}`;
+  async function query(
+    query: MinimumDistanceQuery | GeoSpecQueryOptions,
+  ): Promise<MinimumDistanceResult | GeoSpecCanonicalClaimReport> {
+    const claimId =
+      'claimId' in query ? (query.claimId ?? `geospec-claim-${++sequence}`) : `geospec-claim-${++sequence}`;
     if (query.capability === 'minimumDistance') {
       const pair: unknown = (query as { payload?: { pair?: unknown } }).payload?.pair;
       const path = (item: unknown): string | undefined => {
         if (item === null || typeof item !== 'object' || !('occurrencePath' in item)) {
           return undefined;
         }
-        return typeof item.occurrencePath === 'string' && item.occurrencePath.length > 0 ? item.occurrencePath : undefined;
+        return typeof item.occurrencePath === 'string' && item.occurrencePath.length > 0
+          ? item.occurrencePath
+          : undefined;
       };
-      if (!Array.isArray(pair) || pair.length !== 2 || path(pair[0]) === undefined ||
-        path(pair[1]) === undefined || path(pair[0]) === path(pair[1])) {
-        return { status: 'refused', code: 'invalid-selection', message: 'Select two distinct resolved AP242 occurrence paths.' };
+      if (
+        !Array.isArray(pair) ||
+        pair.length !== 2 ||
+        path(pair[0]) === undefined ||
+        path(pair[1]) === undefined ||
+        path(pair[0]) === path(pair[1])
+      ) {
+        return {
+          status: 'refused',
+          code: 'invalid-selection',
+          message: 'Select two distinct resolved AP242 occurrence paths.',
+        };
       }
       try {
         if (!supportsGeoSpecNativeMinimumDistance(options.engine)) {
-          return { status: 'refused', code: 'unsupported-evidence', message: 'This native engine does not advertise the complete minimum-distance profile.' };
+          return {
+            status: 'refused',
+            code: 'unsupported-evidence',
+            message: 'This native engine does not advertise the complete minimum-distance profile.',
+          };
         }
       } catch {
-        return { status: 'refused', code: 'unsupported-evidence', message: 'This native engine cannot negotiate the complete minimum-distance profile.' };
+        return {
+          status: 'refused',
+          code: 'unsupported-evidence',
+          message: 'This native engine cannot negotiate the complete minimum-distance profile.',
+        };
       }
     }
     try {
@@ -367,7 +427,11 @@ export const createGeoSpecAssertionClient = (options: GeoSpecAssertionClientOpti
       if (query.capability !== 'minimumDistance') {
         throw error;
       }
-      return { status: 'interrupted', code: 'engine-error', message: error instanceof Error ? error.message : 'Native minimum query failed.' };
+      return {
+        status: 'interrupted',
+        code: 'engine-error',
+        message: error instanceof Error ? error.message : 'Native minimum query failed.',
+      };
     }
   }
 

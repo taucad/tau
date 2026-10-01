@@ -219,12 +219,20 @@ export const resolveGeoSpecNativeWorkUnitLimit = (engine: GeoSpecNativeEngine, o
   const configuration = jsonRecord(result['configuration']!, 'initialize configuration');
   const { capabilities } = result;
   const advertised = Array.isArray(capabilities)
-    ? capabilities.filter((entry): entry is Record<string, JSONValue> => entry !== null && typeof entry === 'object' && !Array.isArray(entry) && entry['name'] === 'minimumDistance')
+    ? capabilities.filter(
+        (entry): entry is Record<string, JSONValue> =>
+          entry !== null && typeof entry === 'object' && !Array.isArray(entry) && entry['name'] === 'minimumDistance',
+      )
     : [];
   nativeMinimumDistanceSupport.set(
     engine,
-    advertised.length === 1 && advertised.every((entry) => entry['profile'] === 'geospec-minimum-distance-v1' &&
-      entry['implementation'] === 'implemented' && entry['registryVersion'] === nativeRegistryVersion),
+    advertised.length === 1 &&
+      advertised.every(
+        (entry) =>
+          entry['profile'] === 'geospec-minimum-distance-v1' &&
+          entry['implementation'] === 'implemented' &&
+          entry['registryVersion'] === nativeRegistryVersion,
+      ),
   );
   if (configuration['configurationProfile'] !== 'geospec-entry-config-v1') {
     throw new TypeError('GeoSpec engine returned an unsupported configuration profile.');

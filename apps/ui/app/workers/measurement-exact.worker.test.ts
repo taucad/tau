@@ -84,11 +84,15 @@ describe('displayed Replicad to retained AP242 correspondence', () => {
       if (ambiguous.status === 'unavailable') {
         expect(ambiguous.reason).toContain('distinct displayed AP242 occurrence names');
       }
-      const mixedUnits = await evaluateExactOccurrenceDistance(query(
-        3,
-        new TextEncoder().encode(new TextDecoder().decode(stepBytes).replace('SI_UNIT(.MILLI.,.METRE.)', 'SI_UNIT($,.METRE.)')),
-        ['left', 'right'],
-      ));
+      const mixedUnits = await evaluateExactOccurrenceDistance(
+        query(
+          3,
+          new TextEncoder().encode(
+            new TextDecoder().decode(stepBytes).replace('SI_UNIT(.MILLI.,.METRE.)', 'SI_UNIT($,.METRE.)'),
+          ),
+          ['left', 'right'],
+        ),
+      );
       expect(mixedUnits.status).toBe('unavailable');
       if (mixedUnits.status === 'unavailable') {
         expect(mixedUnits.reason).toContain('units or frame');

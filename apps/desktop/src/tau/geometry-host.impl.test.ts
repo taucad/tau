@@ -10,13 +10,23 @@ describe('geometry utility dispatcher', () => {
     const performance = vi.fn(async () => ({ backend: 'native', samples: [1] }));
     const host = createGeometryHost({ post, measure: vi.fn(), performance, createRunner: vi.fn() });
     host.handle({
-      data: { type: 'geometry-run', generation: 2, requestId: 4, kind: 'performance', input: { type: 'run', id: 12, input: { engine: 'native-desktop' } } },
+      data: {
+        type: 'geometry-run',
+        generation: 2,
+        requestId: 4,
+        kind: 'performance',
+        input: { type: 'run', id: 12, input: { engine: 'native-desktop' } },
+      },
       ports: [],
     });
-    await vi.waitFor(() => { expect(post).toHaveBeenCalledOnce(); });
+    await vi.waitFor(() => {
+      expect(post).toHaveBeenCalledOnce();
+    });
     expect(performance).toHaveBeenCalledExactlyOnceWith({ engine: 'native-desktop' });
     expect(post).toHaveBeenCalledWith({
-      type: 'geometry-result', generation: 2, requestId: 4,
+      type: 'geometry-result',
+      generation: 2,
+      requestId: 4,
       value: { id: 12, type: 'result', result: { backend: 'native', samples: [1] } },
     });
   });
@@ -36,7 +46,12 @@ describe('geometry utility dispatcher', () => {
     });
     host.handle({
       data: {
-        type: 'geometry-run', generation: 3, requestId: 7, kind: 'suite', root: '/project', engine: 'native',
+        type: 'geometry-run',
+        generation: 3,
+        requestId: 7,
+        kind: 'suite',
+        root: '/project',
+        engine: 'native',
         runtimeConfig: { tauApiUrl: 'http://localhost', tauWebSocketUrl: 'ws://localhost' },
         input: { type: 'run', options: { files: ['model.test.ts'] } },
       },
@@ -44,12 +59,16 @@ describe('geometry utility dispatcher', () => {
     });
     host.handle({ data: { type: 'geometry-cancel', generation: 3, requestId: 7 }, ports: [] });
     deferred.resolve(runner);
-    await vi.waitFor(() => { expect(runner.close).toHaveBeenCalledOnce(); });
+    await vi.waitFor(() => {
+      expect(runner.close).toHaveBeenCalledOnce();
+    });
     expect(runner.abort).toHaveBeenCalledOnce();
     expect(runner.run).not.toHaveBeenCalled();
     expect(port.close).toHaveBeenCalledOnce();
     expect(post.mock.calls[0]?.[0]).toMatchObject({
-      type: 'geometry-result', generation: 3, requestId: 7,
+      type: 'geometry-result',
+      generation: 3,
+      requestId: 7,
       value: { type: 'error' },
     });
   });

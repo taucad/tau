@@ -22,7 +22,9 @@ if (!parentPort) {
 }
 
 const host = createGeometryHost({
-  post: (message) => { parentPort.postMessage(message); },
+  post: (message) => {
+    parentPort.postMessage(message);
+  },
   measure: async (input) => {
     const engine = new Engine();
     try {
@@ -63,4 +65,6 @@ const host = createGeometryHost({
   },
 });
 
-parentPort.on('message', (message) => { host.handle(message); });
+parentPort.on('message', (message) => {
+  host.handle(message);
+});

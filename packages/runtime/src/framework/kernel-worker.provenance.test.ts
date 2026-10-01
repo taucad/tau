@@ -86,14 +86,18 @@ describe('request-scoped results name the source revision they evaluated (R4)', 
       async wrapCreateGeometry(input, handler, runtime) {
         geometryDependencies.push({
           hash: runtime.dependencyHash,
-          files: runtime.dependencies.filter((dependency) => dependency.type === 'file').map(({ path, contentHash }) => `${path}:${contentHash}`),
+          files: runtime.dependencies
+            .filter((dependency) => dependency.type === 'file')
+            .map(({ path, contentHash }) => `${path}:${contentHash}`),
         });
         return handler(input);
       },
       async wrapExportGeometry(input, handler, runtime) {
         exportDependencies.push({
           hash: runtime.dependencyHash,
-          files: runtime.dependencies.filter((dependency) => dependency.type === 'file').map(({ path, contentHash }) => `${path}:${contentHash}`),
+          files: runtime.dependencies
+            .filter((dependency) => dependency.type === 'file')
+            .map(({ path, contentHash }) => `${path}:${contentHash}`),
         });
         return handler(input);
       },
@@ -107,16 +111,21 @@ describe('request-scoped results name the source revision they evaluated (R4)', 
         return { success: true, data: { format: 'gltf', content: new TextEncoder().encode(geometry) }, issues: [] };
       }
 
-      protected override async onExportGeometry(input: ExportGeometryInput, runtime: KernelRuntime): Promise<ExportGeometryResult> {
+      protected override async onExportGeometry(
+        input: ExportGeometryInput,
+        runtime: KernelRuntime,
+      ): Promise<ExportGeometryResult> {
         this.exportGeometrySpy(input, runtime);
         const { geometry } = input.nativeHandle as { geometry: string };
         return {
           success: true,
-          data: [{
-            name: 'export.gltf',
-            mimeType: 'model/gltf+json',
-            bytes: new TextEncoder().encode(`${geometry}:${authored.files.get(exportPath) ?? 'missing'}`),
-          }],
+          data: [
+            {
+              name: 'export.gltf',
+              mimeType: 'model/gltf+json',
+              bytes: new TextEncoder().encode(`${geometry}:${authored.files.get(exportPath) ?? 'missing'}`),
+            },
+          ],
           issues: [],
         };
       }
@@ -136,17 +145,24 @@ describe('request-scoped results name the source revision they evaluated (R4)', 
       return bytes;
     });
     filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) => {
-      const contents = Object.fromEntries(paths.map((path) => {
-        const source = files.get(path);
-        if (source === undefined) {
-          throw notFound(path);
-        }
-        return [path, new TextEncoder().encode(source)];
-      }));
-      reads.push({ paths: [...paths], bytes: Object.values(contents).reduce((sum, value) => sum + value.byteLength, 0) });
+      const contents = Object.fromEntries(
+        paths.map((path) => {
+          const source = files.get(path);
+          if (source === undefined) {
+            throw notFound(path);
+          }
+          return [path, new TextEncoder().encode(source)];
+        }),
+      );
+      reads.push({
+        paths: [...paths],
+        bytes: Object.values(contents).reduce((sum, value) => sum + value.byteLength, 0),
+      });
       return contents;
     });
-    const request = { file: createGeometryFile('main.ts'), parameters: {}, format: 'gltf' } satisfies Parameters<MockKernelWorker['exportModel']>[0];
+    const request = { file: createGeometryFile('main.ts'), parameters: {}, format: 'gltf' } satisfies Parameters<
+      MockKernelWorker['exportModel']
+    >[0];
     const observations = [];
     try {
       for (const edit of [undefined, undefined, 'geometry', 'export'] as const) {
@@ -183,7 +199,12 @@ describe('request-scoped results name the source revision they evaluated (R4)', 
           elapsed,
         });
       }
-      expect(observations.map(({ outputText }) => outputText)).toEqual(['g1:missing', 'g1:missing', 'g2:missing', 'g2:e1']);
+      expect(observations.map(({ outputText }) => outputText)).toEqual([
+        'g1:missing',
+        'g1:missing',
+        'g2:missing',
+        'g2:e1',
+      ]);
       expect(new Set(observations.map(({ outputDigest }) => outputDigest)).size).toBe(3);
       expect(observations.map(({ sourceRevision }) => sourceRevision)).toEqual([
         observations[0]!.sourceRevision,
@@ -198,13 +219,22 @@ describe('request-scoped results name the source revision they evaluated (R4)', 
       expect(exportDependencies[2]?.hash).not.toBe(exportDependencies[3]?.hash);
       expect(exportDependencies[0]?.files).toContainEqual(expect.stringContaining(`${exportPath}:missing`));
       expect(exportDependencies[3]?.files).toContainEqual(expect.stringContaining(`${exportPath}:`));
-      expect(observations.map(({ readCalls, readBytes, existsCalls, exportCalls }) => ({ readCalls, readBytes, existsCalls, exportCalls }))).toEqual([
+      expect(
+        observations.map(({ readCalls, readBytes, existsCalls, exportCalls }) => ({
+          readCalls,
+          readBytes,
+          existsCalls,
+          exportCalls,
+        })),
+      ).toEqual([
         { readCalls: 1, readBytes: 4, existsCalls: 0, exportCalls: 1 },
         { readCalls: 1, readBytes: 6, existsCalls: 1, exportCalls: 1 },
         { readCalls: 1, readBytes: 6, existsCalls: 1, exportCalls: 1 },
         { readCalls: 1, readBytes: 6, existsCalls: 1, exportCalls: 1 },
       ]);
-      expect(observations.map(({ singleReadCalls, singleReadBytes }) => ({ singleReadCalls, singleReadBytes }))).toEqual([
+      expect(
+        observations.map(({ singleReadCalls, singleReadBytes }) => ({ singleReadCalls, singleReadBytes })),
+      ).toEqual([
         { singleReadCalls: 1, singleReadBytes: 2 },
         { singleReadCalls: 0, singleReadBytes: 0 },
         { singleReadCalls: 0, singleReadBytes: 0 },
@@ -231,9 +261,15 @@ describe('request-scoped results name the source revision they evaluated (R4)', 
         });
       }
       expect(snapshots[0]?.files).toEqual(snapshots[1]?.files);
-      expect(snapshots.map(({ readCalls, readBytes, singleReadCalls, singleReadBytes, existsCalls }) => ({
-        readCalls, readBytes, singleReadCalls, singleReadBytes, existsCalls,
-      }))).toEqual([
+      expect(
+        snapshots.map(({ readCalls, readBytes, singleReadCalls, singleReadBytes, existsCalls }) => ({
+          readCalls,
+          readBytes,
+          singleReadCalls,
+          singleReadBytes,
+          existsCalls,
+        })),
+      ).toEqual([
         { readCalls: 3, readBytes: 24, singleReadCalls: 0, singleReadBytes: 0, existsCalls: 6 },
         { readCalls: 3, readBytes: 24, singleReadCalls: 0, singleReadBytes: 0, existsCalls: 6 },
       ]);
@@ -400,7 +436,11 @@ describe('request-scoped results name the source revision they evaluated (R4)', 
       ): Promise<CreateGeometryResult> {
         this.createGeometryCalls++;
         this.captureNativeHandle({ value: geometryValue });
-        return { success: true, data: { format: 'gltf', content: new TextEncoder().encode(geometryValue) }, issues: [] };
+        return {
+          success: true,
+          data: { format: 'gltf', content: new TextEncoder().encode(geometryValue) },
+          issues: [],
+        };
       }
 
       protected override async onExportGeometry(
@@ -416,7 +456,9 @@ describe('request-scoped results name the source revision they evaluated (R4)', 
       }
     }
     const { worker, files } = createHarness(
-      { 'main.ts': 'same', [path]: geometryValue }, [middleware], SourceBoundHandleWorker,
+      { 'main.ts': 'same', [path]: geometryValue },
+      [middleware],
+      SourceBoundHandleWorker,
     );
     try {
       await worker.runCreateGeometry('main.ts');

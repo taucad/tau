@@ -75,7 +75,9 @@ export const createGeometryRunnerClient = (port: UtilityPort): HostGeoSpecRunner
         }
       };
       listeners.add(listener);
-      return () => { listeners.delete(listener); };
+      return () => {
+        listeners.delete(listener);
+      };
     },
     abort(reason) {
       if (!closed) {

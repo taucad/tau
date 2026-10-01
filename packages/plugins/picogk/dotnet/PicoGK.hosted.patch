@@ -561,7 +561,36 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -963,21 +986,9 @@
+@@ -812,16 +835,7 @@
+         public void CalculateProperties(    out float fVolumeCubicMM,
+                                             out BBox3 oBBox)
+         {
+-            // Unfortunately openvdb keeps surface voxels (distance 0) around after boolean 
+-            // operations, which cause wrong numbers when calculating the volume
+-            // the only way around is to construct a mesh (which skips these values), 
+-            // create a new voxel field from that mesh, and calculate the values from that.
+-
+-            using Mesh      msh = new(this);
+-            using Voxels    vox = new(msh);
+-
+-            oBBox           = msh.oBoundingBox();
+-            fVolumeCubicMM  = _fCalculateVolume(lib.hThis, vox.hThis);
++            TauCalculateProperties(true, out fVolumeCubicMM, out oBBox);
+         }
+ 
+         /// <summary>
+@@ -834,8 +848,8 @@
+         /// <returns>Bounding box of the voxels in real world coordinates</returns>
+         public BBox3 oCalculateBoundingBox()
+         {
+-            using Mesh msh = new(this);
+-            return msh.oBoundingBox();  
++            TauCalculateProperties(false, out _, out var bounds);
++            return bounds;
+         }
+ 
+         /// <summary>
+@@ -963,21 +977,9 @@
                                          out int nYSize,
                                          out int nZSize)
          {
@@ -586,7 +615,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -990,21 +1001,8 @@
+@@ -990,21 +992,8 @@
                                          out int nYSize,
                                          out int nZSize)
          {
@@ -610,7 +639,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
           /// <summary>
-@@ -1066,30 +1064,28 @@
+@@ -1066,30 +1055,28 @@
              {
              case ESliceAxis.Z:
                  nSliceCount = nZSize;
@@ -649,7 +678,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
          /// which is the native narrow band distance encoded in the float image. You
          /// can also speciy black/white, which encodes the inside of the field as black
-@@ -1101,32 +1097,8 @@
+@@ -1101,32 +1088,8 @@
                                      ESliceMode eMode = ESliceMode.SignedDistance,
                                      ESliceAxis eAxis = ESliceAxis.Z)
          {
@@ -684,7 +713,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
  
              switch (eMode)
              {
-@@ -1176,15 +1148,13 @@
+@@ -1176,15 +1139,13 @@
  
          /// <summary>
          /// Returns a signed distance-field-encoded slice of the voxel field
@@ -705,7 +734,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
          /// which is the native narrow band distance encoded in the float image. You
          /// can also speciy black/white, which encodes the inside of the field as black
-@@ -1193,17 +1163,7 @@
+@@ -1193,17 +1154,7 @@
                                                  ref ImageGrayScale img,
                                                  ESliceMode eMode = ESliceMode.SignedDistance)
          {
@@ -1835,6 +1864,30 @@ new file mode 100644
 +{
 +    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_ProjectZSlice")]
 +    private static extern int TauProjectZSliceNative(LibHandle library, VoxHandle voxels, float start, float end);
++}
+diff --git a/Library/Properties.cs b/Library/Properties.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/Properties.cs
+@@ -0,0 +1,19 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++namespace PicoGK;
++public partial class Voxels
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_GetProperties")]
++    private static extern int TauGetPropertiesNative(LibHandle library, VoxHandle voxels, int mode,
++        out float volume, out BBox3 bounds);
++    private void TauCalculateProperties(bool includeVolume, out float volume, out BBox3 bounds)
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try
++        {
++            var status = TauGetPropertiesNative(lib.hThis, hThis, includeVolume ? 1 : 0, out volume, out bounds);
++            TauCheckedCallbacks.Check(status, null, this);
++        }
++        finally { GC.KeepAlive(this); }
++    }
 +}
 diff --git a/Library/SliceRead.cs b/Library/SliceRead.cs
 new file mode 100644

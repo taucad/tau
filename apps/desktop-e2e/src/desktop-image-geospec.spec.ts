@@ -83,9 +83,9 @@ test('[completed-artifact] captures SVG and GLB geometry and reports GeoSpec pas
       { name: 'create_file', input: { targetFile: 'main.ts', content: solidSource } },
       { name: 'create_file', input: { targetFile: 'drawing.ts', content: drawingSource } },
       { name: 'create_file', input: { targetFile: 'checks.geospec.ts', content: geoSpecSource } },
-      { name: 'get_kernel_result', input: { targetFile: 'main.ts' } },
-      { name: 'get_kernel_result', input: { targetFile: 'drawing.ts' } },
-      { name: 'export_geometry', input: { targetFile: 'main.ts', format: 'glb' } },
+      { name: 'evaluate_model', input: { targetFile: 'main.ts' } },
+      { name: 'evaluate_model', input: { targetFile: 'drawing.ts' } },
+      { name: 'export_model', input: { targetFile: 'main.ts', to: 'glb' } },
       { name: 'screenshot', input: { targetFile: 'main.ts', mode: 'single' } },
       { name: 'screenshot', input: { targetFile: 'drawing.ts', mode: 'single' } },
       { name: 'test_model', input: { files: ['checks.geospec.ts'] } },
@@ -169,7 +169,7 @@ test('[completed-artifact] captures SVG and GLB geometry and reports GeoSpec pas
     const projectEntries = await readdir(projectRoot, { recursive: true });
     const exportedGlb = projectEntries.map(String).find((entry) => /^\.tau\/artifacts\/.+\.glb$/u.test(entry));
     if (!exportedGlb) {
-      throw new Error('export_geometry did not persist a GLB under .tau/artifacts.');
+      throw new Error('export_model did not persist a GLB under .tau/artifacts.');
     }
     validateGlbData(new Uint8Array(await readFile(join(projectRoot, exportedGlb))));
     const offeredToolNames = fixture.gatewayRequests.flatMap((request) => {
@@ -177,7 +177,7 @@ test('[completed-artifact] captures SVG and GLB geometry and reports GeoSpec pas
       return tools.flatMap((tool) => (typeof tool.name === 'string' ? [tool.name] : []));
     });
     expect(offeredToolNames).toEqual(
-      expect.arrayContaining(['get_kernel_result', 'export_geometry', 'screenshot', 'test_model']),
+      expect.arrayContaining(['evaluate_model', 'export_model', 'screenshot', 'test_model']),
     );
     const gatewayRequestCount = fixture.gatewayRequests.length;
 

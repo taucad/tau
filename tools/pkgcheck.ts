@@ -22,7 +22,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
@@ -817,10 +817,43 @@ function linkInstalledPackage(from: string, nodeModules: string, dependency: str
   return true;
 }
 
-function copyAgentAssets(source: string, destination: string, files: unknown): void {
-  const agent = join(source, 'agent');
-  if (Array.isArray(files) && files.includes('agent') && existsSync(agent)) {
-    cpSync(agent, join(destination, 'agent'), { recursive: true });
+/** Stage the files npm would publish, without running package lifecycle scripts. */
+function copyPackedFiles(source: string, destination: string): void {
+  const output = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
+    cwd: source,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const packs: unknown = JSON.parse(output);
+  if (!Array.isArray(packs) || packs.length !== 1 || !isRecord(packs[0]) || !Array.isArray(packs[0].files)) {
+    throw new Error(`npm pack returned an invalid file list for ${source}`);
+  }
+
+  const sourceRoot = realpathSync(source);
+  for (const file of packs[0].files) {
+    if (!isRecord(file) || typeof file.path !== 'string') {
+      throw new Error(`npm pack returned an invalid file path for ${source}`);
+    }
+    const { path } = file;
+    if (path === 'package.json') {
+      // The staged manifest must retain publishConfig overrides and omit scripts.
+      continue;
+    }
+    if (
+      path.startsWith('/') ||
+      path.includes('\\') ||
+      path.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
+    ) {
+      throw new Error(`npm pack returned an unsafe file path: ${path}`);
+    }
+    const fileSource = realpathSync(join(source, path));
+    const relativeSource = relative(sourceRoot, fileSource);
+    if (isAbsolute(relativeSource) || relativeSource.split(sep)[0] === '..') {
+      throw new Error(`npm pack returned a file outside the package: ${path}`);
+    }
+    const fileDestination = join(destination, path);
+    mkdirSync(dirname(fileDestination), { recursive: true });
+    cpSync(fileSource, fileDestination);
   }
 }
 
@@ -851,11 +884,10 @@ function stagePublishedPackage(projectDirectory: string, nodeModules: string, st
     // hide exactly the defect `tau-no-vendored-node-modules` exists to catch.
     failures.push(`${name}: dist/node_modules exists; declare the vendored dependencies instead of shipping a copy`);
   } else if (existsSync(distribution)) {
-    cpSync(distribution, join(destination, 'dist'), { recursive: true });
+    copyPackedFiles(projectDirectory, destination);
   } else {
     failures.push(`${name}: dist/ is missing; build it before running pkgcheck`);
   }
-  copyAgentAssets(projectDirectory, destination, manifest.files);
 
   for (const [dependency] of [
     ...Object.entries(manifest.dependencies ?? {}),
@@ -1025,16 +1057,7 @@ async function runAttw(): Promise<CheckResult> {
     delete publishPackage.scripts;
     writeFileSync(join(stagingDirectory, 'package.json'), JSON.stringify(publishPackage, undefined, 2));
 
-    const distributionSource = join(absoluteRoot, 'dist');
-    if (existsSync(distributionSource)) {
-      cpSync(distributionSource, join(stagingDirectory, 'dist'), { recursive: true });
-    }
-    copyAgentAssets(absoluteRoot, stagingDirectory, packageJson.files);
-
-    const readmeSource = join(absoluteRoot, 'README.md');
-    if (existsSync(readmeSource)) {
-      cpSync(readmeSource, join(stagingDirectory, 'README.md'));
-    }
+    copyPackedFiles(absoluteRoot, stagingDirectory);
 
     const attwConfigSource = join(absoluteRoot, '.attw.json');
     if (existsSync(attwConfigSource)) {

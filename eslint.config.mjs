@@ -257,6 +257,10 @@ const memberOrdering = [
  * own dynamic-dependency exceptions without restating the tag constraints.
  */
 const moduleBoundaryOptions = {
+  // Bambu's unpublished hardware qualifier uses host camera capture; its shipped
+  // plugin and browser-safe settings subpath do not import the host.
+  // ponytail: exclude this development-only edge; split the qualifier project if it gains runtime consumers.
+  ignoredCircularDependencies: [['bambu', 'host']],
   allowCircularSelfDependency: true,
   /*
    * The Quick Look extensions are a nested app project (`desktop-quick-look`,

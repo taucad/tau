@@ -526,6 +526,8 @@ describe('createHostToolRegistry', () => {
       id: 'bambu',
       name: 'Bambu Lab',
       manifest: {
+        schemaVersion: 2,
+        identity: { typeId: 'bambu.x1c', vendor: 'Bambu Lab', model: 'X1C' },
         toolhead: {
           filamentDiameter: { value: 1.75, unit: 'mm' },
           nozzles: [{ diameter: { value: 0.4, unit: 'mm' } }],

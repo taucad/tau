@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 import { bambuA1MiniManifest, bambuX1cManifest } from '#bambu.manifest.js';
 import { bambuExternalSpoolSlot } from '#bambu.protocol.js';
+import { bambuSettingsConfiguration } from '#bambu.settings.js';
 
 const bindingConfiguration = defineConfiguration({
   id: 'bambu.machine.binding',
@@ -73,6 +74,7 @@ export const bambuMachine = defineMachine({
   accepts: bambuAcceptedContainers,
   manifest: bambuX1cManifest,
   bindingConfiguration,
+  settingsConfiguration: bambuSettingsConfiguration,
   submissionConfiguration: bambuSubmissionConfiguration,
   async *discover(input, runtime) {
     const { discoverBambuMachines } = await import('#bambu.host.js');
@@ -97,6 +99,7 @@ export const bambuA1MiniMachine = defineMachine({
   accepts: bambuAcceptedContainers,
   manifest: bambuA1MiniManifest,
   bindingConfiguration,
+  settingsConfiguration: bambuSettingsConfiguration,
   submissionConfiguration: defineConfiguration({
     id: 'bambu.a1-mini.submission',
     version: '1.0.0',

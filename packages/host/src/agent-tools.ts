@@ -28,6 +28,8 @@ import { join } from 'node:path';
 import { ResourceQueue } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import type { MachineTypeId } from '@taucad/types';
+import { MachineSettingsOwner } from '@taucad/runtime/host';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
 import { rpcClientErrorCode } from '@taucad/chat';
@@ -395,6 +397,7 @@ export type HostToolRegistryOptions = {
  */
 export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRegistry => {
   const rooted = new Map<string, ToolRegistry>();
+  const settingsOwners = new Map<string, MachineSettingsOwner>();
   const liveProvider =
     options.filesystem?.(options.workspaceRoot) ?? new NodeFsProvider(options.workspaceRoot, { policy: tauPathPolicy });
   const liveWorkbenchView = composeView({ filesystem: liveProvider }, { consumer: 'user', policy: tauPathPolicy });
@@ -443,6 +446,13 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       },
     );
     const recordView = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
+    const settingsOwner =
+      view.readFileStream && view.writeFileChecked
+        ? new MachineSettingsOwner({ filesystem: view, definitions: [] })
+        : undefined;
+    if (settingsOwner) {
+      settingsOwners.set(workspaceRoot, settingsOwner);
+    }
     const mutations = workspaceRoot === options.workspaceRoot ? liveMutations : new ResourceQueue();
     const { runtimeClient } = options;
 
@@ -582,6 +592,13 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * finds through the same project id. */
     const { revisions, machines, projectId } = options;
     return createChatToolRegistry({
+      ...(settingsOwner
+        ? {
+            machineSettings: {
+              readMachineSettings: async (typeId: MachineTypeId) => settingsOwner.read({ typeId }),
+            },
+          }
+        : {}),
       fileSystemFor: (signal) => createProviderRpcFileSystem({ provider: view, mutations, signal }),
       recordFileSystemFor: (signal) => createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
       workbenchFileSystemFor: (signal) =>
@@ -633,6 +650,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
     const live = new Set([options.workspaceRoot, ...[...(options.checkouts?.values() ?? [])].map(({ cwd }) => cwd)]);
     for (const cached of rooted.keys()) {
       if (!live.has(cached)) {
+        settingsOwners.get(cached)?.dispose();
+        settingsOwners.delete(cached);
         rooted.delete(cached);
       }
     }

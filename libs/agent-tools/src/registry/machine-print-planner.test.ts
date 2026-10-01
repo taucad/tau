@@ -3,13 +3,16 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { JsonObject } from '@taucad/agent-host';
 import type { MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
-import { printIntentPath } from '@taucad/slicer';
-import type { PrintIntent } from '@taucad/slicer';
+import { machineSettingsPath } from '@taucad/runtime/machine/settings';
+import { slicingPreferences } from '@taucad/slicer/preferences';
+import type { SlicingPreferences } from '@taucad/slicer/preferences';
+import type { MachineSettingsRecord } from '@taucad/types';
+import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
 import { writeBambuContainer, slicedFilamentColors } from '@taucad/slicer/container';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { createMachinePrintPlanner, defaultFilamentSlots } from '#registry/machine-print-planner.js';
 import type { MachinePrintPlannerDependencies } from '#registry/machine-print-planner.js';
-import type { BambuStudioEngine, PrintIntentFile } from '#registry/print-profiles.js';
+import type { BambuStudioEngine, ResolvedMachinePreferences } from '#registry/print-profiles.js';
 
 /* Three annotated layers; relative extrusion totals 5 mm. */
 const gcode = [
@@ -31,6 +34,7 @@ const container = writeBambuContainer({ gcode, modelName: 'pyramid' });
 const artifactPath = '.tau/artifacts/call-1__main.ts-gcode.3mf/pyramid.gcode.3mf';
 const mediaType = 'application/vnd.bambulab.gcode-3mf';
 const contract = { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 };
+const settingsPath = machineSettingsPath({ typeId: 'bambu.x1c' });
 const projectId = 'proj_000000000000000000001';
 const loaded = {
   bedType: 'textured-pei',
@@ -101,8 +105,7 @@ const provider = {
   name: 'Bambu Lab',
   vendor: 'Bambu Lab',
   manifest: {
-    /* The manifest's spelling, which a print intent names; the descriptor says X1C. */
-    identity: { model: 'x1c' },
+    identity: { typeId: 'bambu.x1c', model: 'x1c' },
     toolhead: {
       filamentDiameter: { value: 1.75, unit: 'mm' },
       nozzles: [{ id: 'nozzle-0.4', diameter: { value: 0.4, unit: 'mm' } }],
@@ -149,7 +152,7 @@ type PlanCall = Parameters<ReturnType<typeof createMachinePrintPlanner>>[0];
 const plan = async (
   deps: MachinePrintPlannerDependencies,
   entry: MachineDirectoryEntry = machine(loaded),
-  call: Partial<Pick<PlanCall, 'plate' | 'preset' | 'options' | 'profiles' | 'settings' | 'intentFile'>> = {},
+  call: Partial<Pick<PlanCall, 'plate' | 'preset' | 'options' | 'profiles' | 'settings' | 'preferences'>> = {},
 ) =>
   createMachinePrintPlanner(deps)({
     toolCallId: 'call-1',
@@ -166,10 +169,53 @@ const withBambuStudio = () => {
 };
 
 /** The project's print intent for this printer's model, as read. */
-const current = (intent: Partial<PrintIntent>): PrintIntentFile => ({
-  status: 'current',
-  intent: { model: 'x1c', ...intent },
-});
+const current = (
+  preferences: SlicingPreferences & {
+    plate?: ResolvedMachinePreferences['machine']['plate'];
+  },
+): ResolvedMachinePreferences => {
+  const { plate, ...slicing } = preferences;
+  const record: MachineSettingsRecord = {
+    version: 1,
+    typeId: 'bambu.x1c',
+    activeProfile: 'default',
+    profiles: {
+      default: {
+        name: 'Default',
+        configurations: {
+          [slicingPreferences.manifest.source.id]: {
+            version: slicingPreferences.manifest.source.version,
+            values: slicing,
+          },
+          ...(plate
+            ? {
+                [bambuSettingsConfiguration.manifest.source.id]: {
+                  version: bambuSettingsConfiguration.manifest.source.version,
+                  values: { plate },
+                },
+              }
+            : {}),
+        },
+      },
+    },
+  };
+  return {
+    status: 'current',
+    preferences,
+    machine: plate ? { plate } : {},
+    record,
+    profileId: 'default',
+  };
+};
+const reportedProfile = {
+  path: settingsPath,
+  typeId: 'bambu.x1c',
+  profileId: 'default',
+  profileName: 'Default',
+  configurationVersions: {
+    [slicingPreferences.manifest.source.id]: slicingPreferences.manifest.source.version,
+  },
+};
 
 const sliced = (deps: Pick<ReturnType<typeof dependencies>, 'exportGeometry'>): JsonObject | undefined =>
   deps.exportGeometry.mock.calls[0]![0].exportOptions;
@@ -343,7 +389,9 @@ describe('machine print planner', () => {
   });
 
   describe("with the project's print intent", () => {
-    const intent: Partial<PrintIntent> = {
+    const intent: SlicingPreferences & {
+      plate?: ResolvedMachinePreferences['machine']['plate'];
+    } = {
       preset: 'fine',
       printer: 'Bambu Lab X1 Carbon 0.4 nozzle',
       process: '0.12mm Fine @BBL X1C',
@@ -351,11 +399,11 @@ describe('machine print planner', () => {
       settings: { wall_loops: 3, sparse_infill_density: '15%' },
       options: { walls: 4 },
     };
-    const intentFile = current(intent);
+    const preferences = current(intent);
 
     it("should slice with the file's values under the call's own, and say which it used", async () => {
       const deps = withBambuStudio();
-      const result = await plan(deps, machine(loaded), { settings: { sparse_infill_density: '25%' }, intentFile });
+      const result = await plan(deps, machine(loaded), { settings: { sparse_infill_density: '25%' }, preferences });
       expect(sliced(deps)).toEqual({
         engine: 'bambu-studio',
         bambuStudio: {
@@ -375,8 +423,8 @@ describe('machine print planner', () => {
         },
       });
       /* Options are the reference engine's, so Bambu Studio leaves them in the file. */
-      expect(result.printIntent).toEqual({
-        path: printIntentPath,
+      expect(result.machinePreferences).toEqual({
+        ...reportedProfile,
         applied: {
           preset: 'fine',
           printer: 'Bambu Lab X1 Carbon 0.4 nozzle',
@@ -392,7 +440,7 @@ describe('machine print planner', () => {
       const result = await plan(deps, machine(loaded), {
         preset: 'fast',
         profiles: { printer: 'Bambu Lab X1 Carbon 0.6 nozzle' },
-        intentFile,
+        preferences,
       });
       expect(sliced(deps)).toEqual({
         engine: 'bambu-studio',
@@ -403,38 +451,17 @@ describe('machine print planner', () => {
           hints: expect.objectContaining({ preset: 'fast' }) as JsonObject,
         },
       });
-      expect(result.printIntent).toEqual({
-        path: printIntentPath,
+      expect(result.machinePreferences).toEqual({
+        ...reportedProfile,
         applied: { settings: { wall_loops: 3, sparse_infill_density: '15%' } },
       });
-    });
-
-    it.each<readonly [string, PrintIntentFile, string]>([
-      [
-        'a file for another model',
-        current({ model: 'X1C', preset: 'fine' }),
-        "It is for model X1C, not this printer's x1c, so none of its values apply.",
-      ],
-      [
-        'a file that is not a print intent',
-        { status: 'invalid-preserved' },
-        'It is not a valid print intent (broken JSON, an unknown key or a bad value), so none of its values apply.',
-      ],
-    ])('should ignore %s, saying why, and slice as without one', async (_case, file, ignored) => {
-      const bare = withBambuStudio();
-      const without = await plan(bare);
-      const deps = withBambuStudio();
-      const result = await plan(deps, machine(loaded), { intentFile: file });
-      expect(sliced(deps)).toEqual(sliced(bare));
-      expect(result.printIntent).toEqual({ path: printIntentPath, ignored });
-      expect(without.printIntent).toBeUndefined();
     });
 
     it("should apply only the file's quality preset and options when the reference engine slices", async () => {
       const deps = dependencies();
       const result = await plan(deps, machine(loaded), {
         options: { walls: 3 },
-        intentFile: current({ ...intent, options: { walls: 4, infillPercent: 30 } }),
+        preferences: current({ ...intent, options: { walls: 4, infillPercent: 30 } }),
       });
       /* The file's Bambu Studio values never reach the reference engine, and never refuse. */
       expect(sliced(deps)).toEqual({
@@ -447,8 +474,8 @@ describe('machine print planner', () => {
         infillPercent: 30,
         preset: 'fine',
       });
-      expect(result.printIntent).toEqual({
-        path: printIntentPath,
+      expect(result.machinePreferences).toEqual({
+        ...reportedProfile,
         applied: { preset: 'fine', options: { infillPercent: 30 } },
       });
     });
@@ -456,20 +483,34 @@ describe('machine print planner', () => {
     it("should stand the file's plate in for one the printer does not report, never for one it does", async () => {
       const deps = dependencies();
       const unreported = await plan(deps, machine({ materials: loaded.materials }), {
-        intentFile: current({ plate: 'high-temperature' }),
+        preferences: current({ plate: 'high-temperature' }),
       });
       expect(unreported.configuration).toMatchObject({
         expectedBedType: 'high-temperature',
         operatorConfirmedBedType: 'high-temperature',
       });
-      expect(unreported.printIntent).toEqual({ path: printIntentPath, applied: { plate: 'high-temperature' } });
+      expect(unreported.machinePreferences).toEqual({
+        ...reportedProfile,
+        configurationVersions: {
+          ...reportedProfile.configurationVersions,
+          [bambuSettingsConfiguration.manifest.source.id]: '1.0.0',
+        },
+        applied: { plate: 'high-temperature' },
+      });
 
       const reported = await plan(dependencies(), machine(loaded), {
-        intentFile: current({ plate: 'high-temperature' }),
+        preferences: current({ plate: 'high-temperature' }),
       });
       expect(reported.configuration).toMatchObject({ expectedBedType: 'textured-pei' });
       expect(reported.configuration).not.toHaveProperty('operatorConfirmedBedType');
-      expect(reported.printIntent).toEqual({ path: printIntentPath, applied: {} });
+      expect(reported.machinePreferences).toEqual({
+        ...reportedProfile,
+        configurationVersions: {
+          ...reportedProfile.configurationVersions,
+          [bambuSettingsConfiguration.manifest.source.id]: '1.0.0',
+        },
+        applied: {},
+      });
     });
 
     it('should name the file when a slice it supplied values to fails', async () => {
@@ -481,9 +522,11 @@ describe('machine print planner', () => {
         }),
       };
       await expect(
-        plan(deps, machine(loaded), { intentFile: current({ process: '0.12mm Old @BBL X1C' }) }),
+        plan(deps, machine(loaded), {
+          preferences: current({ process: '0.12mm Old @BBL X1C' }),
+        }),
       ).rejects.toThrow(
-        `Slicing main.ts failed: Bambu Studio has no process preset "0.12mm Old @BBL X1C". The project's ${printIntentPath} supplied process; edit it there, or pass your own.`,
+        `Slicing main.ts failed: Bambu Studio has no process preset "0.12mm Old @BBL X1C". The project's ${settingsPath} supplied process; edit it there, or pass your own.`,
       );
     });
   });
@@ -553,6 +596,44 @@ describe('machine print planner', () => {
       });
     });
 
+    it('should resolve saved slots before choosing each filament preset and pin their profile provenance', async () => {
+      const deps = slicing(withBambuStudio());
+      const preferences = current({ printer: printers[0] });
+      const result = await plan(
+        deps,
+        machine({
+          bedType: 'textured-pei',
+          materials: [tray(0, 'PLA', '#0000FFFF'), tray(3, 'PETG', '#FF0000FF')],
+        }),
+        {
+          preferences: {
+            ...preferences,
+            machine: { material: { slotsByColor: { '#ff0000': 3, '#0000ff': 0 } } },
+          },
+        },
+      );
+      expect(result.configuration).toMatchObject({
+        amsMapping: [3, 0],
+        expectedMaterials: [
+          { slot: 3, materialId: 'PETG' },
+          { slot: 0, materialId: 'PLA' },
+        ],
+      });
+      expect(exported(deps)[1]).toMatchObject({
+        filaments: ['Bambu PETG Basic @BBL X1C', 'Bambu PLA Basic @BBL X1C'],
+      });
+      expect(result.summary).toMatchObject({
+        preferences: {
+          scope: 'project',
+          typeId: 'bambu.x1c',
+          profileId: 'default',
+          configurationVersions: {
+            [slicingPreferences.manifest.source.id]: slicingPreferences.manifest.source.version,
+          },
+        },
+      });
+    });
+
     it("should take a free tray of the print's material for a colour none holds, and slice once when the presets agree", async () => {
       const deps = slicing(withBambuStudio());
       /* No PLA tray is blue; slot 2 is free, and slot 3 is blue but PETG. */
@@ -597,7 +678,7 @@ describe('machine print planner', () => {
 
       const deps = slicing(withBambuStudio());
       const result = await plan(deps, entry, {
-        intentFile: current({
+        preferences: current({
           printer: printers[0],
           filaments: { '0': 'Bambu PLA Basic @BBL X1C', '1': 'Bambu PLA Matte @BBL X1C', '2': 'Generic PLA' },
         }),
@@ -608,8 +689,8 @@ describe('machine print planner', () => {
       ]);
       expect(deps.bambuStudio.loadBambuStudioCatalog).toHaveBeenCalledWith(install, { printer: printers[0] });
       /* Only the slots this print uses. */
-      expect(result.printIntent).toEqual({
-        path: printIntentPath,
+      expect(result.machinePreferences).toEqual({
+        ...reportedProfile,
         applied: {
           printer: printers[0],
           filaments: { '1': 'Bambu PLA Matte @BBL X1C', '0': 'Bambu PLA Basic @BBL X1C' },

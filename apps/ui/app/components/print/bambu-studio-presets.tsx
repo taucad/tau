@@ -58,7 +58,7 @@ function PresetRow({
   );
 }
 
-/** The selected presets are still written through the existing print-intent adapter. @public */
+/** The selected presets are still written through the root-owned machine settings profile. @public */
 export function BambuStudioPresets({
   studio,
   trays,

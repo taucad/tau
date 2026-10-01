@@ -13,7 +13,7 @@ const originalSha256 = '3d43750d055dceec2b7d57c92d4a953c4f7dcd40c2abb1452a82de83
 const profileSha256 = 'eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d';
 const successorSha256 = '5dfd1c400ff18b91804cf5514dfc862f47a975bea00877fbd4f2d5ffe609e34f';
 const materialSuccessorSha256 = 'c36f2296878e3daa57cc0cdfe8c86dac3b77ed80d6ddbd60de68b31a64bba5f7';
-const materialCorpusSha256 = '39cd70e7c50eb981fbd5b3b94cfb289658801728a2a87d160388f35f691d6a39';
+const materialCorpusSha256 = '45b98aa9bdc83b0846e74837e5891f4d9c7c7a51b6488db2ae23e8ccbe833975';
 const oldNumericProfileField = '"numericProfile":"geospec-st-logical-requests-v3"';
 const stringAxisIds = new Set([
   'a2/invalid-claim/string-axis',

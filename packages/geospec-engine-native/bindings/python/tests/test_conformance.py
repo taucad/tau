@@ -126,7 +126,7 @@ CORPUS = load_current_corpus("full-backend")
 MESHES = {mesh["id"]: mesh for mesh in CORPUS["meshes"]}
 MATERIAL_PATH = Path(__file__).parents[3] / "conformance" / "material-v6.json"
 MATERIAL_BYTES = MATERIAL_PATH.read_bytes()
-MATERIAL_SHA256 = "39cd70e7c50eb981fbd5b3b94cfb289658801728a2a87d160388f35f691d6a39"
+MATERIAL_SHA256 = "45b98aa9bdc83b0846e74837e5891f4d9c7c7a51b6488db2ae23e8ccbe833975"
 
 
 def load_material_corpus():

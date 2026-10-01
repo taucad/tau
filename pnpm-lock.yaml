@@ -3288,7 +3288,7 @@ importers:
         version: 3.0.2
       manifold-3d:
         specifier: 'catalog:'
-        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2)
+        version: 3.4.1(@gltf-transform/core@4.4.1)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2)
       picovoxel:
         specifier: 'catalog:'
         version: 0.1.0(three@0.184.0)
@@ -3663,14 +3663,14 @@ importers:
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
       '@gltf-transform/core':
-        specifier: ^4.4.0
-        version: 4.4.0
+        specifier: 'catalog:'
+        version: 4.4.1
 
   packages/geospec-engine:
     dependencies:
       '@gltf-transform/core':
-        specifier: ^4.4.0
-        version: 4.4.0
+        specifier: 'catalog:'
+        version: 4.4.1
       '@taucad/assimp':
         specifier: workspace:*
         version: link:../plugins/assimp
@@ -3727,7 +3727,7 @@ importers:
         version: link:../geospec
       manifold-3d:
         specifier: 'catalog:'
-        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2)
+        version: 3.4.1(@gltf-transform/core@4.4.1)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2)
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -8019,9 +8019,6 @@ packages:
         optional: true
       tailwindcss:
         optional: true
-
-  '@gltf-transform/core@4.4.0':
-    resolution: {integrity: sha512-cOPxOhHFFz5hwmix+li1+Nnq5qMV/QD3fTCsVlApxxFACtFdjkt2R/juseD4gvZ7D2c/yl6OilKH0pvI735YyQ==}
 
   '@gltf-transform/core@4.4.1':
     resolution: {integrity: sha512-ygWWFOrj1HnfvBimHF1yHTY4abbeBjn3CvljijaWKoRLMRV/a8pWYQu9rfMFQhfpT5kYZTD5Mp+dizAXPbiTDQ==}
@@ -31280,10 +31277,6 @@ snapshots:
       '@tailwindcss/oxide': 4.3.2
       tailwindcss: 4.3.3
 
-  '@gltf-transform/core@4.4.0':
-    dependencies:
-      property-graph: 4.1.0
-
   '@gltf-transform/core@4.4.1':
     dependencies:
       property-graph: 4.1.0
@@ -47749,21 +47742,6 @@ snapshots:
   makeerror@1.0.12:
     dependencies:
       tmpl: 1.0.5
-
-  manifold-3d@3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2):
-    dependencies:
-      '@gltf-transform/core': 4.4.0
-      '@gltf-transform/extensions': 4.4.1
-      '@gltf-transform/functions': 4.4.1
-      '@jridgewell/resolve-uri': 3.1.2
-      '@jridgewell/trace-mapping': 0.3.31
-      '@jscadui/3mf-export': 0.5.0
-      commander: 13.1.0
-      convert-source-map: 2.0.0
-      esbuild-wasm: 0.28.2
-      fast-xml-parser: 5.7.3
-      fflate: 0.8.3
-      magic-string: 0.30.21
 
   manifold-3d@3.4.1(@gltf-transform/core@4.4.1)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2):
     dependencies:

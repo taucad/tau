@@ -111,7 +111,7 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@gltf-transform/core": "^4.4.0",
+    "@gltf-transform/core": "catalog:",
     "@taucad/assimp": "workspace:*",
     "@taucad/brep": "workspace:*",
     "@taucad/esbuild": "workspace:*",

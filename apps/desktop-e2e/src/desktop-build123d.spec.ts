@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Environment variables retain their wire names. */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import type { Locator, Page } from 'playwright';
@@ -229,6 +229,60 @@ const picogkWorkers = (): readonly NativeWorker[] => {
       return [];
     }
     return [{ pid: Number(pid), temporaryRoot: dirname(workspace) }];
+  });
+};
+
+const capturePicoGkFiles = (root: string, destination: string, artifacts: boolean): unknown[] => {
+  if (!existsSync(root)) {
+    return [];
+  }
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry): unknown[] => {
+    const path = join(root, entry.name);
+    const output = join(destination, entry.name);
+    if (entry.isDirectory() && !['.git', '.tau', 'node_modules'].includes(entry.name)) {
+      return capturePicoGkFiles(path, output, artifacts);
+    }
+    if (!entry.isFile() || (!artifacts && !entry.name.endsWith('.cs') && entry.name !== 'tau.json')) {
+      return [];
+    }
+    const bytes = readFileSync(path);
+    mkdirSync(dirname(output), { recursive: true });
+    writeFileSync(output, bytes);
+    const glb = bytes.length >= 20 && bytes.toString('ascii', 0, 4) === 'glTF';
+    return [
+      {
+        path,
+        byteLength: bytes.length,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        ...(glb ? { glb: JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12))) as unknown } : {}),
+      },
+    ];
+  });
+};
+
+const ownedPicoGkWorkers = (electronPid: number): readonly NativeWorker[] => {
+  const result = spawnSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' });
+  expect(result.status, result.stderr).toBe(0);
+  const parents = new Map(
+    result.stdout
+      .trim()
+      .split('\n')
+      .map((line) => {
+        const [pid, parent] = line.trim().split(/\s+/u).map(Number);
+        return [pid, parent] as const;
+      }),
+  );
+  return picogkWorkers().filter(({ pid }) => {
+    const visited = new Set<number>();
+    let current: number | undefined = pid;
+    while (current && !visited.has(current)) {
+      if (current === electronPid) {
+        return true;
+      }
+      visited.add(current);
+      current = parents.get(current);
+    }
+    return false;
   });
 };
 
@@ -550,6 +604,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     return;
   }
   const existingWorkerPids = new Set(picogkWorkers().map(({ pid }) => pid));
+  let observedProjectRoot: string | undefined;
   const account = tauTestAccount('picogk');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
@@ -588,6 +643,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     const slug = await submitPrompt(page, 'Create the asymmetric PicoGK assembly.');
     const sourcePath = await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.cs' });
     const projectRoot = join(session.pickedDirectory, slug);
+    observedProjectRoot = projectRoot;
     await expect.poll(() => readFileSync(sourcePath, 'utf8'), { timeout: 120_000 }).toBe(picogkSource);
     await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 420_000);
     await expectCount(page.getByText('Native code enabled', { exact: true }), 0);
@@ -799,7 +855,57 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       .poll(() => workers.every(({ temporaryRoot }) => !existsSync(temporaryRoot)), { timeout: 15_000 })
       .toBe(true);
   } catch (error) {
-    await session?.capture('picogk-packaged-failure');
+    if (session) {
+      const activeSession = session;
+      try {
+        const captureDirectory = await activeSession.capture('picogk-packaged-failure');
+        const electronPid = activeSession.application.process().pid;
+        if (electronPid === undefined) {
+          throw new Error('Electron PID unavailable; refusing worker filesystem capture.');
+        }
+        const workers = ownedPicoGkWorkers(electronPid);
+        const visibleParameters = await page.getByRole('spinbutton').evaluateAll((inputs: HTMLInputElement[]) =>
+          inputs
+            .filter((input) => input.checkVisibility())
+            .map((input) => ({
+              label: input.getAttribute('aria-label'),
+              value: input.value,
+            })),
+        );
+        writeFileSync(
+          join(captureDirectory, 'picogk-input-artifacts.json'),
+          JSON.stringify(
+            {
+              electronPid,
+              requestParameters: 'unavailable',
+              actorMetadata: 'unavailable',
+              workerResponseDescriptors: 'unavailable; only existing artifact files are captured',
+              visibleParameters,
+              project: observedProjectRoot
+                ? capturePicoGkFiles(observedProjectRoot, join(captureDirectory, 'project'), false)
+                : [],
+              workers: workers.map((worker) => ({
+                ...worker,
+                workspace: capturePicoGkFiles(
+                  join(worker.temporaryRoot, 'workspace'),
+                  join(captureDirectory, `worker-${worker.pid}`, 'workspace'),
+                  false,
+                ),
+                artifacts: capturePicoGkFiles(
+                  join(worker.temporaryRoot, 'artifacts'),
+                  join(captureDirectory, `worker-${worker.pid}`, 'artifacts'),
+                  true,
+                ),
+              })),
+            },
+            null,
+            2,
+          ),
+        );
+      } catch (captureError) {
+        console.error('PicoGK failure evidence capture failed:', captureError);
+      }
+    }
     throw error;
   }
 }, 900_000);

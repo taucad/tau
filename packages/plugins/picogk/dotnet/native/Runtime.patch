@@ -1,7 +1,7 @@
 diff --git a/API/PicoGK.h b/API/PicoGK.h
 --- a/API/PicoGK.h
 +++ b/API/PicoGK.h
-@@ -747,6 +747,57 @@
+@@ -747,6 +747,61 @@
  PICOGK_API void             Viewer_SideBar_Destroy(         PKVIEWER            hThis,
                                                              PKGUI               hSideBar);
  
@@ -54,6 +54,10 @@ diff --git a/API/PicoGK.h b/API/PicoGK.h
 +// Outputs transfer together on success; both remain zero on failure.
 +PICOGK_API int32_t TauVoxels_CreateCsg(PKINSTANCE library, PKVOXELS left, PKVOXELS right,
 +    int32_t operation, PKVOXELS* output, PKMETADATA* metadata) TAU_NOEXCEPT;
++
++PICOGK_API int32_t TauLattice_AddSphere(PKINSTANCE library, PKLATTICE lattice, const PKVector3* center, float radius) TAU_NOEXCEPT;
++PICOGK_API int32_t TauLattice_AddBeam(PKINSTANCE library, PKLATTICE lattice, const PKVector3* start, const PKVector3* end, float radiusStart, float radiusEnd, bool roundCap) TAU_NOEXCEPT;
++PICOGK_API int32_t TauVoxels_RenderLattice(PKINSTANCE library, PKVOXELS voxels, PKLATTICE lattice) TAU_NOEXCEPT;
 +
 +#undef TAU_NOEXCEPT
 +
@@ -479,7 +483,7 @@ diff --git a/Source/PicoGKHandleManager.h b/Source/PicoGKHandleManager.h
 diff --git a/Source/PicoGKLattice.h b/Source/PicoGKLattice.h
 --- a/Source/PicoGKLattice.h
 +++ b/Source/PicoGKLattice.h
-@@ -37,6 +37,8 @@
+@@ -37,9 +37,12 @@
  #define PICOGKLATTICE_H_
  
  #include "PicoGKTypes.h"
@@ -488,7 +492,99 @@ diff --git a/Source/PicoGKLattice.h b/Source/PicoGKLattice.h
  #include <memory>
  #include <algorithm>
  #include <vector>
-@@ -191,14 +193,37 @@
++#include <stdexcept>
+ 
+ namespace PicoGK
+ {
+@@ -53,12 +56,21 @@
+                     float fRadius)
+     : m_vecC(vecCenter)
+     {
++        TauValidate(vecCenter, fRadius);
+         m_fRad = fRadius;
+         
+         m_oBBox.Include(m_vecC);
+         m_oBBox.Grow(m_fRad);
+     }
+     
++    static void TauValidate(const Vector3& center, float radius) {
++        if (!std::isfinite(radius) || radius < 0)
++            throw std::invalid_argument("lattice radius must be finite and nonnegative");
++        for (float coordinate : {center.X, center.Y, center.Z})
++            if (!std::isfinite(coordinate) || !std::isfinite(coordinate - radius) || !std::isfinite(coordinate + radius))
++                throw std::invalid_argument("lattice position and bounds must be finite");
++    }
++
+     inline float fSdValue(const Vector3& vecSample) const
+     {
+         return (vecSample - m_vecC).fLength() - m_fRad;
+@@ -94,11 +106,34 @@
+         m_fRadE(fRadiusB),
+         m_bRoundCap(bRoundCap)
+     {
++        TauValidate(m_vecS, m_vecE, m_fRadS, m_fRadE, m_bRoundCap);
+         m_oBBox.Include(m_vecS);
+         m_oBBox.Include(m_vecE);
+         m_oBBox.Grow(std::max<float>(m_fRadS, m_fRadE));
+-    }
+-    
++        // A contained pair of endpoint balls has no cone tangent: its hull is
++        // the larger ball. Qualify once without changing ordinary cone math.
++        const Vector3 ba = m_vecE - m_vecS;
++        const float l2 = ba.fDot(ba);
++        const float rr = m_fRadS - m_fRadE;
++        const float a2 = l2 - rr * rr;
++        m_bContainedSphere = m_bRoundCap && std::isfinite(l2) && std::isfinite(a2) &&
++            a2 <= 0.0f && m_fRadS >= 0.0f && m_fRadE >= 0.0f;
++    }
++
++    static void TauValidate(const Vector3& start, const Vector3& end, float radiusStart, float radiusEnd, bool roundCap) {
++        const float radius = std::max(radiusStart, radiusEnd);
++        LatticeSphere::TauValidate(start, radiusStart);
++        LatticeSphere::TauValidate(end, radiusEnd);
++        for (float coordinate : {start.X, start.Y, start.Z, end.X, end.Y, end.Z})
++            if (!std::isfinite(coordinate - radius) || !std::isfinite(coordinate + radius))
++                throw std::invalid_argument("lattice bounds must be finite");
++        const Vector3 axis = end - start;
++        const float lengthSquared = axis.fDot(axis);
++        const float radiusDifference = radiusStart - radiusEnd;
++        if (!std::isfinite(lengthSquared) || !std::isfinite(radiusDifference * radiusDifference) || (!roundCap && lengthSquared == 0))
++            throw std::invalid_argument("lattice beam axis must be finite and nonzero for flat caps");
++    }
++
+     inline float fSdValue(const Vector3& vecSample) const
+     {
+         if (m_bRoundCap)
+@@ -114,7 +149,8 @@
+     inline const BBox3& oBBox() const       {return m_oBBox;}
+     
+ protected:
+-    
++    friend class Lattice;
++
+     float fSdvRoundCone(const Vector3& p) const
+     {
+         Vector3 b = m_vecE;
+@@ -127,6 +163,10 @@
+         float l2 = ba.fDot(ba);
+         float rr = r1 - r2;
+         float a2 = l2 - rr * rr;
++        if (m_bContainedSphere) {
++            const Vector3& center = r1 >= r2 ? m_vecS : m_vecE;
++            return (p - center).fLength() - std::max(r1, r2);
++        }
+         float il2 = 1.0f / l2;
+         
+         // sampling dependant computations
+@@ -183,6 +223,7 @@
+     float   m_fRadS;
+     float   m_fRadE;
+     bool    m_bRoundCap;
++    bool    m_bContainedSphere;
+     BBox3   m_oBBox;
+ };
+ 
+@@ -191,17 +232,40 @@
  public:
      PKSHAREDPTR(Lattice);
      
@@ -525,20 +621,52 @@ diff --git a/Source/PicoGKLattice.h b/Source/PicoGKLattice.h
      {
 +        std::lock_guard<std::recursive_mutex> owner(m_tauGate);
          LatticeSphere::Ptr roSphere = std::make_shared<LatticeSphere>(vecCenter, fRadius);
++        m_oSpheres.push_back(roSphere);
          m_oBBox.Include(roSphere->oBBox());
-         m_oSpheres.push_back(roSphere);
-@@ -210,6 +235,7 @@
+-        m_oSpheres.push_back(roSphere);
+     }
+  
+     void AddBeam(   Vector3 vecS,
+@@ -210,20 +274,22 @@
                      float fRadE,
                      bool bRoundCap)
      {
+-        if (bRoundCap && ((vecS-vecE).fLength() < std::numeric_limits<float>::epsilon()))
+-        {
+-            // this is a sphere...
+-            AddSphere(vecS, std::max(fRadS, fRadE));
+-            return;
 +        std::lock_guard<std::recursive_mutex> owner(m_tauGate);
-         if (bRoundCap && ((vecS-vecE).fLength() < std::numeric_limits<float>::epsilon()))
-         {
-             // this is a sphere...
-@@ -242,6 +268,7 @@
++        // Qualify once before choosing the immutable primitive to publish.
++        LatticeBeam beam(vecS, vecE, fRadS, fRadE, bRoundCap);
++        if (bRoundCap) {
++            if ((vecS - vecE).fLength() < std::numeric_limits<float>::epsilon()) {
++                AddSphere(vecS, std::max(fRadS, fRadE));
++                return;
++            }
++            if (beam.m_bContainedSphere) {
++                AddSphere(fRadS >= fRadE ? vecS : vecE, std::max(fRadS, fRadE));
++                return;
++            }
+         }
+-        
+-        LatticeBeam::Ptr roBeam = std::make_shared<LatticeBeam>(    vecS,
+-                                                                    vecE,
+-                                                                    fRadS,
+-                                                                    fRadE,
+-                                                                    bRoundCap);
++        auto roBeam = std::make_shared<LatticeBeam>(beam);
++        m_oBeams.push_back(roBeam);
+         m_oBBox.Include(roBeam->oBBox());
+-        m_oBeams.push_back(roBeam);
+     }
+     
+     inline const BBox3& oBBox() const
+@@ -242,6 +308,8 @@
      }
      
  protected:
++    friend class Voxels;
 +    mutable std::recursive_mutex m_tauGate;
      std::vector<LatticeBeam::Ptr>   m_oBeams;
      std::vector<LatticeSphere::Ptr> m_oSpheres;
@@ -696,7 +824,32 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API void Lattice_AddSphere(  PKINSTANCE hLib,
-@@ -397,7 +408,7 @@
+@@ -371,10 +382,7 @@
+                                     const PKVector3* vecCenter,
+                                     float fRadius)
+ {
+-    Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    roLib->m_oLattices.roGet(hThis)
+-        ->AddSphere(     *vecCenter,
+-                         fRadius);
++    (void)TauLattice_AddSphere(hLib, hThis, vecCenter, fRadius);
+ }
+ 
+ PICOGK_API void Lattice_AddBeam(    PKINSTANCE hLib,
+@@ -385,19 +393,13 @@
+                                     float fRadiusB,
+                                     bool  bRoundCap)
+ {
+-    Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    roLib->m_oLattices.roGet(hThis)
+-        ->AddBeam(  *pvecA,
+-                    *pvecB,
+-                    fRadiusA,
+-                    fRadiusB,
+-                    bRoundCap);
++    (void)TauLattice_AddBeam(hLib, hThis, pvecA, pvecB, fRadiusA, fRadiusB, bRoundCap);
+ }
+ 
  PICOGK_API PKVOXELS Voxels_hCreate(PKINSTANCE hLib)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -705,7 +858,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
                                                                  PICOGK_VOXEL_DEFAULTNARROWBAND));
  }
  
-@@ -405,7 +416,7 @@
+@@ -405,7 +407,7 @@
                                          PKVOXELS hSource)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -714,7 +867,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKVOXELS Voxels_hCreateSphere(   PKINSTANCE          hLib,
-@@ -413,7 +424,7 @@
+@@ -413,7 +415,7 @@
                                              float               fRadius)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -723,7 +876,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
                                                              PICOGK_VOXEL_DEFAULTNARROWBAND,
                                                              *pvecCenter,
                                                              fRadius));
-@@ -426,7 +437,7 @@
+@@ -426,7 +428,7 @@
                                              float               fRadius2)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -732,7 +885,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
                                                              PICOGK_VOXEL_DEFAULTNARROWBAND,
                                                              *pvecStart,
                                                              *pvecStop,
-@@ -439,7 +450,7 @@
+@@ -439,7 +441,7 @@
                                                  float               fRadius)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -741,7 +894,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
                                                              PICOGK_VOXEL_DEFAULTNARROWBAND,
                                                              *roLib->m_oMeshes.roGet(hMesh),
                                                              fRadius));
-@@ -462,14 +473,11 @@
+@@ -462,14 +464,11 @@
  PICOGK_API void Voxels_Destroy( PKINSTANCE hLib,
                                  PKVOXELS hThis)
  {
@@ -761,7 +914,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API bool Voxels_bDiagnose(   PKINSTANCE  hLib,
-@@ -485,8 +493,10 @@
+@@ -485,8 +484,10 @@
  PICOGK_API int64_t Voxels_nMemUsage(    PKINSTANCE hLib,
                                          PKVOXELS hThis)
  {
@@ -772,7 +925,18 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API float Voxels_fVoxelSize( PKINSTANCE  hLib,
-@@ -742,20 +752,20 @@
+@@ -579,9 +580,7 @@
+                                         PKVOXELS hThis,
+                                         PKLATTICE hLattice)
+ {
+-    Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    roLib->m_oVoxels.roGet(hThis)
+-        ->RenderLattice(    *roLib->m_oLattices.roGet(hLattice));
++    (void)TauVoxels_RenderLattice(hLib, hThis, hLattice);
+ }
+ 
+ PICOGK_API void Voxels_ProjectZSlice(   PKINSTANCE hLib,
+@@ -742,20 +741,20 @@
  PICOGK_API void PolyLine_Destroy(   PKINSTANCE hLib,
                                      PKPOLYLINE hThis)
  {
@@ -800,7 +964,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API int32_t PolyLine_nAddVertex( PKINSTANCE hLib,
-@@ -830,20 +840,20 @@
+@@ -830,20 +829,20 @@
  PICOGK_API void VdbFile_Destroy(    PKINSTANCE hLib,
                                      PKVDBFILE hThis)
  {
@@ -828,7 +992,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API bool VdbFile_bSaveToFile(    PKINSTANCE hLib,
-@@ -861,7 +871,9 @@
+@@ -861,7 +860,9 @@
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
      
@@ -839,7 +1003,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
              
      if (!roGrid->isType<FloatGrid>())
          return 0;
-@@ -869,7 +881,7 @@
+@@ -869,7 +870,7 @@
      if (roGrid->getGridClass() != GRID_LEVEL_SET)
          return 0; // not a voxel field
              
@@ -848,7 +1012,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
                                                              PICOGK_VOXEL_DEFAULTNARROWBAND));
  }
  
-@@ -879,8 +891,8 @@
+@@ -879,8 +880,8 @@
                                          PKVOXELS    hVoxels)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -859,7 +1023,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
      
  }
  
-@@ -891,7 +903,9 @@
+@@ -891,7 +892,9 @@
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
      
@@ -870,7 +1034,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
              
      if (!roGrid->isType<FloatGrid>())
          return 0;
-@@ -909,7 +923,7 @@
+@@ -909,7 +912,7 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      return roLib->m_oVdbFiles.roGet(hThis)
@@ -879,7 +1043,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKVECTORFIELD VdbFile_hGetVectorField(   PKINSTANCE hLib,
-@@ -919,7 +933,9 @@
+@@ -919,7 +922,9 @@
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
      
@@ -890,7 +1054,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
      
      if (!roGrid->isType<Vec3SGrid>())
          return 0;
-@@ -935,7 +951,7 @@
+@@ -935,7 +940,7 @@
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      
      return roLib->m_oVdbFiles.roGet(hThis)
@@ -899,7 +1063,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API int32_t VdbFile_nFieldCount( PKINSTANCE hLib,
-@@ -989,20 +1005,20 @@
+@@ -989,20 +994,20 @@
  PICOGK_API void ScalarField_Destroy(    PKINSTANCE hLib,
                                          PKSCALARFIELD   hThis)
  {
@@ -927,7 +1091,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKSCALARFIELD ScalarField_hCreateFromVoxels( PKINSTANCE hLib,
-@@ -1122,13 +1138,11 @@
+@@ -1122,13 +1127,11 @@
  PICOGK_API void VectorField_Destroy(    PKINSTANCE hLib,
                                          PKVECTORFIELD hThis)
  {
@@ -946,7 +1110,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKVECTORFIELD VectorField_hCreateFromVoxels( PKINSTANCE hLib,
-@@ -1160,8 +1174,10 @@
+@@ -1160,8 +1163,10 @@
  PICOGK_API int64_t VectorField_nMemUsage(   PKINSTANCE hLib,
                                              PKVECTORFIELD hThis)
  {
@@ -957,7 +1121,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API void VectorField_SetValue(   PKINSTANCE hLib,
-@@ -1212,7 +1228,8 @@
+@@ -1212,7 +1217,8 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oVoxels.roGet(hField);
@@ -967,7 +1131,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKMETADATA Metadata_hFromScalarField(    PKINSTANCE hLib,
-@@ -1220,7 +1237,7 @@
+@@ -1220,7 +1226,7 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oScalarFields.roGet(hField);
@@ -976,7 +1140,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKMETADATA Metadata_hFromVectorField(    PKINSTANCE hLib,
-@@ -1228,19 +1245,17 @@
+@@ -1228,19 +1234,17 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oVectorFields.roGet(hField);
@@ -1002,7 +1166,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API int32_t Metadata_nCount( PKINSTANCE hLib,
-@@ -1796,3 +1811,332 @@
+@@ -1796,3 +1800,355 @@
      
      poThis->DestroySideBar(hSideBar);
  }
@@ -1333,6 +1497,29 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
 +            owner->m_oVoxels.bDestroy(voxelHandle);
 +            throw;
 +        }
++    });
++}
++
++PICOGK_API int32_t TauLattice_AddSphere(PKINSTANCE library, PKLATTICE lattice, const PKVector3* center, float radius) noexcept {
++    if (!center) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        owner->m_oLattices.roGet(lattice)->AddSphere(*center, radius);
++    });
++}
++PICOGK_API int32_t TauLattice_AddBeam(PKINSTANCE library, PKLATTICE lattice, const PKVector3* start, const PKVector3* end, float radiusStart, float radiusEnd, bool roundCap) noexcept {
++    if (!start || !end) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        owner->m_oLattices.roGet(lattice)->AddBeam(*start, *end, radiusStart, radiusEnd, roundCap);
++    });
++}
++PICOGK_API int32_t TauVoxels_RenderLattice(PKINSTANCE library, PKVOXELS voxels, PKLATTICE lattice) noexcept {
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto target = owner->m_oVoxels.roGet(voxels);
++        auto source = owner->m_oLattices.roGet(lattice);
++        target->RenderLattice(*source);
 +    });
 +}
 diff --git a/Source/PicoGKLibraryMgr.h b/Source/PicoGKLibraryMgr.h
@@ -2819,16 +3006,22 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_RenderMesh);
          
          FloatGrid::Ptr roVoxelized = roFloatGridFromMesh(   oMesh,
-@@ -342,6 +424,8 @@
+@@ -342,7 +424,14 @@
      
      void RenderLattice(const Lattice& oLattice)
      {
-+        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
-+        TauGridMutation tauMutation(m_tauState);
++        std::scoped_lock owners(m_tauObjectGate, oLattice.m_tauGate);
          PKTRACE(Voxels_RenderLattice);
++        if (oLattice.oSpheres().empty() && oLattice.oBeams().empty()) return;
++        for (const auto& sphere : oLattice.oSpheres())
++            if (!TauImplicitBoundsValid(sphere->oBBox())) throw std::invalid_argument("lattice sphere bounds exceed voxel coordinates");
++        for (const auto& beam : oLattice.oBeams())
++            if (!TauImplicitBoundsValid(beam->oBBox())) throw std::invalid_argument("lattice beam bounds exceed voxel coordinates");
++        TauGridMutation tauMutation(m_tauState);
          
          auto oAccess = m_roGrid->getAccessor();
-@@ -357,9 +441,30 @@
+         
+@@ -357,9 +446,30 @@
          }
      }
      
@@ -2859,7 +3052,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_RenderImplicit);
          
          auto oAccess = m_roGrid->getAccessor();
-@@ -374,8 +479,14 @@
+@@ -374,8 +484,14 @@
              Vector3 vecSample = oVoxelSize().vecToMM(Coord(x,y,z));
              openvdb::Coord xyz(x,y,z);
              
@@ -2876,7 +3069,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
              
              SetSdValue(&oAccess, xyz, fBackgroundMM(), fValue);
          }
-@@ -387,9 +498,16 @@
+@@ -387,9 +503,16 @@
      {
          PKTRACE(Voxels_IntersectImplicit);
          
@@ -2896,7 +3089,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          BBox3 oBBoxMM;
          oBBoxMM.vecMin.X = oVoxelSize().fToMM(oBBox.min().x());
-@@ -406,16 +524,62 @@
+@@ -406,16 +529,62 @@
          // implict grid, and use our grid just as the mask
          // Not sure if this is really necessary, but the
          // implicit grid is "perfect"
@@ -2962,7 +3155,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
      	std::vector< openvdb::Vec3s > oPoints;
      	std::vector< openvdb::Vec3I > oTriangles;
-@@ -429,33 +593,36 @@
+@@ -429,33 +598,36 @@
                                                           0.0,
                                                           false);
  
@@ -3021,7 +3214,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          assert(fZStart > fZEnd);
          
          int32_t iZStart = oVoxelSize().iToVoxels(fZStart);
-@@ -498,6 +665,8 @@
+@@ -498,6 +670,8 @@
      void ProjectZSliceUp(   float fZStart,
                              float fZEnd)
      {
@@ -3030,7 +3223,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          assert(fZStart < fZEnd);
          
          int32_t iZStart = oVoxelSize().iToVoxels(fZStart);
-@@ -547,6 +716,8 @@
+@@ -547,6 +721,8 @@
      
      float fCalculateVolume()
      {
@@ -3039,7 +3232,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_fCalculateVolume);
          
          if (m_roGrid->tree().empty())
-@@ -561,6 +732,8 @@
+@@ -561,6 +737,8 @@
      
      inline bool bIsInside(Vector3 vecTest)
      {
@@ -3048,7 +3241,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          auto oAccess = m_roGrid->getConstAccessor();
      
          openvdb::Coord xyz( oVoxelSize().iToVoxels(vecTest.X),
-@@ -573,6 +746,8 @@
+@@ -573,6 +751,8 @@
      inline void GetSurfaceNormal(   Vector3 vecPt,
                                      Vector3* pvecNormal)
      {
@@ -3057,7 +3250,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          math::GradStencil oStencil(*m_roGrid);
          Coord xyz = oVoxelSize().xyzToVoxels(vecPt);
      
-@@ -591,6 +766,8 @@
+@@ -591,6 +771,8 @@
      inline bool bFindClosestPointOnSurface( Vector3 vecSearch,
                                              Vector3* pvecSurfacePoint)
      {
@@ -3066,7 +3259,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          Coord xyzSearch = oVoxelSize().xyzToVoxels(vecSearch);
          
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
-@@ -638,6 +815,8 @@
+@@ -638,6 +820,8 @@
                                      const Vector3& vecDirection,
                                      Vector3* pvecSurfacePoint)
      {
@@ -3075,7 +3268,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          tools::LevelSetRayIntersector oIntersector(*m_roGrid);
          math::Ray<Real> oRay(   Vec3f(  oVoxelSize().fToVoxels(vecSearch.X),
                                          oVoxelSize().fToVoxels(vecSearch.Y),
-@@ -670,6 +849,8 @@
+@@ -670,6 +854,8 @@
                                  int32_t* pnYSize,
                                  int32_t* pnZSize) const
      {
@@ -3084,7 +3277,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
          
          *pnXMin     = oBBox.min().x();
-@@ -683,6 +864,8 @@
+@@ -683,6 +869,8 @@
      void GetZSlice( int32_t nZSlice,
                      float* pfBuffer)
      {
@@ -3093,7 +3286,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
          openvdb::Coord xyz(0, 0, nZSlice + oBBox.min().z());
          
-@@ -700,6 +883,8 @@
+@@ -700,6 +888,8 @@
      void GetXSlice( int32_t nXSlice,
                      float* pfBuffer)
      {
@@ -3102,7 +3295,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
          openvdb::Coord xyz(nXSlice + oBBox.min().x(), 0, 0);
          
-@@ -717,6 +902,8 @@
+@@ -717,6 +907,8 @@
      void GetYSlice( int32_t nYSlice,
                      float* pfBuffer)
      {
@@ -3111,7 +3304,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
          openvdb::Coord xyz(0, nYSlice + oBBox.min().y(), 0);
          
-@@ -734,6 +921,8 @@
+@@ -734,6 +926,8 @@
      void GetInterpolatedZSlice( float fZSlice,
                                  float* pfBuffer)
      {
@@ -3120,7 +3313,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -750,18 +939,33 @@
+@@ -750,18 +944,33 @@
          }
      }
      
@@ -3157,7 +3350,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      int32_t             m_nSdfNarrowBand;
      
      bool bLevelSetNeedsRebuild() const
-@@ -830,22 +1034,23 @@
+@@ -830,22 +1039,23 @@
                                                  VoxelSize oVoxelSize,
                                                  int32_t nHalfWidth)
      {

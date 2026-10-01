@@ -60,6 +60,15 @@ const config: KnipConfig = {
     '.': {
       // The workspace-root scripts Nx targets and build configs run; `pkgcheck.ts`
       // is the only consumer of `@taucad/nx`, `madge`, and `@types/madge`.
+      nx: {
+        config: [
+          'nx.json',
+          'project.json',
+          '{apps,libs,packages,tools}/**/project.json',
+          'scripts/project.json',
+          'package.json',
+        ],
+      },
       entry: ['tools/*.ts', '{apps,libs,packages,scripts,tools}/**/*.{test,spec,test-d}.{ts,tsx,mts}'],
       project: ['**/*.{ts,tsx,mts}'],
       ignore: [
@@ -84,12 +93,23 @@ const config: KnipConfig = {
     'apps/api': {
       entry: [
         'app/main.ts',
+        'app/*-command.ts',
         'app/api/**/*.module.ts',
         'app/database/**/*.ts',
         'app/telemetry/**/*.ts',
         'app/types/**/*.d.ts',
         'scripts/*.mts',
         'vitest.integration.config.ts',
+      ],
+    },
+    'apps/desktop': {
+      // Electron's main/preload and utility-process bundles are separate entry points.
+      entry: [
+        'electron.vite.config.ts',
+        'src/main/index.ts',
+        'src/preload/**/*.ts',
+        'src/tau/*.entry.ts',
+        'scripts/*.mts',
       ],
     },
     'apps/ui': {

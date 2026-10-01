@@ -28,7 +28,10 @@ fn verifier_source_hash() -> String {
 fn successor_definition_binds_the_same_inventory_to_current_source_without_rewriting_v5() {
     let current = include_str!("fixtures/current-profile-v6/f1-definition-records.json");
     let historical = include_str!("fixtures/current-profile-v5/f1-definition-records.json");
-    assert_eq!(sha256_hex(current), VERIFIER_SOURCE_HASH);
+    assert_eq!(
+        sha256_hex(geospec_engine_native_core::canonicalize(current.as_bytes()).unwrap()),
+        VERIFIER_SOURCE_HASH
+    );
     assert_eq!(
         sha256_hex(historical),
         include_str!("fixtures/current-profile-v5/verifier-source-hash.txt")

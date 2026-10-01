@@ -34,6 +34,79 @@ const parameters = {
 } as const;
 
 describe('v2 kernel boundary with the current client', () => {
+  it('publishes the original evaluation and view failures when watch rearming also fails', async () => {
+    const kernel = defineKernelV2({
+      id: 'lost-filesystem',
+      extensions: ['circuit'] as const,
+      name: 'Lost filesystem',
+      version: '1.0.0',
+      views: { model: { title: 'Model', mimeType: 'image/svg+xml' } },
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve() {
+        throw new Error('Bridge proxy closed');
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        return { handle: {}, views: ['model'] as const, exports: [] as const };
+      },
+      async render() {
+        return { content: '<svg xmlns="http://www.w3.org/2000/svg"/>' };
+      },
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const base = getTestFileSystem();
+    const watchReady = vi.fn(() => ({
+      unsubscribe: () => undefined,
+      ready: Promise.reject(new Error('Filesystem watch channel closed')),
+      closed: Promise.resolve(),
+    }));
+    const inlineFileSystem = Object.assign(base, { watch: () => () => undefined, watchReady });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await worker.initialize({
+      callbacks: { onLog: () => undefined },
+      transferables: { inlineFileSystem },
+      options: {},
+    });
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    worker.onRendered = (event) => {
+      rendered.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 0,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: true,
+      });
+      worker.handleOpenView({ documentId: 'doc', subscriptionId: 'view', requestId: 'request', view: 'model' });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+        expect(rendered).toHaveLength(1);
+      });
+      expect(watchReady).toHaveBeenCalledOnce();
+      expect(evaluated[0]).toMatchObject({
+        success: false,
+        issues: [expect.objectContaining({ message: 'Bridge proxy closed' })],
+      });
+      expect(rendered[0]).toMatchObject({
+        success: false,
+        issues: [expect.objectContaining({ message: 'Bridge proxy closed' })],
+      });
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
   it('delivers a failed view when evaluation has no source revision', async () => {
     const kernel = defineKernelV2({
       id: 'unavailable-source',

@@ -1670,7 +1670,16 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         };
         if (document.watch && !controller.signal.aborted && !document.closed && document.intent === intent) {
           document.watchPaths.add(assertRootedPath(joinRelativePath(document.file.path, document.file.filename)));
-          await this.reconcileObservedPaths();
+          try {
+            await this.reconcileObservedPaths();
+          } catch (watchError) {
+            /* A dead filesystem bridge can reject the replacement watch after
+             * the evaluation itself failed. Its rearm error must not suppress
+             * the original evaluated and rendered failure notifications. */
+            this.logger.warn('Failed to reconcile watched paths after document evaluation error', {
+              data: { error: watchError instanceof Error ? watchError.message : String(watchError) },
+            });
+          }
         }
         if (pendingCommitted) {
           if (controller.signal.aborted || document.closed) {

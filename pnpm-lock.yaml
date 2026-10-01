@@ -4776,9 +4776,6 @@ importers:
       nanoid:
         specifier: 'catalog:'
         version: 5.1.14
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
       '@taucad/formal':
         specifier: workspace:*
@@ -4792,6 +4789,9 @@ importers:
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   packages/rpc:
     dependencies:

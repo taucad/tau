@@ -1,6 +1,8 @@
+diff --git a/API/PicoGK.h b/API/PicoGK.h
+index 70a21b8aa..8c1f2274b 100755
 --- a/API/PicoGK.h
 +++ b/API/PicoGK.h
-@@ -747,6 +747,41 @@
+@@ -747,6 +747,51 @@ PICOGK_API PKGUI            Viewer_SideBar_hCreate(         PKVIEWER
  PICOGK_API void             Viewer_SideBar_Destroy(         PKVIEWER            hThis,
                                                              PKGUI               hSideBar);
  
@@ -29,6 +31,16 @@
 +PICOGK_API int32_t TauMesh_CreateIndexed(PKINSTANCE, const float*, int32_t, const uint32_t*, int32_t, PKMESH*);
 +PICOGK_API int32_t TauMesh_CreateCopy(PKINSTANCE, uint64_t, PKMESH*);
 +PICOGK_API int32_t TauMesh_AppendIndexed(PKINSTANCE, PKMESH, const float*, int32_t, const uint32_t*, int32_t);
++// Private placement proof: actual capture generation remains separate from prototypeGeneration.
++// matrix contains 16 row-vector float elements; placed is 0 or 1. No new lease is created.
++PICOGK_API int32_t TauCapture_GetPlacement(PKINSTANCE, uint64_t, uint64_t*, float*, int32_t, int32_t*, PKBBox3*);
++// indices=null, indexCapacity=0 explicitly omits indices for construction-only qualification.
++PICOGK_API int32_t TauCapture_CopyPrototype(PKINSTANCE, uint64_t, float*, int32_t, uint32_t*, int32_t);
++// Source is a live frozen capture; managed code has proved exact world-position bits.
++// Actual XYZ/ABC remain native query/mutation truth. Success transfers one handle; failure output=0.
++PICOGK_API int32_t TauMesh_CreatePlacedIndexed(PKINSTANCE, uint64_t, const float*, int32_t,
++    const float*, int32_t, const uint32_t*, int32_t, PKMESH*);
++
 +
 +#ifdef __cplusplus
 +#define TAU_NOEXCEPT noexcept
@@ -42,6 +54,8 @@
  #endif
   
  
+diff --git a/API/PicoGKApiTypes.h b/API/PicoGKApiTypes.h
+index d0b982934..e92003a61 100644
 --- a/API/PicoGKApiTypes.h
 +++ b/API/PicoGKApiTypes.h
 @@ -54,65 +54,70 @@
@@ -132,9 +146,11 @@
  
  #pragma pack()
  
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 197a60557..b1cc4088a 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -234,14 +234,13 @@
+@@ -234,14 +234,13 @@ add_custom_command(
      COMMENT "Copying library files to Dist folder"
  )
  
@@ -156,6 +172,8 @@
  )
  
  
+diff --git a/CMake_Utils/PicoGKBuildHeader.cmake b/CMake_Utils/PicoGKBuildHeader.cmake
+index 4ec88b872..f3e668d91 100644
 --- a/CMake_Utils/PicoGKBuildHeader.cmake
 +++ b/CMake_Utils/PicoGKBuildHeader.cmake
 @@ -4,7 +4,7 @@
@@ -167,7 +185,7 @@
  
      # Create the content of the PicoGKBuild.h file
      set(    BUILD_HEADER_CONTENT
-@@ -15,7 +15,13 @@
+@@ -15,7 +15,13 @@ function(generate_build_header)
  #endif // PICOGK_BUILD_H\n"
          )
  
@@ -182,6 +200,9 @@
  endfunction()
  
  generate_build_header()
+diff --git a/Source/PicoGKCapture.h b/Source/PicoGKCapture.h
+new file mode 100644
+index 000000000..85053edf0
 --- /dev/null
 +++ b/Source/PicoGKCapture.h
 @@ -0,0 +1,14 @@
@@ -199,6 +220,9 @@
 +};
 +}
 +#endif
+diff --git a/Source/PicoGKCaptureIdentity.h b/Source/PicoGKCaptureIdentity.h
+new file mode 100644
+index 000000000..17f0325ca
 --- /dev/null
 +++ b/Source/PicoGKCaptureIdentity.h
 @@ -0,0 +1,20 @@
@@ -222,9 +246,11 @@
 +}
 +}
 +#endif
+diff --git a/Source/PicoGKGLViewerObjects.cpp b/Source/PicoGKGLViewerObjects.cpp
+index cad07782d..02af9b0a2 100644
 --- a/Source/PicoGKGLViewerObjects.cpp
 +++ b/Source/PicoGKGLViewerObjects.cpp
-@@ -43,9 +43,10 @@
+@@ -43,9 +43,10 @@ namespace PicoGK
  Viewer::Group::ViewPolyLine::ViewPolyLine(  const ShaderProgMeshPoly& oShader,
                                              const PicoGK::PolyLine& oPoly)
  {
@@ -238,7 +264,7 @@
  }
  
  void Viewer::Group::ViewPolyLine::SetMatrix(const Matrix4x4& mat)
-@@ -111,10 +112,11 @@
+@@ -111,10 +112,11 @@ BBox3 Viewer::Group::oCalculateBBox() const
  Viewer::Group::ViewMesh::ViewMesh(  const ShaderProgMeshPoly& oShader,
                                      const Mesh& oMesh)
  {
@@ -253,6 +279,9 @@
      CHECKGLERRORS;
  }
  
+diff --git a/Source/PicoGKGridState.h b/Source/PicoGKGridState.h
+new file mode 100644
+index 000000000..003a09e3c
 --- /dev/null
 +++ b/Source/PicoGKGridState.h
 @@ -0,0 +1,111 @@
@@ -367,9 +396,11 @@
 +
 +}
 +#endif
+diff --git a/Source/PicoGKHandleManager.h b/Source/PicoGKHandleManager.h
+index 511ad5d59..b67e3b855 100644
 --- a/Source/PicoGKHandleManager.h
 +++ b/Source/PicoGKHandleManager.h
-@@ -66,6 +66,15 @@
+@@ -66,6 +66,15 @@ public:
          return m_hCurrent;
      }
  
@@ -385,6 +416,8 @@
      /// Retrieve the object for a handle. 
      /// Throws exception if invalid.
      inline std::shared_ptr<T> roGet(Handle h) const
+diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
+index c02333fe2..22872c010 100755
 --- a/Source/PicoGKLibrary.cpp
 +++ b/Source/PicoGKLibrary.cpp
 @@ -35,6 +35,8 @@
@@ -396,21 +429,21 @@
  #include "PicoGK.h"
  
  #include "PicoGKLibraryMgr.h"
-@@ -44,6 +46,13 @@
- #include "PicoGKTrace.h"
+@@ -45,6 +47,13 @@
  
  using namespace PicoGK;
-+
+ 
 +// All voxel creation/import/copy routes bind counters at native admission.
 +static PKVOXELS TauAddVoxels(const Library::Instance::Ptr& library, Voxels::Ptr value) {
 +    value->TauBindCounters(library->m_tauCounters);
 +    return library->m_oVoxels.hAdd(std::move(value));
 +}
 +
- 
++
  void SafeCopyInfoString(const std::string s, char psz[PKINFOSTRINGLEN])
  {
-@@ -397,7 +406,7 @@
+ #ifdef _WINDOWS
+@@ -397,7 +406,7 @@ PICOGK_API void Lattice_AddBeam(    PKINSTANCE hLib,
  PICOGK_API PKVOXELS Voxels_hCreate(PKINSTANCE hLib)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -419,7 +452,7 @@
                                                                  PICOGK_VOXEL_DEFAULTNARROWBAND));
  }
  
-@@ -405,7 +414,7 @@
+@@ -405,7 +414,7 @@ PICOGK_API PKVOXELS Voxels_hCreateCopy( PKINSTANCE hLib,
                                          PKVOXELS hSource)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -428,7 +461,7 @@
  }
  
  PICOGK_API PKVOXELS Voxels_hCreateSphere(   PKINSTANCE          hLib,
-@@ -413,7 +422,7 @@
+@@ -413,7 +422,7 @@ PICOGK_API PKVOXELS Voxels_hCreateSphere(   PKINSTANCE          hLib,
                                              float               fRadius)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -437,7 +470,7 @@
                                                              PICOGK_VOXEL_DEFAULTNARROWBAND,
                                                              *pvecCenter,
                                                              fRadius));
-@@ -426,7 +435,7 @@
+@@ -426,7 +435,7 @@ PICOGK_API PKVOXELS Voxels_hCreateCapsule(  PKINSTANCE          hLib,
                                              float               fRadius2)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -446,7 +479,7 @@
                                                              PICOGK_VOXEL_DEFAULTNARROWBAND,
                                                              *pvecStart,
                                                              *pvecStop,
-@@ -439,7 +448,7 @@
+@@ -439,7 +448,7 @@ PICOGK_API PKVOXELS Voxels_hCreateMeshShell(    PKINSTANCE          hLib,
                                                  float               fRadius)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -455,7 +488,7 @@
                                                              PICOGK_VOXEL_DEFAULTNARROWBAND,
                                                              *roLib->m_oMeshes.roGet(hMesh),
                                                              fRadius));
-@@ -861,7 +870,9 @@
+@@ -861,7 +870,9 @@ PICOGK_API PKVOXELS VdbFile_hGetVoxels( PKINSTANCE hLib,
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
      
@@ -466,7 +499,7 @@
              
      if (!roGrid->isType<FloatGrid>())
          return 0;
-@@ -869,7 +880,7 @@
+@@ -869,7 +880,7 @@ PICOGK_API PKVOXELS VdbFile_hGetVoxels( PKINSTANCE hLib,
      if (roGrid->getGridClass() != GRID_LEVEL_SET)
          return 0; // not a voxel field
              
@@ -475,7 +508,7 @@
                                                              PICOGK_VOXEL_DEFAULTNARROWBAND));
  }
  
-@@ -879,8 +890,8 @@
+@@ -879,8 +890,8 @@ PICOGK_API int32_t VdbFile_nAddVoxels(  PKINSTANCE hLib,
                                          PKVOXELS    hVoxels)
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
@@ -486,7 +519,7 @@
      
  }
  
-@@ -891,7 +902,9 @@
+@@ -891,7 +902,9 @@ PICOGK_API PKSCALARFIELD VdbFile_hGetScalarField(   PKINSTANCE hLib,
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
      
@@ -497,7 +530,7 @@
              
      if (!roGrid->isType<FloatGrid>())
          return 0;
-@@ -909,7 +922,7 @@
+@@ -909,7 +922,7 @@ PICOGK_API int32_t VdbFile_nAddScalarField( PKINSTANCE hLib,
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      return roLib->m_oVdbFiles.roGet(hThis)
@@ -506,7 +539,7 @@
  }
  
  PICOGK_API PKVECTORFIELD VdbFile_hGetVectorField(   PKINSTANCE hLib,
-@@ -919,7 +932,9 @@
+@@ -919,7 +932,9 @@ PICOGK_API PKVECTORFIELD VdbFile_hGetVectorField(   PKINSTANCE hLib,
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roVdbFile = roLib->m_oVdbFiles.roGet(hThis);
      
@@ -517,7 +550,7 @@
      
      if (!roGrid->isType<Vec3SGrid>())
          return 0;
-@@ -935,7 +950,7 @@
+@@ -935,7 +950,7 @@ PICOGK_API int32_t VdbFile_nAddVectorField( PKINSTANCE hLib,
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      
      return roLib->m_oVdbFiles.roGet(hThis)
@@ -526,7 +559,7 @@
  }
  
  PICOGK_API int32_t VdbFile_nFieldCount( PKINSTANCE hLib,
-@@ -1212,7 +1227,8 @@
+@@ -1212,7 +1227,8 @@ PICOGK_API PKMETADATA Metadata_hFromVoxels( PKINSTANCE hLib,
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oVoxels.roGet(hField);
@@ -536,7 +569,7 @@
  }
  
  PICOGK_API PKMETADATA Metadata_hFromScalarField(    PKINSTANCE hLib,
-@@ -1220,7 +1236,7 @@
+@@ -1220,7 +1236,7 @@ PICOGK_API PKMETADATA Metadata_hFromScalarField(    PKINSTANCE hLib,
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oScalarFields.roGet(hField);
@@ -545,7 +578,7 @@
  }
  
  PICOGK_API PKMETADATA Metadata_hFromVectorField(    PKINSTANCE hLib,
-@@ -1228,7 +1244,7 @@
+@@ -1228,7 +1244,7 @@ PICOGK_API PKMETADATA Metadata_hFromVectorField(    PKINSTANCE hLib,
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oVectorFields.roGet(hField);
@@ -554,7 +587,7 @@
  }
  
  PICOGK_API void Metadata_Destroy(   PKINSTANCE hLib,
-@@ -1796,3 +1812,229 @@
+@@ -1796,3 +1812,284 @@ PICOGK_API void Viewer_SideBar_Destroy( PKVIEWER hThis,
      
      poThis->DestroySideBar(hSideBar);
  }
@@ -738,6 +771,61 @@
 +        *output = owner->m_oMeshes.hAdd(capture->mesh->TauCapture());
 +    });
 +}
++PICOGK_API int32_t TauCapture_GetPlacement(PKINSTANCE library, uint64_t snapshot,
++    uint64_t* prototypeGeneration, float* matrix, int32_t matrixCapacity, int32_t* placed, PKBBox3* bounds) {
++    if (!prototypeGeneration || !matrix || matrixCapacity < 16 || !placed || !bounds) return -1;
++    *prototypeGeneration = 0; *placed = 0;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto capture = owner->m_tauCaptures.roGet(snapshot);
++        if (!capture->mesh) throw std::invalid_argument("placement requires a frozen mesh capture");
++        uint64_t generation = 0;
++        *placed = capture->mesh->TauGetPlacement(generation, matrix) ? 1 : 0;
++        *bounds = capture->mesh->oBBox();
++        *prototypeGeneration = generation;
++    });
++}
++PICOGK_API int32_t TauCapture_CopyPrototype(PKINSTANCE library, uint64_t snapshot,
++    float* positions, int32_t positionCapacity, uint32_t* indices, int32_t indexCapacity) {
++    if (positionCapacity < 0 || indexCapacity < 0) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto capture = owner->m_tauCaptures.roGet(snapshot);
++        if (!capture->mesh) throw std::invalid_argument("prototype requires a frozen mesh capture");
++        auto prototype = capture->mesh->TauPrototypeCapture();
++        TauCapturedGeometry source; source.mesh = prototype;
++        const auto pCount = TauCapturePositionCount(source), iCount = TauCaptureIndexCount(source);
++        if (positionCapacity < pCount || (pCount && !positions) ||
++            ((indices || indexCapacity) && (indexCapacity < iCount || (iCount && !indices))))
++            throw std::invalid_argument("prototype buffers are too small");
++        const auto& vertices = prototype->vVertices();
++        const auto& triangles = prototype->vTriangles();
++        for (size_t i = 0; i < vertices.size(); ++i) {
++            positions[i*3] = vertices[i].X; positions[i*3+1] = vertices[i].Y; positions[i*3+2] = vertices[i].Z;
++        }
++        if (indices) for (size_t i = 0; i < triangles.size(); ++i) {
++            indices[i*3] = static_cast<uint32_t>(triangles[i].A);
++            indices[i*3+1] = static_cast<uint32_t>(triangles[i].B);
++            indices[i*3+2] = static_cast<uint32_t>(triangles[i].C);
++        }
++        ++owner->m_tauCaptureCopies;
++    });
++}
++PICOGK_API int32_t TauMesh_CreatePlacedIndexed(PKINSTANCE library, uint64_t snapshot,
++    const float* matrix, int32_t matrixCount, const float* positions, int32_t positionCount,
++    const uint32_t* indices, int32_t indexCount, PKMESH* output) {
++    if (!output) return -1;
++    *output = 0;
++    if (!matrix || matrixCount != 16) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto capture = owner->m_tauCaptures.roGet(snapshot);
++        if (!capture->mesh) throw std::invalid_argument("placement requires a frozen mesh capture");
++        auto mesh = Mesh::TauCreateIndexed(positions, positionCount, indices, indexCount);
++        mesh->TauSetPlacement(*capture->mesh, matrix);
++        *output = owner->m_oMeshes.hAdd(mesh);
++    });
++}
 +PICOGK_API int32_t TauMesh_AppendIndexed(PKINSTANCE library, PKMESH target,
 +    const float* positions, int32_t positionCount, const uint32_t* indices, int32_t indexCount) {
 +    return TauCheckedInvoke([&] {
@@ -784,6 +872,8 @@
 +    }
 +    catch (...) { return -1; }
 +}
+diff --git a/Source/PicoGKLibraryMgr.h b/Source/PicoGKLibraryMgr.h
+index 33136f1e3..f3c307766 100644
 --- a/Source/PicoGKLibraryMgr.h
 +++ b/Source/PicoGKLibraryMgr.h
 @@ -48,6 +48,7 @@
@@ -794,7 +884,7 @@
  
  namespace PicoGK
  {
-@@ -80,9 +81,14 @@
+@@ -80,9 +81,14 @@ namespace PicoGK
                  nResult += m_oScalarFields.nMemUsage();
                  nResult += m_oVectorFields.nMemUsage();
                  nResult += m_oVdbMetas.nMemUsage();
@@ -809,9 +899,11 @@
              HandleManager<PicoGK::Mesh>         m_oMeshes       {"Meshes"};
              HandleManager<PicoGK::Lattice>      m_oLattices     {"Lattices"};
              HandleManager<PicoGK::PolyLine>     m_oPolyLines    {"PolyLines"};
+diff --git a/Source/PicoGKMesh.h b/Source/PicoGKMesh.h
+index 99246b5b0..d722f4e1f 100644
 --- a/Source/PicoGKMesh.h
 +++ b/Source/PicoGKMesh.h
-@@ -37,6 +37,10 @@
+@@ -37,6 +37,12 @@
  #define PICOGKMESH_H_
  
  #include "PicoGKTypes.h"
@@ -819,10 +911,12 @@
 +#include <mutex>
 +#include <cmath>
 +#include <type_traits>
++#include <array>
++#include <algorithm>
  
  #include <memory>
  #include <vector>
-@@ -54,19 +58,92 @@
+@@ -54,19 +60,133 @@ public:
      {
      }
      
@@ -848,6 +942,41 @@
 +        std::lock_guard<std::recursive_mutex> owner(m_tauGate);
 +        if (m_tauData.use_count() != 1) throw std::logic_error("surface identity requires unshared backing");
 +        m_tauData->generation = generation;
++    }
++    // Placement is a proof attached to immutable actual geometry, not a lazy geometry replacement.
++    bool TauGetPlacement(uint64_t& generation, float* matrix) const {
++        std::lock_guard<std::recursive_mutex> owner(m_tauGate);
++        const auto root = m_tauData->prototype ? m_tauData->prototype : m_tauData;
++        generation = root->generation;
++        const auto& value = m_tauData->prototype ? m_tauData->placement : TauIdentityPlacement();
++        std::copy(value.begin(), value.end(), matrix);
++        return bool(m_tauData->prototype);
++    }
++    Mesh::Ptr TauPrototypeCapture() const {
++        std::lock_guard<std::recursive_mutex> owner(m_tauGate);
++        // The new wrapper pins backing directly; it creates neither a generation nor an empty Data.
++        return Mesh::Ptr(new Mesh(m_tauData->prototype ? m_tauData->prototype : m_tauData));
++    }
++    void TauSetPlacement(const Mesh& source, const float* matrix) {
++        if (!matrix) throw std::invalid_argument("placement matrix is required");
++        for (size_t i = 0; i < 16; ++i)
++            if (!std::isfinite(matrix[i])) throw std::invalid_argument("nonfinite placement matrix");
++        if (matrix[3] != 0 || matrix[7] != 0 || matrix[11] != 0 || matrix[15] != 1)
++            throw std::invalid_argument("placement matrix must be affine");
++        // source is the private frozen capture. Target is not published until this succeeds.
++        std::scoped_lock owner(m_tauGate, source.m_tauGate);
++        if (m_tauData.use_count() != 1) throw std::logic_error("placement target is already shared");
++        const auto root = source.m_tauData->prototype ? source.m_tauData->prototype : source.m_tauData;
++        if (root->prototype || root->vertices.size() != m_tauData->vertices.size() ||
++            root->triangles.size() != m_tauData->triangles.size())
++            throw std::invalid_argument("placement topology differs from its frozen prototype");
++        for (size_t i = 0; i < root->triangles.size(); ++i) {
++            const auto& a = root->triangles[i]; const auto& b = m_tauData->triangles[i];
++            if (a.A != b.A || a.B != b.B || a.C != b.C)
++                throw std::invalid_argument("placement indices differ from its frozen prototype");
++        }
++        std::copy(matrix, matrix + 16, m_tauData->placement.begin());
++        m_tauData->prototype = root;
 +    }
 +    bool TauValidate() const {
 +        std::lock_guard<std::recursive_mutex> owner(m_tauGate);
@@ -902,6 +1031,7 @@
 +        }
 +        data->generation = generation;
 +        data->validated = false;
++        data->prototype.reset();
 +        m_tauData = std::move(data);
 +    }
 +
@@ -909,7 +1039,12 @@
      {
 -        return sizeof(Mesh) + m_nMemUsage;
 +        std::lock_guard<std::recursive_mutex> tauLock(m_tauGate);
-+        return sizeof(Mesh) + m_tauData->vertices.capacity() * sizeof(Vector3) + m_tauData->triangles.capacity() * sizeof(Triangle);
++        const auto bytes = [](const Data& value) {
++            return sizeof(Data) + value.vertices.capacity() * sizeof(Vector3) + value.triangles.capacity() * sizeof(Triangle);
++        };
++        // Conservative per-owner accounting includes roots retained after source disposal.
++        // The existing manager aggregation can count shared COW/root backing more than once.
++        return sizeof(Mesh) + bytes(*m_tauData) + (m_tauData->prototype ? bytes(*m_tauData->prototype) : 0);
      }
      
      inline int32_t  nAddTriangle(   const Vector3& vecA,
@@ -920,7 +1055,7 @@
          int32_t a = nAddVertex(vecA);
          int32_t b = nAddVertex(vecB);
          int32_t c = nAddVertex(vecC);
-@@ -75,34 +152,38 @@
+@@ -75,34 +195,38 @@ public:
      
      inline int32_t nAddVertex(const Vector3& vecVertex)
      {
@@ -967,7 +1102,7 @@
          assert(nSize < std::numeric_limits<int32_t>::max());
          return (int32_t)nSize;
      }
-@@ -110,15 +191,17 @@
+@@ -110,15 +234,17 @@ public:
      inline void GetVertex(  int32_t     nVertex,
                              Vector3*    pvecVertex) const
      {
@@ -987,7 +1122,7 @@
      }
      
      inline void GetTriangle(    int32_t  nTriangle,
-@@ -126,17 +209,19 @@
+@@ -126,17 +252,19 @@ public:
                                  Vector3* pvecB,
                                  Vector3* pvecC) const
      {
@@ -1011,7 +1146,7 @@
          Vector3 vec1(0,0,0);
          Vector3 vec2(0,0,0);
          Vector3 vec3(0,0,0);
-@@ -153,27 +238,52 @@
+@@ -153,27 +281,60 @@ public:
      
      inline BBox3 oBBox() const
      {
@@ -1045,11 +1180,18 @@
 +        std::vector<Vector3> vertices;
 +        std::vector<Triangle> triangles;
 +        uint64_t generation = TauNextGeneration();
++        std::shared_ptr<Data> prototype;
++        std::array<float, 16> placement = TauIdentityPlacement();
 +        mutable std::mutex admissionGate;
 +        mutable bool validated = false, valid = true;
 +        Data() = default;
-+        Data(const Data& source) : bounds(source.bounds), vertices(source.vertices), triangles(source.triangles), generation(source.generation) {}
++        Data(const Data& source) : bounds(source.bounds), vertices(source.vertices), triangles(source.triangles), generation(source.generation), prototype(source.prototype), placement(source.placement) {}
 +    };
++    explicit Mesh(std::shared_ptr<Data> data) : m_tauData(std::move(data)) {}
++    static const std::array<float, 16>& TauIdentityPlacement() {
++        static const std::array<float, 16> identity{1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
++        return identity;
++    }
 +    std::shared_ptr<Data> m_tauData = std::make_shared<Data>();
 +    mutable std::recursive_mutex m_tauGate;
 +    static void TauCheckIndexed(const float* positions, int32_t positionCount,
@@ -1067,11 +1209,14 @@
 +        if (m_tauData.use_count() != 1) m_tauData = std::make_shared<Data>(*m_tauData);
 +        m_tauData->generation = TauNextGeneration();
 +        m_tauData->validated = false;
++        m_tauData->prototype.reset();
 +    }
 +
      bool bIsPointInTriangle(    const Vector3& vecSurfacePoint,
                                  const Vector3& vecVertex1,
                                  const Vector3& vecVertex2,
+diff --git a/Source/PicoGKPolyLine.h b/Source/PicoGKPolyLine.h
+index 1d5fccceb..70016cdfd 100644
 --- a/Source/PicoGKPolyLine.h
 +++ b/Source/PicoGKPolyLine.h
 @@ -37,6 +37,9 @@
@@ -1084,7 +1229,7 @@
  #include <vector>
  #include <memory>
  #include <assert.h>
-@@ -50,12 +53,28 @@
+@@ -50,12 +53,28 @@ public:
      
      PolyLine(const ColorFloat& clr)
      {
@@ -1116,7 +1261,7 @@
      
      ~PolyLine()
      {
-@@ -63,47 +82,62 @@
+@@ -63,47 +82,62 @@ public:
      
      int64_t nMemUsage() const
      {
@@ -1192,9 +1337,11 @@
  };
  }
  
+diff --git a/Source/PicoGKTypes.h b/Source/PicoGKTypes.h
+index 4fc090bd9..129ba02f1 100644
 --- a/Source/PicoGKTypes.h
 +++ b/Source/PicoGKTypes.h
-@@ -91,7 +91,7 @@
+@@ -91,7 +91,7 @@ public:
  #endif
      }
      
@@ -1203,7 +1350,7 @@
      {
          X = oSrc.X;
          Y = oSrc.Y;
-@@ -143,7 +143,7 @@
+@@ -143,7 +143,7 @@ struct Vector3
          Z = fZ;
      }
      
@@ -1212,6 +1359,8 @@
      {
      }
  
+diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
+index 61584beff..695833ebd 100644
 --- a/Source/PicoGKVdbField.h
 +++ b/Source/PicoGKVdbField.h
 @@ -38,6 +38,7 @@
@@ -1222,7 +1371,7 @@
  
  using namespace openvdb;
  
-@@ -53,33 +54,45 @@
+@@ -53,33 +54,45 @@ public:
      {
          m_roGrid = TFieldType::create();
          m_roGrid->setTransform(openvdb::math::Transform::createLinearTransform(fVoxelSizeMM));
@@ -1272,7 +1421,7 @@
      
      static bool bHasValidPicoGKTransform(const TFieldType::Ptr roGrid)
      {
-@@ -105,32 +118,41 @@
+@@ -105,32 +118,41 @@ public:
      : Field(fVoxelSizeMM)
      {
          m_roGrid->setGridClass(GRID_FOG_VOLUME);
@@ -1283,6 +1432,9 @@
      ScalarField(const ScalarField& roSource)
      : Field(roSource)
      {
+-        m_roGrid->setGridClass(GRID_FOG_VOLUME);
+-    }
+-    
 +        if (m_roGrid->getGridClass() != GRID_FOG_VOLUME) {
 +            TauGridMutation mutation(m_tauState);
 +            m_roGrid->setGridClass(GRID_FOG_VOLUME);
@@ -1290,15 +1442,11 @@
 +            m_tauState = TauStateFor(m_roGrid);
 +}
 +
-+    ScalarField(const Voxels& oSource)
-+    : ScalarField(oSource.TauCopyGrid())
-+    {
-         m_roGrid->setGridClass(GRID_FOG_VOLUME);
--    }
--    
--    ScalarField(const Voxels& oSource)
+     ScalarField(const Voxels& oSource)
 -    : ScalarField(deepCopyTypedGrid<FloatGrid>(oSource.roVdbGrid()))
--    {
++    : ScalarField(oSource.TauCopyGrid())
+     {
++        m_roGrid->setGridClass(GRID_FOG_VOLUME);
      }
      
      ScalarField(const FloatGrid::Ptr roSource)
@@ -1324,7 +1472,7 @@
          
          for (auto x=oBBox.min().x(); x<=oBBox.max().x(); x++)
          for (auto y=oBBox.min().y(); y<=oBBox.max().y(); y++)
-@@ -148,6 +170,7 @@
+@@ -148,6 +170,7 @@ public:
      void SetValue(  Vector3     vecPos,
                      float       fValue)
      {
@@ -1332,7 +1480,7 @@
          auto oAccess = m_roGrid->getAccessor();
          
          openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
-@@ -160,6 +183,7 @@
+@@ -160,6 +183,7 @@ public:
      bool bGetValue( Vector3 vecPos,
                      float* pfValue)
      {
@@ -1340,7 +1488,7 @@
          auto oAccess = m_roGrid->getConstAccessor();
      
          openvdb::Coord xyz( oVoxelSize().iToVoxels(vecPos.X),
-@@ -172,6 +196,7 @@
+@@ -172,6 +196,7 @@ public:
      
      void RemoveValue(Vector3 vecPos)
      {
@@ -1348,7 +1496,7 @@
          auto oAccess = m_roGrid->getAccessor();
          
          openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
-@@ -188,6 +213,7 @@
+@@ -188,6 +213,7 @@ public:
                                  int32_t* pnYSize,
                                  int32_t* pnZSize) const
      {
@@ -1356,7 +1504,7 @@
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
          
          *pnXMin     = oBBox.min().x();
-@@ -201,6 +227,7 @@
+@@ -201,6 +227,7 @@ public:
      void GetSlice( int32_t nZSlice,
                     float* pfBuffer)
      {
@@ -1364,7 +1512,7 @@
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
          openvdb::Coord xyz(0, 0, nZSlice + oBBox.min().z());
          
-@@ -217,21 +244,13 @@
+@@ -217,21 +244,13 @@ public:
      
      void TraverseActive(PKFnTraverseActiveS pfnCallback)
      {
@@ -1382,18 +1530,17 @@
 -    inline FloatGrid::Ptr roGrid() const
 -    {
 -        return m_roGrid;
--    }
 +        TauTraverseValues<FloatGrid>(m_roGrid, m_tauState, [&](const openvdb::Coord& xyz, const auto& value) {
 +            Vector3 location = oVoxelSize().vecToMM(Coord(xyz.x(), xyz.y(), xyz.z()));
 +            pfnCallback(&location, value);
 +        });
-+    }
+     }
 +
 +    inline FloatGrid::Ptr roGrid() const { return roVdbGrid(); }
  };
  
  class VectorField : public Field<Vec3SGrid>
-@@ -242,20 +261,25 @@
+@@ -242,20 +261,25 @@ public:
      VectorField(float fVoxelSizeMM)
      : Field(fVoxelSizeMM)
      {
@@ -1425,7 +1572,7 @@
          
          for (auto x=oBBox.min().x(); x<=oBBox.max().x(); x++)
          for (auto y=oBBox.min().y(); y<=oBBox.max().y(); y++)
-@@ -276,9 +300,12 @@
+@@ -276,9 +300,12 @@ public:
                              Vector3 vecValue,
                              float fThreshold)
      {
@@ -1440,7 +1587,7 @@
          
          openvdb::Vec3s vec(vecValue.X, vecValue.Y, vecValue.Z);
          
-@@ -298,6 +325,7 @@
+@@ -298,6 +325,7 @@ public:
      void SetValue(  Vector3 vecPos,
                      Vector3 vecValue)
      {
@@ -1448,7 +1595,7 @@
          auto oAccess = m_roGrid->getAccessor();
          
          Vec3s vec(vecValue.X, vecValue.Y, vecValue.Z);
-@@ -311,6 +339,7 @@
+@@ -311,6 +339,7 @@ public:
      bool bGetValue( Vector3 vecPos,
                      Vector3* pvecValue)
      {
@@ -1456,7 +1603,7 @@
          auto oAccess = m_roGrid->getConstAccessor();
      
          openvdb::Coord xyz( oVoxelSize().iToVoxels(vecPos.X),
-@@ -328,6 +357,7 @@
+@@ -328,6 +357,7 @@ public:
      
      void RemoveValue(Vector3 vecPos)
      {
@@ -1464,7 +1611,7 @@
          auto oAccess = m_roGrid->getAccessor();
          
          openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
-@@ -339,21 +369,10 @@
+@@ -339,21 +369,10 @@ public:
      
      void TraverseActive(PKFnTraverseActiveV pfnCallback)
      {
@@ -1490,6 +1637,8 @@
      }
  };
  
+diff --git a/Source/PicoGKVdbFile.h b/Source/PicoGKVdbFile.h
+index 1926607f1..e6e64314e 100644
 --- a/Source/PicoGKVdbFile.h
 +++ b/Source/PicoGKVdbFile.h
 @@ -38,6 +38,8 @@
@@ -1501,7 +1650,7 @@
  
  namespace PicoGK
  {
-@@ -54,7 +56,7 @@
+@@ -54,7 +56,7 @@ public:
              oFile.open();
              GridPtrVecPtr  roGrids = oFile.getGrids();
              oFile.close();
@@ -1510,7 +1659,7 @@
          }
          
          catch (const openvdb::IoError& e)
-@@ -76,55 +78,90 @@
+@@ -76,55 +78,90 @@ public:
          m_roGrids = std::make_shared<openvdb::GridPtrVec>();
      }
      
@@ -1571,9 +1720,8 @@
      }
      
 -    GridBase::Ptr roGridAt(int32_t nIndex) const
--    {
 +    GridBase::Ptr TauGridAt(int32_t nIndex) const
-+    {
+     {
 +        std::lock_guard<std::recursive_mutex> owner(m_tauOwner);
          assert(nIndex < nGridCount());
          return m_roGrids->at(nIndex);
@@ -1607,7 +1755,7 @@
          
          if (roGrid->isType<openvdb::FloatGrid>())
          {
-@@ -152,6 +189,12 @@
+@@ -152,6 +189,12 @@ public:
      
      bool bSaveToFile(std::string strFileName)
      {
@@ -1620,7 +1768,7 @@
          std::vector<openvdb::GridBase::Ptr> oGrids;
          for (const auto& roGrid : *m_roGrids)
          {
-@@ -179,8 +222,10 @@
+@@ -179,8 +222,10 @@ public:
      }
  
  protected:
@@ -1631,9 +1779,11 @@
  };
  }
  #endif
+diff --git a/Source/PicoGKVdbMeta.h b/Source/PicoGKVdbMeta.h
+index e1bd65be5..6cb3c309b 100644
 --- a/Source/PicoGKVdbMeta.h
 +++ b/Source/PicoGKVdbMeta.h
-@@ -55,13 +55,15 @@
+@@ -55,13 +55,15 @@ public:
          METATYPE_VECTOR
      };
      
@@ -1650,7 +1800,7 @@
          return (int32_t) m_roMetaMap->metaCount();
      }
      
-@@ -75,6 +77,7 @@
+@@ -75,6 +77,7 @@ public:
      
      std::string strNameAt(int32_t nIndex)
      {
@@ -1658,7 +1808,7 @@
          int32_t n=0;
          
          for (   auto iter = m_roMetaMap->beginMeta();
-@@ -92,6 +95,7 @@
+@@ -92,6 +95,7 @@ public:
      
      EType eTypeAt(const std::string& strValueName)
      {
@@ -1666,7 +1816,7 @@
          openvdb::Metadata::Ptr roMeta = (*m_roMetaMap)[strValueName];
          
          if (roMeta == nullptr)
-@@ -109,6 +113,7 @@
+@@ -109,6 +113,7 @@ public:
      bool bGetValueAt(   const std::string& strValueName,
                          std::string* pstrValue)
      {
@@ -1674,7 +1824,7 @@
          openvdb::Metadata::Ptr roMeta = (*m_roMetaMap)[strValueName];
          
          if (roMeta == nullptr)
-@@ -124,6 +129,7 @@
+@@ -124,6 +129,7 @@ public:
      bool bGetValueAt(  const std::string& strValueName,
                         float* pfValue)
      {
@@ -1682,7 +1832,7 @@
          openvdb::Metadata::Ptr roMeta = (*m_roMetaMap)[strValueName];
          
          if (roMeta == nullptr)
-@@ -139,6 +145,7 @@
+@@ -139,6 +145,7 @@ public:
      bool bGetValueAt(   const std::string& strValueName,
                          Vector3* pvecValue)
      {
@@ -1690,7 +1840,7 @@
          openvdb::Metadata::Ptr roMeta = (*m_roMetaMap)[strValueName];
          
          if (roMeta == nullptr)
-@@ -157,12 +164,18 @@
+@@ -157,12 +164,18 @@ public:
      
      void RemoveAt(const std::string& strValueName)
      {
@@ -1709,7 +1859,7 @@
          
          m_roMetaMap->insertMeta(    strValueName,
                                      openvdb::StringMetadata(strValue));
-@@ -171,6 +184,9 @@
+@@ -171,6 +184,9 @@ public:
      void SetValue(  const std::string&  strValueName,
                      float               fValue)
      {
@@ -1719,7 +1869,7 @@
          
          m_roMetaMap->insertMeta(    strValueName,
                                      openvdb::FloatMetadata(fValue));
-@@ -179,6 +195,9 @@
+@@ -179,6 +195,9 @@ public:
      void SetValue(  const std::string&  strValueName,
                      Vector3             vecValue)
      {
@@ -1729,7 +1879,7 @@
          m_roMetaMap->insertMeta(    strValueName,
                                      openvdb::Vec3SMetadata(
                                          openvdb::Vec3s( vecValue.X,
-@@ -186,7 +205,14 @@
+@@ -186,7 +205,14 @@ public:
                                                          vecValue.Z)));
      }
      
@@ -1744,6 +1894,8 @@
  };
  
  }
+diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
+index 521ad335e..2285b1457 100644
 --- a/Source/PicoGKVdbVoxels.h
 +++ b/Source/PicoGKVdbVoxels.h
 @@ -50,6 +50,7 @@
@@ -1754,7 +1906,7 @@
  #include "PicoGKTrace.h"
  
  using namespace openvdb;
-@@ -72,6 +73,7 @@
+@@ -72,6 +73,7 @@ public:
          m_roGrid            = FloatGrid::create(oVoxelSize.fToMM(nNarrowBand));
          m_roGrid->setGridClass(GRID_LEVEL_SET);
          m_roGrid->setTransform(openvdb::math::Transform::createLinearTransform(oVoxelSize));
@@ -1762,7 +1914,7 @@
      };
      
      Voxels( FloatGrid::Ptr roGrid,
-@@ -84,11 +86,18 @@
+@@ -84,11 +86,18 @@ public:
          
          m_nSdfNarrowBand    = nNarrowBand;
          m_roGrid            = roGrid;
@@ -1782,7 +1934,7 @@
          PKTRACE(Voxels_CopyConstructor);
          
          m_roGrid = deepCopyTypedGrid<FloatGrid>(oSource.m_roGrid);
-@@ -96,6 +105,8 @@
+@@ -96,6 +105,8 @@ public:
          
          assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
          assert(bHasValidPicoGKTransform(m_roGrid));
@@ -1791,7 +1943,7 @@
      };
      
      Voxels( VoxelSize oVoxSize,
-@@ -116,6 +127,7 @@
+@@ -116,6 +127,7 @@ public:
          
          assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
          assert(bHasValidPicoGKTransform(m_roGrid));
@@ -1799,7 +1951,7 @@
      }
      
      Voxels( VoxelSize oVoxSize,
-@@ -142,6 +154,7 @@
+@@ -142,6 +154,7 @@ public:
          
          assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
          assert(bHasValidPicoGKTransform(m_roGrid));
@@ -1807,7 +1959,7 @@
      }
      
      Voxels( VoxelSize oVoxSize,
-@@ -149,8 +162,9 @@
+@@ -149,8 +162,9 @@ public:
              const Mesh& oMesh,
              float fRadius)
      {
@@ -1819,18 +1971,17 @@
                                                                              fRadius,
                                                                              oVoxSize,
                                                                              nNarrowBand);
-@@ -159,24 +173,29 @@
+@@ -159,24 +173,29 @@ public:
          
          assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
          assert(bHasValidPicoGKTransform(m_roGrid));
 -    }
--
++        m_tauState = TauStateFor(m_roGrid);
++}
+ 
 -    ~Voxels()
 -    {
 -    }
-+        m_tauState = TauStateFor(m_roGrid);
-+}
-+
 +    ~Voxels() = default;
      
      std::string strDiagnose() const
@@ -1854,7 +2005,7 @@
          PKTRACE(Voxels_bIsEmpty);
          
          if (m_roGrid->tree().empty())
-@@ -199,6 +218,9 @@
+@@ -199,6 +218,9 @@ public:
      
      bool bIsEqual(const Voxels& oCompare) const
      {
@@ -1864,7 +2015,7 @@
          PKTRACE(Voxels_bIsEqual);
          
          if (m_roGrid->transform() != oCompare.m_roGrid->transform())
-@@ -246,6 +268,9 @@
+@@ -246,6 +268,9 @@ public:
  
      void BoolAdd(const Voxels& oOther)
      {
@@ -1874,7 +2025,7 @@
          PKTRACE(Voxels_BoolAdd);
          
          FloatGrid::Ptr roOperand = deepCopyTypedGrid<FloatGrid>(oOther.m_roGrid);
-@@ -256,6 +281,9 @@
+@@ -256,6 +281,9 @@ public:
  
      void BoolSubtract(const Voxels& oOther)
      {
@@ -1884,7 +2035,7 @@
          PKTRACE(Voxels_BoolSubtract);
          
          FloatGrid::Ptr roOperand = deepCopyTypedGrid<FloatGrid>(oOther.m_roGrid);
-@@ -266,6 +294,9 @@
+@@ -266,6 +294,9 @@ public:
  
      void BoolIntersect(const Voxels& oOther)
      {
@@ -1894,7 +2045,7 @@
          PKTRACE(Voxels_BoolIntersect);
          
          FloatGrid::Ptr roOperand = deepCopyTypedGrid<FloatGrid>(oOther.m_roGrid);
-@@ -276,6 +307,8 @@
+@@ -276,6 +307,8 @@ public:
      
      void Offset(float fSize)
      {
@@ -1903,7 +2054,7 @@
          PKTRACE(Voxels_Offset);
          
          // Create a clean level set with the extended size narrow band
-@@ -292,6 +325,8 @@
+@@ -292,6 +325,8 @@ public:
      void DoubleOffset(  float fSize1,
                          float fSize2)
      {
@@ -1912,7 +2063,7 @@
          PKTRACE(Voxels_DoubleOffset);
          
          // Create a clean level set with the extended size narrow band
-@@ -309,6 +344,8 @@
+@@ -309,6 +344,8 @@ public:
      
      void TripleOffset(float fSize)
      {
@@ -1921,7 +2072,7 @@
          PKTRACE(Voxels_TripleOffset);
          
          // Create a clean level set with the extended size narrow band
-@@ -331,6 +368,8 @@
+@@ -331,6 +368,8 @@ public:
  
      void RenderMesh(const Mesh& oMesh)
      {
@@ -1930,7 +2081,7 @@
          PKTRACE(Voxels_RenderMesh);
          
          FloatGrid::Ptr roVoxelized = roFloatGridFromMesh(   oMesh,
-@@ -342,6 +381,8 @@
+@@ -342,6 +381,8 @@ public:
      
      void RenderLattice(const Lattice& oLattice)
      {
@@ -1939,7 +2090,7 @@
          PKTRACE(Voxels_RenderLattice);
          
          auto oAccess = m_roGrid->getAccessor();
-@@ -357,9 +398,30 @@
+@@ -357,9 +398,30 @@ public:
          }
      }
      
@@ -1970,7 +2121,7 @@
          PKTRACE(Voxels_RenderImplicit);
          
          auto oAccess = m_roGrid->getAccessor();
-@@ -374,8 +436,14 @@
+@@ -374,8 +436,14 @@ public:
              Vector3 vecSample = oVoxelSize().vecToMM(Coord(x,y,z));
              openvdb::Coord xyz(x,y,z);
              
@@ -1987,7 +2138,7 @@
              
              SetSdValue(&oAccess, xyz, fBackgroundMM(), fValue);
          }
-@@ -387,9 +455,16 @@
+@@ -387,9 +455,16 @@ public:
      {
          PKTRACE(Voxels_IntersectImplicit);
          
@@ -2007,7 +2158,7 @@
          
          BBox3 oBBoxMM;
          oBBoxMM.vecMin.X = oVoxelSize().fToMM(oBBox.min().x());
-@@ -406,12 +481,60 @@
+@@ -406,12 +481,60 @@ public:
          // implict grid, and use our grid just as the mask
          // Not sure if this is really necessary, but the
          // implicit grid is "perfect"
@@ -2069,7 +2220,7 @@
      {
          PKTRACE(Voxels_roAsMesh);
          
-@@ -450,12 +573,15 @@
+@@ -450,12 +573,15 @@ public:
                                                          oTri[0]));
          }
  
@@ -2085,7 +2236,7 @@
          assert(fZStart > fZEnd);
          
          int32_t iZStart = oVoxelSize().iToVoxels(fZStart);
-@@ -498,6 +624,8 @@
+@@ -498,6 +624,8 @@ public:
      void ProjectZSliceUp(   float fZStart,
                              float fZEnd)
      {
@@ -2094,7 +2245,7 @@
          assert(fZStart < fZEnd);
          
          int32_t iZStart = oVoxelSize().iToVoxels(fZStart);
-@@ -547,6 +675,8 @@
+@@ -547,6 +675,8 @@ public:
      
      float fCalculateVolume()
      {
@@ -2103,7 +2254,7 @@
          PKTRACE(Voxels_fCalculateVolume);
          
          if (m_roGrid->tree().empty())
-@@ -561,6 +691,8 @@
+@@ -561,6 +691,8 @@ public:
      
      inline bool bIsInside(Vector3 vecTest)
      {
@@ -2112,7 +2263,7 @@
          auto oAccess = m_roGrid->getConstAccessor();
      
          openvdb::Coord xyz( oVoxelSize().iToVoxels(vecTest.X),
-@@ -573,6 +705,8 @@
+@@ -573,6 +705,8 @@ public:
      inline void GetSurfaceNormal(   Vector3 vecPt,
                                      Vector3* pvecNormal)
      {
@@ -2121,7 +2272,7 @@
          math::GradStencil oStencil(*m_roGrid);
          Coord xyz = oVoxelSize().xyzToVoxels(vecPt);
      
-@@ -591,6 +725,8 @@
+@@ -591,6 +725,8 @@ public:
      inline bool bFindClosestPointOnSurface( Vector3 vecSearch,
                                              Vector3* pvecSurfacePoint)
      {
@@ -2130,7 +2281,7 @@
          Coord xyzSearch = oVoxelSize().xyzToVoxels(vecSearch);
          
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
-@@ -638,6 +774,8 @@
+@@ -638,6 +774,8 @@ public:
                                      const Vector3& vecDirection,
                                      Vector3* pvecSurfacePoint)
      {
@@ -2139,7 +2290,7 @@
          tools::LevelSetRayIntersector oIntersector(*m_roGrid);
          math::Ray<Real> oRay(   Vec3f(  oVoxelSize().fToVoxels(vecSearch.X),
                                          oVoxelSize().fToVoxels(vecSearch.Y),
-@@ -670,6 +808,8 @@
+@@ -670,6 +808,8 @@ public:
                                  int32_t* pnYSize,
                                  int32_t* pnZSize) const
      {
@@ -2148,7 +2299,7 @@
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
          
          *pnXMin     = oBBox.min().x();
-@@ -683,6 +823,8 @@
+@@ -683,6 +823,8 @@ public:
      void GetZSlice( int32_t nZSlice,
                      float* pfBuffer)
      {
@@ -2157,7 +2308,7 @@
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
          openvdb::Coord xyz(0, 0, nZSlice + oBBox.min().z());
          
-@@ -700,6 +842,8 @@
+@@ -700,6 +842,8 @@ public:
      void GetXSlice( int32_t nXSlice,
                      float* pfBuffer)
      {
@@ -2166,7 +2317,7 @@
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
          openvdb::Coord xyz(nXSlice + oBBox.min().x(), 0, 0);
          
-@@ -717,6 +861,8 @@
+@@ -717,6 +861,8 @@ public:
      void GetYSlice( int32_t nYSlice,
                      float* pfBuffer)
      {
@@ -2175,7 +2326,7 @@
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
          openvdb::Coord xyz(0, nYSlice + oBBox.min().y(), 0);
          
-@@ -734,6 +880,8 @@
+@@ -734,6 +880,8 @@ public:
      void GetInterpolatedZSlice( float fZSlice,
                                  float* pfBuffer)
      {
@@ -2184,7 +2335,7 @@
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -750,18 +898,33 @@
+@@ -750,18 +898,33 @@ public:
          }
      }
      
@@ -2221,7 +2372,7 @@
      int32_t             m_nSdfNarrowBand;
      
      bool bLevelSetNeedsRebuild() const
-@@ -830,22 +993,23 @@
+@@ -830,22 +993,23 @@ protected:
                                                  VoxelSize oVoxelSize,
                                                  int32_t nHalfWidth)
      {

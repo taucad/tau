@@ -17,6 +17,16 @@ export const shaderRiskCapabilities = {
 
 export const shaderSites = [
   {
+    id: 'filament-beads',
+    modules: [
+      '#components/printer/printer-filament-material.ts',
+      '#components/printer/printer-filament-material.node.ts',
+    ],
+    authoring: ['on-before-compile', 'tsl'],
+    backends: ['webgl', 'webgpu'],
+    risks: ['custom-position', 'depth', 'lifecycle', 'hot-path', 'upstream-drift'],
+  },
+  {
     id: 'infinite-grid',
     modules: [
       '#components/geometry/graphics/three/materials/infinite-grid-material.ts',
@@ -144,6 +154,30 @@ const evidence = (unit: string, semantic: string, generatedSource = `${unit}::${
 
 /** Evidence names are checked against real test source by shader-policy.test.ts. */
 export const shaderEvidence = {
+  'filament-beads': {
+    reference: [
+      'apps/ui/app/components/printer/printer-filament-material.test.ts::should retain exact bead extents and bounded joins',
+    ],
+    'generated-source': [
+      'apps/ui/app/components/printer/printer-filament-material.test.ts::should match the stable stripped filament node graph',
+      'apps/ui/app/components/printer/printer-filament-material.test.ts::should guard generated shader anchors',
+    ],
+    'real-compile': [
+      'apps/ui/app/components/printer/printer-viewer.browser.test.tsx::should compile filament with negative controls and measure dense whole frames',
+    ],
+    pixels: ['apps/ui/app/components/printer/printer-viewer.browser.test.tsx::frames the print wide'],
+    'backend-differential': [
+      'apps/ui/app/components/printer/printer-viewer.browser.test.tsx::grain and translucent hardware with WebGPU',
+    ],
+    'depth-clipping': ['apps/ui/app/components/printer/printer-viewer.browser.test.tsx::shades the plate from below'],
+    lifecycle: ['apps/ui/app/components/printer/printer-toolpath.test.ts::should use one shared capped profile'],
+    'structural-perf': [
+      'apps/ui/app/components/printer/printer-toolpath.test.ts::should use one shared capped profile',
+    ],
+    'gpu-whole-frame': [
+      'apps/ui/app/components/printer/printer-viewer.browser.test.tsx::should compile filament with negative controls and measure dense whole frames',
+    ],
+  },
   'infinite-grid': {
     ...evidence(
       'apps/ui/app/components/geometry/graphics/three/materials/infinite-grid-material.test.ts',

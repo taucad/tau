@@ -1,0 +1,123 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -234,14 +234,13 @@
+     COMMENT "Copying library files to Dist folder"
+ )
+ 
+-add_custom_command(
+-    TARGET ${LIB_NAME} PRE_BUILD
+-    COMMAND ${CMAKE_COMMAND} -E echo "Creating build headers..."
+-    COMMAND ${CMAKE_COMMAND} 	-DAPIDIR=${CMAKE_CURRENT_SOURCE_DIR}/API 
+-    							-DLIB_VERSION=${LIB_VERSION}
+-    							-DLIB_NAME=${LIB_NAME}
+-    							-P ${CMAKE_CURRENT_SOURCE_DIR}/CMake_Utils/PicoGKBuildHeader.cmake
+-    COMMENT "Create build headers"
++# Generate before compilation; PRE_BUILD runs too late with Ninja/Make.
++execute_process(
++    COMMAND ${CMAKE_COMMAND} -DAPIDIR=${CMAKE_CURRENT_SOURCE_DIR}/API
++                            -DLIB_VERSION=${LIB_VERSION}
++                            -DLIB_NAME=${LIB_NAME}
++                            -P ${CMAKE_CURRENT_SOURCE_DIR}/CMake_Utils/PicoGKBuildHeader.cmake
++    COMMAND_ERROR_IS_FATAL ANY
+ )
+ 
+ 
+--- a/CMake_Utils/PicoGKBuildHeader.cmake
++++ b/CMake_Utils/PicoGKBuildHeader.cmake
+@@ -4,7 +4,7 @@
+ # Function to generate the PicoGKBuild.h file
+ function(generate_build_header)
+     # Get the current date and time
+-    string(TIMESTAMP BUILD_DATE_TIME "%Y-%m-%d %H:%M:%S")
++    string(TIMESTAMP BUILD_DATE_TIME "%Y-%m-%d %H:%M:%S" UTC)
+ 
+     # Create the content of the PicoGKBuild.h file
+     set(    BUILD_HEADER_CONTENT
+@@ -15,7 +15,13 @@
+ #endif // PICOGK_BUILD_H\n"
+         )
+ 
+-    file(WRITE "${APIDIR}/PicoGKBuild.h" "${BUILD_HEADER_CONTENT}")
++    set(BUILD_HEADER_PATH "${APIDIR}/PicoGKBuild.h")
++    if(EXISTS "${BUILD_HEADER_PATH}")
++        file(READ "${BUILD_HEADER_PATH}" PREVIOUS_BUILD_HEADER_CONTENT)
++    endif()
++    if(NOT PREVIOUS_BUILD_HEADER_CONTENT STREQUAL BUILD_HEADER_CONTENT)
++        file(WRITE "${BUILD_HEADER_PATH}" "${BUILD_HEADER_CONTENT}")
++    endif()
+ endfunction()
+ 
+ generate_build_header()
+--- a/API/PicoGK.h
++++ b/API/PicoGK.h
+@@ -173,6 +173,14 @@
+                                                             PKMESH              hThis,
+                                                             PKBBox3*            poBox);
+ 
++// Tau private caller-buffer ABI. Zero: null buffer/nonpositive capacity (no lookup).
++// Minus one: resolver failure; buffer untouched. Success: count of copied elements.
++// Caller must exclude mutation for the complete count/copy transaction.
++PICOGK_API int32_t Tau_Mesh_GetVertices(PKINSTANCE hInstance, PKMESH hMesh,
++                                      PKVector3* pBuffer, int32_t nCapacity) noexcept;
++PICOGK_API int32_t Tau_Mesh_GetTriangles(PKINSTANCE hInstance, PKMESH hMesh,
++                                       PKTriangle* pBuffer, int32_t nCapacity) noexcept;
++
+ // LATTICE
+ 
+ PICOGK_API PKLATTICE        Lattice_hCreate(                PKINSTANCE          hInstance);
+--- a/Source/PicoGKLibrary.cpp
++++ b/Source/PicoGKLibrary.cpp
+@@ -33,6 +33,7 @@
+ // limitations under the License.
+ //
+ 
++#include <type_traits>
+ #include "gl/glad.h"
+ #include "PicoGKTypes.h"
+ #include "PicoGK.h"
+@@ -299,6 +300,45 @@
+ {
+     Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+     return roLib->m_oMeshes.roGet(hThis)->GetTriangle( nTriangle, psTri);
++}
++
++// One retained library/object lookup and a typed contiguous copy. The managed
++// snapshot gate serializes this legacy mesh path; immutable generation capture
++// is a separate ABI and must also cover mutation through native aliases.
++PICOGK_API int32_t Tau_Mesh_GetVertices(PKINSTANCE hLib, PKMESH hMesh,
++                                      PKVector3* pBuffer, int32_t nCapacity) noexcept
++{
++    if (pBuffer == nullptr || nCapacity <= 0) return 0;
++    static_assert(std::is_nothrow_copy_assignable_v<Vector3>);
++    try
++    {
++        // Resolve everything before writing. Typed assignment cannot throw.
++        auto roLib = Library::oLib().roGetInstance(hLib);
++        auto roMesh = roLib->m_oMeshes.roGet(hMesh);
++        const auto& vertices = roMesh->vVertices();
++        const auto count = std::min(vertices.size(), static_cast<size_t>(nCapacity));
++        std::copy_n(vertices.begin(), count, pBuffer);
++        return static_cast<int32_t>(count);
++    }
++    catch (...) { return -1; }
++}
++
++PICOGK_API int32_t Tau_Mesh_GetTriangles(PKINSTANCE hLib, PKMESH hMesh,
++                                       PKTriangle* pBuffer, int32_t nCapacity) noexcept
++{
++    if (pBuffer == nullptr || nCapacity <= 0) return 0;
++    static_assert(std::is_nothrow_copy_assignable_v<Triangle>);
++    try
++    {
++        // Resolve everything before writing. Typed assignment cannot throw.
++        auto roLib = Library::oLib().roGetInstance(hLib);
++        auto roMesh = roLib->m_oMeshes.roGet(hMesh);
++        const auto& triangles = roMesh->vTriangles();
++        const auto count = std::min(triangles.size(), static_cast<size_t>(nCapacity));
++        std::copy_n(triangles.begin(), count, pBuffer);
++        return static_cast<int32_t>(count);
++    }
++    catch (...) { return -1; }
+ }
+ 
+ PICOGK_API void Mesh_GetTriangleV(  PKINSTANCE hLib,

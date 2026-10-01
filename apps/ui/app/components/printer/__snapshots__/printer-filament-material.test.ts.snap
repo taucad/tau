@@ -1,0 +1,371 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`filament shape and material contract > should match the stable stripped filament node graph 1`] = `
+"{
+  "blendColor": 0,
+  "color": 16777215,
+  "emissive": 0,
+  "envMapIntensity": 1,
+  "envMapRotation": [0, 0, 0, "XYZ"],
+  "inputNodes": {
+    "colorNode": "<nodeRef>",
+    "normalNode": "<nodeRef>",
+    "positionNode": "<nodeRef>"
+  },
+  "metadata": {
+    "generator": "Material.toJSON",
+    "type": "Material",
+    "version": 4.7
+  },
+  "metalness": 0,
+  "nodes": [
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VaryingNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SubBuild"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "rawInputs": ["<nodeRef>"],
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>"
+      },
+      "method": "normalize",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VaryingNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SubBuild"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "nodes": ["<nodeRef>", "<nodeRef>", "<nodeRef>"]
+      },
+      "type": "JoinNode"
+    },
+    {
+      "components": "x",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "+",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "nodes": ["<nodeRef>", "<nodeRef>"]
+      },
+      "type": "JoinNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>"
+      },
+      "method": "negate",
+      "type": "MathNode"
+    },
+    {
+      "components": "y",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>"
+      },
+      "method": "normalize",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "-",
+      "type": "OperatorNode"
+    },
+    {
+      "components": "xy",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "_attributeName": "aEnd",
+      "global": true,
+      "type": "AttributeNode"
+    },
+    {
+      "components": "xy",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "_attributeName": "aStart",
+      "global": true,
+      "type": "AttributeNode"
+    },
+    {
+      "components": "x",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "components": "x",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "/",
+      "type": "OperatorNode"
+    },
+    {
+      "components": "y",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "_attributeName": "aDimensions",
+      "global": true,
+      "type": "AttributeNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "method": "min",
+      "type": "MathNode"
+    },
+    {
+      "components": "x",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "components": "z",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "components": "y",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "components": "y",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    }
+  ],
+  "roughness": 0.68,
+  "type": "MeshStandardNodeMaterial"
+}
+"
+`;

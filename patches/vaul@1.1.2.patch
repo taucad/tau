@@ -1,0 +1,28 @@
+diff --git a/dist/index.js b/dist/index.js
+index 7f343be1fafe1cf302ee6afc7268c29490895e34..4e4a4f1d863894eb08ebcc69f4bca4ac4a60ee02 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1371,7 +1371,8 @@ function Root({ open: openProp, onOpenChange, children, onDrag: onDragProp, onRe
+             }
+             setIsOpen(open);
+         },
+-        open: isOpen
++        open: isOpen,
++        modal: modal
+     }, /*#__PURE__*/ React__namespace.default.createElement(DrawerContext.Provider, {
+         value: {
+             activeSnapPoint,
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 0dbbce5526681925a81804ced237a045a53c0355..b40bf4765757689a46eb9084c08709bfd02c3f84 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1349,7 +1349,8 @@ function Root({ open: openProp, onOpenChange, children, onDrag: onDragProp, onRe
+             }
+             setIsOpen(open);
+         },
+-        open: isOpen
++        open: isOpen,
++        modal: modal
+     }, /*#__PURE__*/ React__default.createElement(DrawerContext.Provider, {
+         value: {
+             activeSnapPoint,

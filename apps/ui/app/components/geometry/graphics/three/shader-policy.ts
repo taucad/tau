@@ -17,6 +17,16 @@ export const shaderRiskCapabilities = {
 
 export const shaderSites = [
   {
+    id: 'filament-beads',
+    modules: [
+      '#components/printer/printer-filament-material.ts',
+      '#components/printer/printer-filament-material.node.ts',
+    ],
+    authoring: ['on-before-compile', 'tsl'],
+    backends: ['webgl', 'webgpu'],
+    risks: ['custom-position', 'depth', 'lifecycle', 'hot-path', 'upstream-drift'],
+  },
+  {
     id: 'infinite-grid',
     modules: [
       '#components/geometry/graphics/three/materials/infinite-grid-material.ts',
@@ -144,6 +154,30 @@ const evidence = (unit: string, semantic: string, generatedSource = `${unit}::${
 
 /** Evidence names are checked against real test source by shader-policy.test.ts. */
 export const shaderEvidence = {
+  'filament-beads': {
+    reference: [
+      'apps/ui/app/components/printer/printer-filament-material.test.ts::should retain exact bead extents and bounded joins',
+    ],
+    'generated-source': [
+      'apps/ui/app/components/printer/printer-filament-material.test.ts::should match the stable stripped filament node graph',
+      'apps/ui/app/components/printer/printer-filament-material.test.ts::should guard generated shader anchors',
+    ],
+    'real-compile': [
+      'apps/ui/app/components/printer/printer-viewer.browser.test.tsx::should compile filament with negative controls and measure dense whole frames',
+    ],
+    pixels: ['apps/ui/app/components/printer/printer-viewer.browser.test.tsx::frames the print wide'],
+    'backend-differential': [
+      'apps/ui/app/components/printer/printer-viewer.browser.test.tsx::grain and translucent hardware with WebGPU',
+    ],
+    'depth-clipping': ['apps/ui/app/components/printer/printer-viewer.browser.test.tsx::shades the plate from below'],
+    lifecycle: ['apps/ui/app/components/printer/printer-toolpath.test.ts::should use one shared capped profile'],
+    'structural-perf': [
+      'apps/ui/app/components/printer/printer-toolpath.test.ts::should use one shared capped profile',
+    ],
+    'gpu-whole-frame': [
+      'apps/ui/app/components/printer/printer-viewer.browser.test.tsx::should compile filament with negative controls and measure dense whole frames',
+    ],
+  },
   'infinite-grid': {
     ...evidence(
       'apps/ui/app/components/geometry/graphics/three/materials/infinite-grid-material.test.ts',
@@ -190,7 +224,7 @@ export const shaderEvidence = {
       `${sectionClipUnit}::should keep the clip when the surface depth bias composed under it turns off`,
       `${sectionClipUnit}::should give each viewer its own clip and refuse to share a material between them`,
       `${sectionClippingGroupUnit}::should compile the clip into every model surface, line and point on`,
-      `${gltfMeshLifecycleUnit}::should warm a model whose surfaces, edges, line strips and points already carry the section clip on`,
+      `${gltfMeshLifecycleUnit}::should install section clipping on every demanded primitive before committing on`,
       `${gltfMeshLifecycleUnit}::should present the same geometry hash again with every material clipped at commit on`,
     ],
     'structural-perf': [
@@ -214,6 +248,9 @@ export const shaderEvidence = {
       'apps/ui/app/components/geometry/graphics/three/materials/line2.material.test.ts::emits geometric viewZToLogarithmicDepth',
     ],
     pixels: [`${graphicsBackendEndToEnd}::grid, axes and model shading display the same`],
+    'structural-perf': [
+      'apps/ui/app/components/geometry/graphics/three/materials/line2.material.test.ts::should keep its semantic cache key stable across setup and equivalent materials',
+    ],
     'gpu-whole-frame': [`${graphicsBackendEndToEnd}::records warmed whole-frame benchmark`],
   },
   'morphing-points': evidence(
@@ -259,14 +296,14 @@ export const shaderEvidence = {
       'apps/ui/app/components/geometry/graphics/three/post-processing.test.tsx::should resolve viewport AO radius from the CSS diagonal independently of DPR above the physical minimum',
     ],
     lifecycle: [
-      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::disposes both endpoint resources once on unmount',
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::should dispose every demanded endpoint once on unmount',
       'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::updates AO output and estimator uniforms without rebuilding the production graph',
-      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::restores MRT and target when synchronous scene prewarm throws',
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::should release partial resources when graph construction fails',
       'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::keeps beauty ahead of AO dependencies and preserves its alpha in the AO visualization',
       'apps/ui/app/components/geometry/graphics/three/canvas-three-gl.test.ts::should configure both native camera projections before the first WebGPU scene pass',
     ],
     'structural-perf': [
-      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::bypasses GTAO through a retained beauty-only graph sharing the same scene pass',
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::should prepare only the active beauty endpoint when AO is disabled',
     ],
   },
   'model-emphasis-silhouette': evidence(

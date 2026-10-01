@@ -21,6 +21,7 @@ import type { Material, WebGLRenderer } from 'three';
 import { mock } from 'vitest-mock-extended';
 import { BlendFunction, EffectComposer, Pass, ToneMappingEffect } from 'postprocessing';
 import { ManagedN8AoPass } from '#components/geometry/graphics/three/n8ao-pass.js';
+import { invalidateSceneTransparency } from '#components/geometry/graphics/three/utils/scene-transparency-revision.js';
 
 const passes: ManagedN8AoPass[] = [];
 const materials: Material[] = [];
@@ -30,7 +31,7 @@ const createFixture = (camera: PerspectiveCamera | OrthographicCamera = new Pers
   const scene = new Scene();
   const material = new MeshStandardMaterial();
   const geometry = new BoxGeometry();
-  const mesh = new Mesh(geometry, material);
+  const mesh = new Mesh<BoxGeometry, MeshStandardMaterial | MeshStandardMaterial[]>(geometry, material);
   scene.add(mesh);
   const pass = new ManagedN8AoPass(scene, camera);
   passes.push(pass);
@@ -52,6 +53,41 @@ afterEach(() => {
 });
 
 describe('ManagedN8AoPass', () => {
+  it('should detect transparent material arrays and refresh owned-scene classification only on appearance changes', () => {
+    const { pass, material, mesh, scene } = createFixture();
+    const transparent = new MeshStandardMaterial({ transparent: true });
+    materials.push(transparent);
+    mesh.material = [material, transparent];
+    pass.detectTransparency();
+    expect(pass.configuration.transparencyAware).toBe(true);
+    invalidateSceneTransparency(scene);
+    const traversal = vi.spyOn(scene, 'traverseVisible');
+    const renderer = mock<WebGLRenderer>();
+    const input = new WebGLRenderTarget(1, 1);
+    const output = new WebGLRenderTarget(1, 1);
+    // Preserve real classification while isolating unrelated AO draw setup.
+    const nativeRender = vi
+      .spyOn(Object.getPrototypeOf(ManagedN8AoPass.prototype), 'render')
+      .mockImplementation(() => undefined);
+    try {
+      pass.render(renderer, input, output);
+      pass.render(renderer, input, output);
+      expect(traversal).toHaveBeenCalledOnce();
+      transparent.transparent = false;
+      invalidateSceneTransparency(scene);
+      pass.render(renderer, input, output);
+      expect(traversal).toHaveBeenCalledTimes(2);
+      expect(pass.configuration.transparencyAware).toBe(false);
+      transparent.transparent = true;
+      pass.detectTransparency();
+      expect(pass.configuration.transparencyAware).toBe(true);
+    } finally {
+      nativeRender.mockRestore();
+      traversal.mockRestore();
+      input.dispose();
+      output.dispose();
+    }
+  });
   it('should distinguish opacity-aware tone-map blending from the installed default that ignores opacity', () => {
     const source = new ToneMappingEffect();
     const normal = new ToneMappingEffect({ blendFunction: BlendFunction.NORMAL });

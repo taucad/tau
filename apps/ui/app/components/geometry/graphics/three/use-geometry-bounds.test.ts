@@ -23,7 +23,16 @@ const mocks = vi.hoisted(() => ({
   camera: {
     actorRef: {
       send: vi.fn(),
-      getSnapshot: () => ({ context: { view: { target: [0, 0, 0], up: [0, 0, 1], verticalSpan: 2 } } }),
+      getSnapshot: () => ({
+        context: {
+          view: {
+            target: [0, 0, 0],
+            up: [0, 0, 1],
+            verticalSpan: 2,
+            viewport: { width: 800, height: 600, pixelRatio: 1 },
+          },
+        },
+      }),
     },
   },
   framing: { initialized: false, preserveOrientationOnFirstFrame: false },
@@ -83,6 +92,16 @@ describe('useGeometryBounds', () => {
 
   afterEach(() => {
     mocks.kinematics?.stop();
+  });
+
+  it('should measure a settled scene once rather than poll for convergence', () => {
+    const { innerRef, outerRef } = createSceneReferences(10);
+    const bounds = vi.spyOn(THREE.Box3.prototype, 'setFromObject');
+    renderHook(() => useGeometryBounds(innerRef, outerRef));
+    act(() => mocks.frame?.());
+    act(() => mocks.frame?.());
+    expect(bounds).toHaveBeenCalledOnce();
+    bounds.mockRestore();
   });
 
   it('returns a cloned bounds snapshot with its center and sphere', () => {

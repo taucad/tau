@@ -32,6 +32,7 @@ export function bestRouteForActiveKernel(
  * that dynamic record back into the client's statically projected API.
  */
 export type RuntimeValidatedExportInput = {
+  readonly signal?: AbortSignal;
   readonly content?: RuntimeContentInput;
   readonly exportOptions?: Record<string, unknown>;
 };
@@ -41,7 +42,7 @@ export async function exportWithRuntimeValidatedInput(
   route: AppRuntimeExportRoute,
   input: RuntimeValidatedExportInput = {},
 ): Promise<ExportResult> {
-  return input.content !== undefined || input.exportOptions !== undefined
+  return input.signal !== undefined || input.content !== undefined || input.exportOptions !== undefined
     ? client.export(route.targetFormat, input)
     : client.export(route.targetFormat);
 }

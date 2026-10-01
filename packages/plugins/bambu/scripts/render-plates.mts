@@ -4,8 +4,11 @@
  *
  * Exports each model under `models/{x1c,a1-mini}` to binary glTF with the built Tau CLI
  * (`tau export --ext=glb`), writes them to `src/assets/<printer>-<id>.glb`, and
- * records a SHA-256 of the sources in `models/x1c/render.sha256`; the unit
+ * records a SHA-256 of the sources in `models/render.sha256`; the unit
  * tests fail when the sources change without a re-render.
+ *
+ * Environment:
+ *   TAU_RENDER_CLI — absolute path to an already qualified Tau CLI, for isolated asset regeneration.
  *
  * Prerequisite: `pnpm nx build cli` (the Nx target depends on it).
  *
@@ -28,10 +31,10 @@ const packageRoot = resolve(import.meta.dirname, '..');
 const repoRoot = resolve(packageRoot, '../../..');
 const modelDirectory = join(packageRoot, 'models');
 const assetDirectory = join(packageRoot, 'src/assets');
-const cliPath = join(repoRoot, 'packages/cli/dist/bin/tau.mjs');
+const cliPath = process.env['TAU_RENDER_CLI'] ?? join(repoRoot, 'packages/cli/dist/bin/tau.mjs');
 
 /** Where the recorded source hash lives. */
-export const renderHashPath = join(modelDirectory, 'x1c/render.sha256');
+export const renderHashPath = join(modelDirectory, 'render.sha256');
 
 /**
  * Coarser than the 0.02 mm default: keeps each GLB well under 300 KB while

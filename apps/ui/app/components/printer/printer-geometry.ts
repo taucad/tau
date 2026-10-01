@@ -139,10 +139,12 @@ export const derivePrinterGeometry = (manifest: PrinterManifest): PrinterGeometr
   const railLength = build[1] + railInset * 2;
   const rails: PrinterBox[] =
     kinematics === 'cartesian-bedslinger'
-      ? (manifest.identity.model === 'a1-mini' ? [-railInset] : [-railInset, build[0] + railInset]).map((x) => ({
-          center: [x, centerY, (build[2] + beamZ) / 2],
-          size: [railSize, railSize, build[2] + beamZ],
-        }))
+      ? (manifest.identity.model === 'a1-mini' ? [build[0] + railInset] : [-railInset, build[0] + railInset]).map(
+          (x) => ({
+            center: [x, centerY, (build[2] + beamZ) / 2],
+            size: [railSize, railSize, build[2] + beamZ],
+          }),
+        )
       : kinematics === 'delta'
         ? [0, 1, 2].map((index) => {
             const angle = (index / 3) * Math.PI * 2;

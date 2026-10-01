@@ -39,6 +39,8 @@ export type PrinterFileContents = Readonly<{
    * else the G-code's `curr_bed_type`; `undefined` when neither does.
    */
   slicedPlate: PrinterPlateModel | undefined;
+  /** Preserve unknown recorded names instead of presenting them as missing. */
+  recordedBedType: string | undefined;
   /**
    * `#RRGGBB` per filament the file was sliced with, in filament order: entry *i* is the colour tool `T<i>`
    * prints. The container's own list, else the G-code's `filament_colour` setting read by the same rules;
@@ -82,9 +84,12 @@ const filamentColorsOf = (value: string | undefined): readonly string[] => {
 export const readPrinterFile = (bytes: Uint8Array<ArrayBuffer>, kind: PrinterFileKind): PrinterFileContents => {
   const container = kind === 'container' ? readBambuContainer(bytes) : undefined;
   const gcode = container?.gcode ?? bytes;
+  const containerBedType = container?.bedType === 'unspecified' ? undefined : container?.bedType;
+  const recordedBedType = containerBedType ?? readGcodeSetting(gcode, 'curr_bed_type');
   return {
     gcode,
-    slicedPlate: plateForBedType(container?.bedType) ?? plateForBedType(readGcodeSetting(gcode, 'curr_bed_type')),
+    recordedBedType,
+    slicedPlate: plateForBedType(recordedBedType),
     filamentColors: container?.filamentColors ?? filamentColorsOf(readGcodeSetting(gcode, 'filament_colour')),
   };
 };

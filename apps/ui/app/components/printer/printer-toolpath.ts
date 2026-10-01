@@ -144,7 +144,11 @@ const depthFade = 0.35;
 const activeBrighten = 0.3;
 
 /** Build the palette for one filament colour and theme. */
-export const createToolpathPalette = (filament: string, theme: 'light' | 'dark'): ToolpathPalette => {
+export const createToolpathPalette = (
+  filament: string,
+  theme: 'light' | 'dark',
+  plateColor?: string,
+): ToolpathPalette => {
   const outer = new THREE.Color(filament);
   const travel = new THREE.Color(printerToolpath.travel[theme]);
   return {
@@ -154,7 +158,11 @@ export const createToolpathPalette = (filament: string, theme: 'light' | 'dark')
     support: new THREE.Color(printerToolpath.support),
     skirt: new THREE.Color(printerToolpath.skirt),
     brim: new THREE.Color(printerToolpath.brim),
-    purge: new THREE.Color(printerToolpath.preparation),
+    purge: new THREE.Color(
+      plateColor && new THREE.Color(plateColor).getHSL({ h: 0, s: 0, l: 0 }).l < 0.1
+        ? printerToolpath.preparationOnDark
+        : printerToolpath.preparation,
+    ),
     travel,
     retract: travel,
     wipe: travel,

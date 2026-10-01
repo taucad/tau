@@ -3,6 +3,7 @@ import { tauCadTopologyExtension } from '@taucad/types/constants';
 import {
   buildGltfComponentManifest,
   buildGltfMeasurementFeatures,
+  prepareGltfMetadata,
   listReachableGltfPrimitiveReferences,
 } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 
@@ -58,7 +59,10 @@ describe('buildGltfComponentManifest', () => {
       },
     });
     const manifest = buildGltfComponentManifest(bytes);
-    const features = buildGltfMeasurementFeatures(bytes, manifest);
+    const candidate = prepareGltfMetadata(bytes);
+    const features = candidate.getMeasurementFeatures();
+    expect(features).toEqual(buildGltfMeasurementFeatures(bytes, manifest));
+    expect(candidate.getMeasurementFeatures()).toBe(features);
 
     expect(features.get('0/0/0')).toMatchObject({
       occurrenceId: 'part-a@node:0',

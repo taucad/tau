@@ -93,6 +93,13 @@ async function selectPlaneCut(
     },
     { nextPlane: plane, nextCamera: camera },
   );
+  // Section implementations load on first demand; animation frames do not prove the module mounted.
+  await expect
+    .poll(async () => {
+      const arrow = await projectArrow(cutId);
+      return arrow?.visible ?? false;
+    })
+    .toBe(true);
   await waitForTwoAnimationFrames();
   return cutId;
 }

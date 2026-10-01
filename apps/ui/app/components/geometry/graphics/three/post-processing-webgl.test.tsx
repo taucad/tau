@@ -153,19 +153,24 @@ vi.mock('postprocessing', () => {
     // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly forbids parameter properties.
     public readonly options: unknown;
     public readonly passes: Array<Record<string, unknown> & { dispose?: () => void }> = [];
-    public readonly addPass = vi.fn((pass: Record<string, unknown> & { dispose?: () => void }) => {
-      if (this.autoRenderToScreen) {
-        const previous = this.passes.at(-1);
-        if (previous) {
-          previous['renderToScreen'] = false;
+    public readonly addPass = vi.fn(
+      (pass: Record<string, unknown> & { dispose?: () => void }, index: number = this.passes.length) => {
+        if (this.autoRenderToScreen) {
+          const previous = this.passes.at(-1);
+          if (previous) {
+            previous['renderToScreen'] = false;
+          }
+          pass['renderToScreen'] = true;
         }
-        pass['renderToScreen'] = true;
-      }
-      this.passes.push(pass);
-      if (pass['needsDepthTexture'] === true) {
-        (pass['setDepthTexture'] as ((texture: unknown) => void) | undefined)?.({ kind: 'stable-depth' });
-      }
-    });
+        this.passes.splice(index, 0, pass);
+        for (const [position, item] of this.passes.entries()) {
+          item['renderToScreen'] = position === this.passes.length - 1;
+        }
+        if (pass['needsDepthTexture'] === true) {
+          (pass['setDepthTexture'] as ((texture: unknown) => void) | undefined)?.({ kind: 'stable-depth' });
+        }
+      },
+    );
     public readonly dispose = vi.fn(() => {
       for (const pass of this.passes) {
         pass.dispose?.();
@@ -296,31 +301,30 @@ describe('PostProcessingWebGL shared composer and retained camera AO passes', ()
     mocks.setRenderTarget.mockClear();
   });
 
-  it('prewarms both camera-specific AO passes on one composer offscreen, then restores perspective', async () => {
+  it('should prepare only the active AO endpoint without warmup draws', async () => {
     await mount();
-
     expect(mocks.composers).toHaveLength(1);
-    expect(mocks.renderPasses.map(({ camera }) => camera)).toEqual([mocks.perspectiveCamera]);
-    expect(mocks.aoPasses.map(({ camera }) => camera)).toEqual([mocks.perspectiveCamera, mocks.orthographicCamera]);
-    expect(mocks.composers[0]!.renderedCameras).toEqual([mocks.perspectiveCamera, mocks.orthographicCamera]);
-    expect(mocks.composers[0]!.renderedAoCameras).toEqual([[mocks.perspectiveCamera], [mocks.orthographicCamera]]);
-    expect(mocks.composers[0]!.passes).toHaveLength(6);
-    expect(mocks.composers.every(({ passes }) => passes[1]?.['needsDepthTexture'] === true)).toBe(true);
-    expect(mocks.composers[0]!.screenRenderFlags).toEqual([false, false]);
-    expect(mocks.composers[0]!.passes[5]?.['renderToScreen']).toBe(true);
-    expect(mocks.aoPasses.map(({ enabled }) => enabled)).toEqual([true, false]);
-    expect(mocks.setRenderTarget).toHaveBeenLastCalledWith({ kind: 'prior-target' }, 2, 1);
+    expect(mocks.aoPasses.map(({ camera }) => camera)).toEqual([mocks.perspectiveCamera]);
+    expect(mocks.composers[0]!.renderedCameras).toEqual([]);
+    expect(mocks.composers[0]!.passes).toHaveLength(5);
+    expect(mocks.composers[0]!.passes[1]?.['needsDepthTexture']).toBe(true);
+    expect(mocks.composers[0]!.passes.at(-1)?.['renderToScreen']).toBe(true);
+    expect(mocks.setRenderTarget).not.toHaveBeenCalled();
   });
 
-  it('restores the initial orthographic camera and its AO after warming both projections', async () => {
+  it('should create no AO endpoint until enabled, then only the selected projection', async () => {
+    const { PostProcessingWebGL: PostProcessingWebGl } =
+      await import('#components/geometry/graphics/three/post-processing-webgl.js');
+    const mounted = render(<PostProcessingWebGl settings={{ aoEnabled: false }} />);
+    expect(mocks.aoPasses).toEqual([]);
+    act(() => {
+      mocks.getRetarget()?.(mocks.orthographicCamera);
+    });
+    expect(mocks.aoPasses).toEqual([]);
     mocks.rig.activeCamera = mocks.orthographicCamera;
-    mocks.state.camera = mocks.orthographicCamera;
-    await mount();
-
-    expect(mocks.composers).toHaveLength(1);
-    expect(mocks.renderPasses[0]!.camera).toBe(mocks.orthographicCamera);
-    expect(mocks.aoPasses.map(({ enabled }) => enabled)).toEqual([false, true]);
-    expect(mocks.composers[0]!.screenRenderFlags).toEqual([false, false]);
+    mounted.rerender(<PostProcessingWebGl settings={{ aoEnabled: true }} />);
+    expect(mocks.aoPasses.map(({ camera }) => camera)).toEqual([mocks.orthographicCamera]);
+    expect(mocks.aoPasses[0]!.enabled).toBe(true);
   });
 
   it('keeps screen-space occlusion attenuation positive for the active camera', async () => {
@@ -410,7 +414,7 @@ describe('PostProcessingWebGL shared composer and retained camera AO passes', ()
     expect(mocks.toneMappingEffects).toEqual(toneMappingEffects);
     expect(mocks.toneMappingEffects.every(({ mode }) => mode === 'neutral')).toBe(true);
     mounted.rerender(<PostProcessingWebGl settings={{ aoEnabled: true, toneMapping: 'neutral' }} />);
-    expect(mocks.aoPasses.map(({ enabled }) => enabled)).toEqual([true, false]);
+    expect(mocks.aoPasses.map(({ enabled }) => enabled)).toEqual([true]);
     expect(mocks.composers.every(({ dispose }) => dispose.mock.calls.length === 0)).toBe(true);
   });
 
@@ -505,6 +509,10 @@ describe('PostProcessingWebGL shared composer and retained camera AO passes', ()
 
   it('switches projections without new buffers, warmup draws or AO shader configuration', async () => {
     await mount();
+    act(() => {
+      mocks.getRetarget()?.(mocks.orthographicCamera);
+      mocks.getRetarget()?.(mocks.perspectiveCamera);
+    });
     const configurations = mocks.aoPasses.map(({ configuration }) => ({ ...configuration }));
     for (const { configurationWrites } of mocks.aoPasses) {
       configurationWrites.mockClear();
@@ -571,8 +579,9 @@ describe('PostProcessingWebGL shared composer and retained camera AO passes', ()
     expect(mocks.composers).toHaveLength(1);
     expect(mocks.composers.every(({ setSize }) => setSize.mock.calls.at(-1)?.[0] === 1200)).toBe(true);
     expect(mocks.composers[0]!.setSize).toHaveBeenCalledExactlyOnceWith(1200, 700);
-    expect(mocks.aoPasses[1]!.configuration).toMatchObject({ aoRadius: 7, renderMode: 1 });
-    expect(mocks.aoPasses[1]!.enabled).toBe(false);
+    expect(mocks.aoPasses).toHaveLength(1);
+    expect(mocks.aoPasses[0]!.configuration).toMatchObject({ aoRadius: 7, renderMode: 1 });
+    expect(mocks.aoPasses[0]!.enabled).toBe(false);
     expect(mocks.toneMappingEffects[0]!.blendMode.opacity.value).toBe(0);
   });
 
@@ -612,28 +621,7 @@ describe('PostProcessingWebGL shared composer and retained camera AO passes', ()
     error.mockRestore();
   });
 
-  it.each([
-    { camera: mocks.perspectiveCamera, rendered: [false] },
-    { camera: mocks.orthographicCamera, rendered: [false, false] },
-  ])('restores all caller state when the $camera.kind AO warmup fails', async ({ camera, rendered }) => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    mocks.setFailWarmupCamera(camera);
-    const mounted = await mount();
-
-    expect(mocks.composers).toHaveLength(1);
-    expect(mocks.composers[0]!.screenRenderFlags).toEqual(rendered);
-    expect(mocks.composers[0]!.passes[5]?.['renderToScreen']).toBe(true);
-    expect(mocks.renderPasses[0]!.camera).toBe(mocks.perspectiveCamera);
-    expect(mocks.aoPasses.map(({ enabled }) => enabled)).toEqual([true, false]);
-    expect(mocks.setRenderTarget).toHaveBeenLastCalledWith({ kind: 'prior-target' }, 2, 1);
-    expect(error).toHaveBeenCalledOnce();
-    mounted.unmount();
-    expect(mocks.composers[0]!.dispose).toHaveBeenCalledOnce();
-    expect(mocks.aoPasses.every(({ dispose }) => dispose.mock.calls.length === 1)).toBe(true);
-    error.mockRestore();
-  });
-
-  it('replaces and prewarms the one owner when the scene changes, with current settings and size', async () => {
+  it('replaces the one owner without warming unused endpoints when the scene changes, with current settings and size', async () => {
     const mounted = await mount();
     const { PostProcessingWebGL: PostProcessingWebGl } =
       await import('#components/geometry/graphics/three/post-processing-webgl.js');
@@ -650,9 +638,9 @@ describe('PostProcessingWebGL shared composer and retained camera AO passes', ()
     expect(firstComposer.dispose).toHaveBeenCalledOnce();
     expect(mocks.composers[1]!.dispose).not.toHaveBeenCalled();
     expect(mocks.composers[1]!.setSize).toHaveBeenCalledExactlyOnceWith(1200, 700);
-    expect(mocks.composers[1]!.screenRenderFlags).toEqual([false, false]);
-    expect(mocks.composers[1]!.renderedAoCameras).toEqual([[], []]);
-    expect(mocks.aoPasses.slice(2).every(({ configuration }) => configuration['aoRadius'] === 7)).toBe(true);
+    expect(mocks.composers[1]!.screenRenderFlags).toEqual([]);
+    expect(mocks.composers[1]!.renderedAoCameras).toEqual([]);
+    expect(mocks.aoPasses).toHaveLength(1);
     expect(mocks.renderPasses[1]!.camera).toBe(mocks.orthographicCamera);
     mounted.unmount();
     expect(mocks.composers.every(({ dispose }) => dispose.mock.calls.length === 1)).toBe(true);

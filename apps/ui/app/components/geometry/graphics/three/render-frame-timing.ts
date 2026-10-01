@@ -94,7 +94,7 @@ export const createRenderFrameTimer = (renderer: RendererInstance, enabled: bool
     method: enabled
       ? supported
         ? gpuRenderer
-          ? 'webgpu-queue-envelope'
+          ? 'webgpu-queue-envelope-including-markers'
           : 'webgl-time-elapsed'
         : 'unsupported'
       : 'disabled',
@@ -161,12 +161,16 @@ export const createRenderFrameTimer = (renderer: RendererInstance, enabled: bool
         await readBuffer.mapAsync(1); // GPUMapMode.READ
         try {
           const timestamps = new BigUint64Array(readBuffer.getMappedRange());
-          // End of the leading marker to start of the trailing marker includes every
-          // scene/post/overlay pass and copy, plus queue gaps; marker work is excluded.
-          if (timestamps[2]! < timestamps[1]!) {
-            throw new Error('Non-monotonic WebGPU timestamps');
+          // Beginning of the leading marker to end of the trailing marker includes every
+          // scene/post/overlay pass and copy, queue gaps and both 1px marker passes.
+          // Adjacent render passes can overlap on tile GPUs: subtracting the inner
+          // endpoints produced negative durations on Metal, even without a clock reset.
+          // WebGPU timestamps are implementation-defined and may reset or coarsen to equal values.
+          // Discard invalid samples; do not abort the frame benchmark or invent a positive duration.
+          if (timestamps[3]! <= timestamps[0]!) {
+            return undefined;
           }
-          return Number(timestamps[2]! - timestamps[1]!) / 1e6;
+          return Number(timestamps[3]! - timestamps[0]!) / 1e6;
         } finally {
           readBuffer.unmap();
         }

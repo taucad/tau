@@ -73,6 +73,13 @@ export function useCameraFraming<
 
       const actor = rig.actorRef;
       const { view } = actor.getSnapshot().context;
+      if (
+        size.width > 0 &&
+        size.height > 0 &&
+        (view.viewport.width !== size.width || view.viewport.height !== size.height)
+      ) {
+        actor.send({ type: 'setViewport', viewport: { ...view.viewport, width: size.width, height: size.height } });
+      }
       if (options?.enableConfiguredAngles ?? true) {
         const direction = directionFromRotation(resolvedOptions.rotation);
         const up = resolveCameraUp({
@@ -90,7 +97,7 @@ export function useCameraFraming<
       actor.send({ type: 'setBounds', bounds: toCameraBounds(geometryBounds) });
       actor.send({ type: 'frame', margin: resolvedOptions.fitMargin });
     },
-    [geometryBounds, geometryRadius, resolvedOptions.fitMargin, resolvedOptions.rotation, rig],
+    [geometryBounds, geometryRadius, resolvedOptions.fitMargin, resolvedOptions.rotation, rig, size.height, size.width],
   );
 
   useLayoutEffect(() => {

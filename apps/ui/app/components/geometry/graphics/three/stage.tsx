@@ -6,10 +6,8 @@ import { resolveMetersPerRenderUnit } from '@taucad/spatial';
 import { createThreeRenderMatrix } from '@taucad/three/spatial';
 import { Lights } from '#components/geometry/graphics/three/react/lights.js';
 import type { StudioLightingSettings } from '#components/geometry/graphics/three/utils/lights.utils.js';
-import { SectionContourFills } from '#components/geometry/graphics/three/react/section-contour-fill.js';
 import type { SectionCertification } from '#components/geometry/graphics/three/react/section-contour-fill.js';
 import { SectionClippingGroup } from '#components/geometry/graphics/three/react/section-clipping-group.js';
-import { SectionViewTestBridge } from '#components/geometry/graphics/three/react/section-view-test-bridge.js';
 import { useFeature } from '#flags/use-feature.js';
 import {
   useLiveSectionCutSet,
@@ -28,6 +26,15 @@ import {
 import { createSectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 import type { SectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
+
+const SectionContourFills = React.lazy(async () => {
+  const module = await import('#components/geometry/graphics/three/react/section-contour-fill.js');
+  return { default: module.SectionContourFills };
+});
+const SectionViewTestBridge = React.lazy(async () => {
+  const module = await import('#components/geometry/graphics/three/react/section-view-test-bridge.js');
+  return { default: module.SectionViewTestBridge };
+});
 
 export type StageOptions = {
   lighting?: Partial<StudioLightingSettings>;
@@ -96,15 +103,19 @@ export function SectionViewScene({ innerRef, snapshotRef, children }: SectionVie
       <SectionClippingGroup innerRef={innerRef} pieces={committedPieces}>
         {children}
       </SectionClippingGroup>
-      <SectionContourFills
-        cutSet={liveCutSet}
-        enabled={isSectionViewActive}
-        innerRef={innerRef}
-        snapshotRef={snapshotRef}
-        stripeFrequency={stripeFrequency}
-        stripeWidth={stripeWidth}
-        onCertify={certify}
-      />
+      <React.Suspense fallback={null}>
+        {isSectionViewActive ? (
+          <SectionContourFills
+            cutSet={liveCutSet}
+            enabled={isSectionViewActive}
+            innerRef={innerRef}
+            snapshotRef={snapshotRef}
+            stripeFrequency={stripeFrequency}
+            stripeWidth={stripeWidth}
+            onCertify={certify}
+          />
+        ) : null}
+      </React.Suspense>
     </>
   );
 }
@@ -117,7 +128,8 @@ export function Stage({
   const outer = React.useRef<THREE.Group>(null);
   // oxlint-disable-next-line typescript/no-restricted-types -- valid React ref type
   const innerRef = React.useRef<THREE.Group | null>(null);
-  const sectionSnapshotRef = React.useRef(createSectionViewSafeSnapshotStore());
+  const [sectionSnapshot] = React.useState(createSectionViewSafeSnapshotStore);
+  const sectionSnapshotRef = React.useRef(sectionSnapshot);
 
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const geometryKey = useGraphicsSelector(selectPresentedGeometryKey);
@@ -176,7 +188,9 @@ export function Stage({
 
   return (
     <group {...properties}>
-      {isTauDebugEnabled ? <SectionViewTestBridge isGeometryFramed={geometryRadius > 0} /> : undefined}
+      <React.Suspense fallback={null}>
+        {isTauDebugEnabled ? <SectionViewTestBridge isGeometryFramed={geometryRadius > 0} /> : undefined}
+      </React.Suspense>
       <group ref={outer} matrixAutoUpdate={false}>
         <SectionViewScene innerRef={innerRef} snapshotRef={sectionSnapshotRef}>
           <group ref={innerRef}>{children}</group>

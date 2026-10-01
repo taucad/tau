@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useSelector } from '@xstate/react';
-import { Allotment, LayoutPriority } from 'allotment';
+import { LayoutPriority } from 'allotment';
+import { Allotment } from '#components/panes/allotment.js';
 import { PanelBottom } from 'lucide-react';
 import { getActiveGroupValues } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
@@ -187,9 +188,10 @@ const SharedProjectLayout = ({
             {topbar}
             <main className='min-h-0 flex-1 p-2'>
               <Allotment
+                paneLabels={['Viewer', 'Workbench']}
                 separator={false}
                 proportionalLayout={false}
-                className='size-full overflow-hidden rounded-lg border border-border bg-background [--focus-border:var(--primary)]'
+                className='size-full overflow-hidden rounded-lg border border-border bg-background'
               >
                 <Allotment.Pane minSize={360} priority={LayoutPriority.High}>
                   <ViewerDockview profile='shared' />

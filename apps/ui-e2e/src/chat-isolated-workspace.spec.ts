@@ -445,7 +445,7 @@ it('accepts the project Runtime mesh', async () => {
     expect(geospecWasm!.byteLength).toBe(geospecWasm!.expectedByteLength);
     expect(geospecWasm!.sourceSha256).toBe(geospecWasm!.expectedSha256);
     expect(geospecWasm!.sourceByteLength).toBe(geospecWasm!.expectedByteLength);
-    expect(await target.workers('geospec-runner')).toHaveLength(1);
+    const runnerWorkers = await target.workers('geospec-runner');
     const [native, assertionApi, { createGeoSpecNativeModelLoader }] = await Promise.all([
       import('@taucad/geospec-engine-native'),
       import('geospec/assertion-client'),
@@ -557,6 +557,7 @@ it('accepts the project Runtime mesh', async () => {
       expect(reloadedTree['/.tau/workbench/layout.json']).toBe(layoutBeforeReload);
       expect(reloadedTree[`/${artifact.path}`]).toBe(retainedText);
     }
+    expect(runnerWorkers).toHaveLength(1);
   } finally {
     requests = await target.readAgentHostGatewayRequests();
     await target.writeArtifact(

@@ -852,6 +852,36 @@ describe('desktop main deep links', () => {
   );
 
   it(
+    'preserves the development Playwright loader when a packaged wait flag is inherited',
+    async () => {
+      const previous = process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'];
+      const ready = Promise.withResolvers<void>();
+      state.ready = ready.promise;
+      const loaderRelease = vi.fn(() => {
+        ready.resolve();
+      });
+      vi.stubGlobal('__playwright_run', loaderRelease);
+      process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'] = '1';
+      try {
+        await boot();
+        expect(Reflect.get(globalThis, '__playwright_run')).toBe(loaderRelease);
+        expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+        loaderRelease();
+        await vi.waitFor(() => {
+          expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/');
+        });
+      } finally {
+        if (previous === undefined) {
+          delete process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'];
+        } else {
+          process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'] = previous;
+        }
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'registers the app as the tau scheme handler',
     async () => {
       await bootAndWait();

@@ -2,7 +2,8 @@ import { Link, NavigationType, Outlet, useLocation, useNavigationType } from 're
 import { Fragment } from 'react/jsx-runtime';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import type { CSSProperties, ReactNode, UIEvent } from 'react';
-import { Allotment, LayoutPriority } from 'allotment';
+import { LayoutPriority } from 'allotment';
+import { Allotment } from '#components/panes/allotment.js';
 import type { AllotmentHandle } from 'allotment';
 import { AppSidebar } from '#components/layout/app-sidebar.js';
 import {
@@ -203,12 +204,13 @@ const ApplicationShell = ({
         <WebTitlebarControls onSidebarResize={resizeSidebar} />
       )}
       <Allotment
+        paneLabels={['Sidebar', 'Content']}
         id='application-allotment'
         ref={allotmentRef}
         proportionalLayout={false}
         separator={false}
         snap={false}
-        className='size-full [--focus-border:var(--primary)] [--sash-hover-transition-duration:0.1s] [--separator-border:var(--sidebar-border)] [&_.sash:before]:[transition-delay:0.5s]'
+        className='size-full [--separator-border:var(--sidebar-border)]'
         onChange={(sizes) => {
           const sidebarWidth = sizes[0];
           if (sidebarWidth !== undefined && sidebarWidth > 0) {

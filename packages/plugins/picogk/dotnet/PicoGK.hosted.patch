@@ -246,7 +246,40 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -660,11 +662,20 @@
+@@ -290,9 +292,7 @@
+         /// <returns></returns>
+         public Voxels voxBoolAdd(in Voxels voxOperand)
+         {
+-            Voxels vox = new(this);
+-            vox.BoolAdd(voxOperand);
+-            return vox;
++            return TauCreateCsg(voxOperand, 0);
+         }
+ 
+         /// <summary>
+@@ -368,9 +368,7 @@
+         /// <returns></returns>
+         public Voxels voxBoolSubtract(in Voxels voxOperand)
+         {
+-            Voxels vox = new(this);
+-            vox.BoolSubtract(voxOperand);
+-            return vox;
++            return TauCreateCsg(voxOperand, 1);
+         }
+ 
+         /// <summary>
+@@ -419,9 +417,7 @@
+         /// <returns></returns>
+         public Voxels voxBoolIntersect(in Voxels voxOperand)
+         {
+-            Voxels vox = new(this);
+-            vox.BoolIntersect(voxOperand);
+-            return vox;
++            return TauCreateCsg(voxOperand, 2);
+         }
+ 
+         /// <summary>
+@@ -660,11 +656,20 @@
          {
              if (fOffset < 0)
              {
@@ -272,7 +305,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -688,15 +699,19 @@
+@@ -688,15 +693,19 @@
                  fPosOffsetMM    = fTemp;
              }
  
@@ -300,7 +333,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -722,7 +737,7 @@
+@@ -722,7 +731,7 @@
          /// <param name="oBounds">Bounding box in which to render the implicit</param>
          public void RenderImplicit( in IImplicit xImp,
                                      in BBox3 oBounds)
@@ -309,7 +342,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
  
          /// <summary>
          /// Render an implicit signed distance function into the voxels
-@@ -736,7 +751,7 @@
+@@ -736,7 +745,7 @@
          /// </summary>
          /// <param name="xImp">Implicit object with signed distance function</param>
          public void IntersectImplicit(in IImplicit xImp)
@@ -1281,6 +1314,64 @@ new file mode 100644
 +{
 +    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_GetOwnedMemory")]
 +    private static extern int TauOwnedMemoryNative(LibHandle library, VoxHandle voxels, out long bytes);
++}
+diff --git a/Library/VoxelsCsg.cs b/Library/VoxelsCsg.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/VoxelsCsg.cs
+@@ -0,0 +1,53 @@
++using System.Runtime.InteropServices;
++
++namespace PicoGK;
++
++public partial class Voxels
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_CreateCsg")]
++    private static extern int TauCreateCsgNative(LibHandle library, VoxHandle left, VoxHandle right,
++        int operation, out VoxHandle output, out VdbMetaHandle metadata);
++
++    private Voxels(Library library, VoxHandle handle, FieldMetadata metadata)
++    {
++        lib = library;
++        hThis = handle;
++        m_oMetadata = metadata;
++    }
++
++    private Voxels TauCreateCsg(Voxels operand, int operation)
++    {
++        ArgumentNullException.ThrowIfNull(operand);
++        if (operand.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        ObjectDisposedException.ThrowIf(operand.m_bDisposed, operand);
++        VoxHandle handle = default;
++        VdbMetaHandle metadataHandle = default;
++        FieldMetadata? metadata = null;
++        try
++        {
++            var status = TauCreateCsgNative(lib.hThis, hThis, operand.hThis, operation, out handle, out metadataHandle);
++            if (status == -3) throw new ObjectDisposedException(nameof(Voxels));
++            if (status == -1) throw new ArgumentException("Invalid functional CSG input.");
++            if (status != 0) throw new InvalidOperationException($"Functional CSG failed with status {status}.");
++            if (handle.Value == 0 || metadataHandle.Value == IntPtr.Zero) throw new InvalidOperationException("Functional CSG returned incomplete ownership.");
++            metadata = new FieldMetadata(lib, metadataHandle);
++            return new Voxels(lib, handle, metadata);
++        }
++        catch
++        {
++            if (metadata != null) metadata.Dispose();
++            else if (metadataHandle.Value != IntPtr.Zero) TauDestroyCsgMetadata(lib.hThis, metadataHandle);
++            if (handle.Value != 0) _Destroy(lib.hThis, handle);
++            throw;
++        }
++        finally
++        {
++            GC.KeepAlive(this);
++            GC.KeepAlive(operand);
++        }
++    }
++
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_Destroy")]
++    private static extern void TauDestroyCsgMetadata(LibHandle library, VdbMetaHandle metadata);
 +}
 diff --git a/Material.cs b/Material.cs
 new file mode 100644

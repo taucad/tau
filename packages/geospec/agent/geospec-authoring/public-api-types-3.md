@@ -18,7 +18,7 @@ AxisSelector: {
 
   expect: Cardinality
 
-// Body query predicates over per-occurrence solid aggregates
+// Body query predicates over available source facts
 BodyQuery: {
     area?: NumericRange;
     near?: Partial<Vec3Record> & {
@@ -56,9 +56,10 @@ BodyQuery: {
 
   not: BodyQuery
 
-// Body selector
+// Body selector over source-backed solid evidence
 BodySelector: {
     kind: 'body';
+    /** STEP occurrence scope, or the exact retained mesh primitive label including any ordinal suffix. */
     of?: string | RegExp;
     query?: BodyQuery;
     expect?: Cardinality;
@@ -66,6 +67,7 @@ BodySelector: {
 
   kind: 'body'
 
+  // STEP occurrence scope, or the exact retained mesh primitive label including any ordinal suffix
   of: string | RegExp
 
   query: BodyQuery

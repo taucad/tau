@@ -99,7 +99,7 @@ describe('assembly', () => {
     expectGeo(model).toHaveNoComponentInterference({ tolerance: 0.1 });
   });
 
-  it('keeps the ring and planet clearance pair clean', async () => {
+  it('keeps the ring and planet free of interference', async () => {
     const model = await loadModel({ file: 'main.ts' });
     expectGeo(model).toHaveNoComponentInterference({
       tolerance: 0.05,
@@ -135,6 +135,20 @@ expectGeo(model).toHaveSpatialRelationships({
   ],
 });
 ```
+
+Choose selectors supported by the admitted source. A qualified mesh `body`
+selector identifies one material root with its cavity boundaries; disconnected
+roots and islands inside cavities remain separate Bodies. Its `of` scope
+matches the exact retained primitive label, including any ordinal suffix.
+Inspect that label and preserve cardinality instead of guessing an occurrence
+path. Mesh input does not invent assembly ancestry or analytic faces; missing
+measure, probe or ordering evidence refuses, even through query negation.
+The STEP Body index currently exposes per-occurrence solid aggregates, so do
+not assume its Body count maps one-to-one to mesh material roots.
+
+Whole-Body contact requires no interior overlap and boundary separation within
+the declared inclusive tolerance. It does not establish a contact area or seal;
+finite-face angular requirements need their actual analytic evidence.
 
 Load STEP through the same authoring API:
 

@@ -23,7 +23,16 @@ const mocks = vi.hoisted(() => ({
   camera: {
     actorRef: {
       send: vi.fn(),
-      getSnapshot: () => ({ context: { view: { target: [0, 0, 0], up: [0, 0, 1], verticalSpan: 2 } } }),
+      getSnapshot: () => ({
+        context: {
+          view: {
+            target: [0, 0, 0],
+            up: [0, 0, 1],
+            verticalSpan: 2,
+            viewport: { width: 800, height: 600, pixelRatio: 1 },
+          },
+        },
+      }),
     },
   },
   framing: { initialized: false, preserveOrientationOnFirstFrame: false },

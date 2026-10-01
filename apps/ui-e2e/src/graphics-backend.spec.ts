@@ -1475,15 +1475,21 @@ test.describe('Graphics backend regression guard', () => {
                   configuration: scenario,
                 },
               );
-              // Wait for actual demand-loop rest; a fixed delay is insufficient under slow hardware or contention.
-              await target.waitFor(async () => {
-                const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
-                const before = bridge.getRendererIdentity().frame;
-                await new Promise<void>((resolve) => {
-                  setTimeout(resolve, 500);
-                });
-                return bridge.getRendererIdentity().frame === before;
-              });
+              // Require sustained rest across asynchronous texture readiness, then independently check idle draws.
+              await expect
+                .poll(
+                  async () =>
+                    target.evaluate(async () => {
+                      const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+                      const before = bridge.getRendererIdentity().frame;
+                      await new Promise<void>((resolve) => {
+                        setTimeout(resolve, 2000);
+                      });
+                      return bridge.getRendererIdentity().frame === before;
+                    }),
+                  { timeout: 10_000 },
+                )
+                .toBe(true);
               const frameBeforeIdle = await target.evaluate(
                 () =>
                   (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getRendererIdentity()
@@ -1516,7 +1522,10 @@ test.describe('Graphics backend regression guard', () => {
                 expect(measurements.pixelRatio).toBe(scenario.dpr);
                 expect(measurements.width).toBe(measurements.cssWidth * scenario.dpr);
                 expect(measurements.height).toBe(measurements.cssHeight * scenario.dpr);
-                expect(idleFrames).toBe(0);
+                expect(
+                  idleFrames,
+                  `${fixture}/${scenario.id}/${backend}/ao=${postProcessing}/repeat=${repetition}`,
+                ).toBe(0);
                 expect(measurements.submission).toHaveLength(120);
                 expect(measurements.completion).toHaveLength(120);
                 expect(measurements.drawCalls).toBeGreaterThan(0);

@@ -80,22 +80,28 @@ async function expectProjectCardParity(name: string): Promise<void> {
     .toBeGreaterThan(100);
 
   // First pixels can precede camera/layout settling; compare the final view, not an intermediate fit.
-  await target.waitFor(
-    async () => {
-      const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: { getRendererIdentity(): { frame: number } } })
-        .__TAU_SECTION_VIEW_TEST__;
-      if (!bridge) {
-        return false;
-      }
-      const before = bridge.getRendererIdentity().frame;
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 500);
-      });
-      return bridge.getRendererIdentity().frame === before;
-    },
-    undefined,
-    { surface: 'secondary' },
-  );
+  await expect
+    .poll(
+      async () =>
+        target.evaluate(
+          async () => {
+            const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: { getRendererIdentity(): { frame: number } } })
+              .__TAU_SECTION_VIEW_TEST__;
+            if (!bridge) {
+              return false;
+            }
+            const before = bridge.getRendererIdentity().frame;
+            await new Promise<void>((resolve) => {
+              setTimeout(resolve, 500);
+            });
+            return bridge.getRendererIdentity().frame === before;
+          },
+          undefined,
+          'secondary',
+        ),
+      { timeout: 10_000 },
+    )
+    .toBe(true);
   previewForeground = await measureProjectCardForeground(activeMedia, 'secondary');
   const camera = await target.evaluate(
     () => {

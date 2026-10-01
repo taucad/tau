@@ -1,6 +1,8 @@
+import type { BeadData } from '#components/printer/printer-bead-data.js';
+import type { FilamentMode } from '#components/printer/printer-filament-material.js';
 /* oxlint-disable react/immutability -- This uncompiled R3F boundary mutates the Three.js scene it exclusively owns. */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Canvas, addAfterEffect, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons';
 import type CameraControlsImpl from 'camera-controls';
@@ -34,14 +36,23 @@ import type { PrinterPlateModel } from '#components/printer/printer-plates.js';
 import {
   createToolpathPalette,
   createToolpathReveal,
+  setToolpathPalettes,
+  setToolpathAppearance,
   setToolpathVisibility,
   updateToolpathReveal,
 } from '#components/printer/printer-toolpath.js';
-import type { ToolpathGroup, ToolpathGrouping, ToolpathReveal } from '#components/printer/printer-toolpath.js';
+import type { ToolpathReveal } from '#components/printer/printer-toolpath.js';
+import type { ToolpathGroup, ToolpathGrouping } from '#components/printer/printer-toolpath-groups.js';
 
 export type PrinterSceneProps = Readonly<{
   program: ToolpathProgram;
+  beads?: BeadData;
+  appearance?: FilamentMode;
+  analysisMaximum?: number;
+  emphasizeLayer?: boolean;
   geometry: PrinterGeometry;
+  preparedBounds?: PrinterBounds;
+  onFirstFrame?: () => void;
   store: PlaybackStore;
   theme: 'light' | 'dark';
   /** `#RRGGBB` per tool: entry *i* is the filament whose colour tool `T<i>`'s walls and infill take. */
@@ -149,16 +160,10 @@ type MachineParts = Readonly<{
 
 const buildMachine = ({
   geometry,
-  program,
   theme,
-  filamentColors,
-  plate,
   isWholePrinter,
-  grouping,
-}: Pick<
-  PrinterSceneProps,
-  'geometry' | 'program' | 'theme' | 'filamentColors' | 'plate' | 'isWholePrinter' | 'grouping'
->): MachineParts => {
+  reveal,
+}: Pick<PrinterSceneProps, 'geometry' | 'theme' | 'isWholePrinter'> & { reveal: ToolpathReveal }): MachineParts => {
   const geometries = new Set<THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>();
   const own = <T extends THREE.Material>(material: T): T => {
@@ -272,8 +277,7 @@ const buildMachine = ({
   if (bed) {
     plateGroup.add(bed);
   }
-  const palettes = filamentColors.map((color) => createToolpathPalette(color, theme, plate.color));
-  const reveal = createToolpathReveal(program, palettes, grouping);
+  // Toolpath GPU resources live outside machine appearance and wrapper changes.
   plateGroup.add(reveal.lines, reveal.trail);
   root.add(plateGroup);
 
@@ -291,7 +295,6 @@ const buildMachine = ({
     reveal,
     head: new THREE.Vector3(),
     dispose: () => {
-      reveal.dispose();
       for (const geometry of geometries) {
         geometry.dispose();
       }
@@ -532,6 +535,10 @@ function PrinterPlateSurface({
 
 function PrinterObjects({
   program,
+  beads,
+  appearance = 'filament',
+  analysisMaximum = 1,
+  emphasizeLayer = false,
   geometry,
   store,
   theme,
@@ -553,9 +560,29 @@ function PrinterObjects({
   useEffect(() => {
     onAssetStatus?.([plateStatus, hotendStatus].filter(Boolean).join(' ') || undefined);
   }, [onAssetStatus, plateStatus, hotendStatus]);
+  const backend = readGraphicsBackendQueryOverride() ?? 'webgl';
+  const reveal = useMemo(
+    () => createToolpathReveal(program, [], { grouping, backend, data: beads }),
+    [program, grouping, backend, beads],
+  );
+  useEffect(
+    () => () => {
+      reveal.dispose();
+    },
+    [reveal],
+  );
+  useEffect(() => {
+    const palettes = filamentColors.map((color) => createToolpathPalette(color, theme, plate.color));
+    setToolpathPalettes(reveal, palettes);
+    invalidate();
+  }, [reveal, theme, filamentColors, plate.color, invalidate]);
+  useEffect(() => {
+    setToolpathAppearance(reveal, { mode: appearance, maximum: analysisMaximum, emphasizeLayer });
+    invalidate();
+  }, [reveal, appearance, analysisMaximum, emphasizeLayer, invalidate]);
   const machine = useMemo(
-    () => buildMachine({ geometry, program, theme, filamentColors, plate, isWholePrinter, grouping }),
-    [geometry, program, theme, filamentColors, plate, isWholePrinter, grouping],
+    () => buildMachine({ geometry, theme, isWholePrinter, reveal }),
+    [geometry, theme, isWholePrinter, reveal],
   );
   useEffect(
     () => () => {
@@ -587,15 +614,21 @@ function PrinterObjects({
     invalidate();
   }, [hiddenGroups, invalidate, machine]);
 
+  const panels = useMemo(() => {
+    const result: THREE.Object3D[] = [];
+    machine.housing?.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        result.push(object);
+      }
+    });
+    return result;
+  }, [machine]);
   useFrame((state, delta) => {
     if (machine.housing) {
       machine.housing.visible = isHousingVisible;
     }
     // Hide only the near enclosure skins. The chassis remains intact in a cutaway.
-    machine.housing?.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) {
-        return;
-      }
+    for (const object of panels) {
       const [cx, cy] = geometry.enclosure.center;
       if (object.name === 'aluminium-side-panel') {
         object.visible = (object.position.x - cx) * (state.camera.position.x - cx) < 0;
@@ -609,7 +642,7 @@ function PrinterObjects({
       if (object.name === 'glass-lid') {
         object.visible = state.camera.position.z < object.position.z;
       }
-    });
+    }
     store.advance(Math.min(delta, maximumFrameDelta));
     const time = store.getTime();
     const { head } = machine;
@@ -731,6 +764,37 @@ function PrinterCamera({
   return <TauCameraControls ref={controls} makeDefault onControl={release} {...printerCameraControlProps} />;
 }
 
+/** Observe the completed render, rather than mistaking parsed data or a spinner for first presentation. */
+function FirstPresentedFrame({ onFirstFrame }: Readonly<{ onFirstFrame?: () => void }>): undefined {
+  const renderer = useThree((state) => state.gl);
+  useLayoutEffect(() => {
+    const started = performance.now();
+    const frames = (): number => {
+      const frame: unknown = Reflect.get(renderer.info.render, 'frame');
+      return typeof frame === 'number' ? frame : renderer.info.render.calls;
+    };
+    const initial = frames();
+    let presented = false;
+    const remove = addAfterEffect(() => {
+      if (presented || frames() <= initial) {
+        return;
+      }
+      presented = true;
+      performance.clearMeasures('tau.printer.scene-first-frame');
+      performance.measure('tau.printer.scene-first-frame', {
+        start: started,
+        end: performance.now(),
+        detail: {
+          calls: renderer.info.render.calls,
+          triangles: renderer.info.render.triangles,
+        },
+      });
+      onFirstFrame?.();
+    });
+    return remove;
+  }, [renderer, onFirstFrame]);
+}
+
 /** The printer or its plate alone, the toolpath and the camera for one program. */
 export function PrinterScene(props: PrinterSceneProps): React.JSX.Element {
   const { geometry, program, frameRequest, isReducedMotion, onContextLost, isWholePrinter } = props;
@@ -739,7 +803,7 @@ export function PrinterScene(props: PrinterSceneProps): React.JSX.Element {
   const gl = useMemo(() => createTauR3fGlProp(backend), [backend]);
   // The whole printer frames the plate and its travel; the plate alone frames the finished part. Neither
   // depends on playback or the G-code filter, so the camera holds still while the part prints.
-  const part = useMemo(() => partBounds(program), [program]);
+  const part = useMemo(() => props.preparedBounds ?? partBounds(program), [program, props.preparedBounds]);
   const box = useMemo(
     () =>
       isWholePrinter
@@ -781,6 +845,7 @@ export function PrinterScene(props: PrinterSceneProps): React.JSX.Element {
         isReducedMotion={isReducedMotion}
       />
       <PrinterObjects {...props} />
+      <FirstPresentedFrame onFirstFrame={props.onFirstFrame} />
     </Canvas>
   );
 }

@@ -50,9 +50,9 @@ catalog:
   '@eslint-community/eslint-plugin-eslint-comments': ^4.7.2
   '@fastify/cookie': ^11.0.2
   '@fastify/otel': ^0.17.1
-  '@gltf-transform/core': ^4.4.0
-  '@gltf-transform/extensions': ^4.4.0
-  '@gltf-transform/functions': ^4.4.0
+  '@gltf-transform/core': ^4.4.1
+  '@gltf-transform/extensions': ^4.4.1
+  '@gltf-transform/functions': ^4.4.1
   '@inkjs/ui': ^2.0.0
   '@jscad/modeling': ^2.13.0
   '@kittycad/lib': ^2.0.48

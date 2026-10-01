@@ -55,14 +55,14 @@ catalogs:
       specifier: ^0.17.1
       version: 0.17.1
     '@gltf-transform/core':
-      specifier: ^4.4.0
-      version: 4.4.0
+      specifier: ^4.4.1
+      version: 4.4.1
     '@gltf-transform/extensions':
-      specifier: ^4.4.0
-      version: 4.4.0
+      specifier: ^4.4.1
+      version: 4.4.1
     '@gltf-transform/functions':
-      specifier: ^4.4.0
-      version: 4.4.0
+      specifier: ^4.4.1
+      version: 4.4.1
     '@inkjs/ui':
       specifier: ^2.0.0
       version: 2.0.0
@@ -958,13 +958,13 @@ importers:
         version: 0.17.1(@opentelemetry/api@1.9.1)(supports-color@10.2.2)
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@gltf-transform/extensions':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@gltf-transform/functions':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@headless-tree/core':
         specifier: ^1.7.0
         version: 1.7.0
@@ -1372,7 +1372,7 @@ importers:
         version: 0.552.0(react@19.2.7)
       manifold-3d:
         specifier: 'catalog:'
-        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.28.2)
+        version: 3.4.1(@gltf-transform/core@4.4.1)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2)
       minimatch:
         specifier: ^10.2.5
         version: 10.2.6
@@ -2004,10 +2004,10 @@ importers:
         version: 0.0.75
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@gltf-transform/functions':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../packages/agent-host
@@ -3288,7 +3288,7 @@ importers:
         version: 3.0.2
       manifold-3d:
         specifier: 'catalog:'
-        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.28.2)
+        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2)
       picovoxel:
         specifier: 'catalog:'
         version: 0.1.0(three@0.184.0)
@@ -3543,13 +3543,13 @@ importers:
     dependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@gltf-transform/extensions':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@gltf-transform/functions':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@taucad/kinematics':
         specifier: workspace:*
         version: link:../../kinematics
@@ -3558,7 +3558,7 @@ importers:
         version: link:../../spatial
       manifold-3d:
         specifier: 'catalog:'
-        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.28.2)
+        version: 3.4.1(@gltf-transform/core@4.4.1)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2)
     devDependencies:
       '@taucad/runtime':
         specifier: workspace:*
@@ -3727,7 +3727,7 @@ importers:
         version: link:../geospec
       manifold-3d:
         specifier: 'catalog:'
-        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.28.2)
+        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2)
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -4001,7 +4001,7 @@ importers:
     dependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
@@ -4079,10 +4079,10 @@ importers:
     dependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@gltf-transform/functions':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
@@ -4104,10 +4104,10 @@ importers:
     dependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@gltf-transform/extensions':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@resvg/resvg-wasm':
         specifier: 2.6.2
         version: 2.6.2
@@ -4116,7 +4116,7 @@ importers:
         version: link:../../core/geometry
       manifold-3d:
         specifier: 'catalog:'
-        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.28.2)
+        version: 3.4.1(@gltf-transform/core@4.4.1)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2)
       nanoraster:
         specifier: 'catalog:'
         version: 0.5.7
@@ -4147,10 +4147,10 @@ importers:
     dependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@gltf-transform/extensions':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@jscad/modeling':
         specifier: 'catalog:'
         version: 2.13.0
@@ -4184,7 +4184,7 @@ importers:
     dependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
@@ -4193,7 +4193,7 @@ importers:
         version: link:../../parameters
       manifold-3d:
         specifier: 'catalog:'
-        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.28.2)
+        version: 3.4.1(@gltf-transform/core@4.4.1)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2)
     devDependencies:
       '@taucad/esbuild':
         specifier: workspace:*
@@ -4212,10 +4212,10 @@ importers:
     dependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@gltf-transform/extensions':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@msgpack/msgpack':
         specifier: 'catalog:'
         version: 3.1.3
@@ -4249,7 +4249,7 @@ importers:
         version: link:../../../libs/types
       manifold-3d:
         specifier: 'catalog:'
-        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.28.2)
+        version: 3.4.1(@gltf-transform/core@4.4.1)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2)
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -4258,7 +4258,7 @@ importers:
     dependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
@@ -4309,10 +4309,10 @@ importers:
     devDependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@gltf-transform/functions':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@taucad/assimp':
         specifier: workspace:*
         version: link:../assimp
@@ -4401,10 +4401,10 @@ importers:
     dependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@gltf-transform/extensions':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@taucad/cache-core':
         specifier: workspace:*
         version: link:../../core/cache
@@ -4462,7 +4462,7 @@ importers:
     dependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
@@ -4519,7 +4519,7 @@ importers:
     dependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@taucad/units':
         specifier: workspace:*
         version: link:../../units
@@ -4528,7 +4528,7 @@ importers:
         version: 0.8.3
       manifold-3d:
         specifier: 'catalog:'
-        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.28.2)
+        version: 3.4.1(@gltf-transform/core@4.4.1)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2)
     devDependencies:
       '@taucad/runtime':
         specifier: workspace:*
@@ -4544,7 +4544,7 @@ importers:
     dependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@resvg/resvg-wasm':
         specifier: 2.6.2
         version: 2.6.2
@@ -4692,7 +4692,7 @@ importers:
     dependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@kittycad/lib':
         specifier: 'catalog:'
         version: 2.0.48(patch_hash=8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9)(@swc/core@1.15.8(@swc/helpers@0.5.23))(@swc/wasm@1.15.47)(@types/node@24.0.15)(typescript@5.9.3)
@@ -4910,10 +4910,10 @@ importers:
     dependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@gltf-transform/functions':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@taucad/cache-core':
         specifier: workspace:*
         version: link:../core/cache
@@ -4979,7 +4979,7 @@ importers:
     devDependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
-        version: 4.4.0
+        version: 4.4.1
       '@taucad/camera':
         specifier: workspace:*
         version: link:../camera
@@ -8023,11 +8023,14 @@ packages:
   '@gltf-transform/core@4.4.0':
     resolution: {integrity: sha512-cOPxOhHFFz5hwmix+li1+Nnq5qMV/QD3fTCsVlApxxFACtFdjkt2R/juseD4gvZ7D2c/yl6OilKH0pvI735YyQ==}
 
-  '@gltf-transform/extensions@4.4.0':
-    resolution: {integrity: sha512-ZwEgFkkqnUR7d4m6roK9BycxxdoqJNtVyo7w5ShJ9syKBoQiXw2QrTSLwXaUAImSrEIl9Jh/wZTtvSVyviQuXg==}
+  '@gltf-transform/core@4.4.1':
+    resolution: {integrity: sha512-ygWWFOrj1HnfvBimHF1yHTY4abbeBjn3CvljijaWKoRLMRV/a8pWYQu9rfMFQhfpT5kYZTD5Mp+dizAXPbiTDQ==}
 
-  '@gltf-transform/functions@4.4.0':
-    resolution: {integrity: sha512-CaSTAVAd2NXNWsxdgvq090rKHqy7AQlcNWV4ec7xtQyS8WEv3S3gVN27ikWmdB8nWEsXUbOIDhtPMLbXI6xDJg==}
+  '@gltf-transform/extensions@4.4.1':
+    resolution: {integrity: sha512-dZZ9D/NdpNeJUmQKExtISYtd3W6OxU4njk8UI3IKm6j97uVskYQ24BNi2YP40uUpdWPiREsS/DhjNhWAbGU/1A==}
+
+  '@gltf-transform/functions@4.4.1':
+    resolution: {integrity: sha512-CAU6hczuRz7NIEtpn7BARuwVEwRawwIcGqmoMCaEwA4XC+CSUi3xptXuf2zDG/5AftFO7IeQxXl/56rDsck0GQ==}
 
   '@google-cloud/opentelemetry-cloud-trace-exporter@3.0.0':
     resolution: {integrity: sha512-mUfLJBFo+ESbO0dAGboErx2VyZ7rbrHcQvTP99yH/J72dGaPbH2IzS+04TFbTbEd1VW5R9uK3xq2CqawQaG+1Q==}
@@ -31281,15 +31284,19 @@ snapshots:
     dependencies:
       property-graph: 4.1.0
 
-  '@gltf-transform/extensions@4.4.0':
+  '@gltf-transform/core@4.4.1':
     dependencies:
-      '@gltf-transform/core': 4.4.0
+      property-graph: 4.1.0
+
+  '@gltf-transform/extensions@4.4.1':
+    dependencies:
+      '@gltf-transform/core': 4.4.1
       ktx-parse: 1.1.0
 
-  '@gltf-transform/functions@4.4.0':
+  '@gltf-transform/functions@4.4.1':
     dependencies:
-      '@gltf-transform/core': 4.4.0
-      '@gltf-transform/extensions': 4.4.0
+      '@gltf-transform/core': 4.4.1
+      '@gltf-transform/extensions': 4.4.1
       ktx-parse: 1.1.0
       ndarray: 1.0.19
       ndarray-lanczos: 0.3.0
@@ -47743,11 +47750,26 @@ snapshots:
     dependencies:
       tmpl: 1.0.5
 
-  manifold-3d@3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.28.2):
+  manifold-3d@3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2):
     dependencies:
       '@gltf-transform/core': 4.4.0
-      '@gltf-transform/extensions': 4.4.0
-      '@gltf-transform/functions': 4.4.0
+      '@gltf-transform/extensions': 4.4.1
+      '@gltf-transform/functions': 4.4.1
+      '@jridgewell/resolve-uri': 3.1.2
+      '@jridgewell/trace-mapping': 0.3.31
+      '@jscadui/3mf-export': 0.5.0
+      commander: 13.1.0
+      convert-source-map: 2.0.0
+      esbuild-wasm: 0.28.2
+      fast-xml-parser: 5.7.3
+      fflate: 0.8.3
+      magic-string: 0.30.21
+
+  manifold-3d@3.4.1(@gltf-transform/core@4.4.1)(@gltf-transform/extensions@4.4.1)(@gltf-transform/functions@4.4.1)(esbuild-wasm@0.28.2):
+    dependencies:
+      '@gltf-transform/core': 4.4.1
+      '@gltf-transform/extensions': 4.4.1
+      '@gltf-transform/functions': 4.4.1
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/trace-mapping': 0.3.31
       '@jscadui/3mf-export': 0.5.0

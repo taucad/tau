@@ -275,6 +275,10 @@ const initializeMonaco = async (): Promise<typeof Monaco> => {
   // Phase 1: Register language metadata for all contributions (idempotent)
   registry.registerAll(monaco);
 
+  // Monaco's built-in JS/TS contributions do not register React language IDs.
+  monaco.languages.register({ id: monacoLanguages.typescriptreact, aliases: ['TSX', 'tsx'], extensions: ['.tsx'] });
+  monaco.languages.register({ id: monacoLanguages.javascriptreact, aliases: ['JSX', 'jsx'], extensions: ['.jsx'] });
+
   // JSONL is deliberately metadata-only: Shiki owns tokenization, and there is
   // no JSON language service validation for multi-root newline-delimited JSON.
   monaco.languages.register({ id: monacoLanguages.jsonl, aliases: ['JSON Lines', 'jsonl'], extensions: ['.jsonl'] });

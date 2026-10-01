@@ -1,7 +1,7 @@
 diff --git a/API/PicoGK.h b/API/PicoGK.h
 --- a/API/PicoGK.h
 +++ b/API/PicoGK.h
-@@ -747,6 +747,69 @@
+@@ -747,6 +747,74 @@
  PICOGK_API void             Viewer_SideBar_Destroy(         PKVIEWER            hThis,
                                                              PKGUI               hSideBar);
  
@@ -67,6 +67,11 @@ diff --git a/API/PicoGK.h b/API/PicoGK.h
 +    TauSurfaceNormalsBatch, PKVECTORFIELD*, PKMETADATA*) TAU_NOEXCEPT;
 +PICOGK_API int32_t TauScalarField_CountActiveValues(PKINSTANCE, PKSCALARFIELD, int32_t*) TAU_NOEXCEPT;
 +
++// Private capacity-checked reads. 0: filled/query; +1: insufficient capacity, no writes.
++PICOGK_API int32_t TauVoxels_ReadSlice(PKINSTANCE, PKVOXELS, int32_t, int32_t, float,
++    float*, uint64_t, TauSliceInfo*) TAU_NOEXCEPT;
++PICOGK_API int32_t TauScalarField_ReadSlice(PKINSTANCE, PKSCALARFIELD, int32_t, int32_t,
++    float*, uint64_t, TauSliceInfo*) TAU_NOEXCEPT;
 +#undef TAU_NOEXCEPT
 +
  #endif
@@ -163,6 +168,20 @@ diff --git a/API/PicoGKApiTypes.h b/API/PicoGKApiTypes.h
  
  #pragma pack()
  
+@@ -171,4 +176,13 @@
+ typedef void (*PKPFWindowSize)(         void*               poViewer,
+                                         const PKVector2*    pvecWindowSize);
+ 
++// Private coherent slice observation. Buffers hold packed row-major float values.
++typedef struct {
++    int32_t xOrigin, yOrigin, zOrigin;
++    int32_t xSize, ySize, zSize;
++    int32_t width, height;
++    float background;
++    uint64_t required;
++} TauSliceInfo;
++
+ #endif
 diff --git a/CMakeLists.txt b/CMakeLists.txt
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
@@ -298,11 +317,12 @@ diff --git a/Source/PicoGKGridState.h b/Source/PicoGKGridState.h
 new file mode 100644
 --- /dev/null
 +++ b/Source/PicoGKGridState.h
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,241 @@
 +// SPDX-License-Identifier: Apache-2.0
 +#ifndef PICOGK_GRID_STATE_H
 +#define PICOGK_GRID_STATE_H
 +#include <openvdb/openvdb.h>
++#include <openvdb/tools/Interpolation.h>
 +#include "PicoGKMesh.h"
 +#include <mutex>
 +#include <unordered_map>
@@ -312,11 +332,16 @@ new file mode 100644
 +struct TauCaptureCounters {
 +    std::atomic<uint64_t> surfaceBuilds{0};
 +    std::atomic<uint64_t> surfaceHits{0};
++    std::atomic<uint64_t> activeBoundsBuilds{0};
++    std::atomic<uint64_t> activeBoundsHits{0};
++    std::atomic<uint64_t> sliceValueReads{0};
 +};
 +struct TauSurfaceGeneration {
 +    uint64_t identity = TauNextGeneration();
 +    std::recursive_mutex gate;
 +    Mesh::Ptr surface;
++    openvdb::CoordBBox activeBounds;
++    bool activeBoundsReady = false;
 +};
 +struct TauGridState;
 +struct TauGridRegistry {
@@ -360,10 +385,34 @@ new file mode 100644
 +        // Identity exhaustion must fail before invalidating a surface or changing the old revision.
 +        const auto identity = TauNextGeneration();
 +        state.generation->surface.reset();
++        state.generation->activeBoundsReady = false;
 +        state.generation->identity = identity;
 +    } else {
 +        state.generation = std::make_shared<TauSurfaceGeneration>();
 +    }
++}
++// Caller holds the grid state gate; immutable clone generations may share the result.
++template<class TGrid>
++inline openvdb::CoordBBox TauActiveBounds(const std::shared_ptr<TGrid>& grid,
++    const std::shared_ptr<TauGridState>& state) {
++    if (!state->cacheable) {
++        if (state->counters) ++state->counters->activeBoundsBuilds;
++        return grid->evalActiveVoxelBoundingBox();
++    }
++    auto generation = state->generation;
++    std::lock_guard<std::recursive_mutex> lock(generation->gate);
++    if (!generation->activeBoundsReady) {
++        const auto bounds = grid->evalActiveVoxelBoundingBox();
++        generation->activeBounds = bounds;
++        generation->activeBoundsReady = true;
++        if (state->counters) ++state->counters->activeBoundsBuilds;
++    } else if (state->counters) ++state->counters->activeBoundsHits;
++    return generation->activeBounds;
++}
++inline bool TauHasCachedGridRead(const std::shared_ptr<TauGridState>& state) {
++    auto generation = state->generation;
++    std::lock_guard<std::recursive_mutex> lock(generation->gate);
++    return bool(generation->surface) || generation->activeBoundsReady;
 +}
 +class TauGridMutation {
 +    std::shared_ptr<TauGridState> state;
@@ -376,7 +425,7 @@ new file mode 100644
 +    void Lock() { lock.lock(); }
 +    void Retarget(std::shared_ptr<TauGridState> current) {
 +        if (current == state) return;
-+        if (state->generation->surface) TauAdvanceGridGeneration(*state);
++        if (TauHasCachedGridRead(state)) TauAdvanceGridGeneration(*state);
 +        lock.unlock(); state = std::move(current);
 +        lock = std::unique_lock<std::recursive_mutex>(state->gate);
 +        TauAdvanceGridGeneration(*state);
@@ -386,12 +435,90 @@ new file mode 100644
 +        if (!lock.owns_lock()) lock.lock();
 +        // A reentrant callback may have captured an intermediate revision. Never retain that
 +        // intermediate surface as the completed operation's generation, including on failure.
-+        if (state->generation->surface) {
-+            try { TauAdvanceGridGeneration(*state); }
-+            catch (...) { state->cacheable = false; }
-+        }
++        try {
++            if (TauHasCachedGridRead(state)) TauAdvanceGridGeneration(*state);
++        } catch (...) { state->cacheable = false; }
 +    }
 +};
++// Caller holds owner/state gates. Mode -1 observes dimensions, 0/1/2 reads X/Y/Z,
++// and mode 3 reads interpolated Z. Scalar rows ascend Y; voxel rows descend.
++inline int TauReadFloatSlice(const openvdb::FloatGrid::Ptr& grid,
++    const std::shared_ptr<TauGridState>& state, bool scalar, int32_t mode,
++    int32_t slice, float fractionalSlice, float* buffer, uint64_t capacity, TauSliceInfo& info) {
++    if (mode < -1 || mode > 3 || (scalar && mode != -1 && mode != 2))
++        throw std::invalid_argument("invalid slice mode");
++    const auto bounds = TauActiveBounds(grid, state);
++    info.xOrigin = bounds.min().x(); info.yOrigin = bounds.min().y(); info.zOrigin = bounds.min().z();
++    const auto extent = [&](int axis) -> int32_t {
++        if (bounds.empty()) return 0;
++        const int64_t size = int64_t(bounds.max()[axis]) - bounds.min()[axis] + 1;
++        if (size > std::numeric_limits<int32_t>::max()) throw std::overflow_error("slice dimension exceeds int32");
++        return static_cast<int32_t>(size);
++    };
++    info.xSize = extent(0); info.ySize = extent(1); info.zSize = extent(2);
++    info.background = grid->background();
++    if (mode == -1) return 0;
++    info.width = mode == 0 ? info.ySize : info.xSize;
++    info.height = mode >= 2 ? info.ySize : info.zSize;
++    info.required = uint64_t(info.width) * uint64_t(info.height);
++    int32_t plane = 0;
++    double sampleZ = 0;
++    if (mode == 3 && !std::isfinite(fractionalSlice))
++        throw std::invalid_argument("nonfinite interpolated slice");
++    if (bounds.empty()) return 0;
++    if (mode == 3) {
++        // Preserve the legacy float addition before promotion into Vec3R.
++        sampleZ = fractionalSlice + bounds.min().z();
++        const double base = std::floor(sampleZ);
++        if (!std::isfinite(fractionalSlice) || !std::isfinite(sampleZ) ||
++            base < std::numeric_limits<int32_t>::min() || base >= std::numeric_limits<int32_t>::max() ||
++            (!bounds.empty() && (bounds.max().x() == std::numeric_limits<int32_t>::max() ||
++                bounds.max().y() == std::numeric_limits<int32_t>::max())))
++            throw std::invalid_argument("interpolated slice exceeds native coordinate range");
++        plane = static_cast<int32_t>(base);
++    } else if (!bounds.empty()) {
++        const int64_t observed = int64_t(bounds.min()[mode]) + slice;
++        if (observed < std::numeric_limits<int32_t>::min() || observed > std::numeric_limits<int32_t>::max())
++            throw std::invalid_argument("slice exceeds native coordinate range");
++        plane = static_cast<int32_t>(observed);
++    }
++    if (capacity < info.required) return 1;
++    if (info.required && !buffer) throw std::invalid_argument("null slice buffer");
++    if (bounds.empty()) return 0;
++    auto access = grid->getConstAccessor();
++    uint64_t n = 0;
++    uint64_t reads = 0;
++    if (mode == 3) {
++        const openvdb::Vec3R weights(0, 0, sampleZ - plane);
++        for (int64_t y = bounds.max().y(); y >= bounds.min().y(); --y) {
++            float data[2][2][2];
++            for (int64_t x = bounds.min().x(); x <= bounds.max().x(); ++x) {
++                if (x == bounds.min().x()) {
++                    openvdb::tools::BoxSampler::getValues(data, access, openvdb::Coord(int32_t(x), int32_t(y), plane));
++                    reads += 8;
++                } else {
++                    for (int j = 0; j < 2; ++j) for (int k = 0; k < 2; ++k) {
++                        data[0][j][k] = data[1][j][k];
++                        data[1][j][k] = access.getValue(openvdb::Coord(int32_t(x + 1), int32_t(y + j), plane + k));
++                    }
++                    reads += 4;
++                }
++                buffer[n++] = openvdb::tools::BoxSampler::trilinearInterpolation(data, weights);
++            }
++        }
++    } else {
++        for (int64_t row = 0; row < info.height; ++row) for (int64_t column = 0; column < info.width; ++column) {
++            const int32_t x = mode == 0 ? plane : int32_t(int64_t(bounds.min().x()) + column);
++            const int32_t y = mode == 0 ? int32_t(int64_t(bounds.min().y()) + column) :
++                mode == 1 ? plane : int32_t(scalar ? int64_t(bounds.min().y()) + row : int64_t(bounds.max().y()) - row);
++            const int32_t z = mode >= 2 ? plane : int32_t(int64_t(bounds.max().z()) - row);
++            buffer[n++] = access.getValue(openvdb::Coord(x, y, z));
++        }
++        reads = n;
++    }
++    if (state->counters) state->counters->sliceValueReads += reads;
++    return 0;
++}
 +using TauTraversalKey = std::array<int64_t, 6>;
 +inline TauTraversalKey TauActiveKey(const openvdb::Coord& xyz, unsigned depth, bool afterRegion) {
 +    const int64_t high = std::numeric_limits<int64_t>::max();
@@ -1174,7 +1301,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API int32_t Metadata_nCount( PKINSTANCE hLib,
-@@ -1796,3 +1800,392 @@
+@@ -1796,3 +1800,422 @@
      
      poThis->DestroySideBar(hSideBar);
  }
@@ -1566,6 +1693,36 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
 +            throw;
 +        }
 +    });
++}
++
++PICOGK_API int32_t TauVoxels_ReadSlice(PKINSTANCE library, PKVOXELS voxels, int32_t mode,
++    int32_t slice, float fractionalSlice, float* buffer, uint64_t capacity, TauSliceInfo* info) noexcept {
++    if (!info) return -1;
++    *info = {};
++    int result = 0;
++    const int status = TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_oVoxels.roGet(voxels);
++        TauSliceInfo observed{};
++        result = source->TauReadSlice(mode, slice, fractionalSlice, buffer, capacity, observed);
++        *info = observed;
++    });
++    return status ? status : result;
++}
++
++PICOGK_API int32_t TauScalarField_ReadSlice(PKINSTANCE library, PKSCALARFIELD field, int32_t mode,
++    int32_t slice, float* buffer, uint64_t capacity, TauSliceInfo* info) noexcept {
++    if (!info) return -1;
++    *info = {};
++    int result = 0;
++    const int status = TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_oScalarFields.roGet(field);
++        TauSliceInfo observed{};
++        result = source->TauReadSlice(mode, slice, buffer, capacity, observed);
++        *info = observed;
++    });
++    return status ? status : result;
 +}
 diff --git a/Source/PicoGKLibraryMgr.h b/Source/PicoGKLibraryMgr.h
 --- a/Source/PicoGKLibraryMgr.h
@@ -2315,7 +2472,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
      
      static bool bHasValidPicoGKTransform(const TFieldType::Ptr roGrid)
      {
-@@ -105,32 +125,41 @@
+@@ -105,32 +125,43 @@
      : Field(fVoxelSizeMM)
      {
          m_roGrid->setGridClass(GRID_FOG_VOLUME);
@@ -2342,6 +2499,8 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
 -    ScalarField(const Voxels& oSource)
 -    : ScalarField(deepCopyTypedGrid<FloatGrid>(oSource.roVdbGrid()))
 -    {
++        // This overload owns a private deep copy; pointer/loaded-grid constructors stay conservative.
++        m_tauState->cacheable = true;
      }
      
      ScalarField(const FloatGrid::Ptr roSource)
@@ -2363,11 +2522,11 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
 -        auto oVoxels    = roVoxels->roVdbGrid()->getConstAccessor();
 -        CoordBBox oBBox = roVoxels->roVdbGrid()->evalActiveVoxelBoundingBox();
 +        auto oVoxels    = tauSource.grid->getConstAccessor();
-+        CoordBBox oBBox = tauSource.grid->evalActiveVoxelBoundingBox();
++        CoordBBox oBBox = TauActiveBounds(tauSource.grid, tauSource.state);
          
          for (auto x=oBBox.min().x(); x<=oBBox.max().x(); x++)
          for (auto y=oBBox.min().y(); y<=oBBox.max().y(); y++)
-@@ -148,6 +177,7 @@
+@@ -148,6 +179,7 @@
      void SetValue(  Vector3     vecPos,
                      float       fValue)
      {
@@ -2375,7 +2534,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          auto oAccess = m_roGrid->getAccessor();
          
          openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
-@@ -160,6 +190,7 @@
+@@ -160,6 +192,7 @@
      bool bGetValue( Vector3 vecPos,
                      float* pfValue)
      {
@@ -2383,7 +2542,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          auto oAccess = m_roGrid->getConstAccessor();
      
          openvdb::Coord xyz( oVoxelSize().iToVoxels(vecPos.X),
-@@ -172,6 +203,7 @@
+@@ -172,6 +205,7 @@
      
      void RemoveValue(Vector3 vecPos)
      {
@@ -2391,23 +2550,39 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          auto oAccess = m_roGrid->getAccessor();
          
          openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
-@@ -188,6 +220,7 @@
+@@ -181,6 +215,11 @@
+         oAccess.setValueOff(xyz);
+     }
+     
++    int TauReadSlice(int32_t mode, int32_t slice, float* buffer, uint64_t capacity, TauSliceInfo& info) const {
++        std::lock_guard<std::recursive_mutex> state(m_tauState->gate);
++        return TauReadFloatSlice(m_roGrid, m_tauState, true, mode, slice, 0, buffer, capacity, info);
++    }
++
+     void GetVoxelDimensions(    int32_t* pnXMin,
+                                 int32_t* pnYMin,
+                                 int32_t* pnZMin,
+@@ -188,7 +227,8 @@
                                  int32_t* pnYSize,
                                  int32_t* pnZSize) const
      {
+-        CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
 +        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
-         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
++        CoordBBox oBBox = TauActiveBounds(m_roGrid, m_tauState);
          
          *pnXMin     = oBBox.min().x();
-@@ -201,6 +234,7 @@
+         *pnYMin     = oBBox.min().y();
+@@ -201,7 +241,8 @@
      void GetSlice( int32_t nZSlice,
                     float* pfBuffer)
      {
+-        CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
 +        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
-         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
++        CoordBBox oBBox = TauActiveBounds(m_roGrid, m_tauState);
          openvdb::Coord xyz(0, 0, nZSlice + oBBox.min().z());
          
-@@ -215,23 +249,23 @@
+         auto oAccess = m_roGrid->getConstAccessor();
+@@ -215,23 +256,23 @@
          }
      }
      
@@ -2446,7 +2621,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
  };
  
  class VectorField : public Field<Vec3SGrid>
-@@ -242,20 +276,91 @@
+@@ -242,20 +283,91 @@
      VectorField(float fVoxelSizeMM)
      : Field(fVoxelSizeMM)
      {
@@ -2539,13 +2714,13 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
 -        
 -        math::GradStencil oStencil(*roVoxels->roVdbGrid());
 +        auto oVoxels    = tauSource.grid->getConstAccessor();
-+        CoordBBox oBBox = tauSource.grid->evalActiveVoxelBoundingBox();
++        CoordBBox oBBox = TauActiveBounds(tauSource.grid, tauSource.state);
 +
 +        math::GradStencil oStencil(*tauSource.grid);
          
          for (auto x=oBBox.min().x(); x<=oBBox.max().x(); x++)
          for (auto y=oBBox.min().y(); y<=oBBox.max().y(); y++)
-@@ -276,9 +381,12 @@
+@@ -276,9 +388,12 @@
                              Vector3 vecValue,
                              float fThreshold)
      {
@@ -2556,11 +2731,11 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
 -        auto oVoxels    = roVoxels->roVdbGrid()->getConstAccessor();
 -        CoordBBox oBBox = roVoxels->roVdbGrid()->evalActiveVoxelBoundingBox();
 +        auto oVoxels    = tauSource.grid->getConstAccessor();
-+        CoordBBox oBBox = tauSource.grid->evalActiveVoxelBoundingBox();
++        CoordBBox oBBox = TauActiveBounds(tauSource.grid, tauSource.state);
          
          openvdb::Vec3s vec(vecValue.X, vecValue.Y, vecValue.Z);
          
-@@ -298,6 +406,7 @@
+@@ -298,6 +413,7 @@
      void SetValue(  Vector3 vecPos,
                      Vector3 vecValue)
      {
@@ -2568,7 +2743,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          auto oAccess = m_roGrid->getAccessor();
          
          Vec3s vec(vecValue.X, vecValue.Y, vecValue.Z);
-@@ -311,6 +420,7 @@
+@@ -311,6 +427,7 @@
      bool bGetValue( Vector3 vecPos,
                      Vector3* pvecValue)
      {
@@ -2576,7 +2751,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          auto oAccess = m_roGrid->getConstAccessor();
      
          openvdb::Coord xyz( oVoxelSize().iToVoxels(vecPos.X),
-@@ -328,6 +438,7 @@
+@@ -328,6 +445,7 @@
      
      void RemoveValue(Vector3 vecPos)
      {
@@ -2584,7 +2759,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          auto oAccess = m_roGrid->getAccessor();
          
          openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
-@@ -339,21 +450,10 @@
+@@ -339,21 +457,10 @@
      
      void TraverseActive(PKFnTraverseActiveV pfnCallback)
      {
@@ -3014,7 +3189,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_bIsEmpty);
          
          if (m_roGrid->tree().empty())
-@@ -199,6 +221,9 @@
+@@ -199,13 +221,16 @@
      
      bool bIsEqual(const Voxels& oCompare) const
      {
@@ -3024,6 +3199,15 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_bIsEqual);
          
          if (m_roGrid->transform() != oCompare.m_roGrid->transform())
+             return false;
+         
+-        CoordBBox oBBoxThis = m_roGrid->evalActiveVoxelBoundingBox();
+-        CoordBBox oBBoxComp = oCompare.m_roGrid->evalActiveVoxelBoundingBox();
++        CoordBBox oBBoxThis = TauActiveBounds(m_roGrid, m_tauState);
++        CoordBBox oBBoxComp = TauActiveBounds(oCompare.m_roGrid, oCompare.m_tauState);
+         
+         int32_t iMinX = std::min(   oBBoxThis.min().x(),
+                                     oBBoxComp.min().x());
 @@ -244,8 +269,51 @@
          return true;
       }
@@ -3190,7 +3374,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 +            tauObject.lock(); tauMutation.Lock(); tauMutation.Retarget(m_tauState);
 +            std::lock_guard<std::recursive_mutex> currentState(m_tauState->gate);
 +            if (observedGeneration != m_tauState->generation->identity) oAccess = m_roGrid->getAccessor();
-+            if (m_tauState->generation->surface) TauAdvanceGridGeneration(*m_tauState);
++            if (TauHasCachedGridRead(m_tauState)) TauAdvanceGridGeneration(*m_tauState);
 +            float fValue = std::min(sample, oAccess.getValue(xyz));
              
              SetSdValue(&oAccess, xyz, fBackgroundMM(), fValue);
@@ -3207,7 +3391,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 +        VoxelSize voxelSize(1.0f);
 +        { std::lock_guard<std::recursive_mutex> owner(m_tauObjectGate);
 +          std::lock_guard<std::recursive_mutex> state(m_tauState->gate);
-+          oBBox = m_roGrid->evalActiveVoxelBoundingBox();
++          oBBox = TauActiveBounds(m_roGrid, m_tauState);
 +          if (oBBox.empty()) return;
 +          narrowBand = m_nSdfNarrowBand;
 +          voxelSize = oVoxelSize(); }
@@ -3376,7 +3560,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          math::GradStencil oStencil(*m_roGrid);
          Coord xyz = oVoxelSize().xyzToVoxels(vecPt);
      
-@@ -591,6 +771,8 @@
+@@ -591,9 +771,11 @@
      inline bool bFindClosestPointOnSurface( Vector3 vecSearch,
                                              Vector3* pvecSurfacePoint)
      {
@@ -3384,7 +3568,11 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 +        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
          Coord xyzSearch = oVoxelSize().xyzToVoxels(vecSearch);
          
-         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
+-        CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
++        CoordBBox oBBox = TauActiveBounds(m_roGrid, m_tauState);
+         oBBox.expand(openvdb::Coord(xyzSearch.X, xyzSearch.Y, xyzSearch.Z));
+         // Add the search point to the BBox and expand a little to avoid
+         // stopping too soon
 @@ -638,6 +820,8 @@
                                      const Vector3& vecDirection,
                                      Vector3* pvecSurfacePoint)
@@ -3394,52 +3582,76 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          tools::LevelSetRayIntersector oIntersector(*m_roGrid);
          math::Ray<Real> oRay(   Vec3f(  oVoxelSize().fToVoxels(vecSearch.X),
                                          oVoxelSize().fToVoxels(vecSearch.Y),
-@@ -670,6 +854,8 @@
+@@ -663,6 +847,13 @@
+         return false;
+     }
+     
++    int TauReadSlice(int32_t mode, int32_t slice, float fractionalSlice,
++        float* buffer, uint64_t capacity, TauSliceInfo& info) const {
++        auto source = TauPinGrid();
++        std::lock_guard<std::recursive_mutex> state(source.state->gate);
++        return TauReadFloatSlice(source.grid, source.state, false, mode, slice, fractionalSlice, buffer, capacity, info);
++    }
++
+     void GetVoxelDimensions(    int32_t* pnXMin,
+                                 int32_t* pnYMin,
+                                 int32_t* pnZMin,
+@@ -670,7 +861,9 @@
                                  int32_t* pnYSize,
                                  int32_t* pnZSize) const
      {
+-        CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
 +        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
 +        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
-         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
++        CoordBBox oBBox = TauActiveBounds(m_roGrid, m_tauState);
          
          *pnXMin     = oBBox.min().x();
-@@ -683,6 +869,8 @@
+         *pnYMin     = oBBox.min().y();
+@@ -683,7 +876,9 @@
      void GetZSlice( int32_t nZSlice,
                      float* pfBuffer)
      {
+-        CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
 +        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
 +        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
-         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
++        CoordBBox oBBox = TauActiveBounds(m_roGrid, m_tauState);
          openvdb::Coord xyz(0, 0, nZSlice + oBBox.min().z());
          
-@@ -700,6 +888,8 @@
+         auto oAccess = m_roGrid->getConstAccessor();
+@@ -700,7 +895,9 @@
      void GetXSlice( int32_t nXSlice,
                      float* pfBuffer)
      {
+-        CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
 +        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
 +        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
-         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
++        CoordBBox oBBox = TauActiveBounds(m_roGrid, m_tauState);
          openvdb::Coord xyz(nXSlice + oBBox.min().x(), 0, 0);
          
-@@ -717,6 +907,8 @@
+         auto oAccess = m_roGrid->getConstAccessor();
+@@ -717,7 +914,9 @@
      void GetYSlice( int32_t nYSlice,
                      float* pfBuffer)
      {
+-        CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
 +        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
 +        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
-         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
++        CoordBBox oBBox = TauActiveBounds(m_roGrid, m_tauState);
          openvdb::Coord xyz(0, nYSlice + oBBox.min().y(), 0);
          
-@@ -734,6 +926,8 @@
+         auto oAccess = m_roGrid->getConstAccessor();
+@@ -734,7 +933,9 @@
      void GetInterpolatedZSlice( float fZSlice,
                                  float* pfBuffer)
      {
+-        CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
 +        std::lock_guard<std::recursive_mutex> tauObject(m_tauObjectGate);
 +        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
-         CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
++        CoordBBox oBBox = TauActiveBounds(m_roGrid, m_tauState);
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -750,18 +944,33 @@
+         
+@@ -750,18 +951,33 @@
          }
      }
      
@@ -3476,7 +3688,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      int32_t             m_nSdfNarrowBand;
      
      bool bLevelSetNeedsRebuild() const
-@@ -830,22 +1039,23 @@
+@@ -830,22 +1046,23 @@
                                                  VoxelSize oVoxelSize,
                                                  int32_t nHalfWidth)
      {
